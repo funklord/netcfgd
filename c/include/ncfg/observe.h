@@ -914,6 +914,19 @@ int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_
 int ncfg_observe_regdom_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
     char *err, size_t err_size);
 
+/*
+ * The physical ports of every card devlink knows, into `observed->ports`,
+ * over the same generic netlink seam -- one dump, whatever the machine.
+ *
+ * What each port runs as (Ethernet or InfiniBand) and what it became. A
+ * kernel with no devlink, a refused dump or a port that will not read leaves
+ * out what it could not read, with a note. `genl` may be NULL, which is the
+ * seam left out. 0 with a sentence is an allocation that failed, and nothing
+ * else.
+ */
+int ncfg_observe_ports_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * What each WireGuard device is running, and whether it is current
  * ------------------------------------------------------------------------ */

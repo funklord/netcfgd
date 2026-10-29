@@ -12595,6 +12595,65 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.586 A card's port type: reported, and who should set it
+
+**What it is about.** A VPI card -- the ConnectX family -- runs each port as
+Ethernet or as InfiniBand, and a port in InfiniBand mode has no Ethernet
+interface at all: a configuration naming one meets an interface that is not
+there, and nothing in rtnetlink says why. The holder's cards: QLogic IBA7322
+QDR HCAs (`ib_qib`, InfiniBand only) are being replaced by ConnectX VPI cards
+run as Ethernet for file sharing, where InfiniBand buys nothing -- RDMA still
+works as RoCE (NFS over RDMA, SMB Direct), and Ethernet needs no subnet
+manager. So InfiniBand interfaces themselves (IPoIB, pkeys, connected mode)
+are not being built.
+
+**Built: the port type, read only** (2026-10-29). The observation carries
+`ports` -- every physical port devlink describes, from one `PORT_GET` dump per
+observation: device (`pci/0000:05:00.0`), number, type (`eth`, `ib`, `auto`,
+`notset`), and the interface or RDMA device it became. devlink is the
+kernel's vendor-neutral description of a card's ports, and the dump needs no
+privilege. CPU ports, a switch's internal ones and representors are devlink
+ports too and are left out; a port that will not read is left out with a
+note. `ncfg status` prints a *card ports* section; a port running as
+InfiniBand says there is no Ethernet interface because of it, names its RDMA
+device, and gives `devlink port set <device>/<n> type eth`. Checked on this
+machine's real ConnectX-3 Pro (ml350g6-01, `05:00.0`): both ports `eth`, as
+eth2 and eth3, as `devlink port show` says. `devlink_test`, a replay through
+the observation in `current_test` (an Ethernet port, an InfiniBand one, a
+CPU port and an unnumbered one), the witness, and `kernel_bytes` fuzzing.
+
+**Not built: setting it, and the two ways differ in whose job they are.**
+
+- **The firmware default is openmlx4's, by hand, once.** `LINK_TYPE_P1/P2` is
+  NV configuration read at the next boot; openmlx4 `config set` writes it for
+  the ConnectX-3 generation, `mstconfig` for ConnectX-4 and later. A reconcile
+  loop must not drive it: it cannot converge without a reboot, so a plan would
+  carry the change until one happened; and writing a card's firmware from a
+  configuration daemon is the kind of act openmlx4's safety model exists to
+  keep deliberate. netcfgd depending on a firmware tool would also be its first
+  mandatory external tool for a card setting. Choosing a card's mode once, for
+  good, is exactly what the holder's cards need -- **with the holder's caution
+  (2026-10-29): openmlx4 has been tested thoroughly against every known source
+  but little on real cards**, so a firmware write with it is the least proven
+  step on offer. Its own `dump` first, which is the card's identity and what
+  makes a rescue avoidable.
+- **Which is a point for the runtime half below**: it writes no firmware, and
+  a driver reload puts the firmware's default back.
+- **The runtime type is netcfgd-shaped, and is the open half.**
+  `DEVLINK_CMD_PORT_SET` with a type is generic, takes effect at once, and a
+  daemon re-applying it at start makes it as lasting as the configuration --
+  which is netcfgd's whole model. In mainline only mlx4 implements it (mlx5's
+  type is firmware only), it needs `CAP_NET_ADMIN`, and it destroys the
+  interface it replaces. Building it means: a card-keyed block, since the
+  setting belongs to a PCI device's port and not to a netdev that may not
+  exist yet; a plan that sets types before anything is planned for the
+  interfaces they create; and renaming (`eth2` becomes `ib0` and back).
+  **Not built because it cannot be checked here**: this kernel ships no
+  `netdevsim`, no VM can have an mlx4, and hull does not pass a PCI device
+  into a vm (its draft did; it no longer declares it). The IOMMU is on
+  (the card is in group 31), so VFIO passthrough of the real card would be
+  the rig, and asking hull for it is the step before building this.
+
 ## 10.585 What the kernel lets a moving machine do with its regulatory domain
 
 **Measured 2026-10-27 for [0296](doc/decision/0296-the-regulatory-domain-follows-the-machine.md),

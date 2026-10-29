@@ -432,6 +432,20 @@
       }
     }
   ],
+  "ports": [
+    {
+      "device": "pci/0000:05:00.0",
+      "index": 1,
+      "type": "eth",
+      "interface": "eth2"
+    },
+    {
+      "device": "pci/0000:05:00.0",
+      "index": 2,
+      "type": "ib",
+      "rdma": "mlx4_0"
+    }
+  ],
   "regdom": "DE",
   "regdom_set_by": "access_point",
   "addresses": [

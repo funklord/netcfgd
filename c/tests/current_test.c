@@ -42,6 +42,7 @@
 #include "ncfg/nft.h"
 #include "ncfg/observed.h"
 #include "ncfg/regdom.h"
+#include "ncfg/devlink.h"
 #include "ncfg/state.h"
 #include "ncfg/wire.h"
 
@@ -57,6 +58,7 @@
 /* The kernel headers `nft.h` deliberately does not pull in: this file builds
  * the bytes an nftables kernel would send. */
 #include <linux/genetlink.h>
+#include <linux/devlink.h>
 #include <linux/nl80211.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_tables.h>
@@ -1597,6 +1599,134 @@ static void the_regulatory_domain_the_kernel_reports(void)
 	ncfg_buf_free(&nothing);
 }
 
+/* ------------------------------------------------------------------------ *
+ * A card's ports
+ * ------------------------------------------------------------------------ */
+
+#define DEVLINK_FAMILY_ID 21u
+
+static void append_devlink_family(ncfg_buf_t *out)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	uint16_t           id = DEVLINK_FAMILY_ID;
+
+	header.cmd = CTRL_CMD_NEWFAMILY;
+	header.version = 2;
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put(&attrs, CTRL_ATTR_FAMILY_ID, &id, sizeof(id));
+	ncfg_wire_attr_put_str(&attrs, CTRL_ATTR_FAMILY_NAME, DEVLINK_GENL_NAME);
+	append_message(out, GENL_ID_CTRL, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+}
+
+/*
+ * One port of `pci/0000:05:00.0`, as a `PORT_GET` dump carries it. `flavour`
+ * of -1 leaves the attribute out; `index` of -1 leaves the port unnumbered,
+ * which is a port nobody can act on.
+ */
+static void append_port(ncfg_buf_t *out, int index, uint16_t type, int flavour,
+    const char *netdev, const char *ibdev)
+{
+	ncfg_genl_header_t header = { DEVLINK_CMD_PORT_NEW, 1 };
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	uint16_t           value;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put_str(&attrs, DEVLINK_ATTR_BUS_NAME, "pci");
+	ncfg_wire_attr_put_str(&attrs, DEVLINK_ATTR_DEV_NAME, "0000:05:00.0");
+	if (index >= 0) {
+		ncfg_wire_attr_put_u32(&attrs, DEVLINK_ATTR_PORT_INDEX, (uint32_t)index);
+	}
+	ncfg_wire_attr_put(&attrs, DEVLINK_ATTR_PORT_TYPE, &type, sizeof(type));
+	if (flavour >= 0) {
+		value = (uint16_t)flavour;
+		ncfg_wire_attr_put(&attrs, DEVLINK_ATTR_PORT_FLAVOUR, &value, sizeof(value));
+	}
+	if (netdev) {
+		ncfg_wire_attr_put_str(&attrs, DEVLINK_ATTR_PORT_NETDEV_NAME, netdev);
+	}
+	if (ibdev) {
+		ncfg_wire_attr_put_str(&attrs, DEVLINK_ATTR_PORT_IBDEV_NAME, ibdev);
+	}
+	append_message(out, DEVLINK_FAMILY_ID, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+}
+
+/*
+ * The ports a card's devlink dump describes.
+ *
+ * One dump with the four shapes a reader meets: a port running as Ethernet, one
+ * running as InfiniBand with no Ethernet interface -- the case this exists to
+ * report -- a CPU port, which is a devlink port and not a socket anybody plugs
+ * into, and a port with no number, which is left out with a note rather than
+ * taking the observation down with it.
+ */
+static void the_ports_a_card_describes(void)
+{
+	script_t               asked;
+	ncfg_observe_replay_t  replay;
+	ncfg_observe_kernel_t  genl;
+	ncfg_buf_t             family;
+	ncfg_buf_t             dump;
+	ncfg_observed_t       *observed;
+	char                   err[NCFG_ERROR_MAX];
+	int                    read;
+
+	ncfg_buf_init(&family, 0);
+	ncfg_buf_init(&dump, 0);
+	append_devlink_family(&family);
+	append_port(&dump, 1, DEVLINK_PORT_TYPE_ETH, DEVLINK_PORT_FLAVOUR_PHYSICAL, "eth2", NULL);
+	append_port(&dump, 2, DEVLINK_PORT_TYPE_IB, -1, NULL, "mlx4_0");
+	append_port(&dump, 3, DEVLINK_PORT_TYPE_ETH, DEVLINK_PORT_FLAVOUR_CPU, NULL, NULL);
+	append_port(&dump, -1, DEVLINK_PORT_TYPE_ETH, DEVLINK_PORT_FLAVOUR_PHYSICAL, NULL, NULL);
+	append_done(&dump);
+
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue(&asked, &dump);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(0);
+	read = observed && ncfg_observe_ports_from(&genl, observed, err, sizeof(err));
+	check(read && observed->port_count == 2u,
+	    "two physical ports kept: the CPU port and the unnumbered one are not");
+	if (read && observed->port_count == 2u) {
+		const ncfg_observed_port_t *eth = &observed->ports[0];
+		const ncfg_observed_port_t *ib = &observed->ports[1];
+
+		check(strcmp(eth->device, "pci/0000:05:00.0") == 0 && eth->index == 1 &&
+		    strcmp(eth->type, "eth") == 0 && eth->interface &&
+		    strcmp(eth->interface, "eth2") == 0 && !eth->rdma,
+		    "a port running as Ethernet names the interface it became");
+		check(ib->index == 2 && strcmp(ib->type, "ib") == 0 && !ib->interface &&
+		    ib->rdma && strcmp(ib->rdma, "mlx4_0") == 0,
+		    "one running as InfiniBand names its RDMA device and no interface");
+	}
+	ncfg_observed_free(observed);
+
+	/* A kernel with no devlink: the lookup is refused, and the observation
+	 * stands with no ports rather than failing. */
+	memset(&asked, 0, sizeof(asked));
+	queue_failure(&asked, ENOENT);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(0);
+	check(observed && ncfg_observe_ports_from(&genl, observed, err, sizeof(err)) &&
+	    observed->port_count == 0u,
+	    "no devlink is no ports, and the observation stands");
+	ncfg_observed_free(observed);
+
+	ncfg_buf_free(&family);
+	ncfg_buf_free(&dump);
+}
+
 int main(void)
 {
 	make_fixture();
@@ -1606,6 +1736,7 @@ int main(void)
 	a_ruleset_that_moved_is_read_again();
 	the_offloads_the_kernel_reports();
 	the_regulatory_domain_the_kernel_reports();
+	the_ports_a_card_describes();
 	the_chains_that_are_not_a_conflict();
 	a_kernel_that_will_not_answer();
 	a_payload_that_will_not_read_and_an_answer_too_large();

@@ -736,6 +736,15 @@ static void the_status_listing_is_what_an_operator_reads(const char *text, size_
 	line(printed, "wireless regulatory domain: DE, set by the access point this machine is "
 	    "associated to", "the regulatory domain says who set it");
 
+	/* A card's ports: the one running as InfiniBand is the reason there is no
+	 * Ethernet interface for it, and says how to switch it (10.586). */
+	line(printed, "  pci/0000:05:00.0 port 1: Ethernet, eth2",
+	    "a card port running as Ethernet names its interface");
+	line(printed, "  pci/0000:05:00.0 port 2: InfiniBand, mlx4_0, so no Ethernet interface",
+	    "one running as InfiniBand says why there is no interface");
+	line(printed, "    `devlink port set pci/0000:05:00.0/2 type eth` switches it until the "
+	    "driver reloads", "  and how to switch it");
+
 	/*
 	 * **The adapter, which the observation has always carried and nothing
 	 * showed.** `observed.json` holds it and `tests/live/bluetooth.sh` asserts

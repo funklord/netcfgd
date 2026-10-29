@@ -28,6 +28,7 @@
  */
 #include "fuzz.h"
 
+#include "ncfg/devlink.h"
 #include "ncfg/regdom.h"
 #include "ncfg/base.h"
 #include "ncfg/rule.h"
@@ -110,6 +111,14 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		int                  found = 0;
 
 		(void)ncfg_regdom_change_parse(data, length, 35u, &found, &change, err, sizeof(err));
+	}
+
+	/* One port out of devlink's dump, which `ncfg status` prints as what a
+	 * card's port is running as. */
+	{
+		ncfg_devlink_port_t port;
+
+		(void)ncfg_devlink_port_parse(data, length, &port, err, sizeof(err));
 	}
 	return 0;
 }

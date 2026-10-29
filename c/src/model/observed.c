@@ -828,6 +828,19 @@ static const ncfg_field_t observed_bluetooth_fields[] = {
 static const ncfg_type_t observed_bluetooth_type =
     TYPE("bluetooth adapter", observed_bluetooth_fields);
 
+static const ncfg_field_t observed_port_fields[] = {
+	{ .name = "device", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_port_t, device) },
+	{ .name = "index", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	    .offset = offsetof(ncfg_observed_port_t, index) },
+	{ .name = "type", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_port_t, type) },
+	{ .name = "interface", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_port_t, interface) },
+	{ .name = "rdma", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_port_t, rdma) }
+};
+static const ncfg_type_t observed_port_type = TYPE("card port", observed_port_fields);
+
 /* ------------------------------------------------------------------------ *
  * Addresses, routes, rules, bridge VLANs
  * ------------------------------------------------------------------------ */
@@ -1229,6 +1242,10 @@ static const ncfg_field_t observed_fields[] = {
 	    .type = &observed_bluetooth_type, .element_size = sizeof(ncfg_observed_bluetooth_t),
 	    .offset = offsetof(ncfg_observed_t, bluetooth),
 	    .count_offset = offsetof(ncfg_observed_t, bluetooth_count) },
+	{ .name = "ports", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_port_type, .element_size = sizeof(ncfg_observed_port_t),
+	    .offset = offsetof(ncfg_observed_t, ports),
+	    .count_offset = offsetof(ncfg_observed_t, port_count) },
 	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_t, regdom) },
 	{ .name = "regdom_set_by", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_t, regdom_set_by) },

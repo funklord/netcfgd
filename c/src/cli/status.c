@@ -245,6 +245,49 @@ static void print_report(const ncfg_observed_t *observed, const char *name)
 }
 
 /*
+ * A card's physical ports, and what each is running as.
+ *
+ * Said because one in InfiniBand mode has no Ethernet interface, and a
+ * configuration naming one meets an interface that is not there with nothing
+ * else on this screen saying why (project.md 10.586). A port running as
+ * Ethernet names the interface it became; one running as InfiniBand says so,
+ * names its RDMA device, and gives the command that switches it -- devlink's,
+ * the vendor-neutral one, which lasts until the driver reloads.
+ *
+ * Nothing where devlink describes no physical port, which is most laptops.
+ */
+static void print_ports(const ncfg_observed_t *observed)
+{
+	size_t at;
+
+	if (observed->port_count == 0) {
+		return;
+	}
+	ncfg_out_line("");
+	ncfg_out_line("card ports:");
+	for (at = 0; at < observed->port_count; at++) {
+		const ncfg_observed_port_t *port = &observed->ports[at];
+		const char                 *device = port->device ? port->device : "?";
+		const char                 *type = port->type ? port->type : "?";
+
+		if (strcmp(type, "eth") == 0) {
+			ncfg_out_writef("  %s port %lld: Ethernet, %s\n", device, (long long)port->index,
+			    port->interface ? port->interface : "no interface yet");
+		} else if (strcmp(type, "ib") == 0) {
+			ncfg_out_writef("  %s port %lld: InfiniBand%s%s, so no Ethernet interface\n",
+			    device, (long long)port->index, port->rdma ? ", " : "",
+			    port->rdma ? port->rdma : "");
+			ncfg_out_writef("    `devlink port set %s/%lld type eth` switches it until the "
+			    "driver reloads\n", device, (long long)port->index);
+		} else {
+			ncfg_out_writef("  %s port %lld: %s\n", device, (long long)port->index,
+			    strcmp(type, "auto") == 0 ? "chooses its type from what it is plugged into" :
+			    "no type set yet");
+		}
+	}
+}
+
+/*
  * Who set it, in words, where a daemon heard. NULL for a word this build does
  * not know, which prints nothing rather than the raw word.
  *
@@ -382,6 +425,7 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 		}
 	}
 	print_bluetooth(observed);
+	print_ports(observed);
 	print_regdom(observed);
 	print_linksets(observed);
 	/*

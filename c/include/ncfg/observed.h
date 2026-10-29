@@ -709,6 +709,27 @@ typedef struct {
 	ncfg_observed_rfkill_t *rfkill;
 } ncfg_observed_bluetooth_t;
 
+/*
+ * One physical port of a network card, as devlink describes it.
+ *
+ * **Its own list, because a port is not a link.** A VPI card -- the ConnectX
+ * family -- runs each port as Ethernet or as InfiniBand, and a port in
+ * InfiniBand mode has no Ethernet interface at all: the configuration naming
+ * one meets an interface that is not there, and nothing in rtnetlink says why.
+ * This is where the observation says it (`devlink.h`, project.md 10.586).
+ *
+ * Physical ports only. A CPU port, a switch's internal ones and a virtual
+ * function's representor are devlink ports too, and none of them is a socket
+ * a cable plugs into.
+ */
+typedef struct {
+	char   *device;    /* `pci/0000:05:00.0` */
+	int64_t index;     /* the port's number on that device */
+	char   *type;      /* `eth`, `ib`, `auto` or `notset` */
+	char   *interface; /* the Ethernet interface it became, if any */
+	char   *rdma;      /* the RDMA device it became, where it is InfiniBand */
+} ncfg_observed_port_t;
+
 /* ------------------------------------------------------------------------ *
  * Addresses, routes, rules and bridge VLANs
  * ------------------------------------------------------------------------ */
@@ -1189,6 +1210,8 @@ typedef struct {
 	 * entirely rather than shown as an empty list nobody asked about. */
 	ncfg_observed_bluetooth_t *bluetooth;
 	size_t                     bluetooth_count;
+	ncfg_observed_port_t      *ports; /* in the kernel's order */
+	size_t                     port_count;
 	/*
 	 * The wireless regulatory domain the kernel holds every radio to that has
 	 * no private one: a country code, or the kernel's `00` for the world
