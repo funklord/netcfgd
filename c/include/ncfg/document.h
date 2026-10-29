@@ -2166,6 +2166,9 @@ void ncfg_interface_kind_release(ncfg_interface_kind_t *kind);
  * "unmanaged" -- every caller asks `device && !device->managed`.
  */
 const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const char *name);
+/* The mesh a radio is given to, or NULL (10.588). One per radio, which the
+ * compiler holds to. */
+const ncfg_mesh_t *ncfg_document_mesh(const ncfg_document_t *document, const char *device);
 
 /*
  * Put every list in its declared order.

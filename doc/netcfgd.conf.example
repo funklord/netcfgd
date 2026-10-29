@@ -840,9 +840,8 @@
 #     rather than searching for each other.
 #   - Security is SAE (`psk`, used as the SAE password) or none. WPA2 does not
 #     exist in a mesh.
-#
-# **Not yet joined by this build**: the block compiles, `ncfg plan` says so,
-# and the radio's supplicant is not told about it yet.
+#   - It needs an `interface` block for the radio, as an access point does:
+#     that is what brings the radio up and gives the node its address.
 
 #mesh "backhaul" {
 #	device  = "wlan2"

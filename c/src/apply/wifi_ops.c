@@ -253,7 +253,10 @@ int ncfg_service_supplicant_driver(const ncfg_document_t *document, const char *
 		*out = NCFG_SUPPLICANT_DRIVER_WIRED;
 		return 1;
 	}
-	if (ncfg_service_wifi_on(document, iface)) {
+	/* A radio given to a mesh is a radio whether or not a `device` block says
+	 * so: the `mesh` block is what names it (10.588), and the planner wants a
+	 * supplicant on it by the same test. */
+	if (ncfg_service_wifi_on(document, iface) || ncfg_document_mesh(document, iface)) {
 		*out = NCFG_SUPPLICANT_DRIVER_RADIO;
 		return 1;
 	}
@@ -275,6 +278,23 @@ int ncfg_service_supplicant_driver(const ncfg_document_t *document, const char *
  * itself. `autoconnect` defaulting to true is 0236's answer and is why the
  * `DISABLE_NETWORK all` below is not sent on almost every machine.
  */
+int ncfg_service_radio_fingerprint(const ncfg_document_t *document, const char *device,
+    const ncfg_secret_resolver_t *secrets, char *out, char *err, size_t err_size)
+{
+	const ncfg_mesh_t *mesh = ncfg_document_mesh(document, device);
+	int                mac_policy = 0;
+	int                randomise = 0;
+	int                joins = 0;
+
+	if (mesh) {
+		return ncfg_supplicant_mesh_fingerprint(mesh, secrets, out, err, err_size);
+	}
+	ncfg_service_radio_policy(document, device, &mac_policy, &randomise, &joins);
+	return ncfg_supplicant_fingerprint(document ? document->networks : NULL,
+	    document ? document->network_count : 0u, mac_policy, randomise, joins, secrets, out,
+	    err, err_size);
+}
+
 void ncfg_service_radio_policy(const ncfg_document_t *document, const char *device,
     int *mac_policy, int *randomise, int *joins)
 {
@@ -328,8 +348,7 @@ int ncfg_service_networks_record_path(const char *run_dir, const char *iface, ch
  * No digest at all removes the record rather than leaving a stale one: a claim
  * about a set the supplicant does not hold is worse than no claim.
  */
-static void record_networks(const ncfg_service_t *service, const char *device, int mac_policy,
-    int randomise, int joins)
+static void record_networks(const ncfg_service_t *service, const char *device)
 {
 	char  path[WIFI_PATH_MAX];
 	char  digest[NCFG_SUPPLICANT_SSID_HEX_SIZE];
@@ -370,9 +389,8 @@ static void record_networks(const ncfg_service_t *service, const char *device, i
 		}
 	}
 	detail[0] = '\0';
-	if (!ncfg_supplicant_fingerprint(service->document->networks,
-	    service->document->network_count, mac_policy, randomise, joins, service->secrets,
-	    digest, detail, sizeof(detail))) {
+	if (!ncfg_service_radio_fingerprint(service->document, device, service->secrets, digest,
+	    detail, sizeof(detail))) {
 		(void)unlink(path);
 		return;
 	}
@@ -422,6 +440,7 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 {
 	ncfg_supplicant_client_t *client;
 	const ncfg_eap_config_t  *dot1x;
+	const ncfg_mesh_t        *mesh;
 	char                      command[96];
 	char                      detail[NCFG_ERROR_MAX];
 	int                       mac_policy;
@@ -487,6 +506,30 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 		}
 		ncfg_supplicant_client_free(client);
 		return ok;
+	}
+
+	/*
+	 * A radio given to a mesh is the third population (10.588): the mesh and
+	 * nothing else, selected. Recorded as every radio's set is, through the
+	 * one digest the observation also asks, so a changed password or channel is
+	 * a reconcile and an unchanged one is not.
+	 */
+	mesh = ncfg_document_mesh(service->document, device);
+	if (mesh) {
+		uint32_t slot = 0;
+
+		if (!ncfg_supplicant_configure_mesh(client, mesh, service->secrets, &slot, detail,
+		    sizeof(detail))) {
+			ncfg_error_set(err, err_size, "could not join %s to mesh `%s`: %s", device,
+			    mesh->id ? mesh->id : "?", detail);
+			ncfg_supplicant_client_free(client);
+			return 0;
+		}
+		if (service->run_dir && service->run_dir[0] != '\0') {
+			record_networks(service, device);
+		}
+		ncfg_supplicant_client_free(client);
+		return 1;
 	}
 
 	ncfg_service_radio_policy(service->document, device, &mac_policy, &randomise, &joins);
@@ -568,7 +611,7 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 	 * part-way leaves the previous record -- or none -- rather than claiming a
 	 * set the supplicant does not hold. */
 	if (service->run_dir && service->run_dir[0] != '\0') {
-		record_networks(service, device, mac_policy, randomise, joins);
+		record_networks(service, device);
 	}
 	ncfg_supplicant_client_free(client);
 	return 1;

@@ -69,6 +69,19 @@ int ncfg_plan_radio_supplicant_wanted(const ncfg_document_t *desired,
 	const ncfg_device_t        *device = ncfg_plan_device(desired, name);
 	const ncfg_observed_link_t *link;
 
+	/*
+	 * **A mesh is a supplicant's job** (10.588), so a radio given to one wants
+	 * a supplicant whether or not a `device` block gives it a `wifi` one --
+	 * the mesh block is what says the radio is used. `managed = false` still
+	 * means it, as everywhere.
+	 */
+	if (ncfg_document_mesh(desired, name)) {
+		if (device && !device->managed) {
+			return 0;
+		}
+		link = ncfg_observed_link(observed, name);
+		return link && link->wireless;
+	}
 	if (!device || !device->managed || !device->wifi) {
 		return 0;
 	}
@@ -105,9 +118,11 @@ void ncfg_plan_radio_supplicant(ncfg_builder_t *builder, const ncfg_interface_t 
 	 * started by, which carries 0079's restart limit and rule 3's wait for
 	 * `link.up` without a second copy of either. **The field is the `device`
 	 * block's `wifi`, not the interface's**, because that is where somebody
-	 * would go to turn this off.
+	 * would go to turn this off -- or the `mesh` block, for a radio given to
+	 * one (10.588).
 	 */
-	ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_SUPPLICANT, "wifi", base, out);
+	ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_SUPPLICANT,
+	    ncfg_document_mesh(builder->desired, interface->name) ? "mesh" : "wifi", base, out);
 }
 
 /*
@@ -147,8 +162,12 @@ static void warn_bridged_station(ncfg_builder_t *builder)
 		for (at = 0; at < device->kind.bridge.member_count; at++) {
 			const char *member = device->kind.bridge.members[at];
 
+			/* A mesh point is not a three-address station: 802.11s carries a
+			 * bridged frame's own addresses, so a mesh radio in a bridge is
+			 * the backhaul working as meant rather than this warning's case. */
 			if (!member || !ncfg_plan_radio_supplicant_wanted(builder->desired,
-			                   builder->observed, member)) {
+			                   builder->observed, member) ||
+			    ncfg_document_mesh(builder->desired, member)) {
 				continue;
 			}
 			ncfg_plan_warnf(builder->plan, member,

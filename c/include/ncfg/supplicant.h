@@ -469,6 +469,24 @@ int ncfg_supplicant_settings(const ncfg_wifi_network_t *network,
  * Decision 0008 puts wired 802.1X on this supplicant precisely so the EAP
  * method handling is shared; this is the part that must not be.
  */
+/*
+ * A mesh's one network (10.588): `mode 5`, the mesh ID as `ssid`, the channel
+ * as a `frequency`, and SAE with management frame protection required -- or
+ * `key_mgmt NONE` for an open mesh. The password by reference, as every
+ * credential here is.
+ */
+int ncfg_supplicant_mesh_settings(const ncfg_mesh_t *mesh, const ncfg_secret_resolver_t *resolver,
+    ncfg_supplicant_settings_t *out, char *err, size_t err_size);
+
+/*
+ * The digest of what a mesh radio's supplicant is given, for the record the
+ * apply writes and the observation compares -- `ncfg_supplicant_fingerprint`
+ * for a radio whose one network is a mesh. The password reaches it as its
+ * hash, never as text.
+ */
+int ncfg_supplicant_mesh_fingerprint(const ncfg_mesh_t *mesh,
+    const ncfg_secret_resolver_t *resolver, char *out, char *err, size_t err_size);
+
 int ncfg_supplicant_wired_settings(const ncfg_eap_config_t *eap,
     const ncfg_secret_resolver_t *resolver, ncfg_supplicant_settings_t *out, char *err,
     size_t err_size);
@@ -985,6 +1003,16 @@ int ncfg_supplicant_add_network(ncfg_supplicant_client_t *client,
  * clears first -- the port cannot be "on" two profiles, and leaving a stale one
  * would let the supplicant fall back to it.
  */
+/*
+ * Configure a radio to join a mesh: the mesh as its only network, selected.
+ *
+ * Cleared first, as a wired port is: a radio given to a mesh does nothing
+ * else (10.588), so a station network left over would be the supplicant's to
+ * fall back to.
+ */
+int ncfg_supplicant_configure_mesh(ncfg_supplicant_client_t *client, const ncfg_mesh_t *mesh,
+    const ncfg_secret_resolver_t *resolver, uint32_t *id_out, char *err, size_t err_size);
+
 int ncfg_supplicant_configure_wired(ncfg_supplicant_client_t *client,
     const ncfg_eap_config_t *eap, const ncfg_secret_resolver_t *resolver, uint32_t *id_out,
     char *err, size_t err_size);

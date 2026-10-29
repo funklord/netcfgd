@@ -511,6 +511,129 @@ int ncfg_supplicant_wired_settings(const ncfg_eap_config_t *eap,
 	return 1;
 }
 
+/* ------------------------------------------------------------- a mesh */
+
+static int append_value(const ncfg_supplicant_setting_t *setting,
+    const ncfg_secret_resolver_t *resolver, ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * The frequency a channel number means, in MHz, or 0 for none this knows.
+ *
+ * 2.4 GHz is 2407 + 5n, with 14 the exception at 2484; 5 GHz is 5000 + 5n.
+ * Only these two because a mesh's band is one of them -- the compiler takes
+ * `6` for an access point's renderer to refuse, and a mesh on it is refused
+ * here the same way, by a zero.
+ */
+static int64_t frequency_of(int64_t channel)
+{
+	if (channel == 14) {
+		return 2484;
+	}
+	if (channel >= 1 && channel <= 13) {
+		return 2407 + 5 * channel;
+	}
+	if (channel >= 36 && channel <= 177) {
+		return 5000 + 5 * channel;
+	}
+	return 0;
+}
+
+int ncfg_supplicant_mesh_settings(const ncfg_mesh_t *mesh, const ncfg_secret_resolver_t *resolver,
+    ncfg_supplicant_settings_t *out, char *err, size_t err_size)
+{
+	char    hex[NCFG_SUPPLICANT_SSID_HEX_SIZE];
+	char    frequency[16];
+	int64_t mhz;
+
+	if (!mesh || !out || !mesh->channel.has) {
+		ncfg_error_set(err, err_size, "a mesh needs a channel to be joined on");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+	mhz = frequency_of(mesh->channel.value);
+	if (mhz == 0) {
+		ncfg_error_set(err, err_size, "channel %lld names no frequency a mesh can use",
+		    (long long)mesh->channel.value);
+		return 0;
+	}
+	if (!ncfg_supplicant_ssid_argument(&mesh->mesh_id, hex, sizeof(hex))) {
+		ncfg_error_set(err, err_size, "a mesh ID of %zu octets cannot be sent",
+		    mesh->mesh_id.length);
+		return 0;
+	}
+	(void)snprintf(frequency, sizeof(frequency), "%lld", (long long)mhz);
+	/*
+	 * `mode 5` is a mesh point, which the supplicant switches the interface to
+	 * itself; the mesh ID travels as `ssid`. Measured over the control socket
+	 * on hwsim, each of these answered OK and two nodes peered (10.588).
+	 */
+	if (!add_plain(out, "ssid", hex, err, err_size) ||
+	    !add_plain(out, "mode", "5", err, err_size) ||
+	    !add_plain(out, "frequency", frequency, err, err_size)) {
+		ncfg_supplicant_settings_free(out);
+		return 0;
+	}
+	if (mesh->security.kind == NCFG_SECURITY_OPEN) {
+		if (!add_plain(out, "key_mgmt", "NONE", err, err_size)) {
+			ncfg_supplicant_settings_free(out);
+			return 0;
+		}
+		return 1;
+	}
+	/* SAE, with management frame protection required: a mesh's peer links are
+	 * authenticated by SAE and protected by AMPE, and there is no WPA2 half to
+	 * leave room for. `sae_password` because SAE has no length rule. */
+	if (!credential_is_usable(resolver, &mesh->security.psk.passphrase, 0, err, err_size) ||
+	    !add_secret(out, "sae_password", &mesh->security.psk.passphrase, err, err_size) ||
+	    !add_plain(out, "key_mgmt", "SAE", err, err_size) ||
+	    !add_plain(out, "ieee80211w", "2", err, err_size)) {
+		ncfg_supplicant_settings_free(out);
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_supplicant_mesh_fingerprint(const ncfg_mesh_t *mesh,
+    const ncfg_secret_resolver_t *resolver, char *out, char *err, size_t err_size)
+{
+	ncfg_supplicant_settings_t settings;
+	ncfg_buf_t                 text;
+	size_t                     index;
+	int                        ok = 1;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "a digest needs somewhere to be written");
+		return 0;
+	}
+	out[0] = '\0';
+	if (!ncfg_supplicant_mesh_settings(mesh, resolver, &settings, err, err_size)) {
+		return 0;
+	}
+	/* The settings as the supplicant is given them, the secret as its digest:
+	 * `ncfg_supplicant_fingerprint`'s arrangement, so a changed password is a
+	 * changed record and the record holds no password. */
+	ncfg_buf_init(&text, 0);
+	ncfg_buf_add_text(&text, "mesh\n");
+	for (index = 0; ok && index < settings.count; index++) {
+		ncfg_buf_add_text(&text, settings.items[index].variable);
+		ncfg_buf_add_char(&text, ' ');
+		ok = append_value(&settings.items[index], resolver, &text, err, err_size);
+		ncfg_buf_add_char(&text, '\n');
+	}
+	ncfg_supplicant_settings_free(&settings);
+	if (ok && ncfg_buf_failed(&text)) {
+		ncfg_error_set(err, err_size, "a mesh's settings are more than one digest may cover");
+		ok = 0;
+	}
+	if (ok) {
+		ncfg_sha256_hex(ncfg_buf_text(&text), strlen(ncfg_buf_text(&text)), out);
+	}
+	/* The text held the mesh's password: hashed, then gone. */
+	ncfg_supplicant_buf_wipe(&text);
+	return ok;
+}
+
 /* ------------------------------------------------------- one whole network */
 
 int ncfg_supplicant_settings(const ncfg_wifi_network_t *network,

@@ -2515,6 +2515,18 @@ void ncfg_document_free(ncfg_document_t *document)
 	free(document);
 }
 
+const ncfg_mesh_t *ncfg_document_mesh(const ncfg_document_t *document, const char *device)
+{
+	size_t at;
+
+	for (at = 0; document && device && at < document->mesh_count; at++) {
+		if (document->meshes[at].device && strcmp(document->meshes[at].device, device) == 0) {
+			return &document->meshes[at];
+		}
+	}
+	return NULL;
+}
+
 const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const char *name)
 {
 	size_t i;

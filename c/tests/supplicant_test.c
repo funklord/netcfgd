@@ -1767,6 +1767,85 @@ static void a_wired_port_is_not_a_radio(const ncfg_secret_resolver_t *resolver)
 	free(carrier.security.eap.password);
 }
 
+/*
+ * A mesh's one network (10.588): what the supplicant is told, each setting as
+ * the hwsim experiment found the control socket takes it, and the digest the
+ * record and the observation both compute.
+ */
+static void a_mesh_is_mode_5_on_its_channel_with_sae(const ncfg_secret_resolver_t *resolver)
+{
+	ncfg_mesh_t                mesh;
+	ncfg_supplicant_settings_t settings;
+	char                       message[NCFG_ERROR_MAX];
+	char                       first[NCFG_SUPPLICANT_SSID_HEX_SIZE];
+	char                       second[NCFG_SUPPLICANT_SSID_HEX_SIZE];
+	const ncfg_supplicant_setting_t *secret;
+
+	memset(&mesh, 0, sizeof(mesh));
+	mesh.id = (char *)(void *)"backhaul";
+	mesh.mesh_id.has = 1;
+	mesh.mesh_id.length = 8u;
+	memcpy(mesh.mesh_id.bytes, "backhaul", 8u);
+	mesh.device = (char *)(void *)"wlan2";
+	mesh.channel.has = 1;
+	mesh.channel.value = 1;
+	mesh.security.kind = NCFG_SECURITY_PSK;
+	mesh.security.psk.proto = NCFG_PSK_PROTO_WPA3;
+	mesh.security.psk.passphrase.provider = NCFG_SECRET_PROVIDER_FILE;
+	mesh.security.psk.passphrase.name = (char *)(void *)"pass";
+	if (!ncfg_supplicant_mesh_settings(&mesh, resolver, &settings, message, sizeof(message))) {
+		check(0, "a mesh renders");
+		printf("  said: %s\n", message);
+		return;
+	}
+	check(setting_named(&settings, "mode") &&
+	        strcmp(setting_named(&settings, "mode")->value, "5") == 0,
+	    "a mesh is mode 5, which the supplicant makes a mesh point");
+	check(setting_named(&settings, "ssid") &&
+	        strcmp(setting_named(&settings, "ssid")->value, "6261636b6861756c") == 0,
+	    "  its mesh ID travels as the ssid, in hex");
+	check(setting_named(&settings, "frequency") &&
+	        strcmp(setting_named(&settings, "frequency")->value, "2412") == 0,
+	    "  and channel 1 as 2412 MHz, since mesh points meet on it");
+	check(setting_named(&settings, "key_mgmt") &&
+	        strcmp(setting_named(&settings, "key_mgmt")->value, "SAE") == 0 &&
+	        setting_named(&settings, "ieee80211w") &&
+	        strcmp(setting_named(&settings, "ieee80211w")->value, "2") == 0,
+	    "  authenticated by SAE with management frame protection required");
+	secret = setting_named(&settings, "sae_password");
+	check(secret && secret->value == NULL && secret->secret != NULL,
+	    "  and the password by reference, never as text in the list");
+	ncfg_supplicant_settings_free(&settings);
+
+	check(ncfg_supplicant_mesh_fingerprint(&mesh, resolver, first, message, sizeof(message)),
+	    "a mesh has a digest for the record");
+	mesh.channel.value = 6;
+	check(ncfg_supplicant_mesh_fingerprint(&mesh, resolver, second, message, sizeof(message)) &&
+	        strcmp(first, second) != 0,
+	    "  which a moved channel changes, so the radio is joined again");
+	mesh.channel.value = 1;
+	mesh.security.psk.passphrase.name = (char *)(void *)"password";
+	check(ncfg_supplicant_mesh_fingerprint(&mesh, resolver, second, message, sizeof(message)) &&
+	        strcmp(first, second) != 0,
+	    "  and so does another password, though the record holds none");
+	mesh.security.psk.passphrase.name = (char *)(void *)"pass";
+
+	mesh.channel.value = 36;
+	mesh.security.kind = NCFG_SECURITY_OPEN;
+	if (ncfg_supplicant_mesh_settings(&mesh, resolver, &settings, message, sizeof(message))) {
+		check(setting_named(&settings, "frequency") &&
+		        strcmp(setting_named(&settings, "frequency")->value, "5180") == 0 &&
+		        setting_named(&settings, "key_mgmt") &&
+		        strcmp(setting_named(&settings, "key_mgmt")->value, "NONE") == 0 &&
+		        !setting_named(&settings, "sae_password"),
+		    "an open mesh on channel 36 is 5180 MHz with no key management and no secret");
+		ncfg_supplicant_settings_free(&settings);
+	}
+	mesh.channel.value = 0;
+	check(!ncfg_supplicant_mesh_settings(&mesh, resolver, &settings, message, sizeof(message)),
+	    "and a channel that names no frequency is refused rather than sent");
+}
+
 /* ================================================================ pick_ssid */
 
 /* The scan every case below reads a name out of. */
@@ -2134,6 +2213,7 @@ int main(void)
 	two_networks_with_different_cas_do_not_share_one_file(secrets_dir, work_dir);
 	a_stored_certificate_with_nowhere_to_go_is_refused(secrets_dir);
 	a_wired_port_is_not_a_radio(&resolver);
+	a_mesh_is_mode_5_on_its_channel_with_sae(&resolver);
 
 	a_network_named_by_address_learns_its_name();
 	a_hidden_access_point_is_not_resolved_to_an_empty_name();

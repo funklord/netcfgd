@@ -126,6 +126,36 @@ static void a_radio_the_machine_has_gets_a_supplicant(void)
 }
 
 /*
+ * A radio given to a mesh gets a supplicant without a `wifi` block (10.588):
+ * the `mesh` block is what says the radio is used, and the reason names it.
+ * `managed = false` still means it.
+ */
+#define MESH \
+	",\"meshes\":[{\"id\":\"backhaul\",\"mesh_id\":\"6261636b6861756c\"," \
+	"\"device\":\"wlan0\",\"security\":{\"type\":\"open\"},\"channel\":1}]"
+
+static void a_radio_given_to_a_mesh_gets_a_supplicant(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(PLAIN_DEVICE, INTERFACE, "", MESH,
+	    "\"links\":[" DOWN_RADIO_LINK "]", &document, &observed);
+	const ncfg_action_t *start = plan ? planfix_action(plan, "backend.start") : NULL;
+
+	check(start && start->op.u.backend.kind == NCFG_BACKEND_SUPPLICANT,
+	    "a radio given to a mesh starts a supplicant with no `wifi` block");
+	check(start && start->reason.field && strcmp(start->reason.field, "mesh") == 0,
+	    "  and the reason names the `mesh` block, which is what to edit");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(UNMANAGED_RADIO_DEVICE, INTERFACE, "", MESH,
+	    "\"links\":[" DOWN_RADIO_LINK "]", &document, &observed);
+	check(plan && !planfix_action(plan, "backend.start"),
+	    "while an unmanaged radio starts nothing, a mesh or not");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * The addressing waits on it, which is the whole reason this is a prerequisite
  * and not an addressing action: a radio that has not associated carries
  * nothing, so a client started first spends its backoff talking to a network
@@ -405,6 +435,7 @@ static void the_radio_this_build_does_start_one_for_is_not_warned_about(void)
 int main(void)
 {
 	a_radio_the_machine_has_gets_a_supplicant();
+	a_radio_given_to_a_mesh_gets_a_supplicant();
 	the_addressing_waits_for_the_supplicant();
 	a_supplicant_already_running_is_not_started_again();
 	a_wifi_block_on_something_that_is_not_a_radio_starts_nothing();

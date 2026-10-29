@@ -510,6 +510,19 @@ int ncfg_service_access_control(const char *run_dir, const char *iface, int poli
 void ncfg_service_radio_policy(const ncfg_document_t *document, const char *device,
     int *mac_policy, int *randomise, int *joins);
 
+/*
+ * The digest of everything a radio's supplicant is handed, for the record.
+ *
+ * **One question for the two places it is asked**, `ncfg_service_radio_policy`'s
+ * reason: the executor digests what it handed over and the observer digests
+ * what the document asks for, and two spellings of either is a supplicant
+ * repopulated on every reconcile. A radio given to a mesh is handed the mesh
+ * and nothing else (10.588), so its digest is the mesh's; any other radio's is
+ * the document's networks and the three settings above.
+ */
+int ncfg_service_radio_fingerprint(const ncfg_document_t *document, const char *device,
+    const ncfg_secret_resolver_t *secrets, char *out, char *err, size_t err_size);
+
 int ncfg_service_networks_record_path(const char *run_dir, const char *iface, char *out,
     size_t out_size, char *err, size_t err_size);
 

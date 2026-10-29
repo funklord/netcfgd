@@ -97,9 +97,6 @@ static ncfg_optbool_t record_says(const char *run_dir, const char *interface,
 	char           digest[NCFG_SUPPLICANT_SSID_HEX_SIZE];
 	char           why[NCFG_ERROR_MAX];
 	char          *recorded;
-	int            mac_policy = 0;
-	int            randomise = 0;
-	int            joins = 0;
 	size_t         length;
 
 	if (!ncfg_service_networks_record_path(run_dir, interface, path, sizeof(path), NULL, 0)) {
@@ -109,11 +106,9 @@ static ncfg_optbool_t record_says(const char *run_dir, const char *interface,
 	if (!recorded) {
 		return answer;
 	}
-	/* The same three the executor digested, asked the same way. */
-	ncfg_service_radio_policy(desired, interface, &mac_policy, &randomise, &joins);
+	/* The same digest the executor recorded, asked through the same function. */
 	why[0] = '\0';
-	if (!ncfg_supplicant_fingerprint(desired->networks, desired->network_count, mac_policy,
-	    randomise, joins, secrets, digest, why, sizeof(why))) {
+	if (!ncfg_service_radio_fingerprint(desired, interface, secrets, digest, why, sizeof(why))) {
 		/* A credential the store cannot answer for. Nothing may be concluded:
 		 * the set netcfgd would hand over is not knowable, so neither is
 		 * whether the supplicant is holding it. */

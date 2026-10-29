@@ -12628,12 +12628,38 @@ told about it**. Tests in `lower_test` (each refusal, both orders of the radio
 conflict), `render_test` (SAE and open round trips) and `scope_test`; the
 witness carries one.
 
-**Step 2, next: joining.** The radio's supplicant is given the mesh as its one
-network -- `mode=5`, the mesh ID as `ssid`, `frequency`, `key_mgmt=SAE` --
-instead of the document's station networks, and the network-set fingerprint
-both the apply and the observation compute has to say the same. Then a hull
-rig: netcfgd's mesh node peering with a bare `wpa_supplicant` one in another
-network namespace on hwsim, and a ping across.
+**Built, step 2 (2026-10-29): joining.** A radio given to a mesh wants a
+supplicant whether or not a `device` block gives it a `wifi` one, and the
+supplicant driver is a radio's for it. The supplicant is given the mesh as its
+one network -- `mode 5`, the mesh ID as `ssid`, the channel as a `frequency`,
+SAE with `ieee80211w 2` (or `key_mgmt NONE` open) -- cleared first and
+selected, the way a wired 802.1X port is given its one network. **What a radio
+is handed is digested by one function** (`ncfg_service_radio_fingerprint`):
+the executor's record and the observation's comparison both ask it, because
+two answers would repopulate the supplicant on every reconcile. The bridging
+warning for a three-address station does not fire for a mesh point, which
+carries a bridged frame's own addresses.
+
+**Measured before it was written**, in a hull vm over the control socket: each
+`SET_NETWORK` answered OK, the interface became a mesh point by itself, and two
+nodes peered (`mesh plink: ESTAB`). **Verified by `make hull-mesh`**: netcfgd's
+node on wlan0, joined by `ncfg apply` from a `mesh` block and an `interface`
+block, and a bare `wpa_supplicant` node from a file on wlan1 in another
+network namespace. The peer link is established, a UDP echo crosses (and the
+same echo before the apply does not -- the control), and **a second `ncfg plan`
+has nothing to do**, which is the record and the observation agreeing. With
+the reference node given another password the link stays `LISTEN` and nothing
+crosses, so the node is authenticating with its secret. The first run of the
+rig found the supplicant driver refused for a radio no `device` block named,
+which is how the driver came to ask about meshes. Unit tests in
+`supplicant_test` (settings, digest moved by channel and by password) and
+`plan_radio_test` (a supplicant with no `wifi` block, none when unmanaged;
+sabotaged red once).
+
+**Not built**: a mesh and a station or access point on one radio at once
+(which needs a second virtual interface on the phy), mesh gating to a wired
+LAN beyond bridging the mesh interface, and `ncfg status` saying who the
+peers are.
 
 **Found on the way: the example gate could not see two of the language's ten
 blocks.** It read the block heads out of the Rust's lowering, which has eight;
@@ -12717,8 +12743,7 @@ met by this gate later.
    `SET_NEIGHBOR`. An access point cannot learn its neighbours; they would be
    declared in the configuration until fleet management can say them.
 3. **Mesh (802.11s)**: a `mesh` block joined through `wpa_supplicant`
-   (`mode=5`, SAE), as wireless backhaul -- the block is built (10.588) and
-   joining it is that entry's step 2.
+   (`mode=5`, SAE), as wireless backhaul -- built and joined (10.588).
 4. **Repeater.** Four-address (WDS) station mode, so a bridged repeater works
    where `plan/radio.c` warns today that it cannot; Multi-AP backhaul
    (`multi_ap`) beside it; a routed relay (station and access point on one

@@ -368,6 +368,39 @@ int ncfg_supplicant_add_network(ncfg_supplicant_client_t *client,
 	return 1;
 }
 
+int ncfg_supplicant_configure_mesh(ncfg_supplicant_client_t *client, const ncfg_mesh_t *mesh,
+    const ncfg_secret_resolver_t *resolver, uint32_t *id_out, char *err, size_t err_size)
+{
+	ncfg_supplicant_settings_t settings;
+	uint32_t                   id = 0;
+	char                       select[64];
+
+	if (!client || !mesh || !id_out) {
+		ncfg_error_set(err, err_size, "a mesh needs a supplicant and a mesh to join");
+		return 0;
+	}
+	if (!ncfg_supplicant_clear_networks(client, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_supplicant_mesh_settings(mesh, resolver, &settings, err, err_size)) {
+		return 0;
+	}
+	if (!populate(client, &settings, resolver, &id, err, err_size)) {
+		ncfg_supplicant_settings_free(&settings);
+		return 0;
+	}
+	ncfg_supplicant_settings_free(&settings);
+	/* `SELECT_NETWORK`, not `ENABLE_NETWORK`: selecting is what starts the
+	 * mesh -- the supplicant switches the interface to a mesh point and
+	 * begins peering -- and there is nothing else on the radio to choose. */
+	(void)snprintf(select, sizeof(select), "SELECT_NETWORK %lu", (unsigned long)id);
+	if (!ncfg_supplicant_command(client, select, err, err_size)) {
+		return 0;
+	}
+	*id_out = id;
+	return 1;
+}
+
 int ncfg_supplicant_configure_wired(ncfg_supplicant_client_t *client,
     const ncfg_eap_config_t *eap, const ncfg_secret_resolver_t *resolver, uint32_t *id_out,
     char *err, size_t err_size)
