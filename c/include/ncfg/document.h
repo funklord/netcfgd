@@ -2149,6 +2149,22 @@ typedef struct {
 	 */
 	char   **states;
 	size_t   state_count;
+	/*
+	 * The sending station's hardware address, nftables' `ether saddr`
+	 * (project.md 10.592): exact addresses and `aa:bb:cc:*` prefixes,
+	 * normalised and sorted, since a station match is a set. A prefix is
+	 * matched as a mask, which nftables does natively -- unlike hostapd, so
+	 * here it works on every action. Resolved from `mac_lists` as an access
+	 * point's stations are, and the same two fields beside it keep what was
+	 * written for the renderer: `mac_written` is filled only where a list is
+	 * named. All three omitted when empty.
+	 */
+	char   **mac;
+	size_t   mac_count;
+	char   **mac_lists;
+	size_t   mac_list_count;
+	char   **mac_written;
+	size_t   mac_written_count;
 } ncfg_firewall_rule_t;
 
 typedef struct {

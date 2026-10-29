@@ -2514,7 +2514,18 @@ static const ncfg_field_t firewall_rule_fields[] = {
 	    .offset = offsetof(ncfg_firewall_rule_t, interface) },
 	{ .name = "states", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_firewall_rule_t, states),
-	    .count_offset = offsetof(ncfg_firewall_rule_t, state_count) }
+	    .count_offset = offsetof(ncfg_firewall_rule_t, state_count) },
+	/* The three source-station fields, omitted when empty, so a ruleset that
+	 * names no station is the document it was (10.592). */
+	{ .name = "mac", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, mac),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, mac_count) },
+	{ .name = "mac_lists", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, mac_lists),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, mac_list_count) },
+	{ .name = "mac_written", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, mac_written),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, mac_written_count) }
 };
 static const ncfg_type_t firewall_rule_type = TYPE("firewall rule", firewall_rule_fields);
 

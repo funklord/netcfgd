@@ -12597,6 +12597,55 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.592 The firewall, enforced: host lists in its rules, and the slices to get there
+
+**Asked for by the holder 2026-10-29: host lists on the firewall side.** That
+meant finding out the firewall is not enforced at all -- 10.564: it compiles,
+round-trips and reaches the document, and nothing turns it into ops -- because
+the planner waited on 0295's product half. **The holder answered it the same
+day: `ncfg status` must show the installed firewall as rules**, so 0295 is
+accepted as decoder (A) with identity (B), built together. The example file
+now says in capitals that a `firewall` block is not yet enforced, which it had
+not said.
+
+**Measured before building, in an unprivileged `unshare -rn` namespace with
+the host's `nft`:** a user namespace can hold an nftables table, so the whole
+firewall can be exercised against the real kernel with no root; and
+`ether saddr & ff:ff:ff:00:00:00 == aa:bb:cc:00:00:00 drop comment
+"name=x"` is accepted and listed back as written -- **nftables masks
+natively**, so a prefix needs no expansion here, unlike hostapd (10.591), and
+works on an accept as well as a drop.
+
+### The slices, in order
+
+1. **Done: `mac` in a rule.** `drop "strangers" { mac = ["@host_list:banned",
+   "aa:bb:cc:*", "00:11:22:33:44:55"] }` -- nftables' `ether saddr`, which
+   0294's closed vocabulary gains on the holder's request. Resolved from the
+   host lists as an access point's are, the names and what was written kept
+   for the renderer, sorted as a set. **Refused in `output`**, where a packet
+   this host sends has no sending station yet, so the rule would never match.
+   It means nothing on an interface with no Ethernet header (WireGuard, PPP),
+   where it simply never matches; that is not refused, since `interface` is
+   optional and a rule may span both kinds.
+2. **The `sys/nft` layer**: the three filter chains and every rule
+   expression layer one writes -- protocol, ports, addresses, interface,
+   state, `ether saddr` with its mask, the verdict -- each rule carrying B's
+   name and digest in nft's comment TLV; and A, the decoder of those back
+   into `ncfg_firewall_rule_t`. Checked against the kernel in a namespace,
+   with `nft list ruleset` as the independent reader.
+3. **Plan, apply, observe**: the table holds NAT and the firewall, and 0294
+   replaces the whole table in one transaction -- so one op must carry both
+   rather than `nat.replace` beside a firewall op, each of which would drop
+   the other's chains. An observer reading the chains back through A, the
+   `(name, digest)` comparison, and `ncfg status` showing the rules.
+
+Slice 1 checked by `lower_test` (resolution across declaration order, a
+prefix on an accept, the output refusal, an undeclared list, a malformed
+address) and `render_test` (round trips with and without a list) -- the
+round trip found an order dependence on the first run: the rule's set was
+resolved in the list's written order and the list renders sorted, so a saved
+profile compiled to a different document. It is sorted canonically now.
+
 ## 10.591 A host list manager: wanted, and how it stores what it sees
 
 **Asked for by the copyright holder 2026-10-29**: "a host list manager, so we

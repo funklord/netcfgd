@@ -1280,6 +1280,29 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		ncfg_render_list_emit(body, "\t\t\t", "state", &list, 0);
 		ncfg_render_list_free(&list);
 	}
+	/* The lists named, then what was written beside them; where no list is
+	 * named, `mac` is what was written (10.592). */
+	if (rule->mac_count != 0u || rule->mac_list_count != 0u) {
+		ncfg_render_list_t list;
+		char *const       *written = rule->mac_list_count ? rule->mac_written : rule->mac;
+		size_t             written_count =
+		    rule->mac_list_count ? rule->mac_written_count : rule->mac_count;
+
+		ncfg_render_list_init(&list);
+		for (at = 0; at < rule->mac_list_count; at++) {
+			ncfg_buf_t *one = ncfg_render_list_next(&list);
+
+			ncfg_buf_add_char(one, '"');
+			ncfg_buf_add_text(one, "@host_list:");
+			ncfg_buf_add_text(one, rule->mac_lists[at]);
+			ncfg_buf_add_char(one, '"');
+		}
+		for (at = 0; at < written_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&list), written[at]);
+		}
+		ncfg_render_list_emit(body, "\t\t\t", "mac", &list, 0);
+		ncfg_render_list_free(&list);
+	}
 	ncfg_buf_add_text(body, "\t\t}\n");
 }
 

@@ -1473,6 +1473,55 @@ static void host_list_cases(void)
 	}
 }
 
+/* Host lists in the firewall (10.592): a rule's `mac`. */
+static void firewall_mac_cases(void)
+{
+	ncfg_document_t            *document;
+	const ncfg_firewall_rule_t *rule;
+
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"strangers\" { mac = [\"@host_list:banned\", \"AA-BB-CC-*\"] }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n"
+	    "host_list \"banned\" { mac = [\"de:ad:be:*\", \"00:00:00:00:00:07\", \"aa:bb:cc:*\"] }\n",
+	    "a firewall rule names a host list declared after it, and a prefix");
+	if (document && document->firewall && document->firewall->input.rule_count == 1) {
+		rule = &document->firewall->input.rules[0];
+		check(rule->mac_count == 3 && strcmp(rule->mac[0], "00:00:00:00:00:07") == 0 &&
+		    strcmp(rule->mac[1], "aa:bb:cc:*") == 0 && strcmp(rule->mac[2], "de:ad:be:*") == 0,
+		    "  what was written and the list's, normalised, sorted and without repeats");
+		check(rule->mac_list_count == 1 && strcmp(rule->mac_lists[0], "banned") == 0 &&
+		    rule->mac_written_count == 1 && strcmp(rule->mac_written[0], "aa:bb:cc:*") == 0,
+		    "  and the list's name and what was written beside it are kept");
+	} else {
+		check(0, "  the rule is there");
+	}
+	if (document) {
+		ncfg_document_free(document);
+	}
+	/* nftables masks natively, so an accept may take a prefix too. */
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ours\" { mac = [\"aa:bb:cc:*\"] }\n\t}\n"
+	    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "an accept rule may take a prefix, unlike an access point's allow list");
+	if (document) {
+		check(document->firewall && document->firewall->input.rules[0].mac_written_count == 0,
+		    "  and with no list named, nothing is kept twice");
+		ncfg_document_free(document);
+	}
+	refuses("firewall {\n\tinput { policy = \"accept\" }\n\tforward { policy = \"accept\" }\n"
+	    "\toutput {\n\t\tpolicy = \"accept\"\n\t\tdrop \"x\" { mac = [\"aa:bb:cc:dd:ee:ff\"] }\n"
+	    "\t}\n}\n", "in the output chain",
+	    "a `mac` in the output chain is refused, where nothing has a sender yet");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { mac = [\"@host_list:nobody\"] }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "which no `host_list` block declares", "a firewall list nothing declares is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { mac = [\"nonsense\"] }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "six colon-separated octets", "and a `mac` that is not one");
+}
+
 /* ------------------------------------------------------------------------ *
  * Devices and link kinds
  * ------------------------------------------------------------------------ */
@@ -3451,6 +3500,7 @@ int main(void)
 	network_cases();
 	access_point_cases();
 	host_list_cases();
+	firewall_mac_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();

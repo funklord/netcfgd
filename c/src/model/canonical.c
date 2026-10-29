@@ -450,6 +450,31 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 		sort_set(acl->written, &acl->written_count);
 	}
 
+	/* A firewall rule's sending stations are a set as a station list is, and
+	 * sorted for the same reason: resolved in a host list's order, two
+	 * documents meaning one thing would otherwise differ by where the list
+	 * happened to be written (10.592). The rules themselves are never sorted
+	 * -- their order is the policy. */
+	if (document->firewall) {
+		ncfg_firewall_chain_t *chains[3];
+		size_t                 c;
+
+		chains[0] = &document->firewall->input;
+		chains[1] = &document->firewall->forward;
+		chains[2] = &document->firewall->output;
+		for (c = 0; c < 3u; c++) {
+			size_t r;
+
+			for (r = 0; r < chains[c]->rule_count; r++) {
+				ncfg_firewall_rule_t *rule = &chains[c]->rules[r];
+
+				sort_set(rule->mac, &rule->mac_count);
+				sort_set(rule->mac_lists, &rule->mac_list_count);
+				sort_set(rule->mac_written, &rule->mac_written_count);
+			}
+		}
+	}
+
 	stable_sort(document->host_lists, document->host_list_count,
 	    sizeof(*document->host_lists), compare_host_list);
 	for (i = 0; i < document->host_list_count; i++) {

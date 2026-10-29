@@ -417,10 +417,16 @@
 #     is the rule's identity: what `ncfg plan` and a red row say.
 #   - A rule matches on `protocol` (tcp, udp, icmp, icmpv6), `port` (with a
 #     protocol that has ports), `from` and `to` (addresses or CIDRs),
-#     `interface`, and `state` (new, established, related, invalid). That is
-#     the whole vocabulary of version one.
+#     `interface`, `state` (new, established, related, invalid), and `mac` --
+#     the sending station, by address, by manufacturer prefix (`aa:bb:cc:*`)
+#     or by `"@host_list:NAME"`, in `input` and `forward` only.
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
+#
+# **NOT YET ENFORCED.** This build compiles a `firewall` block, checks it and
+# keeps it, and does not yet write it to the kernel: no packet is filtered by
+# it. `ncfg plan` shows nothing to do for it for that reason. Until it says
+# otherwise, keep whatever firewall this machine already has.
 
 #firewall {
 #	input {
@@ -436,6 +442,9 @@
 #		drop "netbios" {
 #			protocol = "udp"
 #			port     = [137, 138]
+#		}
+#		drop "strangers" {
+#			mac = ["de:ad:be:*", "00:11:22:33:44:09"]
 #		}
 #	}
 #	forward {

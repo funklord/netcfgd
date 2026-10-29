@@ -54,6 +54,9 @@ static void rule_free(ncfg_firewall_rule_t *rule)
 	ncfg_strings_free(rule->to, rule->to_count);
 	free(rule->interface);
 	ncfg_strings_free(rule->states, rule->state_count);
+	ncfg_strings_free(rule->mac, rule->mac_count);
+	ncfg_strings_free(rule->mac_lists, rule->mac_list_count);
+	ncfg_strings_free(rule->mac_written, rule->mac_written_count);
 	memset(rule, 0, sizeof(*rule));
 }
 
@@ -270,6 +273,58 @@ static void rule_addresses(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 }
 
 /*
+ * `mac`: the sending station, by address, by OUI prefix, or by host list
+ * (10.592). Lists are resolved once every block is read -- `lower.c` -- and
+ * the addresses written beside one are kept for the renderer only where one
+ * is named, as an access point's are.
+ */
+static void rule_macs(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    ncfg_firewall_rule_t *rule)
+{
+	ncfg_words_t words;
+	size_t       i;
+
+	memset(&words, 0, sizeof(words));
+	if (!ncfg_as_words(ctx, assignment->value, &words)) {
+		ncfg_words_free(&words);
+		return;
+	}
+	for (i = 0; i < words.count; i++) {
+		const char *text = words.at[i].text;
+		char        why[NCFG_ERROR_MAX];
+		char        normal[NCFG_STATION_ADDRESS_SIZE];
+
+		if (strncmp(text, NCFG_HOST_LIST_PREFIX, strlen(NCFG_HOST_LIST_PREFIX)) == 0) {
+			const char *name = text + strlen(NCFG_HOST_LIST_PREFIX);
+
+			if (!ncfg_is_host_list_name(name)) {
+				ncfg_diag(ctx, words.at[i].span,
+				    "`%s` does not name a host list: after `%s` comes the list's name",
+				    text, NCFG_HOST_LIST_PREFIX);
+				continue;
+			}
+			if (!ncfg_has_string(rule->mac_lists, rule->mac_list_count, name)) {
+				(void)ncfg_push_string(ctx, &rule->mac_lists, &rule->mac_list_count, name);
+			}
+			continue;
+		}
+		if (ncfg_station_is_prefix(text)
+		    ? !ncfg_station_prefix_normalize(text, normal, sizeof(normal), why, sizeof(why))
+		    : !ncfg_station_address_normalize(text, normal, sizeof(normal), why,
+		          sizeof(why))) {
+			ncfg_diag(ctx, words.at[i].span, "%s", why);
+			continue;
+		}
+		if (!ncfg_has_string(rule->mac, rule->mac_count, normal)) {
+			(void)ncfg_push_string(ctx, &rule->mac, &rule->mac_count, normal);
+			(void)ncfg_push_string(ctx, &rule->mac_written, &rule->mac_written_count,
+			    normal);
+		}
+	}
+	ncfg_words_free(&words);
+}
+
+/*
  * One rule: the action from the head, the name from the label, the matches
  * from the keys.
  *
@@ -329,11 +384,19 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			rule.interface = ncfg_as_interface_name(ctx, assignment->value);
 		} else if (strcmp(key, "state") == 0) {
 			rule_states(ctx, assignment, &rule);
+		} else if (strcmp(key, "mac") == 0) {
+			rule_macs(ctx, assignment, &rule);
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, state", key);
+			    "interface, state, mac", key);
 		}
+	}
+	/* What was written is the resolved set again where no list is named. */
+	if (rule.mac_list_count == 0) {
+		ncfg_strings_free(rule.mac_written, rule.mac_written_count);
+		rule.mac_written = NULL;
+		rule.mac_written_count = 0;
 	}
 
 	/*
@@ -398,6 +461,18 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				continue;
 			}
 			if (!lower_rule(ctx, &item->as.block, action, &rule)) {
+				continue;
+			}
+			/* A packet this host sends has no sending station yet: its link
+			 * header is built after the output hook, so `ether saddr` there
+			 * would compile into a rule that never matches. */
+			if (strcmp(chain_name, "output") == 0 &&
+			    (rule.mac_count || rule.mac_list_count)) {
+				ncfg_diag(ctx, item->as.block.span,
+				    "rule `%s` matches `mac` in the output chain, where a packet "
+				    "this host sends has no sending station to match; match it in "
+				    "`input` or `forward`", rule.name);
+				rule_free(&rule);
 				continue;
 			}
 			/* **One name per chain**, because the name is the rule's

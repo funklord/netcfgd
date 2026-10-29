@@ -534,6 +534,64 @@ static void resolve_host_lists(ncfg_lower_ctx_t *ctx, const deferred_t *referrer
 	}
 }
 
+/*
+ * The same for the firewall's `mac` (10.592): each list a rule names, into its
+ * `mac`, repeats dropped; the canonical pass sorts the set.
+ * nftables matches a prefix as a mask, so a list's prefixes are kept as they
+ * are on every action. A name nothing declares is refused, for the access
+ * point's reason with the stakes higher.
+ */
+static void resolve_firewall_host_lists(ncfg_lower_ctx_t *ctx, ncfg_span_t span,
+    const char *source)
+{
+	static const char *const names[3] = { "input", "forward", "output" };
+	ncfg_firewall_t          *firewall = ctx->document->firewall;
+	ncfg_firewall_chain_t    *chains[3];
+	size_t                    c;
+
+	if (!firewall) {
+		return;
+	}
+	ctx->source = source;
+	chains[0] = &firewall->input;
+	chains[1] = &firewall->forward;
+	chains[2] = &firewall->output;
+	for (c = 0; c < 3; c++) {
+		size_t r;
+
+		for (r = 0; r < chains[c]->rule_count; r++) {
+			ncfg_firewall_rule_t *rule = &chains[c]->rules[r];
+			size_t                at;
+
+			for (at = 0; at < rule->mac_list_count; at++) {
+				const ncfg_host_list_t *list = NULL;
+				size_t                  find;
+				size_t                  mac;
+
+				for (find = 0; find < ctx->document->host_list_count; find++) {
+					if (strcmp(ctx->document->host_lists[find].name,
+					        rule->mac_lists[at]) == 0) {
+						list = &ctx->document->host_lists[find];
+					}
+				}
+				if (!list) {
+					ncfg_diag(ctx, span,
+					    "firewall rule `%s/%s` names host list `%s`, which no "
+					    "`host_list` block declares", names[c], rule->name,
+					    rule->mac_lists[at]);
+					continue;
+				}
+				for (mac = 0; mac < list->mac_count; mac++) {
+					if (!ncfg_has_string(rule->mac, rule->mac_count, list->mac[mac])) {
+						(void)ncfg_push_string(ctx, &rule->mac, &rule->mac_count,
+						    list->mac[mac]);
+					}
+				}
+			}
+		}
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * The walk
  * ------------------------------------------------------------------------ */
@@ -626,9 +684,14 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	 * read (10.591). */
 	deferred_t      *referrers = NULL;
 	size_t           referrer_count = 0;
+	/* Where the firewall block was, for a host list one of its rules names
+	 * and nothing declares. */
+	ncfg_span_t      firewall_span;
+	const char      *firewall_source = NULL;
 	size_t           i;
 
 	memset(&ctx, 0, sizeof(ctx));
+	memset(&firewall_span, 0, sizeof(firewall_span));
 	ctx.diags = diags;
 	ctx.hooks = hooks ? hooks : ncfg_hook_sink_refusing();
 	ctx.provenance = provenance;
@@ -651,6 +714,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		if (strcmp(head, "global") == 0) {
 			ncfg_lower_global_block(&ctx, block);
 		} else if (strcmp(head, "firewall") == 0) {
+			firewall_span = block->block->span;
+			firewall_source = block->source;
 			ncfg_lower_firewall(&ctx, block);
 		} else if (strcmp(head, "device") == 0) {
 			ncfg_device_t device;
@@ -864,6 +929,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	expand_ingress_shapers(&ctx, shapers, shaper_count);
 	check_linksets(&ctx, linksets, linkset_count);
 	resolve_host_lists(&ctx, referrers, referrer_count);
+	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
 
 	deferred_free(memberships, membership_count);
 	deferred_free(shapers, shaper_count);

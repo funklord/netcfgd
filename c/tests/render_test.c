@@ -1775,6 +1775,20 @@ static void the_enterprise_networks_round_trip(void)
  * at somebody's next `ncfg apply`. The two halves landed together precisely
  * so that this test could exist (10.564).
  */
+/* A firewall rule's `mac`, with a list and without (10.592). */
+static void a_firewall_mac_round_trips(void)
+{
+	round_trips("host_list \"banned\" { mac = [\"de:ad:be:*\"] }\n"
+	    "firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"strangers\" { mac = [\"@host_list:banned\", \"aa:bb:cc:dd:ee:ff\"] }\n"
+	    "\t}\n\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "a firewall rule naming a host list survives a round trip");
+	round_trips("firewall {\n\tinput {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ours\" { mac = [\"aa:bb:cc:*\", \"00:00:00:00:00:01\"] }\n"
+	    "\t}\n\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so does one naming addresses and a prefix alone");
+}
+
 static void a_firewall_round_trips(void)
 {
 	round_trips("firewall {\n"
@@ -3861,6 +3875,7 @@ int main(int argc, char **argv)
 	a_stored_certificate_stays_stored();
 	the_enterprise_networks_round_trip();
 	a_firewall_round_trips();
+	a_firewall_mac_round_trips();
 	a_name_needing_escapes_round_trips();
 	the_link_kinds_round_trip();
 	a_bond_at_its_default_mode_still_writes_the_key();

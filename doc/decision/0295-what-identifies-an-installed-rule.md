@@ -1,7 +1,8 @@
 # 0295: what identifies an installed rule
 
-Status: proposed
+Status: accepted
 Date: 2026-10-25
+Accepted: 2026-10-29, the holder answering the product half
 Milestone: M6
 Follows: [0022](0022-netcfgd-may-own-one-nftables-table.md), [0283](0283-firewall-and-queuing-are-in-scope.md), [0287](0287-a-rule-carries-its-own-standing.md), [0294](0294-layer-one-is-named-rules-in-netcfgds-own-table.md)
 
@@ -133,5 +134,25 @@ after it, because a decoder written later has to be reconciled with a digest
 scheme already in the field. If showing names and standing is enough, B alone
 carries layer one and A waits for a reason of its own.
 
-Nothing here is implemented. This record exists so that the next slice does not
-answer it by accident, which is the reason 0294 gives for existing at all.
+## Decided, 2026-10-29
+
+**The holder: `ncfg status` must show the installed firewall as rules.** So A
+is not optional, and by this record's own argument it is built *with* B rather
+than after it: a decoder written later would have to be reconciled with a
+digest scheme already in the field.
+
+What that settles for the slices that follow:
+
+- **Every rule carries B's identity** -- its name and a digest of netcfgd's
+  own rendering, in nft's comment TLV, within 128 characters -- and the
+  planner's comparison is the ordered list of `(name, digest)`, which is
+  exact and cheap.
+- **A decodes every expression layer one writes back into an
+  `ncfg_firewall_rule_t`**, refusing anything netcfgd would not have written,
+  and `ncfg status` shows what it decoded. A rule inside netcfgd's table that
+  A cannot read, or whose digest does not match what A read, is reported as
+  what it is -- not netcfgd's as written -- and replaced on the next apply.
+- **The two are checked against each other**: a rule A decodes and B's digest
+  disagrees with is a defect in one of them, and the suite says which.
+
+Nothing here is implemented yet; project.md 10.592 tracks the slices.
