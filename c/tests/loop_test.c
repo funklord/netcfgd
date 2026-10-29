@@ -606,14 +606,21 @@ static void a_supplicant_event_reaches_the_log(const char *base)
 	 * fake is another process and emits when it gets to it; on a loaded
 	 * machine one round can look before the event is there, which is a round
 	 * correctly finding nothing -- and was this check failing one run in a
-	 * full `make check`, passing three in three alone. Fifty rounds is far
-	 * past any answer a fake gives, and the check below still fails if the
-	 * line never comes.
+	 * full `make check`, passing three in three alone. **And the bound is
+	 * time, not a count of rounds**: with the clock expired a round returns
+	 * at once, so fifty of them were spent in well under a millisecond and
+	 * the check still failed one run in a full `make test` after the rounds
+	 * went in. A pause of 10 ms between them makes five seconds the ceiling,
+	 * far past any answer a fake gives, and the check below still fails if
+	 * the line never comes.
 	 */
 	{
 		int round;
 
-		for (round = 0; round < 50; round++) {
+		for (round = 0; round < 500; round++) {
+			if (round) {
+				(void)poll(NULL, 0, 10);
+			}
 			char *so_far;
 			int   seen;
 
