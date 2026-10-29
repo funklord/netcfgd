@@ -716,6 +716,44 @@ int ncfg_link_is_wireless(const char *kind, const char *name);
  */
 char *ncfg_access_point_display(int named, const char *name, const char *ssid);
 
+/*
+ * What a tray offers under "connect to": the saved networks a scan heard.
+ *
+ * **One rule for every tray**, here for the reason the display rule is: the Qt
+ * tray and the TDE one both offer this list, and a rule written in each is
+ * how this project's clients came to spell one access point three ways.
+ *
+ * - Only access points a network names. The join is by that id -- it is what
+ *   `ncfg_client_wifi_connect` takes and what keeps it in the `wifi` tier --
+ *   so an access point with none has nothing to send.
+ * - One entry per network, at the strongest signal any of its access points
+ *   was heard at: the supplicant picks the BSS, and two identical names offer
+ *   a choice with nothing to choose by.
+ * - Labelled with the SSID as text, or with the id where the access point sent
+ *   no text name; and where two networks share a label, each carries its id
+ *   as well -- a passphrase and an enterprise block for one SSID, say.
+ * - `current` on the one whose id is `current`, which may be NULL or "".
+ * - Strongest first.
+ *
+ * Returns 1, or 0 with `out` empty if memory ran out. Free with
+ * ncfg_join_choices_free().
+ */
+typedef struct {
+	char *network; /* the id ncfg_client_wifi_connect() takes */
+	char *label;
+	int   signal;  /* dBm */
+	int   current;
+} ncfg_join_choice_t;
+
+typedef struct {
+	ncfg_join_choice_t *items;
+	size_t              count;
+} ncfg_join_choices_t;
+
+int ncfg_join_choices(const ncfg_access_point_t *points, size_t count, const char *current,
+                      ncfg_join_choices_t *out);
+void ncfg_join_choices_free(ncfg_join_choices_t *choices);
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_inventory_free(ncfg_inventory_t *inventory);
 void ncfg_linksets_free(ncfg_linksets_t *linksets);

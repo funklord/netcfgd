@@ -2017,6 +2017,67 @@ static void dump_facts(const char *witness, const char *out_path)
 }
 
 /*
+ * What a tray offers to join, from a scan.
+ *
+ * Both trays draw this list, so the rule is tested once, here, rather than in
+ * either of them. The scan carries every case the rule distinguishes: an
+ * access point nothing names, two carrying one network, two networks sharing
+ * an SSID, and one that sent no text name.
+ */
+static ncfg_access_point_t heard_point(const char *name, const char *configured, int signal)
+{
+	ncfg_access_point_t point = {};
+
+	point.name = (char *)name;
+	point.named = *name != '\0';
+	point.configured = (char *)configured;
+	point.signal = signal;
+	return point;
+}
+
+static void join_choices_are_the_saved_networks_heard(void)
+{
+	ncfg_access_point_t points[] = {
+		heard_point("Cafe", "", -40),
+		heard_point("Home", "home", -70),
+		heard_point("Home", "home", -50),
+		heard_point("Office", "office", -60),
+		heard_point("Corp", "corp-psk", -75),
+		heard_point("Corp", "corp-eap", -72),
+		heard_point("", "attic", -80),
+	};
+	ncfg_join_choices_t choices = {};
+
+	int got = ncfg_join_choices(points, sizeof(points) / sizeof(points[0]), "office", &choices);
+	ok("the join choices are built", got == 1, NULL);
+	ok("one per saved network, and none for a network nothing names", choices.count == 5,
+	    NULL);
+	if (choices.count == 5) {
+		equals("the strongest first", choices.items[0].network, "home");
+		ok("at the strongest signal any of its access points was heard at",
+		    choices.items[0].signal == -50, NULL);
+		equals("labelled with the name it broadcasts", choices.items[0].label, "Home");
+		ok("the network the radio is on is current", choices.items[1].current &&
+		    !strcmp(choices.items[1].network, "office"), NULL);
+		ok("and only that one", !choices.items[0].current && !choices.items[2].current &&
+		    !choices.items[3].current && !choices.items[4].current, NULL);
+		/* Both halves of the pair, which is the half the first draft of this
+		 * rule got wrong: relabelling in place left the second bare. */
+		equals("two networks with one name carry their ids", choices.items[2].label,
+		    "Corp  (corp-eap)");
+		equals("both of them", choices.items[3].label, "Corp  (corp-psk)");
+		equals("a network that sent no name is labelled by its id", choices.items[4].label,
+		    "attic");
+	}
+	ncfg_join_choices_free(&choices);
+
+	got = ncfg_join_choices(points, 1, NULL, &choices);
+	ok("a scan of only unnamed networks offers nothing", got == 1 && choices.count == 0,
+	    NULL);
+	ncfg_join_choices_free(&choices);
+}
+
+/*
  * The document's networks, which is a different list from a scan's.
  *
  * A configured network that is not broadcasting appears here and in no scan,
@@ -2293,6 +2354,7 @@ int main(int argc, char **argv)
 	radios_carry_the_three_states_a_client_has_to_tell_apart();
 	a_modem_carries_the_card_read_in_each_source();
 	saved_networks_come_from_the_document_not_a_scan();
+	join_choices_are_the_saved_networks_heard();
 	dns_reports_that_it_is_not_managing_resolution();
 	a_link_knows_whether_a_default_route_leaves_through_it();
 	an_apply_becomes_a_journal();

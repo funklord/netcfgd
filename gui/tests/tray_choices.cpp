@@ -5,6 +5,10 @@
  * has (tray_icon.cpp says how that was measured). `ncfg_tray::choices` is the
  * part that decides what the menu says, and it needs nothing: a scan and the
  * network the radio is on go in, entries come out.
+ *
+ * The rule itself is the client library's and is tested there
+ * (client_test's join choices); this holds the tray's conversion to it, so
+ * that a row losing a field on the way down shows up here.
  */
 
 #include "../src/tray.h"
@@ -28,7 +32,9 @@ static ncfg_access_point_row point(const char *bssid, const char *display, const
 {
 	ncfg_access_point_row row;
 	row.bssid = QString::fromLatin1(bssid);
-	row.display = QString::fromLatin1(display);
+	row.name = QString::fromLatin1(display);
+	row.named = *display != '\0';
+	row.display = row.named ? row.name : QStringLiteral("(hidden)");
 	row.configured = QString::fromLatin1(configured);
 	row.signal = signal;
 	return row;

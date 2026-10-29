@@ -12627,8 +12627,20 @@ entries labelled with their ids. And **the ticked entry does nothing when
 clicked**: selecting the network a station is on can reassociate, a dropped
 connection for a click meaning "yes, this one".
 
-Checked: `gui/tests/tray_choices` holds `ncfg_tray::choices`, the part that
-decides what the menu says, to all of that. The menu and the clicks still want
+**The rule is the client library's, `ncfg_join_choices`**, because the TDE
+tray offers the same list and a rule written in each tray is how three
+clients came to spell one access point three ways. It was first written in
+the Qt tray and moved down within the hour; the Qt side is a conversion.
+
+**The TDE tray does not have it yet**, and that is the open half. It cannot
+be built on this machine: `/opt/trinity/include` holds five headers and no
+`ksystemtray.h`, so a change there would be code nobody compiled. With the rule
+in the client it is a submenu and four wrappers in `ncfg_tde_connection`, for
+whoever has the TDE development headers.
+
+Checked: `client_test` holds `ncfg_join_choices` to all of that, plainly and
+under ASan and UBSan, and `gui/tests/tray_choices` holds the Qt tray's
+conversion to it. The menu and the clicks still want
 a notification host, which no machine here has (the measurement is under M8's
 entry in section 10's item 5), so they are compiled and not driven.
 

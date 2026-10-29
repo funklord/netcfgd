@@ -671,6 +671,11 @@ struct ncfg_radio_row {
 struct ncfg_access_point_row {
 	QString bssid;
 	QString ssid; /* hex, the canonical name */
+	/* The SSID as text, and whether one was sent: what
+	 * `ncfg_join_choices` labels by, so the tray hands the rule the scan
+	 * rather than a display string with the cases already folded in. */
+	QString name;
+	bool    named = false;
 	QString display;
 	QString configured;
 	int     frequency = 0;

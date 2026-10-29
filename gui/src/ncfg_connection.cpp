@@ -1535,6 +1535,8 @@ bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_poin
 
 		row.bssid = from_c(point.bssid);
 		row.ssid = from_c(point.ssid);
+		row.name = from_c(point.name);
+		row.named = point.named != 0;
 		row.configured = from_c(point.configured);
 		row.frequency = point.frequency;
 		row.signal = point.signal;

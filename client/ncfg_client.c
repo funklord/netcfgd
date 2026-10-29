@@ -1661,6 +1661,129 @@ char *ncfg_access_point_display(int named, const char *name, const char *ssid)
 	return dup_string(name);
 }
 
+void ncfg_join_choices_free(ncfg_join_choices_t *choices)
+{
+	if (!choices) {
+		return;
+	}
+	for (size_t i = 0; i < choices->count; i++) {
+		free(choices->items[i].network);
+		free(choices->items[i].label);
+	}
+	free(choices->items);
+	choices->items = NULL;
+	choices->count = 0;
+}
+
+static int join_choice_stronger(const void *a, const void *b)
+{
+	const ncfg_join_choice_t *left = a;
+	const ncfg_join_choice_t *right = b;
+
+	if (left->signal != right->signal) {
+		return left->signal > right->signal ? -1 : 1;
+	}
+	/* Ties by id, so the order does not depend on qsort's. */
+	return strcmp(left->network, right->network);
+}
+
+int ncfg_join_choices(const ncfg_access_point_t *points, size_t count, const char *current,
+                      ncfg_join_choices_t *out)
+{
+	ncfg_join_choices_t found = { NULL, 0 };
+	char              **heard = NULL;
+
+	if (!out) {
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+	if (count == 0) {
+		return 1;
+	}
+	found.items = calloc(count, sizeof(*found.items));
+	heard = calloc(count, sizeof(*heard));
+	if (!found.items || !heard) {
+		goto fail;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		const ncfg_access_point_t *point = &points[i];
+		size_t                     at;
+
+		if (!point->configured || !*point->configured) {
+			continue;
+		}
+		for (at = 0; at < found.count; at++) {
+			if (strcmp(found.items[at].network, point->configured) == 0) {
+				break;
+			}
+		}
+		if (at < found.count) {
+			if (point->signal > found.items[at].signal) {
+				found.items[at].signal = point->signal;
+			}
+			continue;
+		}
+		found.items[at].network = dup_string(point->configured);
+		/* The text name where one was sent; the id otherwise, since
+		 * "(hidden)" or a run of hex names nothing the operator saved. */
+		heard[at] = dup_string(point->named && point->name && *point->name ? point->name
+		                                                                   : point->configured);
+		found.count++;
+		if (!found.items[at].network || !heard[at]) {
+			goto fail;
+		}
+		found.items[at].signal = point->signal;
+		found.items[at].current = current && *current && strcmp(point->configured, current) == 0;
+	}
+
+	/* Counted over the names as heard, before any label is written, so that
+	 * the second of a pair is compared with what the first was called rather
+	 * than with what it is now called. */
+	for (size_t i = 0; i < found.count; i++) {
+		size_t same = 0;
+
+		for (size_t j = 0; j < found.count; j++) {
+			if (strcmp(heard[i], heard[j]) == 0) {
+				same++;
+			}
+		}
+		if (same > 1) {
+			size_t span = strlen(heard[i]) + strlen("  ()") + strlen(found.items[i].network) + 1u;
+
+			found.items[i].label = malloc(span);
+			if (found.items[i].label) {
+				snprintf(found.items[i].label, span, "%s  (%s)", heard[i],
+				    found.items[i].network);
+			}
+		} else {
+			found.items[i].label = dup_string(heard[i]);
+		}
+		if (!found.items[i].label) {
+			goto fail;
+		}
+	}
+
+	qsort(found.items, found.count, sizeof(*found.items), join_choice_stronger);
+	for (size_t i = 0; i < count; i++) {
+		free(heard[i]);
+	}
+	free(heard);
+	*out = found;
+	return 1;
+
+fail:
+	if (heard) {
+		for (size_t i = 0; i < count; i++) {
+			free(heard[i]);
+		}
+		free(heard);
+	}
+	ncfg_join_choices_free(&found);
+	return 0;
+}
+
 /*
  * The document's `addressing`, `routes` and `dns` readers, declared here and
  * defined with the interface view below.

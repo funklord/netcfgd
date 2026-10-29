@@ -12,10 +12,9 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
-#include <QStringList>
 #include <QSystemTrayIcon>
 
-#include <algorithm>
+#include <vector>
 
 /*
  * An icon, drawn rather than shipped.
@@ -258,51 +257,39 @@ QList<ncfg_tray_choice> ncfg_tray::choices(const QList<ncfg_access_point_row> &s
 {
 	QList<ncfg_tray_choice> out;
 
-	for (const ncfg_access_point_row &point : scanned) {
-		if (!point.joinable()) {
-			continue;
-		}
-		bool merged = false;
-		for (ncfg_tray_choice &choice : out) {
-			if (choice.network == point.configured) {
-				choice.signal = qMax(choice.signal, point.signal);
-				merged = true;
-				break;
-			}
-		}
-		if (merged) {
-			continue;
-		}
+	/* **The rule is the client library's** (`ncfg_join_choices`), because the
+	 * TDE tray offers the same list and a copy in each is how this project's
+	 * clients came to spell one access point three ways. What is here is the
+	 * conversion: the rows back into the C shape, borrowing their bytes for
+	 * the length of the call. */
+	QList<QByteArray> held;
+	std::vector<ncfg_access_point_t> points(static_cast<size_t>(scanned.size()));
+	for (int i = 0; i < scanned.size(); i++) {
+		held.append(scanned.at(i).name.toUtf8());
+		held.append(scanned.at(i).configured.toUtf8());
+	}
+	for (int i = 0; i < scanned.size(); i++) {
+		ncfg_access_point_t &point = points[static_cast<size_t>(i)];
+		point.name = held[i * 2].data();
+		point.named = scanned.at(i).named ? 1 : 0;
+		point.configured = held[i * 2 + 1].data();
+		point.signal = scanned.at(i).signal;
+	}
+	const QByteArray wanted = current.toUtf8();
+
+	ncfg_join_choices_t found = {};
+	if (!ncfg_join_choices(points.data(), points.size(), wanted.constData(), &found)) {
+		return out;
+	}
+	for (size_t i = 0; i < found.count; i++) {
 		ncfg_tray_choice choice;
-		choice.network = point.configured;
-		/* The name as the scan spells it for a person; the id where the
-		 * access point broadcasts none, since an empty menu entry is one
-		 * nobody can choose. */
-		choice.label = point.display.isEmpty() ? point.configured : point.display;
-		choice.signal = point.signal;
-		choice.current = !current.isEmpty() && point.configured == current;
+		choice.network = QString::fromUtf8(found.items[i].network);
+		choice.label = QString::fromUtf8(found.items[i].label);
+		choice.signal = found.items[i].signal;
+		choice.current = found.items[i].current != 0;
 		out.append(choice);
 	}
-
-	/* **Two entries that read the same are told apart by id.** Two blocks
-	 * may name one SSID -- a passphrase and an enterprise login for the same
-	 * network, say -- and a menu showing the name twice offers a choice with
-	 * nothing to choose by. */
-	/* Counted over the names as heard, before any is changed: relabelling in
-	 * place made the second of a pair compare against the first's new label
-	 * and keep its bare name. */
-	QStringList heard;
-	for (const ncfg_tray_choice &choice : out) {
-		heard.append(choice.label);
-	}
-	for (ncfg_tray_choice &choice : out) {
-		if (heard.count(choice.label) > 1) {
-			choice.label = QStringLiteral("%1  (%2)").arg(choice.label, choice.network);
-		}
-	}
-
-	std::stable_sort(out.begin(), out.end(),
-	    [](const ncfg_tray_choice &a, const ncfg_tray_choice &b) { return a.signal > b.signal; });
+	ncfg_join_choices_free(&found);
 	return out;
 }
 
