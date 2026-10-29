@@ -1010,6 +1010,10 @@ typedef struct {
 	 * `se` and a file saying `SE` are the same access point, and comparing
 	 * them as written would restart it on every reconcile. */
 	char         *regdom;
+	/* The 802.11r mobility domain it advertises, NULL where it runs no fast
+	 * roaming. A changed domain splits it from the rest of its network, which
+	 * nothing else here would notice: the key management stays FT-PSK. */
+	char         *mobility_domain;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */

@@ -307,6 +307,60 @@ static void owe_needs_no_secret(void)
 	ncfg_hostapd_lines_free(&lines);
 }
 
+/*
+ * Fast roaming: 802.11r by FT-PSK, each line as the two-access-point hwsim
+ * experiment of 10.587 found hostapd needs it.
+ *
+ * `8498` is the first two octets of SHA-256 over `guest`, computed outside
+ * this program -- the derivation is what lets two machines agree without
+ * being told, so it is checked against a number and not against itself.
+ */
+static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
+{
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_hostapd_lines_t lines;
+
+	point.fast_roaming = 1;
+	if (!rendered(&point, "correcthorse", &lines)) {
+		check(0, "a WPA2 access point with fast roaming renders");
+		return;
+	}
+	check_text(ncfg_hostapd_value_of(&lines, "wpa_key_mgmt"), "WPA-PSK FT-PSK",
+	    "fast roaming offers FT-PSK beside WPA-PSK, so a client without 802.11r still joins");
+	check_text(ncfg_hostapd_value_of(&lines, "mobility_domain"), "8498",
+	    "the mobility domain is derived from the SSID");
+	check_text(ncfg_hostapd_value_of(&lines, "nas_identifier"), "netcfgd-8498",
+	    "and so is the key holder's name, which hostapd refuses FT without");
+	check_text(ncfg_hostapd_value_of(&lines, "ft_psk_generate_local"), "1",
+	    "each access point derives the keys itself, so nothing is shared");
+	check_text(ncfg_hostapd_value_of(&lines, "ft_over_ds"), "0",
+	    "over the air, not through the LAN");
+	check_text(ncfg_hostapd_value_of(&lines, "bss_transition"), "1",
+	    "and 802.11v transition management is advertised");
+	ncfg_hostapd_lines_free(&lines);
+
+	point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2_WPA3);
+	point.fast_roaming = 1;
+	point.mobility_domain = (char *)(void *)"4F2A";
+	if (rendered(&point, "correcthorse", &lines)) {
+		check_text(ncfg_hostapd_value_of(&lines, "wpa_key_mgmt"), "WPA-PSK FT-PSK SAE",
+		    "transition mode roams its WPA2 clients fast and offers SAE as before");
+		check_text(ncfg_hostapd_value_of(&lines, "mobility_domain"), "4f2a",
+		    "a stated domain is used, in hostapd's lower case");
+		ncfg_hostapd_lines_free(&lines);
+	}
+
+	point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	if (rendered(&point, "correcthorse", &lines)) {
+		check(ncfg_hostapd_value_of(&lines, "mobility_domain") == NULL &&
+		        ncfg_hostapd_value_of(&lines, "bss_transition") == NULL,
+		    "without it, no 802.11r or 802.11v line is written");
+		check_text(ncfg_hostapd_value_of(&lines, "wpa_key_mgmt"), "WPA-PSK",
+		    "  and the key management is what it was");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
 static void an_ssid_that_is_not_text_survives_as_hex(void)
 {
 	ncfg_access_point_t  point = point_of(NCFG_SECURITY_OPEN, NCFG_PSK_PROTO_WPA2);
@@ -1005,6 +1059,7 @@ int main(void)
 	transition_mode_offers_both_and_still_protects_sae();
 	only_the_arms_that_write_wpa_passphrase_are_length_checked();
 	owe_needs_no_secret();
+	fast_roaming_is_ft_psk_derived_where_it_runs();
 	an_ssid_that_is_not_text_survives_as_hex();
 	the_band_follows_the_channel_when_nothing_says_otherwise();
 	no_channel_asks_hostapd_to_choose();

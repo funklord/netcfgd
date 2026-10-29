@@ -1547,6 +1547,21 @@ typedef struct {
 	char                  *regdom;
 	/* Absent means everyone. */
 	ncfg_access_control_t *access_control;
+	/*
+	 * 802.11r: a station moves to another access point of this network
+	 * without a full handshake, so a call or a copy carries on through it.
+	 * WPA2 key derivation only -- FT-PSK, with each access point deriving the
+	 * keys from the passphrase itself, so two machines need nothing shared --
+	 * and 802.11v's transition management is advertised beside it. WPA3's
+	 * SAE has no local derivation; its fast transition needs the access
+	 * points to exchange keys over the LAN, which is not built (10.587).
+	 */
+	int                    fast_roaming;
+	/* The four hex digits every access point of the network must agree on,
+	 * or NULL for the one derived from the SSID
+	 * (`ncfg_access_point_mobility_domain`). Stated only to join access
+	 * points that netcfgd does not run. */
+	char                  *mobility_domain;
 } ncfg_access_point_t;
 
 /*
@@ -1623,6 +1638,29 @@ int ncfg_channel_needs_radar_detection(int64_t channel);
  */
 const char *ncfg_psk_proto_key_mgmt(int proto);
 const char *ncfg_security_key_mgmt(const ncfg_security_t *security);
+
+/*
+ * The `wpa_key_mgmt` an access point runs: its security's, with fast
+ * roaming's FT-PSK added beside WPA-PSK where it asks for it. Stated here for
+ * `ncfg_security_key_mgmt`'s reason -- the renderer writes it and the planner
+ * compares a running access point against it, and two copies is an access
+ * point restarted on every pass.
+ */
+const char *ncfg_access_point_key_mgmt(const ncfg_access_point_t *point);
+
+/* `4f2a`: four lower-case hex digits and a NUL. */
+#define NCFG_MOBILITY_DOMAIN_TEXT_MAX 5
+
+/*
+ * The mobility domain an access point with fast roaming advertises: the one
+ * the document states, lower-cased, or the first two octets of SHA-256 over
+ * the SSID's bytes. **Derived so that two machines agree without being told
+ * to**: every access point of a network has to name the same domain, and
+ * netcfgd runs one machine at a time. The derivation is a wire fact once
+ * shipped -- changing it splits every network between versions.
+ */
+void ncfg_access_point_mobility_domain(const ncfg_access_point_t *point,
+    char out[NCFG_MOBILITY_DOMAIN_TEXT_MAX]);
 
 /* ------------------------------------------------------------------------ *
  * Policy routing rules

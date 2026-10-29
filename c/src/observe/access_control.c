@@ -115,6 +115,9 @@ static ncfg_observed_access_point_t *started_with(const char *run_dir, const cha
 	if (observe_config_value(text, "country_code", value, sizeof(value))) {
 		out->regdom = observe_dup(value);
 	}
+	if (observe_config_value(text, "mobility_domain", value, sizeof(value))) {
+		out->mobility_domain = observe_dup(value);
+	}
 	free(text);
 	return out;
 }

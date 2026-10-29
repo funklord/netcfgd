@@ -53,7 +53,9 @@
  *   subject it is about.
  */
 #include "ncfg/document.h"
+#include "ncfg/hooks.h"
 
+#include <ctype.h>
 #include <string.h>
 
 /* The document's two spellings, named once so a comparison cannot be typed
@@ -111,6 +113,46 @@ const char *ncfg_psk_proto_key_mgmt(int proto)
 	default:
 		return "WPA-PSK SAE";
 	}
+}
+
+const char *ncfg_access_point_key_mgmt(const ncfg_access_point_t *point)
+{
+	if (!point) {
+		return NULL;
+	}
+	if (point->fast_roaming && point->security.kind == NCFG_SECURITY_PSK) {
+		switch (point->security.psk.proto) {
+		case NCFG_PSK_PROTO_WPA2:
+			return "WPA-PSK FT-PSK";
+		case NCFG_PSK_PROTO_WPA2_WPA3:
+			return "WPA-PSK FT-PSK SAE";
+		default:
+			break;
+		}
+	}
+	return ncfg_security_key_mgmt(&point->security);
+}
+
+void ncfg_access_point_mobility_domain(const ncfg_access_point_t *point,
+    char out[NCFG_MOBILITY_DOMAIN_TEXT_MAX])
+{
+	char   digest[65];
+	size_t at;
+
+	out[0] = '\0';
+	if (!point) {
+		return;
+	}
+	if (point->mobility_domain && strlen(point->mobility_domain) == 4u) {
+		for (at = 0u; at < 4u; at++) {
+			out[at] = (char)tolower((unsigned char)point->mobility_domain[at]);
+		}
+		out[4] = '\0';
+		return;
+	}
+	ncfg_sha256_hex(point->ssid.bytes, point->ssid.length, digest);
+	(void)memcpy(out, digest, 4u);
+	out[4] = '\0';
 }
 
 const char *ncfg_security_key_mgmt(const ncfg_security_t *security)

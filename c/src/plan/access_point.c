@@ -420,8 +420,10 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 	const char                         *field;
 	char                                desired[NCFG_SSID_MAX_LEN * 2u + 1u];
 	char                                observed[NCFG_SSID_MAX_LEN * 2u + 1u];
+	char                                domain[NCFG_MOBILITY_DOMAIN_TEXT_MAX];
 	ncfg_reason_t                       reason;
 
+	ncfg_access_point_mobility_domain(point, domain);
 	if (!started) {
 		/*
 		 * **Said rather than passed over, because the silence is the whole
@@ -434,10 +436,10 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		 */
 		ncfg_plan_warnf(builder->plan, device,
 		    "netcfgd has no record of what the access point running on %s was started "
-		    "with, so an edited `ssid`, `band`, `channel`, `security`, `hidden` or "
-		    "`regdom` is not noticed and hostapd goes on offering what it has: its "
-		    "station lists are the only part of the block that converges without being "
-		    "restarted",
+		    "with, so an edited `ssid`, `band`, `channel`, `security`, `hidden`, "
+		    "`regdom` or fast roaming is not noticed and hostapd goes on offering what it "
+		    "has: its station lists are the only part of the block that converges without "
+		    "being restarted",
 		    device);
 		return 0;
 	}
@@ -483,7 +485,7 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		    ncfg_access_point_effective_band(point->band, &point->channel) : "<absent>");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->band ? started->band : "<absent>");
-	} else if (!same_text(ncfg_security_key_mgmt(&point->security), started->key_mgmt)) {
+	} else if (!same_text(ncfg_access_point_key_mgmt(point), started->key_mgmt)) {
 		/*
 		 * **The generation, which nothing else notices changing.** hostapd
 		 * reads its file once, so an access point started as WPA2 goes on
@@ -493,12 +495,23 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		 * WPA3 against a radio running WPA2 is the one disagreement here that
 		 * costs more than a restart.
 		 */
+		/* Through the access point's own rule, since fast roaming adds FT-PSK
+		 * to what the security alone would spell -- and an access point
+		 * turning it on or off is this arm too. */
 		field = "access_point.wifi.proto";
 		(void)snprintf(desired, sizeof(desired), "%s",
-		    ncfg_security_key_mgmt(&point->security) ?
-		    ncfg_security_key_mgmt(&point->security) : "open");
+		    ncfg_access_point_key_mgmt(point) ? ncfg_access_point_key_mgmt(point) : "open");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->key_mgmt ? started->key_mgmt : "open");
+	} else if (point->fast_roaming && !same_text(domain, started->mobility_domain)) {
+		/* The domain moving under an unchanged key management: an explicit
+		 * `mobility_domain` edited, or the SSID it is derived from. hostapd
+		 * would go on advertising the old one, splitting this access point from
+		 * the rest of its network with nothing else here noticing. */
+		field = "access_point.mobility_domain";
+		(void)snprintf(desired, sizeof(desired), "%s", domain);
+		(void)snprintf(observed, sizeof(observed), "%s",
+		    started->mobility_domain ? started->mobility_domain : "<absent>");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {
 		/* `ignore_broadcast_ssid` is written only when asked, so its absence
 		 * is "not hidden" rather than "not known" and needs no guard. */

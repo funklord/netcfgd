@@ -1210,6 +1210,33 @@ static void access_point_cases(void)
 		ncfg_document_free(document);
 	}
 
+	/* Fast roaming: FT-PSK where each access point derives the keys itself, so
+	 * only where there is a passphrase to derive from and not on WPA3 alone
+	 * (10.587). */
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\tfast_roaming = true\n\tmobility_domain = \"4F2A\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "an access point with fast roaming and a stated mobility domain compiles");
+	if (document) {
+		check(document->access_points[0].fast_roaming &&
+		    strcmp(document->access_points[0].mobility_domain, "4F2A") == 0,
+		    "  carrying both, the domain as written");
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
+	    "\twifi { psk = \"@secret:ap\"\n\tproto = \"wpa3\" }\n}\n",
+	    "`proto = \"wpa2+wpa3\"`",
+	    "fast roaming on WPA3 alone is refused, naming what does roam");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
+	    "\twifi { open = true }\n}\n", "no passphrase",
+	    "and on a network with no passphrase to derive keys from");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tmobility_domain = \"4f2a\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "without `fast_roaming = true`",
+	    "a mobility domain alone is refused rather than ignored");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
+	    "\tmobility_domain = \"4f2\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "four hex digits", "and a domain that is not four hex digits");
+
 	refuses("access_point \"Home\" { wifi { psk = \"@secret:ap\" } }\n",
 	    "does not say which radio", "an access point without a device is refused");
 	refuses("access_point \"Home\" { device = \"wlan0\" }\n", "so it would be open",

@@ -388,6 +388,10 @@ static const struct {
 	{ NCFG_BLOCK_ACCESS_POINT, "wifi.psk", 0x00040009u },
 	{ NCFG_BLOCK_ACCESS_POINT, "access_control.allow", 0x0004000au },
 	{ NCFG_BLOCK_ACCESS_POINT, "access_control.deny", 0x0004000bu },
+	/* What the network offers a moving station, so the estate's: every
+	 * access point of it has to agree, which is why both travel. */
+	{ NCFG_BLOCK_ACCESS_POINT, "fast_roaming", 0x0004000cu },
+	{ NCFG_BLOCK_ACCESS_POINT, "mobility_domain", 0x0004000du },
 
 	/*
 	 * rule -- a policy expression, group-wide entire.

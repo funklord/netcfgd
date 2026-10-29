@@ -10,6 +10,7 @@
  * readers would eventually accept different spellings of one passphrase.
  */
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 
 #include "lower_internal.h"
@@ -879,6 +880,7 @@ static void access_point_free(ncfg_access_point_t *access_point)
 	free(access_point->device);
 	free(access_point->band);
 	free(access_point->regdom);
+	free(access_point->mobility_domain);
 	ncfg_security_free(&access_point->security);
 	if (access_point->access_control) {
 		ncfg_strings_free(access_point->access_control->stations,
@@ -888,12 +890,83 @@ static void access_point_free(ncfg_access_point_t *access_point)
 	memset(access_point, 0, sizeof(*access_point));
 }
 
+int ncfg_can_roam_fast(const ncfg_access_point_t *point)
+{
+	return point->security.kind == NCFG_SECURITY_PSK &&
+	    point->security.psk.proto != NCFG_PSK_PROTO_WPA3;
+}
+
+int ncfg_is_mobility_domain(const char *text)
+{
+	size_t at;
+
+	if (strlen(text) != 4u) {
+		return 0;
+	}
+	for (at = 0u; at < 4u; at++) {
+		if (!isxdigit((unsigned char)text[at])) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * Fast roaming only where it can be offered, refused by name everywhere else.
+ *
+ * **FT-PSK is the one form built**, because it is the one where each access
+ * point derives the keys from the passphrase by itself (hostapd's
+ * `ft_psk_generate_local`): two machines running one network need nothing
+ * shared but the configuration. WPA3's SAE has no such derivation -- its keys
+ * come out of each association, so another access point has to be handed them
+ * over the LAN -- and an open or OWE network has no passphrase to derive from.
+ * Transition mode takes it, and only its WPA2 clients roam fast: an SAE client
+ * there associates as it always did.
+ *
+ * A mobility domain without fast roaming is refused rather than ignored: it is
+ * a number somebody copied from another vendor's access point to make roaming
+ * work, and silently doing nothing with it is the one answer that leaves them
+ * wondering why it does not.
+ */
+static int check_fast_roaming(ncfg_lower_ctx_t *ctx, const ncfg_access_point_t *point,
+    ncfg_span_t roaming_span, ncfg_span_t domain_span)
+{
+	if (point->mobility_domain && !point->fast_roaming) {
+		ncfg_diag(ctx, domain_span,
+		    "access point `%s` names a mobility domain without `fast_roaming = true`; the "
+		    "domain is what fast roaming advertises and means nothing on its own",
+		    point->id);
+		return 0;
+	}
+	if (!point->fast_roaming) {
+		return 1;
+	}
+	if (point->security.kind != NCFG_SECURITY_PSK) {
+		ncfg_diag(ctx, roaming_span,
+		    "access point `%s` asks for fast roaming on a network with no passphrase; it "
+		    "is built for `psk` networks, where each access point derives the roaming "
+		    "keys from the passphrase", point->id);
+		return 0;
+	}
+	if (point->security.psk.proto == NCFG_PSK_PROTO_WPA3) {
+		ncfg_diag(ctx, roaming_span,
+		    "access point `%s` asks for fast roaming on `proto = \"wpa3\"`, which is not "
+		    "built: SAE's keys come out of each association, so the access points would "
+		    "have to hand them to each other over the LAN. `proto = \"wpa2+wpa3\"` "
+		    "roams its WPA2 clients fast and lets WPA3 ones join as before", point->id);
+		return 0;
+	}
+	return 1;
+}
+
 int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
     ncfg_access_point_t *out)
 {
 	const ncfg_ast_block_t *block = merged->block;
 	ncfg_access_point_t     access_point;
 	ncfg_span_t             channel_span = block->span;
+	ncfg_span_t             roaming_span = block->span;
+	ncfg_span_t             domain_span = block->span;
 	const char             *why = NULL;
 	int                     security_seen = 0;
 	size_t                  i;
@@ -936,6 +1009,28 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.hidden = flag;
 				}
+			} else if (strcmp(key, "fast_roaming") == 0) {
+				roaming_span = assignment->span;
+				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+					access_point.fast_roaming = flag;
+				}
+			} else if (strcmp(key, "mobility_domain") == 0) {
+				char *text = ncfg_as_string(ctx, assignment->value);
+
+				domain_span = assignment->span;
+				if (!text) {
+					continue;
+				}
+				if (!ncfg_is_mobility_domain(text)) {
+					ncfg_diag(ctx, assignment->span,
+					    "`%s` is not a mobility domain: it is four hex digits, such as "
+					    "`4f2a`, and every access point of the network names the same one",
+					    text);
+					free(text);
+					continue;
+				}
+				free(access_point.mobility_domain);
+				access_point.mobility_domain = text;
 			} else if (strcmp(key, "ssid") == 0) {
 				char *text = ncfg_as_string(ctx, assignment->value);
 
@@ -1004,6 +1099,9 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 		goto refused;
 	}
 	if (!check_channel_in_band(ctx, &access_point, channel_span)) {
+		goto refused;
+	}
+	if (!check_fast_roaming(ctx, &access_point, roaming_span, domain_span)) {
 		goto refused;
 	}
 	*out = access_point;

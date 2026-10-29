@@ -221,8 +221,8 @@ static int is_writable(const char *passphrase)
 }
 
 /* The `wpa_*` lines for a pre-shared key network. */
-static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphrase,
-    ncfg_hostapd_unsupported_t *why, char *err, size_t err_size)
+static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *key_mgmt,
+    const char *passphrase, ncfg_hostapd_unsupported_t *why, char *err, size_t err_size)
 {
 	size_t length = strlen(passphrase);
 
@@ -268,7 +268,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 	}
 	switch (proto) {
 	case NCFG_PSK_PROTO_WPA2:
-		if (!add_line(lines, "wpa_key_mgmt", ncfg_psk_proto_key_mgmt(proto), 0) ||
+		if (!add_line(lines, "wpa_key_mgmt", key_mgmt, 0) ||
 		    !add_line(lines, "rsn_pairwise", "CCMP", 0) ||
 		    !add_line(lines, "wpa_passphrase", passphrase, 1)) {
 			return refuse(NCFG_HOSTAPD_OK, why, err, err_size, "out of memory rendering wpa "
@@ -276,7 +276,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 		}
 		break;
 	case NCFG_PSK_PROTO_WPA3:
-		if (!add_line(lines, "wpa_key_mgmt", ncfg_psk_proto_key_mgmt(proto), 0) ||
+		if (!add_line(lines, "wpa_key_mgmt", key_mgmt, 0) ||
 		    !add_line(lines, "rsn_pairwise", "CCMP", 0) ||
 		    /* Management frame protection is required for WPA3, not optional. */
 		    !add_line(lines, "ieee80211w", "2", 0) ||
@@ -287,7 +287,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 		break;
 	case NCFG_PSK_PROTO_WPA2_WPA3:
 	default:
-		if (!add_line(lines, "wpa_key_mgmt", ncfg_psk_proto_key_mgmt(proto), 0) ||
+		if (!add_line(lines, "wpa_key_mgmt", key_mgmt, 0) ||
 		    !add_line(lines, "rsn_pairwise", "CCMP", 0) ||
 		    /* Optional, because a WPA2 client cannot do it and the point of
 		     * transition mode is that such a client can still associate. */
@@ -303,6 +303,39 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 		break;
 	}
 	return 1;
+}
+
+/*
+ * 802.11r by FT-PSK, and 802.11v's transition management advertised beside it.
+ *
+ * **Each line is measured, not read off the manual**, in a two-access-point
+ * hwsim experiment (project.md 10.587):
+ *
+ *   * `nas_identifier` is required -- without it hostapd refuses the file, "FT
+ *     (IEEE 802.11r) requires nas_identifier to be configured as a 1..48 octet
+ *     string". It is the R0 key holder's name, and **the same one on every
+ *     access point works** with local derivation: a station roamed between two
+ *     carrying the same name. So it is derived from the mobility domain, which
+ *     every access point of the network already agrees on.
+ *   * `ft_psk_generate_local` is what makes it need nothing shared: the target
+ *     access point derives the key from the passphrase rather than asking the
+ *     one the station came from.
+ *   * `ft_over_ds=0` -- over the air. Over the distribution system the station
+ *     asks through its current access point, which forwards to the target over
+ *     the LAN, and that is the key exchange local derivation exists to avoid.
+ */
+static int roaming_lines(ncfg_hostapd_lines_t *lines, const ncfg_access_point_t *access_point)
+{
+	char domain[NCFG_MOBILITY_DOMAIN_TEXT_MAX];
+	char holder[32];
+
+	ncfg_access_point_mobility_domain(access_point, domain);
+	(void)snprintf(holder, sizeof(holder), "netcfgd-%s", domain);
+	return add_line(lines, "mobility_domain", domain, 0) &&
+	    add_line(lines, "nas_identifier", holder, 0) &&
+	    add_line(lines, "ft_psk_generate_local", "1", 0) &&
+	    add_line(lines, "ft_over_ds", "0", 0) &&
+	    add_line(lines, "bss_transition", "1", 0);
 }
 
 int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctrl_dir,
@@ -436,8 +469,8 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctr
 			return refuse(NCFG_HOSTAPD_MISSING_PASSPHRASE, why, err, err_size,
 			    "this access point needs a passphrase and none was resolved");
 		}
-		if (!psk_lines(out, access_point->security.psk.proto, passphrase, why, err,
-		    err_size)) {
+		if (!psk_lines(out, access_point->security.psk.proto,
+		    ncfg_access_point_key_mgmt(access_point), passphrase, why, err, err_size)) {
 			ncfg_hostapd_lines_free(out);
 			return 0;
 		}
@@ -459,6 +492,11 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctr
 		    "document has no field for one -- an `eap` block on an `access_point` describes "
 		    "a client's credentials, which is the wrong end of the exchange. Use `psk` or "
 		    "`owe` here");
+	}
+	if (access_point->fast_roaming && !roaming_lines(out, access_point)) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering fast roaming");
+		return 0;
 	}
 	return 1;
 }

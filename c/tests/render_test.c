@@ -794,6 +794,23 @@ static void an_access_point_round_trips(void)
 	    "}\n",
 	    "every field of an access point survives a round trip");
 
+	/* Fast roaming and a stated domain come back; a derived one stays the
+	 * absence of the line, so a saved profile is not pinned to the SSID it
+	 * was saved under. */
+	round_trips("access_point \"roam\" {\n"
+	    "\tdevice = \"wlan0\"\n"
+	    "\tfast_roaming = true\n"
+	    "\tmobility_domain = \"4f2a\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n"
+	    "}\n",
+	    "fast roaming and its mobility domain survive a round trip");
+	plain = rendering_of("access_point \"roam\" {\n"
+	    "\tdevice = \"wlan0\"\n\tfast_roaming = true\n\twifi { psk = \"@secret:ap\" }\n}\n");
+	check(plain && strstr(plain, "fast_roaming = true") != NULL &&
+	        strstr(plain, "mobility_domain") == NULL,
+	    "  and a derived domain is not written out");
+	free(plain);
+
 	denied = rendering_of("access_point \"a\" {\n"
 	    "\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
 	    "\taccess_control { deny = [\"aa:bb:cc:dd:ee:ff\"] }\n}\n");

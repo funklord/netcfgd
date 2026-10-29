@@ -5314,6 +5314,22 @@
           "aa:bb:cc:dd:ee:ff"
         ]
       }
+    },
+    {
+      "id": "home",
+      "ssid": "686f6d65",
+      "device": "wlan1",
+      "security": {
+        "type": "psk",
+        "passphrase": {
+          "provider": "file",
+          "name": "home"
+        },
+        "proto": "wpa2_wpa3"
+      },
+      "hidden": false,
+      "fast_roaming": true,
+      "mobility_domain": "4f2a"
     }
   ],
   "linksets": [

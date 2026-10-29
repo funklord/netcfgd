@@ -2528,7 +2528,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
-      hull-delegation-lossy hull-regdom hull-regdom-heard
+      hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2742,6 +2742,24 @@ hull-regdom-heard:
 		exit 1; \
 	fi
 
+# Fast roaming between two access points netcfgd runs (10.587): one vm, three
+# hwsim radios, a station that roams between two `access_point` blocks and must
+# do it as a fast transition. On the regdom rig's image, which has hostapd; the
+# C is built first because the payload runs the binary off the share.
+hull-roam:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@rm -f tests/hull/roam/verdict/roam
+	@mkdir -p tests/hull/roam/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/roam/hull.conf || true
+	@if [ ! -f tests/hull/roam/verdict/roam ]; then \
+		echo "roam: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/roam: /' tests/hull/roam/verdict/roam; \
+	grep -q '^VERDICT ok' tests/hull/roam/verdict/roam
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -2879,7 +2897,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

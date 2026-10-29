@@ -12595,6 +12595,91 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.587 Fast roaming between access points, and the access point modes still missing
+
+**Where the access point stood** (2026-10-29, asked by the holder: "are all
+the AP modes implemented? normal, mesh, repeater, ubiquiti style roaming"):
+one mode, a plain access point -- SSID, `psk`/`owe`/open security, channel,
+band, hidden, regdom, an allow or deny list. Roaming existed only on the
+station side (`roam { }` and `bssid` lists, 0089/0090). No mesh, no repeater,
+and nothing on the access point side for a station moving between two of them.
+
+**Built: `fast_roaming = true` on an `access_point`**, which is what
+"Ubiquiti-style roaming" mostly is -- UniFi's "Fast Roaming" is 802.11r and its
+"BSS Transition" is 802.11v.
+
+- **802.11r by FT-PSK with locally derived keys** (hostapd's
+  `ft_psk_generate_local`). Each access point derives the roaming keys from
+  the passphrase itself, so two machines running one network share nothing but
+  the configuration -- which is what makes it fit netcfgd, one machine at a
+  time, before fleet management (M9) exists. `ft_over_ds=0`: over the air,
+  since over the distribution system is a key exchange through the LAN.
+- **The mobility domain is derived** from the SSID: the first two octets of
+  SHA-256 over its bytes. Every access point of a network must advertise the
+  same one, and deriving it is how independently configured machines agree.
+  `mobility_domain = "4f2a"` states one, to join another vendor's access
+  points. **The derivation is a wire fact now**: changing it splits every
+  network between versions.
+- **`nas_identifier` is derived too** (`netcfgd-<domain>`), because hostapd
+  refuses FT without one -- measured, "FT (IEEE 802.11r) requires
+  nas_identifier to be configured as a 1..48 octet string" -- and the same name
+  on every access point works with local derivation, which a two-access-point
+  experiment showed before anything was written.
+- **`bss_transition=1`** advertises 802.11v transition management. Nothing
+  sends a transition request yet; that is steering, below.
+- **Key management is stated once** (`ncfg_access_point_key_mgmt`):
+  `WPA-PSK FT-PSK` for `wpa2`, `WPA-PSK FT-PSK SAE` for `wpa2+wpa3`. The
+  renderer writes it and the planner compares a running access point against
+  it, so turning fast roaming on or off restarts the access point naming the
+  key management it will run; a moved domain restarts it by its own arm,
+  since the key management does not change.
+- **Refused by name**: on `wpa3` alone (SAE's keys come out of each
+  association, so they would have to travel between access points), on a
+  network with no passphrase, and a `mobility_domain` without `fast_roaming`
+  (a number copied to make roaming work, silently doing nothing being the worst
+  answer).
+
+**Verified** by `make hull-roam`: one vm, three hwsim radios, netcfgd running
+two `access_point` blocks offering one SSID, and a bare `wpa_supplicant` that
+joins one and roams to the other. Both rendered `mobility_domain=01ff` (computed
+off the machine); the first association authenticated as open system (the
+control) and the roam as fast transition, `auth_type=2`, in about 220 ms.
+With `fast_roaming` taken out the rig fails on exactly those lines. Unit tests
+in `hostapd_test`, `lower_test`, `plan_access_point_test` (a sabotage of the
+key management comparison turned all three red) and `render_test`; both
+witnesses carry the fields.
+
+**What it does not show, said because the number invites it**: the roam
+without fast transition took 199 ms in the same rig. hwsim has no radio, so the
+4-way handshake FT-PSK saves costs almost nothing there; the rig proves the
+mechanism, not a speed-up. On a real radio FT-PSK saves that one handshake --
+real but modest. The large saving is on networks whose handshake is expensive,
+SAE and 802.1X, which is the part not built.
+
+**The example gate compiles against the C now**: it read the Rust's debug
+build, which refused `fast_roaming` -- `linkage`'s reason for moving (0266),
+met by this gate later.
+
+### What is still missing, in the order worth building
+
+1. **WPA3 fast roaming (FT-SAE).** The keys have to travel: hostapd's RRB over
+   the LAN between access points, with `r0kh`/`r1kh` and a shared key. Needs
+   the access points on one layer-2 segment and a key the configuration can
+   name as a secret.
+2. **Neighbour reports (802.11k)** -- `rrm_neighbor_report`, filled by
+   `SET_NEIGHBOR`. An access point cannot learn its neighbours; they would be
+   declared in the configuration until fleet management can say them.
+3. **Mesh (802.11s)**: a `mesh` block joined through `wpa_supplicant`
+   (`mode=5`, SAE), as wireless backhaul. hwsim does mesh points.
+4. **Repeater.** Four-address (WDS) station mode, so a bridged repeater works
+   where `plan/radio.c` warns today that it cannot; Multi-AP backhaul
+   (`multi_ap`) beside it; a routed relay (station and access point on one
+   radio) is possible with what netcfgd already has, NAT included.
+5. **Steering**: band steering and a minimum-signal kick are policy loops over
+   802.11v transition requests, and want the neighbour reports first.
+
+All five can be checked in hull on hwsim, as this was.
+
 ## 10.586 A card's port type: reported, and who should set it
 
 **What it is about.** A VPI card -- the ConnectX family -- runs each port as

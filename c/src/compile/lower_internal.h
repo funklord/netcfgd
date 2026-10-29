@@ -312,6 +312,12 @@ int   ncfg_is_hostname(const char *name);
  * header.
  */
 int   ncfg_is_regdom(const char *name);
+/* Four hex digits, either case: an 802.11r mobility domain (10.587). */
+int   ncfg_is_mobility_domain(const char *text);
+/* Whether an access point's security can carry fast roaming: a passphrase, and
+ * not WPA3 alone. The lowerer refuses by it and the renderer refuses to write
+ * back what the lowerer would refuse. */
+int   ncfg_can_roam_fast(const ncfg_access_point_t *point);
 int   ncfg_is_duplex(const char *name);
 int   ncfg_is_band(const char *name);
 /* An IPv4 netmask as a prefix length, or -1 for a non-contiguous one. */

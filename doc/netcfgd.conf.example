@@ -758,6 +758,40 @@
 #	config = "192.168.4.1/24"
 #}
 
+# FAST ROAMING between access points that offer one network. A station moving
+# from one to the next does so with 802.11r's fast transition rather than a
+# fresh handshake, and is told it may be steered (802.11v). Turn it on in every
+# `access_point` block of the network, on this machine and on the others:
+#
+#   - Each access point derives the roaming keys from the passphrase itself, so
+#     the machines share nothing but the configuration.
+#   - They must agree on a mobility domain. netcfgd derives one from the SSID,
+#     so access points netcfgd runs agree without being told; state
+#     `mobility_domain` only to join another vendor's, using the four hex
+#     digits they show.
+#   - It needs a `psk` network on `wpa2` or `wpa2+wpa3` (the default). On
+#     `wpa2+wpa3` WPA2 clients roam fast and WPA3 ones join as before; `wpa3`
+#     alone is refused, because SAE's keys would have to travel between the
+#     access points, which is not built.
+#   - A client without 802.11r still joins: the plain handshake is offered
+#     beside it.
+
+#access_point "Home" {
+#	device       = "wlan0"
+#	fast_roaming = true
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#}
+#access_point "Home" {
+#	device          = "wlan1"
+#	fast_roaming    = true
+#	mobility_domain = "4f2a"
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#}
+
 # THE ADDRESS IS NOT OPTIONAL, and netcfgd cannot supply what comes after it.
 #
 # hostapd broadcasts and stations associate; that is the whole of what an

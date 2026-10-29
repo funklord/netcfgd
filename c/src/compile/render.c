@@ -1411,6 +1411,20 @@ static void refuse_unwritable_strings(const ncfg_document_t *document,
 			ncfg_render_refuse(missing, "access_point", point->id,
 			    "a `band` of `%s`, which is not one of 2.4, 5 or 6", point->band);
 		}
+		/* The three fast-roaming states the lowerer refuses, refused here
+		 * rather than written back for it to refuse (10.587). */
+		if (point->mobility_domain && !ncfg_is_mobility_domain(point->mobility_domain)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a `mobility_domain` of `%s`, which is not four hex digits",
+			    point->mobility_domain);
+		} else if (point->mobility_domain && !point->fast_roaming) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a `mobility_domain` without fast roaming");
+		}
+		if (point->fast_roaming && !ncfg_can_roam_fast(point)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "fast roaming on security that cannot carry it");
+		}
 	}
 }
 
