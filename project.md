@@ -12597,6 +12597,66 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.606 The wifi dialogs deleted what they could not show
+
+Found by a `/go` run 2026-10-29, deriving the lens from 10.605 -- a feature
+added to the model that a consumer had to be told about -- and asking which
+consumers of an interface, a network and an access point list the members
+they handle. **Two GUI dialogs saved a whole block with `replace` from the
+fields they have**, and nothing stopped them:
+
+- **The network dialog** wrote id, security, ssid, hidden, metric,
+  autoconnect, metered and one `config` word. It did not *load* addressing or
+  metered at all, so opening any network and pressing Save reset both; and it
+  had no field for a pinned `bssid`, `roam`, `hooks`, routes, DNS, addressing
+  beyond one DHCP source, or an enterprise network's identity and
+  certificates, which the client does not even carry. Each of those was
+  deleted by Save. The client's own comment said whatever read a saved
+  network "composes a whole block or refuses to"; the GUI did neither.
+- **The access point dialog** had no field for anything 10.593-10.600 added:
+  `fast_roaming`, `mobility_domain`, `wds`, `roaming_key`,
+  `neighbour_reports`, `neighbour` blocks, `steering`, `width`.
+- **The interface dialog** already refused through `unmodelled` (since
+  `1c78ae98`, which measured the same deletion on an interface), but its list had not gained `dhcp_server`, so it would
+  have deleted a DHCP server the same way. Checked by comparing every
+  interface member the document declares against what the client reads:
+  `dhcp_server` was the only one missing.
+
+**Fixed by the interface dialog's rule, extended**: the client names what
+each dialog cannot carry in an `unmodelled` sentence on `ncfg_saved_network_t`
+and `ncfg_access_point_config_t`; both dialogs refuse Save while editing one
+that has any, naming them and pointing at `ncfg config edit`; the network
+dialog now opens on its addressing and metered; `dhcp_server` joined the
+interface list. Carrying the fields rather than refusing is the better end
+state and is open: refusing is what makes it safe meanwhile.
+
+- `client_test`: a network with a pinned BSSID and a route names `bssid,
+  routes`, one with a single DHCPv6 source names nothing; an access point
+  with steering and width names `steering, width`.
+- `gui_wifi.sh` (all 14 probes pass, under `unshare -rn`): an access point
+  written by hand with `width = 20` is named, Save is refused saying `width`,
+  and the width is still there; a metered DHCP network opens on both and
+  keeps both through Save; a network pinned to a BSSID is named, Save is
+  refused, and its file is byte for byte as it was.
+- **Three GUI probes ran the Rust daemon.** `interface_load`, `access_policy`
+  and `reconnect` start a real daemon by a compiled-in path, and it was
+  `target/debug/netcfgd` -- built only because `make check`'s cargo step
+  builds it, and not what ships (0266). Found when `interface_load` failed on
+  a `dhcp_server` the Rust compiler has never heard of. They name `c/netcfgd`
+  now, and `make gui` builds the C first.
+- **And qmake does not rebuild on a changed `DEFINES`.** After the path
+  changed, the probes' existing objects still carried the old one -- `strings`
+  on the binaries showed `target/debug/netcfgd` -- and `interface_load` kept
+  failing for a reason no longer in the tree until its `.cpp` was edited. The
+  two others were rebuilt by removing their objects. A tree with an older
+  build of `access_policy` or `reconnect` will run them against whatever is
+  at the old path until those objects are rebuilt; a fresh build is right.
+- **The first run had two failures in `live_wifi`** (the table empty right
+  after activation, six rows after a second scan), with the two networks this
+  test wrote still configured on the shared daemon. They are removed at the
+  end of their cases now, and the rerun passed; whether they were the cause
+  or the scan is flaky was not established.
+
 ## 10.605 Reservations: a fixed address for a named host
 
 A `/go` run 2026-10-29: after the range itself, the setting a router is most

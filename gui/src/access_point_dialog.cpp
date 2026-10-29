@@ -304,6 +304,17 @@ QString ncfg_access_point_dialog::block_text() const
 
 void ncfg_access_point_dialog::submit()
 {
+	/* Refused rather than approximated, as the network and interface dialogs
+	 * are (10.606): width, steering, fast roaming and the rest have no field
+	 * here, and the block is written whole. */
+	if (editing && !before.unmodelled.isEmpty()) {
+		note->setText(QStringLiteral(
+		    "this access point's configuration carries %1, which this dialog has no "
+		    "field for -- saving would delete it. Edit the file instead: "
+		    "`ncfg config edit access-point-%2`.")
+		        .arg(before.unmodelled, before.id));
+		return;
+	}
 	const QLineEdit *values[] = { id, credential, regdom, stations };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
@@ -348,10 +359,13 @@ void ncfg_access_point_dialog::submit()
 	}
 	/* **The sentence the example file spends a paragraph on.** hostapd beacons
 	 * and stations associate; a station then needs an address, a route and a
-	 * resolver, and netcfgd serves no DHCP. An access point whose radio has no
-	 * address is one every station associates with and reaches nothing through. */
-	summary = QStringLiteral("wrote access-point-%1: give %2 an address in `links` if it "
-	              "has none -- stations associate and still need one. Run apply.")
+	 * resolver, which come from the radio's interface block -- its address, and
+	 * a `dhcp_server` to lease the stations theirs (0297). An access point whose
+	 * radio has neither is one every station associates with and reaches
+	 * nothing through. */
+	summary = QStringLiteral("wrote access-point-%1: give %2 an address and a dhcp_server "
+	              "in its interface if it has none -- stations associate and still need "
+	              "one. Run apply.")
 	          .arg(name, device->currentText().trimmed());
 	accept();
 }

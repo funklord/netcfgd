@@ -9,9 +9,10 @@
  *
  * What this dialog does not do is anything about what comes *after* an
  * association. hostapd beacons and stations associate; a station still needs an
- * address, a route and a resolver, and **netcfgd serves no DHCP**. So the note
- * says what the example file says -- give the radio's `interface` block an
- * address -- and the planner's own warning carries the rest.
+ * address, a route and a resolver, which the radio's `interface` block gives:
+ * an address, and since 0297 a `dhcp_server` to hand the stations theirs. So
+ * the note says to give it an address, and the planner's own warning carries
+ * the rest.
  *
  * `admin`, because it writes configuration.
  */

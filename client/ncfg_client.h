@@ -1988,6 +1988,15 @@ typedef struct {
 	ncfg_route_t          *routes;
 	size_t                 route_count;
 	ncfg_dns_scope_t       dns;
+	/*
+	 * What the network dialog has no field for, comma-joined, by the
+	 * interface editor's rule: only what a save would delete. Empty for a
+	 * network that dialog can write back whole. A pinned `bssid`, `roam`,
+	 * `hooks`, any route or DNS, addressing beyond one DHCP source, and an
+	 * enterprise network's identity and certificates, which this struct does
+	 * not carry (project.md 10.606).
+	 */
+	char                  *unmodelled;
 } ncfg_saved_network_t;
 
 /*
@@ -2028,6 +2037,11 @@ typedef struct {
 	int   answering;
 	char *started_band;
 	int   started_channel;
+	/* What the access point dialog has no field for, comma-joined, as on a
+	 * saved network: fast roaming and its keys, `wds`, neighbour reports and
+	 * neighbours, steering and `width` (project.md 10.606). Empty for one
+	 * the dialog can write back whole. */
+	char *unmodelled;
 } ncfg_access_point_config_t;
 
 typedef struct {

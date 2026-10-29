@@ -2283,6 +2283,65 @@ static void an_access_point_keeps_the_lists_it_names(void)
 }
 
 /*
+ * What the two wifi dialogs could not write back (10.606).
+ *
+ * Both save a whole block with `replace`, so what they have no field for is
+ * deleted by pressing Save -- a network's pinned BSSID and its routes, an
+ * access point's width and steering, measured by reading the dialogs. The
+ * client names them so the dialog can refuse; one network and one access
+ * point carry nothing beyond the form, and say so with an empty string.
+ */
+static void what_the_wifi_dialogs_cannot_carry_is_named(void)
+{
+	struct staged         staged;
+	ncfg_saved_networks_t networks = {};
+	ncfg_access_points_t  points = {};
+	char                  err[NCFG_ERROR_MAX];
+
+	if (!staged_open(&staged, "a client asking for what the wifi dialogs can carry connects",
+	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
+	    "{\"id\":\"office\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
+	    "\"autoconnect\":true,\"metered\":false,\"bssid\":[\"02:00:00:00:00:01\"],"
+	    "\"addressing\":[{\"source\":\"dhcp4\"}],\"routes\":[{\"destination\":"
+	    "\"10.0.0.0/8\",\"via\":\"192.168.1.1\"}],\"hooks\":[]},"
+	    "{\"id\":\"plain\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
+	    "\"autoconnect\":true,\"metered\":false,\"addressing\":[{\"source\":\"dhcp6\"}],"
+	    "\"routes\":[],\"hooks\":[]}"
+	    "],\"globals\":{}}\n"
+	    "{\"response\":\"document\",\"schema_version\":1,\"access_points\":["
+	    "{\"id\":\"wide\",\"ssid\":\"77\",\"device\":\"wlan0\","
+	    "\"security\":{\"type\":\"open\"},\"hidden\":false,\"width\":160,"
+	    "\"steering\":{\"band\":true}},"
+	    "{\"id\":\"small\",\"ssid\":\"73\",\"device\":\"wlan1\","
+	    "\"security\":{\"type\":\"open\"},\"hidden\":false}"
+	    "],\"globals\":{}}\n"
+	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[]}\n")) {
+		return;
+	}
+
+	int got = ncfg_client_saved_networks(staged.client, &networks, err, sizeof(err));
+	ok("the saved networks arrive", got == 1 && networks.count == 2, err);
+	if (got == 1 && networks.count == 2) {
+		equals("a pinned BSSID and a route are named, the one DHCP source is not",
+		    networks.items[0].unmodelled, "bssid, routes");
+		equals("and a network the dialog can write whole names nothing",
+		    networks.items[1].unmodelled, "");
+	}
+	ncfg_saved_networks_free(&networks);
+
+	got = ncfg_client_access_points(staged.client, &points, err, sizeof(err));
+	ok("the access points arrive", got == 1 && points.count == 2, err);
+	if (got == 1 && points.count == 2) {
+		equals("an access point's steering and width are named",
+		    points.items[0].unmodelled, "steering, width");
+		equals("and one the dialog can write whole names nothing",
+		    points.items[1].unmodelled, "");
+	}
+	ncfg_access_points_free(&points);
+	staged_close(&staged);
+}
+
+/*
  * A default route is what separates "addressed" from "connected".
  *
  * The tray drew a radio as connected on association alone, which is true of a
@@ -2450,6 +2509,7 @@ int main(int argc, char **argv)
 	a_station_list_carries_who_and_the_lease_they_hold();
 	saved_networks_come_from_the_document_not_a_scan();
 	join_choices_are_the_saved_networks_heard();
+	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();
 	dns_reports_that_it_is_not_managing_resolution();
 	a_link_knows_whether_a_default_route_leaves_through_it();

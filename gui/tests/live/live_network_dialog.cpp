@@ -182,6 +182,66 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* 4. What the dialog does not show (10.606). It saves the block whole, so
+	 *    it must open on what the document holds for the fields it has --
+	 *    addressing and metered were not loaded at all -- and refuse where the
+	 *    block carries something it has no field for. */
+	{
+		QString why;
+		check("a metered DHCP network is written by hand",
+		    connection.config_put(QStringLiteral("wifi-metered"),
+		        QStringLiteral("network \"metered\" {\n\twifi { psk = \"@secret:metered\" }\n"
+		                       "\tmetered = true\n\tconfig = \"dhcp\"\n}\n"),
+		        true, &why),
+		    why);
+		ncfg_saved_network_row existing;
+		check("and netcfgd says the dialog can carry all of it",
+		    saved_named(&connection, QStringLiteral("metered"), &existing) &&
+		        existing.unmodelled.isEmpty(),
+		    existing.unmodelled);
+		ncfg_network_dialog dialog(&connection, existing);
+		auto *addressing = dialog.findChild<QComboBox *>(QStringLiteral("network_addressing"));
+		auto *metered = dialog.findChild<QCheckBox *>(QStringLiteral("network_metered"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+		check("the dialog opens on its addressing",
+		    addressing && addressing->currentData().toString() == QStringLiteral("dhcp"),
+		    addressing ? addressing->currentData().toString() : QString());
+		check("and on its being metered", metered && metered->isChecked());
+		save->click();
+		ncfg_saved_network_row after;
+		check("and saving it unchanged keeps both",
+		    saved_named(&connection, QStringLiteral("metered"), &after) && after.metered &&
+		        after.addressing == QStringLiteral("dhcp"),
+		    after.addressing);
+		/* Taken away again: the probes share one daemon, and a network left
+		 * here is one the next probe's radio would try to join. */
+		(void)connection.config_delete(QStringLiteral("wifi-metered"), &why);
+	}
+	{
+		QString why;
+		const QString text = QStringLiteral(
+		    "network \"pinned\" {\n\twifi { psk = \"@secret:pinned\" }\n"
+		    "\tbssid = \"00:11:22:33:44:55\"\n}\n");
+		check("a network pinned to a BSSID is written by hand",
+		    connection.config_put(QStringLiteral("wifi-pinned"), text, true, &why), why);
+		ncfg_saved_network_row existing;
+		check("and netcfgd names the BSSID as something the dialog cannot carry",
+		    saved_named(&connection, QStringLiteral("pinned"), &existing) &&
+		        existing.unmodelled == QStringLiteral("bssid"),
+		    existing.unmodelled);
+		ncfg_network_dialog dialog(&connection, existing);
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+		save->click();
+		QFile file(conf + QStringLiteral("wifi-pinned.conf"));
+		QString kept;
+		if (file.open(QIODevice::ReadOnly)) {
+			kept = QString::fromUtf8(file.readAll());
+		}
+		check("so Save is refused and the file is left as it was",
+		    dialog.outcome().isEmpty() && kept == text, kept);
+		(void)connection.config_delete(QStringLiteral("wifi-pinned"), &why);
+	}
+
 	printf("\n");
 	if (failures) {
 		printf("live_network_dialog: %d failed\n", failures);

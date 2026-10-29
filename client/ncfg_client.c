@@ -1829,10 +1829,58 @@ void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 		free(item->dns.servers);
 		free(item->dns.search);
 		free(item->dns.domains);
+		free(item->unmodelled);
 	}
 	free(networks->items);
 	networks->items = NULL;
 	networks->count = 0;
+}
+
+/* Whether a member says anything: present, and not false, empty or null --
+ * the document omits most defaults, and writes some (a `false`) anyway. */
+static int member_says(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	uint32_t member = ncfg_json_member(doc, object, name);
+
+	switch (ncfg_json_type(doc, member)) {
+	case NCFG_JSON_NULL:
+		return 0;
+	case NCFG_JSON_BOOL:
+		return ncfg_json_bool(doc, member, 0);
+	case NCFG_JSON_ARRAY:
+		return ncfg_json_count(doc, member) > 0u;
+	default:
+		return 1;
+	}
+}
+
+static void note_unmodelled(char **list, const char *key);
+
+static void network_unmodelled(const ncfg_json_doc_t *doc, uint32_t entry,
+                               ncfg_saved_network_t *item)
+{
+	static const char *const beyond[] = { "bssid", "roam", "hooks" };
+	const ncfg_address_source_t *only = item->source_count == 1u ? &item->sources[0] : NULL;
+
+	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
+		if (member_says(doc, entry, beyond[i])) {
+			note_unmodelled(&item->unmodelled, beyond[i]);
+		}
+	}
+	/* The dialog's one addressing choice: none, or a single DHCP source. */
+	if (item->source_count > 1u ||
+	    (only && strcmp(only->source, "dhcp4") != 0 && strcmp(only->source, "dhcp6") != 0)) {
+		note_unmodelled(&item->unmodelled, "addressing (beyond one DHCP source)");
+	}
+	if (item->route_count) {
+		note_unmodelled(&item->unmodelled, "routes");
+	}
+	if (member_says(doc, entry, "dns")) {
+		note_unmodelled(&item->unmodelled, "dns");
+	}
+	if (item->security && strcmp(item->security, "eap") == 0) {
+		note_unmodelled(&item->unmodelled, "eap (its identity and certificates)");
+	}
 }
 
 int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out, char *err,
@@ -1921,16 +1969,32 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		item->metered = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "metered"), 0);
 		/*
 		 * What the network configures, by the same readers the interface view
-		 * uses: the keys are the document's and so are their shapes. No
-		 * `unmodelled` sink, because that field exists to stop a FORM
-		 * overwriting what it cannot show, and a saved network has no form
-		 * here -- what reads this composes a whole block or refuses to.
+		 * uses: the keys are the document's and so are their shapes.
 		 */
 		if (!read_sources(doc, ncfg_json_member(doc, entry, "addressing"),
 		        &item->sources, &item->source_count, NULL)
 		    || !read_routes(doc, ncfg_json_member(doc, entry, "routes"), &item->routes,
 		        &item->route_count, NULL)
 		    || !read_dns(doc, ncfg_json_member(doc, entry, "dns"), &item->dns, NULL)) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			ncfg_saved_networks_free(out);
+			return 0;
+		}
+		/*
+		 * **And what the network dialog cannot write back** (10.606). This
+		 * said a saved network had no form here and that whatever read it
+		 * would compose a whole block or refuse; the GUI's network dialog
+		 * did neither -- it composed the block from the fields it has and
+		 * saved with `replace`, so a route, a pinned BSSID or a hook was
+		 * deleted by pressing Save. Named here as an interface's are, so the
+		 * dialog can refuse saying what.
+		 */
+		network_unmodelled(doc, entry, item);
+		if (!item->unmodelled) {
+			item->unmodelled = dup_string("");
+		}
+		if (!item->unmodelled) {
 			set_error(err, err_size, "out of memory");
 			ncfg_json_free(doc);
 			ncfg_saved_networks_free(out);
@@ -1958,6 +2022,7 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
 		free(points->items[i].acl_policy);
 		free(points->items[i].stations);
 		free(points->items[i].started_band);
+		free(points->items[i].unmodelled);
 	}
 	free(points->items);
 	memset(points, 0, sizeof(*points));
@@ -2178,9 +2243,25 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 
 		running_state(status, item->device ? item->device : "", item);
 
+		/* What the access point dialog cannot write back (10.606): it saves
+		 * the block with `replace`, so each of these would be deleted. */
+		{
+			static const char *const beyond[] = { "fast_roaming", "mobility_domain", "wds",
+				"roaming_key", "neighbour_reports", "neighbours", "steering", "width" };
+
+			for (size_t at = 0; at < sizeof(beyond) / sizeof(beyond[0]); at++) {
+				if (member_says(doc, entry, beyond[at])) {
+					note_unmodelled(&item->unmodelled, beyond[at]);
+				}
+			}
+			if (!item->unmodelled) {
+				item->unmodelled = dup_string("");
+			}
+		}
+
 		if (!item->id || !item->name || !item->ssid || !item->device || !item->security
 		    || !item->credential || !item->band || !item->regdom || !item->acl_policy
-		    || !item->stations || !item->started_band) {
+		    || !item->stations || !item->started_band || !item->unmodelled) {
 			set_error(err, err_size, "out of memory");
 			ncfg_json_free(doc);
 			ncfg_json_free(status);
@@ -3703,7 +3784,10 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	 * generated wifi block reported two unrepresentable keys, and the editor
 	 * refused to open it for editing at all. An empty list is not content.
 	 */
-	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token" };
+	/* `dhcp_server` joined late (10.606): added to the model in 0297 and not
+	 * here, so the interface dialog would have deleted a DHCP server. */
+	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token",
+		"dhcp_server" };
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
 		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
 			note_unmodelled(&out->unmodelled, beyond[i]);

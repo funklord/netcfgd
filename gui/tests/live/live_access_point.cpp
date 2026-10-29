@@ -181,6 +181,37 @@ int main(int argc, char **argv)
 		check("and netcfgd stops reporting it", !offered(&connection, name, &gone));
 	}
 
+	/* What the dialog has no field for (10.606). It saves the block whole, so
+	 * an access point written by hand with a `width` would lose it to Save;
+	 * the dialog has to refuse and leave the file as it was. */
+	{
+		const QString wide = QStringLiteral("gui-wide");
+		const QString text = QStringLiteral(
+		    "access_point \"gui-wide\" {\n\tdevice = \"radio0\"\n\tchannel = 6\n"
+		    "\twidth = 20\n\twifi { psk = \"@secret:gui-wide\" }\n}\n");
+		QString why;
+		check("an access point with a width is written by hand",
+		    connection.config_put(QStringLiteral("access-point-") + wide, text, true, &why),
+		    why);
+		ncfg_access_point_config existing;
+		check("and netcfgd names the width as something the dialog cannot carry",
+		    offered(&connection, wide, &existing) &&
+		        existing.unmodelled == QStringLiteral("width"),
+		    existing.unmodelled);
+		ncfg_access_point_dialog dialog(&connection, existing);
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("ap_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("ap_save"));
+		save->click();
+		check("so Save is refused, saying what it would delete",
+		    dialog.outcome().isEmpty() && note && note->text().contains(QStringLiteral("width")),
+		    note ? note->text() : QString());
+		ncfg_access_point_config after;
+		check("and the width is still there",
+		    offered(&connection, wide, &after) && after.unmodelled == QStringLiteral("width"),
+		    after.unmodelled);
+		(void)connection.config_delete(QStringLiteral("access-point-") + wide, &why);
+	}
+
 	if (failures == 0) {
 		printf("live_access_point: all checks passed\n");
 	} else {

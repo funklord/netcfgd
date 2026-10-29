@@ -9,6 +9,8 @@
  */
 #include "ncfg_connection.h"
 
+#include <cstring>
+
 namespace {
 
 /*
@@ -753,6 +755,16 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		row.metric = networks.items[i].metric;
 		row.autoconnect = networks.items[i].autoconnect != 0;
 		row.hidden = networks.items[i].hidden != 0;
+		row.metered = networks.items[i].metered != 0;
+		row.unmodelled = from_c(networks.items[i].unmodelled);
+		if (row.unmodelled.isEmpty() && networks.items[i].source_count == 1) {
+			const char *source = networks.items[i].sources[0].source;
+			/* The document's word is not the language's: `dhcp` compiles to
+			 * `dhcp4`, as the interface dialog's loader also says. */
+			row.addressing = source && strcmp(source, "dhcp4") == 0
+			    ? QStringLiteral("dhcp")
+			    : from_c(source);
+		}
 		out->append(row);
 	}
 	ncfg_saved_networks_free(&networks);
@@ -1070,6 +1082,7 @@ bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QStrin
 		row.answering = found.items[i].answering != 0;
 		row.started_band = from_c(found.items[i].started_band);
 		row.started_channel = found.items[i].started_channel;
+		row.unmodelled = from_c(found.items[i].unmodelled);
 		*out << row;
 	}
 	ncfg_access_points_free(&found);

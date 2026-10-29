@@ -434,6 +434,9 @@ struct ncfg_access_point_config {
 	bool    answering = false;
 	QString started_band;
 	int     started_channel = -1;
+	/* What the access point dialog has no field for, comma-joined; empty for
+	 * one it can write back whole (project.md 10.606). */
+	QString unmodelled;
 };
 
 /* One device: the hardware, and netcfgd's policy about it. A device is what
@@ -595,6 +598,14 @@ struct ncfg_saved_network_row {
 	int     metric = -1;
 	bool    autoconnect = false;
 	bool    hidden = false;
+	bool    metered = false;
+	/* The network's own addressing as the network dialog's choice spells it:
+	 * empty for none, `dhcp` or `dhcp6` for a single DHCP source. Anything
+	 * else is in `unmodelled`, and this is empty. */
+	QString addressing;
+	/* What the network dialog has no field for, comma-joined; empty for a
+	 * network it can write back whole (project.md 10.606). */
+	QString unmodelled;
 };
 
 /*

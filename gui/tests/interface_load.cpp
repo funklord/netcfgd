@@ -237,6 +237,7 @@ int main(int argc, char **argv)
 		                   "interface eth0 {\n"
 		                   "\tconfig = \"192.0.2.10/24\"\n"
 		                   "\tipv6_token = \"::5\"\n"
+		                   "\tdhcp_server { dns = [\"192.0.2.10\"] }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -254,6 +255,11 @@ int main(int argc, char **argv)
 			return 1;
 		}
 
+		ncfg_interface_config read;
+		check(connection.interface_config(QStringLiteral("eth0"), &read, &error)
+		        ? QStringLiteral("answered")
+		        : error,
+		    QStringLiteral("answered"), "netcfgd answers for the interface");
 		ncfg_interface_dialog dialog(&connection, QStringLiteral("eth0"));
 		QMetaObject::invokeMethod(&dialog, "submit");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
@@ -263,6 +269,10 @@ int main(int argc, char **argv)
 		        ? QStringLiteral("refused")
 		        : said,
 		    QStringLiteral("refused"), "saving over an unmodelled key is refused");
+		/* A DHCP server, which joined the model in 0297 and this list only in
+		 * 10.606: until then Save deleted it. */
+		check(said.contains(QStringLiteral("dhcp_server")) ? QStringLiteral("named") : said,
+		    QStringLiteral("named"), "  naming a DHCP server among them");
 
 		daemon.kill();
 		daemon.waitForFinished(2000);

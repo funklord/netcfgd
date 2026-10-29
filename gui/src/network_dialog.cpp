@@ -182,6 +182,16 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	addressing = new QComboBox(this);
 	addressing->setObjectName(QStringLiteral("network_addressing"));
 	fill(addressing, addressings, sizeof(addressings) / sizeof(addressings[0]));
+	/* What the document holds, which this used not to read: the combo opened
+	 * on "leave to the interface" for every network and Save wrote that back
+	 * (10.606). An empty list and `null` are one document, so both open on
+	 * the first choice and neither loses anything. */
+	if (editing) {
+		const int at = addressing->findData(existing.addressing);
+		if (at >= 0) {
+			addressing->setCurrentIndex(at);
+		}
+	}
 	form->addRow(QStringLiteral("addressing"), addressing);
 
 	autoconnect = new QCheckBox(QStringLiteral("join this network without being asked"), this);
@@ -196,6 +206,7 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 
 	metered = new QCheckBox(QStringLiteral("metered -- avoid large transfers"), this);
 	metered->setObjectName(QStringLiteral("network_metered"));
+	metered->setChecked(existing.metered);
 	form->addRow(QString(), metered);
 
 	layout->addLayout(form);
@@ -346,6 +357,20 @@ void ncfg_network_dialog::submit()
 {
 	const QString name = id->text().trimmed();
 	QString error;
+
+	/* **Refused rather than approximated**, by the interface dialog's rule
+	 * (10.606). The block is written whole with `replace`, so whatever this
+	 * form has no field for -- a pinned BSSID, a route, a hook, an
+	 * enterprise network's identity -- would be deleted by saving, and the
+	 * operator would find out when the network stopped working. */
+	if (editing && !before.unmodelled.isEmpty()) {
+		note->setText(QStringLiteral(
+		    "this network's configuration carries %1, which this dialog has no field "
+		    "for -- saving would delete it. Edit the file instead: "
+		    "`ncfg config edit wifi-%2`.")
+		        .arg(before.unmodelled, before.id));
+		return;
+	}
 
 	/* Every value that reaches the text is checked, not just the name. The
 	 * dialog composes the block, so the only way a key an operator did not
