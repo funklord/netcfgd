@@ -1168,7 +1168,7 @@
     },
     {
       "id": 44,
-      "subject": "nat:host",
+      "subject": "nftables:host",
       "op": {
         "op": "nftables.replace",
         "uplinks": [

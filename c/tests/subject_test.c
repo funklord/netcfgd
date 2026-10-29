@@ -135,7 +135,7 @@ int main(void)
 	 * reader needs no list of which classes are host-wide to parse a key. */
 	memset(&op, 0, sizeof(op));
 	op.kind = NCFG_OP_NFTABLES_REPLACE;
-	check(ncfg_op_subject(&op, other, sizeof(other)) && strcmp(other, "nat:host") == 0,
+	check(ncfg_op_subject(&op, other, sizeof(other)) && strcmp(other, "nftables:host") == 0,
 	    "a host-wide object is scoped to `host` rather than to nothing");
 
 	/* Truncation is a refusal. */

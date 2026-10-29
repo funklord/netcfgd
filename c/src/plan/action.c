@@ -355,8 +355,10 @@ static const char *subject_class(int kind)
 		return "accept_ra";
 	case NCFG_OP_DNS_APPLY:
 		return "dns";
+	/* The whole table, NAT and the firewall together, since 10.592: a lock
+	 * on `nat` would otherwise freeze a firewall it does not name. */
 	case NCFG_OP_NFTABLES_REPLACE:
-		return "nat";
+		return "nftables";
 	case NCFG_OP_HOSTNAME_SET:
 		return "hostname";
 	case NCFG_OP_HOOK_RUN:
