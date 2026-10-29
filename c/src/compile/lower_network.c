@@ -1028,6 +1028,16 @@ static int check_channel_in_band(ncfg_lower_ctx_t *ctx, const ncfg_access_point_
 	return 0;
 }
 
+/* Every list an access control block holds. */
+static void access_control_lists_free(ncfg_access_control_t *acl)
+{
+	ncfg_strings_free(acl->stations, acl->station_count);
+	ncfg_strings_free(acl->prefixes, acl->prefix_count);
+	ncfg_strings_free(acl->lists, acl->list_count);
+	ncfg_strings_free(acl->written, acl->written_count);
+	memset(acl, 0, sizeof(*acl));
+}
+
 static void access_point_free(ncfg_access_point_t *access_point)
 {
 	free(access_point->id);
@@ -1041,8 +1051,7 @@ static void access_point_free(ncfg_access_point_t *access_point)
 	}
 	ncfg_security_free(&access_point->security);
 	if (access_point->access_control) {
-		ncfg_strings_free(access_point->access_control->stations,
-		    access_point->access_control->station_count);
+		access_control_lists_free(access_point->access_control);
 		free(access_point->access_control);
 	}
 	{
@@ -1348,15 +1357,20 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 			if (!lower_access_control(ctx, &item->as.block, &acl)) {
 				continue;
 			}
-			if (!access_point.access_control) {
-				access_point.access_control = calloc(1, sizeof(*access_point.access_control));
-			} else {
-				ncfg_strings_free(access_point.access_control->stations,
-				    access_point.access_control->station_count);
+			/* A second block replacing the first would be the deny list
+			 * that quietly does nothing, which one block's two lists are
+			 * refused for. */
+			if (access_point.access_control) {
+				ncfg_diag(ctx, item->as.block.span,
+				    "access point `%s` has a second `access_control` block: put its "
+				    "stations in the first", access_point.id);
+				access_control_lists_free(&acl);
+				continue;
 			}
+			access_point.access_control = calloc(1, sizeof(*access_point.access_control));
 			if (!access_point.access_control) {
 				ncfg_lower_oom(ctx);
-				ncfg_strings_free(acl.stations, acl.station_count);
+				access_control_lists_free(&acl);
 				continue;
 			}
 			*access_point.access_control = acl;

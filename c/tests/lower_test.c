@@ -1399,6 +1399,12 @@ static void access_point_cases(void)
 	    "}\n", "not both an allow and a deny",
 	    "an access point has one station list rather than two");
 	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { deny = [\"aa:bb:cc:dd:ee:ff\"] }\n"
+	    "\taccess_control { allow = [\"11:22:33:44:55:66\"] }\n"
+	    "}\n", "a second `access_control` block",
+	    "  and so is a second block, which would replace the first");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
 	    "\twifi { psk = \"@secret:ap\" }\n\taccess_control { deny = [\"nonsense\"] }\n}\n",
 	    "six colon-separated octets", "a malformed station address is refused");
 }
