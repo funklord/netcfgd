@@ -381,15 +381,13 @@ static int start_access_point(const ncfg_service_t *service, const char *run_dir
 	local.bridge = device ? device->master : NULL;
 	local.address = interface_address_of(service->class_net, iface, address) ? address : NULL;
 	local.high_throughput = 0;
-	local.forty_mhz_24 = 0;
-	local.forty_mhz_5 = 0;
+	memset(&local.widths, 0, sizeof(local.widths));
 	for (at = 0; at < service->high_throughput_count; at++) {
 		const ncfg_service_radio_t *radio = &service->high_throughput[at];
 
 		if (radio->iface && strcmp(radio->iface, iface) == 0) {
 			local.high_throughput = 1;
-			local.forty_mhz_24 = radio->forty_mhz_24;
-			local.forty_mhz_5 = radio->forty_mhz_5;
+			local.widths = radio->widths;
 		}
 	}
 	return ncfg_hostapd_start(run_dir, access_point, &local, service->secrets,

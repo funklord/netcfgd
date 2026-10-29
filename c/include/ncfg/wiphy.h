@@ -40,6 +40,9 @@ typedef struct {
 	 * `[HT40+]` the band cannot do. */
 	int      forty_mhz_24;
 	int      forty_mhz_5;
+	/* And 802.11ac (VHT) on 5 GHz: the band carries `VHT_CAPA` (10.598).
+	 * 80 MHz is mandatory for VHT, so this is also "can do 80". */
+	int      vht_5;
 } ncfg_wiphy_t;
 
 /* A split dump of every radio, to a family resolved. */

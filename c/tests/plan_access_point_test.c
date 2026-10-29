@@ -1133,6 +1133,9 @@ static void neighbour_reports_are_part_of_what_an_access_point_was_started_as(vo
 /* wlan1's own entry as a 5 GHz radio would hold it: class 115, channel 36. */
 #define OWN_B5 "{\"bssid\":\"02:00:00:00:02:00\",\"ssid\":\"686f6d65\"," \
 	"\"nr\":\"0200000002008f000000732406\"}"
+/* The same radio at 80 MHz, which reports itself in class 128 (0x80). */
+#define OWN_B80 "{\"bssid\":\"02:00:00:00:02:00\",\"ssid\":\"686f6d65\"," \
+	"\"nr\":\"0200000002008f000000802409\"}"
 #define STEERING_POINTS \
 	",\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"device\":\"wlan0\"," \
 	"\"security\":{\"type\":\"open\"},\"neighbour_reports\":true," \
@@ -1335,6 +1338,78 @@ static void forty_megahertz_is_part_of_what_an_access_point_was_started_as(void)
 	planfix_release(plan, document, observed);
 }
 
+#define VHT_LINK HT_LINK(",\"high_throughput\":true,\"forty_mhz\":[\"5\"],\"very_high_throughput\":true")
+
+/*
+ * 802.11ac and 80 MHz are part of what hostapd was started as (10.598): a 5
+ * GHz access point on a VHT radio, started at 40 MHz without it, restarts
+ * once for the width; started at 80 without 802.11ac recorded -- a file no
+ * build writes, but a record somebody edited -- restarts for that.
+ */
+static void eighty_megahertz_is_part_of_what_an_access_point_was_started_as(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" VHT_LINK "]," RUNNING(FIVE_STARTED(",\"forty_mhz\":true")),
+	    &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && strcmp(stop->reason.field, "access_point.width") == 0 &&
+	    strcmp(stop->reason.desired, "80") == 0 && strcmp(stop->reason.observed, "40") == 0,
+	    "a 5 GHz access point at 40 MHz on an 802.11ac radio restarts for 80");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" VHT_LINK "],"
+	    RUNNING(FIVE_STARTED(",\"forty_mhz\":true,\"eighty_mhz\":true,"
+	    "\"very_high_throughput\":true")), &document, &observed);
+	check(plan && plan->action_count == 0u, "  and once it has both, plans nothing");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" VHT_LINK "],"
+	    RUNNING(FIVE_STARTED(",\"forty_mhz\":true,\"eighty_mhz\":true")), &document, &observed);
+	stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+	check(stop && strcmp(stop->reason.field, "access_point.ieee80211ac") == 0,
+	    "one at 80 MHz without 802.11ac recorded restarts for 802.11ac");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"band\":\"5\",\"channel\":36,\"width\":80"),
+	    "\"links\":[" FORTY_LINK("\"5\"") "],"
+	    RUNNING(FIVE_STARTED(",\"forty_mhz\":true")), &document, &observed);
+	check(plan && planfix_warned(plan, "asks for `width = 80` and runs at 40 MHz") &&
+	    planfix_warned(plan, "no 802.11ac"),
+	    "a `width = 80` on a radio without 802.11ac is said to run at 40, and why");
+	planfix_release(plan, document, observed);
+}
+
+/* A 5 GHz sibling at 80 MHz is still 5 GHz to band steering (10.598). */
+static void a_sibling_at_80_mhz_is_still_a_5_ghz_target(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_RADIOS, TWO_RADIO_INTERFACES, "", STEERING_POINTS,
+	    RADIO_LINKS ",\"backends\":["
+	    "{\"kind\":\"access_point\",\"interface\":\"wlan0\",\"running\":true"
+	    STARTED_WITH(AS_WRITTEN ",\"neighbour_reports\":true")
+	    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[],"
+	    "\"neighbours\":[" OWN_A "," OWN_B80 "],\"steerable\":["
+	    STATION("aa:00:00:00:00:01", "-40", "300") "]}},"
+	    "{\"kind\":\"access_point\",\"interface\":\"wlan1\",\"running\":true"
+	    STARTED_WITH(",\"channel\":36,\"band\":\"5\",\"neighbour_reports\":true")
+	    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[],"
+	    "\"neighbours\":[" OWN_B80 "," OWN_A "]}}]",
+	    &document, &observed);
+	const ncfg_op_t *strong = steer_for(plan, "aa:00:00:00:00:01");
+
+	check(strong && strong->u.steer.imminent && strong->u.steer.target &&
+	    strcmp(strong->u.steer.target, "02:00:00:00:02:00") == 0,
+	    "a 5 GHz sibling reporting itself at 80 MHz, class 128, is still the band target");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1370,9 +1445,11 @@ int main(void)
 	a_neighbour_list_held_as_wanted_is_converged();
 	neighbour_reports_are_part_of_what_an_access_point_was_started_as();
 	stations_are_steered_by_band_and_by_signal();
+	a_sibling_at_80_mhz_is_still_a_5_ghz_target();
 	an_access_point_without_steering_moves_nobody();
 	an_access_point_on_a_radio_with_802_11n_takes_it_once();
 	forty_megahertz_is_part_of_what_an_access_point_was_started_as();
+	eighty_megahertz_is_part_of_what_an_access_point_was_started_as();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

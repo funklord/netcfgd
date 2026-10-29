@@ -177,9 +177,8 @@ typedef struct {
 	/* The radio has 802.11n, so the access point is given `ieee80211n=1`
 	 * (10.596). */
 	int         high_throughput;
-	/* And can do 40 MHz in 2.4 GHz, and in 5 (10.597). */
-	int         forty_mhz_24;
-	int         forty_mhz_5;
+	/* And what widths it can do, and 802.11ac (10.597, 10.598). */
+	ncfg_radio_widths_t widths;
 } ncfg_hostapd_local_t;
 
 

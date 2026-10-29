@@ -1076,13 +1076,20 @@ void ncfg_plan_neighbours(ncfg_builder_t *builder)
  */
 #define STEER_SILENT_MS 30000
 
-/* Whether a report element names a 2.4 GHz operating class (81 or 82). */
+/*
+ * Whether a report element names a 2.4 GHz operating class, or a 5 GHz one,
+ * by IEEE 802.11 Annex E's global table: 81 to 84 are 2.4 GHz -- 83 and 84
+ * its 40 MHz classes -- and 115 to 130 are 5 GHz, 128 being 80 MHz. The first
+ * version took only the 20 MHz classes, and an access point given 80 MHz
+ * (10.598) reports itself in 128: measured, band steering then found no 5 GHz
+ * target and moved nobody.
+ */
 static int element_is_24(const char *nr)
 {
 	unsigned class;
 
 	return nr && strlen(nr) >= 22u && sscanf(nr + 20, "%2x", &class) == 1 &&
-	    (class == 81u || class == 82u);
+	    class >= 81u && class <= 84u;
 }
 
 static int element_is_5(const char *nr)
@@ -1090,7 +1097,7 @@ static int element_is_5(const char *nr)
 	unsigned class;
 
 	return nr && strlen(nr) >= 22u && sscanf(nr + 20, "%2x", &class) == 1 &&
-	    class >= 115u && class <= 125u;
+	    class >= 115u && class <= 130u;
 }
 
 /*

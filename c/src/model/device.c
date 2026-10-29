@@ -89,73 +89,133 @@ const char *ncfg_access_point_effective_band(const char *band, const ncfg_optint
 	return channel->value <= 14 ? BAND_24 : BAND_5;
 }
 
-int ncfg_access_point_secondary(const ncfg_access_point_t *access_point, int forty_mhz_24,
-    int forty_mhz_5, const char **why)
+/* The 40 MHz secondary on 5 GHz, or 0: the pairs inside one block of the
+ * band, so that no domain allows one channel of a pair and not the other --
+ * measured, hostapd refuses to start on a secondary the domain forbids
+ * rather than falling back to 20 MHz. 140/144 is left out, since several
+ * domains have no 144, and so is 165 and above. */
+static int pair_on_5(int64_t channel)
+{
+	int64_t base = channel >= 149 ? channel - 1 : channel;
+
+	if (base % 4 != 0 || !((channel >= 36 && channel <= 64) ||
+	        (channel >= 100 && channel <= 136) || (channel >= 149 && channel <= 161))) {
+		return 0;
+	}
+	return (base / 4) % 2 == 1 ? 1 : -1;
+}
+
+/* The centre of the 80 MHz block a 5 GHz channel is in, or 0. The blocks
+ * every domain that has the band allows whole; 132-144 is left out with
+ * 144 (10.598). */
+static int block_of_80(int64_t channel)
+{
+	static const struct {
+		int first;
+		int centre;
+	} blocks[] = { { 36, 42 }, { 52, 58 }, { 100, 106 }, { 116, 122 }, { 149, 155 } };
+	size_t at;
+
+	if (!pair_on_5(channel)) {
+		return 0;
+	}
+	for (at = 0; at < sizeof(blocks) / sizeof(blocks[0]); at++) {
+		if (channel >= blocks[at].first && channel <= blocks[at].first + 12) {
+			return blocks[at].centre;
+		}
+	}
+	return 0;
+}
+
+void ncfg_access_point_channel_plan(const ncfg_access_point_t *access_point,
+    const ncfg_radio_widths_t *radio, ncfg_channel_plan_t *out, const char **why)
 {
 	const char *band = ncfg_access_point_effective_band(access_point->band,
 	    &access_point->channel);
 	int64_t     channel = access_point->channel.has ? access_point->channel.value : 0;
-	int64_t     base;
 	int         five;
 	int64_t     width;
 
+	memset(out, 0, sizeof(*out));
+	out->width = 20;
 	if (why) {
 		*why = NULL;
 	}
 	/* A band this build cannot render, or a channel outside its band, is
 	 * refused by the renderer in its own words; 20 MHz is all this says. */
-	if (!band || (access_point->channel.has && access_point->channel.value != 0 &&
+	if (!radio || !band || (access_point->channel.has && access_point->channel.value != 0 &&
 	        !ncfg_channel_in_band(band, access_point->channel.value))) {
-		return 0;
+		return;
 	}
 	five = strcmp(band, BAND_24) != 0;
-	width = access_point->width.has ? access_point->width.value : (five ? 40 : 20);
-	if (width != 40) {
-		return 0;
+	out->vht = five && radio->vht_5;
+	width = access_point->width.has ? access_point->width.value
+	                                : (five ? (out->vht ? 80 : 40) : 20);
+	if (width == 80) {
+		if (!five) {
+			if (why) {
+				*why = "80 MHz is a 5 GHz width";
+			}
+			return;
+		}
+		if (!out->vht) {
+			if (why) {
+				*why = "the radio has no 802.11ac, which 80 MHz needs";
+			}
+			width = 40;
+		} else if (channel == 0) {
+			/* Measured: automatic selection with an 80 MHz width and no
+			 * centre chooses a block, and fills the centre in. */
+			out->width = 80;
+			out->secondary = 1;
+			return;
+		} else if (block_of_80(channel)) {
+			out->width = 80;
+			out->secondary = pair_on_5(channel);
+			out->centre = block_of_80(channel);
+			return;
+		} else {
+			if (why) {
+				*why = "this channel is in no 80 MHz block every regulatory domain allows";
+			}
+			width = 40;
+		}
 	}
-	if (!(five ? forty_mhz_5 : forty_mhz_24)) {
-		if (why) {
+	if (width != 40) {
+		return;
+	}
+	if (!(five ? radio->forty_mhz_5 : radio->forty_mhz_24)) {
+		if (why && !*why) {
 			*why = "the radio cannot do 40 MHz in this band";
 		}
-		return 0;
+		return;
 	}
 	if (!five) {
 		/* Measured: [HT40+] on 1 and [HT40-] on 11 both run. Five to seven
 		 * could go either way, and up is taken. With no channel the
 		 * direction cannot be known before hostapd chooses one. */
 		if (channel >= 1 && channel <= 7) {
-			return 1;
-		}
-		if (channel >= 8 && channel <= 13) {
-			return -1;
-		}
-		if (why) {
+			out->width = 40;
+			out->secondary = 1;
+		} else if (channel >= 8 && channel <= 13) {
+			out->width = 40;
+			out->secondary = -1;
+		} else if (why) {
 			*why = channel ? "channel 14 has no second channel to pair with"
 			               : "40 MHz on 2.4 GHz needs a `channel`, since the second "
 			                 "channel is above it or below it";
 		}
-		return 0;
+		return;
 	}
 	/* Measured: automatic selection with [HT40+] chooses a pair. */
-	if (channel == 0) {
-		return 1;
+	if (channel == 0 || pair_on_5(channel)) {
+		out->width = 40;
+		out->secondary = channel ? pair_on_5(channel) : 1;
+		return;
 	}
-	/*
-	 * The pairs, each inside one block of the band so that no domain allows
-	 * one channel of a pair and not the other -- measured, hostapd refuses
-	 * to start on a secondary the domain forbids rather than falling back to
-	 * 20 MHz. 140/144 is left out, since several domains have no 144, and
-	 * so is 165 and above.
-	 */
-	base = channel >= 149 ? channel - 1 : channel;
-	if (base % 4 != 0 || !((channel >= 36 && channel <= 64) ||
-	        (channel >= 100 && channel <= 136) || (channel >= 149 && channel <= 161))) {
-		if (why) {
-			*why = "this channel has no partner every regulatory domain allows";
-		}
-		return 0;
+	if (why && !*why) {
+		*why = "this channel has no partner every regulatory domain allows";
 	}
-	return (base / 4) % 2 == 1 ? 1 : -1;
 }
 
 int ncfg_channel_in_band(const char *band, int64_t channel)

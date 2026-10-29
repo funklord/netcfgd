@@ -504,11 +504,12 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 		world->ht[world->ht_count].iface = world->ht_names[world->ht_count];
 		for (band = 0; band < link->forty_mhz_count; band++) {
 			if (strcmp(link->forty_mhz[band], "2.4") == 0) {
-				world->ht[world->ht_count].forty_mhz_24 = 1;
+				world->ht[world->ht_count].widths.forty_mhz_24 = 1;
 			} else if (strcmp(link->forty_mhz[band], "5") == 0) {
-				world->ht[world->ht_count].forty_mhz_5 = 1;
+				world->ht[world->ht_count].widths.forty_mhz_5 = 1;
 			}
 		}
+		world->ht[world->ht_count].widths.vht_5 = link->very_high_throughput;
 		world->ht_count++;
 	}
 	world->service.high_throughput = world->ht;

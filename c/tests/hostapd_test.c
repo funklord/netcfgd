@@ -332,7 +332,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	    "1e76efa2f1c48e99dc6ed03ae8cfd81a88ccc960995b427cccd51d47cc168e2f";
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA3);
 	ncfg_secret_ref_t          key = { NCFG_SECRET_PROVIDER_FILE, (char *)(void *)"roam" };
-	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, 0, 0 };
+	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, { 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 	char                       want[160];
@@ -380,7 +380,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	(void)refused_on(&point, &local, "correcthorse", NULL, NCFG_HOSTAPD_MISSING_ROAMING_KEY,
 	    "an unresolved roaming key is refused rather than rendered as a roam that fails");
 	{
-		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, 0, 0 };
+		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, { 0, 0, 0 } };
 
 		(void)refused_on(&point, &nowhere, "correcthorse", "roamingsecret",
 		    NCFG_HOSTAPD_MISSING_ADDRESS,
@@ -450,7 +450,7 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 static void a_radio_with_802_11n_is_given_it(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, 0, 0 };
+	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, { 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -472,10 +472,12 @@ static void a_radio_with_802_11n_is_given_it(void)
 }
 
 /* One access point on a band and channel, for the width rule. */
-static int secondary_of(const char *band, int64_t channel, int64_t width, int forty_24,
-    int forty_5)
+static ncfg_channel_plan_t plan_of(const char *band, int64_t channel, int64_t width,
+    int forty_24, int forty_5, int vht)
 {
 	ncfg_access_point_t point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_radio_widths_t radio = { forty_24, forty_5, vht };
+	ncfg_channel_plan_t plan;
 	char                text[4];
 
 	(void)snprintf(text, sizeof(text), "%s", band ? band : "");
@@ -484,7 +486,14 @@ static int secondary_of(const char *band, int64_t channel, int64_t width, int fo
 	point.channel.value = channel >= 0 ? channel : 0;
 	point.width.has = width > 0;
 	point.width.value = width;
-	return ncfg_access_point_secondary(&point, forty_24, forty_5, NULL);
+	ncfg_access_point_channel_plan(&point, &radio, &plan, NULL);
+	return plan;
+}
+
+static int secondary_of(const char *band, int64_t channel, int64_t width, int forty_24,
+    int forty_5)
+{
+	return plan_of(band, channel, width, forty_24, forty_5, 0).secondary;
 }
 
 /*
@@ -496,7 +505,7 @@ static int secondary_of(const char *band, int64_t channel, int64_t width, int fo
 static void forty_megahertz_is_given_only_where_it_can_start(void)
 {
 	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_hostapd_local_t local = { NULL, NULL, 1, 0, 1 };
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 0 } };
 	ncfg_hostapd_lines_t lines;
 	char                 message[NCFG_ERROR_MAX];
 	char                 five[] = "5";
@@ -526,7 +535,12 @@ static void forty_megahertz_is_given_only_where_it_can_start(void)
 	point.width.has = 1;
 	point.width.value = 40;
 	why = NULL;
-	(void)ncfg_access_point_secondary(&point, 1, 1, &why);
+	{
+		ncfg_radio_widths_t radio = { 1, 1, 0 };
+		ncfg_channel_plan_t plan;
+
+		ncfg_access_point_channel_plan(&point, &radio, &plan, &why);
+	}
 	check(why && strstr(why, "needs a `channel`"), "  and says so");
 	point.width.has = 0;
 
@@ -545,6 +559,73 @@ static void forty_megahertz_is_given_only_where_it_can_start(void)
 		check(ncfg_hostapd_value_of(&lines, "ht_capab") == NULL &&
 		    ncfg_hostapd_value_of(&lines, "ieee80211n") != NULL,
 		    "  and one on 165 no ht_capab at all, still 802.11n");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
+/*
+ * 80 MHz and 802.11ac (10.598). The centre is the block's, which hwsim does
+ * not check -- measured, a wrong one ran -- so it is pinned here, block by
+ * block. 132-144 is left out with 144; a wider width that cannot be given
+ * falls back one step, and says why.
+ */
+static void eighty_megahertz_is_the_block_the_channel_is_in(void)
+{
+	static const int channel[] = { 36, 40, 44, 48, 52, 64, 100, 112, 116, 128, 149, 161 };
+	static const int centre[] = { 42, 42, 42, 42, 58, 58, 106, 106, 122, 122, 155, 155 };
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 1 } };
+	ncfg_hostapd_lines_t lines;
+	ncfg_channel_plan_t  plan;
+	char                 message[NCFG_ERROR_MAX];
+	char                 five[] = "5";
+	size_t               at;
+	int                  all = 1;
+
+	for (at = 0; at < sizeof(channel) / sizeof(channel[0]); at++) {
+		plan = plan_of("5", channel[at], 0, 0, 1, 1);
+		if (plan.width != 80 || plan.centre != centre[at] || !plan.vht ||
+		    plan.secondary != (channel[at] % 8 == 4 || channel[at] % 8 == 5 ? 1 : -1)) {
+			printf("  channel %d: width %d, centre %d, secondary %d\n", channel[at], plan.width,
+			    plan.centre, plan.secondary);
+			all = 0;
+		}
+	}
+	check(all, "an 802.11ac radio on 5 GHz is 80 MHz by default, centred on its block");
+	plan = plan_of("5", 132, 0, 0, 1, 1);
+	check(plan.width == 40 && plan.vht, "  except 132 to 140, whose block needs 144: 40 MHz there");
+	plan = plan_of("5", 165, 0, 0, 1, 1);
+	check(plan.width == 20 && plan.vht, "  and 165, with no partner at all, 20 -- still 802.11ac");
+	plan = plan_of("5", -1, 0, 0, 1, 1);
+	check(plan.width == 80 && plan.centre == 0 && plan.secondary == 1,
+	    "  and with no channel, automatic selection is left to fill the centre in");
+	plan = plan_of("5", 36, 0, 0, 1, 0);
+	check(plan.width == 40 && !plan.vht, "a radio without 802.11ac is 40 MHz, and no 802.11ac");
+	plan = plan_of("5", 36, 40, 0, 1, 1);
+	check(plan.width == 40 && plan.vht, "`width = 40` on an 802.11ac radio is 40, with its rates");
+	plan = plan_of(NULL, 6, 0, 1, 1, 1);
+	check(plan.width == 20 && !plan.vht, "on 2.4 GHz there is no 802.11ac");
+
+	point.band = five;
+	point.channel.has = 1;
+	point.channel.value = 44;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "ieee80211ac"), "1",
+		    "an access point on 44 is written ieee80211ac=1");
+		check_text(ncfg_hostapd_value_of(&lines, "vht_oper_chwidth"), "1", "  80 MHz");
+		check_text(ncfg_hostapd_value_of(&lines, "vht_oper_centr_freq_seg0_idx"), "42",
+		    "  centred on 42");
+		check_text(ncfg_hostapd_value_of(&lines, "ht_capab"), "[HT40+]",
+		    "  with 44's own 40 MHz direction");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.channel.has = 0;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check(ncfg_hostapd_value_of(&lines, "vht_oper_chwidth") != NULL &&
+		    ncfg_hostapd_value_of(&lines, "vht_oper_centr_freq_seg0_idx") == NULL,
+		    "and one with no channel has the width and no centre");
 		ncfg_hostapd_lines_free(&lines);
 	}
 }
@@ -594,7 +675,7 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, 0, 0 };
+	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, { 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -1370,6 +1451,7 @@ static void the_credential_reaches_no_diagnostic(const char *run, const char *st
 
 int main(void)
 {
+	eighty_megahertz_is_the_block_the_channel_is_in();
 	forty_megahertz_is_given_only_where_it_can_start();
 	a_radio_with_802_11n_is_given_it();
 	neighbour_reports_are_two_lines_and_no_neighbours();

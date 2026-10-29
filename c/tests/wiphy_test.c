@@ -54,8 +54,11 @@ static void part(ncfg_buf_t *out, uint32_t index, int bands, int ht)
 		ncfg_buf_init(&band, 0);
 		ncfg_wire_attr_put_u32(&band, NL80211_BAND_ATTR_HT_AMPDU_FACTOR, 3);
 		if (ht && at == bands - 1) {
+			uint32_t vht = 0x038004fau;
+
 			ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_HT_CAPA, &capability,
 			    sizeof(capability));
+			ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_VHT_CAPA, &vht, sizeof(vht));
 		}
 		ncfg_wire_attr_put_nested(&list, (uint16_t)at, &band);
 		ncfg_buf_free(&band);
@@ -131,11 +134,13 @@ static void the_reply(void)
 	    "a radio with HT in its second band has it");
 	check(radio.forty_mhz_5 && !radio.forty_mhz_24,
 	    "  and 40 MHz in that band alone, the second being 5 GHz, by the capability's bit 1");
+	check(radio.vht_5, "  and 802.11ac, the band carrying VHT_CAPA (hwsim's, measured)");
 	ncfg_buf_free(&payload);
 	part20(&payload);
 	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
-	        radio.high_throughput && !radio.forty_mhz_24 && !radio.forty_mhz_5,
-	    "a band whose capability lacks bit 1 has HT at 20 MHz only");
+	        radio.high_throughput && !radio.forty_mhz_24 && !radio.forty_mhz_5 &&
+	        !radio.vht_5,
+	    "a band whose capability lacks bit 1 has HT at 20 MHz only, and no 802.11ac");
 	ncfg_buf_free(&payload);
 	part(&payload, 2u, 2, 0);
 	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&

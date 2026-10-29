@@ -1577,6 +1577,34 @@ static void append_wiphy(ncfg_buf_t *out, uint32_t index, int ht)
 	ncfg_buf_free(&bands);
 }
 
+/* A part of radio `index` carrying one 5 GHz band with HT and VHT. */
+static void append_wiphy_vht(ncfg_buf_t *out, uint32_t index)
+{
+	ncfg_genl_header_t header = { NL80211_CMD_NEW_WIPHY, 1 };
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	ncfg_buf_t         band;
+	ncfg_buf_t         bands;
+	uint16_t           ht = 0x107e;
+	uint32_t           vht = 0x038004fau;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_buf_init(&band, 0);
+	ncfg_buf_init(&bands, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_WIPHY, index);
+	ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_HT_CAPA, &ht, sizeof(ht));
+	ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_VHT_CAPA, &vht, sizeof(vht));
+	ncfg_wire_attr_put_nested(&bands, NL80211_BAND_5GHZ, &band);
+	ncfg_wire_attr_put_nested(&attrs, NL80211_ATTR_WIPHY_BANDS, &bands);
+	append_message(out, NL80211_FAMILY_ID, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&band);
+	ncfg_buf_free(&bands);
+}
+
 /* One `GET_INTERFACE` dump entry: `wlan0` on radio `wiphy`. */
 static void append_radio_interface(ncfg_buf_t *out, uint32_t wiphy)
 {
@@ -1622,6 +1650,7 @@ static void whether_the_radio_has_802_11n(void)
 	append_wiphy(&with, 0, 0);
 	append_wiphy(&with, 1, 0);
 	append_wiphy(&with, 1, 1);
+	append_wiphy_vht(&with, 1);
 	append_done(&with);
 	append_wiphy(&without, 1, 0);
 	append_done(&without);
@@ -1637,9 +1666,12 @@ static void whether_the_radio_has_802_11n(void)
 	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
 	    observed->links[0].high_throughput.has && observed->links[0].high_throughput.value,
 	    "a radio whose description carries HT in any part has 802.11n");
-	check(observed && observed->links[0].forty_mhz_count == 1u &&
-	    strcmp(observed->links[0].forty_mhz[0], "2.4") == 0,
-	    "  and 40 MHz in the band whose capability says so, in the document's word for it");
+	check(observed && observed->links[0].forty_mhz_count == 2u &&
+	    strcmp(observed->links[0].forty_mhz[0], "2.4") == 0 &&
+	    strcmp(observed->links[0].forty_mhz[1], "5") == 0,
+	    "  and 40 MHz in each band whose capability says so, in the document's words");
+	check(observed && observed->links[0].very_high_throughput,
+	    "  and 802.11ac, from the 5 GHz band's VHT_CAPA");
 	ncfg_observed_free(observed);
 
 	memset(&asked, 0, sizeof(asked));
@@ -1649,7 +1681,8 @@ static void whether_the_radio_has_802_11n(void)
 	kernel_of(&genl, &replay, &asked);
 	observed = one_link(1);
 	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
-	    observed->links[0].high_throughput.has && !observed->links[0].high_throughput.value,
+	    observed->links[0].high_throughput.has && !observed->links[0].high_throughput.value &&
+	    !observed->links[0].very_high_throughput,
 	    "  and one whose does not, has not -- an answer, not a silence");
 	ncfg_observed_free(observed);
 

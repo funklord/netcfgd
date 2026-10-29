@@ -132,6 +132,12 @@ static ncfg_observed_access_point_t *started_with(const char *run_dir, const cha
 	if (observe_config_value(text, "ht_capab", value, sizeof(value))) {
 		out->forty_mhz = strstr(value, "HT40") != NULL;
 	}
+	if (observe_config_value(text, "ieee80211ac", value, sizeof(value))) {
+		out->very_high_throughput = strcmp(value, "1") == 0;
+	}
+	if (observe_config_value(text, "vht_oper_chwidth", value, sizeof(value))) {
+		out->eighty_mhz = strcmp(value, "1") == 0;
+	}
 	free(text);
 	return out;
 }

@@ -291,41 +291,40 @@ static int radio_has_ht(const ncfg_builder_t *builder, const char *device)
 	return link && link->high_throughput.has ? link->high_throughput.value != 0 : -1;
 }
 
-/* Whether the access point is given 40 MHz on this radio (10.597), by the
- * renderer's own rule and the radio's answer. 0 where the radio has no HT or
- * was not answered, which the caller has already kept apart. */
-static int radio_gives_forty(const ncfg_builder_t *builder, const ncfg_access_point_t *point,
-    const char *device, const char **why)
+/* The channel plan the access point is given on this radio (10.597,
+ * 10.598), by the renderer's own rule and the radio's answer. 20 MHz and no
+ * 802.11ac where the radio has no HT or was not answered, which the callers
+ * have already kept apart. */
+static void radio_plan(const ncfg_builder_t *builder, const ncfg_access_point_t *point,
+    const char *device, ncfg_channel_plan_t *plan, const char **why)
 {
 	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, device);
-	int                         in_24 = 0;
-	int                         in_5 = 0;
+	ncfg_radio_widths_t         widths;
 	size_t                      at;
 
-	if (why) {
-		*why = NULL;
+	memset(&widths, 0, sizeof(widths));
+	if (link && link->high_throughput.has && link->high_throughput.value) {
+		for (at = 0; at < link->forty_mhz_count; at++) {
+			widths.forty_mhz_24 |= strcmp(link->forty_mhz[at], "2.4") == 0;
+			widths.forty_mhz_5 |= strcmp(link->forty_mhz[at], "5") == 0;
+		}
+		widths.vht_5 = link->very_high_throughput;
 	}
-	if (!link || !link->high_throughput.has || !link->high_throughput.value) {
-		return 0;
-	}
-	for (at = 0; at < link->forty_mhz_count; at++) {
-		in_24 |= strcmp(link->forty_mhz[at], "2.4") == 0;
-		in_5 |= strcmp(link->forty_mhz[at], "5") == 0;
-	}
-	return ncfg_access_point_secondary(point, in_24, in_5, why) != 0;
+	ncfg_access_point_channel_plan(point, &widths, plan, why);
 }
 
 /*
- * A `width = 40` that cannot be given, said rather than run at 20 MHz in
- * silence (10.597): the reason is the rule's own sentence. Only where the
+ * A `width` that cannot be given, said rather than run narrower in silence
+ * (10.597, 10.598): the reason is the rule's own sentence. Only where the
  * radio's answer was read, since "not known" is not a reason to say no.
  */
 static void warn_width(ncfg_builder_t *builder, const ncfg_access_point_t *point)
 {
 	const ncfg_observed_link_t *link;
+	ncfg_channel_plan_t         plan;
 	const char                 *why = NULL;
 
-	if (!point->device || !point->width.has || point->width.value != 40) {
+	if (!point->device || !point->width.has || point->width.value <= 20) {
 		return;
 	}
 	link = ncfg_observed_link(builder->observed, point->device);
@@ -333,14 +332,18 @@ static void warn_width(ncfg_builder_t *builder, const ncfg_access_point_t *point
 		return;
 	}
 	if (!link->high_throughput.value) {
+		plan.width = 20;
 		why = "the radio has no 802.11n";
-	} else if (!radio_gives_forty(builder, point, point->device, &why)) {
-		why = why ? why : "40 MHz cannot be given here";
 	} else {
-		return;
+		radio_plan(builder, point, point->device, &plan, &why);
+		if (plan.width >= point->width.value) {
+			return;
+		}
+		why = why ? why : "that width cannot be given here";
 	}
 	ncfg_plan_warnf(builder->plan, point->device,
-	    "access point `%s` asks for `width = 40` and runs at 20 MHz: %s", point->id, why);
+	    "access point `%s` asks for `width = %lld` and runs at %d MHz: %s", point->id,
+	    (long long)point->width.value, plan.width, why);
 }
 
 void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
@@ -524,6 +527,12 @@ static int same_text(const char *left, const char *right)
 	return strcmp(left, right) == 0;
 }
 
+/* The width a hostapd was started with, out of what its file said. */
+static int started_width(const ncfg_observed_access_point_t *started)
+{
+	return started->eighty_mhz ? 80 : (started->forty_mhz ? 40 : 20);
+}
+
 int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
     const ncfg_access_point_t *point, const ncfg_observed_backend_t *running)
 {
@@ -533,9 +542,11 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 	char                                desired[NCFG_SSID_MAX_LEN * 2u + 1u];
 	char                                observed[NCFG_SSID_MAX_LEN * 2u + 1u];
 	char                                domain[NCFG_MOBILITY_DOMAIN_TEXT_MAX];
+	ncfg_channel_plan_t                 wanted;
 	ncfg_reason_t                       reason;
 
 	ncfg_access_point_mobility_domain(point, domain);
+	radio_plan(builder, point, device, &wanted, NULL);
 	if (!started) {
 		/*
 		 * **Said rather than passed over, because the silence is the whole
@@ -647,14 +658,19 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		    radio_has_ht(builder, device) ? "true" : "false");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->high_throughput ? "true" : "false");
-	} else if (radio_has_ht(builder, device) > 0 &&
-	    (started->forty_mhz != 0) != radio_gives_forty(builder, point, device, NULL)) {
-		/* `ht_capab` is read once as well (10.597). Compared only where the
-		 * radio's answer was read, for `ieee80211n`'s reason. */
+	} else if (radio_has_ht(builder, device) > 0 && started_width(started) != wanted.width) {
+		/* `ht_capab` and `vht_oper_chwidth` are read once as well (10.597,
+		 * 10.598). Compared only where the radio's answer was read, for
+		 * `ieee80211n`'s reason. */
 		field = "access_point.width";
-		(void)snprintf(desired, sizeof(desired), "%s",
-		    radio_gives_forty(builder, point, device, NULL) ? "40" : "20");
-		(void)snprintf(observed, sizeof(observed), "%s", started->forty_mhz ? "40" : "20");
+		(void)snprintf(desired, sizeof(desired), "%d", wanted.width);
+		(void)snprintf(observed, sizeof(observed), "%d", started_width(started));
+	} else if (radio_has_ht(builder, device) > 0 &&
+	    (started->very_high_throughput != 0) != (wanted.vht != 0)) {
+		field = "access_point.ieee80211ac";
+		(void)snprintf(desired, sizeof(desired), "%s", wanted.vht ? "true" : "false");
+		(void)snprintf(observed, sizeof(observed), "%s",
+		    started->very_high_throughput ? "true" : "false");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {
 		/* `ignore_broadcast_ssid` is written only when asked, so its absence
 		 * is "not hidden" rather than "not known" and needs no guard. */

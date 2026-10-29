@@ -167,9 +167,8 @@ typedef struct {
 
 /* One radio with 802.11n, and the bands it can do 40 MHz in. */
 typedef struct ncfg_service_radio {
-	const char *iface;
-	int         forty_mhz_24;
-	int         forty_mhz_5;
+	const char         *iface;
+	ncfg_radio_widths_t widths;
 } ncfg_service_radio_t;
 
 /*

@@ -616,15 +616,18 @@
 # which every radio has.
 #
 # **802.11n is given where the radio has it**, which netcfgd asks the kernel,
-# so nothing here needs to say so. **And 40 MHz on 5 GHz**, where the radio
-# can do it in that band and the channel has a partner every regulatory
-# domain allows: 36 to 64, 100 to 136 and 149 to 161, up from the first of
-# each pair and down from the second. 140, 144 and 165 stay at 20 MHz, and so
-# does 2.4 GHz, where three channels do not overlap and a 40 MHz one takes two
-# of them. `width = 20` keeps a 5 GHz access point narrow; `width = 40` asks
-# for 40 on 2.4 GHz too, and needs a `channel` there, since the second channel
-# is above or below it. A width that cannot be given is said, and the access
-# point runs at 20. What this build does not write yet is 802.11ac or 802.11ax.
+# so nothing here needs to say so. **On 5 GHz, the widest the radio can do**:
+# 802.11ac at 80 MHz where it has 802.11ac, in the blocks every regulatory
+# domain allows whole -- 36-48, 52-64, 100-112, 116-128 and 149-161 -- and
+# otherwise 40 MHz, on 36 to 64, 100 to 136 and 149 to 161. 132 to 140 is 40
+# MHz, its block needing 144, and 165 is 20. 2.4 GHz is 20 MHz, where three
+# channels do not overlap and a 40 MHz one takes two of them.
+#
+# `width = 20`, `40` or `80` narrows a 5 GHz access point, and keeps its
+# 802.11ac rates; `width = 40` asks for 40 on 2.4 GHz too, and needs a
+# `channel` there, since the second channel is above or below it. 80 is a 5
+# GHz width. A width that cannot be given is said, and the access point runs
+# one step narrower. 160 MHz and 802.11ax are not written yet.
 #
 #access_point "Home" {
 #	device  = "wlan0"

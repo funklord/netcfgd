@@ -1028,6 +1028,13 @@ static int check_channel_in_band(ncfg_lower_ctx_t *ctx, const ncfg_access_point_
 	return 0;
 }
 
+/* Whether a band the model worked out is 5 GHz; NULL is a band the renderer
+ * refuses, and not this check's to judge. */
+static int is_five(const char *band)
+{
+	return !band || strcmp(band, "5") == 0;
+}
+
 /* Every list an access control block holds. */
 static void access_control_lists_free(ncfg_access_control_t *acl)
 {
@@ -1297,6 +1304,7 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	ncfg_span_t             key_span = block->span;
 	ncfg_span_t             neighbour_span = block->span;
 	ncfg_span_t             steering_span = block->span;
+	ncfg_span_t             width_span = block->span;
 	const char             *why = NULL;
 	int                     security_seen = 0;
 	size_t                  i;
@@ -1347,13 +1355,14 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				int64_t width;
 
 				if (ncfg_as_i64(ctx, assignment->value, &width)) {
-					if (width == 20 || width == 40) {
+					if (width == 20 || width == 40 || width == 80) {
 						access_point.width.has = 1;
 						access_point.width.value = width;
+						width_span = assignment->span;
 					} else {
 						ncfg_diag(ctx, assignment->span,
 						    "`width = %lld` is not a channel width this build gives an "
-						    "access point: 20 or 40 (MHz)", (long long)width);
+						    "access point: 20, 40 or 80 (MHz)", (long long)width);
 					}
 				}
 			} else if (strcmp(key, "neighbour_reports") == 0) {
@@ -1497,6 +1506,16 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 		goto refused;
 	}
 	if (!check_channel_in_band(ctx, &access_point, channel_span)) {
+		goto refused;
+	}
+	/* 80 MHz exists only in 5 GHz (10.598); the band is known here, from
+	 * `band` or the channel, or it is 2.4 by default. */
+	if (access_point.width.has && access_point.width.value == 80 &&
+	    !is_five(ncfg_access_point_effective_band(access_point.band, &access_point.channel))) {
+		ncfg_diag(ctx, width_span,
+		    "access point `%s` asks for `width = 80` on 2.4 GHz, and 80 MHz is a 5 GHz "
+		    "width: set `band = \"5\"`, or a 5 GHz `channel`, or a narrower width",
+		    access_point.id);
 		goto refused;
 	}
 	if (!check_fast_roaming(ctx, &access_point, roaming_span, domain_span, key_span)) {

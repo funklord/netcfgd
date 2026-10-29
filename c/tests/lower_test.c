@@ -1352,9 +1352,15 @@ static void access_point_cases(void)
 		    document->access_points[0].width.value == 40, "  carrying it");
 		ncfg_document_free(document);
 	}
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twidth = 160\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "20, 40 or 80",
+	    "a width this build does not give is refused, naming the three it does");
 	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twidth = 80\n"
-	    "\twifi { psk = \"@secret:ap\" }\n}\n", "20 or 40",
-	    "a width this build does not give is refused, naming the two it does");
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "80 MHz is a 5 GHz width",
+	    "  and 80 on 2.4 GHz, which is the band an access point naming neither is on");
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tchannel = 36\n"
+	    "\twidth = 80\n\twifi { psk = \"@secret:ap\" }\n}\n", "while 80 on channel 36 compiles");
+	ncfg_document_free(document);
 
 	/* Steering (10.595 item 2): opt-in, and only where there are neighbours
 	 * to send a station to. */

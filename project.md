@@ -12597,6 +12597,69 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.598 802.11ac and 80 MHz
+
+**Asked for by the holder 2026-10-29** ("go ahead with 802.11ac").
+
+### What 10.598 measured, hostapd 2.10 on hwsim, US domain
+
+| configuration | result |
+|---|---|
+| 36 `[HT40+]`, `ieee80211ac=1`, `vht_oper_chwidth=1`, centre 42 | 80 MHz, `wifi_generation=5` |
+| 48 `[HT40-]`, centre 42; 149 `[HT40+]`, centre 155 | 80 MHz, generation 5 |
+| automatic channel, `vht_oper_chwidth=1`, no centre | ACS chose 36; 80 MHz |
+| `vht_oper_chwidth=0` with `[HT40+]`; no `ht_capab` | 40 and 20 MHz, generation 5 |
+| centre 58 written for channel 36 | **ran at 80 MHz** |
+
+hwsim's 5 GHz band carries `VHT_CAPA` `0x038004fa`, which includes 160 MHz.
+
+**The last row is the reason the centres are a unit test.** hwsim accepted
+a centre that is wrong for the channel, so the vm cannot catch one; a real
+radio's firmware may not be so forgiving. `hostapd_test` pins all five
+blocks channel by channel. 132 was also tried and refused -- but as a radar
+channel the measurement had not enabled DFS for, so it decided nothing.
+
+### What 10.598 built
+
+- **Read**: `NL80211_BAND_ATTR_VHT_CAPA` in the 5 GHz band, into the link's
+  `very_high_throughput`, answered with `high_throughput`. 80 MHz is
+  mandatory for VHT, so this is also "can do 80"; 160 is a further bit, not
+  read.
+- **The rule grew into a plan**: `ncfg_access_point_secondary` became
+  `ncfg_access_point_channel_plan`, which answers width, secondary, centre
+  and whether 802.11ac runs, from `ncfg_radio_widths_t` -- the three things
+  the radio is read for. Default on 5 GHz is the widest the radio can do; a
+  wider width that cannot be given falls back one step and says why. The
+  80 MHz blocks are 36-48, 52-64, 100-112, 116-128 and 149-161, centred on
+  42, 58, 106, 122 and 155; 132-144 is left out with 144, so 132-140 is 40.
+- **`width = 80`**, refused at compile time on 2.4 GHz, where it does not
+  exist; and by the renderer, for a document the reader accepted.
+- **`ieee80211ac` and `vht_oper_chwidth` are part of what hostapd was
+  started as**, compared beside 10.597's width where the radio was read.
+  A 5 GHz access point on a VHT radio restarts once on upgrade.
+
+### Live
+
+`make hull-steer`'s band machine: `wlan1.conf` holds `[HT40+]`,
+`ieee80211ac=1`, `vht_oper_chwidth=1` and centre 42, and the steered station
+reads `WIDTH=80 MHz` and `wifi_generation=5`. The other wifi rigs pass over
+the change.
+
+**And the first run found band steering broken by it.** The band machine
+planned no steer at all: an access point at 80 MHz reports itself in its
+80 MHz operating class -- 128 by Annex E, inferred rather than read: what
+the run showed is that widening the test past 125 made it pass -- and the
+planner's test for "a 5 GHz element" took only
+the 20 MHz classes, 115 to 125 -- so the moment the 5 GHz access point got
+wider it stopped being a 5 GHz target. The tests now take Annex E's whole
+ranges, 81-84 for 2.4 GHz (83 and 84 are its 40 MHz classes) and 115-130
+for 5, and `plan_access_point_test` has a sibling reporting class 128. The
+unit tests could not have caught it: they wrote the element by hand in the
+20 MHz class, which is the fixture-built-from-the-code shape 10.116 names.
+
+**Next**: 160 MHz, from `VHT_CAPA`'s supported-width bits, where a domain
+allows a whole 160 MHz block (36-64, 100-128); then 802.11ax.
+
 ## 10.597 40 MHz
 
 **Asked for by the holder 2026-10-29** ("go ahead with 40 MHz"), the next
@@ -12692,7 +12755,7 @@ estimate and the station rightly stayed. Both steering machines pass, and
 `make hull-wds` and `make hull-roam-sae` were run again over the change.
 
 **Next, in order**: 40 MHz from the `HT_CAPA` bits the radio reports, then
-802.11ac on 5 GHz from `VHT_CAPA`.
+802.11ac on 5 GHz from `VHT_CAPA` -- both done since, in 10.597 and 10.598.
 
 ## 10.595 Neighbour reports and steering: measured, and the design
 
