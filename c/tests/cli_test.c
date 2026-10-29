@@ -2315,6 +2315,48 @@ static void an_apply_is_the_daemon_s_where_there_is_one(void)
  * restart the operator had named. `tests/live/hwsim.sh` met it as a station
  * that never moved to its preferred network.
  */
+/*
+ * A tree the command line names is applied by this process, never by a daemon
+ * that reads its own: `--factory-dir` is asked about as `--config-dir` is, and
+ * a window -- which only the daemon can hold -- refuses either rather than
+ * applying the daemon's configuration under it.
+ */
+static void a_named_tree_is_not_the_daemon_s_to_apply(void)
+{
+	char       *window[] = { (char *)"ncfg", (char *)"apply", (char *)"--confirm-within",
+		(char *)"30", (char *)"--config-dir", testdir_path, (char *)"--run-dir", testdir_path };
+	char       *factory[] = { (char *)"ncfg", (char *)"apply", (char *)"--factory-dir",
+		testdir_path, (char *)"--run-dir", testdir_path };
+	char        path[320];
+	const char *said;
+	pid_t       child;
+	int         listener = -1;
+	int         code = -1;
+
+	complaint_begin();
+	capture_begin();
+	code = ncfg_cli_main(8, window);
+	(void)capture_end();
+	said = complaint_end();
+	check(code != NCFG_CLI_EXIT_OK && said && strstr(said, "cannot go with it") != NULL,
+	    "a window with `--config-dir` is refused: the daemon would apply its own tree");
+
+	/* A daemon is there, and must not be asked: the fake dies of its alarm,
+	 * which is what `fake_daemon_asked` reads as nobody having asked. */
+	(void)snprintf(path, sizeof(path), "%s/netcfgd.sock", testdir_path);
+	(void)unlink(path);
+	child = fake_daemon(path, "{\"response\":\"journal\",\"records\":[]}\n", &listener);
+	if (child < 0) {
+		check(0, "a fake daemon could be started");
+		return;
+	}
+	(void)ran_printing(factory, 6, &code);
+	check(!fake_daemon_asked(child),
+	    "an apply naming `--factory-dir` is this process's, with a daemon running");
+	(void)close(listener);
+	(void)unlink(path);
+}
+
 static void every_consent_travels_with_an_apply(void)
 {
 	static const char *journal = "{\"response\":\"journal\",\"records\":[]}\n";
@@ -2778,6 +2820,7 @@ int main(void)
 	nobody_there_is_told_apart_from_a_failure();
 	an_apply_is_the_daemon_s_where_there_is_one();
 	every_consent_travels_with_an_apply();
+	a_named_tree_is_not_the_daemon_s_to_apply();
 	an_event_is_one_line();
 
 	a_name_that_is_not_text_is_refused_rather_than_repaired();

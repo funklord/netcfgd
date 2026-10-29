@@ -1893,10 +1893,25 @@ static int command_apply(const ncfg_cli_options_t *options)
 	size_t                  delivered_count = 0;
 	int                     code;
 
+	/*
+	 * **A window is the daemon's, and the daemon applies what it reads.** So
+	 * `--config-dir` or `--factory-dir` beside `--confirm-within` names a tree
+	 * that would not be applied -- the daemon's own would be, with the window
+	 * over it -- and that is refused rather than carried out as something the
+	 * command line did not say.
+	 */
+	if (options->confirm.has && (options->config_dir || options->factory_dir)) {
+		return fail("`--confirm-within` is carried out by the daemon, which applies the "
+		    "configuration it reads, so `--config-dir` and `--factory-dir` cannot go with "
+		    "it. Apply that tree without a window, or point the daemon at it");
+	}
 	if (options->confirm.has) {
 		return apply_through_daemon(options, NULL);
 	}
-	if (!options->config_dir) {
+	/* Either directory names a tree the daemon may not be reading, so either
+	 * keeps the apply in this process. `--factory-dir` was not asked about, so
+	 * a running daemon applied its own factory layer instead of the one named. */
+	if (!options->config_dir && !options->factory_dir) {
 		int absent = 0;
 		int answered = apply_through_daemon(options, &absent);
 
