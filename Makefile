@@ -3075,6 +3075,10 @@ live:
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
+	@# Layer one's firewall, written by the C probe and read back by nft
+	@# (project.md 10.592). The probe is an example, so it is built here.
+	@$(MAKE) --no-print-directory -C c examples
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/firewall.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
 	@# SLAAC against a real advertisement, which is the half privacy.sh will not
 	@# do. Neither under NCFG_LIVE nor under unshare: dnsmasq is a package, and it
