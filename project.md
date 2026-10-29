@@ -12638,8 +12638,15 @@ works on an accept as well as a drop.
    nothing behind, and a rule matching both families is refused with the
    table untouched; giving an IPv4 source the destination's offset fails it.
    The audit now allows the three filter chains and still refuses a fifth.
-   *2b*: a match with several values -- refused by name until then, through
-   anonymous sets. *2c*: the decoder. The original plan, for the record:
+   *2b done*: a rule with several values -- ports, addresses, stations, or
+   both families -- is **one kernel rule per combination**, each carrying
+   the written rule's name and digest, so a decoder groups them by name; a
+   combination of an IPv4 source and an IPv6 destination is skipped, a rule
+   with no other is refused, and one that would become more than 256 kernel
+   rules is refused with the count. Chosen over nftables' anonymous sets,
+   which are compact and native but need interval sets -- its most intricate
+   encoding -- for every CIDR and mask, and a decoder for them; the language
+   and the identity would not change if sets replaced it. *2c*: the decoder. The original plan, for the record:
    the three filter chains and every rule
    expression layer one writes -- protocol, ports, addresses, interface,
    state, `ether saddr` with its mask, the verdict -- each rule carrying B's

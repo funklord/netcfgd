@@ -291,6 +291,51 @@ static size_t message_count(const ncfg_buf_t *buf)
 	return seen;
 }
 
+/*
+ * A written rule becomes one kernel rule per combination of its values
+ * (10.592 slice 2b), and the bound on that is a refusal with its reason
+ * rather than a transaction of thousands of rules.
+ */
+static void a_rule_is_bounded_in_what_it_becomes(void)
+{
+	static char          stations[257][18];
+	char                *macs[257];
+	ncfg_firewall_t      firewall;
+	ncfg_firewall_rule_t rule;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	char                 err[NCFG_ERROR_MAX];
+	size_t               at;
+	int                  ok;
+
+	for (at = 0; at < 257u; at++) {
+		(void)snprintf(stations[at], sizeof(stations[at]), "02:00:00:00:%02x:%02x",
+		    (unsigned)(at >> 8), (unsigned)(at & 0xffu));
+		macs[at] = stations[at];
+	}
+	memset(&firewall, 0, sizeof(firewall));
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"many";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_ANY;
+	rule.mac = macs;
+	rule.mac_count = 257u;
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+
+	ncfg_buf_init(&out, 0);
+	ok = ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err));
+	check(!ok && strstr(err, "257 kernel rules") != NULL && out.length == 0u,
+	    "a rule that would become 257 kernel rules is refused, saying so, and nothing built");
+	ncfg_buf_free(&out);
+
+	rule.mac_count = 256u;
+	ncfg_buf_init(&out, 0);
+	ok = ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err));
+	check(ok && out.length > 0u, "and one that becomes 256 is built");
+	ncfg_buf_free(&out);
+}
+
 int main(void)
 {
 	char err[NCFG_ERROR_MAX];
@@ -1038,6 +1083,8 @@ int main(void)
 		    NFT_MSG_NEWSET)) == NULL,
 		    "  nor a set message, which 0022 says cannot reach this port");
 	}
+
+	a_rule_is_bounded_in_what_it_becomes();
 
 	if (failures) {
 		printf("nft: %d check(s) failed\n", failures);

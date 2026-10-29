@@ -271,10 +271,15 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
  * TLV (0295 B): `name=NAME sha256=DIGEST`, the digest over
  * `ncfg_nft_firewall_rule_text`.
  *
+ * **A rule with several values is several kernel rules**, one per
+ * combination, each carrying the written rule's comment -- so a decoder groups
+ * them by name. A combination of an IPv4 source and an IPv6 destination
+ * matches no packet and is not written.
+ *
  * **Refused before a byte is written**, rather than half-built: a rule whose
- * name and digest do not fit a comment, addresses of two families in one rule
- * (no packet can match both), and -- until anonymous sets land -- a match with
- * more than one value.
+ * name and digest do not fit a comment, a rule no combination of which any
+ * packet could match, and one that would become more kernel rules than the
+ * bound in nft.c allows.
  */
 int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,

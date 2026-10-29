@@ -875,15 +875,17 @@ static int rule_comment(const char *chain, const ncfg_firewall_rule_t *rule, cha
 }
 
 /*
- * One rule, as the expressions nftables would write for it.
+ * One kernel rule, every match single-valued, as the expressions nftables
+ * would write for it.
  *
  * The order is nftables' own -- the family, the protocol, the port, the
  * addresses, the interface, the state, the station, and the verdict -- so
  * that `nft list ruleset` prints what the document says in the words an
- * operator would have typed.
+ * operator would have typed. `comment` is the written rule's identity, the
+ * same on every kernel rule it became.
  */
 static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_rule_t *rule,
-    char *err, size_t err_size)
+    const char *comment, char *err, size_t err_size)
 {
 	ncfg_buf_t    expressions;
 	ncfg_buf_t    data;
@@ -891,18 +893,9 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	ncfg_buf_t    userdata;
 	nft_address_t from;
 	nft_address_t to;
-	char          comment[NCFG_NFT_COMMENT_MAX + 1u];
 	uint8_t       family = 0;
 	size_t        at;
 
-	/* Until anonymous sets land (10.592 slice 2b), one value per match. */
-	if (rule->port_count > 1u || rule->from_count > 1u || rule->to_count > 1u ||
-	    rule->mac_count > 1u) {
-		ncfg_error_set(err, err_size,
-		    "rule `%s/%s` matches more than one port, address or station, which this "
-		    "build cannot write to nftables yet", chain, rule->name);
-		return 0;
-	}
 	if (rule->from_count && !parse_address(rule->from[0], &from, err, err_size)) {
 		return 0;
 	}
@@ -913,16 +906,7 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 		family = from.nfproto;
 	}
 	if (rule->to_count) {
-		if (family && family != to.nfproto) {
-			ncfg_error_set(err, err_size,
-			    "rule `%s/%s` matches an IPv4 and an IPv6 address together, which no "
-			    "packet carries", chain, rule->name);
-			return 0;
-		}
 		family = to.nfproto;
-	}
-	if (!rule_comment(chain, rule, comment, sizeof(comment), err, err_size)) {
-		return 0;
 	}
 
 	ncfg_buf_init(&expressions, 0);
@@ -1044,6 +1028,97 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	return 1;
 }
 
+/*
+ * How many kernel rules one written rule may become.
+ *
+ * **One per combination of values** (10.592 slice 2b): a rule with three
+ * stations and two ports is six kernel rules, each carrying the written rule's
+ * name and digest. The alternative is nftables' anonymous sets, which are
+ * compact and native and need interval sets -- its most intricate encoding --
+ * for every CIDR and OUI mask, with a decoder to match; the language and the
+ * identity scheme would not change if sets replaced this. The bound keeps a
+ * large host list from becoming thousands of rules silently: past it the rule
+ * is refused and says why.
+ */
+#define FIREWALL_EXPANSION_MAX 256u
+
+static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    const char *chain, const ncfg_firewall_rule_t *rule, char *err, size_t err_size)
+{
+	const size_t ports = rule->port_count ? rule->port_count : 1u;
+	const size_t froms = rule->from_count ? rule->from_count : 1u;
+	const size_t tos = rule->to_count ? rule->to_count : 1u;
+	const size_t macs = rule->mac_count ? rule->mac_count : 1u;
+	char         comment[NCFG_NFT_COMMENT_MAX + 1u];
+	size_t       p, f, t, m;
+	size_t       wrote = 0;
+
+	if (ports * froms * tos * macs > FIREWALL_EXPANSION_MAX) {
+		ncfg_error_set(err, err_size,
+		    "rule `%s/%s` would be %zu kernel rules, one per combination of its ports, "
+		    "addresses and stations, and %u is the most one rule may become; split it",
+		    chain, rule->name, ports * froms * tos * macs, (unsigned)FIREWALL_EXPANSION_MAX);
+		return 0;
+	}
+	if (!rule_comment(chain, rule, comment, sizeof(comment), err, err_size)) {
+		return 0;
+	}
+	for (p = 0; p < ports; p++) {
+		for (f = 0; f < froms; f++) {
+			for (t = 0; t < tos; t++) {
+				for (m = 0; m < macs; m++) {
+					ncfg_firewall_rule_t one = *rule;
+					nft_address_t        a;
+					nft_address_t        b;
+					ncfg_buf_t           attrs;
+					int                  ok;
+
+					one.port_count = rule->port_count ? 1u : 0u;
+					one.ports = rule->port_count ? &rule->ports[p] : NULL;
+					one.from_count = rule->from_count ? 1u : 0u;
+					one.from = rule->from_count ? &rule->from[f] : NULL;
+					one.to_count = rule->to_count ? 1u : 0u;
+					one.to = rule->to_count ? &rule->to[t] : NULL;
+					one.mac_count = rule->mac_count ? 1u : 0u;
+					one.mac = rule->mac_count ? &rule->mac[m] : NULL;
+					/* A source of one family and a destination of the other
+					 * is a combination no packet carries: skipped, not
+					 * written as a rule that can never match. */
+					if (one.from_count && one.to_count) {
+						if (!parse_address(one.from[0], &a, err, err_size) ||
+						    !parse_address(one.to[0], &b, err, err_size)) {
+							return 0;
+						}
+						if (a.nfproto != b.nfproto) {
+							continue;
+						}
+					}
+					ncfg_buf_init(&attrs, 0);
+					ok = firewall_rule(&attrs, chain, &one, comment, err, err_size);
+					if (ok) {
+						*last_acked = *seq;
+						ok = build(transaction, NFT_MSG_NEWRULE,
+						    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), (*seq)++,
+						    NFPROTO_INET, &attrs, err, err_size);
+					}
+					ncfg_buf_free(&attrs);
+					if (!ok) {
+						return 0;
+					}
+					wrote++;
+				}
+			}
+		}
+	}
+	if (wrote == 0u) {
+		ncfg_error_set(err, err_size,
+		    "rule `%s/%s` matches only IPv4 sources with IPv6 destinations or the reverse, "
+		    "which no packet carries", chain, rule->name);
+		return 0;
+	}
+	return 1;
+}
+
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size)
@@ -1159,16 +1234,8 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
 				    err, err_size);
 				ncfg_buf_free(&attrs);
 				for (r = 0; ok && r < chains[c]->rule_count; r++) {
-					ncfg_buf_init(&attrs, 0);
-					ok = firewall_rule(&attrs, names[c], &chains[c]->rules[r], err,
-					    err_size);
-					if (ok) {
-						last_acked = seq;
-						ok = build(&transaction, NFT_MSG_NEWRULE,
-						    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), seq++,
-						    NFPROTO_INET, &attrs, err, err_size);
-					}
-					ncfg_buf_free(&attrs);
+					ok = firewall_rule_messages(&transaction, &seq, &last_acked, names[c],
+					    &chains[c]->rules[r], err, err_size);
 				}
 			}
 		}

@@ -109,7 +109,32 @@ check "and leaves none of the old rules behind" \
 	"$(grep -c 'comment "name=' "$work/listed" || true)" "0"
 has "with the new policy in place" "type filter hook input priority filter; policy accept;"
 
-# The two refusals of this slice, which must refuse before anything is sent.
+# Several values, and both families, in one rule: one kernel rule per
+# combination, each carrying the written rule's name (10.592 slice 2b).
+cat > "$work/netcfgd.conf" <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		drop "netbios" { protocol = "udp"; port = [137, 138]; from = ["10.0.0.0/8", "fd00::/8"] }
+		drop "pair" { mac = ["02:00:00:00:00:01", "aa:bb:cc:*"] }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$probe" "$work" --replace > "$work/sent" 2>&1 || true
+check "a rule with several values is taken" "$(cat "$work/sent")" ""
+nft list ruleset > "$work/listed" 2>&1 || true
+check "as one kernel rule per port and address" \
+	"$(grep -c 'comment "name=netbios sha256=' "$work/listed" || true)" "4"
+has "the IPv6 one among them" \
+	'udp dport 138 ip6 saddr fd00::/8 drop comment "name=netbios'
+check "all four with one digest, the written rule's" \
+	"$(grep -o 'name=netbios sha256=[0-9a-f]*' "$work/listed" | sort -u | wc -l | tr -d ' ')" "1"
+check "and the stations as two" \
+	"$(grep -c 'comment "name=pair sha256=' "$work/listed" || true)" "2"
+
+# The refusals, which must refuse before anything is sent.
 cat > "$work/netcfgd.conf" <<'CONF'
 firewall {
 	input {
