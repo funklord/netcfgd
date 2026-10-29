@@ -20,6 +20,23 @@ its configuration is left exactly as it is. Everything it observes and does
 is written as plain files under `/run/netcfgd/`, so what it believes about the
 machine can be read with `cat` and `grep`.
 
+It is meant to be the network configuration for three kinds of user at
+once, each on their own terms: the person editing the file by hand, perhaps
+over a serial console on a machine with no network, who gets a readable
+language, errors that say what to write, and an example file that is compiled
+rather than trusted; the person who does not know networking, who uses the
+tray or a window and for whom joining a network is the whole interaction; and
+the person running many machines, for whom the same model is served over
+RESTCONF and a network-wide scope -- one wireless network across forty access
+points -- is part of the language rather than a script around it. It is also
+meant to fit the device class it was designed for, an OpenWrt-sized router,
+with `ncfg plan` surviving into the smallest build. **Not there yet**, said
+once: the firewall below compiles and is not yet enforced; fleet management
+and RESTCONF come last; the interfaces are not frozen; and nothing here has
+been released or proven on real hardware for long -- [project.md](project.md)
+section 10 tracks exactly what has, and is worth reading before deploying this
+anywhere you care about.
+
 The programs that do this job today are **NetworkManager**, the desktop
 default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
 **netifrc** on Debian and Gentoo; **netifd** on OpenWrt; and **ConnMan** and
@@ -52,7 +69,9 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   802.11s mesh, four-address repeaters, and station allow and deny lists that
   can name shared host lists and manufacturer prefixes -- WireGuard, OpenVPN,
   PPPoE, IP tunnels, bridges, bonds and VLANs, LTE modems with SIM fallback,
-  Bluetooth networking, scoped DNS, routing rules, NAT and traffic shaping.
+  Bluetooth networking, scoped DNS, routing rules, NAT and traffic shaping,
+  and a host firewall of named rules in netcfgd's own nftables table -- that
+  can match a sending station by address, prefix or shared host list.
   systemd-networkd configures no wireless authentication at all and leaves it
   to a separate supplicant with a configuration of its own.
 - **It chooses an uplink by asking, not by carrier.** A cable plugged into a
@@ -68,11 +87,6 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   full-screen text interface, and Qt window with a tray icon that joins saved
   networks and reports whether the machine is actually routed rather than
   merely associated.
-
-**Maturity:** substantially built, not yet proven, no release, interfaces not
-frozen. What has and has not met real hardware is tracked in
-[project.md](project.md) section 10 — read it before deploying this anywhere
-you care about.
 
 ---
 
