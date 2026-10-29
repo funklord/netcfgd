@@ -10,6 +10,7 @@
 #include "devices_view.h"
 #include "global_view.h"
 #include "modems_view.h"
+#include "stations_view.h"
 #include "config_view.h"
 #include "secrets_view.h"
 #include "profiles_view.h"
@@ -73,6 +74,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	devices = new ncfg_devices_view(connection, machine);
 	wifi = new ncfg_wifi_view(connection, machine);
 	modems = new ncfg_modems_view(connection, machine);
+	stations = new ncfg_stations_view(connection, machine);
 	bluetooth = new ncfg_bluetooth_view(connection, machine);
 	/* **`links`, not `devices`, and the rename is the model's own vocabulary.**
 	 * This tab has always shown `ncfg_client_links()` -- interface, kind,
@@ -90,6 +92,9 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * model's since 0155 and no window could write one until 0250. */
 	machine->addTab(devices, QStringLiteral("devices"));
 	machine->addTab(wifi, QStringLiteral("wifi"));
+	/* Straight after wifi, where the access points are configured: who is on
+	 * one is the question an operator has the moment it is up. */
+	machine->addTab(stations, QStringLiteral("stations"));
 	/* Beside wifi: a modem is the other way this machine reaches a network,
 	 * and an operator looking for one looks where the radios are. */
 	machine->addTab(modems, QStringLiteral("modems"));
@@ -141,6 +146,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(links, &ncfg_links_view::reported, this, &ncfg_main_window::note);
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
 	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
+	connect(stations, &ncfg_stations_view::reported, this, &ncfg_main_window::note);
 	connect(global, &ncfg_global_view::reported, this, &ncfg_main_window::note);
 	connect(secrets, &ncfg_secrets_view::reported, this, &ncfg_main_window::note);
 	connect(config, &ncfg_config_view::reported, this, &ncfg_main_window::note);
@@ -300,6 +306,8 @@ void ncfg_main_window::refresh()
 		/* Re-reads the radios and what they are doing. Never scans: a scan
 		 * blocks for seconds and a refresh button is not consent to that. */
 		wifi->refresh();
+	} else if (current == stations) {
+		stations->refresh();
 	} else if (current == modems) {
 		modems->refresh();
 	} else if (current == global) {

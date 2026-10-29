@@ -1222,6 +1222,56 @@ static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
  * and an ICCID are two strings that are only meaningful paired, and a parser
  * that dropped one would look exactly like a board that had not been on that
  * source yet. */
+/*
+ * A station list, as the daemon writes it: this is the socket witness's own
+ * `ap_stations` line (doc/schema/socket.json), so the decoder is held to the
+ * real shape rather than to a copy of it. One station with a lease name, one
+ * whose name was not a plain host name and so carries only its address, and
+ * one with no statistics at all (project.md 10.602).
+ */
+static void a_station_list_carries_who_and_the_lease_they_hold(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[1024];
+	char answers[2048];
+
+	snprintf(answers, sizeof(answers), "%s\n", "{\"response\":\"ap_stations\",\"interface\":\"wlan0\",\"access_point\":\"guest\",\"access_control\":\"deny\",\"stations\":[{\"address\":\"00:11:22:33:44:55\",\"hostname\":\"laptop\",\"ipv4\":\"192.168.4.120\",\"authorized\":true,\"listed\":true,\"signal\":-52,\"connected_seconds\":3600,\"inactive_msec\":40,\"rx_bytes\":100000,\"tx_bytes\":200000},{\"address\":\"66:77:88:99:aa:bb\",\"ipv4\":\"192.168.4.121\",\"authorized\":false,\"listed\":false,\"signal\":-70,\"connected_seconds\":10800,\"inactive_msec\":40,\"rx_bytes\":300000,\"tx_bytes\":600000},{\"address\":\"aa:bb:cc:dd:ee:ff\",\"authorized\":true,\"listed\":false}]}");
+	if (!staged_open(&staged, "a station list can be staged", answers)) {
+		return;
+	}
+
+	ncfg_stations_t stations;
+	if (ncfg_client_ap_stations(staged.client, "wlan0", &stations, err, sizeof(err))) {
+		(void)received(staged.server, sent, sizeof(sent));
+		ok("the request names the radio",
+		   strstr(sent, "\"request\":\"ap_stations\"") && strstr(sent, "\"wlan0\""), sent);
+		ok("three stations come back", stations.count == 3, err);
+		equals("the access point is named", stations.access_point, "guest");
+		equals("  and which way its list reads", stations.access_control, "deny");
+		if (stations.count == 3) {
+			equals("a station's name comes from its lease", stations.items[0].hostname,
+			       "laptop");
+			equals("  and its address", stations.items[0].ipv4, "192.168.4.120");
+			ok("  with its numbers", stations.items[0].has_signal &&
+			   stations.items[0].signal == -52 && stations.items[0].has_connected &&
+			   stations.items[0].connected_seconds == 3600, "");
+			ok("  and its standing", stations.items[0].authorized &&
+			   stations.items[0].listed, "");
+			equals("one whose name was not a host name has none",
+			       stations.items[1].hostname, "");
+			equals("  and keeps its address", stations.items[1].ipv4, "192.168.4.121");
+			ok("one with no statistics says it has none, rather than zeroes",
+			   !stations.items[2].has_signal && !stations.items[2].has_connected &&
+			   !stations.items[2].has_rx, "");
+		}
+		ncfg_stations_free(&stations);
+	} else {
+		ok("three stations come back", 0, err);
+	}
+	staged_close(&staged);
+}
+
 static void a_modem_carries_the_card_read_in_each_source(void)
 {
 	struct staged staged;
@@ -2397,6 +2447,7 @@ int main(int argc, char **argv)
 	storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer();
 	radios_carry_the_three_states_a_client_has_to_tell_apart();
 	a_modem_carries_the_card_read_in_each_source();
+	a_station_list_carries_who_and_the_lease_they_hold();
 	saved_networks_come_from_the_document_not_a_scan();
 	join_choices_are_the_saved_networks_heard();
 	an_access_point_keeps_the_lists_it_names();

@@ -32,6 +32,7 @@ class ncfg_dns_view;
 class ncfg_links_view;
 class ncfg_devices_view;
 class ncfg_modems_view;
+class ncfg_stations_view;
 class ncfg_global_view;
 class ncfg_config_view;
 class ncfg_secrets_view;
@@ -108,6 +109,7 @@ private:
 	ncfg_links_view *links;
 	ncfg_devices_view *devices;
 	ncfg_modems_view  *modems;
+	ncfg_stations_view *stations;
 	ncfg_global_view  *global;
 	ncfg_secrets_view *secrets;
 	ncfg_config_view  *config;

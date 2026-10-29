@@ -45,7 +45,7 @@ READERS = {
 	"explanation": 3,
 	"journal": 4,
 	"event": 4,
-	"ap_stations": 18,
+	"ap_stations": 21,
 	"wifi_status": 18,
 	"ok": 0,
 	"error": 8,

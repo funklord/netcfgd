@@ -3974,6 +3974,97 @@ int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
 	return 1;
 }
 
+void ncfg_stations_free(ncfg_stations_t *stations)
+{
+	if (!stations) {
+		return;
+	}
+	for (size_t i = 0; i < stations->count; i++) {
+		free(stations->items[i].address);
+		free(stations->items[i].hostname);
+		free(stations->items[i].ipv4);
+	}
+	free(stations->items);
+	free(stations->interface);
+	free(stations->access_point);
+	free(stations->access_control);
+	memset(stations, 0, sizeof(*stations));
+}
+
+/* An optional number: whether the member was there, and what it said. */
+static int member_number(const ncfg_json_doc_t *doc, uint32_t object, const char *name,
+                         long long *out)
+{
+	uint32_t value = ncfg_json_member(doc, object, name);
+
+	if (value == NCFG_JSON_NONE) {
+		return 0;
+	}
+	*out = (long long)ncfg_json_int(doc, value, 0);
+	return 1;
+}
+
+int ncfg_client_ap_stations(ncfg_client_t *client, const char *interface, ncfg_stations_t *out,
+                            char *err, size_t err_size)
+{
+	char request[512];
+
+	if (!out || !interface) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	if (!wifi_request(request, sizeof(request), "ap_stations", interface)) {
+		set_error(err, err_size, "interface name is too long to ask about");
+		return 0;
+	}
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+	uint32_t root = ncfg_json_root(doc);
+	out->interface = member_text(doc, root, "interface");
+	out->access_point = member_text(doc, root, "access_point");
+	out->access_control = member_text(doc, root, "access_control");
+	uint32_t list = ncfg_json_member(doc, root, "stations");
+	uint32_t count = ncfg_json_count(doc, list);
+	if (count) {
+		out->items = calloc(count, sizeof(*out->items));
+		if (!out->items) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			ncfg_stations_free(out);
+			return 0;
+		}
+		out->count = count;
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t        entry = ncfg_json_at(doc, list, i);
+		ncfg_station_t *one = &out->items[i];
+		long long       number = 0;
+
+		one->address = member_text(doc, entry, "address");
+		one->hostname = member_text(doc, entry, "hostname");
+		one->ipv4 = member_text(doc, entry, "ipv4");
+		one->authorized = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "authorized"), 0);
+		one->listed = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "listed"), 0);
+		if ((one->has_signal = member_number(doc, entry, "signal", &number)) != 0) {
+			one->signal = (int)number;
+		}
+		one->has_connected =
+		    member_number(doc, entry, "connected_seconds", &one->connected_seconds);
+		one->has_inactive = member_number(doc, entry, "inactive_msec", &one->inactive_msec);
+		one->has_rx = member_number(doc, entry, "rx_bytes", &one->rx_bytes);
+		one->has_tx = member_number(doc, entry, "tx_bytes", &one->tx_bytes);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_client_probes_free(ncfg_probes_t *probes)
 {
 	if (!probes) {

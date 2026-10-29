@@ -981,6 +981,56 @@ bool ncfg_connection::devices(QList<ncfg_device_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::stations(const QString &interface, QList<ncfg_station_row> *out,
+    QString *policy, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (policy) {
+		policy->clear();
+	}
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_stations_t found = {};
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+	if (!ncfg_client_ap_stations(client, name.constData(), &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	if (policy) {
+		*policy = from_c(found.access_control);
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		const ncfg_station_t &one = found.items[i];
+		ncfg_station_row row;
+
+		row.address = from_c(one.address);
+		row.hostname = from_c(one.hostname);
+		row.ipv4 = from_c(one.ipv4);
+		row.authorized = one.authorized != 0;
+		row.listed = one.listed != 0;
+		row.has_signal = one.has_signal != 0;
+		row.signal = one.signal;
+		row.connected_seconds = one.has_connected ? one.connected_seconds : -1;
+		row.inactive_msec = one.has_inactive ? one.inactive_msec : -1;
+		row.rx_bytes = one.has_rx ? one.rx_bytes : -1;
+		row.tx_bytes = one.has_tx ? one.tx_bytes : -1;
+		*out << row;
+	}
+	ncfg_stations_free(&found);
+	return true;
+}
+
 bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QString *error)
 {
 	if (!out) {

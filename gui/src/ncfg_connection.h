@@ -232,6 +232,51 @@ struct ncfg_modem_row {
 	QList<ncfg_sim_card> cards;
 };
 
+/*
+ * One station associated with an access point netcfgd runs (project.md
+ * 10.603): who, from the lease netcfgd's own DHCP server gave it where it gave
+ * one, and how well it is connected. A number hostapd could not read is -1 or
+ * absent, never a zero nobody measured.
+ */
+struct ncfg_station_row {
+	QString   address;
+	QString   hostname;
+	QString   ipv4;
+	bool      authorized = false;
+	/* On the access point's list, read under `access_control`. */
+	bool      listed = false;
+	bool      has_signal = false;
+	int       signal = 0;
+	long long connected_seconds = -1;
+	long long inactive_msec = -1;
+	long long rx_bytes = -1;
+	long long tx_bytes = -1;
+
+	/* What is surprising about this station under `policy`, in the words
+	 * `ncfg wifi clients` uses: a listed station is expected under
+	 * `allow` and should be impossible under `deny`, so the same flag is
+	 * the anomaly under one policy and the normal case under the other.
+	 * Empty for a station with nothing to say about it. */
+	bool anomalous(const QString &policy) const
+	{
+		return (policy == QLatin1String("deny") && listed) ||
+		    (policy == QLatin1String("allow") && !listed);
+	}
+	QString state(const QString &policy) const
+	{
+		if (policy == QLatin1String("deny") && listed) {
+			return QStringLiteral("on the deny list and still connected");
+		}
+		if (policy == QLatin1String("allow") && !listed) {
+			return QStringLiteral("not on the allow list and still connected");
+		}
+		if (!authorized) {
+			return QStringLiteral("associated, not authorized");
+		}
+		return QString();
+	}
+};
+
 /* One routing rule. `selector` is the matching half as one string: a rule with
  * six of the eight selectors set is unreadable as six columns, most of them
  * empty on every other row. */
@@ -1005,6 +1050,14 @@ public:
 	 * copy of a rule that belongs to the daemon.
 	 */
 	bool modems(QList<ncfg_modem_row> *out, QString *error);
+	/*
+	 * The stations associated with the access point on `interface`, and which
+	 * way its list reads ("allow", "deny" or empty) in `policy`. `observe`,
+	 * and what it shows is other people's devices -- see the socket
+	 * protocol's own warning about that tier.
+	 */
+	bool stations(const QString &interface, QList<ncfg_station_row> *out, QString *policy,
+	    QString *error);
 	/* The routing rules the configuration declares -- what was asked for,
 	 * rather than what the kernel currently has, which is drift's question. */
 	bool rules(QList<ncfg_rule_row> *out, QString *error);

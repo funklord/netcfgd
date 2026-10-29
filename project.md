@@ -12597,6 +12597,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.603 A stations tab in the GUI
+
+**Asked for by the holder 2026-10-29** ("go ahead with a station view in the
+GUI"): the CLI (`ncfg wifi clients`) and the TUI could say who was on an
+access point netcfgd runs, and the GUI, which can configure one, could not.
+
+- **The client library gains `ncfg_client_ap_stations`** and
+  `ncfg_stations_t`/`ncfg_station_t`, decoding every field the socket's
+  `ap_stations` reply carries; a number hostapd did not report is a `has_`
+  flag cleared, never a zero. Tested against the socket witness's own
+  `ap_stations` line, and driven by the reply fuzzer as reader 21.
+- **One `stations` tab, straight after `wifi`**, listing every running
+  access point's stations in one table with the access point as the first
+  column -- a router runs one or two, and "is my phone on the 5 GHz one" is a
+  column read rather than a chooser. Columns: access point, device, station,
+  name, ipv4, signal, connected, idle, state. An access point whose stations
+  cannot be read is named under the table without hiding the others.
+- **`state` uses the CLI's words**, from `ncfg_station_row::state()`, so the
+  two clients agree: `listed` is the anomaly under `deny` and the normal case
+  under `allow`, which `gui/tests/station_states` holds.
+- **Idle is in seconds** because steering's 30 s silence rule (10.597) is
+  read against it; connected is minutes, as the TUI rounds.
+- **Read-only.** Removing a station is a change to the access point's
+  `access_control` list, which the access point dialog writes; a kick button
+  here would be a second, unrecorded way to say it, undone by the next apply.
+- **The note says where a name comes from**: only from netcfgd's own leases,
+  and as the device chose to call itself, so it identifies nothing.
+
+Not live-tested: the view against a daemon running a real access point needs
+hostapd, which the GUI's live harness does not start.
+
 ## 10.602 Hostnames from the leases
 
 **Asked for by the holder 2026-10-29** ("go ahead with hostnames from the
@@ -12624,9 +12655,9 @@ since 0040, because netcfgd ran no DHCP server to learn names from.
   is the one it always was -- `cli_test`'s existing table is the control. A
   name longer than its column is cut there.
 - **The TUI shows the name in place of the MAC** where there is one.
-- **The GUI shows no associated stations at all** -- its `ap_stations` is the
-  access-control editor's field -- so there is nothing there to name. A
-  station view in the GUI is open, and is a GUI feature rather than this one.
+- **The GUI showed no associated stations at all** when this landed -- its
+  `ap_stations` was the access-control editor's field. It has a stations tab
+  since 10.603, which shows the name.
 - **What the observe tier exposes grew**, and `doc/socket-protocol.md` says
   so beside its existing warning: a device's name is very often its owner's.
 - 0040 carries an amendment: the "no hostname" it recorded has a source now,

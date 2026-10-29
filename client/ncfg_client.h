@@ -1040,6 +1040,43 @@ typedef struct {
 void ncfg_modems_free(ncfg_modems_t *modems);
 
 /*
+ * One station associated with an access point netcfgd runs.
+ *
+ * `hostname` and `ipv4` are the lease netcfgd's own DHCP server gave it, and
+ * empty where it gave none (project.md 10.602). Every number is optional, as
+ * hostapd omits its statistics where the driver cannot read them: a station
+ * with none is still a station, and `has_*` says which were said.
+ */
+typedef struct {
+	char     *address;
+	char     *hostname;
+	char     *ipv4;
+	int       authorized;
+	int       listed;
+	int       has_signal;
+	int       signal;
+	int       has_connected;
+	long long connected_seconds;
+	int       has_inactive;
+	long long inactive_msec;
+	int       has_rx;
+	long long rx_bytes;
+	int       has_tx;
+	long long tx_bytes;
+} ncfg_station_t;
+
+typedef struct {
+	char           *interface;
+	char           *access_point;
+	/* "allow", "deny", or empty with no list; `listed` reads under it. */
+	char           *access_control;
+	ncfg_station_t *items;
+	size_t          count;
+} ncfg_stations_t;
+
+void ncfg_stations_free(ncfg_stations_t *stations);
+
+/*
  * One routing rule: which packets consult which table, and when.
  *
  * The priority is the identity as far as the kernel is concerned -- it decides
@@ -1721,6 +1758,15 @@ int ncfg_client_hook_scripts(ncfg_client_t *client, ncfg_hook_scripts_t *out, ch
  */
 int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
                        size_t err_size);
+
+/*
+ * The stations associated with the access point on `interface`, sorted by
+ * address, as `ncfg wifi clients` shows them. Needs `observe` -- which is
+ * other people's hardware addresses, signal strengths and, with a DHCP
+ * server, their devices' names: the socket protocol's own warning applies.
+ */
+int ncfg_client_ap_stations(ncfg_client_t *client, const char *interface, ncfg_stations_t *out,
+                            char *err, size_t err_size);
 
 /*
  * The profiles netcfgd can see, and which one is chosen. Needs `observe`.

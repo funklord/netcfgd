@@ -1,1 +1,1 @@
-{"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"686f6d65","name":"home","bssid":"00:11:22:33:44:55","network":"home","not_trying":[{"ssid":"6f6666696365","name":"office","flags":"[TEMP-DISABLED]"},{"ssid":"6c6162","flags":"[DISABLED]"}]}
+{"response":"wifi_status","interface":"wlan0","state":"COMPLETED","ssid":"486f6d654669626572","name":"HomeFiber","bssid":"00:11:22:33:44:55","network":"home","not_trying":[{"ssid":"4f6666696365","name":"Office","flags":"[TEMP-DISABLED]"},{"ssid":"4c6162","name":"Lab","flags":"[DISABLED]"}]}

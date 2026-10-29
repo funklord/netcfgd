@@ -90,7 +90,7 @@ static void free_nothing(const void *answer)
 
 /* How many cases the switch has. Asserted against the switch by its own
  * `default`, which cannot be reached while this number is right. */
-#define READER_COUNT 21u
+#define READER_COUNT 22u
 /* What will be written into a socket nobody is draining. Well inside the
  * default unix buffer, so the write cannot block. */
 #define REPLY_MAX 32768u
@@ -251,6 +251,17 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 	case 20:
 		DRIVE(ncfg_dns_t, ncfg_client_dns, ncfg_dns_free)
 		break;
+	case 21: {
+		/* The station list (10.602), written out because it names an
+		 * interface and `DRIVE` does not. Freed on both outcomes, as
+		 * `DRIVE` does, for its reason. */
+		ncfg_stations_t answer;
+
+		memset(&answer, 0, sizeof(answer));
+		(void)ncfg_client_ap_stations(client, "wlan0", &answer, err, sizeof(err));
+		ncfg_stations_free(&answer);
+		break;
+	}
 	default:
 		abort(); /* READER_COUNT disagrees with this switch */
 	}
