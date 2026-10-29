@@ -1381,6 +1381,11 @@ packaging:
 	@# counted by document equality and unwritable by the renderer, so every
 	@# document from an older schema minor failed the round trip.
 	@python3 tool/field_coverage_gate.py
+	@# And the same question for the client's readers, which a GUI dialog saves
+	@# a whole block from: a member the reader never mentions cannot be named
+	@# unmodelled, and Save deletes it. A DHCP server, an access point's width
+	@# and steering and a network's pinned BSSID all were (10.606).
+	@python3 tool/form_coverage_gate.py
 	@# And every word table against the enum it indexes. The renderer keeps the
 	@# language's spellings rather than the document's, deliberately; a value
 	@# added to one of those enums without its word makes the renderer write

@@ -12651,6 +12651,16 @@ state and is open: refusing is what makes it safe meanwhile.
   two others were rebuilt by removing their objects. A tree with an older
   build of `access_policy` or `reconnect` will run them against whatever is
   at the old path until those objects are rebuilt; a fresh build is right.
+- **`tool/form_coverage_gate.py`, in `make check`, so the next member is not
+  missed.** It holds each saved block's members -- device, interface, network,
+  access point, from their `ncfg_field_t` tables -- to a string literal in
+  the client reader its dialog loads through, or a reason in
+  `tool/form-unread-keys.txt` (`declared`, provenance; an interface's `hooks`,
+  which its dialog carries itself). Run against the client from before this
+  fix it reports all twelve deletions above; with `width` taken out of the
+  access point list it goes red. It sees top-level members only, and a
+  member read is not a member written back -- the network's routes and DNS
+  were read and still dropped by a dialog with no field for them.
 - **The first run had two failures in `live_wifi`** (the table empty right
   after activation, six rows after a second scan), with the two networks this
   test wrote still configured on the shared daemon. They are removed at the

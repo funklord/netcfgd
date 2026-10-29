@@ -1,0 +1,4 @@
+# Members of a saved block that its client reader does not mention, each
+# with the reason no GUI dialog can delete it. Read by tool/form_coverage_gate.py.
+device_fields.declared	provenance: true for a block somebody wrote, false for one netcfgd synthesised; a dialog's save writes a block, which makes it true, and nobody writes the key
+interface_fields.hooks	the interface dialog carries hooks itself, through the hook requests and its own list (0258), and refuses when a body is withheld
