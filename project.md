@@ -5577,11 +5577,13 @@ the sentence that disposes of an alternative in half a line.
      thing a GUI gives that `ncfg` and `ncfg tui` structurally cannot: an
      answer to "am I on the network" costing no window and no command, on a
      desktop that has no NetworkManager applet to fall back to. State at a
-     glance, disconnect, show, quit. **It does not scan** -- a scan blocks for
-     seconds and transmits probe requests, and doing that because somebody
-     opened a menu would be wrong twice -- and it offers nothing needing the
-     admin tier, because a menu is the wrong place to change a machine without
-     showing the plan first. Absent tray, `create()` returns nothing and the
+     glance, disconnect, show, quit -- and since 10.590, joining a saved network
+     in range. **It does not scan on its own** -- a scan blocks for seconds and
+     transmits probe requests, and doing that because somebody opened a menu
+     would be wrong twice, so a scan is a menu entry the operator chooses --
+     and it offers nothing needing the admin tier bar the profile switch,
+     because a menu is the wrong place to change a machine without showing the
+     plan first. Absent tray, `create()` returns nothing and the
      window behaves as it always did; `--tray` on a desktop without one
      complains on stderr and shows the window, which is the daemon's own
      convention rather than a modal that blocks startup on the machines least
@@ -12594,6 +12596,41 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.590 The tray joins a saved network, which is the whole interaction it was for
+
+**Found by walking the aims rather than by a defect.** The brief's second
+group "should never meet a permission wall, a tier, or a config file. Joining a
+network is the whole interaction" -- and the tray, which is where that person
+lives, could show state, disconnect and switch profiles, and could not join
+anything. Changing network meant opening the window and finding the wifi tab.
+
+**`Connect to`, a submenu**: the saved networks the last scan heard, strongest
+first, the one the radio is on ticked, then `Scan for networks` and `Another
+network...`. Two things the tray's header had ruled out stay ruled out:
+
+- **It does not scan on its own.** The list is the last scan *the operator
+  chose* from that submenu, with the time it was taken and the daemon's reason
+  where the results are the previous scan's. Nothing scans on a timer or on the
+  menu opening. Because the menu has closed by the time a scan returns, the
+  result is said in a balloon rather than left for a reopening to discover.
+- **Nothing needs a plan.** A join is `wifi_connect` by the network's id,
+  exactly the wifi tab's, so it is the `wifi` tier and writes nothing; an
+  access point no block names has no id and is not offered. `Another
+  network...` opens the window on the wifi tab, since a new network is a
+  block written.
+
+Two choices in it worth knowing. **Access points carrying one network are one
+entry** at the strongest signal heard, since the supplicant picks the BSS; two
+*blocks* naming one SSID -- a passphrase and an enterprise login -- are two
+entries labelled with their ids. And **the ticked entry does nothing when
+clicked**: selecting the network a station is on can reassociate, a dropped
+connection for a click meaning "yes, this one".
+
+Checked: `gui/tests/tray_choices` holds `ncfg_tray::choices`, the part that
+decides what the menu says, to all of that. The menu and the clicks still want
+a notification host, which no machine here has (the measurement is under M8's
+entry in section 10's item 5), so they are compiled and not driven.
 
 ## 10.589 `ncfg wifi connect` lasted one pass, and an apply's consents were dropped
 

@@ -12,7 +12,10 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
+#include <QStringList>
 #include <QSystemTrayIcon>
+
+#include <algorithm>
 
 /*
  * An icon, drawn rather than shipped.
@@ -101,6 +104,10 @@ ncfg_tray::ncfg_tray(ncfg_connection *connection, QObject *parent)
 	QAction *show = menu->addAction(QStringLiteral("Show window"));
 	connect(show, &QAction::triggered, this, &ncfg_tray::window_requested);
 
+	/* Above `Disconnect`, because joining is what most people open this menu
+	 * for. Rebuilt on every refresh, as the profile submenu is. */
+	join_menu = menu->addMenu(QStringLiteral("Connect to"));
+
 	disconnect_action = menu->addAction(QStringLiteral("Disconnect wifi"));
 	connect(disconnect_action, &QAction::triggered, this, &ncfg_tray::disconnect_radio);
 
@@ -142,6 +149,7 @@ void ncfg_tray::refresh()
 		icon->setIcon(state_icon(ncfg_reach::offline));
 		disconnect_action->setEnabled(false);
 		radio.clear();
+		rebuild_join(QString());
 		return;
 	}
 
@@ -152,6 +160,19 @@ void ncfg_tray::refresh()
 			break;
 		}
 	}
+
+	/* Which network the radio is on, so the submenu ticks it. Asked rather
+	 * than read off the scan: a scan says what was heard, not what was
+	 * joined, and the radio may have moved since. A refusal leaves nothing
+	 * ticked, which is the honest picture of "could not ask". */
+	QString current;
+	if (!radio.isEmpty()) {
+		ncfg_wifi_status_row status;
+		if (connection->wifi_status(radio, &status, nullptr)) {
+			current = status.network;
+		}
+	}
+	rebuild_join(current);
 
 	/* **Asked, not worked out.** This function used to derive the rung from
 	 * the links -- an address here, a default route there, a radio's
@@ -230,6 +251,178 @@ QString ncfg_tray::line_for(const ncfg_connectivity_row &state)
 	default:
 		return QStringLiteral("offline");
 	}
+}
+
+QList<ncfg_tray_choice> ncfg_tray::choices(const QList<ncfg_access_point_row> &scanned,
+                                           const QString &current)
+{
+	QList<ncfg_tray_choice> out;
+
+	for (const ncfg_access_point_row &point : scanned) {
+		if (!point.joinable()) {
+			continue;
+		}
+		bool merged = false;
+		for (ncfg_tray_choice &choice : out) {
+			if (choice.network == point.configured) {
+				choice.signal = qMax(choice.signal, point.signal);
+				merged = true;
+				break;
+			}
+		}
+		if (merged) {
+			continue;
+		}
+		ncfg_tray_choice choice;
+		choice.network = point.configured;
+		/* The name as the scan spells it for a person; the id where the
+		 * access point broadcasts none, since an empty menu entry is one
+		 * nobody can choose. */
+		choice.label = point.display.isEmpty() ? point.configured : point.display;
+		choice.signal = point.signal;
+		choice.current = !current.isEmpty() && point.configured == current;
+		out.append(choice);
+	}
+
+	/* **Two entries that read the same are told apart by id.** Two blocks
+	 * may name one SSID -- a passphrase and an enterprise login for the same
+	 * network, say -- and a menu showing the name twice offers a choice with
+	 * nothing to choose by. */
+	/* Counted over the names as heard, before any is changed: relabelling in
+	 * place made the second of a pair compare against the first's new label
+	 * and keep its bare name. */
+	QStringList heard;
+	for (const ncfg_tray_choice &choice : out) {
+		heard.append(choice.label);
+	}
+	for (ncfg_tray_choice &choice : out) {
+		if (heard.count(choice.label) > 1) {
+			choice.label = QStringLiteral("%1  (%2)").arg(choice.label, choice.network);
+		}
+	}
+
+	std::stable_sort(out.begin(), out.end(),
+	    [](const ncfg_tray_choice &a, const ncfg_tray_choice &b) { return a.signal > b.signal; });
+	return out;
+}
+
+void ncfg_tray::rebuild_join(const QString &current)
+{
+	join_menu->clear();
+
+	if (radio.isEmpty()) {
+		QAction *none = join_menu->addAction(QStringLiteral("no wireless interface"));
+		none->setEnabled(false);
+		return;
+	}
+
+	/* Results belong to the radio that heard them. A machine whose first
+	 * wireless interface changed since -- a dongle pulled out -- does not
+	 * offer the old one's networks against the new one. */
+	if (scanned_radio != radio) {
+		scanned.clear();
+		scan_stale.clear();
+		scanned_at = QDateTime();
+		scanned_radio = radio;
+	}
+
+	if (scanned_at.isNull()) {
+		/* Said rather than left empty: an empty submenu reads as "nothing in
+		 * range", and nobody has looked. */
+		QAction *never = join_menu->addAction(QStringLiteral("not scanned yet"));
+		never->setEnabled(false);
+	} else {
+		/* When, because these results are the last time somebody asked and
+		 * a laptop moves. And why they are old, where the daemon said. */
+		QString when = QStringLiteral("seen at %1")
+		                   .arg(scanned_at.toString(QStringLiteral("HH:mm")));
+		if (!scan_stale.isEmpty()) {
+			when += QStringLiteral(" -- the previous scan's: %1").arg(scan_stale);
+		}
+		QAction *header = join_menu->addAction(when);
+		header->setEnabled(false);
+
+		const QList<ncfg_tray_choice> found = choices(scanned, current);
+		if (found.isEmpty()) {
+			QAction *empty = join_menu->addAction(QStringLiteral("no saved network in range"));
+			empty->setEnabled(false);
+		}
+		for (const ncfg_tray_choice &choice : found) {
+			QAction *action = join_menu->addAction(
+			    QStringLiteral("%1  (%2 dBm)").arg(choice.label).arg(choice.signal));
+			action->setCheckable(true);
+			action->setChecked(choice.current);
+			/* The one already joined is ticked and does nothing: asking the
+			 * supplicant to select the network it is on can reassociate,
+			 * which is a dropped connection for a click that meant "yes,
+			 * this one". The rebuild puts the tick back. */
+			if (choice.current) {
+				connect(action, &QAction::triggered, this, &ncfg_tray::refresh);
+				continue;
+			}
+			const QString network = choice.network;
+			connect(action, &QAction::triggered, this, [this, network] { join(network); });
+		}
+	}
+
+	join_menu->addSeparator();
+	QAction *again = join_menu->addAction(QStringLiteral("Scan for networks"));
+	connect(again, &QAction::triggered, this, &ncfg_tray::scan);
+	QAction *other = join_menu->addAction(QStringLiteral("Another network..."));
+	connect(other, &QAction::triggered, this, &ncfg_tray::wifi_requested);
+}
+
+void ncfg_tray::scan()
+{
+	if (radio.isEmpty()) {
+		return;
+	}
+	/* Synchronous, as the wifi tab's is: it blocks for as long as the radio
+	 * takes. The menu has closed by the time this runs, and the tooltip
+	 * says what is happening for the seconds it takes. */
+	icon->setToolTip(QStringLiteral("scanning %1...").arg(radio));
+
+	QList<ncfg_access_point_row> points;
+	QString stale;
+	QString error;
+	if (!connection->wifi_scan(radio, &points, &stale, &error)) {
+		/* The daemon's words, which name the tier or the missing
+		 * supplicant. The previous results are kept: they are still what
+		 * was last heard, and their time says how old. */
+		state_action->setText(error);
+		icon->setToolTip(error);
+		return;
+	}
+	scanned = points;
+	scan_stale = stale;
+	scanned_at = QDateTime::currentDateTime();
+	scanned_radio = radio;
+	refresh();
+
+	/* The menu closed when the scan was chosen, so what it found is said
+	 * where it can be seen without reopening it. */
+	const int saved = choices(scanned, QString()).size();
+	icon->showMessage(QStringLiteral("netcfgd"),
+	    saved == 0 ? QStringLiteral("No saved network in range.")
+	               : QStringLiteral("%1 saved network(s) in range -- choose one under "
+	                                "Connect to.")
+	                         .arg(saved),
+	    QSystemTrayIcon::Information, 4000);
+}
+
+void ncfg_tray::join(const QString &network)
+{
+	if (radio.isEmpty() || network.isEmpty()) {
+		return;
+	}
+	QString error;
+	if (!connection->wifi_connect(radio, network, &error)) {
+		state_action->setText(error);
+		icon->setToolTip(error);
+		return;
+	}
+	refresh();
+	emit changed();
 }
 
 void ncfg_tray::activated(int reason)

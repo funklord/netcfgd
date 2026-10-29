@@ -249,6 +249,16 @@ void ncfg_main_window::attach_tray(ncfg_tray *adopted)
 		raise();
 		activateWindow();
 	});
+	/* A network the configuration does not name yet: the wifi tab is where
+	 * one is added, so that is the pane shown rather than whichever was last
+	 * in front. */
+	connect(tray, &ncfg_tray::wifi_requested, this, [this]() {
+		tabs->setCurrentWidget(machine);
+		machine->setCurrentWidget(wifi);
+		showNormal();
+		raise();
+		activateWindow();
+	});
 	connect(tray, &ncfg_tray::quit_requested, this, []() { QApplication::quit(); });
 	/* The tray changed the machine, so the tabs are stale. Same path an event
 	 * takes, so there is one answer to "something moved". */

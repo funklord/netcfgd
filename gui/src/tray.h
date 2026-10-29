@@ -12,14 +12,20 @@
  *   that costs no window and no command.
  *
  * WHAT IT DELIBERATELY DOES NOT DO
- *   **Scan.** A scan blocks for as long as the radio takes to walk its
- *   channels and it transmits probe requests -- doing that because somebody
- *   opened a menu would be wrong twice over. Joining therefore lives in the
- *   window, where a scan is a thing the operator asked for.
+ *   **Scan on its own.** A scan blocks for as long as the radio takes to walk
+ *   its channels and it transmits probe requests -- doing that because
+ *   somebody opened a menu would be wrong twice over. So the `Connect to`
+ *   submenu lists what the last scan *the operator asked for* found, and
+ *   asking is an entry of its own in that submenu. Nothing scans on a timer
+ *   or on the menu opening.
  *
  *   **Applying.** A menu is the wrong place to change a machine without
- *   showing the plan first, which is the whole product. Disconnecting is
- *   offered because it is the `wifi` tier and needs no plan to understand.
+ *   showing the plan first, which is the whole product. Disconnecting, and
+ *   joining a network the configuration already names, are offered because
+ *   they are the `wifi` tier and need no plan to understand: the join is by
+ *   the network's id, exactly as the wifi tab's, and writes nothing.
+ *   Joining a network the configuration does *not* name needs a block
+ *   written, so that entry opens the window's wifi tab instead.
  *
  * THE ONE ADMIN-TIER THING IT DOES, AND WHY
  *   **Switching profiles**, which is a configuration write and therefore the
@@ -43,6 +49,8 @@
 #ifndef NCFG_TRAY_H
 #define NCFG_TRAY_H
 
+#include <QDateTime>
+#include <QList>
 #include <QObject>
 #include <QString>
 
@@ -79,6 +87,25 @@ enum class ncfg_reach {
 	routed,  /* a default route in the main table */
 };
 
+/*
+ * One entry in the `Connect to` submenu: a saved network some access point in
+ * the last scan carries.
+ *
+ * **Saved networks only, and keyed by the network's id rather than its
+ * SSID.** The id is what `wifi_connect` takes and what keeps the join inside
+ * the `wifi` tier; an access point nothing in the configuration names has no
+ * id to send. Several access points carrying one network are one entry, at
+ * the strongest signal any of them was heard at, because the supplicant picks
+ * the BSS and an operator choosing between two identical names has nothing to
+ * choose by.
+ */
+struct ncfg_tray_choice {
+	QString network; /* the id `wifi_connect` takes */
+	QString label;
+	int     signal = 0;
+	bool    current = false;
+};
+
 class ncfg_tray : public QObject {
 	Q_OBJECT
 
@@ -97,6 +124,12 @@ public:
 	static QIcon state_icon(ncfg_reach reach);
 	static ncfg_reach reach_of(ncfg_rung_t rung);
 	static QString line_for(const ncfg_connectivity_row &state);
+	/* The submenu's entries, strongest first, from a scan and the network the
+	 * radio is on. Public for the reason the icon functions are: the menu
+	 * itself needs a notification host, and this is the part of it that
+	 * decides what the menu says. */
+	static QList<ncfg_tray_choice> choices(const QList<ncfg_access_point_row> &scanned,
+	                                       const QString &current);
 
 	void refresh();
 
@@ -104,6 +137,9 @@ signals:
 	/* The operator asked to see the window, or to leave. The window owns
 	 * both answers; the tray only reports that they were asked for. */
 	void window_requested();
+	/* The operator wants a network the configuration does not name, which
+	 * means writing a block: the window's wifi tab is where that is done. */
+	void wifi_requested();
 	void quit_requested();
 	void changed();
 
@@ -113,6 +149,8 @@ private slots:
 	/* Write the selection, having asked. An empty name means no profile
 	 * chosen, which is the default and is not a profile called "none". */
 	void choose_profile(const QString &name);
+	void scan();
+	void join(const QString &network);
 
 private:
 	ncfg_tray(ncfg_connection *connection, QObject *parent);
@@ -123,7 +161,18 @@ private:
 	QAction         *state_action;
 	QAction         *disconnect_action;
 	QMenu           *profile_menu;
+	QMenu           *join_menu;
 	QString          radio;
+	/* The last scan the operator asked for, kept so that the submenu can be
+	 * rebuilt on every refresh -- the tick follows the radio when something
+	 * else moves it -- without scanning again. `scanned_at` is null until
+	 * there has been one, which is not the same as a scan that found
+	 * nothing. */
+	QList<ncfg_access_point_row> scanned;
+	QString                      scanned_radio;
+	QString                      scan_stale;
+	QDateTime                    scanned_at;
+	void rebuild_join(const QString &current);
 	/* Rebuilt on every refresh, because a profile can appear or be chosen
 	 * from anywhere -- `ncfg`, an editor, another client. A menu built once
 	 * would go quietly stale, which is the failure this tray exists to not
