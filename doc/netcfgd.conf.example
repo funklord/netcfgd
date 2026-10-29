@@ -616,10 +616,22 @@
 # which every radio has.
 #
 # **802.11n is given where the radio has it**, which netcfgd asks the kernel,
-# so nothing here needs to say so: HT at 20 MHz, which every 802.11n radio can
-# do. What this build does not write yet is a wider channel (`ht_capab`),
-# 802.11ac or 802.11ax, so on 5 GHz an access point is not as fast as the
-# radio could be -- worth knowing before measuring throughput and blaming it.
+# so nothing here needs to say so. **And 40 MHz on 5 GHz**, where the radio
+# can do it in that band and the channel has a partner every regulatory
+# domain allows: 36 to 64, 100 to 136 and 149 to 161, up from the first of
+# each pair and down from the second. 140, 144 and 165 stay at 20 MHz, and so
+# does 2.4 GHz, where three channels do not overlap and a 40 MHz one takes two
+# of them. `width = 20` keeps a 5 GHz access point narrow; `width = 40` asks
+# for 40 on 2.4 GHz too, and needs a `channel` there, since the second channel
+# is above or below it. A width that cannot be given is said, and the access
+# point runs at 20. What this build does not write yet is 802.11ac or 802.11ax.
+#
+#access_point "Home" {
+#	device  = "wlan0"
+#	channel = 6
+#	width   = 40
+#	wifi { psk = "@secret:ap" }
+#}
 
 # **`regdom` here is not the one that does anything, and that is a trap worth
 # knowing about.** The language spells `regdom` in three places:

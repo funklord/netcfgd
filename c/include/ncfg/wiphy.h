@@ -34,6 +34,12 @@ typedef struct {
 	uint32_t index;
 	/* Whether this part carried a band with an HT capability. */
 	int      high_throughput;
+	/* And, per band, whether that capability says 20/40 MHz -- bit 1 of
+	 * `HT_CAPA`, "supported channel width set" (10.597). Per band because a
+	 * radio can differ between them, and hostapd refuses to start with an
+	 * `[HT40+]` the band cannot do. */
+	int      forty_mhz_24;
+	int      forty_mhz_5;
 } ncfg_wiphy_t;
 
 /* A split dump of every radio, to a family resolved. */

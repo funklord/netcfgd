@@ -12597,6 +12597,63 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.597 40 MHz
+
+**Asked for by the holder 2026-10-29** ("go ahead with 40 MHz"), the next
+step 10.596 named.
+
+### Measured first, hostapd 2.10 on hwsim, US domain
+
+| `channel`, `ht_capab` | result |
+|---|---|
+| 36 `[HT40+]`, 40 `[HT40-]` | runs; station `WIDTH=40 MHz` |
+| 1 `[HT40+]`, 11 `[HT40-]` on 2.4 GHz | runs; 40 MHz |
+| 0 (automatic) `[HT40+]` on 5 GHz | ACS chose 36; 40 MHz |
+| 36 `[HT40-]`, the wrong way | **refuses to start** |
+| 165 `[HT40+]`, no partner | **refuses to start**: "Frequency 5845 (secondary) not allowed" |
+
+**So a wrong secondary is not a slower access point, it is none.** hostapd
+does not fall back to 20 MHz. That decides the shape: netcfgd writes a
+direction only where it is certain of the pair.
+
+### What 10.597 built
+
+- **Read per band**: bit 1 of `HT_CAPA`, "supported channel width set", in
+  each band of the `GET_WIPHY` dump, so the observed link carries
+  `forty_mhz: ["2.4", "5"]` -- per band because a radio may differ, and a
+  `[HT40+]` the band cannot do refuses the start. hwsim reports `0x107e`.
+- **The rule, in the model** (`ncfg_access_point_secondary`, beside the band
+  helpers, as the mobility domain's is), so the file and the planner's
+  comparison agree: `width` decides, or by default 40 on 5 GHz and 20 on 2.4;
+  then the radio in that band; then the channel. The pairs are the ones
+  inside one block of the band -- 36-64, 100-136, 149-161 -- so no domain
+  allows one channel of a pair and forbids the other; 140/144, which several
+  domains lack 144 for, and 165 upwards stay at 20. Automatic selection on 5
+  GHz is told `[HT40+]`, measured to pair; on 2.4 GHz with no channel the
+  direction cannot be known, so it stays at 20 and says so.
+- **`width = 20 | 40`** on an access point, estate scope like the channel
+  plan; a `width = 40` that cannot be given is a plan warning naming why.
+- **Part of what hostapd was started as**: `ht_capab` naming HT40 is read
+  back as `started_with.forty_mhz` and compared only where the radio's answer
+  was read, for 10.596's reason. A 5 GHz access point on an HT40 radio
+  restarts once on upgrade.
+
+### What the live run taught
+
+- `make hull-steer`'s band machine: the station steered to the 5 GHz access
+  point reads `WIDTH=40 MHz` on 5180 and `wlan1.conf` holds `[HT40+]`;
+  `make hull-roam` asserts its 2.4 GHz station reads `20 MHz`.
+- **A false pass, caught, and a gap in steering behind it.** The first run
+  had the band machine fail its request-mode check: the station had been
+  sent nothing. With 5 GHz now 40 MHz, the payload's scan after unpinning
+  the station handed wpa_supplicant a candidate so much better that it
+  roamed there by itself -- and the 2.4 GHz hostapd kept listing the station
+  until its inactivity timeout, so netcfgd planned a steer, sent it to
+  nobody, and recorded it. The payload no longer scans and now has the weak
+  machine's stay-put control. **And steering skips a station hostapd has not
+  heard from in 30 s** (`inactive_msec`, now in `steerable`): a ghost of one
+  that left, or one asleep, is not a station to move.
+
 ## 10.596 802.11n where the radio has it
 
 **Asked for by the holder 2026-10-29** ("go ahead with ieee80211n"). Until

@@ -1201,7 +1201,7 @@ typedef struct {
 	/* The radios with 802.11n, for `service.high_throughput`: names copied
 	 * out of the observation, which does not outlive the pass. */
 	char                          ht_names[NCFG_MAIN_METRICS_MAX][16];
-	const char                   *ht[NCFG_MAIN_METRICS_MAX];
+	ncfg_service_radio_t          ht[NCFG_MAIN_METRICS_MAX];
 	size_t                        ht_count;
 	/*
 	 * What each advertising interface announces, resolved.

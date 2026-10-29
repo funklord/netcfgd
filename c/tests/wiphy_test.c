@@ -66,6 +66,26 @@ static void part(ncfg_buf_t *out, uint32_t index, int bands, int ht)
 	ncfg_buf_free(&list);
 }
 
+/* Radio 3, one 2.4 GHz band with HT and no 20/40 bit. */
+static void part20(ncfg_buf_t *out)
+{
+	ncfg_genl_header_t header = { NL80211_CMD_NEW_WIPHY, 1 };
+	ncfg_buf_t         list;
+	ncfg_buf_t         band;
+	uint16_t           capability = 0x017c;
+
+	ncfg_buf_init(out, 0);
+	ncfg_buf_init(&list, 0);
+	ncfg_buf_init(&band, 0);
+	ncfg_genl_header_encode(&header, out);
+	ncfg_wire_attr_put_u32(out, NL80211_ATTR_WIPHY, 3u);
+	ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_HT_CAPA, &capability, sizeof(capability));
+	ncfg_wire_attr_put_nested(&list, NL80211_BAND_2GHZ, &band);
+	ncfg_wire_attr_put_nested(out, NL80211_ATTR_WIPHY_BANDS, &list);
+	ncfg_buf_free(&band);
+	ncfg_buf_free(&list);
+}
+
 static void the_request(void)
 {
 	ncfg_genl_family_t family;
@@ -109,6 +129,13 @@ static void the_reply(void)
 	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
 	        radio.index == 2u && radio.high_throughput,
 	    "a radio with HT in its second band has it");
+	check(radio.forty_mhz_5 && !radio.forty_mhz_24,
+	    "  and 40 MHz in that band alone, the second being 5 GHz, by the capability's bit 1");
+	ncfg_buf_free(&payload);
+	part20(&payload);
+	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
+	        radio.high_throughput && !radio.forty_mhz_24 && !radio.forty_mhz_5,
+	    "a band whose capability lacks bit 1 has HT at 20 MHz only");
 	ncfg_buf_free(&payload);
 	part(&payload, 2u, 2, 0);
 	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&

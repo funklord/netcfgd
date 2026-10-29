@@ -174,10 +174,14 @@ const char *ncfg_hostapd_value_of(const ncfg_hostapd_lines_t *lines, const char 
 typedef struct {
 	const char *bridge;
 	const char *address;
-	/* The radio has 802.11n, so the access point is given `ieee80211n=1`:
-	 * HT20, with no `ht_capab`, which every HT radio can do (10.596). */
+	/* The radio has 802.11n, so the access point is given `ieee80211n=1`
+	 * (10.596). */
 	int         high_throughput;
+	/* And can do 40 MHz in 2.4 GHz, and in 5 (10.597). */
+	int         forty_mhz_24;
+	int         forty_mhz_5;
 } ncfg_hostapd_local_t;
+
 
 /* `roaming_key` is the resolved `roaming_key` secret, or NULL; it is what
  * `passphrase` is for the passphrase. */

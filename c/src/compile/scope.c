@@ -420,6 +420,9 @@ static const struct {
 	 * estate's, as fast roaming is. */
 	{ NCFG_BLOCK_ACCESS_POINT, "steering.signal", 0x00040012u },
 	{ NCFG_BLOCK_ACCESS_POINT, "steering.band", 0x00040013u },
+	/* The channel width (10.597): how much spectrum the network takes,
+	 * which a site agrees on, as it does the channel plan. */
+	{ NCFG_BLOCK_ACCESS_POINT, "width", 0x00040014u },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

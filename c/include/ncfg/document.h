@@ -1694,6 +1694,14 @@ typedef struct {
 	 * is the default: moving people's devices is a choice to make.
 	 */
 	struct ncfg_steering  *steering;
+	/*
+	 * The channel width in MHz, 20 or 40 (project.md 10.597). Absent is
+	 * netcfgd's choice: 40 on 5 GHz and 20 on 2.4, where three channels do
+	 * not overlap and a 40 MHz one takes two of them. Either is given only
+	 * where the radio can do it and the channel has a partner; see
+	 * `ncfg_access_point_secondary`.
+	 */
+	ncfg_optint_t          width;
 } ncfg_access_point_t;
 
 /*
@@ -1786,6 +1794,20 @@ const char *ncfg_access_point_effective_band(const char *band, const ncfg_optint
  * the document already has a way to say and gets told rather than agreed with.
  */
 int ncfg_channel_in_band(const char *band, int64_t channel);
+
+/*
+ * The 40 MHz secondary channel an access point is given: 1 for `[HT40+]`, -1
+ * for `[HT40-]`, 0 for 20 MHz (project.md 10.597). One answer for the file
+ * and for the planner that compares it with what hostapd was started with.
+ *
+ * `width` decides, or by default 40 on 5 GHz and 20 on 2.4; then the radio,
+ * per band; then the channel, whose partner is fixed by the band plan --
+ * measured, hostapd refuses to start with the wrong direction or with a
+ * secondary the domain forbids, rather than running at 20 MHz. `why`, where
+ * given, is set to a sentence when a width of 40 was wanted and is not given.
+ */
+int ncfg_access_point_secondary(const ncfg_access_point_t *access_point, int forty_mhz_24,
+    int forty_mhz_5, const char **why);
 
 /*
  * Whether a channel is one the radio must listen on before it may beacon.

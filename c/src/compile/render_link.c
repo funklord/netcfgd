@@ -987,6 +987,14 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	if (point->wds) {
 		ncfg_buf_add_text(&body, "\twds = true\n");
 	}
+	if (point->width.has) {
+		if (point->width.value == 20 || point->width.value == 40) {
+			ncfg_buf_addf(&body, "\twidth = %lld\n", (long long)point->width.value);
+		} else {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a width of %lld MHz", (long long)point->width.value);
+		}
+	}
 	if (point->neighbour_reports) {
 		ncfg_buf_add_text(&body, "\tneighbour_reports = true\n");
 	} else if (point->neighbour_count) {

@@ -2166,7 +2166,9 @@ static const ncfg_field_t access_point_fields[] = {
 	    .count_offset = offsetof(ncfg_access_point_t, neighbour_count) },
 	{ .name = "steering", .kind = NCFG_F_OPT_STRUCT, .type = &steering_type,
 	    .element_size = sizeof(ncfg_steering_t),
-	    .offset = offsetof(ncfg_access_point_t, steering) }
+	    .offset = offsetof(ncfg_access_point_t, steering) },
+	{ .name = "width", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_access_point_t, width) }
 };
 static const ncfg_type_t access_point_type = TYPE("access point", access_point_fields);
 

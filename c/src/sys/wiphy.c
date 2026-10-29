@@ -81,7 +81,18 @@ int ncfg_wiphy_parse(const void *payload, size_t length, ncfg_wiphy_t *out, char
 			return 0;
 		}
 		if (found == NCFG_WIRE_OK) {
+			uint16_t bits = 0;
+
 			out->high_throughput = 1;
+			if (!ncfg_wire_attr_u16(&capability, &bits, err, err_size)) {
+				return 0;
+			}
+			if ((bits & 0x0002u) != 0u && band.kind == NL80211_BAND_2GHZ) {
+				out->forty_mhz_24 = 1;
+			}
+			if ((bits & 0x0002u) != 0u && band.kind == NL80211_BAND_5GHZ) {
+				out->forty_mhz_5 = 1;
+			}
 		}
 	}
 	return step != NCFG_WIRE_BAD;

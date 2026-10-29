@@ -8,7 +8,8 @@
 # minute to settle -- steering waits for that -- and an `ncfg apply` then
 # plans a `station.steer` and sends it. What is asserted:
 #
-#   - the control: before the minute, a plan steers nobody;
+#   - the controls: before the minute, a plan steers nobody, and for the
+#     minute the station stays where it is -- so a move is the steer's;
 #   - the plan after it carries one steer, to the 5 GHz BSSID, imminent;
 #   - the station is then associated with the 5 GHz access point;
 #   - the steer is in the record beside hostapd's socket;
@@ -111,8 +112,12 @@ until status | grep -q '^wpa_state=COMPLETED' || [ "$n" -gt 100 ]; do
 done
 say "joins: $(status | grep -E '^(bssid|freq)=' | tr '\n' ' ')"
 # Free to move, and the 5 GHz one in its scan results.
+# Free to move, and **not scanned again**: since 10.597 the 5 GHz access
+# point runs 40 MHz, and a scan here hands wpa_supplicant so much better a
+# candidate that it roamed there by itself -- while the 2.4 GHz hostapd kept
+# listing it, so a steer was planned, "sent" to nobody, and the station's
+# move read as the steer's. The control below is what would now say so.
 wpa_cli -p "$work/sta" -i wlan2 set_network 0 bssid any >/dev/null
-wpa_cli -p "$work/sta" -i wlan2 scan >/dev/null
 sleep 3
 
 "$build/ncfg" plan > "$work/plan-early.log" 2>&1
@@ -120,6 +125,8 @@ early=$(grep -cE '^ +[0-9]+ +station\.steer ' "$work/plan-early.log")
 say "a plan before the station settled: $early steer(s)"
 
 sleep 62
+stayed=$(status | grep -E '^bssid=')
+say "a minute later, unasked, the station is on: $stayed"
 "$build/ncfg" plan > "$work/plan.log" 2>&1
 planned=$(grep -cE '^ +[0-9]+ +station\.steer ' "$work/plan.log")
 say "the plan after a minute: $(grep -E '^ +[0-9]+ +station\.steer ' "$work/plan.log" | head -1)"
@@ -132,7 +139,8 @@ until status | grep -q "^bssid=$b1" && status | grep -q '^wpa_state=COMPLETED' |
 	n=$((n + 1))
 done
 after=$(status | grep -E '^(bssid|freq)=' | tr '\n' ' ')
-say "the station is then on: $after"
+width=$(wpa_cli -p "$work/sta" -i wlan2 signal_poll 2>/dev/null | sed -n 's/^WIDTH=//p')
+say "the station is then on: $after at ${width:-no width}"
 record=$(cat "$work/run/hostapd/wlan0.steered" 2>/dev/null)
 say "  wlan0.steered: $record"
 "$build/ncfg" plan > "$work/plan-after.log" 2>&1
@@ -149,10 +157,15 @@ failed=0
 [ -n "$mode" ] && [ $(( mode & 4 )) -eq 4 ] || { say "  the station was not told disassociation is imminent"; failed=1; }
 
 [ "$early" -eq 0 ] || { say "  the control failed: a station that had just joined was steered"; failed=1; }
+[ "$stayed" = "bssid=$b0" ] || { say "  the control failed: the station moved before it was asked"; failed=1; }
 [ "$planned" -eq 1 ] || { say "  the plan after the minute did not carry one steer"; failed=1; }
 case "$after" in *"bssid=$b1"*) ;; *) say "  the station did not move to $b1"; failed=1 ;; esac
 case "$record" in "$sta_mac "*" 1") ;; *) say "  the steer is not in the record"; failed=1 ;; esac
 [ "$again" -eq 0 ] || { say "  a plan after the move still steers"; failed=1; }
+# 10.597: the 5 GHz access point on 36 is given 40 MHz, [HT40+].
+case "$width" in "40 MHz") ;; *) say "  the 5 GHz access point does not run 40 MHz"; failed=1 ;; esac
+grep -q '^ht_capab=\[HT40+\]$' "$work/run/hostapd/wlan1.conf" ||
+	{ say "  wlan1.conf was not written ht_capab=[HT40+]"; failed=1; }
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -6 >> "$out"
 	sed 's/^/  plan: /' "$work/plan.log" | head -12 >> "$out"

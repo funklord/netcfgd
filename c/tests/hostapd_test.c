@@ -332,7 +332,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	    "1e76efa2f1c48e99dc6ed03ae8cfd81a88ccc960995b427cccd51d47cc168e2f";
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA3);
 	ncfg_secret_ref_t          key = { NCFG_SECRET_PROVIDER_FILE, (char *)(void *)"roam" };
-	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0 };
+	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, 0, 0 };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 	char                       want[160];
@@ -380,7 +380,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	(void)refused_on(&point, &local, "correcthorse", NULL, NCFG_HOSTAPD_MISSING_ROAMING_KEY,
 	    "an unresolved roaming key is refused rather than rendered as a roam that fails");
 	{
-		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0 };
+		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, 0, 0 };
 
 		(void)refused_on(&point, &nowhere, "correcthorse", "roamingsecret",
 		    NCFG_HOSTAPD_MISSING_ADDRESS,
@@ -450,7 +450,7 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 static void a_radio_with_802_11n_is_given_it(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t ht = { NULL, NULL, 1 };
+	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, 0, 0 };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -467,6 +467,84 @@ static void a_radio_with_802_11n_is_given_it(void)
 	if (rendered(&point, "correcthorse", &lines)) {
 		check(ncfg_hostapd_value_of(&lines, "ieee80211n") == NULL,
 		    "and one on a radio without it, or not known to have it, is not");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
+/* One access point on a band and channel, for the width rule. */
+static int secondary_of(const char *band, int64_t channel, int64_t width, int forty_24,
+    int forty_5)
+{
+	ncfg_access_point_t point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	char                text[4];
+
+	(void)snprintf(text, sizeof(text), "%s", band ? band : "");
+	point.band = band ? text : NULL;
+	point.channel.has = channel >= 0;
+	point.channel.value = channel >= 0 ? channel : 0;
+	point.width.has = width > 0;
+	point.width.value = width;
+	return ncfg_access_point_secondary(&point, forty_24, forty_5, NULL);
+}
+
+/*
+ * 40 MHz, and which way (10.597). Measured against hostapd 2.10 on hwsim: the
+ * wrong direction, and a secondary the domain forbids, each make it refuse to
+ * start rather than run at 20 MHz -- so every pair here is one the band plan
+ * fixes, and a channel without a safe one is 20 MHz.
+ */
+static void forty_megahertz_is_given_only_where_it_can_start(void)
+{
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, 0, 1 };
+	ncfg_hostapd_lines_t lines;
+	char                 message[NCFG_ERROR_MAX];
+	char                 five[] = "5";
+	const char          *why = NULL;
+
+	check(secondary_of("5", 36, 0, 0, 1) == 1 && secondary_of("5", 40, 0, 0, 1) == -1 &&
+	    secondary_of("5", 44, 0, 0, 1) == 1 && secondary_of("5", 64, 0, 0, 1) == -1,
+	    "on 5 GHz, 40 MHz by default, up from 36 and 44 and down from 40 and 64");
+	check(secondary_of("5", 100, 0, 0, 1) == 1 && secondary_of("5", 136, 0, 0, 1) == -1 &&
+	    secondary_of("5", 149, 0, 0, 1) == 1 && secondary_of("5", 161, 0, 0, 1) == -1,
+	    "  and so through 100 to 136 and 149 to 161");
+	check(secondary_of("5", 140, 0, 0, 1) == 0 && secondary_of("5", 144, 0, 0, 1) == 0 &&
+	    secondary_of("5", 165, 0, 0, 1) == 0,
+	    "  while 140, 144 and 165, whose partner some domain lacks, stay at 20 MHz");
+	check(secondary_of("5", -1, 0, 0, 1) == 1,
+	    "  and with no channel, automatic selection is told up, which it pairs");
+	check(secondary_of("5", 36, 20, 0, 1) == 0, "a `width = 20` on 5 GHz is 20 MHz");
+	check(secondary_of("5", 36, 0, 1, 0) == 0,
+	    "a radio that can do 40 MHz only on 2.4 GHz is 20 MHz on 5");
+	check(secondary_of(NULL, 1, 0, 1, 1) == 0, "on 2.4 GHz, 20 MHz by default");
+	check(secondary_of(NULL, 1, 40, 1, 1) == 1 && secondary_of(NULL, 11, 40, 1, 1) == -1,
+	    "  and `width = 40` there goes up from 1 and down from 11");
+	check(secondary_of(NULL, -1, 40, 1, 1) == 0,
+	    "  but not with no channel, whose direction cannot be known beforehand");
+	point.band = NULL;
+	point.channel.has = 0;
+	point.width.has = 1;
+	point.width.value = 40;
+	why = NULL;
+	(void)ncfg_access_point_secondary(&point, 1, 1, &why);
+	check(why && strstr(why, "needs a `channel`"), "  and says so");
+	point.width.has = 0;
+
+	point.band = five;
+	point.channel.has = 1;
+	point.channel.value = 36;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "ht_capab"), "[HT40+]",
+		    "an access point on 36 is written [HT40+]");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.channel.value = 165;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check(ncfg_hostapd_value_of(&lines, "ht_capab") == NULL &&
+		    ncfg_hostapd_value_of(&lines, "ieee80211n") != NULL,
+		    "  and one on 165 no ht_capab at all, still 802.11n");
 		ncfg_hostapd_lines_free(&lines);
 	}
 }
@@ -516,7 +594,7 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0 };
+	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, 0, 0 };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -1292,6 +1370,7 @@ static void the_credential_reaches_no_diagnostic(const char *run, const char *st
 
 int main(void)
 {
+	forty_megahertz_is_given_only_where_it_can_start();
 	a_radio_with_802_11n_is_given_it();
 	neighbour_reports_are_two_lines_and_no_neighbours();
 	const char *run = testdir_make("hostapd");

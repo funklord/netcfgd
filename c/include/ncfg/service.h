@@ -165,6 +165,13 @@ typedef struct {
 	const char *report;
 } ncfg_service_tunnel_t;
 
+/* One radio with 802.11n, and the bands it can do 40 MHz in. */
+typedef struct ncfg_service_radio {
+	const char *iface;
+	int         forty_mhz_24;
+	int         forty_mhz_5;
+} ncfg_service_radio_t;
+
 /*
  * One PPPoE session, with its password already resolved.
  *
@@ -350,13 +357,13 @@ typedef struct {
 	const ncfg_service_client_metric_t *client_metrics;
 	size_t                              client_metric_count;
 	/*
-	 * The radios that have 802.11n, by interface name, resolved from the
-	 * observation for `client_metrics`' reason: the half of the rule that
-	 * decides `ieee80211n=1` is what the radio reports (10.596). A radio not
-	 * named runs its access point at 802.11a/g rates.
+	 * The radios that have 802.11n, resolved from the observation for
+	 * `client_metrics`' reason: the half of the rule that decides
+	 * `ieee80211n=1` and `ht_capab` is what the radio reports (10.596,
+	 * 10.597). A radio not named runs its access point at 802.11a/g rates.
 	 */
-	const char *const *high_throughput;
-	size_t             high_throughput_count;
+	const struct ncfg_service_radio *high_throughput;
+	size_t                           high_throughput_count;
 	/*
 	 * How long a control socket gets. 0 means `NCFG_SUPPLICANT_IMPATIENT_MS`.
 	 *

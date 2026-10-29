@@ -1067,6 +1067,14 @@ void ncfg_plan_neighbours(ncfg_builder_t *builder)
 /* An advisory request is repeated no more often than this; one with
  * disassociation imminent no more than once in the record's hour. */
 #define STEER_ADVISED_SECONDS 300
+/*
+ * Nor is a station hostapd has not heard from in this long. Measured in a vm:
+ * a station that roamed to another access point by itself stays in the old
+ * one's list until the inactivity timeout, minutes later, and was planned a
+ * steer that went to nobody and was recorded as sent. A station that is
+ * there and asleep for this long is not one to move now either.
+ */
+#define STEER_SILENT_MS 30000
 
 /* Whether a report element names a 2.4 GHz operating class (81 or 82). */
 static int element_is_24(const char *nr)
@@ -1221,7 +1229,8 @@ void ncfg_plan_steering(ncfg_builder_t *builder)
 			int64_t                          signal;
 
 			if (!station->signal.has || !station->connected.has ||
-			    station->connected.value < STEER_SETTLED_SECONDS) {
+			    station->connected.value < STEER_SETTLED_SECONDS ||
+			    (station->inactive.has && station->inactive.value > STEER_SILENT_MS)) {
 				continue;
 			}
 			signal = station->signal.value;

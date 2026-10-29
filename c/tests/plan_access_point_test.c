@@ -1165,7 +1165,7 @@ static const ncfg_op_t *steer_for(const ncfg_plan_t *plan, const char *station)
  * weak one is asked to go where it likes and is not disconnected; one that
  * has just arrived is left to settle; one moved within the hour is not moved
  * again, nor one asked within five minutes -- while one asked longer ago than
- * that is asked again.
+ * that is asked again. A seventh, silent for 45 s, is left alone.
  */
 static void stations_are_steered_by_band_and_by_signal(void)
 {
@@ -1182,7 +1182,9 @@ static void stations_are_steered_by_band_and_by_signal(void)
 	    STATION("aa:00:00:00:00:03", "-40", "10") ","
 	    STATION("aa:00:00:00:00:04", "-40", "300") ","
 	    STATION("aa:00:00:00:00:05", "-85", "300") ","
-	    STATION("aa:00:00:00:00:06", "-85", "300") "],\"steered\":["
+	    STATION("aa:00:00:00:00:06", "-85", "300") ","
+	    "{\"address\":\"aa:00:00:00:00:07\",\"signal\":-40,\"connected\":300,"
+	    "\"inactive\":45000}],\"steered\":["
 	    STEERED("aa:00:00:00:00:04", "100", "true") ","
 	    STEERED("aa:00:00:00:00:05", "100", "false") ","
 	    STEERED("aa:00:00:00:00:06", "400", "false") "]}},"
@@ -1211,6 +1213,8 @@ static void stations_are_steered_by_band_and_by_signal(void)
 	    "one asked within five minutes is not asked again");
 	check(plan && steer_for(plan, "aa:00:00:00:00:06"),
 	    "  and one asked longer ago than that is");
+	check(plan && !steer_for(plan, "aa:00:00:00:00:07"),
+	    "and one hostapd has not heard from in 45 s -- gone, or asleep -- is not steered");
 	check(plan && planfix_count(plan, "station.steer") == 3u &&
 	    planfix_count(plan, "neighbour.add") == 0u && !planfix_action(plan, "backend.stop"),
 	    "and that is the whole plan");
@@ -1286,6 +1290,51 @@ static void an_access_point_on_a_radio_with_802_11n_takes_it_once(void)
 	planfix_release(plan, document, observed);
 }
 
+#define FIVE_POINT(extra) POINT(",\"security\":{\"type\":\"open\"},\"band\":\"5\",\"channel\":36" extra)
+#define FIVE_STARTED(extra) STARTED_WITH(",\"channel\":36,\"band\":\"5\",\"high_throughput\":true" extra)
+#define FORTY_LINK(bands) HT_LINK(",\"high_throughput\":true,\"forty_mhz\":[" bands "]")
+
+/*
+ * 40 MHz is part of what hostapd was started as (10.597): on 5 GHz, a radio
+ * that can do it in that band and a hostapd started without it restarts
+ * once, and one started with it plans nothing. A `width = 40` that cannot be
+ * given is said.
+ */
+static void forty_megahertz_is_part_of_what_an_access_point_was_started_as(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" FORTY_LINK("\"5\"") "]," RUNNING(FIVE_STARTED("")), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && strcmp(stop->reason.field, "access_point.width") == 0 &&
+	    strcmp(stop->reason.desired, "40") == 0 && strcmp(stop->reason.observed, "20") == 0,
+	    "a 5 GHz access point started at 20 MHz on a radio that can do 40 restarts for it");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" FORTY_LINK("\"5\"") "]," RUNNING(FIVE_STARTED(",\"forty_mhz\":true")),
+	    &document, &observed);
+	check(plan && plan->action_count == 0u, "  and once it has it, plans nothing");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" FORTY_LINK("\"2.4\"") "]," RUNNING(FIVE_STARTED("")), &document, &observed);
+	check(plan && plan->action_count == 0u,
+	    "a radio that can do 40 MHz only on 2.4 GHz leaves a 5 GHz one at 20");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"width\":40"),
+	    "\"links\":[" FORTY_LINK("\"2.4\"") "],"
+	    RUNNING(STARTED_WITH(AS_WRITTEN ",\"high_throughput\":true")), &document, &observed);
+	check(plan && planfix_warned(plan, "asks for `width = 40` and runs at 20 MHz") &&
+	    planfix_warned(plan, "needs a `channel`"),
+	    "a `width = 40` on 2.4 GHz with no channel is said to run at 20, and why");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1323,6 +1372,7 @@ int main(void)
 	stations_are_steered_by_band_and_by_signal();
 	an_access_point_without_steering_moves_nobody();
 	an_access_point_on_a_radio_with_802_11n_takes_it_once();
+	forty_megahertz_is_part_of_what_an_access_point_was_started_as();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

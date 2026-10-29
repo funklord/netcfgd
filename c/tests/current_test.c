@@ -1637,6 +1637,9 @@ static void whether_the_radio_has_802_11n(void)
 	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
 	    observed->links[0].high_throughput.has && observed->links[0].high_throughput.value,
 	    "a radio whose description carries HT in any part has 802.11n");
+	check(observed && observed->links[0].forty_mhz_count == 1u &&
+	    strcmp(observed->links[0].forty_mhz[0], "2.4") == 0,
+	    "  and 40 MHz in the band whose capability says so, in the document's word for it");
 	ncfg_observed_free(observed);
 
 	memset(&asked, 0, sizeof(asked));

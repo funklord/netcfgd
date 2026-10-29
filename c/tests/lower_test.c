@@ -1344,6 +1344,18 @@ static void access_point_cases(void)
 	    "\twifi { psk = \"@secret:ap\" }\n}\n", "named by its BSSID",
 	    "  and one named by something that is not a BSSID");
 
+	/* The channel width (10.597): 20 or 40, and nothing else. */
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twidth = 40\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "an access point with a stated width compiles");
+	if (document) {
+		check(document->access_points[0].width.has &&
+		    document->access_points[0].width.value == 40, "  carrying it");
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twidth = 80\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "20 or 40",
+	    "a width this build does not give is refused, naming the two it does");
+
 	/* Steering (10.595 item 2): opt-in, and only where there are neighbours
 	 * to send a station to. */
 	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"

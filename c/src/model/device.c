@@ -89,6 +89,75 @@ const char *ncfg_access_point_effective_band(const char *band, const ncfg_optint
 	return channel->value <= 14 ? BAND_24 : BAND_5;
 }
 
+int ncfg_access_point_secondary(const ncfg_access_point_t *access_point, int forty_mhz_24,
+    int forty_mhz_5, const char **why)
+{
+	const char *band = ncfg_access_point_effective_band(access_point->band,
+	    &access_point->channel);
+	int64_t     channel = access_point->channel.has ? access_point->channel.value : 0;
+	int64_t     base;
+	int         five;
+	int64_t     width;
+
+	if (why) {
+		*why = NULL;
+	}
+	/* A band this build cannot render, or a channel outside its band, is
+	 * refused by the renderer in its own words; 20 MHz is all this says. */
+	if (!band || (access_point->channel.has && access_point->channel.value != 0 &&
+	        !ncfg_channel_in_band(band, access_point->channel.value))) {
+		return 0;
+	}
+	five = strcmp(band, BAND_24) != 0;
+	width = access_point->width.has ? access_point->width.value : (five ? 40 : 20);
+	if (width != 40) {
+		return 0;
+	}
+	if (!(five ? forty_mhz_5 : forty_mhz_24)) {
+		if (why) {
+			*why = "the radio cannot do 40 MHz in this band";
+		}
+		return 0;
+	}
+	if (!five) {
+		/* Measured: [HT40+] on 1 and [HT40-] on 11 both run. Five to seven
+		 * could go either way, and up is taken. With no channel the
+		 * direction cannot be known before hostapd chooses one. */
+		if (channel >= 1 && channel <= 7) {
+			return 1;
+		}
+		if (channel >= 8 && channel <= 13) {
+			return -1;
+		}
+		if (why) {
+			*why = channel ? "channel 14 has no second channel to pair with"
+			               : "40 MHz on 2.4 GHz needs a `channel`, since the second "
+			                 "channel is above it or below it";
+		}
+		return 0;
+	}
+	/* Measured: automatic selection with [HT40+] chooses a pair. */
+	if (channel == 0) {
+		return 1;
+	}
+	/*
+	 * The pairs, each inside one block of the band so that no domain allows
+	 * one channel of a pair and not the other -- measured, hostapd refuses
+	 * to start on a secondary the domain forbids rather than falling back to
+	 * 20 MHz. 140/144 is left out, since several domains have no 144, and
+	 * so is 165 and above.
+	 */
+	base = channel >= 149 ? channel - 1 : channel;
+	if (base % 4 != 0 || !((channel >= 36 && channel <= 64) ||
+	        (channel >= 100 && channel <= 136) || (channel >= 149 && channel <= 161))) {
+		if (why) {
+			*why = "this channel has no partner every regulatory domain allows";
+		}
+		return 0;
+	}
+	return (base / 4) % 2 == 1 ? 1 : -1;
+}
+
 int ncfg_channel_in_band(const char *band, int64_t channel)
 {
 	if (band && strcmp(band, BAND_24) == 0) {

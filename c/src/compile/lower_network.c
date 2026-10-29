@@ -1343,6 +1343,19 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.wds = flag;
 				}
+			} else if (strcmp(key, "width") == 0) {
+				int64_t width;
+
+				if (ncfg_as_i64(ctx, assignment->value, &width)) {
+					if (width == 20 || width == 40) {
+						access_point.width.has = 1;
+						access_point.width.value = width;
+					} else {
+						ncfg_diag(ctx, assignment->span,
+						    "`width = %lld` is not a channel width this build gives an "
+						    "access point: 20 or 40 (MHz)", (long long)width);
+					}
+				}
 			} else if (strcmp(key, "neighbour_reports") == 0) {
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.neighbour_reports = flag;

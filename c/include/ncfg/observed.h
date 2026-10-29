@@ -596,6 +596,10 @@ typedef struct {
 	 * is not "no": a read that failed once must not restart an access point to
 	 * take its HT away and again to give it back. */
 	ncfg_optbool_t high_throughput;
+	/* The bands ("2.4", "5") in which it can also do 40 MHz (10.597),
+	 * answered with `high_throughput` and empty where that is not. */
+	char         **forty_mhz;
+	size_t         forty_mhz_count;
 	/* **Carried rather than derived, before four clients derive it.** Absent
 	 * where nothing has computed it: a bare netlink snapshot. */
 	ncfg_optint_t category; /* ncfg_link_category_t where `has` */
@@ -1011,6 +1015,10 @@ typedef struct ncfg_observed_steerable {
 	char         *address;
 	ncfg_optint_t signal;
 	ncfg_optint_t connected;
+	/* Milliseconds since hostapd last heard from it. A station that roamed
+	 * away stays in hostapd's list until its inactivity timeout, minutes
+	 * later, and this is what tells it from one that is there (10.597). */
+	ncfg_optint_t inactive;
 } ncfg_observed_steerable_t;
 
 typedef struct ncfg_observed_steered {
@@ -1079,6 +1087,8 @@ typedef struct {
 	int           neighbour_reports;
 	/* Whether it was given 802.11n (`ieee80211n`, 10.596). */
 	int           high_throughput;
+	/* And 40 MHz (`ht_capab` naming HT40, 10.597). */
+	int           forty_mhz;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */

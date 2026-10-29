@@ -392,7 +392,7 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
     const char *roaming_key, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why,
     char *err, size_t err_size)
 {
-	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0 };
+	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0, 0, 0 };
 	const char                       *bridge;
 	static const char hex[] = "0123456789abcdef";
 	const char       *band = BAND_24;
@@ -516,6 +516,20 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 		ncfg_hostapd_lines_free(out);
 		ncfg_error_set(err, err_size, "out of memory rendering 802.11n");
 		return 0;
+	}
+	/* 40 MHz where the radio, the band and the channel allow it (10.597),
+	 * and nothing else in `ht_capab`: the direction is the only part of it
+	 * this build reads the radio for. */
+	if (local->high_throughput) {
+		int secondary = ncfg_access_point_secondary(access_point, local->forty_mhz_24,
+		    local->forty_mhz_5, NULL);
+
+		if (secondary &&
+		    !add_line(out, "ht_capab", secondary > 0 ? "[HT40+]" : "[HT40-]", 0)) {
+			ncfg_hostapd_lines_free(out);
+			ncfg_error_set(err, err_size, "out of memory rendering 40 MHz");
+			return 0;
+		}
 	}
 
 	if (access_point->hidden) {

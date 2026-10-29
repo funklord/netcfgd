@@ -744,6 +744,9 @@ static const ncfg_field_t observed_link_fields[] = {
 	    .offset = offsetof(ncfg_observed_link_t, wds) },
 	{ .name = "high_throughput", .kind = NCFG_F_OPT_BOOL,
 	    .offset = offsetof(ncfg_observed_link_t, high_throughput) },
+	{ .name = "forty_mhz", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_link_t, forty_mhz),
+	    .count_offset = offsetof(ncfg_observed_link_t, forty_mhz_count) },
 	{ .name = "category", .kind = NCFG_F_OPT_ENUM, .choices = &link_category_set,
 	    .offset = offsetof(ncfg_observed_link_t, category) },
 	{ .name = "network", .kind = NCFG_F_STR,
@@ -1072,7 +1075,9 @@ static const ncfg_field_t observed_steerable_fields[] = {
 	{ .name = "signal", .kind = NCFG_F_OPT_INT, R_I32,
 	    .offset = offsetof(ncfg_observed_steerable_t, signal) },
 	{ .name = "connected", .kind = NCFG_F_OPT_INT, R_U32,
-	    .offset = offsetof(ncfg_observed_steerable_t, connected) }
+	    .offset = offsetof(ncfg_observed_steerable_t, connected) },
+	{ .name = "inactive", .kind = NCFG_F_OPT_INT, R_U32,
+	    .offset = offsetof(ncfg_observed_steerable_t, inactive) }
 };
 static const ncfg_type_t observed_steerable_type =
     TYPE("steerable station", observed_steerable_fields);
@@ -1139,7 +1144,9 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	{ .name = "neighbour_reports", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_access_point_t, neighbour_reports) },
 	{ .name = "high_throughput", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
-	    .offset = offsetof(ncfg_observed_access_point_t, high_throughput) }
+	    .offset = offsetof(ncfg_observed_access_point_t, high_throughput) },
+	{ .name = "forty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, forty_mhz) }
 };
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);

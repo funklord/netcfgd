@@ -281,6 +281,68 @@ static void warn_empty_allow(ncfg_builder_t *builder, const ncfg_access_point_t 
 	    point->id);
 }
 
+/* Whether the radio has 802.11n, as the observation read it (10.596): the
+ * same answer the executor is handed, so the file and this comparison agree.
+ * -1 where it was not answered, which compares with nothing. */
+static int radio_has_ht(const ncfg_builder_t *builder, const char *device)
+{
+	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, device);
+
+	return link && link->high_throughput.has ? link->high_throughput.value != 0 : -1;
+}
+
+/* Whether the access point is given 40 MHz on this radio (10.597), by the
+ * renderer's own rule and the radio's answer. 0 where the radio has no HT or
+ * was not answered, which the caller has already kept apart. */
+static int radio_gives_forty(const ncfg_builder_t *builder, const ncfg_access_point_t *point,
+    const char *device, const char **why)
+{
+	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, device);
+	int                         in_24 = 0;
+	int                         in_5 = 0;
+	size_t                      at;
+
+	if (why) {
+		*why = NULL;
+	}
+	if (!link || !link->high_throughput.has || !link->high_throughput.value) {
+		return 0;
+	}
+	for (at = 0; at < link->forty_mhz_count; at++) {
+		in_24 |= strcmp(link->forty_mhz[at], "2.4") == 0;
+		in_5 |= strcmp(link->forty_mhz[at], "5") == 0;
+	}
+	return ncfg_access_point_secondary(point, in_24, in_5, why) != 0;
+}
+
+/*
+ * A `width = 40` that cannot be given, said rather than run at 20 MHz in
+ * silence (10.597): the reason is the rule's own sentence. Only where the
+ * radio's answer was read, since "not known" is not a reason to say no.
+ */
+static void warn_width(ncfg_builder_t *builder, const ncfg_access_point_t *point)
+{
+	const ncfg_observed_link_t *link;
+	const char                 *why = NULL;
+
+	if (!point->device || !point->width.has || point->width.value != 40) {
+		return;
+	}
+	link = ncfg_observed_link(builder->observed, point->device);
+	if (!link || !link->high_throughput.has) {
+		return;
+	}
+	if (!link->high_throughput.value) {
+		why = "the radio has no 802.11n";
+	} else if (!radio_gives_forty(builder, point, point->device, &why)) {
+		why = why ? why : "40 MHz cannot be given here";
+	} else {
+		return;
+	}
+	ncfg_plan_warnf(builder->plan, point->device,
+	    "access point `%s` asks for `width = 40` and runs at 20 MHz: %s", point->id, why);
+}
+
 void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 {
 	size_t i;
@@ -369,6 +431,7 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 		warn_no_address(builder, point);
 		warn_empty_allow(builder, point);
 		warn_second_access_point(builder, point);
+		warn_width(builder, point);
 	}
 }
 
@@ -409,16 +472,6 @@ static int restart(ncfg_builder_t *builder, const char *device, const ncfg_reaso
 /* An SSID as the document writes it: lowercase hex, because 802.11 places no
  * encoding requirement on one and a name that is not text still has to reach a
  * reason line. `document.h` has the whole of the reason. */
-/* Whether the radio has 802.11n, as the observation read it (10.596): the
- * same answer the executor is handed, so the file and this comparison agree.
- * -1 where it was not answered, which compares with nothing. */
-static int radio_has_ht(const ncfg_builder_t *builder, const char *device)
-{
-	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, device);
-
-	return link && link->high_throughput.has ? link->high_throughput.value != 0 : -1;
-}
-
 static void ssid_hex(const ncfg_ssid_t *ssid, char *out, size_t out_size)
 {
 	static const char digits[] = "0123456789abcdef";
@@ -594,6 +647,14 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		    radio_has_ht(builder, device) ? "true" : "false");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->high_throughput ? "true" : "false");
+	} else if (radio_has_ht(builder, device) > 0 &&
+	    (started->forty_mhz != 0) != radio_gives_forty(builder, point, device, NULL)) {
+		/* `ht_capab` is read once as well (10.597). Compared only where the
+		 * radio's answer was read, for `ieee80211n`'s reason. */
+		field = "access_point.width";
+		(void)snprintf(desired, sizeof(desired), "%s",
+		    radio_gives_forty(builder, point, device, NULL) ? "40" : "20");
+		(void)snprintf(observed, sizeof(observed), "%s", started->forty_mhz ? "40" : "20");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {
 		/* `ignore_broadcast_ssid` is written only when asked, so its absence
 		 * is "not hidden" rather than "not known" and needs no guard. */

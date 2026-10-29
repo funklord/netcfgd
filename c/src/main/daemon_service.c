@@ -492,13 +492,24 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 	    world->ht_count < (size_t)NCFG_MAIN_METRICS_MAX; at++) {
 		const ncfg_observed_link_t *link = &observed->links[at];
 
-		if (link->high_throughput.has && link->high_throughput.value && link->name &&
-		    strlen(link->name) < sizeof(world->ht_names[0])) {
-			(void)snprintf(world->ht_names[world->ht_count], sizeof(world->ht_names[0]), "%s",
-			    link->name);
-			world->ht[world->ht_count] = world->ht_names[world->ht_count];
-			world->ht_count++;
+		size_t band;
+
+		if (!link->high_throughput.has || !link->high_throughput.value || !link->name ||
+		    strlen(link->name) >= sizeof(world->ht_names[0])) {
+			continue;
 		}
+		(void)snprintf(world->ht_names[world->ht_count], sizeof(world->ht_names[0]), "%s",
+		    link->name);
+		memset(&world->ht[world->ht_count], 0, sizeof(world->ht[0]));
+		world->ht[world->ht_count].iface = world->ht_names[world->ht_count];
+		for (band = 0; band < link->forty_mhz_count; band++) {
+			if (strcmp(link->forty_mhz[band], "2.4") == 0) {
+				world->ht[world->ht_count].forty_mhz_24 = 1;
+			} else if (strcmp(link->forty_mhz[band], "5") == 0) {
+				world->ht[world->ht_count].forty_mhz_5 = 1;
+			}
+		}
+		world->ht_count++;
 	}
 	world->service.high_throughput = world->ht;
 	world->service.high_throughput_count = world->ht_count;
