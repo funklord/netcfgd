@@ -336,6 +336,78 @@ static void a_rule_is_bounded_in_what_it_becomes(void)
 	ncfg_buf_free(&out);
 }
 
+/*
+ * The decoder reads back what the writer wrote (0295 A, 10.592 slice 2c),
+ * without a kernel: a rule message in a transaction is laid out as a rule in a
+ * dump reply is. `tests/live/firewall.sh` does the same against the kernel's
+ * own form; this keeps the pair honest in `make check`, which runs no kernel.
+ */
+static void what_is_written_is_read_back(void)
+{
+	static char         *from[] = { (char *)"192.168.7.9/16" };
+	static char         *mac[] = { (char *)"de:ad:be:*" };
+	static char         *states[] = { (char *)"related", (char *)"established" };
+	static int64_t       port[] = { 22 };
+	ncfg_firewall_rule_t rules[2];
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	int                  read = 0;
+	int                  right = 0;
+
+	memset(rules, 0, sizeof(rules));
+	rules[0].name = (char *)"ssh";
+	rules[0].action = NCFG_FIREWALL_ACCEPT;
+	rules[0].protocol = NCFG_FIREWALL_PROTO_TCP;
+	rules[0].ports = port;
+	rules[0].port_count = 1u;
+	rules[0].from = from;
+	rules[0].from_count = 1u;
+	rules[0].states = states;
+	rules[0].state_count = 2u;
+	rules[1].name = (char *)"vendor";
+	rules[1].action = NCFG_FIREWALL_REJECT;
+	rules[1].protocol = NCFG_FIREWALL_PROTO_ANY;
+	rules[1].interface = (char *)"eth0";
+	rules[1].mac = mac;
+	rules[1].mac_count = 1u;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.rules = rules;
+	firewall.input.rule_count = 2u;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a transaction carrying two rules is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		read++;
+		if (!ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			continue;
+		}
+		if (strcmp(one.name, "ssh") == 0 && one.action == NCFG_FIREWALL_ACCEPT &&
+		    one.protocol == NCFG_FIREWALL_PROTO_TCP && one.has_port && one.port == 22u &&
+		    strcmp(one.from, "192.168.0.0/16") == 0 && one.states == 6u) {
+			right++;
+		}
+		if (strcmp(one.name, "vendor") == 0 && one.action == NCFG_FIREWALL_REJECT &&
+		    strcmp(one.interface, "eth0") == 0 && strcmp(one.mac, "de:ad:be:*") == 0) {
+			right++;
+		}
+	}
+	check(read == 2 && right == 2,
+	    "each rule reads back as written, the address normalised to its network");
+	ncfg_buf_free(&out);
+}
+
 int main(void)
 {
 	char err[NCFG_ERROR_MAX];
@@ -1085,6 +1157,7 @@ int main(void)
 	}
 
 	a_rule_is_bounded_in_what_it_becomes();
+	what_is_written_is_read_back();
 
 	if (failures) {
 		printf("nft: %d check(s) failed\n", failures);

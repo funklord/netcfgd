@@ -361,6 +361,20 @@ int ncfg_nft_build_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t er
 	return built;
 }
 
+int ncfg_nft_build_table_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_buf_t filter;
+	int        built;
+
+	/* The table only, every chain; the reader checks each reply's table and
+	 * chain again rather than trusting the filter. */
+	ncfg_buf_init(&filter, 0);
+	ncfg_wire_attr_put_str(&filter, NFTA_RULE_TABLE, NCFG_NFT_TABLE);
+	built = build(out, NFT_MSG_GETRULE, NLM_F_DUMP, seq, NFPROTO_INET, &filter, err, err_size);
+	ncfg_buf_free(&filter);
+	return built;
+}
+
 /*
  * The kernel's own name for one of these messages, or NULL.
  *
@@ -771,6 +785,41 @@ static void put_address_match(ncfg_buf_t *list, const nft_address_t *address, in
 	put_cmp(list, NFT_CMP_EQ, network, address->length);
 }
 
+/* An address's bytes and prefix, as the text the digest and the decoder share:
+ * the network, and `/N` only where N is short of the family's length. */
+static void format_address(uint8_t nfproto, const uint8_t *bytes, uint32_t prefix, char *out,
+    size_t out_size)
+{
+	char     text[INET6_ADDRSTRLEN];
+	uint32_t full = nfproto == NFPROTO_IPV4 ? 32u : 128u;
+
+	if (!inet_ntop(nfproto == NFPROTO_IPV4 ? AF_INET : AF_INET6, bytes, text, sizeof(text))) {
+		text[0] = '\0';
+	}
+	if (prefix < full) {
+		(void)snprintf(out, out_size, "%s/%u", text, (unsigned)prefix);
+	} else {
+		(void)snprintf(out, out_size, "%s", text);
+	}
+}
+
+/* A document address in that form. One the parser refuses is shown as
+ * written: the builder refuses it before anything is digested. */
+static void normal_address(const char *text, char *out, size_t out_size)
+{
+	nft_address_t address;
+	uint32_t      at;
+
+	if (!parse_address(text, &address, NULL, 0)) {
+		(void)snprintf(out, out_size, "%s", text);
+		return;
+	}
+	for (at = address.prefix; at < address.length * 8u; at++) {
+		address.bytes[at / 8u] = (uint8_t)(address.bytes[at / 8u] & ~(0x80u >> (at % 8u)));
+	}
+	format_address(address.nfproto, address.bytes, address.prefix, out, out_size);
+}
+
 /* The conntrack state bit for one of the document's words, or 0. */
 static uint32_t state_bit(const char *word)
 {
@@ -822,11 +871,20 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	for (at = 0; at < rule->port_count; at++) {
 		ncfg_buf_addf(out, "port %lld\n", (long long)rule->ports[at]);
 	}
+	/* Addresses as the decoder prints them -- network masked, prefix shown
+	 * only where it is short -- so that what is read back digests the same
+	 * as what was written. */
 	for (at = 0; at < rule->from_count; at++) {
-		ncfg_buf_addf(out, "from %s\n", rule->from[at]);
+		char shown[64];
+
+		normal_address(rule->from[at], shown, sizeof(shown));
+		ncfg_buf_addf(out, "from %s\n", shown);
 	}
 	for (at = 0; at < rule->to_count; at++) {
-		ncfg_buf_addf(out, "to %s\n", rule->to[at]);
+		char shown[64];
+
+		normal_address(rule->to[at], shown, sizeof(shown));
+		ncfg_buf_addf(out, "to %s\n", shown);
 	}
 	if (rule->interface) {
 		ncfg_buf_addf(out, "interface %s\n", rule->interface);
@@ -1529,5 +1587,403 @@ int ncfg_nft_rule_uplink(const void *payload, size_t length, char *out, size_t o
 		return 0;
 	}
 	memcpy(out, seen.name, strlen(seen.name) + 1u);
+	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Reading the firewall back (0295 A, 10.592 slice 2c)
+ * ------------------------------------------------------------------------ */
+
+/* What register 1 holds as the expressions are walked. */
+enum { LOADED_NONE, LOADED_META, LOADED_PAYLOAD, LOADED_CT };
+
+typedef struct {
+	int      what;
+	uint32_t key;    /* meta or ct key */
+	uint32_t base;   /* payload */
+	uint32_t offset;
+	uint32_t length;
+	uint8_t  mask[16];
+	size_t   mask_length; /* 0 where nothing was masked */
+	uint8_t  family; /* from `meta nfproto`, for the addresses after it */
+} reading_t;
+
+static int be32_member(const ncfg_wire_attrs_t *area, uint16_t kind, uint32_t *out)
+{
+	ncfg_wire_attr_t attr;
+
+	if (ncfg_wire_attrs_find(area, kind, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	return attr_be32(&attr, out, NULL, 0);
+}
+
+/* The bytes of a nested `NFTA_DATA_VALUE`. */
+static int data_value(const ncfg_wire_attrs_t *area, uint16_t kind, const uint8_t **bytes,
+    size_t *length)
+{
+	ncfg_wire_attr_t  outer;
+	ncfg_wire_attr_t  inner;
+	ncfg_wire_attrs_t nest;
+
+	if (ncfg_wire_attrs_find(area, kind, &outer, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	ncfg_wire_attrs_start(&nest, outer.value, outer.length);
+	if (ncfg_wire_attrs_find(&nest, NFTA_DATA_VALUE, &inner, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	*bytes = inner.value;
+	*length = inner.length;
+	return 1;
+}
+
+/* A mask's prefix length, or -1 where its ones are not all leading. */
+static int prefix_of(const uint8_t *mask, size_t length)
+{
+	size_t bit;
+	int    ones = 0;
+	int    ended = 0;
+
+	for (bit = 0; bit < length * 8u; bit++) {
+		const int set = (mask[bit / 8u] >> (7u - bit % 8u)) & 1;
+
+		if (set && ended) {
+			return -1;
+		}
+		if (set) {
+			ones++;
+		} else {
+			ended = 1;
+		}
+	}
+	return ones;
+}
+
+static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
+    ncfg_nft_kernel_rule_t *out, char *err, size_t err_size)
+{
+	const uint8_t *value = NULL;
+	size_t         length = 0;
+	uint32_t       op = 0;
+
+	if (!be32_member(data, NFTA_CMP_OP, &op) ||
+	    !data_value(data, NFTA_CMP_DATA, &value, &length)) {
+		ncfg_error_set(err, err_size, "a comparison with no operator or no value");
+		return 0;
+	}
+	if (reading->what == LOADED_CT && reading->key == NFT_CT_STATE) {
+		uint32_t bits = 0;
+
+		if (op != NFT_CMP_NEQ || length != 4u || reading->mask_length != 4u) {
+			ncfg_error_set(err, err_size, "a conntrack state test netcfgd does not write");
+			return 0;
+		}
+		memcpy(&bits, reading->mask, sizeof(bits));
+		out->states = 0;
+		if (bits & NF_CT_STATE_BIT(IP_CT_NEW)) {
+			out->states |= 1u;
+		}
+		if (bits & NF_CT_STATE_BIT(IP_CT_ESTABLISHED)) {
+			out->states |= 2u;
+		}
+		if (bits & NF_CT_STATE_BIT(IP_CT_RELATED)) {
+			out->states |= 4u;
+		}
+		if (bits & NF_CT_STATE_INVALID_BIT) {
+			out->states |= 8u;
+		}
+		return 1;
+	}
+	if (op != NFT_CMP_EQ) {
+		ncfg_error_set(err, err_size, "a comparison other than equality, which netcfgd "
+		    "writes only for a conntrack state");
+		return 0;
+	}
+	if (reading->what == LOADED_META) {
+		switch (reading->key) {
+		case NFT_META_NFPROTO:
+			if (length != 1u) {
+				break;
+			}
+			reading->family = value[0];
+			return 1;
+		case NFT_META_L4PROTO:
+			if (length != 1u) {
+				break;
+			}
+			switch (value[0]) {
+			case IPPROTO_TCP:
+				out->protocol = NCFG_FIREWALL_PROTO_TCP;
+				return 1;
+			case IPPROTO_UDP:
+				out->protocol = NCFG_FIREWALL_PROTO_UDP;
+				return 1;
+			case IPPROTO_ICMP:
+				out->protocol = NCFG_FIREWALL_PROTO_ICMP;
+				return 1;
+			case IPPROTO_ICMPV6:
+				out->protocol = NCFG_FIREWALL_PROTO_ICMPV6;
+				return 1;
+			default:
+				break;
+			}
+			break;
+		case NFT_META_IIFNAME:
+		case NFT_META_OIFNAME:
+			if (length == 0u || length > sizeof(out->interface) ||
+			    memchr(value, '\0', length) == NULL) {
+				break;
+			}
+			memcpy(out->interface, value, length);
+			return 1;
+		case NFT_META_IIFTYPE: {
+			uint16_t type = 0;
+
+			if (length != sizeof(type)) {
+				break;
+			}
+			memcpy(&type, value, sizeof(type));
+			if (type == ARPHRD_ETHER) {
+				return 1;
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	} else if (reading->what == LOADED_PAYLOAD) {
+		if (reading->base == NFT_PAYLOAD_TRANSPORT_HEADER && reading->offset == 2u &&
+		    reading->length == 2u && length == 2u && reading->mask_length == 0u) {
+			uint16_t port;
+
+			memcpy(&port, value, sizeof(port));
+			out->has_port = 1;
+			out->port = ntohs(port);
+			return 1;
+		}
+		if (reading->base == NFT_PAYLOAD_NETWORK_HEADER &&
+		    ((reading->length == 4u && reading->family == NFPROTO_IPV4 &&
+		    (reading->offset == 12u || reading->offset == 16u)) ||
+		    (reading->length == 16u && reading->family == NFPROTO_IPV6 &&
+		    (reading->offset == 8u || reading->offset == 24u))) && length == reading->length) {
+			const int source = reading->offset == 12u || reading->offset == 8u;
+			int       prefix = (int)(length * 8u);
+
+			if (reading->mask_length) {
+				prefix = prefix_of(reading->mask, reading->mask_length);
+				if (prefix < 0 || reading->mask_length != length) {
+					ncfg_error_set(err, err_size, "an address mask that is not a prefix");
+					return 0;
+				}
+			}
+			format_address(reading->family, value, (uint32_t)prefix,
+			    source ? out->from : out->to, sizeof(out->from));
+			return 1;
+		}
+		if (reading->base == NFT_PAYLOAD_LL_HEADER && reading->offset == 6u &&
+		    reading->length == 6u && length == 6u) {
+			static const uint8_t oui[6] = { 0xff, 0xff, 0xff, 0, 0, 0 };
+
+			if (reading->mask_length == 0u) {
+				(void)snprintf(out->mac, sizeof(out->mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+				    value[0], value[1], value[2], value[3], value[4], value[5]);
+				return 1;
+			}
+			if (reading->mask_length == 6u && memcmp(reading->mask, oui, 6u) == 0) {
+				(void)snprintf(out->mac, sizeof(out->mac), "%02x:%02x:%02x:*", value[0],
+				    value[1], value[2]);
+				return 1;
+			}
+		}
+	}
+	ncfg_error_set(err, err_size, "a comparison netcfgd does not write");
+	return 0;
+}
+
+static int read_comment(const ncfg_wire_attrs_t *area, ncfg_nft_kernel_rule_t *out)
+{
+	ncfg_wire_attr_t attr;
+	const uint8_t   *at;
+	size_t           left;
+	const char      *digest;
+	char             text[NCFG_NFT_COMMENT_MAX + 1u];
+
+	if (ncfg_wire_attrs_find(area, NFTA_RULE_USERDATA, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	at = attr.value;
+	left = attr.length;
+	while (left >= 2u) {
+		const uint8_t type = at[0];
+		const uint8_t length = at[1];
+
+		if ((size_t)length + 2u > left) {
+			return 0;
+		}
+		if (type == 0u && length > 0u && length <= sizeof(text) && at[2 + length - 1] == '\0') {
+			memcpy(text, at + 2, length);
+			if (strncmp(text, "name=", 5) != 0) {
+				return 0;
+			}
+			digest = strstr(text, " sha256=");
+			if (!digest || (size_t)(digest - (text + 5)) >= sizeof(out->name) ||
+			    strlen(digest + 8) != NCFG_NFT_DIGEST_HEX) {
+				return 0;
+			}
+			memcpy(out->name, text + 5, (size_t)(digest - (text + 5)));
+			out->name[digest - (text + 5)] = '\0';
+			memcpy(out->digest, digest + 8, NCFG_NFT_DIGEST_HEX + 1u);
+			return 1;
+		}
+		at += 2u + length;
+		left -= 2u + (size_t)length;
+	}
+	return 0;
+}
+
+int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
+    ncfg_nft_kernel_rule_t *out, char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t expressions;
+	ncfg_wire_attr_t  attr;
+	ncfg_wire_attr_t  element;
+	reading_t         reading;
+	char              name[NCFG_NFT_NAME_MAX];
+	int               verdict = 0;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "a rule read needs somewhere to go");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	memset(&reading, 0, sizeof(reading));
+	out->protocol = NCFG_FIREWALL_PROTO_ANY;
+	if (!payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	if (((const uint8_t *)payload)[0] != NFPROTO_INET ||
+	    !read_name(&area, NFTA_RULE_TABLE, name, sizeof(name), err, err_size) ||
+	    strcmp(name, NCFG_NFT_TABLE) != 0) {
+		ncfg_error_set(err, err_size, "a rule outside netcfgd's table, which is not read");
+		return 0;
+	}
+	if (!read_name(&area, NFTA_RULE_CHAIN, out->chain, sizeof(out->chain), err, err_size) ||
+	    (strcmp(out->chain, NCFG_NFT_CHAIN_INPUT) != 0 &&
+	    strcmp(out->chain, NCFG_NFT_CHAIN_FORWARD) != 0 &&
+	    strcmp(out->chain, NCFG_NFT_CHAIN_OUTPUT) != 0)) {
+		ncfg_error_set(err, err_size, "a rule outside the three filter chains");
+		return 0;
+	}
+	if (!read_comment(&area, out)) {
+		ncfg_error_set(err, err_size,
+		    "a rule in chain `%s` with no `name=... sha256=...` comment, so not one netcfgd "
+		    "wrote", out->chain);
+		return 0;
+	}
+	if (ncfg_wire_attrs_find(&area, NFTA_RULE_EXPRESSIONS, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		ncfg_error_set(err, err_size, "rule `%s` has no expressions", out->name);
+		return 0;
+	}
+	ncfg_wire_attrs_start(&expressions, attr.value, attr.length);
+	while (ncfg_wire_attrs_next(&expressions, &element, err, err_size) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t expression;
+		ncfg_wire_attrs_t data;
+		ncfg_wire_attr_t  data_attr;
+		char              why[NCFG_ERROR_MAX];
+
+		if (element.kind != NFTA_LIST_ELEM) {
+			continue;
+		}
+		ncfg_wire_attrs_start(&expression, element.value, element.length);
+		if (!read_name(&expression, NFTA_EXPR_NAME, name, sizeof(name), NULL, 0)) {
+			ncfg_error_set(err, err_size, "rule `%s` has an expression with no name",
+			    out->name);
+			return 0;
+		}
+		memset(&data, 0, sizeof(data));
+		if (ncfg_wire_attrs_find(&expression, NFTA_EXPR_DATA, &data_attr, NULL, 0) ==
+		    NCFG_WIRE_OK) {
+			ncfg_wire_attrs_start(&data, data_attr.value, data_attr.length);
+		}
+		if (verdict) {
+			ncfg_error_set(err, err_size, "rule `%s` has an expression after its verdict",
+			    out->name);
+			return 0;
+		}
+		if (strcmp(name, "meta") == 0) {
+			reading.what = LOADED_META;
+			reading.mask_length = 0;
+			(void)be32_member(&data, NFTA_META_KEY, &reading.key);
+		} else if (strcmp(name, "ct") == 0) {
+			reading.what = LOADED_CT;
+			reading.mask_length = 0;
+			(void)be32_member(&data, NFTA_CT_KEY, &reading.key);
+		} else if (strcmp(name, "payload") == 0) {
+			reading.what = LOADED_PAYLOAD;
+			reading.mask_length = 0;
+			(void)be32_member(&data, NFTA_PAYLOAD_BASE, &reading.base);
+			(void)be32_member(&data, NFTA_PAYLOAD_OFFSET, &reading.offset);
+			(void)be32_member(&data, NFTA_PAYLOAD_LEN, &reading.length);
+		} else if (strcmp(name, "bitwise") == 0) {
+			const uint8_t *mask = NULL;
+			size_t         mask_length = 0;
+
+			if (!data_value(&data, NFTA_BITWISE_MASK, &mask, &mask_length) ||
+			    mask_length > sizeof(reading.mask)) {
+				ncfg_error_set(err, err_size, "rule `%s` has a mask netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			memcpy(reading.mask, mask, mask_length);
+			reading.mask_length = mask_length;
+		} else if (strcmp(name, "cmp") == 0) {
+			if (!read_cmp_into(&reading, &data, out, why, sizeof(why))) {
+				ncfg_error_set(err, err_size, "rule `%s`: %s", out->name, why);
+				return 0;
+			}
+			reading.what = LOADED_NONE;
+			reading.mask_length = 0;
+		} else if (strcmp(name, "immediate") == 0) {
+			ncfg_wire_attr_t  outer;
+			ncfg_wire_attrs_t nest;
+			ncfg_wire_attr_t  inner;
+			ncfg_wire_attrs_t verdict_area;
+			uint32_t          code = 0;
+
+			if (ncfg_wire_attrs_find(&data, NFTA_IMMEDIATE_DATA, &outer, NULL, 0) !=
+			    NCFG_WIRE_OK) {
+				ncfg_error_set(err, err_size, "rule `%s` has no verdict", out->name);
+				return 0;
+			}
+			ncfg_wire_attrs_start(&nest, outer.value, outer.length);
+			if (ncfg_wire_attrs_find(&nest, NFTA_DATA_VERDICT, &inner, NULL, 0) !=
+			    NCFG_WIRE_OK) {
+				ncfg_error_set(err, err_size, "rule `%s` has no verdict", out->name);
+				return 0;
+			}
+			ncfg_wire_attrs_start(&verdict_area, inner.value, inner.length);
+			if (!be32_member(&verdict_area, NFTA_VERDICT_CODE, &code) ||
+			    (code != NF_ACCEPT && code != NF_DROP)) {
+				ncfg_error_set(err, err_size, "rule `%s` has a verdict netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			out->action = code == NF_DROP ? NCFG_FIREWALL_DROP : NCFG_FIREWALL_ACCEPT;
+			verdict = 1;
+		} else if (strcmp(name, "reject") == 0) {
+			out->action = NCFG_FIREWALL_REJECT;
+			verdict = 1;
+		} else {
+			ncfg_error_set(err, err_size, "rule `%s` has a `%s` expression, which netcfgd "
+			    "does not write", out->name, name);
+			return 0;
+		}
+	}
+	if (!verdict) {
+		ncfg_error_set(err, err_size, "rule `%s` has no verdict", out->name);
+		return 0;
+	}
 	return 1;
 }

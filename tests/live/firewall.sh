@@ -55,11 +55,11 @@ firewall {
 	input {
 		policy = "drop"
 		accept "established" { state = ["established", "related"] }
-		accept "ssh" { protocol = "tcp"; port = 22; from = ["192.168.0.0/16"] }
+		accept "ssh" { protocol = "tcp"; port = 22; from = ["192.168.7.9/16"] }
 		accept "v6ping" { protocol = "icmpv6" }
 		drop "strangers" { mac = ["de:ad:be:*"] }
 		drop "one-station" { mac = ["02:00:00:00:01:00"] }
-		reject "one" { from = ["2001:db8::1"]; interface = "eth0" }
+		reject "one" { from = ["2001:DB8::1"]; interface = "eth0" }
 	}
 	forward { policy = "drop" }
 	output {
@@ -93,6 +93,39 @@ has "in output, the interface is the leaving one and the address the destination
 	'tcp dport 25 ip daddr 198.51.100.0/24 oifname "wan0" drop comment "name=smtp-out'
 check "nothing is written outside netcfgd's table" \
 	"$(grep -c '^table ' "$work/listed" || true)" "1"
+
+# The decoder (0295 A, 10.592 slice 2c): each kernel rule read back, and the
+# digest recomputed from what was read. For a rule written with one value per
+# match, agreeing digests say the reader and the writer agree.
+"$probe" --read > "$work/read" 2>&1 || true
+read_has() { # $1 what, $2 fixed text a decoded line must hold
+	check "$1" "$(grep -cF -- "$2" "$work/read" || true)" "1"
+}
+read_has "a state set is read back" \
+	"input established accept protocol=0 state=established state=related digest=recomputed"
+read_has "a protocol, a port and a CIDR are read back" \
+	"input ssh accept protocol=1 port=22 from=192.168.0.0/16 digest=recomputed"
+read_has "a station prefix is read back as a prefix" \
+	"input strangers drop protocol=0 mac=de:ad:be:* digest=recomputed"
+read_has "an exact station as an address" \
+	"input one-station drop protocol=0 mac=02:00:00:00:01:00 digest=recomputed"
+read_has "an IPv6 source, an interface and a reject" \
+	"input one reject protocol=0 from=2001:db8::1 interface=eth0 digest=recomputed"
+read_has "and in output, the destination and the leaving interface" \
+	"output smtp-out drop protocol=1 port=25 to=198.51.100.0/24 interface=wan0 digest=recomputed"
+check "every rule the probe wrote is read, and none is refused" \
+	"$(grep -c 'digest=recomputed' "$work/read" || true) $(grep -c '^refused' "$work/read" || true)" \
+	"7 0"
+
+# A rule somebody added inside netcfgd's table by hand is not netcfgd's as
+# written, and the reader says so rather than describing it.
+nft add rule inet netcfgd input tcp dport 8080 accept
+nft add rule inet netcfgd input limit rate 10/second accept comment '"name=sneaky sha256=0000000000000000"'
+"$probe" --read > "$work/read" 2>&1 || true
+check "a hand-added rule with no identity is refused, naming why" \
+	"$(grep -c '^refused .*no .name=... sha256=.... comment' "$work/read" || true)" "1"
+check "and one wearing an identity with an expression netcfgd never writes" \
+	"$(grep -c '^refused rule .sneaky. has a .limit. expression' "$work/read" || true)" "1"
 
 # A replacement: the table is there, and a smaller ruleset takes its place.
 cat > "$work/netcfgd.conf" <<'CONF'

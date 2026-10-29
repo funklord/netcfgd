@@ -314,9 +314,52 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 int ncfg_nft_writes_only_our_table(const void *bytes, size_t length, char *err,
     size_t err_size);
 
+/* Every rule in netcfgd's table, in every chain: what the firewall's reader
+ * walks (0295 A). */
+int ncfg_nft_build_table_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * Reading replies
  * ------------------------------------------------------------------------ */
+
+/*
+ * One kernel rule of the firewall, read back (0295 A, 10.592 slice 2c).
+ *
+ * Every match single-valued, because that is what one kernel rule holds; a
+ * written rule with several values is several of these sharing a name, and
+ * putting them back together is the observer's. Addresses are in the form
+ * `ncfg_nft_firewall_rule_text` uses -- the network masked, the prefix
+ * written only where it is short of the family's length -- so a digest
+ * recomputed from this agrees with the one netcfgd wrote.
+ */
+typedef struct {
+	char     chain[NCFG_NFT_NAME_MAX];
+	char     name[NCFG_NFT_COMMENT_MAX + 1u];
+	char     digest[NCFG_NFT_DIGEST_HEX + 1u];
+	int      action;   /* ncfg_firewall_action_t */
+	int      protocol; /* ncfg_firewall_protocol_t */
+	int      has_port;
+	uint16_t port;
+	char     from[64]; /* "" where the rule matches no source address */
+	char     to[64];
+	char     interface[NCFG_NFT_IFNAME_MAX];
+	/* Conntrack states as bits: new, established, related, invalid, in the
+	 * language's order -- bit 0 is `new`. */
+	unsigned states;
+	char     mac[NCFG_STATION_ADDRESS_SIZE];
+} ncfg_nft_kernel_rule_t;
+
+/*
+ * Read one entry of a rule dump as a firewall rule netcfgd wrote.
+ *
+ * **Refused, not guessed at**: a rule from another table, from the NAT chain,
+ * with an expression or a comparison netcfgd does not write, or with no
+ * `name=... sha256=...` comment. A refusal says which, because a rule inside
+ * netcfgd's table that is not as netcfgd writes rules is somebody's hand edit,
+ * reported as such and replaced on the next apply.
+ */
+int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
+    ncfg_nft_kernel_rule_t *out, char *err, size_t err_size);
 
 /* One entry of a table dump. */
 int ncfg_nft_table_read(const void *payload, size_t length, ncfg_nft_table_t *out,

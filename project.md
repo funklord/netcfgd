@@ -12646,7 +12646,16 @@ works on an accept as well as a drop.
    rules is refused with the count. Chosen over nftables' anonymous sets,
    which are compact and native but need interval sets -- its most intricate
    encoding -- for every CIDR and mask, and a decoder for them; the language
-   and the identity would not change if sets replaced it. *2c*: the decoder. The original plan, for the record:
+   and the identity would not change if sets replaced it. *2c done*:
+   `ncfg_nft_firewall_rule_read` decodes one kernel rule -- every
+   expression layer one writes, its comment's name and digest -- and refuses
+   anything else by name: a rule with no identity, or one wearing an
+   identity with an expression netcfgd never writes (`limit`, measured with
+   a hand-added rule). The digest's text normalises addresses as the decoder
+   prints them, because the kernel holds `192.168.7.9/16` as
+   `192.168.0.0/16`; with that, the digest recomputed from every
+   single-valued rule read back equals the one written. Regrouping a written
+   rule's several kernel rules by name is the observer's, in slice 3. The original plan, for the record:
    the three filter chains and every rule
    expression layer one writes -- protocol, ports, addresses, interface,
    state, `ether saddr` with its mask, the verdict -- each rule carrying B's
