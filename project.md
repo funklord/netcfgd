@@ -12597,45 +12597,72 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.591 Wanted, later: a host list manager
+## 10.591 A host list manager: wanted, and how it stores what it sees
 
-**Asked for by the copyright holder 2026-10-29, explicitly deferred**: "a host
-list manager, so we can have seen devices, whitelists, blacklists of different
-sorts, preferably intermixable with a limited set of wildcard rules, but
-later." Nothing is built. This entry is so the request is findable when it is
-picked up, with what already exists beside it.
+**Asked for by the copyright holder 2026-10-29**: "a host list manager, so we
+can have seen devices, whitelists, blacklists of different sorts, preferably
+intermixable with a limited set of wildcard rules". The "later" in that request
+was about **the wildcards, not the manager**, and the holder added that the
+wildcards may land with it. Nothing is built yet.
 
-**What it is**, as asked: named lists of hosts that other blocks refer to, of
-three kinds -- hosts *seen* (observed, not written), and allow and deny lists
-written by an operator -- that can be combined, with a small set of wildcard
-forms rather than a pattern language.
+**What it is**: named lists of hosts that other blocks refer to, of three
+kinds -- hosts *seen* (observed, not written), and allow and deny lists an
+operator writes -- that can be combined, with a small set of wildcard forms
+rather than a pattern language.
 
-**Footholds in the tree today**, none of which is a list another block can
-name:
+### Decided by the holder, 2026-10-29
+
+- **Wildcards are expanded where a consumer needs it.** hostapd takes exact
+  MACs, so a wildcard is resolved against what has been seen into the
+  concrete list that consumer can hold.
+- **Seen hosts, leases and the like are stored persistently, per host.** Not
+  disposable `/run` state, and not config under `/etc` either: they are
+  observations, kept keyed by the host that made them.
+- **That data is distributed the normal way, because this is a fuzznet-based
+  project.** Storage and every operation across the network goes through
+  fuzznet's generic calls, not a protocol of netcfgd's own -- the scope
+  decision 10.567 already records ("every project using fuzznet uses
+  fuzznet's high-level abstractions").
+- **Retention is a built-in rule engine that netcfgd uses**, rather than one
+  netcfgd writes. How long a host keeps what it saw is a rule set, not code
+  here.
+
+### What the tree already has
 
 - `access_point { access_control { allow | deny = [...] } }` -- exact MAC
   addresses, inline, one access point at a time
   ([0039](doc/decision/0039-a-station-list-is-one-list.md)).
-- `ap_stations` on the socket -- the stations an access point is holding
-  now, which is one source of *seen*.
+- `ap_stations` on the socket -- the stations an access point holds now, one
+  source of *seen*; the leases netcfgd's DHCP server hands out are another.
 - The firewall model (10.563, [0283](doc/decision/0283-firewall-and-queuing-are-in-scope.md))
   -- address-keyed rules, the other likely consumer.
-- Leases netcfgd's DHCP server hands out, the other source of *seen*.
 
-**The constraint to design against is 0039, and it does not forbid the
-feature.** 0039 refuses `allow` and `deny` on one access point together,
-because hostapd holds exactly one list and a precedence rule would let a deny
-list silently do nothing. Intermixable lists are then a compile-time
-operation: the lists and their wildcards are resolved into the one concrete
-list each consumer can hold, and `ncfg plan` shows the resolved list, so the
-precedence is visible rather than silent. A wildcard hostapd cannot express (it
-takes exact MACs) has to be expanded against *seen* or refused, and which of
-those is the first open question.
+None of these is a list another block can name.
 
-**Open, and the holder's when this is picked up**: which wildcard forms (an
-OUI prefix, a mask, a name pattern); whether *seen* is persisted, which would
-put observed data under `/etc` or a new state file and touches constraints 1
-and 2; and whether lists are per machine or belong to the site model (0271).
+**0039 constrains the output, not the feature.** It refuses `allow` and `deny`
+on one access point together, because hostapd holds one list and a precedence
+rule would let a deny list silently do nothing. Combinable lists are therefore
+resolved at compile time into the one list each consumer holds, and `ncfg
+plan` shows the resolved list, so the precedence is visible.
+
+### What it needs from fuzznet, measured 2026-10-29 at fuzznet `0f33b17`
+
+**fuzznet's retention engine is for logs today.** `log/retain.h` is the rule
+engine -- prune and keep rules by `age`, `size` or `count`, selecting by
+program, host, machine, level, subsystem and text, set per host and
+estate-wide by a root (its sections 475 and 476). Holdings retention (its
+section 152) is a different thing: a per-host tri-state saying whether a host
+keeps a catalogue item. **Neither covers records such as seen hosts or
+leases.** Whether the log engine generalises to records, or records get an
+engine of their own shape, is fuzznet's design; netcfgd brings the caller.
+Signalled to fuzznet in its inbox, `20261029T1119Z`.
+
+### Still open
+
+- Which wildcard forms: an OUI prefix, a mask, a name pattern.
+- Whether the lists themselves are per host or estate-wide. The data is per
+  host by the decision above; a list written once for every access point in a
+  site is the site model's question (0271).
 
 ## 10.590 The tray joins a saved network, which is the whole interaction it was for
 
