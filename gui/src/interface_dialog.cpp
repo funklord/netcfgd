@@ -295,6 +295,42 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	nat->setObjectName(QStringLiteral("iface_nat"));
 	form->addRow(QString(), nat);
 
+	/* **The router's other half, beside forwarding and NAT** (0297). It serves
+	 * the network of this interface's static IPv4 address, so it needs one,
+	 * which the compiler says when it is missing. */
+	dhcp_server = new QCheckBox(QStringLiteral("serve DHCP to the hosts behind it"), this);
+	dhcp_server->setObjectName(QStringLiteral("iface_dhcp_server"));
+	form->addRow(QString(), dhcp_server);
+
+	dhcp_range = new QLineEdit(this);
+	dhcp_range->setObjectName(QStringLiteral("iface_dhcp_range"));
+	dhcp_range->setPlaceholderText(QStringLiteral("default: the 100th host to the 249th"));
+	form->addRow(QStringLiteral("range"), dhcp_range);
+
+	dhcp_lease = new QSpinBox(this);
+	dhcp_lease->setObjectName(QStringLiteral("iface_dhcp_lease"));
+	dhcp_lease->setRange(0, 604800);
+	dhcp_lease->setSuffix(QStringLiteral(" s"));
+	dhcp_lease->setSpecialValueText(QStringLiteral("default (12 hours)"));
+	form->addRow(QStringLiteral("lease"), dhcp_lease);
+
+	dhcp_dns = new QLineEdit(this);
+	dhcp_dns->setObjectName(QStringLiteral("iface_dhcp_dns"));
+	/* Never guessed (0297): the router's own address answers only if
+	 * something on it resolves, so an empty field offers none and the plan
+	 * says so. */
+	dhcp_dns->setPlaceholderText(QStringLiteral("DNS servers to offer, separated by spaces "
+	            "-- none if empty"));
+	form->addRow(QStringLiteral("offer DNS"), dhcp_dns);
+
+	const auto serving = [this](bool on) {
+		dhcp_range->setEnabled(on);
+		dhcp_lease->setEnabled(on);
+		dhcp_dns->setEnabled(on);
+	};
+	connect(dhcp_server, &QCheckBox::toggled, this, serving);
+	serving(false);
+
 	/* **Every program netcfgd runs for this interface.** A hook belongs to the
 	 * interface whose lifecycle it follows, and the drop-in this form writes
 	 * owns that block whole -- so this is where they can be edited at all. */
@@ -419,6 +455,10 @@ void ncfg_interface_dialog::load_existing()
 	enabled->setChecked(existing.enabled);
 	forwarding->setChecked(existing.forwarding);
 	nat->setChecked(existing.nat);
+	dhcp_server->setChecked(existing.dhcp_server);
+	dhcp_range->setText(existing.dhcp_range);
+	dhcp_lease->setValue(existing.dhcp_lease > 0 ? existing.dhcp_lease : 0);
+	dhcp_dns->setText(existing.dhcp_dns);
 
 	if (!existing.probe_command.isEmpty()) {
 		const int known = detection->findData(existing.probe_command);
@@ -899,6 +939,26 @@ QString ncfg_interface_dialog::block_text() const
 	if (nat->isChecked()) {
 		body << QStringLiteral("\tnat = true");
 	}
+	if (dhcp_server->isChecked()) {
+		QStringList served;
+		if (!dhcp_range->text().trimmed().isEmpty()) {
+			served << QStringLiteral("\t\trange = \"%1\"").arg(dhcp_range->text().trimmed());
+		}
+		if (dhcp_lease->value() > 0) {
+			served << QStringLiteral("\t\tlease = %1").arg(dhcp_lease->value());
+		}
+		QStringList offered;
+		const QStringList each = dhcp_dns->text().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+		for (const QString &one : each) {
+			offered << QStringLiteral("\"%1\"").arg(one);
+		}
+		if (!offered.isEmpty()) {
+			served << QStringLiteral("\t\tdns = [%1]").arg(offered.join(QStringLiteral(", ")));
+		}
+		body << QStringLiteral("\tdhcp_server {");
+		body << served;
+		body << QStringLiteral("\t}");
+	}
 
 	const QString how = detection->currentData().toString();
 	if (!how.isEmpty()) {
@@ -959,7 +1019,7 @@ QString ncfg_interface_dialog::block_text() const
 void ncfg_interface_dialog::submit()
 {
 	const QLineEdit *values[] = { source_address, dns_servers, dns_search, dns_domains,
-		probe_command, probe_args };
+		probe_command, probe_args, dhcp_range, dhcp_dns };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "

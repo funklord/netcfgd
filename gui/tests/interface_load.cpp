@@ -65,8 +65,12 @@ static QString text_of(const QWidget *view, const char *name)
 	return edit ? edit->text() : QStringLiteral("<missing>");
 }
 
-/* Start a daemon over `body`, and hand back its socket. */
-static QString start(QProcess *daemon, const QString &work, const QString &body)
+/* Start a daemon over `body`, and hand back its socket. `drop_in`, where
+ * given, is `conf.d/interface-eth0.conf`: the file the interface dialog owns
+ * and replaces, which is where an interface it edits lives -- one declared in
+ * `netcfgd.conf` instead is a duplicate its save cannot write (10.608). */
+static QString start(QProcess *daemon, const QString &work, const QString &body,
+    const QString &drop_in = QString())
 {
 	const QString etc = work + QStringLiteral("/etc");
 	const QString run = work + QStringLiteral("/run");
@@ -81,6 +85,15 @@ static QString start(QProcess *daemon, const QString &work, const QString &body)
 	}
 	conf.write(body.toUtf8());
 	conf.close();
+	if (!drop_in.isEmpty()) {
+		QDir().mkpath(etc + QStringLiteral("/conf.d"));
+		QFile owned(etc + QStringLiteral("/conf.d/interface-eth0.conf"));
+		if (!owned.open(QIODevice::WriteOnly)) {
+			return QString();
+		}
+		owned.write(drop_in.toUtf8());
+		owned.close();
+	}
 
 	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
 	environment.insert(QStringLiteral("NCFG_CONFIG_DIR"), etc);
@@ -118,10 +131,13 @@ int main(int argc, char **argv)
 	{
 		QTemporaryDir work;
 		QProcess daemon;
+		/* `admin` open, so the save is a save: with it at `root` the dialog
+		 * was refused for permission, and "saveable" could only mean "not
+		 * refused for an unmodelled key" (10.608). */
 		const QString socket = start(&daemon, work.path(),
-		    QStringLiteral("global { control { observe = \"any\" } }\n"
-		                   "device eth0 { kind = \"physical\" }\n"
-		                   "interface eth0 {\n"
+		    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+		                   "device eth0 { kind = \"physical\" }\n"),
+		    QStringLiteral("interface eth0 {\n"
 		                   "\tconfig = [\"dhcp\", \"192.0.2.10/24\"]\n"
 		                   "\troutes = [\"default via 192.0.2.1\", "
 		                   "\"10.9.0.0/24 via 192.0.2.9\"]\n"
@@ -131,6 +147,8 @@ int main(int argc, char **argv)
 		                   "\tpreference = 50\n"
 		                   "\tforwarding = true\n"
 		                   "\tnat = true\n"
+		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
+		                   "dns = [\"192.0.2.53\"] }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the daemon never bound its socket\n");
@@ -199,6 +217,17 @@ int main(int argc, char **argv)
 		check(forwarding && forwarding->isChecked() ? QStringLiteral("yes")
 		                                           : QStringLiteral("no"),
 		    QStringLiteral("yes"), "forwarding is loaded");
+		/* A DHCP server, a field since 10.608 rather than a refusal. */
+		auto *serving = widget<QCheckBox>(&dialog, "iface_dhcp_server");
+		auto *lease = widget<QSpinBox>(&dialog, "iface_dhcp_lease");
+		check(serving && serving->isChecked() ? QStringLiteral("yes") : QStringLiteral("no"),
+		    QStringLiteral("yes"), "a DHCP server is loaded");
+		check(text_of(&dialog, "iface_dhcp_range"), QStringLiteral("192.0.2.50-192.0.2.60"),
+		    "  with its range");
+		check(QString::number(lease ? lease->value() : -1), QStringLiteral("3600"),
+		    "  its lease");
+		check(text_of(&dialog, "iface_dhcp_dns"), QStringLiteral("192.0.2.53"),
+		    "  and the DNS server it offers");
 
 		/* **And it can be saved**, which is the half that was broken for
 		 * every interface netcfgd writes itself. The refusal used to fire on
@@ -213,6 +242,31 @@ int main(int argc, char **argv)
 		                                                    : QStringLiteral("accepted"),
 		    QStringLiteral("accepted"),
 		    "and a block whose every key has a field is saveable");
+		/* Read back through the daemon, so a DHCP server the dialog wrote and
+		 * the compiler refused fails here rather than passing on a note. */
+		ncfg_interface_config saved;
+		check(connection.interface_config(QStringLiteral("eth0"), &saved, &error) &&
+		        saved.dhcp_server && saved.dhcp_range == QStringLiteral("192.0.2.50-192.0.2.60") &&
+		        saved.dhcp_lease == 3600 && saved.dhcp_dns == QStringLiteral("192.0.2.53")
+		        ? QStringLiteral("kept")
+		        : QStringLiteral("%1 %2 %3 %4").arg(error, saved.dhcp_range)
+		              .arg(saved.dhcp_lease).arg(saved.dhcp_dns),
+		    QStringLiteral("kept"), "  and the DHCP server survives the save");
+		/* **Through the dialog's own file**, or the reread above would pass on
+		 * the hand-written one it replaces -- which already says all three, so
+		 * the header the dialog writes is what proves the save happened. */
+		QFile written(work.path() + QStringLiteral("/etc/conf.d/interface-eth0.conf"));
+		const QString wrote = written.open(QIODevice::ReadOnly)
+		    ? QString::fromUtf8(written.readAll())
+		    : QStringLiteral("<no file>");
+		check(wrote.startsWith(QStringLiteral("# Written by netcfgd's gui")) &&
+		        wrote.contains(QStringLiteral("\tdhcp_server {")) &&
+		        wrote.contains(QStringLiteral("range = \"192.0.2.50-192.0.2.60\"")) &&
+		        wrote.contains(QStringLiteral("lease = 3600")) &&
+		        wrote.contains(QStringLiteral("dns = [\"192.0.2.53\"]"))
+		        ? QStringLiteral("written")
+		        : wrote,
+		    QStringLiteral("written"), "  written by the dialog, all three of its fields");
 
 		daemon.kill();
 		daemon.waitForFinished(2000);
@@ -237,7 +291,8 @@ int main(int argc, char **argv)
 		                   "interface eth0 {\n"
 		                   "\tconfig = \"192.0.2.10/24\"\n"
 		                   "\tipv6_token = \"::5\"\n"
-		                   "\tdhcp_server { dns = [\"192.0.2.10\"] }\n"
+		                   "\tdhcp_server { host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
+		                   "address = \"192.0.2.20\" } }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -269,10 +324,10 @@ int main(int argc, char **argv)
 		        ? QStringLiteral("refused")
 		        : said,
 		    QStringLiteral("refused"), "saving over an unmodelled key is refused");
-		/* A DHCP server, which joined the model in 0297 and this list only in
-		 * 10.606: until then Save deleted it. */
-		check(said.contains(QStringLiteral("dhcp_server")) ? QStringLiteral("named") : said,
-		    QStringLiteral("named"), "  naming a DHCP server among them");
+		/* A DHCP server's reservations, which the form has no table for: the
+		 * server is a field since 10.608, and what it reserves is refused. */
+		check(said.contains(QStringLiteral("reservations")) ? QStringLiteral("named") : said,
+		    QStringLiteral("named"), "  naming a DHCP server's reservations among them");
 
 		daemon.kill();
 		daemon.waitForFinished(2000);

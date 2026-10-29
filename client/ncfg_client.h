@@ -1327,6 +1327,14 @@ typedef struct {
 	char *probe_args;
 	int   probe_interval;
 	int   probe_timeout;
+	/* A DHCP server on it (0297, project.md 10.608): `dhcp_range` as the
+	 * language writes it, "A-B", or "" for the default; `dhcp_lease` -1 for
+	 * the default; `dhcp_dns` space-joined. Reservations are not carried and
+	 * are named in `unmodelled`. */
+	int   dhcp_server;
+	char *dhcp_range;
+	int   dhcp_lease;
+	char *dhcp_dns;
 	/*
 	 * What the fields above cannot express, joined for a message.
 	 *

@@ -2761,6 +2761,8 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->on_drift);
 	free(config->probe_command);
 	free(config->probe_args);
+	free(config->dhcp_range);
+	free(config->dhcp_dns);
 	free(config->unmodelled);
 	memset(config, 0, sizeof(*config));
 }
@@ -3796,10 +3798,47 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	 * generated wifi block reported two unrepresentable keys, and the editor
 	 * refused to open it for editing at all. An empty list is not content.
 	 */
-	/* `dhcp_server` joined late (10.606): added to the model in 0297 and not
-	 * here, so the interface dialog would have deleted a DHCP server. */
-	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token",
-		"dhcp_server" };
+	/*
+	 * A DHCP server, carried since 10.608 but for its reservations. It joined
+	 * this list late (10.606) -- added to the model in 0297 and not here, so
+	 * the interface dialog would have deleted it -- and left it again when
+	 * the dialog gained its range, lease and DNS.
+	 */
+	uint32_t server = ncfg_json_member(doc, found, "dhcp_server");
+	out->dhcp_lease = -1;
+	if (ncfg_json_type(doc, server) == NCFG_JSON_OBJECT) {
+		char *start = member_text(doc, server, "range_start");
+		char *end = member_text(doc, server, "range_end");
+
+		out->dhcp_server = 1;
+		out->dhcp_lease = (int)ncfg_json_int(doc, ncfg_json_member(doc, server, "lease"), -1);
+		out->dhcp_dns = joined_words(doc, ncfg_json_member(doc, server, "dns"));
+		if (start && end && *start && *end) {
+			size_t length = strlen(start) + strlen(end) + 2;
+
+			out->dhcp_range = malloc(length);
+			if (out->dhcp_range) {
+				snprintf(out->dhcp_range, length, "%s-%s", start, end);
+			}
+		}
+		free(start);
+		free(end);
+		if (ncfg_json_count(doc, ncfg_json_member(doc, server, "hosts"))) {
+			note_unmodelled(&out->unmodelled, "dhcp_server (its reservations)");
+		}
+	}
+	if (!out->dhcp_range) {
+		out->dhcp_range = dup_string("");
+	}
+	if (!out->dhcp_dns) {
+		out->dhcp_dns = dup_string("");
+	}
+	if (!out->dhcp_range || !out->dhcp_dns) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token" };
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
 		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
 			note_unmodelled(&out->unmodelled, beyond[i]);

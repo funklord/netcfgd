@@ -12597,6 +12597,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.608 The interface dialog serves DHCP
+
+A `/go` run 2026-10-30. 10.606 put `dhcp_server` on the interface dialog's
+refusal list, which was correct and left a router's LAN interface
+uneditable in the GUI at all. It is a field now, beside forwarding and NAT:
+a box to serve DHCP, the range (empty for the 100th to the 249th host), the
+lease (0 for 12 hours) and the DNS servers to offer (empty offers none, as
+0297 says). Reservations have no table here, and an interface whose server
+reserves hosts is still refused, naming `dhcp_server (its reservations)`.
+
+The client reads the range back as the language writes it, `A-B`, from the
+document's `range_start` and `range_end`, so the field round-trips.
+
+**And `interface_load`'s "saveable" check never saved.** Its fixture opened
+`admin` to `root` only, so Save was refused for permission and the check --
+that the note did not say "would delete" -- passed on the refusal. With
+`admin` open it then failed for a second reason: the fixture declared `eth0`
+in `netcfgd.conf`, and the dialog's `interface-eth0` drop-in is a duplicate
+the loader refuses. The fixture's interface lives in that drop-in now, which
+is where an interface the dialog edits lives, and the probe checks the file
+it wrote -- by its header, since the hand-written file already said all
+three DHCP values -- and that the daemon reads the server back.
+
+- `interface_load`: the server, range, lease and DNS are loaded; Save writes
+  the dialog's own file with all three and the daemon compiles it; a server
+  with a reservation is refused naming the reservations.
+- `gui_wifi.sh`: all 14 probes pass.
+
 ## 10.607 The access point dialog carries width, reports, steering and wds
 
 A `/go` run 2026-10-30, the end state 10.606 named: refusing made the

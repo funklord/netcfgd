@@ -405,6 +405,12 @@ struct ncfg_interface_config {
 	QString probe_args;
 	int     probe_interval = 0;
 	int     probe_timeout = 0;
+	/* A DHCP server on it (10.608): `dhcp_range` "A-B" or empty for the
+	 * default, `dhcp_lease` -1 for the default, `dhcp_dns` space-joined. */
+	bool    dhcp_server = false;
+	QString dhcp_range;
+	int     dhcp_lease = -1;
+	QString dhcp_dns;
 	QString unmodelled;
 };
 

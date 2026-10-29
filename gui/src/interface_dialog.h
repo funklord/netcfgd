@@ -155,6 +155,12 @@ private:
 	QCheckBox   *enabled;
 	QCheckBox   *forwarding;
 	QCheckBox   *nat;
+	/* A DHCP server for the hosts behind it (10.608): on, the range, the
+	 * lease and the DNS servers offered. Reservations have no field. */
+	QCheckBox   *dhcp_server;
+	QLineEdit   *dhcp_range;
+	QSpinBox    *dhcp_lease;
+	QLineEdit   *dhcp_dns;
 	QListWidget *hooks;
 	QPushButton *hook_add;
 	QPushButton *hook_change;
