@@ -31,16 +31,45 @@ RESTCONF and a network-wide scope -- one wireless network across forty access
 points -- is part of the language rather than a script around it. It is also
 meant to fit the device class it was designed for, an OpenWrt-sized router,
 with `ncfg plan` surviving into the smallest build. **Not there yet**, said
-once: fleet management and RESTCONF come last; the interfaces are not frozen; and nothing here has
-been released or proven on real hardware for long -- [project.md](project.md)
-section 10 tracks exactly what has, and is worth reading before deploying this
-anywhere you care about.
+once: the network-wide half -- keeping one configuration consistent across
+many machines and applying a change on all of them at once -- waits on
+fuzznet's record storage; fleet management over RESTCONF comes last; the
+interfaces are not frozen; and nothing here has been released or proven on
+real hardware for long. [project.md](project.md) section 10 tracks exactly
+what has, and is worth reading before deploying this anywhere you care
+about.
 
 The programs that do this job today are **NetworkManager**, the desktop
 default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
 **netifrc** on Debian and Gentoo; **netifd** on OpenWrt; and **ConnMan** and
 **iwd** on embedded and wifi-only systems. What netcfgd does that they do not:
 
+- **It describes a network, not one machine.** Every one of those programs
+  configures the host it runs on. NetworkManager's connections are that
+  host's alone, and a site of many machines is configured by copying files
+  between them or by wrapping a tool such as Ansible around it. netcfgd's
+  language is written for the network: every setting has a scope --
+  host-private (which radio this box uses), host, group (a zone's routing
+  policy) or estate (one wireless network across forty access points, the
+  host lists those access points share, the key they derive fast-roaming keys
+  from) -- so one configuration describes a site and each machine takes its
+  part, and a value netcfgd must not set is locked rather than fought over.
+  The configuration is designed to be kept consistent across the network
+  through fuzznet, and a change that has to land everywhere at once -- a
+  renumbering, where half a network moved is a network split in two -- to be
+  applied on every node at the same moment rather than host by host, with each
+  rule's standing showing which machine could not apply it.
+- **It configures the router as fully as the laptop.** NetworkManager's
+  scope is the client: its access point is a hotspot that shares one
+  connection. netcfgd configures the box at the other end with the same
+  language and the same plan -- access points with station allow and deny
+  lists that name shared host lists and manufacturer prefixes, fast roaming
+  between access points (802.11r, by FT-PSK or FT-SAE), 802.11s mesh,
+  four-address repeaters, NAT, a firewall of named rules in netcfgd's own
+  nftables table that can match a sending station by address, prefix or host
+  list, router advertisements, a delegated prefix subnetted onto the
+  interfaces behind it, VLAN-aware bridges, bonds, policy routing and traffic
+  shaping -- on the OpenWrt-sized box it was designed for.
 - **It shows the change before making it.** `ncfg plan` lists every action in
   order -- add this address, start that client, deny this station -- each
   with the configured value and the observed one that differ. `ncfg explain`
@@ -63,16 +92,12 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   speaking netlink directly, and it ships service files for systemd, OpenRC,
   sysvinit and OpenWrt's procd. NetworkManager and ConnMan need D-Bus;
   systemd-networkd needs systemd.
-- **One language covers the whole network.** Wired links and 802.1X, wifi as a
-  station and as an access point -- with fast roaming between access points,
-  802.11s mesh, four-address repeaters, and station allow and deny lists that
-  can name shared host lists and manufacturer prefixes -- WireGuard, OpenVPN,
-  PPPoE, IP tunnels, bridges, bonds and VLANs, LTE modems with SIM fallback,
-  Bluetooth networking, scoped DNS, routing rules, NAT and traffic shaping,
-  and a host firewall of named rules in netcfgd's own nftables table -- that
-  can match a sending station by address, prefix or shared host list.
-  systemd-networkd configures no wireless authentication at all and leaves it
-  to a separate supplicant with a configuration of its own.
+- **One language for all of it.** Wired links and 802.1X, wifi as a station
+  across several saved networks, WireGuard, OpenVPN, PPPoE, IP tunnels, LTE
+  modems with SIM fallback, Bluetooth networking and scoped DNS, in the same
+  language and the same plan as the router half above. systemd-networkd
+  configures no wireless authentication at all and leaves it to a separate
+  supplicant with a configuration of its own.
 - **It chooses an uplink by asking, not by carrier.** A cable plugged into a
   switch that has lost its own uplink has carrier and goes nowhere; a probe
   script per interface decides whether a link is usable, and a failing one
@@ -251,6 +276,35 @@ rules** by source, destination, input and output interface, fwmark and mask,
 suppressed prefix length and L3 master, resolving to a table or to blackhole,
 unreachable or prohibit; **qdisc** and ingress bandwidth per interface; **NAT**
 and **IP forwarding** per interface; router advertisement via `radvd`.
+
+## Firewall
+
+Named rules in three chains -- `input`, `forward`, `output` -- each with a
+policy, in netcfgd's own nftables table, so nothing another program writes is
+touched:
+
+```
+host_list "banned" { mac = ["de:ad:be:*", "02:00:00:00:00:09"] }
+firewall {
+	input {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "ssh" { protocol = "tcp"; port = 22; from = ["192.168.0.0/16"] }
+		drop "strangers" { mac = ["@host_list:banned"] }
+	}
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+```
+
+A rule matches protocol, ports, source and destination addresses of either
+family, the interface, the connection state and the sending station; several
+values in one match are one kernel rule per combination. `ncfg plan` shows the
+change, and `ncfg apply` replaces the whole table in one transaction, so all
+the rules land or none do. Each rule carries its name and a digest in its
+nftables comment, `ncfg status` lists what is installed, and a rule somebody
+added inside netcfgd's table by hand is named there and replaced. Another
+table filtering at the same hooks is named in the plan and left alone.
 
 ## Profiles
 
