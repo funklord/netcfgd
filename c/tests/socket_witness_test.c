@@ -515,6 +515,20 @@ static void the_stations(void)
 	if (!access_point) {
 		return;
 	}
+	/* Two leases from netcfgd's DHCP server (10.602), never expiring so the
+	 * witness does not depend on the clock: one with a plain host name, one
+	 * whose name is not, which carries its address and no name. */
+	{
+		char directory[600];
+		char leases[700];
+
+		(void)snprintf(directory, sizeof(directory), "%s/dhcp-server", run_dir);
+		(void)snprintf(leases, sizeof(leases), "%s/br0.leases", directory);
+		testdir_mkdirp(directory);
+		(void)testdir_write(leases,
+		    "0 00:11:22:33:44:55 192.168.4.120 laptop 01:00:11:22:33:44:55\n"
+		    "0 66:77:88:99:aa:bb 192.168.4.121 <script> *\n", 107u);
+	}
 	ncfg_buf_init(&out, 0);
 	one("the stations",
 	    ncfg_wifi_ap_stations(&where, access_point, "wlan0", &out, err, sizeof(err)), &out,

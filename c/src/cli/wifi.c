@@ -207,9 +207,17 @@ void ncfg_cli_print_stations(const ncfg_proto_stations_t *report)
 	char     access_point[NCFG_CLI_TEXT_MAX];
 	size_t   at;
 	unsigned anomalies = 0;
+	int      leased = 0;
 
 	if (!report) {
 		return;
+	}
+	/* The name and address columns only where netcfgd's DHCP server leased
+	 * to somebody here (10.602), so a table of stations it serves nothing to
+	 * reads as it always has. */
+	for (at = 0; at < report->station_count; at++) {
+		leased |= ncfg_proto_str_present(report->stations[at].hostname) ||
+		    ncfg_proto_str_present(report->stations[at].ipv4);
 	}
 	(void)ncfg_cli_text(report->interface, interface, sizeof(interface));
 	(void)ncfg_cli_text(report->access_point, access_point, sizeof(access_point));
@@ -220,8 +228,12 @@ void ncfg_cli_print_stations(const ncfg_proto_stations_t *report)
 	ncfg_out_writef("%zu station%s on `%s` (%s)\n", report->station_count,
 	    report->station_count == 1 ? "" : "s", access_point, interface);
 	ncfg_out_line("");
-	ncfg_out_writef("%-17s  %7s  %9s  %7s  %8s  %8s\n", "ADDRESS", "SIGNAL", "CONNECTED",
-	    "IDLE", "RX", "TX");
+	if (leased) {
+		ncfg_out_writef("%-17s  %-16s  %-15s  ", "ADDRESS", "NAME", "IPV4");
+	} else {
+		ncfg_out_writef("%-17s  ", "ADDRESS");
+	}
+	ncfg_out_writef("%7s  %9s  %7s  %8s  %8s\n", "SIGNAL", "CONNECTED", "IDLE", "RX", "TX");
 
 	for (at = 0; at < report->station_count; at++) {
 		const ncfg_proto_station_t *station = &report->stations[at];
@@ -266,9 +278,30 @@ void ncfg_cli_print_stations(const ncfg_proto_stations_t *report)
 		} else {
 			(void)snprintf(tx, sizeof(tx), "--");
 		}
-		ncfg_out_writef("%-17s  %7s  %9s  %7s  %8s  %8s%s\n",
-		    ncfg_cli_text(station->address, address, sizeof(address)), signal, connected,
-		    idle, rx, tx, station_note(report->access_control, station, &anomalies));
+		if (leased) {
+			char name[NCFG_CLI_TEXT_MAX];
+			char ipv4[NCFG_CLI_TEXT_MAX];
+
+			if (ncfg_proto_str_present(station->hostname)) {
+				(void)ncfg_cli_text(station->hostname, name, sizeof(name));
+			} else {
+				(void)snprintf(name, sizeof(name), "--");
+			}
+			if (ncfg_proto_str_present(station->ipv4)) {
+				(void)ncfg_cli_text(station->ipv4, ipv4, sizeof(ipv4));
+			} else {
+				(void)snprintf(ipv4, sizeof(ipv4), "--");
+			}
+			/* A name longer than its column is cut there, not let run the
+			 * rest of the row out of line. */
+			ncfg_out_writef("%-17s  %-16.16s  %-15.15s  ",
+			    ncfg_cli_text(station->address, address, sizeof(address)), name, ipv4);
+		} else {
+			ncfg_out_writef("%-17s  ",
+			    ncfg_cli_text(station->address, address, sizeof(address)));
+		}
+		ncfg_out_writef("%7s  %9s  %7s  %8s  %8s%s\n", signal, connected, idle, rx, tx,
+		    station_note(report->access_control, station, &anomalies));
 	}
 
 	if (anomalies > 0) {

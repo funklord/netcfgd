@@ -8,7 +8,8 @@
 #   - the first plan starts the server after the address;
 #   - the client is given an address in the default range, the router, the
 #     DNS server named and the lease, read from dhcpcd's own hook;
-#   - the lease is in netcfgd's lease file under /run, by the client's MAC;
+#   - the lease is in netcfgd's lease file under /run, by the client's MAC,
+#     with the name the client sent as its fourth column (10.602);
 #   - a second plan has nothing to do;
 #   - a changed lease is planned as a restart, the apply runs a new dnsmasq,
 #     and the lease file is kept across it.
@@ -64,7 +65,7 @@ pid1=$(cat "$work/run/dhcp-server/lan0.pid" 2>/dev/null)
 
 client() {
 	: > "$work/given"
-	ip netns exec client timeout 20 dhcpcd -1 -4 -t 15 --script /payload/hook.sh eth0 \
+	ip netns exec client timeout 20 dhcpcd -1 -4 -t 15 -h laptop --script /payload/hook.sh eth0 \
 		> "$work/client.log" 2>&1
 	cat "$work/given"
 }
@@ -96,6 +97,10 @@ addr=$(printf '%s' "$given" | sed -n 's/.*address=192\.168\.7\.\([0-9]*\) .*/\1/
 [ -n "$addr" ] && [ "$addr" -ge 100 ] && [ "$addr" -le 249 ] ||
 	{ say "  the address is not in the default range, .100 to .249"; failed=1; }
 case "$leases" in *" $mac 192.168.7."*) ;; *) say "  the lease is not in netcfgd's lease file"; failed=1 ;; esac
+# 10.602: the name the client sent, in the fourth column, which is where
+# `ncfg_dhcp_server_lease_of` reads it -- the layout only dnsmasq can say.
+printf '%s\n' "$leases" | awk -v m="$mac" '$2 == m && $4 == "laptop" {found=1} END {exit !found}' ||
+	{ say "  the client's name is not the lease's fourth column"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the second plan was not empty"; failed=1; }
 [ "$restart" -eq 2 ] || { say "  a changed lease was not planned as a stop and a start"; failed=1; }
 [ -n "$pid2" ] && [ "$pid2" != "$pid1" ] || { say "  the apply did not run a new dnsmasq"; failed=1; }

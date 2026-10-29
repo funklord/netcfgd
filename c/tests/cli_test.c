@@ -1285,6 +1285,46 @@ static void a_station_list_shows_who_is_there_and_what_is_surprising(void)
 }
 
 /*
+ * Where netcfgd's DHCP server leased to somebody here, the table gains the
+ * name and address it gave them (10.602); a station it did not lease to has
+ * dashes, and a name longer than its column is cut there rather than pushing
+ * the row out of line. The table above, with no lease, is the control.
+ */
+static void a_station_list_names_who_netcfgd_leased_to(void)
+{
+	ncfg_proto_station_t  stations[2];
+	ncfg_proto_stations_t report;
+	const char           *printed;
+
+	memset(stations, 0, sizeof(stations));
+	memset(&report, 0, sizeof(report));
+	stations[0].address = ncfg_proto_str("aa:bb:cc:dd:ee:01");
+	stations[0].authorized = 1;
+	stations[0].hostname = ncfg_proto_str("a-rather-long-laptop-name");
+	stations[0].ipv4 = ncfg_proto_str("192.168.1.101");
+	stations[1].address = ncfg_proto_str("aa:bb:cc:dd:ee:02");
+	stations[1].authorized = 1;
+	report.interface = ncfg_proto_str("wlan0");
+	report.access_point = ncfg_proto_str("home");
+	report.stations = stations;
+	report.station_count = 2;
+
+	capture_begin();
+	ncfg_cli_print_stations(&report);
+	printed = capture_end();
+
+	line(printed, "ADDRESS            NAME              IPV4              SIGNAL  CONNECTED"
+	    "     IDLE        RX        TX",
+	    "with a lease among them, the table names who and at which address");
+	line(printed, "aa:bb:cc:dd:ee:01  a-rather-long-la  192.168.1.101         --         --"
+	    "       --        --        --",
+	    "  a name longer than its column cut there");
+	line(printed, "aa:bb:cc:dd:ee:02  --                --                    --         --"
+	    "       --        --        --",
+	    "  and a station it did not lease to keeps its row, with dashes");
+}
+
+/*
  * Three states rather than two, because the third is the one somebody is stuck
  * in: a radio nothing has activated but where a supplicant is answering belongs
  * to another manager, and netcfgd declines those rather than taking them.
@@ -2835,6 +2875,7 @@ int main(void)
 	a_scan_is_a_column_per_fact();
 	a_radio_status_says_what_is_stopping_it();
 	a_station_list_shows_who_is_there_and_what_is_surprising();
+	a_station_list_names_who_netcfgd_leased_to();
 	a_radio_list_has_three_states_and_not_two();
 	a_modem_says_what_it_is_on_and_whether_it_got_there();
 

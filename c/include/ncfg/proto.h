@@ -627,6 +627,10 @@ typedef struct {
 	ncfg_proto_int_t inactive_msec;
 	ncfg_proto_int_t rx_bytes;
 	ncfg_proto_int_t tx_bytes;
+	/* The name and address netcfgd's DHCP server leased it (10.602), absent
+	 * where it leased nothing or the name was not a plain host name. */
+	ncfg_proto_str_t hostname;
+	ncfg_proto_str_t ipv4;
 } ncfg_proto_station_t;
 
 typedef struct {

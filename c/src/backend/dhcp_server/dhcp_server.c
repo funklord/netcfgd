@@ -8,10 +8,13 @@
 #include "ncfg/buf.h"
 #include "ncfg/process.h"
 
+#include <ctype.h>
+#include <dirent.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -315,4 +318,92 @@ int ncfg_dhcp_server_stop(const char *run, const char *iface, char *err, size_t 
 		(void)unlink(pid_file);
 	}
 	return 1;
+}
+
+/* A client's name, given only where it is a plain host name (10.602). */
+static int plain_hostname(const char *name)
+{
+	size_t at;
+
+	if (!name || !isalnum((unsigned char)name[0])) {
+		return 0;
+	}
+	for (at = 0; name[at]; at++) {
+		if (at >= NCFG_DHCP_SERVER_HOSTNAME_MAX - 1u ||
+		    !(isalnum((unsigned char)name[at]) || name[at] == '-' || name[at] == '.')) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* One lease file's answer for `mac`, or 0. */
+static int lease_in(const char *path, const char *mac, long long now, char *hostname,
+    size_t hostname_size, char *address, size_t address_size)
+{
+	char       *text = ncfg_backend_read_file(path, NULL, 1024u * 1024u);
+	const char *line;
+	int         found = 0;
+
+	if (!text) {
+		return 0;
+	}
+	for (line = text; !found && line && *line;
+	    line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		long long expiry;
+		char      leased_mac[32];
+		char      leased_address[NCFG_ADDRESS_MAX];
+		char      name[256];
+
+		if (sscanf(line, "%lld %31s %49s %255s", &expiry, leased_mac, leased_address, name) != 4 ||
+		    strcasecmp(leased_mac, mac) != 0 || (expiry != 0 && expiry <= now)) {
+			continue;
+		}
+		found = 1;
+		(void)snprintf(address, address_size, "%s", leased_address);
+		(void)snprintf(hostname, hostname_size, "%s",
+		    strcmp(name, "*") != 0 && plain_hostname(name) ? name : "");
+	}
+	free(text);
+	return found;
+}
+
+int ncfg_dhcp_server_lease_of(const char *run, const char *mac, long long now, char *hostname,
+    size_t hostname_size, char *address, size_t address_size)
+{
+	char           dir[NCFG_DHCP_SERVER_PATH_MAX];
+	DIR           *listing;
+	struct dirent *entry;
+	int            found = 0;
+
+	if (hostname && hostname_size) {
+		hostname[0] = '\0';
+	}
+	if (address && address_size) {
+		address[0] = '\0';
+	}
+	if (!run || !mac || !hostname || !address ||
+	    !ncfg_backend_join(dir, sizeof(dir), run, "dhcp-server", NULL, 0)) {
+		return 0;
+	}
+	/* netcfgd's own directory, and only the files whose name says they are
+	 * leases; nothing else there is read. */
+	listing = opendir(dir);
+	if (!listing) {
+		return 0;
+	}
+	while (!found && (entry = readdir(listing)) != NULL) {
+		size_t length = strlen(entry->d_name);
+		char   path[NCFG_DHCP_SERVER_PATH_MAX * 2u];
+
+		if (length <= 7u || strcmp(entry->d_name + length - 7u, ".leases") != 0) {
+			continue;
+		}
+		if ((size_t)snprintf(path, sizeof(path), "%s/%s", dir, entry->d_name) >= sizeof(path)) {
+			continue;
+		}
+		found = lease_in(path, mac, now, hostname, hostname_size, address, address_size);
+	}
+	(void)closedir(listing);
+	return found;
 }

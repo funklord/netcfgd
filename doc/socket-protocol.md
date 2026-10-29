@@ -158,8 +158,10 @@ first glance:
   status display that needed the `wifi` tier is a status display that ends up
   being given it. What `ap_stations` exposes is worth naming, though: other
   people's hardware addresses and signal strengths, which is a proximity
-  sensor for anybody granted `observe`. A site opening `observe` to `any`
-  opens that too.
+  sensor for anybody granted `observe`. **Since project.md 10.602 it carries
+  the name and address netcfgd's DHCP server leased each station as well**,
+  and a device's name is very often its owner's -- "Anna's iPhone". A site
+  opening `observe` to `any` opens all of that too.
 - **`wifi_scan` is not reading.** It transmits probe requests and interrupts
   whatever the radio was doing.
 - **`apply` is `admin` even when the only thing in the plan is a wifi

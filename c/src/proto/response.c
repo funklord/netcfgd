@@ -327,7 +327,9 @@ static int decode_stations(ncfg_proto_dec_t *dec, uint32_t object, ncfg_proto_re
 		    !ncfg_proto_get_int(dec, entry, "inactive_msec", 0, one,
 		        &items[at].inactive_msec) ||
 		    !ncfg_proto_get_int(dec, entry, "rx_bytes", 0, one, &items[at].rx_bytes) ||
-		    !ncfg_proto_get_int(dec, entry, "tx_bytes", 0, one, &items[at].tx_bytes)) {
+		    !ncfg_proto_get_int(dec, entry, "tx_bytes", 0, one, &items[at].tx_bytes) ||
+		    !ncfg_proto_get_str(dec, entry, "hostname", 0, one, &items[at].hostname) ||
+		    !ncfg_proto_get_str(dec, entry, "ipv4", 0, one, &items[at].ipv4)) {
 			return 0;
 		}
 	}

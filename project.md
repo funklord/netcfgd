@@ -12597,6 +12597,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.602 Hostnames from the leases
+
+**Asked for by the holder 2026-10-29** ("go ahead with hostnames from the
+leases"), the first open item 10.601 named: a station list has shown a MAC
+since 0040, because netcfgd ran no DHCP server to learn names from.
+
+- **The source is netcfgd's own lease files**, every
+  `<run>/dhcp-server/*.leases`, by the station's MAC
+  (`ncfg_dhcp_server_lease_of`). A MAC is one host, so this answers for a
+  radio that is the served interface and for one bridged into it alike,
+  without working out which. Only an unexpired lease counts; an expiry of 0
+  never expires. Nothing outside netcfgd's own directory is read, and only
+  files named `.leases` in it.
+- **The name is the client's, and untrusted**: it is carried only where it is
+  a plain host name -- letters, digits, hyphens and dots, starting with a
+  letter or digit, at most 63 characters. Otherwise the address is still
+  carried and the name left out. The socket witness holds one of each: a
+  `laptop`, and a `<script>` that comes out as its address alone.
+- **`ap_stations` gains `hostname` and `ipv4`**, after `address`, both
+  optional, decoded by the client library and re-emitted by `--json` in the
+  daemon's order (the JSON form is held to the socket witness byte for byte,
+  which is what caught the first placement).
+- **`ncfg wifi clients` gains NAME and IPV4 columns only where some station
+  holds a lease**, so a table for an access point netcfgd serves no DHCP on
+  is the one it always was -- `cli_test`'s existing table is the control. A
+  name longer than its column is cut there.
+- **The TUI shows the name in place of the MAC** where there is one.
+- **The GUI shows no associated stations at all** -- its `ap_stations` is the
+  access-control editor's field -- so there is nothing there to name. A
+  station view in the GUI is open, and is a GUI feature rather than this one.
+- **What the observe tier exposes grew**, and `doc/socket-protocol.md` says
+  so beside its existing warning: a device's name is very often its owner's.
+- 0040 carries an amendment: the "no hostname" it recorded has a source now,
+  and its "nothing invented" half stands.
+
 ## 10.601 A DHCP server, policy handed to dnsmasq
 
 **Asked for by the holder 2026-10-29** ("go ahead with amending 0009 for a

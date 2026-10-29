@@ -196,6 +196,14 @@ int ncfg_cli_json_stations(const ncfg_proto_stations_t *report, ncfg_buf_t *out,
 
 		ncfg_json_write_object_begin(&writer);
 		member_text(&writer, "address", one->address);
+		/* Where the daemon puts them, after the address: this form is the
+		 * socket's byte for byte (10.602). */
+		if (ncfg_proto_str_present(one->hostname)) {
+			member_text(&writer, "hostname", one->hostname);
+		}
+		if (ncfg_proto_str_present(one->ipv4)) {
+			member_text(&writer, "ipv4", one->ipv4);
+		}
 		ncfg_json_write_member_bool(&writer, "authorized", one->authorized);
 		ncfg_json_write_member_bool(&writer, "listed", one->listed);
 		/*

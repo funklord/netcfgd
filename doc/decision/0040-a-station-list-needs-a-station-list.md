@@ -1,6 +1,6 @@
 # 0040: A station list needs a station list
 
-Status: accepted
+Status: accepted, amended 2026-10-29 by project.md 10.602 (see the end)
 Date: 2026-07-31
 Milestone: completes what 0039 started
 
@@ -58,7 +58,8 @@ documentation, which changed the implementation in two places:
 
 There is **no hostname**. hostapd knows hardware addresses; a friendly name
 would have to come from DHCP leases, and netcfgd runs no DHCP server. Showing
-a MAC and calling it a client is honest; inventing a name is not.
+a MAC and calling it a client is honest; inventing a name is not. *(Amended
+2026-10-29, below: netcfgd runs one since 0297, and the name comes from it.)*
 
 The walk is bounded at 2007 iterations rather than looping until the reply
 stops. hostapd terminates its own list correctly, but this is one daemon
@@ -108,3 +109,14 @@ The feature accounts for about 250 KB of the mean; the rest is that nothing had
 re-measured since the comment saying "measured at 5400 KB". Raised to 9216 with
 the measurements written down, because a gate that goes red on spread rather
 than on regression teaches people to re-run the build.
+
+## Amendment, 2026-10-29
+
+[0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md) gave netcfgd a DHCP
+server, so the friendly name this record could not have now has a source that
+is not invented: the lease netcfgd's own server gave the station. Each station
+carries `hostname` and `ipv4` from it where there is one (project.md 10.602).
+The rule above survives in its half that matters: **nothing is invented** -- a
+station no server of netcfgd's leased to has neither, and a name the client
+sent that is not a plain host name is left out rather than shown.
+

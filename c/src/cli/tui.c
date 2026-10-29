@@ -1042,7 +1042,12 @@ static void clients(const ncfg_tui_t *tui, size_t width, ncfg_tui_lines_t *out)
 		char                        connected[32];
 		char                        line[NCFG_TUI_WIDTH_MAX];
 
-		if (!ncfg_proto_str_present(station->address)) {
+		/* The name its lease gave it where there is one (10.602), the
+		 * hardware address otherwise: the pane is a list of who, and a name
+		 * says who where a MAC does not. */
+		if (ncfg_proto_str_present(station->hostname)) {
+			(void)ncfg_cli_text(station->hostname, address, sizeof(address));
+		} else if (!ncfg_proto_str_present(station->address)) {
 			(void)snprintf(address, sizeof(address), "<no address>");
 		} else {
 			(void)ncfg_cli_text(station->address, address, sizeof(address));
@@ -1068,7 +1073,7 @@ static void clients(const ncfg_tui_t *tui, size_t width, ncfg_tui_lines_t *out)
 		} else {
 			marker = " ";
 		}
-		(void)snprintf(line, sizeof(line), "%s %-19s %sdBm  %6s", marker, address,
+		(void)snprintf(line, sizeof(line), "%s %-19.19s %sdBm  %6s", marker, address,
 		    signal, connected);
 		line_fit(out, line, width);
 	}

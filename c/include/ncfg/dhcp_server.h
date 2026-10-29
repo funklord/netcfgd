@@ -75,4 +75,23 @@ int ncfg_dhcp_server_stop(const char *run, const char *iface, char *err, size_t 
 /* The pid of netcfgd's dnsmasq on this interface, or 0. */
 pid_t ncfg_dhcp_server_running_pid(const char *run, const char *iface);
 
+/*
+ * The name and address netcfgd's DHCP servers have given the host with this
+ * MAC (project.md 10.602): read out of every lease file under
+ * `<run>/dhcp-server/`, which dnsmasq keeps as `<expiry> <mac> <address>
+ * <name> <client id>`, so it answers for a station on a radio that is itself the served interface
+ * and on one bridged into it alike -- a MAC is one host, whichever interface
+ * leased to it.
+ *
+ * A lease that has expired by `now` is not one; an expiry of 0 never does.
+ * **The name is the client's, and is untrusted**: it is given only where it
+ * is a plain host name -- letters, digits, hyphens and dots, starting with a
+ * letter or digit, at most 63 characters -- and otherwise `hostname` is left
+ * empty while `address` is still given. 1 where a lease was found, with
+ * either buffer possibly empty; 0 where none was.
+ */
+#define NCFG_DHCP_SERVER_HOSTNAME_MAX 64
+int ncfg_dhcp_server_lease_of(const char *run, const char *mac, long long now, char *hostname,
+    size_t hostname_size, char *address, size_t address_size);
+
 #endif /* NCFG_DHCP_SERVER_H */

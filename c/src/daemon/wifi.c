@@ -30,6 +30,7 @@
 #include "ncfg/daemon.h"
 
 #include "ncfg/config.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/json_write.h"
 #include "ncfg/observe.h"
@@ -42,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 
 /* ------------------------------------------------------------- the pieces */
@@ -1343,9 +1345,22 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 	ncfg_json_write_array_begin(&writer);
 	for (at = 0; at < count; at++) {
 		const ncfg_hostapd_station_t *station = &found[at];
+		char                          hostname[NCFG_DHCP_SERVER_HOSTNAME_MAX];
+		char                          leased[NCFG_ADDRESS_MAX];
+		int                           has_lease;
 
+		/* The name and address netcfgd's own DHCP server gave it, where it
+		 * did (10.602): hostapd knows the hardware address and nothing else. */
+		has_lease = ncfg_dhcp_server_lease_of(where->run_dir, station->address,
+		    (long long)time(NULL), hostname, sizeof(hostname), leased, sizeof(leased));
 		ncfg_json_write_object_begin(&writer);
 		ncfg_json_write_member_string(&writer, "address", station->address);
+		if (has_lease && hostname[0]) {
+			ncfg_json_write_member_string(&writer, "hostname", hostname);
+		}
+		if (has_lease && leased[0]) {
+			ncfg_json_write_member_string(&writer, "ipv4", leased);
+		}
 		ncfg_json_write_member_bool(&writer, "authorized", station->authorized);
 		ncfg_json_write_member_bool(&writer, "listed",
 		    acl_lists(access_point, station->address));

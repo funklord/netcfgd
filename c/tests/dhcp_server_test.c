@@ -115,6 +115,47 @@ int main(void)
 	    "an interface with no address to serve from renders nothing, and says why");
 	free(text);
 
+	/* The leases, read back for a station list (10.602). */
+	{
+		char directory[NCFG_DHCP_SERVER_PATH_MAX];
+		char file[NCFG_DHCP_SERVER_PATH_MAX + 32];
+		char host[NCFG_DHCP_SERVER_HOSTNAME_MAX];
+		char leased[NCFG_ADDRESS_MAX];
+		static const char lan_leases[] =
+		    "2000 aa:bb:cc:00:00:01 192.168.1.101 phone *\n"
+		    "1000 aa:bb:cc:00:00:02 192.168.1.102 gone *\n"
+		    "0 aa:bb:cc:00:00:03 192.168.1.103 * *\n"
+		    "2000 aa:bb:cc:00:00:04 192.168.1.104 "
+		    "a-name-that-is-far-too-long-to-be-a-host-name-and-is-left-out-of-it-x *\n";
+		static const char guest[] = "0 AA:BB:CC:00:00:05 10.0.0.105 tv *\n";
+
+		(void)snprintf(directory, sizeof(directory), "%s/dhcp-server", run);
+		testdir_mkdirp(directory);
+		(void)snprintf(file, sizeof(file), "%s/lan0.leases", directory);
+		(void)testdir_write(file, lan_leases, sizeof(lan_leases) - 1u);
+		(void)snprintf(file, sizeof(file), "%s/guest0.leases", directory);
+		(void)testdir_write(file, guest, sizeof(guest) - 1u);
+		check(ncfg_dhcp_server_lease_of(run, "aa:bb:cc:00:00:01", 1500, host, sizeof(host),
+		    leased, sizeof(leased)) && strcmp(host, "phone") == 0 &&
+		    strcmp(leased, "192.168.1.101") == 0,
+		    "a station's name and address come from the lease netcfgd's server gave it");
+		check(!ncfg_dhcp_server_lease_of(run, "aa:bb:cc:00:00:02", 1500, host, sizeof(host),
+		    leased, sizeof(leased)) && !host[0] && !leased[0],
+		    "  and a lease that has expired is none");
+		check(ncfg_dhcp_server_lease_of(run, "aa:bb:cc:00:00:03", 99999, host, sizeof(host),
+		    leased, sizeof(leased)) && !host[0] && strcmp(leased, "192.168.1.103") == 0,
+		    "  one that never expires holds, a client that sent no name has none");
+		check(ncfg_dhcp_server_lease_of(run, "aa:bb:cc:00:00:04", 1500, host, sizeof(host),
+		    leased, sizeof(leased)) && !host[0] && leased[0],
+		    "  and a name too long to be a host name is left out, the address kept");
+		check(ncfg_dhcp_server_lease_of(run, "aa:bb:cc:00:00:05", 1500, host, sizeof(host),
+		    leased, sizeof(leased)) && strcmp(host, "tv") == 0,
+		    "  from whichever interface's server leased it, the address in either case");
+		check(!ncfg_dhcp_server_lease_of(run, "aa:bb:cc:00:00:09", 1500, host, sizeof(host),
+		    leased, sizeof(leased)),
+		    "  and a station no server leased to has nothing");
+	}
+
 	testdir_remove(run);
 	if (failures) {
 		printf("%d check(s) failed\n", failures);
