@@ -228,10 +228,16 @@ static inline void fake_handle(struct fake *state, const char *command, const st
 	if (starts_with(command, "SELECT_NETWORK ")) {
 		/* A join is two things: OK to the command, and later an event saying
 		 * what became of it. 0197. */
-		fake_reply(state, from, from_length, "OK\n");
-		(void)sendto(state->fd,
+		/* The length from the literal, not written beside it: an `88u` here
+		 * sent five bytes past the end of an 82-byte string with every join,
+		 * which ASan caught in a forked fake whose exit nobody reads. */
+		static const char connected[] =
 		    "<3>CTRL-EVENT-CONNECTED - Connection to 00:11:22:33:44:55 completed "
-		    "[id=0 id_str=]", 88u, 0, (const struct sockaddr *)from, from_length);
+		    "[id=0 id_str=]";
+
+		fake_reply(state, from, from_length, "OK\n");
+		(void)sendto(state->fd, connected, sizeof(connected) - 1u, 0,
+		    (const struct sockaddr *)from, from_length);
 		return;
 	}
 	if (strcmp(command, "TERMINATE") == 0 || strcmp(command, "DISCONNECT") == 0 ||
@@ -305,6 +311,8 @@ static inline void fake_serve(const char *path, const char *log_path)
 	_exit(0);
 }
 
+/* Fakes that died of something other than being stopped; see `fake_stop`. */
+static int fake_faults;
 static pid_t fake_pid = -1;
 /* Generous, and checked: the path is a directory this test made plus an
  * interface name, and a truncated socket path binds somewhere nobody looks. */
@@ -360,6 +368,20 @@ static inline void fake_stop(void)
 	(void)kill(-fake_pid, SIGTERM);
 	(void)kill(fake_pid, SIGTERM);
 	(void)waitpid(fake_pid, &status, 0);
+	/*
+	 * **How it ended is a check, not a formality.** The stop's SIGTERM, or a
+	 * clean exit, is a fake that ran; anything else -- ASan's exit status,
+	 * a crash -- is a fault in a process whose output nobody reads, and
+	 * reaping it quietly is how an 88-byte read past an 82-byte string in
+	 * the hostapd fake stayed green (2026-10-29). Counted into `fake_faults`,
+	 * which each test's `main` adds to its failures.
+	 */
+	if (!((WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM) ||
+	    (WIFEXITED(status) && WEXITSTATUS(status) == 0))) {
+		fake_faults++;
+		printf("%-72s FAILED\n", "the hostapd fake ended as it was stopped, not of a fault");
+		printf("  status: %d\n", status);
+	}
 	fake_pid = -1;
 	(void)unlink(fake_socket);
 }

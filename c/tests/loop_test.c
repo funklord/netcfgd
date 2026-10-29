@@ -2665,6 +2665,8 @@ int main(void)
 	testdir_remove(base);
 
 	printf("loop_test: %d check(s)\n", checks);
+	/* A fake that died of a fault is a failure too; see `fake_stop`. */
+	failures += fake_faults;
 	if (failures == 0) {
 		printf("loop_test: all checks passed\n");
 	} else {

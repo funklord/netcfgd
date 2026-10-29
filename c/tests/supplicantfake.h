@@ -494,6 +494,8 @@ static inline void fake_serve(const char *path, const char *log_path, const char
 	_exit(0);
 }
 
+/* Fakes that died of something other than being stopped; see `fake_stop`. */
+static int fake_faults;
 static pid_t fake_pid = -1;
 static char  fake_socket[512];
 static char  fake_log_path[512];
@@ -549,6 +551,20 @@ static inline void fake_stop(void)
 	(void)kill(-fake_pid, SIGTERM);
 	(void)kill(fake_pid, SIGTERM);
 	(void)waitpid(fake_pid, &status, 0);
+	/*
+	 * **How it ended is a check, not a formality.** The stop's SIGTERM, or a
+	 * clean exit, is a fake that ran; anything else -- ASan's exit status,
+	 * a crash -- is a fault in a process whose output nobody reads, and
+	 * reaping it quietly is how an 88-byte read past an 82-byte string in
+	 * the hostapd fake stayed green (2026-10-29). Counted into `fake_faults`,
+	 * which each test's `main` adds to its failures.
+	 */
+	if (!((WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM) ||
+	    (WIFEXITED(status) && WEXITSTATUS(status) == 0))) {
+		fake_faults++;
+		printf("%-72s FAILED\n", "the supplicant fake ended as it was stopped, not of a fault");
+		printf("  status: %d\n", status);
+	}
 	fake_pid = -1;
 	(void)unlink(fake_socket);
 }

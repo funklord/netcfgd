@@ -1307,6 +1307,8 @@ int main(void)
 	printf("    (%zu bytes of diagnostics were swept)\n", every_message_length);
 
 	testdir_remove(work_dir);
+	/* A fake that died of a fault is a failure too; see `fake_stop`. */
+	failures += fake_faults;
 	if (failures == 0) {
 		printf("supplicant_client_test: all checks passed\n");
 	} else {

@@ -449,6 +449,8 @@ int main(void)
 	fake_stop();
 	testdir_remove(made);
 	printf("observe_supplicants_test: %d check(s)\n", checks);
+	/* A fake that died of a fault is a failure too; see `fake_stop`. */
+	failures += fake_faults;
 	if (failures == 0) {
 		printf("observe_supplicants_test: all checks passed\n");
 	} else {

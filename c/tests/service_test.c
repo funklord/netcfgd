@@ -1516,6 +1516,8 @@ int main(void)
 	fake_stop();
 	remove_under(base, 0);
 	testdir_remove(base);
+	/* A fake that died of a fault is a failure too; see `fake_stop`. */
+	failures += fake_faults;
 	if (failures) {
 		printf("service: %d check(s) failed\n", failures);
 		return 1;
