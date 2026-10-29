@@ -173,6 +173,37 @@ static int compare_mesh(const void *left, const void *right)
 	return compare_text(((const ncfg_mesh_t *)left)->id, ((const ncfg_mesh_t *)right)->id);
 }
 
+static int compare_host_list(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_host_list_t *)left)->name,
+	    ((const ncfg_host_list_t *)right)->name);
+}
+
+/*
+ * Sort a set of strings and drop the repeats, freeing them.
+ *
+ * Was written inline for an access point's stations; a host list and the two
+ * fields beside the stations are sets of the same kind (10.591), and a second
+ * copy of a deduplication is one that frees differently.
+ */
+static void sort_set(char **items, size_t *count)
+{
+	size_t kept;
+	size_t at;
+
+	stable_sort(items, *count, sizeof(*items), compare_strings);
+	kept = *count ? 1u : 0u;
+	for (at = 1u; at < *count; at++) {
+		if (compare_text(items[kept - 1u], items[at]) == 0) {
+			free(items[at]);
+			items[at] = NULL;
+			continue;
+		}
+		items[kept++] = items[at];
+	}
+	*count = kept;
+}
+
 static int compare_linkset(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_linkset_t *)left)->name,
@@ -401,8 +432,6 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 
 	for (i = 0; i < document->access_point_count; i++) {
 		ncfg_access_control_t *acl = document->access_points[i].access_control;
-		size_t                 kept;
-		size_t                 at;
 
 		if (!acl) {
 			continue;
@@ -413,17 +442,17 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 		 * would give them different document hashes and so a spurious change
 		 * to reconcile.
 		 */
-		stable_sort(acl->stations, acl->station_count, sizeof(*acl->stations), compare_strings);
-		kept = acl->station_count ? 1u : 0u;
-		for (at = 1u; at < acl->station_count; at++) {
-			if (compare_text(acl->stations[kept - 1u], acl->stations[at]) == 0) {
-				free(acl->stations[at]);
-				acl->stations[at] = NULL;
-				continue;
-			}
-			acl->stations[kept++] = acl->stations[at];
-		}
-		acl->station_count = kept;
+		sort_set(acl->stations, &acl->station_count);
+		/* The names of the lists, and what was written beside them, are sets
+		 * for the same reason (10.591). */
+		sort_set(acl->lists, &acl->list_count);
+		sort_set(acl->written, &acl->written_count);
+	}
+
+	stable_sort(document->host_lists, document->host_list_count,
+	    sizeof(*document->host_lists), compare_host_list);
+	for (i = 0; i < document->host_list_count; i++) {
+		sort_set(document->host_lists[i].mac, &document->host_lists[i].mac_count);
 	}
 
 	/* The device half of what used to be one loop: `kind` and `bridge_vlans`

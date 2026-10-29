@@ -23,7 +23,7 @@ Saying so here rather than letting the gate's name imply otherwise: a check
 that is trusted for more than it does is worse than no check, because the next
 person stops reading the file by hand.
 
-THREE BLOCKS ARE EXPECTED NOT TO COMPILE ALONE, and they are named rather than
+FOUR BLOCKS ARE EXPECTED NOT TO COMPILE ALONE, and they are named rather than
 skipped by pattern, so that a fourth joining them is a failure:
 
   - `override interface` needs the block it overrides.
@@ -34,6 +34,9 @@ skipped by pattern, so that a fourth joining them is a failure:
 	resolves to nothing is refused on purpose -- an `uplink` naming an
 	interface this configuration does not describe answers "disconnected" for
 	ever with nothing saying why.
+  - the `access_point "Family"` names a `host_list`, and a list nothing
+	declares is refused on purpose: read as empty it would shut every station
+	out of an allow list, or keep nobody out of a deny list.
 
 Each is correct as documentation and meaningless in isolation. A gate that
 silently tolerated "anything that does not compile" would tolerate the next
@@ -67,6 +70,7 @@ EXPECTED_INCOMPLETE = {
 	"override interface eth0 {",
 	'interface eth0 {\n\tconfig = "dhcp"\n\tdns {',
 	'linkset "uplink" {',
+	'access_point "Family" {',
 }
 
 

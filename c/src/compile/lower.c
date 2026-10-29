@@ -471,6 +471,59 @@ static void check_linksets(ncfg_lower_ctx_t *ctx, const deferred_t *spans, size_
 	}
 }
 
+/*
+ * Put each host list an access point names into its station list (10.591).
+ *
+ * **Into `stations`, so nothing downstream learns lists exist**: the planner,
+ * hostapd's list file and `ap_stations` read that one field. The names stay
+ * in `lists` for `ncfg profile save`. Repeats are the canonical pass's to
+ * drop. A name no `host_list` declares is refused rather than read as empty,
+ * because on an allow list an empty list shuts every station out and on a
+ * deny list it lets in what the operator meant to keep out.
+ */
+static void resolve_host_lists(ncfg_lower_ctx_t *ctx, const deferred_t *referrers,
+    size_t count)
+{
+	ncfg_document_t *document = ctx->document;
+	size_t           i;
+
+	for (i = 0; i < count; i++) {
+		ncfg_access_control_t *acl = NULL;
+		size_t                 at;
+
+		ctx->source = referrers[i].source;
+		for (at = 0; at < document->access_point_count; at++) {
+			if (strcmp(document->access_points[at].id, referrers[i].name) == 0) {
+				acl = document->access_points[at].access_control;
+			}
+		}
+		if (!acl) {
+			continue;
+		}
+		for (at = 0; at < acl->list_count; at++) {
+			const ncfg_host_list_t *list = NULL;
+			size_t                  find;
+			size_t                  mac;
+
+			for (find = 0; find < document->host_list_count; find++) {
+				if (strcmp(document->host_lists[find].name, acl->lists[at]) == 0) {
+					list = &document->host_lists[find];
+				}
+			}
+			if (!list) {
+				ncfg_diag(ctx, referrers[i].span,
+				    "access point `%s` names host list `%s`, which no `host_list` block "
+				    "declares", referrers[i].name, acl->lists[at]);
+				continue;
+			}
+			for (mac = 0; mac < list->mac_count; mac++) {
+				(void)ncfg_push_string(ctx, &acl->stations, &acl->station_count,
+				    list->mac[mac]);
+			}
+		}
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * The walk
  * ------------------------------------------------------------------------ */
@@ -559,6 +612,10 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	 * read. */
 	deferred_t      *linksets = NULL;
 	size_t           linkset_count = 0;
+	/* Each access point naming a host list, resolved once every list has been
+	 * read (10.591). */
+	deferred_t      *referrers = NULL;
+	size_t           referrer_count = 0;
 	size_t           i;
 
 	memset(&ctx, 0, sizeof(ctx));
@@ -680,6 +737,10 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 			if (!ncfg_lower_access_point(&ctx, block, &access_point)) {
 				continue;
 			}
+			if (access_point.access_control && access_point.access_control->list_count) {
+				(void)remember(&ctx, &referrers, &referrer_count, access_point.id, NULL,
+				    block->block->span, block->source);
+			}
 			check_mesh_radio(&ctx, block->block->span, access_point.device, "access point",
 			    access_point.id);
 			ncfg_record(&ctx, block->source, block->block->span, "access_point.%s",
@@ -723,6 +784,40 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 					*slot = network;
 				}
 			}
+		} else if (strcmp(head, "host_list") == 0) {
+			ncfg_host_list_t list;
+			size_t           at;
+			int              repeated = 0;
+
+			if (!ncfg_lower_host_list(&ctx, block, &list)) {
+				continue;
+			}
+			for (at = 0; at < ctx.document->host_list_count; at++) {
+				if (strcmp(ctx.document->host_lists[at].name, list.name) == 0) {
+					repeated = 1;
+				}
+			}
+			if (repeated) {
+				/* The merge joins blocks of one label, so this is two
+				 * spellings of one name the merge saw as different. */
+				ncfg_diag(&ctx, block->block->span, "host list `%s` is declared twice",
+				    list.name);
+				ncfg_strings_free(list.mac, list.mac_count);
+				free(list.name);
+				continue;
+			}
+			ncfg_record(&ctx, block->source, block->block->span, "host_list.%s", list.name);
+			{
+				ncfg_host_list_t *slot = ncfg_push(&ctx, &ctx.document->host_lists,
+				    &ctx.document->host_list_count, sizeof(*slot));
+
+				if (slot) {
+					*slot = list;
+				} else {
+					ncfg_strings_free(list.mac, list.mac_count);
+					free(list.name);
+				}
+			}
 		} else if (strcmp(head, "linkset") == 0) {
 			ncfg_linkset_t set;
 
@@ -750,17 +845,20 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		} else {
 			ncfg_diag(&ctx, block->block->span,
 			    "unknown top-level block `%s`: the top-level blocks are interface, network, "
-			    "device, rule, linkset, access_point, mesh, firewall and global", head);
+			    "device, rule, linkset, access_point, mesh, host_list, firewall and global",
+			    head);
 		}
 	}
 
 	expand_members(&ctx, memberships, membership_count);
 	expand_ingress_shapers(&ctx, shapers, shaper_count);
 	check_linksets(&ctx, linksets, linkset_count);
+	resolve_host_lists(&ctx, referrers, referrer_count);
 
 	deferred_free(memberships, membership_count);
 	deferred_free(shapers, shaper_count);
 	deferred_free(linksets, linkset_count);
+	deferred_free(referrers, referrer_count);
 
 	/*
 	 * A table for a document nobody gets is a table of paths into nothing, so

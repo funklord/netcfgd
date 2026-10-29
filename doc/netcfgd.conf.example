@@ -938,6 +938,28 @@
 # that is on the deny list and connected anyway -- which happens because
 # hostapd holds the list it read at startup.
 
+# A list of hosts can be named once and used from several access points. A
+# `host_list` holds exact addresses for now; an access point names it inside
+# its list as "@host_list:NAME", beside any addresses written there. The
+# lists and the addresses are joined into the one list hostapd reads, and
+# `ncfg show` prints the joined list under `stations`. A name no `host_list`
+# declares is refused rather than read as empty, since an empty allow list
+# shuts every station out and an empty deny list keeps nobody out.
+
+#host_list "family" {
+#	mac = ["00:11:22:33:44:01", "00:11:22:33:44:02"]
+#}
+
+#access_point "Family" {
+#	device = "wlan1"
+#	wifi {
+#		psk = "@secret:family"
+#	}
+#	access_control {
+#		allow = ["@host_list:family", "00:11:22:33:44:03"]
+#	}
+#}
+
 
 ##############################################################################
 # WIRELESS NETWORKS

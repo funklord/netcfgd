@@ -1972,7 +1972,10 @@ typedef struct {
 	int   hidden;
 	/* "allow", "deny" or "" for an access point that talks to everyone. */
 	char *acl_policy;
-	char *stations; /* the addresses, space-joined */
+	/* What the block's list says, space-joined: its addresses, and any
+	 * `@host_list:NAME` it names (10.591) -- the form an editor writes back,
+	 * not the resolved set hostapd holds. */
+	char *stations;
 	/* The running half. `started_band` and `started_channel` are what hostapd
 	 * took, which is the answer to "why is it not on channel 36". */
 	int   running;

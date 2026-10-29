@@ -414,6 +414,14 @@ int ncfg_lower_network(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
 int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
     ncfg_access_point_t *out);
 int ncfg_lower_mesh(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block, ncfg_mesh_t *out);
+
+/* How an `access_control` list names a `host_list` (10.591), and how long its
+ * name may be. */
+#define NCFG_HOST_LIST_PREFIX   "@host_list:"
+#define NCFG_HOST_LIST_NAME_MAX 64
+int ncfg_is_host_list_name(const char *name);
+int ncfg_lower_host_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
+    ncfg_host_list_t *out);
 /*
  * The keys a `wifi` block can carry, before they become an `ncfg_security_t`.
  *

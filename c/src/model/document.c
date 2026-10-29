@@ -1991,7 +1991,15 @@ static const ncfg_field_t access_control_fields[] = {
 	    .offset = offsetof(ncfg_access_control_t, policy) },
 	{ .name = "stations", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_access_control_t, stations),
-	    .count_offset = offsetof(ncfg_access_control_t, station_count) }
+	    .count_offset = offsetof(ncfg_access_control_t, station_count) },
+	/* Both left out when empty, which is every block naming no host list, so
+	 * those documents are byte for byte what they were (10.591). */
+	{ .name = "lists", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_access_control_t, lists),
+	    .count_offset = offsetof(ncfg_access_control_t, list_count) },
+	{ .name = "written", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_access_control_t, written),
+	    .count_offset = offsetof(ncfg_access_control_t, written_count) }
 };
 static const ncfg_type_t access_control_type = TYPE("access control list", access_control_fields);
 
@@ -2039,6 +2047,14 @@ static const ncfg_field_t mesh_fields[] = {
 	{ .name = "band", .kind = NCFG_F_STR, .offset = offsetof(ncfg_mesh_t, band) }
 };
 static const ncfg_type_t mesh_type = TYPE("mesh", mesh_fields);
+
+static const ncfg_field_t host_list_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_host_list_t, name) },
+	{ .name = "mac", .kind = NCFG_F_STR_LIST, .offset = offsetof(ncfg_host_list_t, mac),
+	    .count_offset = offsetof(ncfg_host_list_t, mac_count) }
+};
+static const ncfg_type_t host_list_type = TYPE("host list", host_list_fields);
 
 /* ------------------------------------------------------------------------ *
  * Rules, bluetooth devices, linksets
@@ -2491,7 +2507,12 @@ static const ncfg_field_t document_fields[] = {
 	 * are unchanged -- an appended list, `firewall`'s reasoning. */
 	{ .name = "meshes", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY, .type = &mesh_type,
 	    .element_size = sizeof(ncfg_mesh_t), .offset = offsetof(ncfg_document_t, meshes),
-	    .count_offset = offsetof(ncfg_document_t, mesh_count) }
+	    .count_offset = offsetof(ncfg_document_t, mesh_count) },
+	/* Left out when empty, as `meshes` is (10.591). */
+	{ .name = "host_lists", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &host_list_type, .element_size = sizeof(ncfg_host_list_t),
+	    .offset = offsetof(ncfg_document_t, host_lists),
+	    .count_offset = offsetof(ncfg_document_t, host_list_count) }
 };
 static const ncfg_type_t document_type = TYPE("document", document_fields);
 

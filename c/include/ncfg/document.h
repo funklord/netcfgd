@@ -1530,7 +1530,39 @@ typedef struct {
 	 * hostapd reports is a string comparison rather than a parse. */
 	char  **stations;
 	size_t  station_count;
+	/*
+	 * The `host_list`s this block names, by name, sorted (project.md 10.591).
+	 *
+	 * **`stations` above is still the whole answer**: the lowerer resolves
+	 * every list into it, so the planner, hostapd's list file and `ap_stations`
+	 * read one field and none of them learns that lists exist. These two are
+	 * what was *written*, kept so that `ncfg profile save` renders the
+	 * reference rather than the addresses it stood for.
+	 *
+	 * `written` is the addresses spelled in the block itself, and is filled
+	 * only where `lists` is not empty: without a list the two would be the same
+	 * set, and a document that never names one stays the document it was.
+	 */
+	char  **lists;
+	size_t  list_count;
+	char  **written;
+	size_t  written_count;
 } ncfg_access_control_t;
+
+/*
+ * A named list of hosts that other blocks refer to (project.md 10.591).
+ *
+ * **Exact addresses only, for now**: `mac` holds lowercase
+ * `aa:bb:cc:dd:ee:ff`, sorted and deduplicated as an access point's station
+ * list is. Wildcards, and hosts that were seen rather than written, are the
+ * later halves 10.591 describes; a list is configuration, and what has been
+ * observed is not stored here.
+ */
+typedef struct {
+	char   *name; /* the label, and the sorting key */
+	char  **mac;
+	size_t  mac_count;
+} ncfg_host_list_t;
 
 /*
  * An access point netcfgd runs, rather than joins.
@@ -2139,6 +2171,9 @@ typedef struct {
 	 * the document it was. */
 	ncfg_mesh_t             *meshes; /* sorted by id */
 	size_t                   mesh_count;
+	/* After the meshes, and omitted when empty, for the same reason. */
+	ncfg_host_list_t        *host_lists; /* sorted by name */
+	size_t                   host_list_count;
 } ncfg_document_t;
 
 /*

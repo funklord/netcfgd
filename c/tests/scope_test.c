@@ -70,7 +70,10 @@ static const struct {
 	{ "firewall", NCFG_SCOPE_HOST_PRIVATE },
 	/* A mesh is the estate's, as a network is: every node names the same one.
 	 * Which radio joins it is host-private, as an access point's is. */
-	{ "mesh", NCFG_SCOPE_ESTATE }
+	{ "mesh", NCFG_SCOPE_ESTATE },
+	/* A host list is the estate's because an access point's reference to it
+	 * travels, and must find it on the other end (10.591). */
+	{ "host_list", NCFG_SCOPE_ESTATE }
 };
 
 #define EXPECTED_COUNT (sizeof(EXPECTED) / sizeof(EXPECTED[0]))

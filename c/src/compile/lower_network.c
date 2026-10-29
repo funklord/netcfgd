@@ -801,15 +801,41 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 		}
 		for (i = 0; i < words.count; i++) {
 			char  why[NCFG_ERROR_MAX];
-			char *station = ncfg_normalize_station(ctx, words.at[i].text, why, sizeof(why));
+			char *station;
 
+			/* A list by name (10.591), resolved once every block is read:
+			 * the list may be declared later, or in another drop-in. */
+			if (strncmp(words.at[i].text, NCFG_HOST_LIST_PREFIX,
+			        strlen(NCFG_HOST_LIST_PREFIX)) == 0) {
+				const char *name = words.at[i].text + strlen(NCFG_HOST_LIST_PREFIX);
+
+				if (!ncfg_is_host_list_name(name)) {
+					ncfg_diag(ctx, words.at[i].span,
+					    "`%s` does not name a host list: after `%s` comes the list's "
+					    "name, letters, digits, `-`, `_` and `.`", words.at[i].text,
+					    NCFG_HOST_LIST_PREFIX);
+					continue;
+				}
+				(void)ncfg_push_string(ctx, &out->lists, &out->list_count, name);
+				continue;
+			}
+			station = ncfg_normalize_station(ctx, words.at[i].text, why, sizeof(why));
 			if (!station) {
 				ncfg_diag(ctx, words.at[i].span, "%s", why);
 				continue;
 			}
+			(void)ncfg_push_string(ctx, &out->written, &out->written_count, station);
 			(void)ncfg_push_string_owned(ctx, &out->stations, &out->station_count, station);
 		}
 		ncfg_words_free(&words);
+	}
+
+	/* What was written is kept only beside a list: without one it is the
+	 * stations again, and a document naming no list stays what it was. */
+	if (out->list_count == 0) {
+		ncfg_strings_free(out->written, out->written_count);
+		out->written = NULL;
+		out->written_count = 0;
 	}
 
 	/*
@@ -827,8 +853,103 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 
 refused:
 	ncfg_strings_free(out->stations, out->station_count);
+	ncfg_strings_free(out->lists, out->list_count);
+	ncfg_strings_free(out->written, out->written_count);
 	memset(out, 0, sizeof(*out));
 	return 0;
+}
+
+/*
+ * A host list's name: what follows `@host_list:` in a reference, and the
+ * block's label. Kept to the characters an interface or a secret name uses,
+ * so a reference cannot be mistaken for anything else in a list of words.
+ */
+int ncfg_is_host_list_name(const char *name)
+{
+	size_t at;
+
+	if (!name || !*name || strlen(name) > NCFG_HOST_LIST_NAME_MAX) {
+		return 0;
+	}
+	for (at = 0; name[at]; at++) {
+		const char c = name[at];
+
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		    c == '-' || c == '_' || c == '.')) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * A `host_list` block: a named set of hosts other blocks refer to (10.591).
+ *
+ *     host_list "office" { mac = ["aa:bb:cc:dd:ee:ff", ...] }
+ *
+ * Exact addresses only. A list is a set, so the order and the repeats are
+ * the canonical pass's to remove, and an empty one is accepted: it is a list
+ * somebody is about to fill, and the access point naming it says what that
+ * means for it.
+ */
+int ncfg_lower_host_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
+    ncfg_host_list_t *out)
+{
+	const ncfg_ast_block_t *block = merged->block;
+	size_t                  i;
+
+	memset(out, 0, sizeof(*out));
+	out->name = ncfg_require_label(ctx, block);
+	if (!out->name) {
+		return 0;
+	}
+	if (!ncfg_is_host_list_name(out->name)) {
+		ncfg_diag(ctx, block->span,
+		    "`%s` cannot name a host list: use letters, digits, `-`, `_` and `.`, up to %d",
+		    out->name, NCFG_HOST_LIST_NAME_MAX);
+		free(out->name);
+		out->name = NULL;
+		return 0;
+	}
+
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t       *item = merged->items[i].item;
+		const ncfg_ast_assignment_t *assignment;
+		ncfg_words_t                 words;
+		size_t                       at;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `host_list`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "mac") != 0) {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown host_list key `%s`: a host list holds `mac` addresses", assignment->key);
+			continue;
+		}
+		if (!ncfg_as_words(ctx, assignment->value, &words)) {
+			ncfg_words_free(&words);
+			continue;
+		}
+		for (at = 0; at < words.count; at++) {
+			char  why[NCFG_ERROR_MAX];
+			char *mac = ncfg_normalize_station(ctx, words.at[at].text, why, sizeof(why));
+
+			if (!mac) {
+				ncfg_diag(ctx, words.at[at].span, "%s", why);
+				continue;
+			}
+			(void)ncfg_push_string_owned(ctx, &out->mac, &out->mac_count, mac);
+		}
+		ncfg_words_free(&words);
+	}
+	return 1;
 }
 
 /*

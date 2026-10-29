@@ -388,6 +388,12 @@ static int collect_overrides(const ncfg_document_t *base, ncfg_overrides_t *over
 			return 0;
 		}
 	}
+	for (i = 0; i < base->host_list_count; i++) {
+		if (!ncfg_overrides_add(overrides, "host_list", base->host_lists[i].name, err,
+		        err_size)) {
+			return 0;
+		}
+	}
 	for (i = 0; i < base->linkset_count; i++) {
 		if (!ncfg_overrides_add(overrides, "linkset", base->linksets[i].name, err,
 		    err_size)) {

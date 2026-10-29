@@ -849,6 +849,25 @@ static void an_access_point_round_trips(void)
 	free(plain);
 }
 
+/* A host list, and the reference to it, round-trip (10.591). */
+static void a_host_list_round_trips(void)
+{
+	char *text;
+
+	round_trips("host_list \"office\" { mac = [\"00:00:00:00:00:01\", \"aa:bb:cc:dd:ee:ff\"] }\n"
+	    "access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { allow = [\"@host_list:office\", \"11:22:33:44:55:66\"] }\n}\n",
+	    "a host list and an access point naming it survive a round trip");
+	text = rendering_of("host_list \"office\" { mac = [\"00:00:00:00:00:01\"] }\n"
+	    "access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { allow = [\"@host_list:office\"] }\n}\n");
+	/* The reference, not what it stood for: a profile that wrote the
+	 * address would stop following the list the moment it changed. */
+	check(text && strstr(text, "allow = [\"@host_list:office\"]") != NULL,
+	    "  the access point is saved naming the list, not its addresses");
+	free(text);
+}
+
 /* A `mesh` round-trips, SAE and open alike (10.588). */
 static void a_mesh_round_trips(void)
 {
@@ -3787,6 +3806,7 @@ int main(int argc, char **argv)
 	the_hostname_policy_round_trips();
 	a_radios_own_policy_round_trips();
 	a_mesh_round_trips();
+	a_host_list_round_trips();
 	a_routing_rule_round_trips();
 	an_access_point_round_trips();
 	ethtool_and_qdisc_round_trip();

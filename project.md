@@ -12682,6 +12682,55 @@ hosts with its own pruning would be a second retention engine to retire, and
 a format other code would grow to depend on -- the placeholder 10.567 found
 this tree still holding for coordination.
 
+### Built: exact addresses, 2026-10-29
+
+    host_list "family" { mac = ["00:11:22:33:44:01", "00:11:22:33:44:02"] }
+    access_point "Family" {
+    	...
+    	access_control { allow = ["@host_list:family", "00:11:22:33:44:03"] }
+    }
+
+- **A `host_list` block** holds exact MAC addresses, normalised and sorted
+  as a station list is. **An access point names one** inside its `allow` or
+  `deny` as `"@host_list:NAME"`, beside literal addresses; several lists and
+  addresses on one side are joined. 0039 still holds: one side per access
+  point.
+- **Resolved at compile time into `stations`**, after every block is read,
+  so a list may be declared later or in another drop-in. The planner,
+  hostapd's list file and `ap_stations` read `stations` and do not know
+  lists exist. **A name no `host_list` declares is refused**, not read as
+  empty: empty is "nobody" on an allow list and "everybody" on a deny list.
+- **The document keeps what was written** -- `lists`, and `written` for the
+  literal addresses beside them, both omitted when no list is named, so
+  every earlier document is byte for byte what it was -- because two
+  writers put an access point back into configuration and each would
+  otherwise save the addresses and drop the list. `ncfg profile save`
+  renders the reference; the client library gives the GUI's access point
+  dialog `@host_list:NAME` plus the written addresses instead of the
+  resolved set (`ncfg_client_access_points`), which the dialog was filling
+  from and writing back.
+- **Scope: estate, assumed.** An access point's `access_control` travels,
+  so a list it names has to travel with it or arrive as a reference to
+  nothing; `mac` is kind `0x00080001`. Whether lists are estate-wide is
+  still the open question below, and this default follows the reference
+  rather than answering it.
+
+Checked: `lower_test` (resolution across declaration order, repeats
+dropped, the missing and malformed refusals, two lists and an empty one, a
+block naming none unchanged), `render_test` (round trip by production's
+equality; the saved access point names the list), `client_test` (the
+editor's form, plain and sanitised), `scope_test`, the witness, `make
+example` with the new block as a named exception, `registry`, `agree`.
+Sabotage: not resolving fails two `lower_test` checks; rendering the
+stations instead of the reference fails both `render_test` checks.
+
+**What it does not do yet**: wildcards, and a list on the firewall's side.
+**Not run against a hostapd**: a changed list reaches a running access point
+the way a changed station list does, through the planner's existing
+`access_control.add` and `del`, and no rig has exercised it with a list.
+`ncfg_document_validate` does not check that a document read from JSON names
+only lists it carries; one compiled here always does.
+
 ### Still open
 
 - Which wildcard forms: an OUI prefix, a mask, a name pattern.

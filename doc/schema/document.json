@@ -5313,6 +5313,12 @@
         "policy": "deny",
         "stations": [
           "aa:bb:cc:dd:ee:ff"
+        ],
+        "lists": [
+          "banned"
+        ],
+        "written": [
+          "aa:bb:cc:dd:ee:ff"
         ]
       }
     },
@@ -5369,6 +5375,14 @@
       },
       "channel": 36,
       "band": "5"
+    }
+  ],
+  "host_lists": [
+    {
+      "name": "banned",
+      "mac": [
+        "aa:bb:cc:dd:ee:ff"
+      ]
     }
   ]
 }

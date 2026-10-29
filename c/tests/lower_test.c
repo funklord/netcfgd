@@ -1361,6 +1361,80 @@ static void access_point_cases(void)
 	    "six colon-separated octets", "a malformed station address is refused");
 }
 
+/*
+ * Host lists (10.591): a named set of addresses an access point's station list
+ * can name, resolved into the stations everything downstream reads.
+ */
+#define AP_OPEN "access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+
+static void host_list_cases(void)
+{
+	ncfg_document_t             *document;
+	const ncfg_access_control_t *acl;
+
+	document = compiles(AP_OPEN
+	    "\taccess_control { allow = [\"@host_list:office\", \"11:22:33:44:55:66\"] }\n}\n"
+	    "host_list \"office\" { mac = [\"AA:BB:CC:DD:EE:FF\", \"00:00:00:00:00:01\", "
+	    "\"11:22:33:44:55:66\"] }\n",
+	    "an access point names a host list declared after it");
+	if (document) {
+		acl = document->access_points[0].access_control;
+		check(document->host_list_count == 1 &&
+		    strcmp(document->host_lists[0].name, "office") == 0 &&
+		    document->host_lists[0].mac_count == 3 &&
+		    strcmp(document->host_lists[0].mac[0], "00:00:00:00:00:01") == 0,
+		    "  the list is kept, its addresses lowercased and sorted");
+		/* The whole answer, in the one field the planner, hostapd's file and
+		 * `ap_stations` read -- and the address in both places once. */
+		check(acl && acl->station_count == 3 &&
+		    strcmp(acl->stations[0], "00:00:00:00:00:01") == 0 &&
+		    strcmp(acl->stations[1], "11:22:33:44:55:66") == 0 &&
+		    strcmp(acl->stations[2], "aa:bb:cc:dd:ee:ff") == 0,
+		    "  the list is resolved into the stations, without repeats");
+		check(acl && acl->list_count == 1 && strcmp(acl->lists[0], "office") == 0 &&
+		    acl->written_count == 1 && strcmp(acl->written[0], "11:22:33:44:55:66") == 0,
+		    "  and what was written is kept beside it, for profile save");
+		ncfg_document_free(document);
+	}
+
+	/* Without a list, nothing new: the document is the one it was. */
+	document = compiles(AP_OPEN "\taccess_control { deny = [\"aa:bb:cc:dd:ee:ff\"] }\n}\n",
+	    "an access control block naming no list compiles as before");
+	if (document) {
+		acl = document->access_points[0].access_control;
+		check(acl && acl->list_count == 0 && acl->written_count == 0 && acl->written == NULL,
+		    "  and carries neither the list names nor a second copy of its stations");
+		ncfg_document_free(document);
+	}
+
+	/* An empty list on a deny side lets everything in, and on an allow side
+	 * shuts everything out: reading a missing one as empty is wrong both ways. */
+	refuses(AP_OPEN "\taccess_control { deny = [\"@host_list:banned\"] }\n}\n",
+	    "which no `host_list` block declares",
+	    "a list nothing declares is refused rather than read as empty");
+	refuses(AP_OPEN "\taccess_control { deny = [\"@host_list:\"] }\n}\n",
+	    "does not name a host list", "a reference with no name is refused");
+	refuses("host_list \"office\" { mac = [\"nonsense\"] }\n",
+	    "six colon-separated octets", "a host list holds addresses");
+	refuses("host_list \"office\" { address = [\"192.0.2.1\"] }\n",
+	    "unknown host_list key", "and only addresses, for now");
+	refuses("host_list \"two words\" { mac = [] }\n", "cannot name a host list",
+	    "a name a reference could not spell is refused");
+
+	/* Two lists and a literal on one side: the union, still one list. */
+	document = compiles(AP_OPEN
+	    "\taccess_control { deny = [\"@host_list:a\", \"@host_list:b\"] }\n}\n"
+	    "host_list \"a\" { mac = [\"00:00:00:00:00:0a\"] }\n"
+	    "host_list \"b\" { mac = [] }\n",
+	    "two lists, one of them empty");
+	if (document) {
+		acl = document->access_points[0].access_control;
+		check(acl && acl->station_count == 1 && acl->list_count == 2 && acl->written_count == 0,
+		    "  resolve into one station list, with neither name lost");
+		ncfg_document_free(document);
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * Devices and link kinds
  * ------------------------------------------------------------------------ */
@@ -2240,19 +2314,18 @@ static void interface_cases(void)
  *     them; alone it compiles against the default mode `none` and is refused.
  *   - the `linkset` names the links it chooses between, and a member that
  *     resolves to nothing is refused on purpose.
+ *   - the `access_point "Family"` names a `host_list`, and a list nothing
+ *     declares is refused on purpose (10.591).
  *
- * All three are correct as documentation and meaningless in isolation. A gate
+ * All four are correct as documentation and meaningless in isolation. A gate
  * that silently tolerated "anything that does not compile" would tolerate the
- * next real error too.
- *
- * `tool/example_gate.py`'s own header says "TWO BLOCKS ARE EXPECTED NOT TO
- * COMPILE ALONE" and then names three; the list is the authority, and the
- * count in the prose is stale.
+ * next real error too. `tool/example_gate.py` keeps the same list.
  */
 static const char *const expected_incomplete[] = {
 	"override interface eth0 {",
 	"interface eth0 {\n\tconfig = \"dhcp\"\n\tdns {",
-	"linkset \"uplink\" {"
+	"linkset \"uplink\" {",
+	"access_point \"Family\" {"
 };
 
 /* Every top-level block head this build accepts. The example calls itself
@@ -2260,7 +2333,7 @@ static const char *const expected_incomplete[] = {
  * entirely is invisible to a gate that only compiles what is there --
  * `bluetooth` was in the language from 0149 and in that file never. */
 static const char *const block_heads[] = { "global", "interface", "device", "network",
-	"access_point", "rule", "linkset", "bluetooth" };
+	"access_point", "rule", "linkset", "bluetooth", "host_list" };
 
 static char *read_example(size_t *length_out)
 {
@@ -3339,6 +3412,7 @@ int main(void)
 	dns_cases();
 	network_cases();
 	access_point_cases();
+	host_list_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();

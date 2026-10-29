@@ -1967,6 +1967,74 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
  * station list is read before the interface reader that first needed it. */
 static char *joined_words(const ncfg_json_doc_t *doc, uint32_t array);
 
+/*
+ * The station list as an editor should show it: what the block says.
+ *
+ * **Not `stations` where the block names a host list** (project.md 10.591).
+ * That field is the lists resolved, so a dialog filled from it and saved
+ * writes the addresses a list stood for and drops the list -- the access point
+ * then stops following it, and nothing says so. Where `lists` is present the
+ * answer is each as `@host_list:NAME`, then the addresses written beside
+ * them; where it is absent `stations` is exactly what was written.
+ */
+static char *editable_stations(const ncfg_json_doc_t *doc, uint32_t acl)
+{
+	uint32_t lists = ncfg_json_member(doc, acl, "lists");
+	uint32_t count = ncfg_json_count(doc, lists);
+	char    *written;
+	char    *joined;
+	size_t   length;
+
+	if (count == 0) {
+		return joined_words(doc, ncfg_json_member(doc, acl, "stations"));
+	}
+	written = joined_words(doc, ncfg_json_member(doc, acl, "written"));
+	if (!written) {
+		return NULL;
+	}
+	length = strlen(written);
+	for (uint32_t i = 0; i < count; i++) {
+		size_t      name_length = 0;
+		const char *name = ncfg_json_string(doc, ncfg_json_at(doc, lists, i), &name_length);
+
+		if (name && name_length) {
+			length += strlen("@host_list: ") + name_length;
+		}
+	}
+	joined = malloc(length + 1u);
+	if (!joined) {
+		free(written);
+		return NULL;
+	}
+	joined[0] = '\0';
+	length = 0;
+	for (uint32_t i = 0; i < count; i++) {
+		size_t      name_length = 0;
+		const char *name = ncfg_json_string(doc, ncfg_json_at(doc, lists, i), &name_length);
+
+		if (!name || !name_length) {
+			continue;
+		}
+		if (length) {
+			joined[length++] = ' ';
+		}
+		memcpy(joined + length, "@host_list:", strlen("@host_list:"));
+		length += strlen("@host_list:");
+		memcpy(joined + length, name, name_length);
+		length += name_length;
+	}
+	if (*written) {
+		if (length) {
+			joined[length++] = ' ';
+		}
+		memcpy(joined + length, written, strlen(written));
+		length += strlen(written);
+	}
+	joined[length] = '\0';
+	free(written);
+	return joined;
+}
+
 /* The `@secret:` name a security block refers to, whichever key holds it. */
 static char *security_credential(const ncfg_json_doc_t *doc, uint32_t security)
 {
@@ -2085,7 +2153,7 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 
 		uint32_t acl = ncfg_json_member(doc, entry, "access_control");
 		item->acl_policy = member_text(doc, acl, "policy");
-		item->stations = joined_words(doc, ncfg_json_member(doc, acl, "stations"));
+		item->stations = editable_stations(doc, acl);
 
 		running_state(status, item->device ? item->device : "", item);
 

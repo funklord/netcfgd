@@ -15,7 +15,8 @@
 #include <string.h>
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
-	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh" };
+	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh",
+	"host_list" };
 
 const char *ncfg_block_name(int block)
 {
@@ -86,7 +87,12 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	[NCFG_BLOCK_FIREWALL] = NCFG_SCOPE_HOST_PRIVATE,
 	/* The mesh is the estate's, as a network is: every node of it names the
 	 * same one. Which radio joins it is this host's, below. */
-	[NCFG_BLOCK_MESH] = NCFG_SCOPE_ESTATE
+	[NCFG_BLOCK_MESH] = NCFG_SCOPE_ESTATE,
+	/* **The estate's, because the reference to it is** (10.591). An access
+	 * point's `access_control` travels, and it may name a list: a list that
+	 * stayed behind would arrive on the next host as a reference to nothing,
+	 * which that host refuses. */
+	[NCFG_BLOCK_HOST_LIST] = NCFG_SCOPE_ESTATE
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)
@@ -279,6 +285,7 @@ static const struct {
  *     0x0002xxxx  interface     0x0005xxxx  rule
  *     0x0003xxxx  network       0x0006xxxx  linkset
  *                               0x0007xxxx  mesh
+ *                               0x0008xxxx  host_list
  *
  * `device` and `bluetooth` have no range because they are host-private
  * entire: nothing in them travels, so nothing in them has a number.
@@ -410,6 +417,10 @@ static const struct {
 	{ NCFG_BLOCK_MESH, "band", 0x00070002u },
 	{ NCFG_BLOCK_MESH, "wifi.open", 0x00070003u },
 	{ NCFG_BLOCK_MESH, "wifi.psk", 0x00070004u },
+
+	/* host_list -- its addresses, which travel with the access points that
+	 * name the list (10.591). */
+	{ NCFG_BLOCK_HOST_LIST, "mac", 0x00080001u },
 
 	/*
 	 * rule -- a policy expression, group-wide entire.

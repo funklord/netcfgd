@@ -1489,6 +1489,11 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	for (i = 0; i < document->rule_count; i++) {
 		render_rule(&document->rules[i], overrides, text);
 	}
+	/* Before the access points that name them, so a profile reads in the
+	 * order it is used. */
+	for (i = 0; i < document->host_list_count; i++) {
+		ncfg_render_host_list(&document->host_lists[i], overrides, text, missing);
+	}
 	for (i = 0; i < document->access_point_count; i++) {
 		ncfg_render_access_point(&document->access_points[i], overrides, text, missing);
 	}

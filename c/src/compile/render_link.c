@@ -1004,15 +1004,31 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	ncfg_buf_add_text(&body, "\t}\n");
 
 	if (point->access_control) {
-		size_t i;
+		const ncfg_access_control_t *acl = point->access_control;
+		/* **What was written, where a list was named** (10.591): `stations`
+		 * is then the lists resolved, and rendering it would save a profile
+		 * that no longer follows the list. */
+		char *const *addresses = acl->list_count ? acl->written : acl->stations;
+		size_t       address_count = acl->list_count ? acl->written_count : acl->station_count;
+		size_t       i;
+		size_t       said = 0;
 
 		ncfg_buf_addf(&body, "\taccess_control { %s = [",
-		    point->access_control->policy == NCFG_ACL_POLICY_ALLOW ? "allow" : "deny");
-		for (i = 0; i < point->access_control->station_count; i++) {
-			if (i) {
+		    acl->policy == NCFG_ACL_POLICY_ALLOW ? "allow" : "deny");
+		for (i = 0; i < acl->list_count; i++, said++) {
+			if (said) {
 				ncfg_buf_add_text(&body, ", ");
 			}
-			ncfg_render_quote(&body, point->access_control->stations[i]);
+			ncfg_buf_add_char(&body, '"');
+			ncfg_buf_add_text(&body, "@host_list:");
+			ncfg_buf_add_text(&body, acl->lists[i]);
+			ncfg_buf_add_char(&body, '"');
+		}
+		for (i = 0; i < address_count; i++, said++) {
+			if (said) {
+				ncfg_buf_add_text(&body, ", ");
+			}
+			ncfg_render_quote(&body, addresses[i]);
 		}
 		ncfg_buf_add_text(&body, "] }\n");
 	}
@@ -1043,6 +1059,30 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
  * the compiler would refuse: no channel, a channel outside its band, and a
  * security a mesh does not have.
  */
+void ncfg_render_host_list(const ncfg_host_list_t *list, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
+{
+	size_t i;
+
+	/* The lowerer's refusal, asked again: a name it would not take back is a
+	 * profile that does not load. */
+	if (!ncfg_is_host_list_name(list->name)) {
+		ncfg_render_refuse(missing, "host_list", list->name,
+		    "a name a host list cannot have: letters, digits, `-`, `_` and `.`");
+		return;
+	}
+	ncfg_render_opening(text, "host_list", list->name, overrides);
+	ncfg_render_quote(text, list->name);
+	ncfg_buf_add_text(text, " {\n\tmac = [");
+	for (i = 0; i < list->mac_count; i++) {
+		if (i) {
+			ncfg_buf_add_text(text, ", ");
+		}
+		ncfg_render_quote(text, list->mac[i]);
+	}
+	ncfg_buf_add_text(text, "]\n}\n");
+}
+
 void ncfg_render_mesh(const ncfg_mesh_t *mesh, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {

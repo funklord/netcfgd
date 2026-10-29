@@ -2189,6 +2189,50 @@ static void dns_reports_that_it_is_not_managing_resolution(void)
 }
 
 /*
+ * An access point's station list, as an editor should show it (10.591).
+ *
+ * The GUI's dialog is filled from this and writes it back as the block. Where
+ * the block names a host list, `stations` is the list resolved, and a dialog
+ * filled from it would save the addresses and drop the list. So the client
+ * gives back what was written: the references, then the addresses beside
+ * them. The second access point names no list and keeps reading `stations`.
+ */
+static void an_access_point_keeps_the_lists_it_names(void)
+{
+	struct staged         staged;
+	ncfg_access_points_t  points = {};
+	char                  err[NCFG_ERROR_MAX];
+
+	if (!staged_open(&staged, "a client asking for access points connects",
+	    "{\"response\":\"document\",\"schema_version\":1,\"access_points\":["
+	    "{\"id\":\"family\",\"ssid\":\"66\",\"device\":\"wlan0\","
+	    "\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"allow\","
+	    "\"stations\":[\"00:00:00:00:00:01\",\"00:00:00:00:00:02\",\"00:00:00:00:00:03\"],"
+	    "\"lists\":[\"kids\",\"parents\"],\"written\":[\"00:00:00:00:00:03\"]}},"
+	    "{\"id\":\"guest\",\"ssid\":\"67\",\"device\":\"wlan1\","
+	    "\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"deny\","
+	    "\"stations\":[\"00:00:00:00:00:09\"]}}"
+	    "],\"globals\":{}}\n"
+	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[]}\n")) {
+		return;
+	}
+
+	int got = ncfg_client_access_points(staged.client, &points, err, sizeof(err));
+	ok("the access points arrive", got == 1, err);
+	if (got == 1 && points.count == 2) {
+		equals("one naming lists is shown naming them, then what was written beside them",
+		    points.items[0].stations,
+		    "@host_list:kids @host_list:parents 00:00:00:00:00:03");
+		equals("one naming none is shown its stations, as before", points.items[1].stations,
+		    "00:00:00:00:00:09");
+	} else {
+		ok("both of them", 0, NULL);
+	}
+	ncfg_access_points_free(&points);
+	staged_close(&staged);
+}
+
+/*
  * A default route is what separates "addressed" from "connected".
  *
  * The tray drew a radio as connected on association alone, which is true of a
@@ -2355,6 +2399,7 @@ int main(int argc, char **argv)
 	a_modem_carries_the_card_read_in_each_source();
 	saved_networks_come_from_the_document_not_a_scan();
 	join_choices_are_the_saved_networks_heard();
+	an_access_point_keeps_the_lists_it_names();
 	dns_reports_that_it_is_not_managing_resolution();
 	a_link_knows_whether_a_default_route_leaves_through_it();
 	an_apply_becomes_a_journal();

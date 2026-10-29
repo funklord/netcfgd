@@ -86,6 +86,9 @@ typedef enum {
 	NCFG_BLOCK_FIREWALL,
 	/* An 802.11s mesh one radio joins (10.588). Last, for the reason above. */
 	NCFG_BLOCK_MESH,
+	/* A named list of hosts other blocks refer to (10.591). Last, for the
+	 * reason above. */
+	NCFG_BLOCK_HOST_LIST,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 
