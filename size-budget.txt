@@ -949,4 +949,25 @@ netcfgd
 # the source.
 #
 # Recorded at 1194300 rather than left riding the tolerance.
-total 1194300
+#
+# Then four days nobody recorded, 2026-10-26 to 10-29, +40,072 bytes to
+# 1,234,272 -- found at the next raise rather than at the commit that crossed
+# the ceiling, and which commit that was was not measured. 34 commits to
+# c/src and c/include: the regulatory domain (observed, named, set from
+# `global { regdom }`), a network's hooks running as a radio joins and leaves,
+# `ncfg apply` through the daemon with every consent carried, fast roaming on
+# access points by FT-PSK and then FT-SAE, the mesh block and joining it, a
+# repeater at both ends in four-address mode, and six stop-and-wait fixes
+# to the backends. text 998,107 to 1,033,522 (+35,415), data 60,489 to
+# 62,697 (+2,208). Every one is a feature or a fix the holder asked for; what
+# went wrong is that `make check` was not run between them, or its failure was
+# not recorded -- three other gates were red over the same days -- and this
+# file is a ratchet only while something runs it.
+#
+# Then host lists, 2026-10-29, +4,392 bytes to 1,238,664 (project.md 10.591):
+# the `host_list` block, `@host_list:` references resolved into an access
+# point's stations, and rendering both back. text +3,366, data +480 (the
+# field tables), the rest alignment.
+#
+# Recorded at 1238700 rather than left riding the tolerance.
+total 1238700
