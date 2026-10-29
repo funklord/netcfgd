@@ -845,6 +845,18 @@
 #	}
 #}
 
+# The repeater's own end: a station in four-address mode, so frames from the
+# hosts behind it keep their own addresses across the hop, bridged with its
+# wired side. netcfgd sets the mode before the radio joins the bridge, which
+# a three-address station cannot, and starts wpa_supplicant on the bridge.
+
+#device br0 {
+#	bridge { members = ["wlan0", "eth0"] }
+#}
+#device wlan0 {
+#	wifi { wds = true }
+#}
+
 # A MESH (802.11s): radios that link to each other with no access point and
 # no cable -- the backhaul between two rooms. Every node is configured the same
 # way and peers with any other that is; there is no master.

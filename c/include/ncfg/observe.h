@@ -927,6 +927,15 @@ int ncfg_observe_regdom_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t 
 int ncfg_observe_ports_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
     char *err, size_t err_size);
 
+/*
+ * Each radio's four-address (WDS) mode, into its link's `wds`, from one
+ * nl80211 `GET_INTERFACE` dump -- asked only where there is a radio. A kernel
+ * that will not say leaves them false with a note. `genl` may be NULL, which
+ * is the seam left out.
+ */
+int ncfg_observe_wds_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * What each WireGuard device is running, and whether it is current
  * ------------------------------------------------------------------------ */

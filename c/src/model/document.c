@@ -1657,7 +1657,9 @@ static const ncfg_field_t wifi_device_fields[] = {
 	    .fallback = NCFG_MAC_POLICY_PERMANENT,
 	    .offset = offsetof(ncfg_wifi_device_policy_t, mac_policy) },
 	{ .name = "scan_randomization", .kind = NCFG_F_BOOL,
-	    .offset = offsetof(ncfg_wifi_device_policy_t, scan_randomization) }
+	    .offset = offsetof(ncfg_wifi_device_policy_t, scan_randomization) },
+	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_wifi_device_policy_t, wds) }
 };
 static const ncfg_type_t wifi_device_type = TYPE("wifi device policy", wifi_device_fields);
 

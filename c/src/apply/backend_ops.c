@@ -606,8 +606,10 @@ static int no_other_manager_holds(const ncfg_service_t *service, const char *ifa
 static int start_supplicant(const ncfg_service_t *service, const char *run_dir,
     const char *iface, char *err, size_t err_size)
 {
-	const char *dir;
-	const char *driver;
+	const ncfg_device_t *device;
+	const char          *dir;
+	const char          *driver;
+	const char          *bridge;
 
 	if (!supplicant_dir_of(service, "backend.start", iface, &dir, err, err_size) ||
 	    !ncfg_service_supplicant_driver(service->document, iface, &driver, err, err_size)) {
@@ -616,8 +618,12 @@ static int start_supplicant(const ncfg_service_t *service, const char *run_dir,
 	if (!no_other_manager_holds(service, iface, err, err_size)) {
 		return 0;
 	}
-	if (!ncfg_supplicant_start(run_dir, dir, iface, driver, service->supplicant_program, err,
-	    err_size)) {
+	/* A four-address radio in a bridge is told the bridge, where its EAPOL
+	 * arrives (10.587 item 4). */
+	device = ncfg_document_device(service->document, iface);
+	bridge = (device && device->wifi && device->wifi->wds) ? device->master : NULL;
+	if (!ncfg_supplicant_start(run_dir, dir, iface, bridge, driver,
+	    service->supplicant_program, err, err_size)) {
 		return 0;
 	}
 	/*

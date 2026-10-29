@@ -156,6 +156,45 @@ static void a_radio_given_to_a_mesh_gets_a_supplicant(void)
 }
 
 /*
+ * A repeater: a radio in a bridge, in four-address mode (10.587 item 4).
+ *
+ * The mode is set before the radio is enslaved -- the kernel will not bridge a
+ * three-address station -- and the warning that a bridged station cannot work
+ * is not given for one that has the cure. A radio already in the mode plans
+ * nothing for it.
+ */
+#define WDS_RADIO \
+	"{\"name\":\"br0\",\"kind\":{\"kind\":\"bridge\",\"members\":[\"wlan0\"]," \
+	"\"stp\":false}},{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"}," \
+	"\"master\":\"br0\",\"wifi\":{\"wds\":true}}"
+#define BRIDGE_AND_RADIO \
+	"{\"name\":\"br0\",\"addressing\":[]},{\"name\":\"wlan0\",\"addressing\":[]}"
+
+static void a_repeater_radio_is_four_address_before_it_is_bridged(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(WDS_RADIO, BRIDGE_AND_RADIO, "", "",
+	    "\"links\":[" RADIO_LINK "]", &document, &observed);
+	const ncfg_action_t *wds = plan ? planfix_action(plan, "link.set_wds") : NULL;
+	const ncfg_action_t *master = plan ? planfix_action(plan, "link.set_master") : NULL;
+
+	check(wds && wds->op.u.set_wds.on, "a repeater's radio is put in four-address mode");
+	check(wds && master && planfix_depends_on(master, wds->id),
+	    "  before it is bridged, which the kernel refuses a three-address station");
+	check(plan && !planfix_warned(plan, "three-address"),
+	    "  and is not warned that a bridged station cannot work");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(WDS_RADIO, BRIDGE_AND_RADIO, "", "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true,\"wds\":true") "]",
+	    &document, &observed);
+	check(plan && !planfix_action(plan, "link.set_wds"),
+	    "a radio already in four-address mode plans nothing for it");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * The addressing waits on it, which is the whole reason this is a prerequisite
  * and not an addressing action: a radio that has not associated carries
  * nothing, so a client started first spends its backoff talking to a network
@@ -436,6 +475,7 @@ int main(void)
 {
 	a_radio_the_machine_has_gets_a_supplicant();
 	a_radio_given_to_a_mesh_gets_a_supplicant();
+	a_repeater_radio_is_four_address_before_it_is_bridged();
 	the_addressing_waits_for_the_supplicant();
 	a_supplicant_already_running_is_not_started_again();
 	a_wifi_block_on_something_that_is_not_a_radio_starts_nothing();

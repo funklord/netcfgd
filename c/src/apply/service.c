@@ -173,6 +173,7 @@ int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, cha
 	case NCFG_OP_WG_SET_DEVICE:
 	case NCFG_OP_WG_SET_PEERS:
 	case NCFG_OP_LINK_SET_OFFLOADS:
+	case NCFG_OP_LINK_SET_WDS:
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 	case NCFG_OP_RULE_ADD:
 	case NCFG_OP_RULE_DEL:

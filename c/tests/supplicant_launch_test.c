@@ -639,7 +639,7 @@ static void the_subtool_verbosity_follows_the_daemons(void)
 	ncfg_log_accept(NCFG_LOG_INFO);
 	message[0] = '\0';
 	check(recorded(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant",
-	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", "/run/wpa_supplicant",
+	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", NULL, "/run/wpa_supplicant",
 	    "/run/netcfgd/supplicant/wlan-test0.pid", &args, message, sizeof(message)), message),
 	    "a command line is built at the ordinary level");
 	joined_argv(&args, quiet, sizeof(quiet));
@@ -649,7 +649,7 @@ static void the_subtool_verbosity_follows_the_daemons(void)
 	ncfg_log_accept(NCFG_LOG_DEBUG);
 	message[0] = '\0';
 	check(recorded(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant",
-	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", "/run/wpa_supplicant",
+	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", NULL, "/run/wpa_supplicant",
 	    "/run/netcfgd/supplicant/wlan-test0.pid", &args, message, sizeof(message)), message),
 	    "and one is built at `debug`");
 	joined_argv(&args, loud, sizeof(loud));
@@ -674,7 +674,7 @@ static void the_command_line_is_what_a_supplicant_is_started_with(void)
 	printf("\n-- the command line\n");
 	message[0] = '\0';
 	check(recorded(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant",
-	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", "/run/wpa_supplicant",
+	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", NULL, "/run/wpa_supplicant",
 	    "/run/netcfgd/supplicant/wlan-test0.pid", &args, message, sizeof(message)), message),
 	    "a radio's command line is built");
 	joined[0] = '\0';
@@ -699,12 +699,20 @@ static void the_command_line_is_what_a_supplicant_is_started_with(void)
 	    "  and `-s`, without which a daemonised supplicant logs nowhere at all");
 
 	message[0] = '\0';
-	refused(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant", NULL, "wlan-test0",
+	/* A repeater's radio is told its bridge, where its EAPOL arrives. */
+	check(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant", NCFG_SUPPLICANT_DRIVER_RADIO,
+	          "wlan-test0", "br0", "/run/wpa_supplicant",
+	          "/run/netcfgd/supplicant/wlan-test0.pid", &args, message, sizeof(message)) &&
+	        args.count >= 2u && strcmp(args.argv[args.count - 2u], "-b") == 0 &&
+	        strcmp(args.argv[args.count - 1u], "br0") == 0,
+	    "a four-address radio in a bridge is started with `-b` naming it");
+	message[0] = '\0';
+	refused(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant", NULL, "wlan-test0", NULL,
 	    "/run/wpa_supplicant", "/run/netcfgd/supplicant/wlan-test0.pid", &args, message,
 	    sizeof(message)), message, "wired",
 	    "a command line with no driver is refused, naming both of them");
 	message[0] = '\0';
-	refused(ncfg_supplicant_arguments(NULL, NCFG_SUPPLICANT_DRIVER_WIRED, "eth-test0",
+	refused(ncfg_supplicant_arguments(NULL, NCFG_SUPPLICANT_DRIVER_WIRED, "eth-test0", NULL,
 	    "/run/wpa_supplicant", "/run/netcfgd/supplicant/eth-test0.pid", &args, message,
 	    sizeof(message)), message, "program",
 	    "and one with no program says which piece is missing");
@@ -1113,11 +1121,11 @@ static void nothing_here_has_a_default(void)
 
 	printf("\n-- nothing here has a default\n");
 	message[0] = '\0';
-	refused(ncfg_supplicant_start(NULL, ctrl_dir, "wlan-test0",
+	refused(ncfg_supplicant_start(NULL, ctrl_dir, "wlan-test0", NULL,
 	    NCFG_SUPPLICANT_DRIVER_RADIO, wrapper, message, sizeof(message)), message,
 	    "run directory", "a start with no run directory is refused by name");
 	message[0] = '\0';
-	refused(ncfg_supplicant_start(run_dir, NULL, "wlan-test0",
+	refused(ncfg_supplicant_start(run_dir, NULL, "wlan-test0", NULL,
 	    NCFG_SUPPLICANT_DRIVER_RADIO, wrapper, message, sizeof(message)), message,
 	    "control directory", "and one with nowhere to put the control socket");
 

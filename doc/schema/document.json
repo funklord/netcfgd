@@ -838,7 +838,8 @@
         "regdom": "SE",
         "powersave": "off",
         "mac_policy": "per_network",
-        "scan_randomization": true
+        "scan_randomization": true,
+        "wds": true
       },
       "modem": {
         "sim": [

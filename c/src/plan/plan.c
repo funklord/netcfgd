@@ -334,6 +334,9 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 		out->u.set_ipv6_token.name = ncfg_plan_intern(plan, in->u.set_ipv6_token.name);
 		out->u.set_ipv6_token.token = ncfg_plan_intern(plan, in->u.set_ipv6_token.token);
 		return;
+	case NCFG_OP_LINK_SET_WDS:
+		out->u.set_wds.name = ncfg_plan_intern(plan, in->u.set_wds.name);
+		return;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		out->u.set_offloads.name = ncfg_plan_intern(plan, in->u.set_offloads.name);
 		if (in->u.set_offloads.feature_count == 0u || plan->failed) {

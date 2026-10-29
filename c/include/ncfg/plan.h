@@ -104,6 +104,8 @@ typedef enum {
 	NCFG_OP_WG_SET_PEERS,
 	NCFG_OP_DNS_APPLY,
 	NCFG_OP_LINK_SET_OFFLOADS,
+	/* A station radio's four-address (WDS) mode, over nl80211 (10.587). */
+	NCFG_OP_LINK_SET_WDS,
 	NCFG_OP_LINK_SET_IPV6_TOKEN,
 	NCFG_OP_RULE_ADD,
 	NCFG_OP_RULE_DEL,
@@ -183,6 +185,10 @@ typedef struct {
 			const ncfg_offload_t *features;
 			size_t                feature_count;
 		} set_offloads;
+		struct {
+			const char *name;
+			int         on;
+		} set_wds;
 		struct {
 			const char   *iface;
 			const char   *addr;

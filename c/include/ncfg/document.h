@@ -1201,6 +1201,14 @@ typedef struct {
 	 * is ever joined, so a device that randomises on association and not on
 	 * scan is trackable by a passive listener in a cafe it never joined. */
 	int   scan_randomization;
+	/*
+	 * Four-address (WDS) station mode, which is what lets this radio be a
+	 * member of a bridge -- a repeater carrying a second LAN through somebody
+	 * else's access point. The kernel will not bridge a three-address station
+	 * at all, and the access point has to take four-address stations
+	 * (`access_point { wds = true }` on netcfgd's). 10.587 item 4.
+	 */
+	int   wds;
 } ncfg_wifi_device_policy_t;
 
 /*

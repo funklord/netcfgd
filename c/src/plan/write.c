@@ -125,6 +125,10 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 	 * carries a mask bitset saying "change exactly these", and the order
 	 * the planner sorted them into is part of the value.
 	 */
+	case NCFG_OP_LINK_SET_WDS:
+		member_text(writer, "name", op->u.set_wds.name);
+		ncfg_json_write_member_bool(writer, "on", op->u.set_wds.on);
+		break;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		member_text(writer, "name", op->u.set_offloads.name);
 		ncfg_json_write_key(writer, "features");

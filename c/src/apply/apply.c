@@ -337,6 +337,7 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_LINK_SET_VXLAN:
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 	case NCFG_OP_LINK_SET_OFFLOADS:
+	case NCFG_OP_LINK_SET_WDS:
 	case NCFG_OP_BRIDGE_VLAN_ADD:
 	case NCFG_OP_BRIDGE_VLAN_DEL:
 	case NCFG_OP_WG_SET_DEVICE:

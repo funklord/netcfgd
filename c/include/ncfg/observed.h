@@ -587,6 +587,9 @@ typedef struct {
 	 * on an interface, and reading sysfs from the planner would make it
 	 * untestable against fixtures whose interfaces do not exist. */
 	int     wireless;
+	/* A station radio in four-address (WDS) mode, which is what lets it be a
+	 * bridge member (10.587 item 4). Asked of nl80211, and only of radios. */
+	int     wds;
 	/* **Carried rather than derived, before four clients derive it.** Absent
 	 * where nothing has computed it: a bare netlink snapshot. */
 	ncfg_optint_t category; /* ncfg_link_category_t where `has` */

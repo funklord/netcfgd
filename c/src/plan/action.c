@@ -83,6 +83,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "dns.apply";
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return "link.set_offloads";
+	case NCFG_OP_LINK_SET_WDS:
+		return "link.set_wds";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 		return "link.set_ipv6_token";
 	case NCFG_OP_RULE_ADD:
@@ -258,6 +260,9 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	 * lost session -- and a guard that blocked it would block the change most
 	 * often made to fix a NIC that is already corrupting traffic. */
 	case NCFG_OP_LINK_SET_OFFLOADS:
+	/* Measured: a station stays associated while its four-address mode is
+	 * changed (10.587), so nothing in flight is cut by it. */
+	case NCFG_OP_LINK_SET_WDS:
 	case NCFG_OP_COMMIT_REVERT:
 		return 0;
 	}
@@ -304,6 +309,8 @@ static const char *subject_class(int kind)
 		return "vxlan";
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return "offloads";
+	case NCFG_OP_LINK_SET_WDS:
+		return "wds";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 		return "token";
 	case NCFG_OP_ADDR_ADD:
@@ -481,6 +488,8 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 		return op->u.set_ipv6_token.name;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return op->u.set_offloads.name;
+	case NCFG_OP_LINK_SET_WDS:
+		return op->u.set_wds.name;
 	case NCFG_OP_LINK_DELETE:
 	case NCFG_OP_LINK_UNSET_MASTER:
 	case NCFG_OP_LINK_UP:

@@ -739,6 +739,8 @@ static const ncfg_field_t observed_link_fields[] = {
 	    .offset = offsetof(ncfg_observed_link_t, kind) },
 	{ .name = "wireless", .kind = NCFG_F_BOOL,
 	    .offset = offsetof(ncfg_observed_link_t, wireless) },
+	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_link_t, wds) },
 	{ .name = "category", .kind = NCFG_F_OPT_ENUM, .choices = &link_category_set,
 	    .offset = offsetof(ncfg_observed_link_t, category) },
 	{ .name = "network", .kind = NCFG_F_STR,

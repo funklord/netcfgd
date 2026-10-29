@@ -1075,9 +1075,12 @@ int ncfg_supplicant_configure_wired(ncfg_supplicant_client_t *client,
 /*
  * Room for the vector below and its terminator: the program, `-B`,
  * `-D<driver>`, `-s`, `-i`, the interface, `-C`, the directory, `-P` and the
- * pid file.
+ * pid file -- ten -- then `-d` where netcfgd logs at debug, and `-b` and a
+ * bridge for a four-address radio (10.587 item 4): thirteen and the NULL. It
+ * was twelve until the bridge arrived, and `supplicant_launch_test` found the
+ * repeater's command line refused for length before any radio met it.
  */
-#define NCFG_SUPPLICANT_ARGV_MAX 12
+#define NCFG_SUPPLICANT_ARGV_MAX 14
 
 /*
  * The two drivers, which are a property of the interface rather than a
@@ -1142,9 +1145,12 @@ typedef struct {
  * `-C` is the control directory and `-P` is the pid file that is also the
  * mark. There is deliberately no `-c`: see the note above.
  */
+/* `bridge` is the bridge a four-address radio is in, or NULL: the supplicant
+ * is told it with `-b`, since a bridged station's EAPOL arrives on the bridge
+ * rather than on the radio (10.587 item 4). */
 int ncfg_supplicant_arguments(const char *program, const char *driver, const char *iface,
-    const char *dir, const char *pid_path, ncfg_supplicant_args_t *out, char *err,
-    size_t err_size);
+    const char *bridge, const char *dir, const char *pid_path, ncfg_supplicant_args_t *out,
+    char *err, size_t err_size);
 
 /*
  * The pid of a supplicant of netcfgd's, if it is still there.
@@ -1203,7 +1209,7 @@ int ncfg_supplicant_adopt(const char *run, const char *dir, const char *iface, p
  * `NCFG_WPA_SUPPLICANT` exists because its search had no other seam.
  */
 int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
-    const char *driver, const char *program, char *err, size_t err_size);
+    const char *bridge, const char *driver, const char *program, char *err, size_t err_size);
 
 /*
  * Stop netcfgd's own supplicant on one interface.

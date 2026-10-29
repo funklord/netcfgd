@@ -336,6 +336,7 @@
       "index": 7,
       "kind": "wlan",
       "wireless": true,
+      "wds": true,
       "network": "n-office",
       "up": true,
       "carrier": true,

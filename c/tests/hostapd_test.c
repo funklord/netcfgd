@@ -376,6 +376,9 @@ static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 		    "an access point taking repeaters takes four-address stations");
 		check_text(ncfg_hostapd_value_of(&lines, "wds_bridge"), "br0",
 		    "  and puts each one's interface in the radio's bridge");
+		check_text(ncfg_hostapd_value_of(&lines, "bridge"), "br0",
+		    "  and hostapd bridges the radio itself, which the kernel will not do for a "
+		    "station");
 		ncfg_hostapd_lines_free(&lines);
 	} else {
 		check(0, "an access point taking repeaters renders");

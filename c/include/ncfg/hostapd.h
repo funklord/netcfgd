@@ -150,9 +150,10 @@ const char *ncfg_hostapd_value_of(const ncfg_hostapd_lines_t *lines, const char 
  * 0 with the code in `*why` (which may be NULL) and a sentence in `err`. The
  * sentence never carries the passphrase -- a length is said, a value is not.
  */
-/* `bridge` is the bridge the access point's radio is in, or NULL: hostapd is
- * told it as `wds_bridge` where the access point takes four-address stations,
- * since the interface it makes for each one joins nothing otherwise --
+/* `bridge` is the bridge the access point's radio is in, or NULL. hostapd is
+ * told it as `bridge`, since only hostapd can bridge the radio -- after making
+ * it an access point -- and as `wds_bridge` where the access point takes
+ * four-address stations, whose interfaces join nothing otherwise. Both
  * measured (10.587 item 4). */
 int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bridge,
     const char *ctrl_dir, const char *passphrase, ncfg_hostapd_lines_t *out,

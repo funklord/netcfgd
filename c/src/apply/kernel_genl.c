@@ -45,9 +45,11 @@
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/state.h"
+#include "ncfg/wds.h"
 #include "ncfg/wire.h"
 
 #include <errno.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -56,6 +58,8 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include <linux/nl80211.h>
 
 /* ------------------------------------------------------------------------ *
  * A socket, and a family on it: `ncfg_genl_family_open`, in genl_socket.c
@@ -735,6 +739,42 @@ int ncfg_kernel_offloads_op(const ncfg_kernel_world_t *world, const ncfg_op_t *o
 	if (ok) {
 		(void)snprintf(doing, sizeof(doing), "set the offloads on %s",
 		    op->u.set_offloads.name ? op->u.set_offloads.name : "?");
+		ok = ncfg_kernel_send(&socket, &message, seq, op->kind, doing, err, err_size);
+	}
+	ncfg_buf_free(&message);
+	ncfg_genl_family_free(&family);
+	ncfg_netlink_close(&socket);
+	return ok;
+}
+
+int ncfg_kernel_wds_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
+    size_t err_size)
+{
+	ncfg_netlink_t     socket;
+	ncfg_genl_family_t family;
+	ncfg_buf_t         message;
+	char               doing[NCFG_ERROR_MAX];
+	unsigned int       index;
+	uint32_t           seq;
+	int                ok;
+
+	(void)world;
+	index = op->u.set_wds.name ? if_nametoindex(op->u.set_wds.name) : 0u;
+	if (index == 0u) {
+		ncfg_error_set(err, err_size, "%s is not an interface this machine has",
+		    op->u.set_wds.name ? op->u.set_wds.name : "?");
+		return 0;
+	}
+	if (!ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, err, err_size)) {
+		return 0;
+	}
+	seq = ncfg_netlink_take_seq(&socket);
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_wds_set_request(&message, &family, (uint32_t)index, op->u.set_wds.on, seq, err,
+	    err_size);
+	if (ok) {
+		(void)snprintf(doing, sizeof(doing), "turn four-address mode %s on %s",
+		    op->u.set_wds.on ? "on" : "off", op->u.set_wds.name);
 		ok = ncfg_kernel_send(&socket, &message, seq, op->kind, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);

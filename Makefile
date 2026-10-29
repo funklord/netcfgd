@@ -2528,7 +2528,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
-      hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh
+      hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2777,6 +2777,24 @@ hull-mesh:
 	sed 's/^/mesh: /' tests/hull/mesh/verdict/mesh; \
 	grep -q '^VERDICT ok' tests/hull/mesh/verdict/mesh
 
+# A repeater through four-address (WDS) mode (10.587 item 4): one vm, four hwsim
+# radios, netcfgd's access point against a reference repeater and netcfgd's
+# repeater against a reference access point, an echo across each, and a
+# second plan with nothing to do. The regdom rig's image.
+hull-wds:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@rm -f tests/hull/wds/verdict/wds
+	@mkdir -p tests/hull/wds/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/wds/hull.conf || true
+	@if [ ! -f tests/hull/wds/verdict/wds ]; then \
+		echo "wds: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/wds: /' tests/hull/wds/verdict/wds; \
+	grep -q '^VERDICT ok' tests/hull/wds/verdict/wds
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -2914,7 +2932,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

@@ -12789,11 +12789,23 @@ met by this gate later.
    and nothing crosses**, so the renderer is told the radio's bridge (its
    device's `master`). **The access point side is built** (2026-10-29):
    `wds = true` on an `access_point` renders both lines, a change restarts it,
-   and a radio in no bridge is warned about. **The station side is not yet**:
-   `device { wifi { wds = true } }` setting `4addr` over nl80211 with the link
-   down, the supplicant started with `-b <bridge>`, and `plan/radio.c`'s
-   bridging warning lifted for it. Multi-AP backhaul (`multi_ap`) and a routed
-   relay are the alternatives beside it.
+   and a radio in no bridge is warned about. **The station side is built
+   too** (2026-10-29): `device { wifi { wds = true } }` is a
+   `link.set_wds` op -- nl80211 `SET_INTERFACE` with `4ADDR`, planned
+   before the radio's `set_master` because a three-address station cannot be
+   enslaved -- the supplicant is started with `-b <bridge>`, `plan/radio.c`'s
+   bridging warning is lifted for it, and the observation reads each
+   interface's `4addr` back (`wds` on a link), so a second plan is empty.
+   **And the access point's own radio is not enslaved by netcfgd**: the
+   kernel refuses `EOPNOTSUPP` for an AP-type interface before hostapd has
+   it, so `ncfg_plan_master` skips an access point's radio and hostapd is
+   given `bridge=` and does it. That was a fault in the AP side as first
+   committed, found by the rig. `make hull-wds` checks both ends, each
+   against a reference end (a bare four-address `wpa_supplicant`; a bare
+   hostapd with `wds_sta`): a UDP echo from a host behind the repeater to
+   one on the LAN, silent before the apply and crossing after it, both
+   halves. Multi-AP backhaul (`multi_ap`) and a routed relay are the
+   alternatives beside it, not built.
 5. **Steering**: band steering and a minimum-signal kick are policy loops over
    802.11v transition requests, and want the neighbour reports first.
 

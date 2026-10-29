@@ -88,8 +88,8 @@ static int push(ncfg_supplicant_args_t *args, const char *one)
 }
 
 int ncfg_supplicant_arguments(const char *program, const char *driver, const char *iface,
-    const char *dir, const char *pid_path, ncfg_supplicant_args_t *out, char *err,
-    size_t err_size)
+    const char *bridge, const char *dir, const char *pid_path, ncfg_supplicant_args_t *out,
+    char *err, size_t err_size)
 {
 	int written;
 
@@ -158,7 +158,8 @@ int ncfg_supplicant_arguments(const char *program, const char *driver, const cha
 	if (!push(out, program) || !push(out, "-B") || !push(out, out->driver) ||
 	    !push(out, "-s") || !push(out, "-i") || !push(out, iface) || !push(out, "-C") ||
 	    !push(out, dir) || !push(out, "-P") || !push(out, pid_path) ||
-	    (ncfg_log_accepted() >= NCFG_LOG_DEBUG && !push(out, "-d"))) {
+	    (ncfg_log_accepted() >= NCFG_LOG_DEBUG && !push(out, "-d")) ||
+	    (bridge && bridge[0] != '\0' && (!push(out, "-b") || !push(out, bridge)))) {
 		ncfg_error_set(err, err_size,
 		    "the command line for wpa_supplicant on %s is longer than this build will "
 		    "build", iface);
@@ -246,7 +247,7 @@ int ncfg_supplicant_adopt(const char *run, const char *dir, const char *iface, p
  * ------------------------------------------------------------------------ */
 
 int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
-    const char *driver, const char *program, char *err, size_t err_size)
+    const char *bridge, const char *driver, const char *program, char *err, size_t err_size)
 {
 	char                   pid_path[NCFG_SUPPLICANT_PATH_MAX];
 	char                   log[NCFG_SUPPLICANT_PATH_MAX];
@@ -360,7 +361,7 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 		}
 		program = found;
 	}
-	if (!ncfg_supplicant_arguments(program, driver, iface, dir, pid_path, &args, err,
+	if (!ncfg_supplicant_arguments(program, driver, iface, bridge, dir, pid_path, &args, err,
 	    err_size)) {
 		free(found);
 		return 0;

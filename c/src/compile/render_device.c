@@ -561,6 +561,9 @@ static void render_wifi_device(const ncfg_wifi_device_policy_t *wifi, ncfg_buf_t
 	if (wifi->scan_randomization) {
 		ncfg_buf_add_text(body, "\t\tscan_randomization = true\n");
 	}
+	if (wifi->wds) {
+		ncfg_buf_add_text(body, "\t\twds = true\n");
+	}
 	ncfg_buf_add_text(body, "\t}\n");
 }
 

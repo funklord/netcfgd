@@ -297,6 +297,41 @@ void ncfg_plan_link_attributes(ncfg_builder_t *builder, const ncfg_interface_t *
  * Enslavement, and the links that have no interface block
  * ------------------------------------------------------------------------ */
 
+/*
+ * A station radio's four-address (WDS) mode, where the document asks for it
+ * or the radio has it and the document does not (10.587 item 4).
+ *
+ * **Before the master, which is why this is here.** The kernel will not put a
+ * three-address station in a bridge -- measured, the enslave left the bridge
+ * without it -- so a repeater's `link.set_master` has to wait for this. It
+ * needs no link cycle: a vm measured a station staying associated through the
+ * change. Only radios: an access point takes four-address stations through
+ * hostapd's `wds_sta`, and nothing else has the mode.
+ */
+static uint32_t plan_wds(ncfg_builder_t *builder, const char *name,
+    const ncfg_device_t *device, const ncfg_observed_link_t *link,
+    const ncfg_plan_ids_t *gate)
+{
+	ncfg_op_t     op;
+	ncfg_op_t     inverse;
+	ncfg_reason_t reason;
+	int           wanted = device && device->wifi && device->wifi->wds;
+
+	if (!link || !link->wireless || (wanted != 0) == (link->wds != 0) ||
+	    ncfg_plan_access_point_wanted(builder->desired, name)) {
+		return NCFG_PLAN_NO_ACTION;
+	}
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_SET_WDS;
+	op.u.set_wds.name = name;
+	op.u.set_wds.on = wanted;
+	inverse = op;
+	inverse.u.set_wds.on = !wanted;
+	reason = ncfg_plan_reason_differs(name, "wifi.wds", wanted ? "true" : "false",
+	    link->wds ? "true" : "false");
+	return ncfg_builder_push(builder, &op, &reason, gate->ids, gate->count, &inverse);
+}
+
 uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name)
 {
 	const ncfg_device_t        *device = ncfg_plan_device(builder->desired, name);
@@ -308,11 +343,33 @@ uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name)
 	ncfg_op_t                   inverse;
 	ncfg_reason_t               reason;
 	uint32_t                    id = NCFG_PLAN_NO_ACTION;
+	uint32_t                    wds;
 
+	ncfg_builder_gate(builder, name, &gate);
+	wds = plan_wds(builder, name, device, link, &gate);
 	if (!wanted && !current) {
+		ncfg_plan_ids_free(&gate);
 		return NCFG_PLAN_NO_ACTION;
 	}
-	ncfg_builder_gate(builder, name, &gate);
+	/* The enslave waits for four-address mode, which the kernel requires
+	 * before it will bridge a station. */
+	if (wds != NCFG_PLAN_NO_ACTION) {
+		ncfg_plan_ids_push(builder->plan, &gate, wds);
+	}
+	/*
+	 * **An access point's radio is bridged by hostapd, not here.** Enslaving
+	 * it beforehand is enslaving a station, which the kernel refuses --
+	 * measured by `make hull-wds`: `link.set_master wlan0` failed with
+	 * EOPNOTSUPP and stopped the apply, so no bridged access point had ever
+	 * come up, whatever `plan/radio.c` said about bridging one being fine.
+	 * hostapd is told the bridge (`bridge=`), switches the radio to AP mode
+	 * and adds it itself; the observation then shows the master wanted.
+	 */
+	if (wanted && (!current || strcmp(current, wanted) != 0) &&
+	    ncfg_plan_access_point_wanted(builder->desired, name)) {
+		ncfg_plan_ids_free(&gate);
+		return NCFG_PLAN_NO_ACTION;
+	}
 	if (wanted && (!current || strcmp(current, wanted) != 0)) {
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_LINK_SET_MASTER;

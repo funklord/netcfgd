@@ -493,6 +493,14 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bri
 		    "a client's credentials, which is the wrong end of the exchange. Use `psk` or "
 		    "`owe` here");
 	}
+	/* The radio's bridge, which hostapd joins it to once the radio is an
+	 * access point -- the kernel refuses to bridge it before (10.587 item 4,
+	 * `make hull-wds`), so the planner leaves the enslave to this line. */
+	if (bridge && !add_line(out, "bridge", bridge, 0)) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering the radio's bridge");
+		return 0;
+	}
 	/* Four-address stations, each given an interface hostapd puts in the
 	 * radio's bridge -- without `wds_bridge` it joins none and nothing
 	 * crosses, which a vm measured before this was written. */

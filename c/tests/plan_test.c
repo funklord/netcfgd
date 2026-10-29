@@ -788,8 +788,9 @@ static void the_frozen_witness(void)
  * The tag used to be serde's `snake_case` of the variant while the name was a
  * function, so one operation had two spellings and only a client outside the
  * workspace could see both at once (0082). Here they are one function, so what
- * this checks instead is the list: a sorted roll-call of forty-eight names,
- * which fails when one is renamed, added or lost.
+ * this checks instead is the list: a sorted roll-call of forty-nine names,
+ * which fails when one is renamed, added or lost. `link.set_wds` is the
+ * forty-ninth (10.587 item 4).
  */
 static void the_op_vocabulary(void)
 {
@@ -800,7 +801,7 @@ static void the_op_vocabulary(void)
 		"ingress.redirect.clear", "link.create", "link.delete", "link.down",
 		"link.set_bond", "link.set_bridge", "link.set_ipv6_token", "link.set_mac",
 		"link.set_macvlan", "link.set_master", "link.set_mtu", "link.set_offloads",
-		"link.set_tunnel", "link.set_vxlan", "link.unset_master", "link.up",
+		"link.set_tunnel", "link.set_vxlan", "link.set_wds", "link.unset_master", "link.up",
 		"nat.replace", "qdisc.reset", "qdisc.set", "route.add", "route.del", "rule.add",
 		"rule.del", "sysctl.set_accept_ra", "sysctl.set_forwarding",
 		"sysctl.set_privacy", "wg.set_device", "wg.set_peers", "wifi.associate",
@@ -810,11 +811,11 @@ static void the_op_vocabulary(void)
 	size_t       i;
 	size_t       j;
 
-	check(count == 48u, "the vocabulary is forty-eight ops");
+	check(count == 49u, "the vocabulary is forty-nine ops");
 	for (i = 0; i < count; i++) {
 		int found = 0;
 
-		for (j = 0; j < 48u; j++) {
+		for (j = 0; j < 49u; j++) {
 			ncfg_op_t op;
 
 			memset(&op, 0, sizeof(op));
@@ -829,7 +830,7 @@ static void the_op_vocabulary(void)
 			complete = 0;
 		}
 	}
-	for (j = 0; j < 48u; j++) {
+	for (j = 0; j < 49u; j++) {
 		ncfg_op_t op;
 		int       found = 0;
 

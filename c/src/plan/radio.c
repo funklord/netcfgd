@@ -165,9 +165,15 @@ static void warn_bridged_station(ncfg_builder_t *builder)
 			/* A mesh point is not a three-address station: 802.11s carries a
 			 * bridged frame's own addresses, so a mesh radio in a bridge is
 			 * the backhaul working as meant rather than this warning's case. */
+			/* Nor for a radio in four-address mode, which is the cure this
+			 * warning names: `wds = true` in its `wifi` block (10.587). */
+			const ncfg_device_t *radio = member ? ncfg_plan_device(builder->desired,
+			    member) : NULL;
+
 			if (!member || !ncfg_plan_radio_supplicant_wanted(builder->desired,
 			                   builder->observed, member) ||
-			    ncfg_document_mesh(builder->desired, member)) {
+			    ncfg_document_mesh(builder->desired, member) ||
+			    (radio && radio->wifi && radio->wifi->wds)) {
 				continue;
 			}
 			ncfg_plan_warnf(builder->plan, member,
@@ -177,7 +183,8 @@ static void warn_bridged_station(ncfg_builder_t *builder)
 			    "access point sourced from an address that never associated, and is "
 			    "dropped. netcfgd sets the master anyway, so the bridge will look "
 			    "configured and carry nothing across the wifi. Four-address mode "
-			    "(WDS) is what bridges a station and both ends must agree on it; "
+			    "(WDS) is what bridges a station and both ends must agree on it -- "
+			    "`wds = true` in this radio's `wifi` block, and on the access point; "
 			    "otherwise route or NAT between the two. Bridging an `access_point` "
 			    "radio is the other case and is fine",
 			    member, device->name);

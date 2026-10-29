@@ -487,6 +487,7 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 	case NCFG_OP_WG_SET_PEERS:
 	case NCFG_OP_DNS_APPLY:
 	case NCFG_OP_LINK_SET_OFFLOADS:
+	case NCFG_OP_LINK_SET_WDS:
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 	case NCFG_OP_RULE_ADD:
 	case NCFG_OP_RULE_DEL:

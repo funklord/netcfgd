@@ -691,6 +691,10 @@ static void lower_wifi_device(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *blo
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 				policy->scan_randomization = flag;
 			}
+		} else if (strcmp(key, "wds") == 0) {
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				policy->wds = flag;
+			}
 		} else if (strcmp(key, "powersave") == 0) {
 			name = ncfg_as_string(ctx, assignment->value);
 			if (!name) {
