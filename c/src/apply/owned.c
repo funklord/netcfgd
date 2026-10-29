@@ -492,7 +492,7 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 	case NCFG_OP_RULE_ADD:
 	case NCFG_OP_RULE_DEL:
 	case NCFG_OP_HOSTNAME_SET:
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 	case NCFG_OP_COMMIT_ARM:
 	case NCFG_OP_COMMIT_CONFIRM:
 	case NCFG_OP_COMMIT_REVERT:

@@ -241,7 +241,7 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "so nothing changed";
 		}
 		return NULL;
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 		/*
 		 * **ENOENT, measured, where this arm first hedged over two codes.**
 		 * 0283 and 0287 both reasoned about `EOPNOTSUPP` from a construct a

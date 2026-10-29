@@ -31,8 +31,7 @@ RESTCONF and a network-wide scope -- one wireless network across forty access
 points -- is part of the language rather than a script around it. It is also
 meant to fit the device class it was designed for, an OpenWrt-sized router,
 with `ncfg plan` surviving into the smallest build. **Not there yet**, said
-once: the firewall below compiles and is not yet enforced; fleet management
-and RESTCONF come last; the interfaces are not frozen; and nothing here has
+once: fleet management and RESTCONF come last; the interfaces are not frozen; and nothing here has
 been released or proven on real hardware for long -- [project.md](project.md)
 section 10 tracks exactly what has, and is worth reading before deploying this
 anywhere you care about.

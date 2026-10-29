@@ -12,7 +12,7 @@
  * WHAT IT ANSWERS, AND WHY BOTH HALVES MATTER
  *   `nat` is what netcfgd's own table currently masquerades, which is the
  *   observation half of the reconciliation: without it the planner compares
- *   the document against an empty list, emits `nat.replace` on every pass and
+ *   the document against an empty list, emits `nftables.replace` on every pass and
  *   never converges -- and its *inverse* is the observed list, so a revert
  *   would put back nothing rather than what was there. `nat_conflicts` is the
  *   other half of decision 0022: a second table doing source NAT at the same
@@ -41,6 +41,7 @@
 #include "ncfg/nft.h"
 #include "ncfg/wire.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -374,13 +375,38 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 		ncfg_error_set(err, err_size, "out of memory recording the installed firewall");
 		return 0;
 	}
+	observe_names_free(observed->filter_neighbours, observed->filter_neighbour_count);
+	observed->filter_neighbours = NULL;
+	observed->filter_neighbour_count = 0;
 	for (at = 0; at < reply->count; at++) {
 		ncfg_nft_chain_t chain;
 		char           **slot = NULL;
 
 		if (!ncfg_nft_chain_read(reply->items[at].bytes, reply->items[at].length, &chain, NULL,
-		        0) || strcmp(chain.table, NCFG_NFT_TABLE) != 0 ||
-		    strcmp(chain.kind, "filter") != 0 || !chain.has_policy) {
+		        0) || strcmp(chain.kind, "filter") != 0 || !chain.has_hook) {
+			continue;
+		}
+		/* Somebody else's filter chain at one of the three hooks: reported,
+		 * never touched (0294). */
+		if (strcmp(chain.table, NCFG_NFT_TABLE) != 0) {
+			const char *hook = chain.hook == NF_INET_LOCAL_IN ? "input"
+			    : chain.hook == NF_INET_FORWARD ? "forward"
+			    : chain.hook == NF_INET_LOCAL_OUT ? "output" : NULL;
+			char        named[2u * NCFG_NFT_NAME_MAX + 16u];
+
+			if (hook) {
+				(void)snprintf(named, sizeof(named), "%s/%s (%s)", chain.table, chain.name,
+				    hook);
+				if (!observe_list_add(&observed->filter_neighbours,
+				        &observed->filter_neighbour_count, named)) {
+					ncfg_observed_firewall_free(found);
+					ncfg_error_set(err, err_size, "out of memory recording the firewall");
+					return 0;
+				}
+			}
+			continue;
+		}
+		if (!chain.has_policy) {
 			continue;
 		}
 		if (strcmp(chain.name, NCFG_NFT_CHAIN_INPUT) == 0) {

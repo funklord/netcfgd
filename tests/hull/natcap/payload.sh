@@ -61,7 +61,7 @@ command -v modprobe >/dev/null || { echo "natcap: no modprobe in this image" >&2
 work=$(mktemp -d /tmp/natcap.XXXXXX)
 export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
 mkdir -p "$work/etc" "$work/run"
-# The smallest config that plans a `nat.replace`: one uplink that translates.
+# The smallest config that plans a `nftables.replace`: one uplink that translates.
 cat > "$work/with-nat.conf" <<'CONF'
 device wan0 {
 	kind   = "dummy"
@@ -202,7 +202,7 @@ state
 if apply_now "$work/with-nat.conf"; then rc=0; else rc=$?; fi
 sed 's/^/     /' "$work/apply.log"
 check "a kernel with the modules applies NAT" "$rc" 0
-check "  and the plan carried the op this rig is about" "$(said 'nat.replace')" yes
+check "  and the plan carried the op this rig is about" "$(said 'nftables.replace')" yes
 
 # --- no `nat` chain type -------------------------------------------------
 echo
@@ -215,9 +215,9 @@ if apply_now "$work/with-nat.conf"; then rc=0; else rc=$?; fi
 sed 's/^/     /' "$work/apply.log"
 check "a kernel with no nat chain type refuses the apply" "$([ "$rc" -ne 0 ] && echo refused || echo applied)" refused
 # **The vacuous pass this is most exposed to**: a converged machine plans no
-# `nat.replace`, and the apply then says nothing about the kernel while looking
+# `nftables.replace`, and the apply then says nothing about the kernel while looking
 # like a result.
-check "  the plan did contain the nat.replace, so this measured something" "$(said 'nat.replace')" yes
+check "  the plan did contain the nftables.replace, so this measured something" "$(said 'nftables.replace')" yes
 check "  the kernel's answer is ENOENT" "$(said 'ENOENT')" yes
 check "  and not EOPNOTSUPP, which 0283 and 0287 both assumed" "$(said 'EOPNOTSUPP')" no
 check "  the refused message is named, which is what says which step" \
@@ -242,7 +242,7 @@ state
 if apply_now "$work/with-nat.conf"; then rc=0; else rc=$?; fi
 sed 's/^/     /' "$work/apply.log"
 check "a kernel with no masquerade refuses the apply" "$([ "$rc" -ne 0 ] && echo refused || echo applied)" refused
-check "  with the nat.replace in the plan" "$(said 'nat.replace')" yes
+check "  with the nftables.replace in the plan" "$(said 'nftables.replace')" yes
 check "  on ENOENT as well, so one code covers both faults" "$(said 'ENOENT')" yes
 check "  and the message named is the rule's, not the chain's" \
 	"$(said 'NFT_MSG_NEWRULE')" yes

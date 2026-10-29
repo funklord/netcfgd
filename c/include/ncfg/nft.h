@@ -384,6 +384,16 @@ const char *ncfg_nft_state_word(unsigned bit);
 int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
     const ncfg_observed_firewall_rule_t *observed);
 
+/*
+ * Whether the installed firewall is the document's, exactly (10.592): each
+ * policy, no rule the decoder refused, and every kernel rule the document's
+ * own transaction decodes to, matched in order. NULL and NULL agree.
+ * `refusal` is set, and the answer is 0, where the document's firewall cannot
+ * be built at all.
+ */
+int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
+    const ncfg_observed_firewall_t *observed, char *refusal, size_t refusal_size);
+
 /* One entry of a table dump. */
 int ncfg_nft_table_read(const void *payload, size_t length, ncfg_nft_table_t *out,
     char *err, size_t err_size);

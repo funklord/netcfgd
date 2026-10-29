@@ -2269,6 +2269,12 @@ ncfg_document_t *ncfg_document_new(char *err, size_t err_size);
  * Returns NULL with a sentence in `err` naming the member, the block it was
  * in, or the invariant that failed.
  */
+/* A firewall of the caller's own, and its release (10.592): what an op that
+ * carries one holds, since a plan outlives the document it was made from.
+ * NULL in, NULL out; NULL out otherwise means out of memory. */
+ncfg_firewall_t *ncfg_firewall_copy(const ncfg_firewall_t *firewall);
+void ncfg_firewall_free(ncfg_firewall_t *firewall);
+
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size);
 
 /* Free the tree. A NULL document, and one never filled in, are nothing. */

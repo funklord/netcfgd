@@ -24,8 +24,10 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/json_write.h"
+#include "ncfg/nft.h"
 #include "ncfg/observed.h"
 #include "ncfg/plan.h"
+#include "ncfg/sha256.h"
 #include "ncfg/value.h"
 
 #include <stddef.h>
@@ -72,6 +74,52 @@ static void member_strings(ncfg_json_writer_t *writer, const char *name,
  * name was `Op::name()`, so one operation had two spellings and only a client
  * outside the workspace could see both at once (0082).
  */
+
+/*
+ * The firewall an `nftables.replace` installs, as what identifies it rather
+ * than the whole of it (10.592): each chain's policy, and each rule's name and
+ * the digest its comment will carry -- 0295's identity, which is what a reader
+ * of the plan can check `ncfg status` against. The rules themselves are the
+ * document's, and `ncfg show` prints them.
+ */
+static void write_firewall_summary(ncfg_json_writer_t *writer, const ncfg_firewall_t *firewall)
+{
+	const ncfg_firewall_chain_t *chains[3] = { &firewall->input, &firewall->forward,
+		&firewall->output };
+	static const char *const     names[3] = { "input", "forward", "output" };
+	size_t                       c;
+
+	ncfg_json_write_key(writer, "firewall");
+	ncfg_json_write_object_begin(writer);
+	for (c = 0; c < 3u; c++) {
+		size_t r;
+
+		ncfg_json_write_key(writer, names[c]);
+		ncfg_json_write_object_begin(writer);
+		ncfg_json_write_member_string(writer, "policy",
+		    chains[c]->policy == NCFG_FIREWALL_POLICY_DROP ? "drop" : "accept");
+		ncfg_json_write_key(writer, "rules");
+		ncfg_json_write_array_begin(writer);
+		for (r = 0; r < chains[c]->rule_count; r++) {
+			ncfg_buf_t text;
+			char       digest[NCFG_SHA256_HEX_SIZE];
+
+			ncfg_buf_init(&text, 0);
+			(void)ncfg_nft_firewall_rule_text(names[c], &chains[c]->rules[r], &text);
+			ncfg_sha256_hex(text.data, text.length, digest);
+			ncfg_buf_free(&text);
+			digest[NCFG_NFT_DIGEST_HEX] = '\0';
+			ncfg_json_write_object_begin(writer);
+			member_text(writer, "name", chains[c]->rules[r].name);
+			ncfg_json_write_member_string(writer, "digest", digest);
+			ncfg_json_write_object_end(writer);
+		}
+		ncfg_json_write_array_end(writer);
+		ncfg_json_write_object_end(writer);
+	}
+	ncfg_json_write_object_end(writer);
+}
+
 static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 {
 	size_t i;
@@ -263,8 +311,11 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		member_text(writer, "iface", op->u.accept_ra.iface);
 		ncfg_json_write_member_int(writer, "value", op->u.accept_ra.value);
 		break;
-	case NCFG_OP_NAT_REPLACE:
-		member_strings(writer, "uplinks", op->u.nat.uplinks, op->u.nat.uplink_count);
+	case NCFG_OP_NFTABLES_REPLACE:
+		member_strings(writer, "uplinks", op->u.nftables.uplinks, op->u.nftables.uplink_count);
+		if (op->u.nftables.firewall) {
+			write_firewall_summary(writer, op->u.nftables.firewall);
+		}
 		break;
 	case NCFG_OP_HOOK_RUN:
 		member_text(writer, "iface", op->u.hook.iface);

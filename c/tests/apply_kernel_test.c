@@ -296,7 +296,7 @@ static const int mine[] = {
 	NCFG_OP_LINK_SET_OFFLOADS, NCFG_OP_BRIDGE_VLAN_ADD, NCFG_OP_BRIDGE_VLAN_DEL,
 	NCFG_OP_WG_SET_DEVICE, NCFG_OP_WG_SET_PEERS, NCFG_OP_RULE_ADD, NCFG_OP_RULE_DEL,
 	NCFG_OP_QDISC_SET, NCFG_OP_QDISC_RESET, NCFG_OP_INGRESS_REDIRECT,
-	NCFG_OP_INGRESS_REDIRECT_CLEAR, NCFG_OP_NAT_REPLACE
+	NCFG_OP_INGRESS_REDIRECT_CLEAR, NCFG_OP_NFTABLES_REPLACE
 };
 
 #define COUNT(array) (sizeof(array) / sizeof((array)[0]))
@@ -509,9 +509,9 @@ static void check_hints(void)
 	 * cause of this same errno, since the number cannot tell them apart.
 	 */
 	{
-		const char *absent = ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, ENOENT);
+		const char *absent = ncfg_kernel_hint(NCFG_OP_NFTABLES_REPLACE, ENOENT);
 
-		check(absent != NULL, "nat.replace on ENOENT has something to say");
+		check(absent != NULL, "nftables.replace on ENOENT has something to say");
 		check(absent && strstr(absent, "nft_chain_nat") != NULL &&
 		    strstr(absent, "nft_masq") != NULL,
 		    "  naming both modules, which is what an operator can act on");
@@ -529,9 +529,9 @@ static void check_hints(void)
 		check(absent && strstr(absent, "between the dump") != NULL,
 		    "  and the other fault that lands on this errno, which it cannot "
 		    "rule out");
-		check(ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, EOPNOTSUPP) == NULL,
+		check(ncfg_kernel_hint(NCFG_OP_NFTABLES_REPLACE, EOPNOTSUPP) == NULL,
 		    "  while EOPNOTSUPP gets nothing: measured in no state, so no arm");
-		check(ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, EPERM) == NULL,
+		check(ncfg_kernel_hint(NCFG_OP_NFTABLES_REPLACE, EPERM) == NULL,
 		    "  and EPERM nothing, because the socket already said that one");
 	}
 }
@@ -2016,14 +2016,14 @@ static void check_nat(void)
 
 	uplinks[0] = "eth0";
 	memset(&op, 0, sizeof(op));
-	op.kind = NCFG_OP_NAT_REPLACE;
-	op.u.nat.uplinks = uplinks;
-	op.u.nat.uplink_count = 1u;
+	op.kind = NCFG_OP_NFTABLES_REPLACE;
+	op.u.nftables.uplinks = uplinks;
+	op.u.nftables.uplink_count = 1u;
 
 	memset(&batch, 0, sizeof(batch));
 	ncfg_buf_init(&message, 0);
 	check(ncfg_kernel_build_nat(&message, 100u, 0, &op, &batch, err, sizeof(err)),
-	    "a nat.replace builds a transaction");
+	    "a nftables.replace builds a transaction");
 	check(!batch.empty && batch.last_acked >= 100u,
 	    "with an acknowledged message inside it");
 	/*
@@ -2044,8 +2044,8 @@ static void check_nat(void)
 	    "and it also touches nothing else");
 	ncfg_buf_free(&message);
 
-	op.u.nat.uplinks = NULL;
-	op.u.nat.uplink_count = 0u;
+	op.u.nftables.uplinks = NULL;
+	op.u.nftables.uplink_count = 0u;
 	memset(&batch, 0, sizeof(batch));
 	ncfg_buf_init(&message, 0);
 	check(ncfg_kernel_build_nat(&message, 100u, 0, &op, &batch, err, sizeof(err)) &&
@@ -2053,7 +2053,7 @@ static void check_nat(void)
 	    "no uplinks and no table is an empty batch, which must not be sent");
 	ncfg_buf_free(&message);
 
-	op.u.nat.uplink_count = 2u;
+	op.u.nftables.uplink_count = 2u;
 	memset(&batch, 0, sizeof(batch));
 	ncfg_buf_init(&message, 0);
 	err[0] = '\0';

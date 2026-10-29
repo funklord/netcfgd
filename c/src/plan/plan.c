@@ -262,6 +262,11 @@ ncfg_dns_policy_t *ncfg_plan_intern_dns_policy(ncfg_plan_t *plan, const ncfg_dns
 }
 
 /* A counted array of strings, copied into the plan. */
+static void release_firewall(void *owned)
+{
+	ncfg_firewall_free(owned);
+}
+
 static const char *const *intern_strings(ncfg_plan_t *plan, const char *const *list, size_t count)
 {
 	const char **copy;
@@ -271,7 +276,7 @@ static const char *const *intern_strings(ncfg_plan_t *plan, const char *const *l
 		return NULL;
 	}
 	if (count == 0u) {
-		/* An empty list is a list, and `nat.replace` with none is how a
+		/* An empty list is a list, and `nftables.replace` with none is how a
 		 * document that stops asking for NAT is honoured. */
 		return NULL;
 	}
@@ -435,9 +440,23 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 	case NCFG_OP_SYSCTL_SET_ACCEPT_RA:
 		out->u.accept_ra.iface = ncfg_plan_intern(plan, in->u.accept_ra.iface);
 		return;
-	case NCFG_OP_NAT_REPLACE:
-		out->u.nat.uplinks =
-		    intern_strings(plan, in->u.nat.uplinks, in->u.nat.uplink_count);
+	case NCFG_OP_NFTABLES_REPLACE:
+		out->u.nftables.uplinks =
+		    intern_strings(plan, in->u.nftables.uplinks, in->u.nftables.uplink_count);
+		/* The plan's own copy, adopted, since the document or observation
+		 * the caller built this from goes before the plan does (10.592). */
+		out->u.nftables.firewall = NULL;
+		if (in->u.nftables.firewall) {
+			ncfg_firewall_t *copy = ncfg_firewall_copy(in->u.nftables.firewall);
+
+			if (!copy) {
+				plan->failed = 1;
+				return;
+			}
+			if (ncfg_plan_adopt(plan, copy, release_firewall)) {
+				out->u.nftables.firewall = copy;
+			}
+		}
 		return;
 	case NCFG_OP_HOOK_RUN:
 		out->u.hook.iface = ncfg_plan_intern(plan, in->u.hook.iface);

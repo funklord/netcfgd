@@ -1170,7 +1170,7 @@
       "id": 44,
       "subject": "nat:host",
       "op": {
-        "op": "nat.replace",
+        "op": "nftables.replace",
         "uplinks": [
           "eth0"
         ]
@@ -1185,7 +1185,7 @@
         0
       ],
       "inverse": {
-        "op": "nat.replace",
+        "op": "nftables.replace",
         "uplinks": [
           "eth0"
         ]

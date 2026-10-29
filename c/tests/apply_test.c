@@ -975,7 +975,7 @@ static void which_ops_may_be_left_unmet(void)
 	check(ncfg_apply_optional(&op) == 1, "a qdisc is optional: traffic flows unshaped");
 	op.kind = NCFG_OP_INGRESS_REDIRECT;
 	check(ncfg_apply_optional(&op) == 1, "  so is the ingress redirect behind it");
-	op.kind = NCFG_OP_NAT_REPLACE;
+	op.kind = NCFG_OP_NFTABLES_REPLACE;
 	check(ncfg_apply_optional(&op) == 1,
 	    "  and NAT, which the host's own traffic does not need");
 	op.kind = NCFG_OP_LINK_SET_OFFLOADS;

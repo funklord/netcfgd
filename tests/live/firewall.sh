@@ -185,6 +185,96 @@ nft list ruleset > "$work/listed" 2>&1 || true
 check "and the table it would have replaced is still there" \
 	"$(grep -c 'policy accept;' "$work/listed" || true)" "3"
 
+# ------------------------------------------- planned and applied by ncfg
+
+# Slice 3 (10.592): the firewall through the program rather than the probe.
+# The table above is cleared first, so this starts from a machine with none.
+nft delete table inet netcfgd 2>/dev/null || true
+ncfg="$build/ncfg"
+[ -x "$ncfg" ] || skip "ncfg is not built"
+mkdir -p "$work/etc" "$work/run"
+export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
+write_etc() {
+	cat > "$work/etc/netcfgd.conf"
+}
+write_etc <<'CONF'
+host_list "banned" { mac = ["de:ad:be:*", "02:00:00:00:00:09"] }
+firewall {
+	input {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "ssh" { protocol = "tcp"; port = 22 }
+		drop "strangers" { mac = ["@host_list:banned"] }
+	}
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a firewall the machine lacks is planned as one table replacement" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "and applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the host list's prefix is enforced in the kernel, as a mask" \
+	'ether saddr & ff:ff:ff:00:00:00 == de:ad:be:00:00:00 drop comment "name=strangers'
+has "and its exact station as an address" \
+	'ether saddr 02:00:00:00:00:09 drop comment "name=strangers'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a second plan has nothing to do" "$(cat "$work/plan")" "nothing to do"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status shows the installed firewall as rules" \
+	"$(grep -cE '^    (accept established state established,related|accept ssh protocol tcp port 22|drop strangers mac (de:ad:be:\*|02:00:00:00:00:09))$' "$work/status" || true)" "4"
+
+# A hand edit inside netcfgd's table is a difference, and is replaced.
+nft add rule inet netcfgd input tcp dport 8080 accept
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status names a rule that is not netcfgd's as written" \
+	"$(grep -c 'not netcfgd.s as written' "$work/status" || true)" "1"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the plan replaces the table to take it out" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+"$ncfg" apply > /dev/null 2>&1 || true
+check "after which the hand-added rule is gone" \
+	"$(nft list ruleset | grep -c 'dport 8080' || true)" "0"
+
+# Editing only the host list moves the firewall.
+write_etc <<'CONF'
+host_list "banned" { mac = ["de:ad:be:*"] }
+firewall {
+	input {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "ssh" { protocol = "tcp"; port = 22 }
+		drop "strangers" { mac = ["@host_list:banned"] }
+	}
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a host list edit alone is planned" "$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+"$ncfg" apply > /dev/null 2>&1 || true
+check "and leaves the station it lost unmatched" \
+	"$(nft list ruleset | grep -c '02:00:00:00:00:09' || true)" "0"
+
+# Another table filtering at the same hook is reported before the apply, and
+# left alone (0294): nftables is additive and the strictest verdict wins.
+nft add table inet neighbour
+nft add chain inet neighbour in '{ type filter hook input priority 0; policy accept; }'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a neighbour's filter chain at the input hook is named in the plan" \
+	"$(grep -c 'neighbour/in (input)' "$work/plan" || true)" "1"
+"$ncfg" apply > /dev/null 2>&1 || true
+check "and is not touched" "$(nft list tables | grep -c 'inet neighbour' || true)" "1"
+nft delete table inet neighbour
+
+# Taking the firewall out of the document takes it out of the kernel.
+: > "$work/etc/netcfgd.conf"
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a document with no firewall removes the table" \
+	"$(nft list tables | grep -c 'inet netcfgd' || true)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "firewall.sh: all checks passed"

@@ -117,7 +117,7 @@ typedef enum {
 	NCFG_OP_SYSCTL_SET_PRIVACY,
 	NCFG_OP_SYSCTL_SET_ACCEPT_RA,
 	NCFG_OP_HOSTNAME_SET,
-	NCFG_OP_NAT_REPLACE,
+	NCFG_OP_NFTABLES_REPLACE,
 	NCFG_OP_HOOK_RUN,
 	NCFG_OP_COMMIT_ARM,
 	NCFG_OP_COMMIT_CONFIRM,
@@ -285,11 +285,20 @@ typedef struct {
 			/* `2` to accept, `1` to hand the interface back. Never `0`. */
 			int64_t     value;
 		} accept_ra;
+		/*
+		 * netcfgd's whole nftables table, replaced in one transaction
+		 * (0294): the NAT chain's uplinks and layer one's firewall, carried
+		 * together because the table is replaced whole and a replacement
+		 * that left either out would delete it (10.592).
+		 */
 		struct {
-			/* Sorted. Empty removes the table. */
-			const char *const *uplinks;
-			size_t             uplink_count;
-		} nat;
+			/* Sorted. Empty, with no firewall, removes the table. */
+			const char *const     *uplinks;
+			size_t                 uplink_count;
+			/* NULL is a document with no `firewall` block. The plan owns
+			 * its copy. */
+			const ncfg_firewall_t *firewall;
+		} nftables;
 		struct {
 			const char *iface;
 			int         phase; /* ncfg_hook_phase_t */

@@ -80,12 +80,12 @@ int ncfg_kernel_inverse_kind(int op_kind)
 	case NCFG_OP_WG_SET_PEERS:
 		return NCFG_OP_WG_SET_PEERS;
 	/*
-	 * Replacing a table is its own inverse: `nat.replace` carries the whole
+	 * Replacing a table is its own inverse: `nftables.replace` carries the whole
 	 * uplink set, an empty set removes the table, and the previous set is a
 	 * value the old document holds.
 	 */
-	case NCFG_OP_NAT_REPLACE:
-		return NCFG_OP_NAT_REPLACE;
+	case NCFG_OP_NFTABLES_REPLACE:
+		return NCFG_OP_NFTABLES_REPLACE;
 	default:
 		/* Every other op of this module's -- the five link-kind ops, the
 		 * token, the offloads, `qdisc.reset` and `wg.set_device` -- is a

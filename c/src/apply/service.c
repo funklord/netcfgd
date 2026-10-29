@@ -181,7 +181,7 @@ int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, cha
 	case NCFG_OP_QDISC_RESET:
 	case NCFG_OP_INGRESS_REDIRECT:
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 	case NCFG_OP_HOOK_RUN:
 	case NCFG_OP_COMMIT_ARM:
 	case NCFG_OP_COMMIT_CONFIRM:

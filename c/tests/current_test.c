@@ -1070,7 +1070,7 @@ static int names_are(char *const *names, size_t count, const char *joined)
  * **Sorted and deduplicated is the assertion rather than a tidiness.** The
  * planner sorts the document's uplinks and compares the two lists in order, so
  * an observation in the kernel's order would differ from a machine that is
- * already right -- and `nat.replace` would be planned on every pass for ever,
+ * already right -- and `nftables.replace` would be planned on every pass for ever,
  * which is exactly what an empty list did before this pass existed.
  */
 /*

@@ -2072,3 +2072,70 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	}
 	return states == expected->states;
 }
+
+static const char *policy_text(int policy)
+{
+	return policy == NCFG_FIREWALL_POLICY_DROP ? "drop" : "accept";
+}
+
+/*
+ * Whether the installed firewall is the document's, exactly.
+ *
+ * **The document's own transaction, decoded, is what is compared**: the
+ * builder writes it, the decoder reads it back into the kernel rules a
+ * converged machine holds, and those are matched against the observation in
+ * order, field by field and identity by identity -- the same reader on both
+ * sides, so a difference is in the kernel and not in two renderings of one
+ * rule. A rule the decoder refused (`unread`) is somebody's hand edit, and a
+ * table holding one is not converged.
+ *
+ * `refusal` is set where the document's firewall cannot be built at all, and
+ * the answer is then "not converged": the op is planned and fails at apply
+ * naming the rule, which is 0294's all-or-nothing.
+ */
+int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
+    const ncfg_observed_firewall_t *observed, char *refusal, size_t refusal_size)
+{
+	ncfg_buf_t           built;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	size_t               at = 0;
+	int                  same = 1;
+
+	refusal[0] = '\0';
+	if (!desired || !observed) {
+		return !desired && !observed;
+	}
+	if (observed->unread_count != 0u ||
+	    strcmp(policy_text(desired->input.policy), observed->input ? observed->input : "") ||
+	    strcmp(policy_text(desired->forward.policy),
+	        observed->forward ? observed->forward : "") ||
+	    strcmp(policy_text(desired->output.policy), observed->output ? observed->output : "")) {
+		return 0;
+	}
+	ncfg_buf_init(&built, 0);
+	if (!ncfg_nft_build_replace(&built, 1u, 0, NULL, 0, desired, &batch, refusal,
+	        refusal_size)) {
+		ncfg_buf_free(&built);
+		return 0;
+	}
+	ncfg_wire_messages_start(&walk, built.data, built.length);
+	while (same && ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t expected;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (!ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &expected,
+		        NULL, 0)) {
+			continue; /* the NAT chain's masquerade, which is not this half */
+		}
+		same = at < observed->rule_count &&
+		    ncfg_nft_kernel_rule_matches(&expected, &observed->rules[at]);
+		at++;
+	}
+	ncfg_buf_free(&built);
+	return same && at == observed->rule_count;
+}
+

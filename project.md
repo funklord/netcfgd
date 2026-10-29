@@ -12662,7 +12662,25 @@ works on an accept as well as a drop.
    name and digest in nft's comment TLV; and A, the decoder of those back
    into `ncfg_firewall_rule_t`. Checked against the kernel in a namespace,
    with `nft list ruleset` as the independent reader.
-3. **Plan, apply, observe**: the table holds NAT and the firewall, and 0294
+3. **Done, 2026-10-29: plan, apply, observe.** The observation carries
+   each filter chain's policy and every kernel rule as decoded, with the
+   reasons for any it could not read, and `ncfg status` lists them. The op
+   is renamed `nftables.replace` and carries the uplinks *and* the firewall,
+   because the table is replaced whole; its inverse carries the installed
+   firewall regrouped from the observation, so a rollback does not leave the
+   host open. **Convergence is decided by decoding the document's own
+   transaction** and matching it in order against the installed rules, field
+   by field -- so a hand edit that kept a rule's comment is still a
+   difference. Another table's filter chain at the same hooks is named in
+   the plan (0294) and left alone. `tests/live/firewall.sh` drives `ncfg
+   plan`, `apply` and `status` against the kernel: installed, converged, a
+   hand-added rule named and removed, a host list edit alone planned, a
+   neighbour reported and untouched, the firewall taken out with the
+   document. Reducing the comparison to the policies fails four of its
+   checks; `plan_setting_test` holds the five planner cases without a
+   kernel.
+
+   The original plan for this slice, for the record: the table holds NAT and the firewall, and 0294
    replaces the whole table in one transaction -- so one op must carry both
    rather than `nat.replace` beside a firewall op, each of which would drop
    the other's chains. An observer reading the chains back through A, the

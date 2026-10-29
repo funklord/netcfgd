@@ -828,7 +828,7 @@ int ncfg_observe_augment_host(ncfg_observed_t *observed, const ncfg_observe_root
  * **What its absence cost, said once here.** `nat` is what netcfgd's own table
  * masquerades now, and the planner compares the document against it; with
  * nothing filling it the comparison was against an empty list, so a machine
- * whose NAT was already right was planned a `nat.replace` on every pass and
+ * whose NAT was already right was planned a `nftables.replace` on every pass and
  * never converged -- and the op's *inverse* is that same list, so a revert
  * would have removed the table rather than putting back what was there.
  * `nat_conflicts` is decision 0022's other half: a second table doing source

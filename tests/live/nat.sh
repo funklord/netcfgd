@@ -168,12 +168,12 @@ check "the LAN side forwards" "$(forwards lan0)" "yes"
 check "the uplink does not forward" "$(forwards wan0)" "no"
 
 # The idempotence gate, against the kernel rather than against the fake. A
-# `nat.replace` that did not compare with what is installed would be planned
+# `nftables.replace` that did not compare with what is installed would be planned
 # again here, and a table that accumulated rules instead of being replaced
 # would show `wan0` twice.
 plan=$("$ncfg" plan 2>&1)
 check "a second plan has nothing to do" \
-	"$(printf '%s' "$plan" | grep -c 'nat.replace' || true)" "0"
+	"$(printf '%s' "$plan" | grep -c 'nftables.replace' || true)" "0"
 apply "the second apply"
 check "re-applying changes nothing" "$(uplinks)" "wan0"
 

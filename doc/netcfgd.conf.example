@@ -423,10 +423,13 @@
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
 #
-# **NOT YET ENFORCED.** This build compiles a `firewall` block, checks it and
-# keeps it, and does not yet write it to the kernel: no packet is filtered by
-# it. `ncfg plan` shows nothing to do for it for that reason. Until it says
-# otherwise, keep whatever firewall this machine already has.
+# `ncfg plan` shows the change before anything is written, and `ncfg apply`
+# replaces netcfgd's table in one transaction: all the rules land, or none do
+# and the ones before stay. `ncfg status` lists the rules as installed; a rule
+# somebody added inside netcfgd's table by hand is named there and replaced on
+# the next apply. Another program's table filtering at the same hooks -- a
+# container runtime's, say -- is named in the plan and never touched; both see
+# every packet, and the strictest verdict wins.
 
 #firewall {
 #	input {

@@ -390,8 +390,8 @@ static size_t witness_ops(ncfg_op_t *ops, size_t max, const ncfg_route_t *route,
 	OP(NCFG_OP_SYSCTL_SET_ACCEPT_RA)->u.accept_ra.iface = "eth0";
 	ops[at - 1u].u.accept_ra.value = 2;
 	OP(NCFG_OP_HOSTNAME_SET)->u.named.name = "host.example";
-	OP(NCFG_OP_NAT_REPLACE)->u.nat.uplinks = uplinks;
-	ops[at - 1u].u.nat.uplink_count = 1u;
+	OP(NCFG_OP_NFTABLES_REPLACE)->u.nftables.uplinks = uplinks;
+	ops[at - 1u].u.nftables.uplink_count = 1u;
 	OP(NCFG_OP_HOOK_RUN)->u.hook.iface = "eth0";
 	ops[at - 1u].u.hook.phase = NCFG_HOOK_PHASE_POST_UP;
 	ops[at - 1u].u.hook.path = "/run/netcfgd/hooks/eth0-post_up";
@@ -805,7 +805,7 @@ static void the_op_vocabulary(void)
 		"link.set_bond", "link.set_bridge", "link.set_ipv6_token", "link.set_mac",
 		"link.set_macvlan", "link.set_master", "link.set_mtu", "link.set_offloads",
 		"link.set_tunnel", "link.set_vxlan", "link.set_wds", "link.unset_master", "link.up",
-		"nat.replace", "qdisc.reset", "qdisc.set", "route.add", "route.del", "rule.add",
+		"nftables.replace", "qdisc.reset", "qdisc.set", "route.add", "route.del", "rule.add",
 		"rule.del", "sysctl.set_accept_ra", "sysctl.set_forwarding",
 		"sysctl.set_privacy", "wg.set_device", "wg.set_peers", "wifi.associate",
 		"wifi.disassociate", "wifi.set_profiles", "wifi.set_regdom" };
@@ -907,9 +907,9 @@ static void what_counts_as_disruptive(void)
 	check(!ncfg_op_is_host_wide_config(&op),
 	    "and commit.confirm names none either and is not swept into a drift pass");
 	memset(&op, 0, sizeof(op));
-	op.kind = NCFG_OP_NAT_REPLACE;
+	op.kind = NCFG_OP_NFTABLES_REPLACE;
 	check(!ncfg_op_interface(&op),
-	    "nat.replace names no interface, so no guard has standing to refuse it");
+	    "nftables.replace names no interface, so no guard has standing to refuse it");
 }
 
 /*

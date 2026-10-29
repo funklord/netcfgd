@@ -79,7 +79,7 @@ int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const ncfg_op_t *op, ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	if (!op || !batch) {
-		ncfg_error_set(err, err_size, "there is no NAT action to carry out");
+		ncfg_error_set(err, err_size, "there is no nftables action to carry out");
 		return 0;
 	}
 	/*
@@ -96,8 +96,10 @@ int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
 	 * the planner emits the op only where the document and the machine
 	 * disagree.
 	 */
-	return ncfg_nft_build_replace_nat(out, first_seq, table_exists, op->u.nat.uplinks,
-	    op->u.nat.uplink_count, batch, err, err_size);
+	/* The firewall rides in the same transaction (10.592): the table is
+	 * replaced whole, so a NAT change that left it out would delete it. */
+	return ncfg_nft_build_replace(out, first_seq, table_exists, op->u.nftables.uplinks,
+	    op->u.nftables.uplink_count, op->u.nftables.firewall, batch, err, err_size);
 }
 
 /*

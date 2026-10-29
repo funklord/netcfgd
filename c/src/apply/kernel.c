@@ -851,7 +851,7 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		return ncfg_kernel_ingress_op(&world, op, 1, err, err_size);
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
 		return ncfg_kernel_ingress_op(&world, op, 0, err, err_size);
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 		return ncfg_kernel_nat_op(&world, op, err, err_size);
 	}
 	ncfg_error_set(err, err_size,

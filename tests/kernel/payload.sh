@@ -154,17 +154,17 @@ echo "=== ncfg apply rc=$rc"
 sed 's/^/     /' "$work/apply.log"
 
 # **The vacuity guard this is most exposed to**: a converged machine plans no
-# `nat.replace` and the apply then says nothing about the kernel while looking
+# `nftables.replace` and the apply then says nothing about the kernel while looking
 # like a result.
-if ! grep -q 'nat.replace' "$work/apply.log"; then
-	echo "VERDICT bad: no nat.replace in that plan, so this measured nothing"
+if ! grep -q 'nftables.replace' "$work/apply.log"; then
+	echo "VERDICT bad: no nftables.replace in that plan, so this measured nothing"
 	exit 1
 fi
 if [ "$expect" = applied ]; then
 	# The control, and the only state here that must succeed: without it a
 	# refusal could be a property of a small kernel rather than of the
 	# construct that was left out.
-	if [ "$rc" -eq 0 ] && grep -q 'ok   nat.replace' "$work/apply.log"; then
+	if [ "$rc" -eq 0 ] && grep -q 'ok   nftables.replace' "$work/apply.log"; then
 		echo "VERDICT ok: a kernel with both constructs applies NAT"
 	else
 		echo "VERDICT bad: the control kernel did not apply NAT"

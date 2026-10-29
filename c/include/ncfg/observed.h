@@ -1331,6 +1331,12 @@ typedef struct {
 	 * project.md 10.592). NULL where the table has no filter chain, which
 	 * is every machine whose document has no `firewall`. */
 	struct ncfg_observed_firewall *firewall;
+	/* Filter base chains in other tables at the hooks netcfgd's firewall
+	 * uses, as `table/chain (hook)`: docker, libvirt, firewalld. nftables is
+	 * additive, so both see a packet and the strictest verdict wins -- which
+	 * 0294 says to report before an apply, not to fight. Omitted when empty. */
+	char  **filter_neighbours;
+	size_t  filter_neighbour_count;
 } ncfg_observed_t;
 
 /*

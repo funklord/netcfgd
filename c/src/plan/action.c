@@ -107,8 +107,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "sysctl.set_accept_ra";
 	case NCFG_OP_HOSTNAME_SET:
 		return "hostname.set";
-	case NCFG_OP_NAT_REPLACE:
-		return "nat.replace";
+	case NCFG_OP_NFTABLES_REPLACE:
+		return "nftables.replace";
 	case NCFG_OP_HOOK_RUN:
 		return "hook.run";
 	case NCFG_OP_COMMIT_ARM:
@@ -234,7 +234,7 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	 * a whole LAN. It is because this op names no interface, so no guard can
 	 * match it anyway, and claiming otherwise would suggest a protection that
 	 * does not exist. The commit-confirm inverse is what covers this one. */
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 	/* Adding a rule changes which table a packet consults, which can move
 	 * traffic -- but a guard protects an interface, and a rule names at most
 	 * one incidentally. Removing one is the disruptive direction, above. */
@@ -355,7 +355,7 @@ static const char *subject_class(int kind)
 		return "accept_ra";
 	case NCFG_OP_DNS_APPLY:
 		return "dns";
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 		return "nat";
 	case NCFG_OP_HOSTNAME_SET:
 		return "hostname";
@@ -553,7 +553,7 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 	 */
 	case NCFG_OP_RULE_ADD:
 	case NCFG_OP_RULE_DEL:
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 	case NCFG_OP_HOSTNAME_SET:
 	case NCFG_OP_DNS_APPLY:
 	case NCFG_OP_COMMIT_ARM:

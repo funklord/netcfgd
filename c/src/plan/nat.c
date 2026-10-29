@@ -27,6 +27,7 @@
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/nft.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -108,6 +109,196 @@ static void warn_conflicts(ncfg_builder_t *builder, size_t wanted_count)
 	ncfg_buf_free(&buf);
 }
 
+/* ------------------------------------------------------------------------ *
+ * The firewall half of the table (10.592)
+ * ------------------------------------------------------------------------ */
+
+static const char *policy_word(int policy)
+{
+	return policy == NCFG_FIREWALL_POLICY_DROP ? "drop" : "accept";
+}
+
+/* One word back to its enum, for the inverse. */
+static int action_of(const char *word)
+{
+	if (word && strcmp(word, "drop") == 0) {
+		return NCFG_FIREWALL_DROP;
+	}
+	if (word && strcmp(word, "reject") == 0) {
+		return NCFG_FIREWALL_REJECT;
+	}
+	return NCFG_FIREWALL_ACCEPT;
+}
+
+static int protocol_of(const char *word)
+{
+	static const struct {
+		const char *word;
+		int         protocol;
+	} words[] = { { "tcp", NCFG_FIREWALL_PROTO_TCP }, { "udp", NCFG_FIREWALL_PROTO_UDP },
+		{ "icmp", NCFG_FIREWALL_PROTO_ICMP }, { "icmpv6", NCFG_FIREWALL_PROTO_ICMPV6 } };
+	size_t at;
+
+	for (at = 0; word && at < sizeof(words) / sizeof(words[0]); at++) {
+		if (strcmp(word, words[at].word) == 0) {
+			return words[at].protocol;
+		}
+	}
+	return NCFG_FIREWALL_PROTO_ANY;
+}
+
+static int add_text(char ***list, size_t *count, const char *text)
+{
+	char **grown;
+	size_t at;
+
+	if (!text) {
+		return 1;
+	}
+	for (at = 0; at < *count; at++) {
+		if (strcmp((*list)[at], text) == 0) {
+			return 1;
+		}
+	}
+	grown = realloc(*list, (*count + 1u) * sizeof(**list));
+	if (!grown) {
+		return 0;
+	}
+	*list = grown;
+	(*list)[*count] = strdup(text);
+	if (!(*list)[*count]) {
+		return 0;
+	}
+	(*count)++;
+	return 1;
+}
+
+/*
+ * The installed firewall as a document's, for the op's inverse: the rules of
+ * one chain that share a name in a row are one written rule, each match the
+ * values its kernel rules carried, in the order they first appear -- which is
+ * the order the builder expanded them in. A rule the decoder refused is not
+ * restorable and is not in it. NULL on out of memory.
+ */
+static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
+{
+	ncfg_firewall_t       *firewall = calloc(1u, sizeof(*firewall));
+	ncfg_firewall_chain_t *chains[3];
+	const char            *names[3] = { "input", "forward", "output" };
+	const char            *policies[3];
+	size_t                 c;
+	size_t                 at;
+
+	if (!firewall) {
+		return NULL;
+	}
+	chains[0] = &firewall->input;
+	chains[1] = &firewall->forward;
+	chains[2] = &firewall->output;
+	policies[0] = observed->input;
+	policies[1] = observed->forward;
+	policies[2] = observed->output;
+	for (c = 0; c < 3u; c++) {
+		chains[c]->policy = policies[c] && strcmp(policies[c], "drop") == 0
+		    ? NCFG_FIREWALL_POLICY_DROP : NCFG_FIREWALL_POLICY_ACCEPT;
+	}
+	for (at = 0; at < observed->rule_count; at++) {
+		const ncfg_observed_firewall_rule_t *one = &observed->rules[at];
+		ncfg_firewall_chain_t               *chain = NULL;
+		ncfg_firewall_rule_t                *rule;
+
+		for (c = 0; c < 3u; c++) {
+			if (strcmp(one->chain, names[c]) == 0) {
+				chain = chains[c];
+			}
+		}
+		if (!chain) {
+			continue;
+		}
+		if (chain->rule_count == 0u ||
+		    strcmp(chain->rules[chain->rule_count - 1u].name, one->name) != 0) {
+			ncfg_firewall_rule_t *grown = realloc(chain->rules,
+			    (chain->rule_count + 1u) * sizeof(*chain->rules));
+
+			if (!grown) {
+				ncfg_firewall_free(firewall);
+				return NULL;
+			}
+			chain->rules = grown;
+			rule = &chain->rules[chain->rule_count++];
+			memset(rule, 0, sizeof(*rule));
+			rule->name = strdup(one->name);
+			rule->action = action_of(one->action);
+			rule->protocol = protocol_of(one->protocol);
+			rule->interface = one->interface ? strdup(one->interface) : NULL;
+			if (!rule->name || (one->interface && !rule->interface)) {
+				ncfg_firewall_free(firewall);
+				return NULL;
+			}
+			for (c = 0; c < one->state_count; c++) {
+				if (!add_text(&rule->states, &rule->state_count, one->states[c])) {
+					ncfg_firewall_free(firewall);
+					return NULL;
+				}
+			}
+		}
+		rule = &chain->rules[chain->rule_count - 1u];
+		if (one->port.has) {
+			size_t p;
+			int    seen = 0;
+
+			for (p = 0; p < rule->port_count; p++) {
+				seen = seen || rule->ports[p] == one->port.value;
+			}
+			if (!seen) {
+				int64_t *grown = realloc(rule->ports, (rule->port_count + 1u) *
+				    sizeof(*rule->ports));
+
+				if (!grown) {
+					ncfg_firewall_free(firewall);
+					return NULL;
+				}
+				rule->ports = grown;
+				rule->ports[rule->port_count++] = one->port.value;
+			}
+		}
+		if (!add_text(&rule->from, &rule->from_count, one->from) ||
+		    !add_text(&rule->to, &rule->to_count, one->to) ||
+		    !add_text(&rule->mac, &rule->mac_count, one->mac)) {
+			ncfg_firewall_free(firewall);
+			return NULL;
+		}
+	}
+	return firewall;
+}
+
+/* What the reason says about a firewall: each chain's policy and rule count. */
+static const char *describe_firewall(ncfg_plan_t *plan, const char *input, size_t in_rules,
+    const char *forward, size_t forward_rules, const char *output, size_t out_rules)
+{
+	ncfg_buf_t  buf;
+	const char *text;
+
+	ncfg_buf_init(&buf, 0);
+	ncfg_buf_addf(&buf, "input %s, %zu rule(s); forward %s, %zu; output %s, %zu",
+	    input ? input : "absent", in_rules, forward ? forward : "absent", forward_rules,
+	    output ? output : "absent", out_rules);
+	text = ncfg_plan_intern(plan, ncfg_buf_text(&buf));
+	ncfg_buf_free(&buf);
+	return text ? text : "<firewall>";
+}
+
+static size_t observed_in(const ncfg_observed_firewall_t *observed, const char *chain)
+{
+	size_t at;
+	size_t count = 0;
+
+	for (at = 0; observed && at < observed->rule_count; at++) {
+		count += strcmp(observed->rules[at].chain, chain) == 0;
+	}
+	return count;
+}
+
 void ncfg_plan_nat(ncfg_builder_t *builder)
 {
 	const ncfg_document_t *desired = builder->desired;
@@ -117,6 +308,10 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	ncfg_op_t              op;
 	ncfg_op_t              inverse;
 	ncfg_reason_t          reason;
+	ncfg_firewall_t       *was = NULL;
+	char                   refusal[NCFG_ERROR_MAX];
+	int                    uplinks_same;
+	int                    firewall_same;
 	size_t                 i;
 
 	if (desired->interface_count != 0u) {
@@ -155,30 +350,80 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		    "the LAN side, not the uplink.");
 	}
 
-	if (same_uplinks((const char *const *)wanted, count,
-	    (const char *const *)builder->observed->nat,
-	    builder->observed->nat_count)) {
+	uplinks_same = same_uplinks((const char *const *)wanted, count,
+	    (const char *const *)builder->observed->nat, builder->observed->nat_count);
+	firewall_same = ncfg_nft_firewall_matches(desired->firewall, builder->observed->firewall,
+	    refusal, sizeof(refusal));
+	if (refusal[0] != '\0') {
+		ncfg_plan_warnf(builder->plan, NULL,
+		    "the firewall cannot be written to nftables: %s. The table is replaced in one "
+		    "transaction, so applying this changes neither the firewall nor NAT until it is "
+		    "fixed", refusal);
+	}
+	/* 0294: another table's filter chain at netcfgd's hooks sees every packet
+	 * too, and the strictest verdict wins -- so a `drop` here can drop what a
+	 * container runtime forwards. Said before the apply, and not fought. */
+	if (desired->firewall && builder->observed->filter_neighbour_count) {
+		ncfg_buf_t buf;
+
+		ncfg_buf_init(&buf, 0);
+		for (i = 0; i < builder->observed->filter_neighbour_count; i++) {
+			ncfg_buf_addf(&buf, "%s%s", i ? "`, `" : "", builder->observed->filter_neighbours[i]);
+		}
+		ncfg_plan_warnf(builder->plan, NULL,
+		    "other nftables tables filter at the firewall's hooks too: `%s`. Both see "
+		    "every packet and the strictest verdict wins, so a `drop` in netcfgd's firewall "
+		    "can drop traffic those tables accept -- a container runtime's forwarding, for "
+		    "one. netcfgd does not touch them", ncfg_buf_text(&buf));
+		ncfg_buf_free(&buf);
+	}
+	if (uplinks_same && firewall_same) {
 		free(wanted);
 		return;
 	}
 	memset(&op, 0, sizeof(op));
-	op.kind = NCFG_OP_NAT_REPLACE;
-	op.u.nat.uplinks = (const char *const *)wanted;
-	op.u.nat.uplink_count = count;
+	op.kind = NCFG_OP_NFTABLES_REPLACE;
+	op.u.nftables.uplinks = (const char *const *)wanted;
+	op.u.nftables.uplink_count = count;
+	op.u.nftables.firewall = desired->firewall;
 	memset(&inverse, 0, sizeof(inverse));
-	inverse.kind = NCFG_OP_NAT_REPLACE;
+	inverse.kind = NCFG_OP_NFTABLES_REPLACE;
 	/* The table as it stands, which is a real revert rather than a guess: an
-	 * empty list removes the table, and that is what a machine with no table
-	 * had. */
-	inverse.u.nat.uplinks = (const char *const *)builder->observed->nat;
-	inverse.u.nat.uplink_count = builder->observed->nat_count;
-	reason = ncfg_plan_reason_differs(NULL, "nat",
-	    describe(builder->plan, (const char *const *)wanted, count),
-	    describe(builder->plan, (const char *const *)builder->observed->nat,
-	        builder->observed->nat_count));
+	 * empty list and no firewall removes the table, and that is what a
+	 * machine with no table had. The firewall is the installed one put back
+	 * together, so undoing this op does not leave the host unprotected. */
+	inverse.u.nftables.uplinks = (const char *const *)builder->observed->nat;
+	inverse.u.nftables.uplink_count = builder->observed->nat_count;
+	if (builder->observed->firewall) {
+		was = installed(builder->observed->firewall);
+		if (!was) {
+			builder->plan->failed = 1;
+			free(wanted);
+			return;
+		}
+	}
+	inverse.u.nftables.firewall = was;
+	if (!uplinks_same) {
+		reason = ncfg_plan_reason_differs(NULL, "nat",
+		    describe(builder->plan, (const char *const *)wanted, count),
+		    describe(builder->plan, (const char *const *)builder->observed->nat,
+		        builder->observed->nat_count));
+	} else {
+		const ncfg_firewall_t          *fw = desired->firewall;
+		const ncfg_observed_firewall_t *seen = builder->observed->firewall;
+
+		reason = ncfg_plan_reason_differs(NULL, "firewall",
+		    fw ? describe_firewall(builder->plan, policy_word(fw->input.policy),
+		        fw->input.rule_count, policy_word(fw->forward.policy), fw->forward.rule_count,
+		        policy_word(fw->output.policy), fw->output.rule_count) : "<none>",
+		    seen ? describe_firewall(builder->plan, seen->input, observed_in(seen, "input"),
+		        seen->forward, observed_in(seen, "forward"), seen->output,
+		        observed_in(seen, "output")) : "<none>");
+	}
 	(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, &inverse);
-	/* `ncfg_plan_add` copies the list into the plan's arena, so this one is
-	 * the caller's to give back -- the same bargain every string an op names
-	 * is under. */
+	/* `ncfg_plan_add` copies the list and the firewall into the plan, so these
+	 * are the caller's to give back -- the same bargain every string an op
+	 * names is under. */
+	ncfg_firewall_free(was);
 	free(wanted);
 }

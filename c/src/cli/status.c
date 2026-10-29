@@ -169,6 +169,68 @@ static void print_bluetooth(const ncfg_observed_t *observed)
  * out of range" is not visible anywhere else, and it is the whole of what
  * somebody asking "why am I on the modem" wants.
  */
+/*
+ * The firewall netcfgd's table holds, as rules (0295, 10.592): what the holder
+ * asked `ncfg status` to show. One line per kernel rule, in the order they
+ * run, so a written rule with several values reads as the several rules it
+ * became; a rule netcfgd could not read is named with the reason, because it
+ * is somebody's edit inside netcfgd's table and the next apply replaces it.
+ */
+static void print_firewall(const ncfg_observed_t *observed)
+{
+	static const char *const chains[3] = { "input", "forward", "output" };
+	const ncfg_observed_firewall_t *firewall = observed->firewall;
+	const char                     *policies[3];
+	size_t                          c;
+	size_t                          at;
+
+	if (!firewall) {
+		return;
+	}
+	policies[0] = firewall->input;
+	policies[1] = firewall->forward;
+	policies[2] = firewall->output;
+	ncfg_out_line("");
+	ncfg_out_line("firewall (netcfgd's nftables table)");
+	for (c = 0; c < 3u; c++) {
+		ncfg_out_writef("  %s: policy %s\n", chains[c], policies[c] ? policies[c] : "absent");
+		for (at = 0; at < firewall->rule_count; at++) {
+			const ncfg_observed_firewall_rule_t *rule = &firewall->rules[at];
+			size_t                               state;
+
+			if (strcmp(rule->chain, chains[c]) != 0) {
+				continue;
+			}
+			ncfg_out_writef("    %s %s", rule->action, rule->name);
+			if (rule->protocol && strcmp(rule->protocol, "any") != 0) {
+				ncfg_out_writef(" protocol %s", rule->protocol);
+			}
+			if (rule->port.has) {
+				ncfg_out_writef(" port %lld", (long long)rule->port.value);
+			}
+			if (rule->from) {
+				ncfg_out_writef(" from %s", rule->from);
+			}
+			if (rule->to) {
+				ncfg_out_writef(" to %s", rule->to);
+			}
+			if (rule->interface) {
+				ncfg_out_writef(" interface %s", rule->interface);
+			}
+			for (state = 0; state < rule->state_count; state++) {
+				ncfg_out_writef("%s%s", state ? "," : " state ", rule->states[state]);
+			}
+			if (rule->mac) {
+				ncfg_out_writef(" mac %s", rule->mac);
+			}
+			ncfg_out_line("");
+		}
+	}
+	for (at = 0; at < firewall->unread_count; at++) {
+		ncfg_out_writef("  not netcfgd's as written: %s\n", firewall->unread[at]);
+	}
+}
+
 static void print_linksets(const ncfg_observed_t *observed)
 {
 	size_t set;
@@ -428,6 +490,7 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 	print_ports(observed);
 	print_regdom(observed);
 	print_linksets(observed);
+	print_firewall(observed);
 	/*
 	 * Printed once rather than per interface: the conflict is with a table,
 	 * not with a device, and repeating it under every link would make one

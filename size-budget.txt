@@ -978,4 +978,14 @@ netcfgd
 # and costs nothing but the observation's half of it.
 #
 # Recorded at 1243100 rather than left riding the tolerance.
-total 1243100
+#
+# Then the firewall, enforced, 2026-10-29, +22,304 bytes to 1,265,360
+# (project.md 10.592): the `mac` match and its host lists, the filter chains
+# and every rule expression written to nftables with its identity, the decoder
+# that reads them back, the observation and `ncfg status` lines for them, and
+# the planner's comparison and the op's inverse. Most of it is the writer and
+# the decoder, which are the same expression layers twice -- the price 0295
+# named for showing installed rules rather than only their identity.
+#
+# Recorded at 1265400 rather than left riding the tolerance.
+total 1265400

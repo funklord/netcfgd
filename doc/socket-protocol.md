@@ -535,7 +535,7 @@ are using and one that will cut them off.
 | `link.set_wds` |  |  |
 | `link.unset_master` | yes |  |
 | `link.up` |  |  |
-| `nat.replace` |  |  |
+| `nftables.replace` |  |  |
 | `qdisc.reset` |  |  |
 | `qdisc.set` |  |  |
 | `route.add` |  |  |

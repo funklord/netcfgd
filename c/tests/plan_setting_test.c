@@ -23,8 +23,10 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/nft.h"
 #include "ncfg/observed.h"
 #include "ncfg/plan.h"
+#include "ncfg/sha256.h"
 
 #include "planfix.h"
 
@@ -132,14 +134,14 @@ static void the_uplinks_are_a_sorted_list_replaced_whole(void)
 	    "\"links\":[" PLANFIX_LINK("wan0", "") "," PLANFIX_LINK("wan1", "") "]",
 	    &document, &observed);
 
-	check(plan && planfix_count(plan, "nat.replace") == 1u,
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
 	    "two interfaces asking for NAT are one action, not two");
 	check(plan && wrote(plan, "\"uplinks\":[\"wan0\",\"wan1\"]"),
 	    "and the uplinks are sorted, whatever order the document put them in");
-	check(plan && planfix_for_field(plan, "nat.replace", "nat") != NULL,
+	check(plan && planfix_for_field(plan, "nftables.replace", "nat") != NULL,
 	    "and the reason names the setting rather than an interface");
-	check(plan && planfix_action(plan, "nat.replace") &&
-	    planfix_action(plan, "nat.replace")->has_inverse,
+	check(plan && planfix_action(plan, "nftables.replace") &&
+	    planfix_action(plan, "nftables.replace")->has_inverse,
 	    "and it carries the table as it stands, which is a real way back");
 	check(plan && !planfix_warned(plan, "does not act on it"),
 	    "and nothing warns that this build is holding the setting and not acting on it");
@@ -160,7 +162,93 @@ static void the_uplinks_are_a_sorted_list_replaced_whole(void)
 }
 
 /*
- * Taking `nat` out of the document is a `nat.replace` with nothing in it.
+ * The firewall rides the same op (10.592): the table is netcfgd's and is
+ * replaced whole, so it is planned wherever NAT or the firewall differs, and a
+ * machine already holding both plans nothing.
+ */
+#define FIREWALL_DOCUMENT \
+	",\"firewall\":{\"input\":{\"policy\":\"drop\",\"rules\":[{\"name\":\"ssh\"," \
+	"\"action\":\"accept\",\"protocol\":\"tcp\",\"ports\":[22]}]}," \
+	"\"forward\":{\"policy\":\"drop\"},\"output\":{\"policy\":\"accept\"}}"
+
+/* The installed `ssh` rule as the observer would report it, with the digest
+ * the writer gives it -- computed rather than pasted, so this case does not go
+ * stale when the digest's text does. `port` and `unread` vary per case. */
+static void observed_firewall(char *out, size_t out_size, long port, const char *unread)
+{
+	int64_t              ports[1] = { 22 };
+	ncfg_firewall_rule_t rule;
+	ncfg_buf_t           text;
+	char                 digest[NCFG_SHA256_HEX_SIZE];
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"ssh";
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	rule.protocol = NCFG_FIREWALL_PROTO_TCP;
+	rule.ports = ports;
+	rule.port_count = 1u;
+	ncfg_buf_init(&text, 0);
+	(void)ncfg_nft_firewall_rule_text("input", &rule, &text);
+	ncfg_sha256_hex(text.data, text.length, digest);
+	ncfg_buf_free(&text);
+	(void)snprintf(out, out_size,
+	    "\"links\":[],\"firewall\":{\"input\":\"drop\",\"forward\":\"drop\",\"output\":\"accept\","
+	    "\"rules\":[{\"chain\":\"input\",\"name\":\"ssh\",\"digest\":\"%.16s\",\"action\":\"accept\","
+	    "\"protocol\":\"tcp\",\"port\":%ld}]%s%s%s}",
+	    digest, port, unread ? ",\"unread\":[\"" : "", unread ? unread : "", unread ? "\"]" : "");
+}
+
+static void the_firewall_is_planned_with_the_table(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	char             seen[1024];
+	ncfg_plan_t     *plan = planfix_plan("", "", "", FIREWALL_DOCUMENT, "\"links\":[]", &document,
+	    &observed);
+
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
+	    "a firewall the machine does not hold is one table replacement");
+	check(plan && planfix_for_field(plan, "nftables.replace", "firewall") != NULL,
+	    "  whose reason names the firewall");
+	check(plan && wrote(plan, "\"firewall\":{\"input\":{\"policy\":\"drop\",\"rules\":[{\"name\":\"ssh\""),
+	    "  and the plan carries each rule by its identity");
+	planfix_release(plan, document, observed);
+
+	observed_firewall(seen, sizeof(seen), 22, NULL);
+	plan = planfix_plan("", "", "", FIREWALL_DOCUMENT, seen, &document, &observed);
+	check(plan && planfix_count(plan, "nftables.replace") == 0u,
+	    "a machine already holding exactly that firewall plans nothing");
+	planfix_release(plan, document, observed);
+
+	observed_firewall(seen, sizeof(seen), 22, "a rule in chain `input` with no comment");
+	plan = planfix_plan("", "", "", FIREWALL_DOCUMENT, seen, &document, &observed);
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
+	    "a rule netcfgd could not read in its table is replaced");
+	planfix_release(plan, document, observed);
+
+	/* The comment kept, the port changed: what the field-by-field comparison
+	 * is for, since the identity alone would call this converged. */
+	observed_firewall(seen, sizeof(seen), 2222, NULL);
+	plan = planfix_plan("", "", "", FIREWALL_DOCUMENT, seen, &document, &observed);
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
+	    "a hand edit that kept the rule's comment is still a difference");
+	planfix_release(plan, document, observed);
+
+	observed_firewall(seen, sizeof(seen), 22, NULL);
+	plan = planfix_plan("", "", "", "", seen, &document, &observed);
+	check(plan && planfix_count(plan, "nftables.replace") == 1u &&
+	    wrote(plan, "\"desired\":\"<none>\""),
+	    "a document with no firewall plans the installed one away");
+	check(plan && planfix_action(plan, "nftables.replace") &&
+	    planfix_action(plan, "nftables.replace")->has_inverse &&
+	    planfix_action(plan, "nftables.replace")->inverse.u.nftables.firewall &&
+	    planfix_action(plan, "nftables.replace")->inverse.u.nftables.firewall->input.rule_count == 1u,
+	    "  with an inverse that puts the installed firewall back, not an empty table");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * Taking `nat` out of the document is a `nftables.replace` with nothing in it.
  *
  * The removal has to be an action rather than an absence, because the table is
  * netcfgd's and nothing else will take it away -- a document that stopped
@@ -175,7 +263,7 @@ static void a_document_that_stops_asking_removes_the_table(void)
 	    "\"links\":[" PLANFIX_LINK("wan0", "") "],\"nat\":[\"wan0\"]",
 	    &document, &observed);
 
-	check(plan && planfix_count(plan, "nat.replace") == 1u,
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
 	    "a document that no longer asks for NAT plans the table away");
 	check(plan && wrote(plan, "\"observed\":\"wan0\"") && wrote(plan, "\"desired\":\"<none>\""),
 	    "and the reason says what the table held and that nothing is wanted now");
@@ -183,7 +271,7 @@ static void a_document_that_stops_asking_removes_the_table(void)
 
 	plan = plan_of(DEVICE("wan0"), "{\"name\":\"wan0\",\"addressing\":[]}",
 	    "\"links\":[" PLANFIX_LINK("wan0", "") "]", &document, &observed);
-	check(plan && planfix_count(plan, "nat.replace") == 0u,
+	check(plan && planfix_count(plan, "nftables.replace") == 0u,
 	    "and a machine with no table and a document that wants none plans nothing");
 	planfix_release(plan, document, observed);
 }
@@ -371,6 +459,7 @@ static void a_token_on_a_new_link_waits_for_the_link(void)
 int main(void)
 {
 	the_uplinks_are_a_sorted_list_replaced_whole();
+	the_firewall_is_planned_with_the_table();
 	a_document_that_stops_asking_removes_the_table();
 	a_second_table_translating_is_reported_and_not_deleted();
 	nat_with_nothing_forwarded_is_a_router_that_does_nothing();

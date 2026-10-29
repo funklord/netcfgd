@@ -2664,6 +2664,48 @@ const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const
 	return NULL;
 }
 
+void ncfg_firewall_free(ncfg_firewall_t *firewall)
+{
+	if (!firewall) {
+		return;
+	}
+	ncfg_type_free(&firewall_type, firewall);
+	free(firewall);
+}
+
+ncfg_firewall_t *ncfg_firewall_copy(const ncfg_firewall_t *firewall)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         text;
+	ncfg_json_doc_t   *json = NULL;
+	ncfg_firewall_t   *copy;
+
+	if (!firewall) {
+		return NULL;
+	}
+	/* Through the table's own writer and reader, so a copy cannot disagree
+	 * with the type about what a firewall holds. */
+	ncfg_buf_init(&text, 0);
+	ncfg_json_write_init(&writer, &text);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_type_write(&firewall_type, &writer, firewall);
+	ncfg_json_write_object_end(&writer);
+	copy = calloc(1, sizeof(*copy));
+	if (copy && !ncfg_buf_failed(&text)) {
+		json = ncfg_json_parse(ncfg_buf_text(&text), text.length, NULL, 0);
+	}
+	if (!copy || !json || !ncfg_type_init(&firewall_type, copy) ||
+	    !ncfg_type_read(&firewall_type, json, ncfg_json_root(json), copy, NULL, 0)) {
+		ncfg_json_free(json);
+		ncfg_firewall_free(copy);
+		ncfg_buf_free(&text);
+		return NULL;
+	}
+	ncfg_json_free(json);
+	ncfg_buf_free(&text);
+	return copy;
+}
+
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size)
 {
 	ncfg_json_doc_t *json = ncfg_json_parse(text, length, err, err_size);

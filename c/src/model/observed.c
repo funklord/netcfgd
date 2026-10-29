@@ -1375,7 +1375,10 @@ static const ncfg_field_t observed_fields[] = {
 	 * and every one before 10.592 -- is what it was. */
 	{ .name = "firewall", .kind = NCFG_F_OPT_STRUCT, .type = &observed_firewall_type,
 	    .element_size = sizeof(ncfg_observed_firewall_t),
-	    .offset = offsetof(ncfg_observed_t, firewall) }
+	    .offset = offsetof(ncfg_observed_t, firewall) },
+	{ .name = "filter_neighbours", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_t, filter_neighbours),
+	    .count_offset = offsetof(ncfg_observed_t, filter_neighbour_count) }
 };
 static const ncfg_type_t observed_type = TYPE("observation", observed_fields);
 /* The same members under a status answer's envelope, whose `response` the

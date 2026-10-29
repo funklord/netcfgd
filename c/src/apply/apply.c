@@ -221,7 +221,7 @@ int ncfg_apply_optional(const ncfg_op_t *op)
 	case NCFG_OP_QDISC_RESET:
 	case NCFG_OP_INGRESS_REDIRECT:
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 		return 1;
 	/*
 	 * **Offload tuning changes how fast, not whether.** A driver that
@@ -348,7 +348,7 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_QDISC_RESET:
 	case NCFG_OP_INGRESS_REDIRECT:
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
-	case NCFG_OP_NAT_REPLACE:
+	case NCFG_OP_NFTABLES_REPLACE:
 		return 1;
 	}
 	ncfg_error_set(err, err_size, "an op this build does not know cannot be carried out");
