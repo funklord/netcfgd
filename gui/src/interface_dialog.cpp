@@ -354,16 +354,28 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	dhcp_dns = new QLineEdit(this);
 	dhcp_dns->setObjectName(QStringLiteral("iface_dhcp_dns"));
 	/* Never guessed (0297): the router's own address answers only if
-	 * something on it resolves, so an empty field offers none and the plan
-	 * says so. */
+	 * something on it resolves -- which is what the forwarder below is -- so
+	 * an empty field with the forwarder off offers none and the plan says so. */
 	dhcp_dns->setPlaceholderText(QStringLiteral("DNS servers to offer, separated by spaces "
-	            "-- none if empty"));
+	            "-- the router if it answers, else none"));
 	form->addRow(QStringLiteral("offer DNS"), dhcp_dns);
+
+	/* **The LAN's DNS forwarder** (0301): the same dnsmasq answers names on
+	 * this interface, forwarding to what the router itself resolves with,
+	 * and the hosts' lease names resolve too. */
+	dhcp_dns_forward = new QCheckBox(QStringLiteral("answer DNS for this network"), this);
+	dhcp_dns_forward->setObjectName(QStringLiteral("iface_dhcp_dns_forward"));
+	dhcp_dns_forward->setToolTip(QStringLiteral(
+	    "The hosts are offered this router as their DNS server, and it forwards what "
+	    "it cannot answer to the servers the router uses. Names the DHCP server handed "
+	    "out resolve too."));
+	form->addRow(QString(), dhcp_dns_forward);
 
 	const auto serving = [this](bool on) {
 		dhcp_range->setEnabled(on);
 		dhcp_lease->setEnabled(on);
 		dhcp_dns->setEnabled(on);
+		dhcp_dns_forward->setEnabled(on);
 	};
 	connect(dhcp_server, &QCheckBox::toggled, this, serving);
 	serving(false);
@@ -576,6 +588,7 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_range->setText(existing.dhcp_range);
 	dhcp_lease->setValue(existing.dhcp_lease > 0 ? existing.dhcp_lease : 0);
 	dhcp_dns->setText(existing.dhcp_dns);
+	dhcp_dns_forward->setChecked(existing.dhcp_dns_forward);
 	for (const auto &one : existing.reservations) {
 		put_row(reservations, { one.name, one.mac, one.address });
 	}
@@ -888,6 +901,9 @@ QString ncfg_interface_dialog::block_text() const
 		}
 		if (!offered.isEmpty()) {
 			served << QStringLiteral("\t\tdns = [%1]").arg(offered.join(QStringLiteral(", ")));
+		}
+		if (dhcp_dns_forward->isChecked()) {
+			served << QStringLiteral("\t\tdns_forward = true");
 		}
 		body << QStringLiteral("\tdhcp_server {");
 		for (int row = 0; row < reservations->rowCount(); row++) {

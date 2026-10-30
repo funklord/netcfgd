@@ -78,8 +78,61 @@ static void a_server_with_no_dns_is_said(void)
 	    "\"links\":[" LAN_UP "]", &document, &observed);
 
 	check(plan && planfix_warned(plan, "offers no DNS server") &&
-	    planfix_warned(plan, "set `dns`"),
+	    planfix_warned(plan, "set `dns_forward = true`") && planfix_warned(plan, "or `dns`"),
 	    "a server offering no DNS server is said, with what to set (0297: never guessed)");
+	planfix_release(plan, document, observed);
+}
+
+/* A firewall whose input chain drops, with `rules` spliced in. */
+#define DROPPING(rules) \
+	",\"firewall\":{\"input\":{\"policy\":\"drop\",\"rules\":[" rules "]}," \
+	"\"forward\":{\"policy\":\"accept\"},\"output\":{\"policy\":\"accept\"}}"
+
+static void a_forwarder_answers_for_the_router(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "", "",
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+
+	/* 0301: with no `dns`, a forwarding server offers itself, so the hosts
+	 * do resolve and the 0297 warning would be wrong. */
+	check(plan && !planfix_warned(plan, "offers no DNS server"),
+	    "a server forwarding DNS is not said to offer none");
+	planfix_release(plan, document, observed);
+}
+
+static void a_firewall_that_drops_the_requests_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "", DROPPING(""),
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+
+	/* Warned, not opened (0301, as 0298 for a forward), with the rule to
+	 * write -- spelled as the firewall's grammar takes it. */
+	check(plan && planfix_warned(plan, "no rule accepting DHCP on br0") &&
+	        planfix_warned(plan, "port = [67]; interface = \"br0\""),
+	    "an input chain dropping DHCP is said, naming the rule that would let it in");
+	check(plan && planfix_warned(plan, "no rule accepting DNS on br0") &&
+	        planfix_warned(plan, "port = [53]; interface = \"br0\""),
+	    "  and so is one dropping the forwarder's DNS");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "",
+	    DROPPING("{\"name\":\"lan\",\"action\":\"accept\",\"interface\":\"br0\"}"),
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "no rule accepting DHCP") &&
+	        !planfix_warned(plan, "no rule accepting DNS"),
+	    "  and neither once a rule accepts everything on that interface");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "",
+	    DROPPING("{\"name\":\"dns\",\"action\":\"accept\",\"protocol\":\"udp\","
+	             "\"ports\":[53],\"interface\":\"wan0\"}"),
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+	check(plan && planfix_warned(plan, "no rule accepting DNS on br0"),
+	    "  while one accepting DNS on another interface does not count");
 	planfix_release(plan, document, observed);
 }
 
@@ -153,6 +206,8 @@ int main(void)
 {
 	a_server_starts_after_the_address_it_serves();
 	a_server_with_no_dns_is_said();
+	a_forwarder_answers_for_the_router();
+	a_firewall_that_drops_the_requests_is_said();
 	a_server_serving_what_is_asked_is_left_alone();
 	a_server_serving_something_else_restarts();
 	a_reservation_added_restarts_the_server();

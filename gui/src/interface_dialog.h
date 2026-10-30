@@ -158,6 +158,7 @@ private:
 	QLineEdit   *dhcp_range;
 	QSpinBox    *dhcp_lease;
 	QLineEdit   *dhcp_dns;
+	QCheckBox   *dhcp_dns_forward;
 	ncfg_hooks_editor *hooks;
 	QComboBox   *detection;
 	/* What the daemon said, kept so the editor can be handed the text rather

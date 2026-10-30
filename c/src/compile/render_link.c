@@ -763,6 +763,9 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 		}
 		ncfg_buf_add_text(body, "]\n");
 	}
+	if (server->dns_forward) {
+		ncfg_buf_add_text(body, "\t\tdns_forward = true\n");
+	}
 	/* Their shapes were checked with the range above, so a quote cannot be
 	 * in any of the three. */
 	for (at = 0; at < server->host_count; at++) {

@@ -441,10 +441,16 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 				}
 			}
 			ncfg_words_free(&words);
+		} else if (strcmp(assignment->key, "dns_forward") == 0) {
+			int flag;
+
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				server->dns_forward = flag;
+			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown dhcp_server key `%s`: range, lease and dns, and `host` blocks",
-			    assignment->key);
+			    "unknown dhcp_server key `%s`: range, lease, dns and dns_forward, and `host` "
+			    "blocks", assignment->key);
 		}
 	}
 	return server;

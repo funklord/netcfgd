@@ -148,7 +148,8 @@ int main(int argc, char **argv)
 		                   "\tforwarding = true\n"
 		                   "\tnat = true\n"
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
-		                   "dns = [\"192.0.2.53\"]; host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
+		                   "dns = [\"192.0.2.53\"]; dns_forward = true; "
+		                   "host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
 		                   "address = \"192.0.2.20\" } }\n"
 		                   /* To the reservation by name (10.618), which Save must
 		                    * write back as the name, not as 192.0.2.20. */
@@ -274,7 +275,9 @@ int main(int argc, char **argv)
 		        wrote.contains(QStringLiteral("\tdhcp_server {")) &&
 		        wrote.contains(QStringLiteral("range = \"192.0.2.50-192.0.2.60\"")) &&
 		        wrote.contains(QStringLiteral("lease = 3600")) &&
-		        wrote.contains(QStringLiteral("dns = [\"192.0.2.53\"]"))
+		        wrote.contains(QStringLiteral("dns = [\"192.0.2.53\"]")) &&
+		        /* 0301: the LAN's forwarder, written back with the rest. */
+		        wrote.contains(QStringLiteral("dns_forward = true"))
 		        ? QStringLiteral("written")
 		        : wrote,
 		    QStringLiteral("written"), "  written by the dialog, all three of its fields");

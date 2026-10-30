@@ -45,6 +45,7 @@ argument:
 | IPv4 masquerade | ~~no~~ **yes, in netcfgd's own table** | amended by [0022](0022-netcfgd-may-own-one-nftables-table.md); see below for the original reasoning |
 | DHCPv4/v6 server | ~~no~~ **DHCPv4: policy yes, implementation no** | amended by [0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md): handed to dnsmasq, as RA is to radvd; DHCPv6 still no |
 | PPPoE | **yes** | a link kind, implemented by pppd |
+| DNS forwarding for the LAN | **policy yes, implementation no** | added by [0301](0301-the-lan-is-answered-by-a-dns-forwarder.md): the interface's dnsmasq answers, forwarding to the router's own resolution |
 
 ### Prefix delegation needs an indirection, not a value
 

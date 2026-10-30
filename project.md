@@ -12597,6 +12597,43 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.619 The LAN is answered by a DNS forwarder
+
+**Asked for by the holder 2026-10-30** ("go ahead with the LAN DNS
+forwarder"), the question two `/go` runs had parked. Decided in
+[0301](doc/decision/0301-the-lan-is-answered-by-a-dns-forwarder.md), which
+adds a row to 0009's table: `dhcp_server { dns_forward = true }` makes the
+interface's dnsmasq answer DNS there too, forwarding to `/etc/resolv.conf` --
+the router's own resolution, so there is no second upstream list to drift --
+and, with no `dns`, offering the router to the hosts. A host's lease name
+resolves on the LAN.
+
+**Measured before it was written, in the rig's image (dnsmasq 2.91)**:
+`interface=lan0` alone also binds `127.0.0.1:53` and `[::1]:53`, and failed
+outright beside a resolver already on loopback; `listen-address` does not stop
+it; `except-interface=lo` does, and two LAN instances ran beside a loopback
+resolver with it. So the forwarder writes `port=53`, `except-interface=lo`,
+`domain-needed` and `bogus-priv` where the DHCP-only server writes `port=0`.
+The summary line says `dns this router, forwarding dns`, so turning it on is a
+restart and a server without it keeps the line it had.
+
+**And a gap 0297 left, closed with it**: a firewall whose `input` chain drops
+by default, with no rule accepting UDP 67 on the interface, silently starved
+the DHCP server. Both that and the forwarder's UDP 53 are now plan warnings
+naming the rule to write, as 0298 does for a forward. A rule narrowed by
+source still counts; one on another interface does not.
+
+`make hull-dhcp-server` carries it end to end: an upstream dnsmasq on
+`127.0.0.2` answering `example.test`, the router's resolv.conf naming it,
+`dns_forward` turned on (planned as a restart), port 53 bound on
+`192.168.7.1` and lan0's link-local address and not on loopback, the client
+offered `dns=192.168.7.1`, and through it resolving `example.test` to
+10.9.9.9 and the reservation `desk` to 192.168.7.50. Units: the dnsmasq lines
+and summary, the plan's silence on DNS when forwarding and its two firewall
+warnings with their rules, the lowering, and a profile round trip. The GUI's
+interface dialog has an "answer DNS for this network" box, which the form gate
+required before the client read it.
+
 ## 10.618 A forward may name a reservation
 
 **Asked for by the holder 2026-10-30** ("go ahead with the port forward

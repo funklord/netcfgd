@@ -4163,6 +4163,8 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->dhcp_server = 1;
 		out->dhcp_lease = (int)ncfg_json_int(doc, ncfg_json_member(doc, server, "lease"), -1);
 		out->dhcp_dns = joined_words(doc, ncfg_json_member(doc, server, "dns"));
+		out->dhcp_dns_forward =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, server, "dns_forward"), 0);
 		if (start && end && *start && *end) {
 			size_t length = strlen(start) + strlen(end) + 2;
 

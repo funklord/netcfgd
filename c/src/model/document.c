@@ -1917,7 +1917,11 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	{ .name = "hosts", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &dhcp_host_type, .element_size = sizeof(ncfg_dhcp_host_t),
 	    .offset = offsetof(ncfg_dhcp_server_t, hosts),
-	    .count_offset = offsetof(ncfg_dhcp_server_t, host_count) }
+	    .count_offset = offsetof(ncfg_dhcp_server_t, host_count) },
+	/* Absent where off (0301), so a server written before it existed reads
+	 * and writes back unchanged. */
+	{ .name = "dns_forward", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_dhcp_server_t, dns_forward) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 

@@ -834,6 +834,9 @@ static void an_access_point_round_trips(void)
 	    "a DHCP server round-trips");
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server { }\n}\n",
 	    "  and so does one with every default");
+	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns_forward = true }\n}\n",
+	    "  and so does one answering DNS for the LAN (0301)");
 	round_trips("interface wan0 {\n\tnat = true\n"
 	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\"; "
 	    "to_port = 8443 }\n"

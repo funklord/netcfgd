@@ -427,6 +427,7 @@ struct ncfg_interface_config {
 	QString dhcp_range;
 	int     dhcp_lease = -1;
 	QString dhcp_dns;
+	bool    dhcp_dns_forward = false;
 	/* The server's reservations, and the ports forwarded from this interface
 	 * (10.612). */
 	struct reservation {

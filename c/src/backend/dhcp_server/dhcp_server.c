@@ -72,13 +72,19 @@ int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_
 	if (!server || !ncfg_dhcp_server_range(interface, start, end, NULL, NULL)) {
 		return 0;
 	}
+	/* "none" only where nothing answers (0301): a forwarding server with no
+	 * `dns` offers itself, so the line says so, and a changed `dns_forward`
+	 * is a changed summary and therefore a restart. */
 	used = (size_t)snprintf(out, out_size, "%s-%s, %lld s, dns %s", start, end,
 	    server->lease.has ? (long long)server->lease.value
 	                      : (long long)NCFG_DHCP_SERVER_LEASE_DEFAULT,
-	    server->dns_count ? "" : "none");
+	    server->dns_count ? "" : server->dns_forward ? "this router" : "none");
 	for (at = 0; at < server->dns_count && used < out_size; at++) {
 		used += (size_t)snprintf(out + used, out_size - used, "%s%s", at ? " " : "",
 		    server->dns[at]);
+	}
+	if (server->dns_forward && used < out_size) {
+		used += (size_t)snprintf(out + used, out_size - used, ", forwarding dns");
 	}
 	/*
 	 * **A count and a digest, not the list** (10.605). The line is bounded
@@ -171,10 +177,25 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 	ncfg_buf_init(&buf, DHCP_SERVER_CONFIG_MAX);
 	ncfg_buf_addf(&buf,
 	    "# Written by netcfgd for %s (decision 0297). Do not edit; it is rewritten on apply.\n"
-	    "%s%s\n"
-	    /* DHCP only: never also a resolver, so it cannot meet a `dns_mode =
-	     * "dnsmasq"` delivery on port 53. */
-	    "port=0\n"
+	    "%s%s\n", interface->name, SUMMARY_PREFIX, summary);
+	if (server->dns_forward) {
+		/* **A forwarder on this interface alone** (0301). `except-interface=lo`
+		 * because `interface=` also binds loopback, measured against 2.91:
+		 * without it this failed beside a resolver on 127.0.0.1:53 and two
+		 * LANs' instances would collide. Upstream is /etc/resolv.conf, the
+		 * router's own resolution, re-read when it changes. A bare name and a
+		 * private address's reverse lookup are never sent upstream. */
+		ncfg_buf_add_text(&buf,
+		    "port=53\n"
+		    "except-interface=lo\n"
+		    "domain-needed\n"
+		    "bogus-priv\n");
+	} else {
+		/* DHCP only: never also a resolver, so it cannot meet a `dns_mode =
+		 * "dnsmasq"` delivery on port 53. */
+		ncfg_buf_add_text(&buf, "port=0\n");
+	}
+	ncfg_buf_addf(&buf,
 	    "interface=%s\n"
 	    /* Measured: what lets two instances serve two interfaces at once. */
 	    "bind-interfaces\n"
@@ -184,7 +205,7 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 	    "user=" DHCP_SERVER_USER "\n"
 	    "dhcp-range=%s,%s,%s,%lld\n"
 	    "dhcp-leasefile=%s\n",
-	    interface->name, SUMMARY_PREFIX, summary, interface->name, interface->name, start, end,
+	    interface->name, interface->name, start, end,
 	    server->lease.has ? (long long)server->lease.value
 	                      : (long long)NCFG_DHCP_SERVER_LEASE_DEFAULT,
 	    leases_path ? leases_path : "");

@@ -1508,6 +1508,18 @@ static void access_point_cases(void)
 		    "  sorted by name, each with its protocol, ports and host");
 		ncfg_document_free(document);
 	}
+	/* The LAN's DNS forwarder (0301): a boolean on the server. */
+	document = compiles("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns_forward = true }\n}\n", "a server forwarding DNS compiles");
+	if (document) {
+		check(document->interfaces[0].dhcp_server &&
+		        document->interfaces[0].dhcp_server->dns_forward == 1,
+		    "  with the forwarder on");
+		ncfg_document_free(document);
+	}
+	refuses("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns_forward = \"yes\" }\n}\n", "expected true or false",
+	    "  and one that is not a boolean is refused");
 	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443 }\n}\n",
 	    "needs a `protocol`, a `port` and a `to`", "  a forward with nowhere to go is refused");
 	/* **To a reservation by name** (10.618): resolved to its address across

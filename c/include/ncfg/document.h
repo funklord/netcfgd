@@ -1395,6 +1395,10 @@ typedef struct {
 	size_t            dns_count;
 	ncfg_dhcp_host_t *hosts;
 	size_t            host_count;
+	/* The same dnsmasq answers DNS on this interface, forwarding to the
+	 * router's own resolution (0301); with no `dns`, the hosts are offered
+	 * the router. */
+	int               dns_forward;
 } ncfg_dhcp_server_t;
 
 /*

@@ -84,6 +84,24 @@ int main(void)
 	    "  and offering no DNS server where none is named");
 	free(text);
 
+	/* **The forwarder** (0301): DNS on this interface alone, measured against
+	 * 2.91 -- `interface=` also binds loopback, and `except-interface=lo` is
+	 * what keeps it off a resolver already there. No `dhcp-option=6`, so the
+	 * router is offered; and the summary changes, so turning it on restarts. */
+	server.dns_forward = 1;
+	text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+	check(text && has_line(text, "port=53") && !has_line(text, "port=0") &&
+	        has_line(text, "except-interface=lo") && has_line(text, "interface=br0") &&
+	        has_line(text, "domain-needed") && has_line(text, "bogus-priv") &&
+	        !strstr(text, "dhcp-option=6"),
+	    "a forwarding server answers DNS on its interface alone, offering itself");
+	check(ncfg_dhcp_server_summary(&lan, summary, sizeof(summary)) &&
+	        strcmp(summary, "192.168.1.100-192.168.1.249, 43200 s, dns this router, "
+	                        "forwarding dns") == 0,
+	    "  and says so in its summary, so turning it on is a restart");
+	free(text);
+	server.dns_forward = 0;
+
 	server.dns = dns;
 	server.dns_count = 2u;
 	server.lease.has = 1;

@@ -1382,6 +1382,8 @@ typedef struct {
 	char *dhcp_range;
 	int   dhcp_lease;
 	char *dhcp_dns;
+	/* Whether the server also answers DNS, forwarding it (0301). */
+	int   dhcp_dns_forward;
 	/* The server's reservations (10.605), carried since 10.612. */
 	ncfg_reservation_t *reservations;
 	size_t              reservation_count;
