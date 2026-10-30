@@ -487,6 +487,12 @@ struct ncfg_access_point_config {
 	bool    steering = false;
 	int     steering_signal = 0;
 	bool    steering_band = false;
+	/* Fast roaming, its domain and the key's reference as written, and the
+	 * neighbours listed by hand (10.612); a neighbour's channel -1 unset. */
+	bool    fast_roaming = false;
+	QString mobility_domain;
+	QString roaming_key;
+	QList<QPair<QString, int>> neighbours;
 	/* What the access point dialog has no field for, comma-joined; empty for
 	 * one it can write back whole (project.md 10.606). */
 	QString unmodelled;

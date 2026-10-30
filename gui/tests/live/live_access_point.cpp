@@ -215,38 +215,48 @@ int main(int argc, char **argv)
 		(void)connection.config_delete(QStringLiteral("access-point-") + wide, &why);
 	}
 
-	/* What the dialog still has no field for (10.606): a `neighbour` block.
-	 * It saves the block whole, so it must refuse and leave the file. */
+	/* Fast roaming and a neighbour, fields since 10.612 -- the last of an
+	 * access point's members the dialog refused. Opened on them, a changed
+	 * channel saved with them. */
 	{
-		const QString named = QStringLiteral("gui-near");
+		const QString near = QStringLiteral("gui-near");
 		const QString text = QStringLiteral(
 		    "access_point \"gui-near\" {\n\tdevice = \"radio0\"\n\tchannel = 6\n"
 		    "\tneighbour_reports = true\n"
 		    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
+		    "\tfast_roaming = true\n\tmobility_domain = \"a1b2\"\n"
+		    "\troaming_key = \"@secret:gui-near-ft\"\n"
 		    "\twifi { psk = \"@secret:gui-near\" }\n}\n");
 		QString why;
-		check("an access point naming a neighbour is written by hand",
-		    connection.config_put(QStringLiteral("access-point-") + named, text, true, &why),
+		check("an access point with fast roaming and a neighbour is written by hand",
+		    connection.config_put(QStringLiteral("access-point-") + near, text, true, &why),
 		    why);
 		ncfg_access_point_config existing;
-		check("and netcfgd names the neighbours as something the dialog cannot carry",
-		    offered(&connection, named, &existing) &&
-		        existing.unmodelled == QStringLiteral("neighbours"),
+		check("and netcfgd says the dialog can carry all of it",
+		    offered(&connection, near, &existing) && existing.unmodelled.isEmpty(),
 		    existing.unmodelled);
 		ncfg_access_point_dialog dialog(&connection, existing);
-		auto *note = dialog.findChild<QLabel *>(QStringLiteral("ap_note"));
+		auto *fast = dialog.findChild<QCheckBox *>(QStringLiteral("ap_fast_roaming"));
+		auto *key = dialog.findChild<QLineEdit *>(QStringLiteral("ap_roaming_key"));
+		auto *channel = dialog.findChild<QSpinBox *>(QStringLiteral("ap_channel"));
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("ap_save"));
+		check("the dialog opens on its fast roaming and its key",
+		    fast && fast->isChecked() && key &&
+		        key->text() == QStringLiteral("@secret:gui-near-ft"),
+		    key ? key->text() : QString());
+		channel->setValue(11);
 		save->click();
-		check("so Save is refused, saying what it would delete",
-		    dialog.outcome().isEmpty() && note &&
-		        note->text().contains(QStringLiteral("neighbours")),
-		    note ? note->text() : QString());
 		ncfg_access_point_config after;
-		check("and the neighbour is still there",
-		    offered(&connection, named, &after) &&
-		        after.unmodelled == QStringLiteral("neighbours"),
-		    after.unmodelled);
-		(void)connection.config_delete(QStringLiteral("access-point-") + named, &why);
+		check("and Save keeps them, the domain and the neighbour with them",
+		    !dialog.outcome().isEmpty() && offered(&connection, near, &after) &&
+		        after.channel == 11 && after.fast_roaming &&
+		        after.mobility_domain == QStringLiteral("a1b2") &&
+		        after.roaming_key == QStringLiteral("@secret:gui-near-ft") &&
+		        after.neighbours.size() == 1 &&
+		        after.neighbours[0].first == QStringLiteral("02:00:00:00:09:00") &&
+		        after.neighbours[0].second == 36,
+		    QString::number(after.neighbours.size()));
+		(void)connection.config_delete(QStringLiteral("access-point-") + near, &why);
 	}
 
 	if (failures == 0) {

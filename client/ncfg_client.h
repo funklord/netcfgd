@@ -1309,6 +1309,12 @@ typedef struct {
 	char *address;
 } ncfg_reservation_t;
 
+/* One neighbour an access point lists (10.612): `channel` -1 where unset. */
+typedef struct {
+	char *bssid;
+	int   channel;
+} ncfg_neighbour_entry_t;
+
 /* One port forward, as an editor carries it (10.612): `to_port` -1 where it
  * is the same port, `hairpin` -1 where unset (on) or the 0 or 1 written. */
 typedef struct {
@@ -2136,6 +2142,13 @@ typedef struct {
 	int   steering;
 	int   steering_signal;
 	int   steering_band;
+	/* Fast roaming (802.11r) with its domain and the key's reference as the
+	 * language writes it, and the neighbours an operator listed (10.612). */
+	int   fast_roaming;
+	char *mobility_domain;
+	char *roaming_key;
+	ncfg_neighbour_entry_t *neighbours;
+	size_t                  neighbour_count;
 	/* What the access point dialog has no field for, comma-joined, as on a
 	 * saved network: fast roaming with its domain and key, and `neighbour`
 	 * blocks (project.md 10.606). Empty for one the dialog can write back

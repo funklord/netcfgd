@@ -12644,6 +12644,23 @@ the same reason. `gui_wifi.sh`: a network pinned to two access points,
 roaming, with a route and a DNS scope opens on them and keeps every value
 through a Save; one addressed twice is refused with its file as it was.
 
+**Then the access point dialog**: fast roaming with its mobility domain and
+the key's reference as written, and a neighbours table (BSSID, channel). With
+10.607's width, reports, steering and wds that is every member of an access
+point; the only refusal left is inside a neighbour -- a `signal` or `band`
+the language's `neighbour` block has no key for. The form scrolls. A
+neighbour's cells are checked before Save. `gui_wifi.sh`: an access point
+with fast roaming, a domain, a key and a neighbour opens on them and keeps
+them through a Save that changed its channel.
+
+**What is still refused, after all three**: on an interface, an `advertise`
+with an `exec` backend or a prefix naming its delegation, a route with a
+`src`, and a peer or delegated addressing source; on a network, addressing
+beyond one DHCP source, and its `hooks`, which the GUI has no way to read;
+and the device dialog's own list -- `master`, `access_control`, `match`,
+`bridge_vlans`, an `ifb` and a rate finer than a kbit -- which this pass did
+not take up.
+
 ## 10.611 The network dialog edits enterprise networks
 
 **Asked for by the holder 2026-10-30** ("go ahead with the enterprise network

@@ -32,6 +32,8 @@
 
 class QCheckBox;
 class QComboBox;
+class QFormLayout;
+class QTableWidget;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -84,6 +86,12 @@ private:
 	QSpinBox  *steering_signal;
 	QCheckBox *steering_band;
 	QCheckBox *wds;
+	/* Fast roaming and the neighbour list (10.612). */
+	QCheckBox    *fast_roaming;
+	QLineEdit    *mobility_domain;
+	QLineEdit    *roaming_key;
+	QTableWidget *neighbours;
+	QFormLayout  *form_layout;
 	QLabel      *note;
 	QPushButton *save_button;
 	QPushButton *remove_button;

@@ -5,6 +5,10 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QTableWidget>
+#include <QScrollArea>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -152,6 +156,20 @@ QString ncfg_access_point_block(const ncfg_access_point_config &settings)
 	if (settings.wds) {
 		body << QStringLiteral("\twds = true");
 	}
+	if (settings.fast_roaming) {
+		body << QStringLiteral("\tfast_roaming = true");
+	}
+	if (!settings.mobility_domain.isEmpty()) {
+		body << QStringLiteral("\tmobility_domain = \"%1\"").arg(settings.mobility_domain);
+	}
+	if (!settings.roaming_key.isEmpty()) {
+		body << QStringLiteral("\troaming_key = \"%1\"").arg(settings.roaming_key);
+	}
+	for (const auto &one : settings.neighbours) {
+		body << (one.second > 0
+		    ? QStringLiteral("\tneighbour \"%1\" { channel = %2 }").arg(one.first).arg(one.second)
+		    : QStringLiteral("\tneighbour \"%1\" { }").arg(one.first));
+	}
 
 	QStringList block;
 	block << QStringLiteral("# Written by netcfgd's gui. Ordinary netcfgd configuration:");
@@ -173,6 +191,7 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 
 	auto *layout = new QVBoxLayout(this);
 	auto *form = new QFormLayout();
+	form_layout = form;
 
 	id = new QLineEdit(existing.id, this);
 	id->setObjectName(QStringLiteral("ap_id"));
@@ -264,7 +283,59 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	wds = new QCheckBox(QStringLiteral("let stations bridge through it (4-address)"), this);
 	wds->setObjectName(QStringLiteral("ap_wds"));
 	form->addRow(QString(), wds);
-	layout->addLayout(form);
+
+	/* 802.11r (10.593): every access point of one network shares the domain
+	 * and the key, which is why the key is a reference to a stored secret. */
+	fast_roaming = new QCheckBox(QStringLiteral("fast roaming between this network's access "
+	                           "points (802.11r)"), this);
+	fast_roaming->setObjectName(QStringLiteral("ap_fast_roaming"));
+	form->addRow(QString(), fast_roaming);
+	mobility_domain = new QLineEdit(this);
+	mobility_domain->setObjectName(QStringLiteral("ap_mobility_domain"));
+	mobility_domain->setPlaceholderText(QStringLiteral("four hex digits, the same on every "
+	                                  "access point -- blank derives one"));
+	form->addRow(QStringLiteral("mobility domain"), mobility_domain);
+	roaming_key = new QLineEdit(this);
+	roaming_key->setObjectName(QStringLiteral("ap_roaming_key"));
+	roaming_key->setPlaceholderText(QStringLiteral("@secret:NAME, the same on every access "
+	                              "point"));
+	form->addRow(QStringLiteral("roaming key"), roaming_key);
+
+	neighbours = new QTableWidget(0, 2, this);
+	neighbours->setObjectName(QStringLiteral("ap_neighbours"));
+	neighbours->setHorizontalHeaderLabels({ QStringLiteral("bssid"), QStringLiteral("channel") });
+	neighbours->verticalHeader()->setVisible(false);
+	neighbours->horizontalHeader()->setStretchLastSection(true);
+	neighbours->setMaximumHeight(100);
+	neighbours->setToolTip(QStringLiteral("access points of this network that netcfgd does not "
+	                     "run, told to stations in neighbour reports"));
+	form->addRow(QStringLiteral("neighbours"), neighbours);
+	{
+		auto *row = new QHBoxLayout();
+		auto *add = new QPushButton(QStringLiteral("add neighbour"), this);
+		auto *drop = new QPushButton(QStringLiteral("remove neighbour"), this);
+		row->addWidget(add);
+		row->addWidget(drop);
+		row->addStretch(1);
+		form->addRow(QString(), row);
+		connect(add, &QPushButton::clicked, this, [this]() {
+			neighbours->insertRow(neighbours->rowCount());
+			neighbours->setCurrentCell(neighbours->rowCount() - 1, 0);
+		});
+		connect(drop, &QPushButton::clicked, this, [this]() {
+			if (neighbours->currentRow() >= 0) {
+				neighbours->removeRow(neighbours->currentRow());
+			}
+		});
+	}
+
+	auto *holder = new QWidget(this);
+	holder->setLayout(form);
+	auto *scroll = new QScrollArea(this);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setWidget(holder);
+	layout->addWidget(scroll, 1);
 
 	note = new QLabel(this);
 	note->setObjectName(QStringLiteral("ap_note"));
@@ -309,6 +380,16 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 		steering_signal->setValue(existing.steering ? existing.steering_signal : 0);
 		steering_band->setChecked(existing.steering && existing.steering_band);
 		wds->setChecked(existing.wds);
+		fast_roaming->setChecked(existing.fast_roaming);
+		mobility_domain->setText(existing.mobility_domain);
+		roaming_key->setText(existing.roaming_key);
+		for (const auto &one : existing.neighbours) {
+			const int row = neighbours->rowCount();
+			neighbours->insertRow(row);
+			neighbours->setItem(row, 0, new QTableWidgetItem(one.first));
+			neighbours->setItem(row, 1, new QTableWidgetItem(
+			    one.second > 0 ? QString::number(one.second) : QString()));
+		}
 
 		/* **What hostapd actually took**, where it differs from what the block
 		 * asks for. A channel can be refused and a band unsupported, and
@@ -358,7 +439,8 @@ void ncfg_access_point_dialog::offer_radios()
 void ncfg_access_point_dialog::security_changed()
 {
 	const bool needs = security->currentData().toString() == QLatin1String("psk");
-	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
+	/* A member: the form is inside a scroll area since 10.612. */
+	QFormLayout *form = form_layout;
 	if (form) {
 		form->setRowVisible(credential, needs);
 	}
@@ -387,6 +469,16 @@ QString ncfg_access_point_dialog::block_text() const
 	settings.steering_band = settings.neighbour_reports && steering_band->isChecked();
 	settings.steering = settings.steering_signal < 0 || settings.steering_band;
 	settings.wds = wds->isChecked();
+	settings.fast_roaming = fast_roaming->isChecked();
+	settings.mobility_domain = mobility_domain->text().trimmed();
+	settings.roaming_key = roaming_key->text().trimmed();
+	for (int row = 0; row < neighbours->rowCount(); row++) {
+		const QTableWidgetItem *bssid = neighbours->item(row, 0);
+		const QTableWidgetItem *channel = neighbours->item(row, 1);
+		settings.neighbours << qMakePair(bssid ? bssid->text().trimmed() : QString(),
+		                           channel && !channel->text().trimmed().isEmpty()
+		                               ? channel->text().trimmed().toInt() : -1);
+	}
 	return ncfg_access_point_block(settings);
 }
 
@@ -403,11 +495,30 @@ void ncfg_access_point_dialog::submit()
 		        .arg(before.unmodelled, before.id));
 		return;
 	}
-	const QLineEdit *values[] = { id, credential, regdom, stations };
+	const QLineEdit *values[] = { id, credential, regdom, stations, mobility_domain, roaming_key };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
 			              "or a newline"));
+			return;
+		}
+	}
+	/* A neighbour's cells are text in the block: its BSSID one word with
+	 * nothing that could close the line, its channel a number (10.612). */
+	for (int row = 0; row < neighbours->rowCount(); row++) {
+		const QString bssid = neighbours->item(row, 0) ? neighbours->item(row, 0)->text().trimmed()
+		                                               : QString();
+		const QString channel = neighbours->item(row, 1)
+		    ? neighbours->item(row, 1)->text().trimmed() : QString();
+		bool number = true;
+		if (!channel.isEmpty()) {
+			const int value = channel.toInt(&number);
+			number = number && value >= 1 && value <= 233;
+		}
+		if (bssid.isEmpty() || !safe_value(bssid) || bssid.contains(QLatin1Char(' ')) ||
+		    bssid.contains(QLatin1Char('{')) || bssid.contains(QLatin1Char('}')) || !number) {
+			note->setText(QStringLiteral("neighbour %1 needs a BSSID, and a channel is a number")
+			                  .arg(row + 1));
 			return;
 		}
 	}

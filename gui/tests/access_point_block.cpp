@@ -110,6 +110,20 @@ int main(int argc, char **argv)
 		    "and steering, as one block with both triggers");
 		check(block.contains(QStringLiteral("wds = true")), "and wds");
 
+		shaped.fast_roaming = true;
+		shaped.mobility_domain = QStringLiteral("a1b2");
+		shaped.roaming_key = QStringLiteral("@secret:ft");
+		shaped.neighbours << qMakePair(QStringLiteral("02:00:00:00:09:00"), 36)
+		                  << qMakePair(QStringLiteral("02:00:00:00:0a:00"), -1);
+		const QString roaming = ncfg_access_point_block(shaped);
+		check(roaming.contains(QStringLiteral("fast_roaming = true")) &&
+		        roaming.contains(QStringLiteral("mobility_domain = \"a1b2\"")) &&
+		        roaming.contains(QStringLiteral("roaming_key = \"@secret:ft\"")),
+		    "fast roaming is written with its domain and its key's reference (10.612)");
+		check(roaming.contains(QStringLiteral("neighbour \"02:00:00:00:09:00\" { channel = 36 }")) &&
+		        roaming.contains(QStringLiteral("neighbour \"02:00:00:00:0a:00\" { }")),
+		    "  and each neighbour, with its channel where it has one");
+
 		ncfg_access_point_config plain;
 		plain.id = QStringLiteral("Plain");
 		plain.device = QStringLiteral("wlan0");

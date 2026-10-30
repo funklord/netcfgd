@@ -2337,10 +2337,11 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	got = ncfg_client_access_points(staged.client, &points, err, sizeof(err));
 	ok("the access points arrive", got == 1 && points.count == 2, err);
 	if (got == 1 && points.count == 2) {
-		/* Width, neighbour reports and steering are fields since 10.607;
-		 * fast roaming, with its domain and key, is not. */
-		equals("an access point's fast roaming is named",
-		    points.items[0].unmodelled, "fast_roaming");
+		/* Width, neighbour reports and steering are fields since 10.607,
+		 * fast roaming since 10.612. */
+		equals("an access point carrying fast roaming names nothing the dialog cannot carry",
+		    points.items[0].unmodelled, "");
+		ok("  and fast roaming is read", points.items[0].fast_roaming == 1, NULL);
 		ok("  and its width, reports and steering are read into fields",
 		    points.items[0].width == 160 && points.items[0].neighbour_reports &&
 		        points.items[0].steering && points.items[0].steering_signal == -75 &&

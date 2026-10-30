@@ -2118,6 +2118,12 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
 		free(points->items[i].stations);
 		free(points->items[i].started_band);
 		free(points->items[i].unmodelled);
+		free(points->items[i].mobility_domain);
+		free(points->items[i].roaming_key);
+		for (size_t n = 0; n < points->items[i].neighbour_count; n++) {
+			free(points->items[i].neighbours[n].bssid);
+		}
+		free(points->items[i].neighbours);
 	}
 	free(points->items);
 	memset(points, 0, sizeof(*points));
@@ -2344,27 +2350,46 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 		    (int)ncfg_json_int(doc, ncfg_json_member(doc, steering, "signal"), 0);
 		item->steering_band = ncfg_json_bool(doc, ncfg_json_member(doc, steering, "band"), 0);
 
-		/* What the access point dialog cannot write back (10.606): it saves
-		 * the block with `replace`, so each of these would be deleted. Width,
-		 * neighbour reports, wds and steering left this list when the dialog
-		 * gained fields for them (10.607). */
+		/* Fast roaming and the neighbour list, fields since 10.612: every
+		 * member of an access point has one now, and what is named below is
+		 * inside a neighbour -- a signal or band the language's own block has
+		 * no key for, which only a generated document would carry. */
+		item->fast_roaming = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "fast_roaming"), 0);
+		item->mobility_domain = member_text(doc, entry, "mobility_domain");
 		{
-			static const char *const beyond[] = { "fast_roaming", "mobility_domain",
-				"roaming_key", "neighbours" };
-
-			for (size_t at = 0; at < sizeof(beyond) / sizeof(beyond[0]); at++) {
-				if (member_says(doc, entry, beyond[at])) {
-					note_unmodelled(&item->unmodelled, beyond[at]);
+			uint32_t key = ncfg_json_member(doc, entry, "roaming_key");
+			item->roaming_key = ncfg_json_type(doc, key) == NCFG_JSON_OBJECT
+			    ? reference_text(doc, key) : dup_string("");
+		}
+		{
+			uint32_t list = ncfg_json_member(doc, entry, "neighbours");
+			uint32_t many = ncfg_json_count(doc, list);
+			if (many) {
+				item->neighbours = calloc(many, sizeof(*item->neighbours));
+				if (item->neighbours) {
+					item->neighbour_count = many;
 				}
 			}
-			if (!item->unmodelled) {
-				item->unmodelled = dup_string("");
+			for (uint32_t n = 0; n < item->neighbour_count; n++) {
+				uint32_t one = ncfg_json_at(doc, list, n);
+				item->neighbours[n].bssid = member_text(doc, one, "bssid");
+				item->neighbours[n].channel =
+				    (int)ncfg_json_int(doc, ncfg_json_member(doc, one, "channel"), -1);
+				if (member_says(doc, one, "signal") || member_says(doc, one, "band")) {
+					note_unmodelled(&item->unmodelled, "neighbours (a signal or band)");
+				}
 			}
+		}
+		if (!item->unmodelled) {
+			item->unmodelled = dup_string("");
 		}
 
 		if (!item->id || !item->name || !item->ssid || !item->device || !item->security
 		    || !item->credential || !item->band || !item->regdom || !item->acl_policy
-		    || !item->stations || !item->started_band || !item->unmodelled) {
+		    || !item->stations || !item->started_band || !item->unmodelled ||
+		    !item->mobility_domain || !item->roaming_key ||
+		    (ncfg_json_count(doc, ncfg_json_member(doc, entry, "neighbours")) &&
+		    !item->neighbours)) {
 			set_error(err, err_size, "out of memory");
 			ncfg_json_free(doc);
 			ncfg_json_free(status);

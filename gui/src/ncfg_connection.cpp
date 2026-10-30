@@ -1113,6 +1113,13 @@ bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QStrin
 		row.steering = found.items[i].steering != 0;
 		row.steering_signal = found.items[i].steering_signal;
 		row.steering_band = found.items[i].steering_band != 0;
+		row.fast_roaming = found.items[i].fast_roaming != 0;
+		row.mobility_domain = from_c(found.items[i].mobility_domain);
+		row.roaming_key = from_c(found.items[i].roaming_key);
+		for (size_t n = 0; n < found.items[i].neighbour_count; n++) {
+			row.neighbours << qMakePair(from_c(found.items[i].neighbours[n].bssid),
+			                    found.items[i].neighbours[n].channel);
+		}
 		row.unmodelled = from_c(found.items[i].unmodelled);
 		*out << row;
 	}
