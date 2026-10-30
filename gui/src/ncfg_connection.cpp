@@ -1258,6 +1258,32 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dhcp_range = from_c(found.dhcp_range);
 	out->dhcp_lease = found.dhcp_lease;
 	out->dhcp_dns = from_c(found.dhcp_dns);
+	for (size_t i = 0; i < found.reservation_count; i++) {
+		ncfg_interface_config::reservation one;
+		one.name = from_c(found.reservations[i].name);
+		one.mac = from_c(found.reservations[i].mac);
+		one.address = from_c(found.reservations[i].address);
+		out->reservations << one;
+	}
+	for (size_t i = 0; i < found.port_forward_count; i++) {
+		ncfg_interface_config::forward one;
+		one.name = from_c(found.port_forwards[i].name);
+		one.protocol = from_c(found.port_forwards[i].protocol);
+		one.port = found.port_forwards[i].port;
+		one.to = from_c(found.port_forwards[i].to);
+		one.to_port = found.port_forwards[i].to_port;
+		one.hairpin = found.port_forwards[i].hairpin;
+		out->port_forwards << one;
+	}
+	out->ipv6_token = from_c(found.ipv6_token);
+	out->guard = from_c(found.guard);
+	out->advertise = found.advertise != 0;
+	out->advertise_backend = from_c(found.advertise_backend);
+	out->advertise_prefixes = from_c(found.advertise_prefixes);
+	out->advertise_managed = found.advertise_managed != 0;
+	out->advertise_other = found.advertise_other != 0;
+	out->advertise_dns = found.advertise_dns != 0;
+	out->advertise_lifetime = found.advertise_lifetime;
 	out->unmodelled = from_c(found.unmodelled);
 	ncfg_interface_config_free(&found);
 	return true;

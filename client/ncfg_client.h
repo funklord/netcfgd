@@ -1302,6 +1302,24 @@ typedef struct {
 	char *domains;
 } ncfg_dns_scope_t;
 
+/* One DHCP reservation, as an editor carries it (10.612). */
+typedef struct {
+	char *name;
+	char *mac;
+	char *address;
+} ncfg_reservation_t;
+
+/* One port forward, as an editor carries it (10.612): `to_port` -1 where it
+ * is the same port, `hairpin` -1 where unset (on) or the 0 or 1 written. */
+typedef struct {
+	char *name;
+	char *protocol;
+	int   port;
+	char *to;
+	int   to_port;
+	int   hairpin;
+} ncfg_forward_entry_t;
+
 typedef struct {
 	/* Whether the document configures this interface at all. */
 	int   present;
@@ -1335,6 +1353,27 @@ typedef struct {
 	char *dhcp_range;
 	int   dhcp_lease;
 	char *dhcp_dns;
+	/* The server's reservations (10.605), carried since 10.612. */
+	ncfg_reservation_t *reservations;
+	size_t              reservation_count;
+	/* The ports forwarded to hosts behind it (0298, 0299). */
+	ncfg_forward_entry_t *port_forwards;
+	size_t                port_forward_count;
+	/* `ipv6_token` and a guard's reason, each "" where unset (10.612). */
+	char *ipv6_token;
+	char *guard;
+	/* Router advertisements (0009): `advertise` set where the block is
+	 * there; `advertise_prefixes` space-joined as the language writes them,
+	 * `@pd:wan0/1`; the backend `auto`, `radvd` or `odhcpd`; the lifetime
+	 * -1 for the default. An `exec` backend, or a prefix naming which of
+	 * several delegations it is, has no field and stays unmodelled. */
+	int   advertise;
+	char *advertise_backend;
+	char *advertise_prefixes;
+	int   advertise_managed;
+	int   advertise_other;
+	int   advertise_dns;
+	int   advertise_lifetime;
 	/*
 	 * What the fields above cannot express, joined for a message.
 	 *

@@ -2841,6 +2841,22 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->probe_args);
 	free(config->dhcp_range);
 	free(config->dhcp_dns);
+	for (size_t i = 0; i < config->reservation_count; i++) {
+		free(config->reservations[i].name);
+		free(config->reservations[i].mac);
+		free(config->reservations[i].address);
+	}
+	free(config->reservations);
+	for (size_t i = 0; i < config->port_forward_count; i++) {
+		free(config->port_forwards[i].name);
+		free(config->port_forwards[i].protocol);
+		free(config->port_forwards[i].to);
+	}
+	free(config->port_forwards);
+	free(config->ipv6_token);
+	free(config->guard);
+	free(config->advertise_backend);
+	free(config->advertise_prefixes);
 	free(config->unmodelled);
 	memset(config, 0, sizeof(*config));
 }
@@ -3901,9 +3917,109 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		}
 		free(start);
 		free(end);
-		if (ncfg_json_count(doc, ncfg_json_member(doc, server, "hosts"))) {
-			note_unmodelled(&out->unmodelled, "dhcp_server (its reservations)");
+		/* The reservations, a table in the dialog since 10.612. */
+		uint32_t hosts = ncfg_json_member(doc, server, "hosts");
+		uint32_t host_count = ncfg_json_count(doc, hosts);
+		if (host_count) {
+			out->reservations = calloc(host_count, sizeof(*out->reservations));
+			if (!out->reservations) {
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+			out->reservation_count = host_count;
+			for (uint32_t i = 0; i < host_count; i++) {
+				uint32_t host = ncfg_json_at(doc, hosts, i);
+				out->reservations[i].name = member_text(doc, host, "name");
+				out->reservations[i].mac = member_text(doc, host, "mac");
+				out->reservations[i].address = member_text(doc, host, "address");
+			}
 		}
+	}
+	{
+		uint32_t forwards = ncfg_json_member(doc, found, "port_forwards");
+		uint32_t forward_count = ncfg_json_count(doc, forwards);
+		if (forward_count) {
+			out->port_forwards = calloc(forward_count, sizeof(*out->port_forwards));
+			if (!out->port_forwards) {
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+			out->port_forward_count = forward_count;
+			for (uint32_t i = 0; i < forward_count; i++) {
+				uint32_t entry = ncfg_json_at(doc, forwards, i);
+				uint32_t hairpin = ncfg_json_member(doc, entry, "hairpin");
+				ncfg_forward_entry_t *one = &out->port_forwards[i];
+
+				one->name = member_text(doc, entry, "name");
+				one->protocol = member_text(doc, entry, "protocol");
+				one->port = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "port"), 0);
+				one->to = member_text(doc, entry, "to");
+				one->to_port =
+				    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "to_port"), -1);
+				one->hairpin = ncfg_json_type(doc, hairpin) == NCFG_JSON_BOOL
+				    ? ncfg_json_bool(doc, hairpin, 1) : -1;
+			}
+		}
+	}
+	out->ipv6_token = member_text(doc, found, "ipv6_token");
+	out->guard = member_text(doc, ncfg_json_member(doc, found, "guard"), "reason");
+	out->advertise_lifetime = -1;
+	{
+		uint32_t policy = ncfg_json_member(doc, found, "advertise");
+		if (ncfg_json_type(doc, policy) == NCFG_JSON_OBJECT) {
+			uint32_t backend = ncfg_json_member(doc, policy, "backend");
+			uint32_t prefixes = ncfg_json_member(doc, policy, "prefixes");
+			char    *joined = dup_string("");
+
+			out->advertise = 1;
+			out->advertise_managed = ncfg_json_bool(doc, ncfg_json_member(doc, policy, "managed"), 0);
+			out->advertise_other =
+			    ncfg_json_bool(doc, ncfg_json_member(doc, policy, "other_config"), 0);
+			out->advertise_dns = ncfg_json_bool(doc, ncfg_json_member(doc, policy, "dns"), 1);
+			out->advertise_lifetime =
+			    (int)ncfg_json_int(doc, ncfg_json_member(doc, policy, "lifetime"), -1);
+			if (ncfg_json_type(doc, backend) == NCFG_JSON_OBJECT) {
+				note_unmodelled(&out->unmodelled, "advertise (an exec backend)");
+				out->advertise_backend = dup_string("");
+			} else {
+				size_t      length = 0;
+				const char *word = ncfg_json_string(doc, backend, &length);
+				out->advertise_backend = dup_text(word ? word : "auto", word ? length : 4);
+			}
+			for (uint32_t i = 0; joined && i < ncfg_json_count(doc, prefixes); i++) {
+				uint32_t ref = ncfg_json_at(doc, prefixes, i);
+				char    *source = member_text(doc, ref, "source");
+				long long subnet = ncfg_json_int(doc, ncfg_json_member(doc, ref, "subnet"), 0);
+				char      one[160];
+				char     *grown;
+
+				if (ncfg_json_int(doc, ncfg_json_member(doc, ref, "index"), 0) != 0) {
+					note_unmodelled(&out->unmodelled,
+					    "advertise (a prefix naming which delegation it is)");
+				}
+				if (subnet) {
+					snprintf(one, sizeof(one), "@pd:%s/%lld", source ? source : "", subnet);
+				} else {
+					snprintf(one, sizeof(one), "@pd:%s", source ? source : "");
+				}
+				free(source);
+				grown = malloc(strlen(joined) + strlen(one) + 2);
+				if (grown) {
+					sprintf(grown, "%s%s%s", joined, *joined ? " " : "", one);
+				}
+				free(joined);
+				joined = grown;
+			}
+			out->advertise_prefixes = joined;
+		}
+	}
+	if (!out->advertise_backend) {
+		out->advertise_backend = dup_string("");
+	}
+	if (!out->advertise_prefixes) {
+		out->advertise_prefixes = dup_string("");
 	}
 	if (!out->dhcp_range) {
 		out->dhcp_range = dup_string("");
@@ -3916,10 +4032,10 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		ncfg_json_free(doc);
 		return 0;
 	}
-	/* `port_forwards` from the day they existed (0298): the dialog has no
-	 * table for them, and this list is what stops its Save deleting them. */
-	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token",
-		"port_forwards" };
+	/* `dot1x` alone now: `advertise`, `guard`, `ipv6_token` and
+	 * `port_forwards` are fields since 10.612, and what of `advertise` the
+	 * dialog cannot write is named above. */
+	static const char *const beyond[] = { "dot1x" };
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
 		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
 			note_unmodelled(&out->unmodelled, beyond[i]);

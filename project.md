@@ -12597,6 +12597,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.612 The dialogs carry what they used to refuse
+
+**Asked for by the holder 2026-10-30** ("go ahead with the other dialogs"),
+after 10.611: each dialog still refused to save a block carrying a key it had
+no field for (10.606). Taken one dialog at a time.
+
+**The interface dialog** gained, beside forwarding and NAT and the DHCP
+server: a reservations table (name, MAC, address) inside the server, a port
+forwards table (name, protocol, port, host, host port, hairpin), an
+`advertise` group (prefixes as written, `@pd:wan0/1`; backend; managed;
+other config; DNS; lifetime), an IPv6 token and a guard's reason. Each left
+the client's unmodelled list; what of `advertise` has no field -- an `exec`
+backend, a prefix naming which of several delegations it is -- is still
+named and refused. A table cell is text written into the block, so each is
+checked as the word or number it must be before Save (a name, MAC or host has
+no quote, brace, semicolon, `=` or space; a port is 1 to 65535; hairpin is
+blank, `yes` or `no`) and the compiler checks the rest. **The form now
+scrolls**: it had grown taller than a laptop's screen, and the probe
+detection's row hiding, which found the form as the dialog's first layout
+item, holds it as a member instead -- the scroll area is that item now.
+
+`interface_load` saves an interface carrying all of it and finds each in the
+file the dialog wrote; its refusal case moved to a wired `dot1x` block, the
+one interface key still without a field. `gui_wifi.sh` 14 of 14.
+
 ## 10.611 The network dialog edits enterprise networks
 
 **Asked for by the holder 2026-10-30** ("go ahead with the enterprise network

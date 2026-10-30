@@ -38,6 +38,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -158,6 +159,22 @@ private:
 	/* A DHCP server for the hosts behind it (10.608): on, the range, the
 	 * lease and the DNS servers offered. Reservations have no field. */
 	QCheckBox   *dhcp_server;
+	/* The router's other keys, fields since 10.612: the server's
+	 * reservations and the forwarded ports as tables, an advertisement, a
+	 * token and a guard. A cell is text the compiler reads on Save, so each
+	 * is checked as the word or number it must be before it is written. */
+	QFormLayout *form_layout;
+	QTableWidget *reservations;
+	QTableWidget *forwards;
+	QLineEdit   *ipv6_token;
+	QLineEdit   *guard;
+	QCheckBox   *advertise;
+	QLineEdit   *advertise_prefixes;
+	QComboBox   *advertise_backend;
+	QCheckBox   *advertise_managed;
+	QCheckBox   *advertise_other;
+	QCheckBox   *advertise_dns;
+	QSpinBox    *advertise_lifetime;
 	QLineEdit   *dhcp_range;
 	QSpinBox    *dhcp_lease;
 	QLineEdit   *dhcp_dns;

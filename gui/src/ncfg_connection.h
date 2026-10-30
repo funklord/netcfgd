@@ -411,6 +411,33 @@ struct ncfg_interface_config {
 	QString dhcp_range;
 	int     dhcp_lease = -1;
 	QString dhcp_dns;
+	/* The server's reservations, and the ports forwarded from this interface
+	 * (10.612). */
+	struct reservation {
+		QString name;
+		QString mac;
+		QString address;
+	};
+	QList<reservation> reservations;
+	struct forward {
+		QString name;
+		QString protocol;
+		int     port = 0;
+		QString to;
+		int     to_port = -1; /* -1: the same port */
+		int     hairpin = -1; /* -1: unset, which is on */
+	};
+	QList<forward> port_forwards;
+	QString ipv6_token;
+	QString guard;
+	/* Router advertisements (0009), as the client reads them. */
+	bool    advertise = false;
+	QString advertise_backend;
+	QString advertise_prefixes;
+	bool    advertise_managed = false;
+	bool    advertise_other = false;
+	bool    advertise_dns = true;
+	int     advertise_lifetime = -1;
 	QString unmodelled;
 };
 

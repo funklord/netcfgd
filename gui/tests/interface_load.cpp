@@ -148,7 +148,14 @@ int main(int argc, char **argv)
 		                   "\tforwarding = true\n"
 		                   "\tnat = true\n"
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
-		                   "dns = [\"192.0.2.53\"] }\n"
+		                   "dns = [\"192.0.2.53\"]; host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
+		                   "address = \"192.0.2.20\" } }\n"
+		                   "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
+		                   "to = \"192.0.2.20\"; to_port = 8443; hairpin = false }\n"
+		                   "\tipv6_token = \"::5\"\n"
+		                   "\tguard = \"nfs root\"\n"
+		                   "\tadvertise { backend = \"radvd\"; prefixes = [\"@pd:wan0/1\"]; "
+		                   "managed = true; lifetime = 1800 }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the daemon never bound its socket\n");
@@ -267,6 +274,22 @@ int main(int argc, char **argv)
 		        ? QStringLiteral("written")
 		        : wrote,
 		    QStringLiteral("written"), "  written by the dialog, all three of its fields");
+		/* 10.612: the reservation, the forward, the token and the guard, which
+		 * the dialog refused to save over until it had fields for them. */
+		check(wrote.contains(QStringLiteral("host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
+		                                    "address = \"192.0.2.20\" }")) &&
+		        wrote.contains(QStringLiteral("port_forward \"web\" { protocol = \"tcp\"; port = "
+		                                    "443; to = \"192.0.2.20\"; to_port = 8443; hairpin = "
+		                                    "false }")) &&
+		        wrote.contains(QStringLiteral("ipv6_token = \"::5\"")) &&
+		        wrote.contains(QStringLiteral("guard = \"nfs root\"")) &&
+		        wrote.contains(QStringLiteral("\tadvertise {\n\t\tbackend = \"radvd\"\n"
+		                                    "\t\tprefixes = [\"@pd:wan0/1\"]\n"
+		                                    "\t\tmanaged = true\n\t\tlifetime = 1800\n\t}"))
+		        ? QStringLiteral("written")
+		        : wrote,
+		    QStringLiteral("written"),
+		    "  and its reservation, port forward, token, guard and advertisement with it");
 
 		daemon.kill();
 		daemon.waitForFinished(2000);
@@ -290,9 +313,8 @@ int main(int argc, char **argv)
 		                   "device eth0 { kind = \"physical\" }\n"
 		                   "interface eth0 {\n"
 		                   "\tconfig = \"192.0.2.10/24\"\n"
-		                   "\tipv6_token = \"::5\"\n"
-		                   "\tdhcp_server { host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
-		                   "address = \"192.0.2.20\" } }\n"
+		                   "\tdot1x { eap = \"peap\"; identity = \"me@example\"; "
+		                   "password = \"@secret:wired\" }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -319,15 +341,14 @@ int main(int argc, char **argv)
 		QMetaObject::invokeMethod(&dialog, "submit");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
 		const QString said = note ? note->text() : QStringLiteral("<no note>");
-		check(said.contains(QStringLiteral("ipv6_token")) &&
+		check(said.contains(QStringLiteral("dot1x")) &&
 		        said.contains(QStringLiteral("would delete"))
 		        ? QStringLiteral("refused")
 		        : said,
 		    QStringLiteral("refused"), "saving over an unmodelled key is refused");
-		/* A DHCP server's reservations, which the form has no table for: the
-		 * server is a field since 10.608, and what it reserves is refused. */
-		check(said.contains(QStringLiteral("reservations")) ? QStringLiteral("named") : said,
-		    QStringLiteral("named"), "  naming a DHCP server's reservations among them");
+		/* Wired 802.1X is the one interface key with no field, since 10.612
+		 * gave the rest theirs; this used to be `ipv6_token` and then a
+		 * reservation. */
 
 		daemon.kill();
 		daemon.waitForFinished(2000);

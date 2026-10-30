@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QHeaderView>
 #include <QListWidget>
 #include <QSpinBox>
@@ -22,6 +23,81 @@
 #include <QVBoxLayout>
 
 namespace {
+
+/* An editable table with add and remove buttons under it, in the form. */
+QTableWidget *a_table(QWidget *parent, QFormLayout *form, const QString &label,
+    const QString &name, const QStringList &columns)
+{
+	auto *table = new QTableWidget(0, (int)columns.size(), parent);
+	table->setObjectName(name);
+	table->setHorizontalHeaderLabels(columns);
+	table->verticalHeader()->setVisible(false);
+	table->horizontalHeader()->setStretchLastSection(true);
+	table->setSelectionBehavior(QAbstractItemView::SelectRows);
+	table->setSelectionMode(QAbstractItemView::SingleSelection);
+	table->setMaximumHeight(110);
+	form->addRow(label, table);
+
+	auto *row = new QHBoxLayout();
+	auto *add = new QPushButton(QStringLiteral("add"), parent);
+	add->setObjectName(name + QStringLiteral("_add"));
+	auto *drop = new QPushButton(QStringLiteral("remove"), parent);
+	drop->setObjectName(name + QStringLiteral("_drop"));
+	row->addWidget(add);
+	row->addWidget(drop);
+	row->addStretch(1);
+	form->addRow(QString(), row);
+	QObject::connect(add, &QPushButton::clicked, table, [table]() {
+		table->insertRow(table->rowCount());
+		table->setCurrentCell(table->rowCount() - 1, 0);
+	});
+	QObject::connect(drop, &QPushButton::clicked, table, [table]() {
+		if (table->currentRow() >= 0) {
+			table->removeRow(table->currentRow());
+		}
+	});
+	return table;
+}
+
+void put_row(QTableWidget *table, const QStringList &cells)
+{
+	const int row = table->rowCount();
+	table->insertRow(row);
+	for (int at = 0; at < cells.size(); at++) {
+		table->setItem(row, at, new QTableWidgetItem(cells[at]));
+	}
+}
+
+QString text_at(const QTableWidget *table, int row, int column)
+{
+	const QTableWidgetItem *item = table->item(row, column);
+	return item ? item->text().trimmed() : QString();
+}
+
+/* A port, as the language takes one. */
+bool is_port(const QString &text)
+{
+	bool ok = false;
+	const int value = text.toInt(&ok);
+	return ok && value >= 1 && value <= 65535;
+}
+
+/* A name, a MAC or an address in a cell: no quote, backslash, brace,
+ * semicolon or space, which is everything a cell could use to say more than
+ * its value. */
+bool is_word(const QString &text)
+{
+	static const QString refused = QStringLiteral("\"\\{};= \t\n");
+	if (text.isEmpty()) {
+		return false;
+	}
+	for (const QChar one : text) {
+		if (refused.contains(one)) {
+			return false;
+		}
+	}
+	return true;
+}
 
 struct choice {
 	const char *shown;
@@ -107,6 +183,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 
 	auto *layout = new QVBoxLayout(this);
 	auto *form = new QFormLayout();
+	form_layout = form;
 
 	/* **The addressing list, as a list.** An interface composes its addresses
 	 * out of several sources -- a lease and a fixed address, DHCP and SLAAC,
@@ -331,6 +408,69 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	connect(dhcp_server, &QCheckBox::toggled, this, serving);
 	serving(false);
 
+	reservations = a_table(this, form, QStringLiteral("reservations"),
+	    QStringLiteral("iface_reservations"),
+	    { QStringLiteral("name"), QStringLiteral("mac"), QStringLiteral("address") });
+	reservations->setToolTip(QStringLiteral(
+	    "A fixed address for a named host, served with the range above."));
+
+	/* Port forwards (0298) beside NAT, where the language puts them: traffic
+	 * arriving on this interface for a port goes to a host behind it. */
+	forwards = a_table(this, form, QStringLiteral("port forwards"),
+	    QStringLiteral("iface_forwards"),
+	    { QStringLiteral("name"), QStringLiteral("protocol"), QStringLiteral("port"),
+	        QStringLiteral("to"), QStringLiteral("to port"), QStringLiteral("hairpin") });
+	forwards->setToolTip(QStringLiteral(
+	    "protocol is tcp or udp; to port blank for the same port; hairpin blank or yes for "
+	    "reachable from inside too (0299), no to turn that off."));
+
+	advertise = new QCheckBox(QStringLiteral("advertise a prefix to the hosts behind it"), this);
+	advertise->setObjectName(QStringLiteral("iface_advertise"));
+	form->addRow(QString(), advertise);
+	advertise_prefixes = new QLineEdit(this);
+	advertise_prefixes->setObjectName(QStringLiteral("iface_advertise_prefixes"));
+	advertise_prefixes->setPlaceholderText(QStringLiteral("@pd:wan0/1 -- a delegated prefix, "
+	                                     "and which subnet of it"));
+	form->addRow(QStringLiteral("prefixes"), advertise_prefixes);
+	advertise_backend = new QComboBox(this);
+	advertise_backend->setObjectName(QStringLiteral("iface_advertise_backend"));
+	advertise_backend->addItem(QStringLiteral("whichever is installed"), QStringLiteral("auto"));
+	advertise_backend->addItem(QStringLiteral("radvd"), QStringLiteral("radvd"));
+	advertise_backend->addItem(QStringLiteral("odhcpd"), QStringLiteral("odhcpd"));
+	form->addRow(QStringLiteral("advertised by"), advertise_backend);
+	advertise_managed = new QCheckBox(QStringLiteral("addresses come from DHCPv6 (managed)"), this);
+	form->addRow(QString(), advertise_managed);
+	advertise_other = new QCheckBox(QStringLiteral("other settings come from DHCPv6"), this);
+	form->addRow(QString(), advertise_other);
+	advertise_dns = new QCheckBox(QStringLiteral("advertise this router as a DNS server"), this);
+	advertise_dns->setChecked(true);
+	form->addRow(QString(), advertise_dns);
+	advertise_lifetime = new QSpinBox(this);
+	advertise_lifetime->setRange(0, 9000);
+	advertise_lifetime->setSuffix(QStringLiteral(" s"));
+	advertise_lifetime->setSpecialValueText(QStringLiteral("default"));
+	form->addRow(QStringLiteral("router lifetime"), advertise_lifetime);
+	const auto advertising = [this](bool on) {
+		advertise_prefixes->setEnabled(on);
+		advertise_backend->setEnabled(on);
+		advertise_managed->setEnabled(on);
+		advertise_other->setEnabled(on);
+		advertise_dns->setEnabled(on);
+		advertise_lifetime->setEnabled(on);
+	};
+	connect(advertise, &QCheckBox::toggled, this, advertising);
+	advertising(false);
+
+	ipv6_token = new QLineEdit(this);
+	ipv6_token->setObjectName(QStringLiteral("iface_ipv6_token"));
+	ipv6_token->setPlaceholderText(QStringLiteral("::5 -- the host part of a SLAAC address"));
+	form->addRow(QStringLiteral("IPv6 token"), ipv6_token);
+	guard = new QLineEdit(this);
+	guard->setObjectName(QStringLiteral("iface_guard"));
+	guard->setPlaceholderText(QStringLiteral("why this must not be disrupted -- an NFS root, "
+	                        "say; blank for no guard"));
+	form->addRow(QStringLiteral("guard"), guard);
+
 	/* **Every program netcfgd runs for this interface.** A hook belongs to the
 	 * interface whose lifecycle it follows, and the drop-in this form writes
 	 * owns that block whole -- so this is where they can be edited at all. */
@@ -353,7 +493,16 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	hook_row->addStretch(1);
 	form->addRow(QString(), hook_row);
 
-	layout->addLayout(form);
+	/* In a scroll area since 10.612: the router keys made the form taller
+	 * than a laptop's screen, and a row below the edge is a row nobody can
+	 * reach. */
+	auto *holder = new QWidget(this);
+	holder->setLayout(form);
+	auto *scroll = new QScrollArea(this);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setWidget(holder);
+	layout->addWidget(scroll, 1);
 
 	/* Constructed near the top rather than here; see the comment there. */
 	note->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -459,6 +608,29 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_range->setText(existing.dhcp_range);
 	dhcp_lease->setValue(existing.dhcp_lease > 0 ? existing.dhcp_lease : 0);
 	dhcp_dns->setText(existing.dhcp_dns);
+	for (const auto &one : existing.reservations) {
+		put_row(reservations, { one.name, one.mac, one.address });
+	}
+	for (const auto &one : existing.port_forwards) {
+		put_row(forwards, { one.name, one.protocol, QString::number(one.port), one.to,
+		    one.to_port > 0 ? QString::number(one.to_port) : QString(),
+		    one.hairpin < 0 ? QString() : (one.hairpin ? QStringLiteral("yes")
+		                                               : QStringLiteral("no")) });
+	}
+	advertise->setChecked(existing.advertise);
+	advertise_prefixes->setText(existing.advertise_prefixes);
+	{
+		const int at = advertise_backend->findData(existing.advertise_backend);
+		if (at >= 0) {
+			advertise_backend->setCurrentIndex(at);
+		}
+	}
+	advertise_managed->setChecked(existing.advertise_managed);
+	advertise_other->setChecked(existing.advertise_other);
+	advertise_dns->setChecked(existing.advertise_dns);
+	advertise_lifetime->setValue(existing.advertise_lifetime > 0 ? existing.advertise_lifetime : 0);
+	ipv6_token->setText(existing.ipv6_token);
+	guard->setText(existing.guard);
 
 	if (!existing.probe_command.isEmpty()) {
 		const int known = detection->findData(existing.probe_command);
@@ -804,7 +976,9 @@ void ncfg_interface_dialog::detection_changed()
 {
 	const QString how = detection->currentData().toString();
 	const bool custom = how == QStringLiteral("command");
-	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
+	/* Kept as a member: the form is inside a scroll area since 10.612, so the
+	 * dialog's first layout item is that area, not the form. */
+	QFormLayout *form = form_layout;
 	if (form) {
 		form->setRowVisible(probe_command, custom);
 		form->setRowVisible(probe_args, custom);
@@ -956,8 +1130,60 @@ QString ncfg_interface_dialog::block_text() const
 			served << QStringLiteral("\t\tdns = [%1]").arg(offered.join(QStringLiteral(", ")));
 		}
 		body << QStringLiteral("\tdhcp_server {");
+		for (int row = 0; row < reservations->rowCount(); row++) {
+			served << QStringLiteral("\t\thost \"%1\" { mac = \"%2\"; address = \"%3\" }")
+			              .arg(text_at(reservations, row, 0), text_at(reservations, row, 1),
+			                  text_at(reservations, row, 2));
+		}
 		body << served;
 		body << QStringLiteral("\t}");
+	}
+	for (int row = 0; row < forwards->rowCount(); row++) {
+		QString line = QStringLiteral("\tport_forward \"%1\" { protocol = \"%2\"; port = %3; "
+		                              "to = \"%4\"")
+		                   .arg(text_at(forwards, row, 0), text_at(forwards, row, 1),
+		                       text_at(forwards, row, 2), text_at(forwards, row, 3));
+		if (!text_at(forwards, row, 4).isEmpty()) {
+			line += QStringLiteral("; to_port = %1").arg(text_at(forwards, row, 4));
+		}
+		if (!text_at(forwards, row, 5).isEmpty()) {
+			line += QStringLiteral("; hairpin = %1")
+			            .arg(text_at(forwards, row, 5) == QLatin1String("no")
+			                    ? QStringLiteral("false") : QStringLiteral("true"));
+		}
+		body << line + QStringLiteral(" }");
+	}
+	if (advertise->isChecked()) {
+		QStringList quoted;
+		for (const QString &one :
+		    advertise_prefixes->text().split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+			quoted << QStringLiteral("\"%1\"").arg(one);
+		}
+		body << QStringLiteral("\tadvertise {");
+		if (advertise_backend->currentData().toString() != QLatin1String("auto")) {
+			body << QStringLiteral("\t\tbackend = \"%1\"")
+			            .arg(advertise_backend->currentData().toString());
+		}
+		body << QStringLiteral("\t\tprefixes = [%1]").arg(quoted.join(QStringLiteral(", ")));
+		if (advertise_managed->isChecked()) {
+			body << QStringLiteral("\t\tmanaged = true");
+		}
+		if (advertise_other->isChecked()) {
+			body << QStringLiteral("\t\tother_config = true");
+		}
+		if (!advertise_dns->isChecked()) {
+			body << QStringLiteral("\t\tdns = false");
+		}
+		if (advertise_lifetime->value() > 0) {
+			body << QStringLiteral("\t\tlifetime = %1").arg(advertise_lifetime->value());
+		}
+		body << QStringLiteral("\t}");
+	}
+	if (!ipv6_token->text().trimmed().isEmpty()) {
+		body << QStringLiteral("\tipv6_token = \"%1\"").arg(ipv6_token->text().trimmed());
+	}
+	if (!guard->text().trimmed().isEmpty()) {
+		body << QStringLiteral("\tguard = \"%1\"").arg(guard->text().trimmed());
 	}
 
 	const QString how = detection->currentData().toString();
@@ -1019,11 +1245,37 @@ QString ncfg_interface_dialog::block_text() const
 void ncfg_interface_dialog::submit()
 {
 	const QLineEdit *values[] = { source_address, dns_servers, dns_search, dns_domains,
-		probe_command, probe_args, dhcp_range, dhcp_dns };
+		probe_command, probe_args, dhcp_range, dhcp_dns, advertise_prefixes, ipv6_token,
+		guard };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
 			              "or a newline"));
+			return;
+		}
+	}
+	/* Each cell as the word or number it must be (10.612): a cell is text
+	 * written into the block, so one that could close it is refused here. */
+	for (int row = 0; row < reservations->rowCount(); row++) {
+		if (!is_word(text_at(reservations, row, 0)) || !is_word(text_at(reservations, row, 1)) ||
+		    !is_word(text_at(reservations, row, 2))) {
+			note->setText(QStringLiteral("reservation %1 needs a name, a MAC and an address, "
+			              "each one word").arg(row + 1));
+			return;
+		}
+	}
+	for (int row = 0; row < forwards->rowCount(); row++) {
+		const QString protocol = text_at(forwards, row, 1);
+		const QString hairpin = text_at(forwards, row, 5);
+		if (!is_word(text_at(forwards, row, 0)) || !is_word(text_at(forwards, row, 3)) ||
+		    (protocol != QLatin1String("tcp") && protocol != QLatin1String("udp")) ||
+		    !is_port(text_at(forwards, row, 2)) ||
+		    (!text_at(forwards, row, 4).isEmpty() && !is_port(text_at(forwards, row, 4))) ||
+		    (!hairpin.isEmpty() && hairpin != QLatin1String("yes") &&
+		    hairpin != QLatin1String("no"))) {
+			note->setText(QStringLiteral("port forward %1 needs a name, tcp or udp, a port, a "
+			              "host and optionally its port, and hairpin blank, yes or no")
+			                  .arg(row + 1));
 			return;
 		}
 	}
