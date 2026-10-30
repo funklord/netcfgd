@@ -12601,10 +12601,18 @@ check exists for, and has stopped asserting the one thing it could not know.
 
 **Asked for by the holder 2026-10-30** ("go ahead with the slaac.sh hull
 advertiser"), on hull's session's suggestion. `tests/live/slaac.sh` needs
-dnsmasq to advertise, and skipped on every machine without it -- this one
-included -- so 0073's fix, that netcfgd sets `accept_ra` to 2 on an interface
-that forwards and does so before the link comes up, was carried by a test that
-never ran here.
+dnsmasq to advertise and skips on a machine without it.
+
+**Corrected the same day: it was never skipping here.** This entry and its
+commit (8df73d60) said dnsmasq was absent on this machine and the test had
+never run. Both were wrong: dnsmasq is at `/sbin/dnsmasq`, and `which dnsmasq`
+had been asked from a PATH without `/sbin` -- an empty search read as an
+absence, the trap `slaac.sh`'s own `find_in_sbin` exists to avoid. Run as the
+Makefile runs it, `slaac.sh` passes every check here. What the rig below adds
+is what remains true: a second advertiser, independent of dnsmasq, that
+answers only when solicited -- so the sysctl's place before `link.up` decides
+whether an address comes at all -- and netcfgd's first rig on hull's chroot
+engine.
 
 `make hull-slaac` (`tests/hull/slaac`) is its twin and **the first netcfgd rig
 on hull's chroot engine**: one machine of `(network none)` on a segment of
@@ -12619,7 +12627,8 @@ none at all rather than a late one. Eleven checks, all passing on the first
 run: the wire, the counter-proof, the plan's sysctl with its reason and its
 place before `link.up`, the address from the prefix after the apply, a second
 plan with nothing to do, the handback to 1, and a value netcfgd never wrote left
-alone. `slaac.sh` stays, for a machine with dnsmasq and no hull.
+alone. `slaac.sh` stays: the two advertisers disagree about unsolicited
+advertisements, and each test covers the case the other cannot.
 
 ## 10.623 A forward rule may match where a packet leaves
 

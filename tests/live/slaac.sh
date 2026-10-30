@@ -15,8 +15,8 @@
 # in `delegation.sh` that says so.
 #
 # **Its twin is `make hull-slaac`** (tests/hull/slaac, project.md 10.624), with
-# hull answering the router solicitation in place of dnsmasq, so the netcfgd half
-# runs on a machine with no dnsmasq, where this script skips.
+# hull answering the router solicitation in place of dnsmasq: an advertiser that
+# sends nothing unasked, and one that runs where this script would skip.
 #
 # The advertiser is dnsmasq, which is one package and needs no configuration file:
 # `--enable-ra` with an `ra-only` range sends advertisements a kernel will

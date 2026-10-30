@@ -2844,8 +2844,8 @@ hull-dhcp-server:
 	grep -q '^VERDICT ok' tests/hull/dhcp-server/verdict/dhcp-server
 
 # SLAAC on an interface that forwards (0073), against hull's advertiser rather
-# than dnsmasq (10.624): the half of tests/live/slaac.sh that needs a router
-# advertising, on a machine with no dnsmasq. **A chroot machine, the first
+# than dnsmasq (10.624): a second advertiser for tests/live/slaac.sh's half that
+# needs one, and one that answers only when solicited. **A chroot machine, the first
 # here**: the core runs it rather than this shell, and it is destroyed when its
 # `hull run` disconnects -- the spec says no `(on_disconnect keep)` -- so the
 # `timeout` on `hull run` still ends it.
