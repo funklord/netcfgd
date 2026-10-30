@@ -12597,6 +12597,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.625 A tool in sbin is not missing because a PATH lacks sbin
+
+The shape of 10.624's correction, searched for: a live script asking `command
+-v` for a tool that lives in `/sbin` without putting `/sbin` on its PATH. `make
+live` adds it, so the suite was never affected; run by hand from an ordinary
+user's PATH -- which sessions here do constantly -- such a script reports a
+tool missing that is installed. Of four found by a grep, two already searched
+`/sbin` themselves (`ap.sh`, `qdisc.sh`) and were left alone; `dhcp.sh`
+(dnsmasq) and `switch_network.sh` (dhcpcd, whose metric section was skipped
+with a note) now add it, as `port_forward.sh` does. Both run whole by hand from
+a PATH with no `/sbin`, the metric section included.
+
 ## 10.624 SLAAC on a forwarding interface, against hull's advertiser
 
 **Asked for by the holder 2026-10-30** ("go ahead with the slaac.sh hull
