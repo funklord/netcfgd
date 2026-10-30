@@ -1044,6 +1044,14 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 				if (!lower_probe(ctx, inner, &probe)) {
 					break;
 				}
+				/* A second block replaces the first, contents and all: freeing
+				 * the struct alone leaked the first's command and arguments,
+				 * once per compile, which the daemon does on every edit.
+				 * Found by fuzzing `config_parse` (project.md 10.621). */
+				if (interface.probe) {
+					free(interface.probe->command);
+					ncfg_strings_free(interface.probe->args, interface.probe->arg_count);
+				}
 				free(interface.probe);
 				interface.probe = calloc(1, sizeof(*interface.probe));
 				if (!interface.probe) {

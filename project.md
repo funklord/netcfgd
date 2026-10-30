@@ -12597,6 +12597,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.621 The compiler's fuzzer, seeded with a router, found two leaks
+
+A `/go` run 2026-10-30. `c/fuzz/corpus/config_parse` held five seeds, none of
+them a router: no DHCP server, forward, firewall, advertisement or delegation,
+so the code this week added was fuzzed only as far as mutation could stumble
+into it from a laptop's configuration. `seed-router.conf` now carries all of
+it, and five minutes of `make fuzz FUZZ_TARGET=config_parse` found:
+
+- **A second `probe` block leaked the first's command and arguments**: the
+  replacement freed the struct and not what it owned. Once per compile, and the
+  daemon compiles on every edit to its directory.
+- **A route naming `via` (or `src`) twice leaked the first address**, the second
+  replacing it unfreed. Refused now rather than only freed -- a route with two
+  gateways is a mistake to say, not a choice to make by taking the last -- and
+  a repeated `metric` or `table` with it, which overwrote silently the same way.
+
+Both inputs are in the corpus as `regress-*.conf`, replay clean under
+LeakSanitizer, and `lower_test` has the refusals and the second probe winning.
+Ten more minutes across `config_parse` and `document_json` (1.2 and 0.7 million
+runs) found nothing further.
+
 ## 10.620 What netcfgd runs, against what its own firewall drops
 
 A `/go` run 2026-10-30, from the lens of the last fix: 10.619 found that a

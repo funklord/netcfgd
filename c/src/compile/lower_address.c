@@ -702,6 +702,15 @@ int ncfg_lower_route(ncfg_lower_ctx_t *ctx, const ncfg_word_t *entry, ncfg_route
 				ncfg_diag(ctx, entry->span, "`%s` needs an IP address", word);
 				goto refused;
 			}
+			/* **Once each.** A second `via` replaced the first and leaked it,
+			 * found by fuzzing `config_parse` (project.md 10.621); and a route
+			 * with two gateways is a mistake to say, not a choice to make
+			 * silently by taking the last. */
+			if ((word[0] == 'v' && route.via) || (word[0] == 's' && route.src)) {
+				ncfg_diag(ctx, entry->span, "`%s` is given twice in one route", word);
+				free(canonical);
+				goto refused;
+			}
 			if (word[0] == 'v') {
 				route.via = canonical;
 			} else {
@@ -716,6 +725,10 @@ int ncfg_lower_route(ncfg_lower_ctx_t *ctx, const ncfg_word_t *entry, ncfg_route
 
 			if (!argument || end == argument || *end != '\0' || number > 4294967295UL) {
 				ncfg_diag(ctx, entry->span, "`%s` needs a number", word);
+				goto refused;
+			}
+			if ((word[0] == 'm' && route.metric.has) || (word[0] == 't' && route.table.has)) {
+				ncfg_diag(ctx, entry->span, "`%s` is given twice in one route", word);
 				goto refused;
 			}
 			if (word[0] == 'm') {

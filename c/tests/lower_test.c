@@ -1508,6 +1508,22 @@ static void access_point_cases(void)
 		    "  sorted by name, each with its protocol, ports and host");
 		ncfg_document_free(document);
 	}
+	/* A route says each part once (10.621): a second `via` replaced the first
+	 * and leaked it, found by fuzzing, and two gateways are a mistake. */
+	refuses("interface eth0 {\n\troutes = [\"default via 192.0.2.1 via 192.0.2.9\"]\n}\n",
+	    "`via` is given twice", "a route naming two gateways is refused");
+	refuses("interface eth0 {\n\troutes = [\"10.0.0.0/8 via 192.0.2.1 metric 5 metric 6\"]\n}\n",
+	    "`metric` is given twice", "  and so is one with two metrics");
+	/* And a second `probe` block replaces the first whole (10.621), which the
+	 * fuzzer found leaking the first's command: compiles, the second wins. */
+	document = compiles("interface eth0 {\n\tprobe { command = \"/bin/true\" }\n"
+	    "\tprobe { command = \"/bin/false\" }\n}\n", "two probe blocks compile");
+	if (document) {
+		check(document->interfaces[0].probe &&
+		        strcmp(document->interfaces[0].probe->command, "/bin/false") == 0,
+		    "  the second replacing the first");
+		ncfg_document_free(document);
+	}
 	/* The LAN's DNS forwarder (0301): a boolean on the server. */
 	document = compiles("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
 	    "\tdhcp_server { dns_forward = true }\n}\n", "a server forwarding DNS compiles");
