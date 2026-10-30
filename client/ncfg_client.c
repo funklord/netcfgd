@@ -3432,6 +3432,8 @@ void ncfg_device_config_free(ncfg_device_config_t *config)
 	free(config->portal_check);
 	free(config->sim);
 	free(config->apn);
+	free(config->master);
+	free(config->bridge_vlans);
 	free(config->unmodelled);
 	memset(config, 0, sizeof(*config));
 }
@@ -3593,26 +3595,17 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 }
 
 /*
- * A shaped rate in kbit/s, or -1 for one the form cannot carry exactly.
+ * A shaped rate in bits/s, as the document holds it, or 0 for none.
  *
- * The document is in bits and the form is in kbit, because kbit is what
- * `tc` takes and what an operator writes. A rate that is not a whole kbit --
- * somebody wrote `1234567bit` -- is not rounded: it comes back as -1 and the
- * caller reports the block as unrepresentable, which is the same rule every
- * other field here follows.
+ * Exact, so nothing is rounded on the way to a form: it used to come back in
+ * kbit with a rate finer than that refused as unmodelled (10.613), which left
+ * `1234567bit` uneditable for the sake of a unit.
  */
-static int rate_kbit(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+static long long rate_bits(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
 {
-	uint32_t value = ncfg_json_member(doc, object, name);
+	int64_t bits = ncfg_json_int(doc, ncfg_json_member(doc, object, name), 0);
 
-	if (ncfg_json_type(doc, value) == NCFG_JSON_NULL) {
-		return 0;
-	}
-	int64_t bits = ncfg_json_int(doc, value, 0);
-	if (bits <= 0 || bits % 1000 != 0 || bits / 1000 > 2147483647) {
-		return -1;
-	}
-	return (int)(bits / 1000);
+	return bits > 0 ? (long long)bits : 0;
 }
 
 /*
@@ -3637,7 +3630,7 @@ static int read_qdisc(const ncfg_json_doc_t *doc, uint32_t devices, uint32_t fou
 	if (!out->qdisc_kind) {
 		return 0;
 	}
-	out->bandwidth_kbit = rate_kbit(doc, qdisc, "bandwidth_bits");
+	out->bandwidth_bits = rate_bits(doc, qdisc, "bandwidth_bits");
 
 	/* The redirect names the `ifb` netcfgd made, and that device's own rate is
 	 * what the operator asked for as `ingress_bandwidth`. */
@@ -3651,12 +3644,64 @@ static int read_qdisc(const ncfg_json_doc_t *doc, uint32_t devices, uint32_t fou
 			if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "name"), redirect)) {
 				continue;
 			}
-			out->ingress_bandwidth_kbit =
-			    rate_kbit(doc, ncfg_json_member(doc, entry, "qdisc"), "bandwidth_bits");
+			out->ingress_bandwidth_bits =
+			    rate_bits(doc, ncfg_json_member(doc, entry, "qdisc"), "bandwidth_bits");
 			break;
 		}
 	}
 	free(redirect);
+	return 1;
+}
+
+/*
+ * What this device is a port of, and the VLANs it carries there.
+ *
+ * `master_by_members` is found by asking every other device whether its kind
+ * lists this one: the compiler turns a bridge's `members` into `master` on
+ * each member (lower.c), so the document cannot say which end was written,
+ * and a form that wrote `master` into the port's own block would be stating
+ * the membership twice.
+ */
+static int read_port(const ncfg_json_doc_t *doc, uint32_t devices, uint32_t found,
+                     const char *device, ncfg_device_config_t *out)
+{
+	out->master = member_text(doc, found, "master");
+	if (!out->master) {
+		return 0;
+	}
+	for (uint32_t i = 0; out->master[0] && i < ncfg_json_count(doc, devices); i++) {
+		uint32_t entry = ncfg_json_at(doc, devices, i);
+		uint32_t kind = ncfg_json_member(doc, entry, "kind");
+		uint32_t members = ncfg_json_member(doc, kind, "members");
+
+		if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "name"), out->master)) {
+			continue;
+		}
+		for (uint32_t m = 0; m < ncfg_json_count(doc, members); m++) {
+			if (ncfg_json_string_equals(doc, ncfg_json_at(doc, members, m), device)) {
+				out->master_by_members = 1;
+			}
+		}
+	}
+
+	uint32_t vlans = ncfg_json_member(doc, found, "bridge_vlans");
+	uint32_t count = ncfg_json_count(doc, vlans);
+	if (!count) {
+		return 1;
+	}
+	out->bridge_vlans = calloc(count, sizeof(*out->bridge_vlans));
+	if (!out->bridge_vlans) {
+		return 0;
+	}
+	out->bridge_vlan_count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t vlan = ncfg_json_at(doc, vlans, i);
+
+		out->bridge_vlans[i].vid = (int)ncfg_json_int(doc, ncfg_json_member(doc, vlan, "vid"), 0);
+		out->bridge_vlans[i].pvid = ncfg_json_bool(doc, ncfg_json_member(doc, vlan, "pvid"), 0);
+		out->bridge_vlans[i].untagged =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, vlan, "untagged"), 0);
+	}
 	return 1;
 }
 
@@ -3705,8 +3750,9 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		out->portal_check = dup_string("");
 		out->sim = dup_string("");
 		out->apn = dup_string("");
+		out->master = dup_string("");
 		int whole = read_kind(doc, NCFG_JSON_NONE, out) && out->on_unmanage && out->kind
-		    && out->mac && out->duplex && out->wol && out->unmodelled;
+		    && out->mac && out->duplex && out->wol && out->unmodelled && out->master;
 		ncfg_json_free(doc);
 		return whole;
 	}
@@ -3745,6 +3791,11 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		ncfg_json_free(doc);
 		return 0;
 	}
+	if (!read_port(doc, devices, found, device, out)) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
 
 	uint32_t wifi = ncfg_json_member(doc, found, "wifi");
 	if (wifi != NCFG_JSON_NONE) {
@@ -3755,6 +3806,7 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		out->mac_policy = member_text(doc, wifi, "mac_policy");
 		out->scan_randomization =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, wifi, "scan_randomization"), 0);
+		out->wds = ncfg_json_bool(doc, ncfg_json_member(doc, wifi, "wds"), 0);
 		out->regdom = member_text(doc, wifi, "regdom");
 		out->portal_check = member_text(doc, wifi, "portal_check");
 	} else {
@@ -3807,20 +3859,13 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "
 		    "interface it belongs to)");
 	}
-	if (ncfg_json_count(doc, ncfg_json_member(doc, found, "bridge_vlans"))) {
-		note_unmodelled(&out->unmodelled, "bridge_vlans");
-	}
-	/* A rate the form cannot write back exactly: `-1` is what `rate_kbit`
-	 * answers for one that is not a whole kbit, and rounding somebody's shaped
-	 * rate silently is what this editor exists not to do. */
-	if (out->bandwidth_kbit < 0 || out->ingress_bandwidth_kbit < 0) {
-		note_unmodelled(&out->unmodelled, "qdisc (a rate finer than a kbit)");
-	}
-	static const char *const beyond[] = { "master", "access_control", "match" };
-	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
-		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
-			note_unmodelled(&out->unmodelled, beyond[i]);
-		}
+	/* `match` alone (10.613): the configuration language cannot write one, so a
+	 * document holding it came from somewhere a form should not overwrite.
+	 * `master`, `bridge_vlans` and an inexact rate are fields now, and
+	 * `access_control` was never a device's member -- it is an access
+	 * point's -- so naming it here guarded nothing. */
+	if (ncfg_json_type(doc, ncfg_json_member(doc, found, "match")) != NCFG_JSON_NULL) {
+		note_unmodelled(&out->unmodelled, "match");
 	}
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");
@@ -3828,7 +3873,7 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 
 	int whole = out->on_unmanage && out->kind && out->mac && out->duplex && out->wol
 	    && out->wifi_backend && out->powersave && out->mac_policy && out->regdom
-	    && out->portal_check && out->sim && out->apn && out->unmodelled;
+	    && out->portal_check && out->sim && out->apn && out->master && out->unmodelled;
 	ncfg_json_free(doc);
 	if (!whole) {
 		set_error(err, err_size, "out of memory");

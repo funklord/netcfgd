@@ -21,10 +21,13 @@ WHAT THIS ENFORCES
   it with a reason.
 
 WHAT IT DOES NOT CATCH
-  **Nesting.** Only a block's own members: a key added inside `probe` or
-  `steering` is not seen. Where the reader names a whole sub-block as
-  unmodelled that is complete; where it reads a sub-block field by field, a
-  new field there can still be dropped.
+  **Nesting, outside the device's sub-blocks.** `NESTED` holds the device's
+  `wifi`, `modem`, `ethtool`, `qdisc` and port VLAN tables to the rule, since
+  a device's `wifi { wds }` was dropped by Save for exactly this reason
+  (10.613). Elsewhere only a block's own members are checked: a key added
+  inside `probe` or `steering` is not seen. Where a reader names a whole
+  sub-block as unmodelled that is complete; where it reads one field by
+  field, a new field there can still be dropped.
 
   **Reading is not carrying.** A literal in the reader is a member the code
   looks at, not proof that the dialog writes it back. The dialog tests do
@@ -45,14 +48,26 @@ MODEL = pathlib.Path("c/src/model/document.c")
 CLIENT = pathlib.Path("client/ncfg_client.c")
 WAIVED = pathlib.Path("tool/form-unread-keys.txt")
 
+DEVICE_READER = ("ncfg_client_device_config", ["read_qdisc", "read_kind", "read_port"])
+
 # Each saved block, the reader its dialog loads it through, and the helpers
 # that reader hands members to. Written out rather than derived, because a
 # helper is found by its call and a call does not say which keys it reads.
 FORMS = {
-	"device_fields": ("ncfg_client_device_config", ["read_qdisc", "read_kind"]),
+	"device_fields": DEVICE_READER,
 	"interface_fields": ("ncfg_client_interface_config", []),
 	"network_fields": ("ncfg_client_saved_networks", ["network_unmodelled"]),
 	"access_point_fields": ("ncfg_client_access_points", ["editable_stations"]),
+}
+
+# Sub-blocks a dialog reads field by field, held to the same rule. Each names
+# the reader of the block it sits in.
+NESTED = {
+	"wifi_device_fields": DEVICE_READER,
+	"modem_fields": DEVICE_READER,
+	"link_settings_fields": DEVICE_READER,
+	"qdisc_fields": DEVICE_READER,
+	"bridge_vlan_fields": DEVICE_READER,
 }
 
 
@@ -111,7 +126,7 @@ def main():
 	faults = []
 	checked = 0
 	unread = set()
-	for table, (reader, helpers) in FORMS.items():
+	for table, (reader, helpers) in {**FORMS, **NESTED}.items():
 		keys = table_keys(model, table)
 		if not keys:
 			faults.append(f"{table}: no field table of that name, so nothing was checked")
@@ -139,7 +154,7 @@ def main():
 	# Held to the tree in both directions, so a waiver cannot outlive its key.
 	for name in sorted(waived):
 		table, _, key = name.partition(".")
-		keys = table_keys(model, table) if table in FORMS else None
+		keys = table_keys(model, table) if table in FORMS or table in NESTED else None
 		if not keys or key not in keys:
 			faults.append(f"{name}: waived, and no longer a member of a form's block")
 		elif name not in unread:
@@ -160,7 +175,8 @@ def main():
 			print(f"  {fault}")
 		return 1
 	print(
-		f"form_coverage_gate: {checked} member(s) of {len(FORMS)} saved block(s), "
+		f"form_coverage_gate: {checked} member(s) of {len(FORMS)} saved block(s) and "
+		f"{len(NESTED)} sub-block(s), "
 		f"{checked - len(unread)} their readers mention, {len(waived)} waived with a reason"
 	)
 	return 0

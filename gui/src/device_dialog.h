@@ -16,11 +16,10 @@
  * the fields it needs are the top of this form; a device with no block at all
  * opens on `physical`, which asks for nothing.
  *
- * What it still does not hold is the kinds that carry something else entirely:
- * a `WireGuard` tunnel's peers and keys, a PPPoE session's credentials, an
- * `OpenVPN` link's own configuration file. Each refuses to save for the reason
- * the interface editor refuses a block carrying what it has no field for --
- * saving would delete it.
+ * What it still does not hold is a `match` block, which the configuration
+ * language cannot write either, and the `ifb` netcfgd synthesises for ingress
+ * shaping. Each refuses to save for the reason the interface editor refuses a
+ * block carrying what it has no field for -- saving would delete it.
  *
  * `admin`, because it writes configuration. The refusal comes from the daemon
  * with the tier it needed in it, and is shown as it arrives.
@@ -35,6 +34,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QFormLayout;
 class QGroupBox;
 class QLabel;
 class QLineEdit;
@@ -68,6 +68,8 @@ private slots:
 	 * ordinary as one with six, so they are a table rather than a form. */
 	void add_peer();
 	void drop_peer();
+	/* One row of a bridge port's VLANs: an id or a range, and its flags. */
+	void add_vlan(const QString &vids, bool pvid, bool untagged);
 
 private:
 	/* The block this dialog would write, as configuration text. */
@@ -77,6 +79,7 @@ private:
 	QString peer_cell(int row, int column) const;
 
 	ncfg_connection *connection;
+	QFormLayout     *form_layout;
 	QString          device;
 	QString          summary;
 	ncfg_device_config existing;
@@ -130,6 +133,12 @@ private:
 	QWidget      *peer_buttons;
 	QPushButton  *peer_add;
 	QPushButton  *peer_drop;
+	/* A port of a bridge or bond: what it joins, and the VLANs it carries. */
+	QGroupBox    *port_box;
+	QLineEdit    *master;
+	QTableWidget *vlans;
+	QPushButton  *vlan_add;
+	QPushButton  *vlan_drop;
 
 	QCheckBox *managed;
 	QComboBox *on_unmanage;
@@ -155,6 +164,7 @@ private:
 	QComboBox *powersave;
 	QComboBox *mac_policy;
 	QCheckBox *scan_randomization;
+	QCheckBox *wds;
 	QLineEdit *regdom;
 	QLineEdit *portal_check;
 	/* The modem half, likewise. */

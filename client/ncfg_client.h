@@ -1477,6 +1477,14 @@ typedef enum {
 	ncfg_toggle_off,
 } ncfg_toggle_t;
 
+/* One VLAN on a bridge port (`vlans`), as the document holds it: one entry per
+ * id, a range in the configuration being several. */
+typedef struct {
+	int vid;
+	int pvid;
+	int untagged;
+} ncfg_bridge_vlan_entry_t;
+
 /*
  * One device's configuration, as far as a form can show it.
  *
@@ -1574,10 +1582,10 @@ typedef struct {
 	 * Queueing, which is where bufferbloat is fixed.
 	 *
 	 * `qdisc_kind` is "" for a device the document gives no scheduler. The two
-	 * rates are in kbit/s, which is what an operator writes and what the form
-	 * takes; the document holds bits, and a rate that is not a whole kbit is
-	 * reported through `unmodelled` rather than rounded -- rounding somebody's
-	 * shaped rate silently is exactly what this editor must not do.
+	 * rates are in bits/s, as the document holds them, 0 where none is
+	 * stated. They were kbit, with a rate finer than that refused as
+	 * unmodelled; carried exactly instead (10.613), so a form shows kbit and
+	 * writes back the exact rate it was given when it is not changed.
 	 *
 	 * **The ingress rate is not on this device in the document.** Asking for
 	 * one makes netcfgd build an `ifb`, redirect everything arriving here onto
@@ -1585,9 +1593,23 @@ typedef struct {
 	 * on the `ifb-<name>` device netcfgd synthesised. Joined back here, because
 	 * the operator wrote one block and should see one block.
 	 */
-	char *qdisc_kind;
-	int   bandwidth_kbit;
-	int   ingress_bandwidth_kbit;
+	char     *qdisc_kind;
+	long long bandwidth_bits;
+	long long ingress_bandwidth_bits;
+	/*
+	 * The bridge or bond this device is a port of, "" for none, and the VLANs
+	 * it carries as a bridge port.
+	 *
+	 * **Membership is written from either end** -- `master` here, or the
+	 * master's own `members` -- and the document holds only this end, so a
+	 * port its bridge lists carries a `master` nobody wrote in its block.
+	 * `master_by_members` says so: a form shows it and does not write it back,
+	 * since the bridge's block is where it lives.
+	 */
+	char *master;
+	int   master_by_members;
+	ncfg_bridge_vlan_entry_t *bridge_vlans;
+	size_t                    bridge_vlan_count;
 	int   mtu;         /* 0 where the document states none */
 	char *mac;         /* "" where the document states none */
 	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */
@@ -1609,6 +1631,7 @@ typedef struct {
 	char *powersave;
 	char *mac_policy;
 	int   scan_randomization;
+	int   wds; /* four-address mode, for a radio that is a bridge port */
 	char *regdom;
 	char *portal_check;
 	/* modem policy, where the device has one. */

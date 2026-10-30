@@ -524,6 +524,15 @@ struct ncfg_wg_peer_row {
 	int     keepalive = 0;
 };
 
+/* A run of VLANs on a bridge port, as the `vlans` list writes one: `10` or
+ * `20-30`. The document holds one entry per id, and consecutive ones with the
+ * same flags are joined back into the range somebody wrote. */
+struct ncfg_bridge_vlan_row {
+	QString vids;
+	bool    pvid = false;
+	bool    untagged = false;
+};
+
 /* One device's configuration, as far as a form can show it. */
 struct ncfg_device_config {
 	bool    present = false;
@@ -570,13 +579,18 @@ struct ncfg_device_config {
 	QString owner;
 	QString group;
 	QString tun_mode;
-	/* Queueing. The rates are kbit/s, which is what the form takes; a rate
-	 * finer than a kbit comes back as -1 and makes the block unrepresentable
-	 * rather than being rounded. The ingress rate lives on the `ifb` netcfgd
-	 * synthesised and is joined back here. */
+	/* Queueing. The rates are bits/s, exactly as the document holds them, so
+	 * a rate finer than the form's kbit survives a save (10.613). The ingress
+	 * rate lives on the `ifb` netcfgd synthesised and is joined back here. */
 	QString qdisc_kind;
-	int     bandwidth_kbit = 0;
-	int     ingress_bandwidth_kbit = 0;
+	qint64  bandwidth_bits = 0;
+	qint64  ingress_bandwidth_bits = 0;
+	/* The bridge or bond this is a port of, and the VLANs it carries there.
+	 * `master_by_members` where the master's own `members` says so, which is
+	 * where it is then edited. */
+	QString master;
+	bool    master_by_members = false;
+	QList<ncfg_bridge_vlan_row> vlans;
 	int     mtu = 0;
 	QString mac;
 	/* ethtool. A toggle is three-valued: unmanaged, on, off. */
@@ -597,6 +611,7 @@ struct ncfg_device_config {
 	QString powersave;
 	QString mac_policy;
 	bool    scan_randomization = false;
+	bool    wds = false;
 	QString regdom;
 	QString portal_check;
 	bool    has_modem = false;

@@ -18,6 +18,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -180,6 +182,43 @@ bool safe_value(const QString &text)
 {
 	return !text.contains(QLatin1Char('"')) && !text.contains(QLatin1Char('\\')) &&
 	       !text.contains(QLatin1Char('\n'));
+}
+
+/* A rate as the language writes one: kbit where it is whole, so the block
+ * reads as somebody would type it, and bits where it is not, so nothing is
+ * rounded on the way back (10.613). */
+QString rate_text(qint64 bits)
+{
+	return bits % 1000 == 0 ? QStringLiteral("%1kbit").arg(bits / 1000)
+	                        : QStringLiteral("%1bit").arg(bits);
+}
+
+/* What the form's kbit field shows for a rate in bits: the nearest whole
+ * kbit, and at least 1, so a shaped link never reads as "unshaped". */
+int rate_shown(qint64 bits)
+{
+	if (bits <= 0) {
+		return 0;
+	}
+	const qint64 kbit = (bits + 500) / 1000;
+	return kbit < 1 ? 1 : kbit > 100'000'000 ? 100'000'000 : int(kbit);
+}
+
+/* The rate to write: the exact one that was loaded while the field still
+ * shows it, and the field's own otherwise. Without this a `1234567bit`
+ * rate opened and saved for an unrelated change became `1235kbit`. */
+qint64 rate_written(int shown, qint64 loaded)
+{
+	return loaded > 0 && shown == rate_shown(loaded) ? loaded : qint64(shown) * 1000;
+}
+
+/* Whether a `vlans` cell is an id or a range of them -- `10` or `20-30` --
+ * and so cannot carry anything that would end the quoted string it is
+ * written into. The ids' range is the compiler's to check. */
+bool is_vlan_run(const QString &text)
+{
+	static const QRegularExpression run(QStringLiteral("^[0-9]{1,4}(-[0-9]{1,4})?$"));
+	return run.match(text).hasMatch();
 }
 
 const char *toggle_word(int value)
@@ -441,17 +480,38 @@ QString ncfg_device_block(const QString &name, const ncfg_device_config &setting
 	if (settings.mtu > 0) {
 		body << QStringLiteral("\tmtu = %1").arg(settings.mtu);
 	}
+	/* Not where the master's own `members` already says it: membership
+	 * written from both ends is the same fact twice, and the copy here would
+	 * outlive the bridge's list being edited. */
+	if (!settings.master.isEmpty() && !settings.master_by_members) {
+		body << QStringLiteral("\tmaster = \"%1\"").arg(settings.master);
+	}
+	if (!settings.vlans.isEmpty()) {
+		QStringList runs;
+		for (const ncfg_bridge_vlan_row &vlan : settings.vlans) {
+			QString run = vlan.vids;
+			if (vlan.pvid) {
+				run += QStringLiteral(" pvid");
+			}
+			if (vlan.untagged) {
+				run += QStringLiteral(" untagged");
+			}
+			runs << QStringLiteral("\"%1\"").arg(run);
+		}
+		body << QStringLiteral("\tvlans = [%1]").arg(runs.join(QStringLiteral(", ")));
+	}
 	if (!settings.qdisc_kind.isEmpty()) {
 		body << QStringLiteral("\tqdisc {");
 		body << QStringLiteral("\t\tkind = \"%1\"").arg(settings.qdisc_kind);
 		/* kbit rather than mbit, so a rate that is not a whole megabit is
-		 * written as what it is. The language takes either. */
-		if (settings.bandwidth_kbit > 0) {
-			body << QStringLiteral("\t\tbandwidth = \"%1kbit\"").arg(settings.bandwidth_kbit);
+		 * written as what it is; bits where it is not a whole kbit. The
+		 * language takes any of them. */
+		if (settings.bandwidth_bits > 0) {
+			body << QStringLiteral("\t\tbandwidth = \"%1\"").arg(rate_text(settings.bandwidth_bits));
 		}
-		if (settings.ingress_bandwidth_kbit > 0) {
-			body << QStringLiteral("\t\tingress_bandwidth = \"%1kbit\"")
-			        .arg(settings.ingress_bandwidth_kbit);
+		if (settings.ingress_bandwidth_bits > 0) {
+			body << QStringLiteral("\t\tingress_bandwidth = \"%1\"")
+			        .arg(rate_text(settings.ingress_bandwidth_bits));
 		}
 		body << QStringLiteral("\t}");
 	}
@@ -518,6 +578,9 @@ QString ncfg_device_block(const QString &name, const ncfg_device_config &setting
 		if (settings.scan_randomization) {
 			body << QStringLiteral("\t\tscan_randomization = true");
 		}
+		if (settings.wds) {
+			body << QStringLiteral("\t\twds = true");
+		}
 		if (!settings.regdom.isEmpty()) {
 			body << QStringLiteral("\t\tregdom = \"%1\"").arg(settings.regdom);
 		}
@@ -564,6 +627,13 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 
 	auto *layout = new QVBoxLayout(this);
 	auto *form = new QFormLayout();
+	form_layout = form;
+	/* In a scroll area since 10.613, as the other three editors are since
+	 * 10.612: a bridge port's VLANs made the form taller than a laptop's
+	 * screen, and a row below the edge is a row nobody can reach. */
+	auto *holder = new QWidget(this);
+	auto *content = new QVBoxLayout(holder);
+	content->setContentsMargins(0, 0, 0, 0);
 
 	this->name = new QLineEdit(name, this);
 	this->name->setObjectName(QStringLiteral("device_name"));
@@ -834,7 +904,43 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	mac->setPlaceholderText(QStringLiteral("02:00:00:00:00:01 -- blank keeps the "
 	            "hardware's"));
 	form->addRow(QStringLiteral("mac address"), mac);
-	layout->addLayout(form);
+	content->addLayout(form);
+
+	/* **A port of a bridge or a bond**, which any device can be: a cable, a
+	 * radio in four-address mode, a VLAN, another bond. Membership can be
+	 * written from the bridge's `members` instead, and where it was, this
+	 * shows it and leaves it to the bridge's own block. */
+	port_box = new QGroupBox(QStringLiteral("port of a bridge or bond"), this);
+	port_box->setObjectName(QStringLiteral("device_port_box"));
+	auto *port_form = new QFormLayout(port_box);
+	master = new QLineEdit(this);
+	master->setObjectName(QStringLiteral("device_master"));
+	master->setPlaceholderText(QStringLiteral("br0 -- blank for none"));
+	port_form->addRow(QStringLiteral("joins"), master);
+	vlans = new QTableWidget(0, 3, this);
+	vlans->setObjectName(QStringLiteral("device_vlans"));
+	vlans->setHorizontalHeaderLabels(
+	    { QStringLiteral("vlans"), QStringLiteral("pvid"), QStringLiteral("untagged") });
+	vlans->verticalHeader()->setVisible(false);
+	vlans->horizontalHeader()->setStretchLastSection(true);
+	vlans->setSelectionBehavior(QAbstractItemView::SelectRows);
+	vlans->setSelectionMode(QAbstractItemView::SingleSelection);
+	vlans->setMaximumHeight(140);
+	vlans->setToolTip(QStringLiteral(
+	    "The VLANs this port carries, one id or a range such as 20-30 per row. "
+	    "pvid is where untagged traffic arriving here lands; untagged sends that "
+	    "VLAN out without its tag. Needs vlan filtering on the bridge."));
+	port_form->addRow(QStringLiteral("vlans"), vlans);
+	auto *vlan_buttons = new QHBoxLayout();
+	vlan_add = new QPushButton(QStringLiteral("add"), this);
+	vlan_add->setObjectName(QStringLiteral("device_vlan_add"));
+	vlan_drop = new QPushButton(QStringLiteral("remove"), this);
+	vlan_drop->setObjectName(QStringLiteral("device_vlan_drop"));
+	vlan_buttons->addWidget(vlan_add);
+	vlan_buttons->addWidget(vlan_drop);
+	vlan_buttons->addStretch(1);
+	port_form->addRow(QString(), vlan_buttons);
+	content->addWidget(port_box);
 
 	auto *ethtool_box = new QGroupBox(QStringLiteral("link settings and offloads"), this);
 	ethtool_box->setObjectName(QStringLiteral("device_ethtool"));
@@ -883,7 +989,7 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 		fill(*one.box, toggles, sizeof(toggles) / sizeof(toggles[0]));
 		ethtool->addRow(QString::fromLatin1(one.shown), *one.box);
 	}
-	layout->addWidget(ethtool_box);
+	content->addWidget(ethtool_box);
 
 	wifi_box = new QGroupBox(QStringLiteral("radio"), this);
 	wifi_box->setObjectName(QStringLiteral("device_wifi"));
@@ -919,6 +1025,13 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	    "is joined. Without this a laptop announces one address to every receiver "
 	    "it passes."));
 	radio->addRow(QString(), scan_randomization);
+	wds = new QCheckBox(QStringLiteral("four-address mode, to be a bridge port"), this);
+	wds->setObjectName(QStringLiteral("device_wds"));
+	wds->setToolTip(QStringLiteral(
+	    "A client radio can join a bridge only if it carries other machines' "
+	    "addresses, which takes four-address frames -- and an access point that "
+	    "accepts them."));
+	radio->addRow(QString(), wds);
 	regdom = new QLineEdit(this);
 	regdom->setObjectName(QStringLiteral("device_regdom"));
 	regdom->setPlaceholderText(QStringLiteral("SE -- the country the radio is in"));
@@ -927,7 +1040,7 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	portal_check->setObjectName(QStringLiteral("device_portal_check"));
 	portal_check->setPlaceholderText(QStringLiteral("http://example.com/generate_204"));
 	radio->addRow(QStringLiteral("captive portal check"), portal_check);
-	layout->addWidget(wifi_box);
+	content->addWidget(wifi_box);
 
 	modem_box = new QGroupBox(QStringLiteral("modem"), this);
 	modem_box->setObjectName(QStringLiteral("device_modem"));
@@ -940,7 +1053,14 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	apn = new QLineEdit(this);
 	apn->setObjectName(QStringLiteral("device_apn"));
 	cellular->addRow(QStringLiteral("apn"), apn);
-	layout->addWidget(modem_box);
+	content->addWidget(modem_box);
+	content->addStretch(1);
+
+	auto *scroll = new QScrollArea(this);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setWidget(holder);
+	layout->addWidget(scroll, 1);
 
 	note = new QLabel(this);
 	note->setObjectName(QStringLiteral("device_note"));
@@ -956,6 +1076,12 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	connect(kind, &QComboBox::currentIndexChanged, this, &ncfg_device_dialog::kind_changed);
 	connect(peer_add, &QPushButton::clicked, this, &ncfg_device_dialog::add_peer);
 	connect(peer_drop, &QPushButton::clicked, this, &ncfg_device_dialog::drop_peer);
+	connect(vlan_add, &QPushButton::clicked, this, [this]() { add_vlan(QString(), false, false); });
+	connect(vlan_drop, &QPushButton::clicked, this, [this]() {
+		if (vlans->currentRow() >= 0) {
+			vlans->removeRow(vlans->currentRow());
+		}
+	});
 	layout->addWidget(buttons);
 	resize(560, 680);
 
@@ -984,13 +1110,26 @@ void ncfg_device_dialog::drop_peer()
 	}
 }
 
+/* One VLAN row: the ids as text and the two flags as checkboxes, which is
+ * what they are -- a word typed into a cell would be one more thing to check. */
+void ncfg_device_dialog::add_vlan(const QString &vids, bool pvid, bool untagged)
+{
+	const int row = vlans->rowCount();
+	vlans->insertRow(row);
+	vlans->setItem(row, 0, new QTableWidgetItem(vids));
+	for (int column = 1; column <= 2; column++) {
+		auto *flag = new QTableWidgetItem();
+		flag->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+		flag->setCheckState((column == 1 ? pvid : untagged) ? Qt::Checked : Qt::Unchecked);
+		vlans->setItem(row, column, flag);
+	}
+	vlans->setCurrentCell(row, 0);
+}
+
 void ncfg_device_dialog::kind_changed()
 {
 	const QString chosen = kind->currentData().toString();
-	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
-	if (!form) {
-		return;
-	}
+	QFormLayout *form = form_layout;
 
 	/* Which kinds want which field, written as the table it is. A bridge and a
 	 * bond share `members`; four kinds share `parent`; a tunnel and a VXLAN
@@ -1096,9 +1235,17 @@ void ncfg_device_dialog::load()
 	owner->setText(existing.owner);
 	group->setText(existing.group);
 	select(qdisc_kind, existing.qdisc_kind);
-	bandwidth->setValue(existing.bandwidth_kbit > 0 ? existing.bandwidth_kbit : 0);
-	ingress_bandwidth->setValue(
-	    existing.ingress_bandwidth_kbit > 0 ? existing.ingress_bandwidth_kbit : 0);
+	bandwidth->setValue(rate_shown(existing.bandwidth_bits));
+	ingress_bandwidth->setValue(rate_shown(existing.ingress_bandwidth_bits));
+	master->setText(existing.master);
+	if (existing.master_by_members) {
+		master->setReadOnly(true);
+		master->setToolTip(QStringLiteral("%1 lists this device among its members; "
+		    "change it in %1's own block.").arg(existing.master));
+	}
+	for (const ncfg_bridge_vlan_row &vlan : existing.vlans) {
+		add_vlan(vlan.vids, vlan.pvid, vlan.untagged);
+	}
 	listen_port->setValue(existing.listen_port);
 	fwmark->setValue(existing.fwmark);
 	for (const ncfg_wg_peer_row &known : existing.peers) {
@@ -1153,6 +1300,7 @@ void ncfg_device_dialog::load()
 		select(powersave, existing.powersave);
 		select(mac_policy, existing.mac_policy);
 		scan_randomization->setChecked(existing.scan_randomization);
+		wds->setChecked(existing.wds);
 		regdom->setText(existing.regdom);
 		portal_check->setText(existing.portal_check);
 	}
@@ -1214,8 +1362,19 @@ QString ncfg_device_dialog::block_text() const
 	settings.owner = owner->text().trimmed();
 	settings.group = group->text().trimmed();
 	settings.qdisc_kind = qdisc_kind->currentData().toString();
-	settings.bandwidth_kbit = bandwidth->value();
-	settings.ingress_bandwidth_kbit = ingress_bandwidth->value();
+	settings.bandwidth_bits = rate_written(bandwidth->value(), existing.bandwidth_bits);
+	settings.ingress_bandwidth_bits =
+	    rate_written(ingress_bandwidth->value(), existing.ingress_bandwidth_bits);
+	settings.master = master->text().trimmed();
+	settings.master_by_members = existing.master_by_members;
+	for (int row = 0; row < vlans->rowCount(); row++) {
+		ncfg_bridge_vlan_row vlan;
+		vlan.vids = vlans->item(row, 0) ? vlans->item(row, 0)->text().trimmed() : QString();
+		vlan.pvid = vlans->item(row, 1) && vlans->item(row, 1)->checkState() == Qt::Checked;
+		vlan.untagged =
+		    vlans->item(row, 2) && vlans->item(row, 2)->checkState() == Qt::Checked;
+		settings.vlans << vlan;
+	}
 	settings.listen_port = listen_port->value();
 	settings.fwmark = fwmark->value();
 	for (int row = 0; row < peers->rowCount(); row++) {
@@ -1254,6 +1413,7 @@ QString ncfg_device_dialog::block_text() const
 	settings.powersave = powersave->currentData().toString();
 	settings.mac_policy = mac_policy->currentData().toString();
 	settings.scan_randomization = scan_randomization->isChecked();
+	settings.wds = wds->isChecked();
 	settings.regdom = regdom->text().trimmed();
 	settings.portal_check = portal_check->text().trimmed();
 	settings.has_modem = existing.has_modem;
@@ -1360,11 +1520,35 @@ void ncfg_device_dialog::submit()
 
 	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn, members, parent_link,
 		peer, local, remote, private_key, username, password, service, ac, config, owner,
-		group };
+		group, master };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
 			              "or a newline"));
+			return;
+		}
+	}
+	/* A cell is written inside a quoted string, so it is checked here rather
+	 * than left to the compiler: one carrying a quote would end the string. */
+	for (int row = 0; row < vlans->rowCount(); row++) {
+		const QString vids =
+		    vlans->item(row, 0) ? vlans->item(row, 0)->text().trimmed() : QString();
+		if (!is_vlan_run(vids)) {
+			note->setText(QStringLiteral("`%1` is not a vlan: an id such as 10, or a "
+			              "range such as 20-30").arg(vids));
+			return;
+		}
+		if (vids.contains(QLatin1Char('-')) && vlans->item(row, 1)
+		    && vlans->item(row, 1)->checkState() == Qt::Checked) {
+			note->setText(QStringLiteral("a range cannot be the pvid: untagged traffic "
+			              "joins one vlan"));
+			return;
+		}
+	}
+	if (!master->text().trimmed().isEmpty() && !existing.master_by_members) {
+		const QString refused = ncfg_device_name_refusal(master->text().trimmed());
+		if (!refused.isEmpty()) {
+			note->setText(refused);
 			return;
 		}
 	}

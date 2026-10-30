@@ -532,14 +532,14 @@ int main(int argc, char **argv)
 		    connection.device_config(QStringLiteral("gui-shaped0"), &shaped, &error), error);
 		check("with the scheduler", shaped.qdisc_kind == QStringLiteral("cake"),
 		    shaped.qdisc_kind);
-		check("and the rate going out", shaped.bandwidth_kbit == 20000,
-		    QString::number(shaped.bandwidth_kbit));
+		check("and the rate going out", shaped.bandwidth_bits == 20000000,
+		    QString::number(shaped.bandwidth_bits));
 		/* **The join.** This number is not on this device in the document: it
 		 * is on the `ifb` netcfgd synthesised, and the client puts the halves
 		 * back together so the form shows the one block that was written. */
 		check("and the rate arriving, which lives on the ifb netcfgd made",
-		    shaped.ingress_bandwidth_kbit == 8000,
-		    QString::number(shaped.ingress_bandwidth_kbit));
+		    shaped.ingress_bandwidth_bits == 8000000,
+		    QString::number(shaped.ingress_bandwidth_bits));
 
 		QList<ncfg_device_row> rows;
 		check("the daemon lists devices", connection.devices(&rows, &error), error);

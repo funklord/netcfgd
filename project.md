@@ -12597,6 +12597,47 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.613 The device dialog carries a bridge port, and stops dropping wds
+
+**Asked for by the holder 2026-10-30** ("go ahead with the device dialog"),
+the dialog 10.612 left: it refused `master`, `access_control`, `match`,
+`bridge_vlans`, an `ifb` and a rate finer than a kbit.
+
+- **A port of a bridge or bond** is a group of its own: what it joins
+  (`master`) and a VLAN table -- an id or a range, pvid, untagged -- written
+  as the language writes `vlans`. The document holds one entry per id, so the
+  connection joins consecutive ids with the same flags back into the range
+  that was written. A cell is checked before Save as an id or a range, and a
+  range is refused as a pvid, as the compiler refuses it.
+- **A port its bridge lists could not be edited at all.** The compiler turns a
+  bridge's `members` into `master` on each member (lower.c), so a cable in a
+  bridge read back with a `master` nobody wrote in its block, and the refusal
+  fired on it: its MTU could not be changed from the window. The client now
+  says whether the master's own `members` names the device
+  (`master_by_members`); the dialog shows it read-only and does not write it,
+  so the membership is not stated twice.
+- **`wds` was dropped by Save, silently.** Nothing read a device's
+  `wifi { wds }`, and `tool/form_coverage_gate.py` checked a block's own
+  members, not a sub-block's -- the blind spot it named. It reads now and has a
+  checkbox, and the gate holds the device's `wifi`, `modem`, `ethtool`,
+  `qdisc` and port VLAN tables to the same rule (`NESTED`). Two qdisc members
+  are waived: the arriving rate is moved onto the synthesised `ifb` and
+  cleared from the device, and `ingress` is set only on that `ifb`. A copy of
+  the client with `"wds"` removed fails the gate, naming it.
+- **Rates are carried exactly**, in bits, rather than in kbit with a finer
+  rate refused. The field still shows kbit (the nearest, and at least 1);
+  while it shows what was loaded, Save writes the loaded rate back exactly,
+  as `1234567bit` where it is not a whole kbit.
+- `access_control` was never a device member -- it is an access point's -- so
+  naming it guarded nothing and it is gone. **What is still refused**: a
+  `match` block, which the language cannot write either, and the `ifb`, which
+  netcfgd synthesises. The form scrolls, as the other three do.
+
+`gui/tests/device_load.cpp` is new, an `interface_load` for devices: a daemon
+over hand-written drop-ins for a port with VLANs, a port by its bridge's list,
+a radio with `wds` and a rate in bits; each is opened, saved and read back
+through the daemon, and the files are checked for what the dialog wrote.
+
 ## 10.612 The dialogs carry what they used to refuse
 
 **Asked for by the holder 2026-10-30** ("go ahead with the other dialogs"),
@@ -12657,9 +12698,7 @@ them through a Save that changed its channel.
 with an `exec` backend or a prefix naming its delegation, a route with a
 `src`, and a peer or delegated addressing source; on a network, addressing
 beyond one DHCP source, and its `hooks`, which the GUI has no way to read;
-and the device dialog's own list -- `master`, `access_control`, `match`,
-`bridge_vlans`, an `ifb` and a rate finer than a kbit -- which this pass did
-not take up.
+and the device dialog's own list, which 10.613 took up.
 
 ## 10.611 The network dialog edits enterprise networks
 

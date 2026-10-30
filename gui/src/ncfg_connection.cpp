@@ -1183,8 +1183,31 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->group = from_c(found.group);
 	out->tun_mode = from_c(found.tun_mode);
 	out->qdisc_kind = from_c(found.qdisc_kind);
-	out->bandwidth_kbit = found.bandwidth_kbit;
-	out->ingress_bandwidth_kbit = found.ingress_bandwidth_kbit;
+	out->bandwidth_bits = found.bandwidth_bits;
+	out->ingress_bandwidth_bits = found.ingress_bandwidth_bits;
+	out->master = from_c(found.master);
+	out->master_by_members = found.master_by_members != 0;
+	/* Runs of consecutive ids with the same flags become one row, so
+	 * `20-30` comes back as written rather than as eleven. A pvid is never
+	 * a range -- the language refuses one -- so it stays alone. */
+	for (size_t i = 0; i < found.bridge_vlan_count;) {
+		const ncfg_bridge_vlan_entry_t &first = found.bridge_vlans[i];
+		size_t last = i;
+		while (!first.pvid && last + 1 < found.bridge_vlan_count &&
+		       !found.bridge_vlans[last + 1].pvid &&
+		       found.bridge_vlans[last + 1].untagged == first.untagged &&
+		       found.bridge_vlans[last + 1].vid == found.bridge_vlans[last].vid + 1) {
+			last++;
+		}
+		ncfg_bridge_vlan_row row;
+		row.vids = last == i ? QString::number(first.vid)
+		                     : QStringLiteral("%1-%2").arg(first.vid)
+		                           .arg(found.bridge_vlans[last].vid);
+		row.pvid = first.pvid != 0;
+		row.untagged = first.untagged != 0;
+		out->vlans << row;
+		i = last + 1;
+	}
 	out->listen_port = found.listen_port;
 	out->fwmark = found.fwmark;
 	for (size_t i = 0; i < found.peer_count; i++) {
@@ -1216,6 +1239,7 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->powersave = from_c(found.powersave);
 	out->mac_policy = from_c(found.mac_policy);
 	out->scan_randomization = found.scan_randomization != 0;
+	out->wds = found.wds != 0;
 	out->regdom = from_c(found.regdom);
 	out->portal_check = from_c(found.portal_check);
 	out->has_modem = found.has_modem != 0;

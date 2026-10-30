@@ -365,8 +365,8 @@ int main(int argc, char **argv)
 		ncfg_device_config shaped;
 		shaped.kind = QStringLiteral("physical");
 		shaped.qdisc_kind = QStringLiteral("cake");
-		shaped.bandwidth_kbit = 20000;
-		shaped.ingress_bandwidth_kbit = 8000;
+		shaped.bandwidth_bits = 20'000'000;
+		shaped.ingress_bandwidth_bits = 8'000'000;
 		const QString block = ncfg_device_block(QStringLiteral("eth0"), shaped);
 
 		check(block.contains(QStringLiteral("qdisc {")), "a shaped device gets a qdisc block");
@@ -375,6 +375,14 @@ int main(int argc, char **argv)
 		    "and the rate going out, in kbit rather than rounded to megabits");
 		check(block.contains(QStringLiteral("ingress_bandwidth = \"8000kbit\"")),
 		    "and the rate arriving, which is what makes netcfgd build an ifb");
+
+		/* **A rate finer than a kbit is written in bits** (10.613): the form
+		 * refused one as unmodelled, because rounding it would have changed
+		 * somebody's shaping without saying so. */
+		shaped.bandwidth_bits = 1'234'567;
+		check(ncfg_device_block(QStringLiteral("eth0"), shaped)
+		          .contains(QStringLiteral("bandwidth = \"1234567bit\"")),
+		    "a rate that is not a whole kbit is written exactly, in bits");
 
 		/* A scheduler with no rate is ordinary -- `fq_codel` on a link whose
 		 * speed nobody knows -- and writes no rate rather than a zero. */
@@ -392,6 +400,49 @@ int main(int argc, char **argv)
 		check(!ncfg_device_block(QStringLiteral("eth0"), none)
 		           .contains(QStringLiteral("qdisc")),
 		    "and a device with no scheduler gets no qdisc block");
+	}
+
+	/* A PORT OF A BRIDGE (10.613): what it joins and the VLANs it carries,
+	 * which the dialog refused to save over until it had fields for them. */
+	{
+		ncfg_device_config port;
+		port.master = QStringLiteral("br0");
+		ncfg_bridge_vlan_row native;
+		native.vids = QStringLiteral("10");
+		native.pvid = true;
+		native.untagged = true;
+		ncfg_bridge_vlan_row trunk;
+		trunk.vids = QStringLiteral("20-22");
+		port.vlans << native << trunk;
+		const QString block = ncfg_device_block(QStringLiteral("eth1"), port);
+		check(block.contains(QStringLiteral("\tmaster = \"br0\"\n")),
+		    "a port names the bridge it joins");
+		check(block.contains(QStringLiteral("\tvlans = [\"10 pvid untagged\", \"20-22\"]")),
+		    "and its vlans as the language writes them, a range kept a range");
+
+		/* **Not where the bridge's `members` already says so.** The compiler
+		 * turns that list into `master` on each member, so the port reads
+		 * back with one; writing it here would state the membership twice
+		 * and keep it after the bridge's list dropped the port. */
+		port.master_by_members = true;
+		check(!ncfg_device_block(QStringLiteral("eth1"), port)
+		           .contains(QStringLiteral("master")),
+		    "and does not repeat a membership the bridge's own list states");
+	}
+
+	/* FOUR-ADDRESS MODE, which a radio needs to be a bridge port -- and which
+	 * a save used to drop, because nothing read it (10.613). */
+	{
+		ncfg_device_config radio;
+		radio.has_wifi = true;
+		radio.wds = true;
+		check(ncfg_device_block(QStringLiteral("wlan0"), radio)
+		          .contains(QStringLiteral("\t\twds = true\n")),
+		    "a radio in four-address mode keeps it");
+		radio.wds = false;
+		check(!ncfg_device_block(QStringLiteral("wlan0"), radio)
+		           .contains(QStringLiteral("wds")),
+		    "and one not in it says nothing about it");
 	}
 
 	/* THE NAME, which is the link's name and the drop-in's filename. */
