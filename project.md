@@ -12597,6 +12597,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.618 A forward may name a reservation
+
+**Asked for by the holder 2026-10-30** ("go ahead with the port forward
+reservation names"), the item 0298 deferred as wanted. Decided in
+[0300](doc/decision/0300-a-forward-may-name-a-reservation.md): `to` is an IPv4
+address or the name of a `dhcp_server` reservation on any interface, resolved
+by the compiler after every interface is read; none or two matches are
+refused. The document keeps the address in `to` and the name in `to_host`, so
+every rule is unchanged and the renderer, the client and the interface dialog
+write the name back.
+
+**A fault of this change's own, caught by trying it before testing it**: the
+pass that remembers an interface with a named forward reused `i`, the index of
+the loop over blocks it sits in, so `ncfg show` spun at full CPU forever on any
+configuration with one. The first compile by hand hung and `timeout` killed it;
+the loop has its own index now. Worth knowing as a shape: `lower.c`'s loop
+body is long enough that its index is out of sight.
+
+Tests: `lower_test` resolves a name across interfaces and refuses an unknown
+one, one reserved twice, and an address-shaped one; `render_test` round-trips a
+forward by name and checks the name, not the address, is written;
+`interface_load`'s forward names its reservation and Save writes `to = "tv"`.
+The form gate caught `to_host` before the client read it.
+
 ## 10.617 The form gate reads every sub-block, and found the probe's counts
 
 A `/go` run 2026-10-30, from the lens of 10.613 and 10.615: each silent drop

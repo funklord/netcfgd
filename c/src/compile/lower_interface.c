@@ -545,16 +545,33 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 			if (!text) {
 				continue;
 			}
+			/* **A reservation's name** (10.618), so the host's address is
+			 * written once, in its `host` block. Anything that is not only
+			 * digits and dots and is a plain host name names one; the
+			 * address is filled in once every interface has been read,
+			 * because the reservation may be on one not read yet. Digits
+			 * and dots stay an address, so `192.168.1.300` is refused as
+			 * one rather than looked up as a name. */
+			if (strspn(text, "0123456789.") != strlen(text) && ncfg_dhcp_server_plain_name(text)) {
+				free(forward.to);
+				free(forward.to_host);
+				forward.to = NULL;
+				forward.to_host = text;
+				continue;
+			}
 			if (!ncfg_address_parse(text, &address, NULL, 0) || address.is_ipv6 ||
 			    address.has_prefix || address.bytes[0] == 0u || address.bytes[0] == 127u ||
 			    address.bytes[0] >= 224u) {
 				ncfg_diag(ctx, assignment->span,
 				    "`%s` is not a host a port can be forwarded to: one IPv4 address, not "
-				    "loopback, multicast, broadcast or unspecified", text);
+				    "loopback, multicast, broadcast or unspecified, or the name of a "
+				    "`dhcp_server` reservation", text);
 				free(text);
 				continue;
 			}
 			free(forward.to);
+			free(forward.to_host);
+			forward.to_host = NULL;
 			forward.to = text;
 		} else {
 			ncfg_diag(ctx, assignment->span,
@@ -562,11 +579,12 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 			    assignment->key);
 		}
 	}
-	if (!has_protocol || !has_port || !forward.to) {
+	if (!has_protocol || !has_port || (!forward.to && !forward.to_host)) {
 		ncfg_diag(ctx, block->span, "port_forward `%s` needs a `protocol`, a `port` and a `to`",
 		    forward.name);
 		free(forward.name);
 		free(forward.to);
+		free(forward.to_host);
 		return;
 	}
 	for (i = 0; i < interface->port_forward_count; i++) {
@@ -580,6 +598,7 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 			    earlier->name);
 			free(forward.name);
 			free(forward.to);
+			free(forward.to_host);
 			return;
 		}
 	}
@@ -589,6 +608,7 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 		ncfg_lower_oom(ctx);
 		free(forward.name);
 		free(forward.to);
+		free(forward.to_host);
 		return;
 	}
 	interface->port_forwards = grown;

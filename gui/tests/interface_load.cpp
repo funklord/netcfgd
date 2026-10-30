@@ -150,8 +150,10 @@ int main(int argc, char **argv)
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
 		                   "dns = [\"192.0.2.53\"]; host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
 		                   "address = \"192.0.2.20\" } }\n"
+		                   /* To the reservation by name (10.618), which Save must
+		                    * write back as the name, not as 192.0.2.20. */
 		                   "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
-		                   "to = \"192.0.2.20\"; to_port = 8443; hairpin = false }\n"
+		                   "to = \"tv\"; to_port = 8443; hairpin = false }\n"
 		                   "\tipv6_token = \"::5\"\n"
 		                   "\tguard = \"nfs root\"\n"
 		                   "\tadvertise { backend = \"radvd\"; prefixes = [\"@pd:wan0/1\"]; "
@@ -281,7 +283,7 @@ int main(int argc, char **argv)
 		check(wrote.contains(QStringLiteral("host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
 		                                    "address = \"192.0.2.20\" }")) &&
 		        wrote.contains(QStringLiteral("port_forward \"web\" { protocol = \"tcp\"; port = "
-		                                    "443; to = \"192.0.2.20\"; to_port = 8443; hairpin = "
+		                                    "443; to = \"tv\"; to_port = 8443; hairpin = "
 		                                    "false }")) &&
 		        wrote.contains(QStringLiteral("ipv6_token = \"::5\"")) &&
 		        wrote.contains(QStringLiteral("guard = \"nfs root\"")) &&

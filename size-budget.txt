@@ -1029,4 +1029,11 @@ netcfgd
 # small box is met by compiling out what it does not use.
 #
 # Recorded at 1339300 rather than left riding the tolerance.
-total 1339300
+#
+# **1343448, 2026-10-30, a forward naming a reservation** (10.618, 0300): the
+# resolution pass and the `to_host` member, +4,152 -- text +1,321 and data
+# +104 by `size`, the rest symbols. Measured against HEAD built from
+# `git archive`, which came back at the recorded 1,339,296, so the
+# supplicant's shorter refusal (10.614's sibling, 894e2532) was neutral and
+# every byte here is this change's.
+total 1343450

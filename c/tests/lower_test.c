@@ -1510,6 +1510,42 @@ static void access_point_cases(void)
 	}
 	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443 }\n}\n",
 	    "needs a `protocol`, a `port` and a `to`", "  a forward with nowhere to go is refused");
+	/* **To a reservation by name** (10.618): resolved to its address across
+	 * interfaces, whichever is read first, and the name kept beside it. */
+	document = compiles("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"nas\" }\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { host \"nas\" { mac = \"aa:bb:cc:dd:ee:03\"; address = \"192.168.1.12\" } }\n"
+	    "}\n", "a forward naming a reservation on another interface compiles");
+	if (document) {
+		const ncfg_interface_t *wan = NULL;
+
+		for (size_t at = 0; at < document->interface_count; at++) {
+			if (strcmp(document->interfaces[at].name, "wan0") == 0) {
+				wan = &document->interfaces[at];
+			}
+		}
+		check(wan && wan->port_forward_count == 1u &&
+		        strcmp(wan->port_forwards[0].to, "192.168.1.12") == 0 &&
+		        wan->port_forwards[0].to_host &&
+		        strcmp(wan->port_forwards[0].to_host, "nas") == 0,
+		    "  to the reservation's address, with its name kept");
+		ncfg_document_free(document);
+	}
+	refuses("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"printer\" }\n}\n",
+	    "nor a reservation any `dhcp_server` declares",
+	    "  and a name nothing reserves is refused, not left going nowhere");
+	refuses("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"nas\" }\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { host \"nas\" { mac = \"aa:bb:cc:dd:ee:03\"; address = \"192.168.1.12\" } }\n}\n"
+	    "interface lan1 {\n\tconfig = \"192.168.2.1/24\"\n"
+	    "\tdhcp_server { host \"nas\" { mac = \"aa:bb:cc:dd:ee:04\"; address = \"192.168.2.12\" } }\n}\n",
+	    "reserved on both", "  and a name reserved on two networks is refused as a guess");
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
+	    "to = \"192.168.1.300\" }\n}\n", "is not a host a port can be forwarded to",
+	    "  and digits and dots stay an address, refused as one rather than looked up");
 	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"icmp\"; port = 1; "
 	    "to = \"192.168.1.10\" }\n}\n", "tcp or udp", "  and one of a protocol with no port");
 	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 70000; "

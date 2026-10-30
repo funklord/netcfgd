@@ -783,8 +783,13 @@ static void render_port_forwards(const ncfg_interface_t *interface, ncfg_buf_t *
 	for (at = 0; at < interface->port_forward_count; at++) {
 		const ncfg_port_forward_t *forward = &interface->port_forwards[at];
 
-		if (!forward->name || !forward->to || strchr(forward->name, '"') ||
-		    strchr(forward->to, '"') || forward->port < 1 || forward->port > 65535) {
+		/* The reservation's name where the forward was written to one
+		 * (10.618): writing its address would be a profile that stops
+		 * following the reservation the moment it is restored. */
+		const char *to = forward->to_host ? forward->to_host : forward->to;
+
+		if (!forward->name || !to || strchr(forward->name, '"') ||
+		    strchr(to, '"') || forward->port < 1 || forward->port > 65535) {
 			ncfg_render_refuse(missing, "interface", interface->name, "a port forward `%s`",
 			    forward->name ? forward->name : "");
 			continue;
@@ -792,7 +797,7 @@ static void render_port_forwards(const ncfg_interface_t *interface, ncfg_buf_t *
 		ncfg_buf_addf(body, "\tport_forward \"%s\" {\n\t\tprotocol = \"%s\"\n"
 		    "\t\tport = %lld\n\t\tto = \"%s\"\n", forward->name,
 		    forward->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp",
-		    (long long)forward->port, forward->to);
+		    (long long)forward->port, to);
 		if (forward->to_port.has) {
 			ncfg_buf_addf(body, "\t\tto_port = %lld\n", (long long)forward->to_port.value);
 		}

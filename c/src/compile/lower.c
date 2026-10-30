@@ -596,6 +596,78 @@ static void resolve_firewall_host_lists(ncfg_lower_ctx_t *ctx, ncfg_span_t span,
  * The walk
  * ------------------------------------------------------------------------ */
 
+/*
+ * Give each forward that names a reservation the reservation's address
+ * (10.618).
+ *
+ * **Any interface's reservation**, because the forward is on the uplink and
+ * the host is on the LAN: the two are never the same block. Exactly one must
+ * match. None is refused rather than left without a target, since a forward to
+ * nowhere is the configuration failing silently; two -- the same name reserved
+ * on two networks -- is refused because either answer would be a guess.
+ */
+static void resolve_forward_hosts(ncfg_lower_ctx_t *ctx, const deferred_t *forwarders,
+    size_t count)
+{
+	ncfg_document_t *document = ctx->document;
+	size_t           i;
+
+	for (i = 0; i < count; i++) {
+		ncfg_interface_t *interface = NULL;
+		size_t            at;
+
+		ctx->source = forwarders[i].source;
+		for (at = 0; at < document->interface_count; at++) {
+			if (strcmp(document->interfaces[at].name, forwarders[i].name) == 0) {
+				interface = &document->interfaces[at];
+			}
+		}
+		for (at = 0; interface && at < interface->port_forward_count; at++) {
+			ncfg_port_forward_t    *forward = &interface->port_forwards[at];
+			const ncfg_dhcp_host_t *found = NULL;
+			const char             *where = NULL;
+			const char             *also = NULL;
+			size_t                  other;
+			size_t                  host;
+
+			if (!forward->to_host) {
+				continue;
+			}
+			for (other = 0; other < document->interface_count; other++) {
+				const ncfg_dhcp_server_t *server = document->interfaces[other].dhcp_server;
+
+				for (host = 0; server && host < server->host_count; host++) {
+					if (strcmp(server->hosts[host].name, forward->to_host) != 0) {
+						continue;
+					}
+					if (found) {
+						also = document->interfaces[other].name;
+					} else {
+						found = &server->hosts[host];
+						where = document->interfaces[other].name;
+					}
+				}
+			}
+			if (!found) {
+				ncfg_diag(ctx, forwarders[i].span,
+				    "port_forward `%s` on `%s` goes to `%s`, which is neither an IPv4 "
+				    "address nor a reservation any `dhcp_server` declares",
+				    forward->name, interface->name, forward->to_host);
+				continue;
+			}
+			if (also) {
+				ncfg_diag(ctx, forwarders[i].span,
+				    "port_forward `%s` on `%s` goes to `%s`, which is reserved on both `%s` "
+				    "and `%s`: name the address instead", forward->name, interface->name,
+				    forward->to_host, where, also);
+				continue;
+			}
+			free(forward->to);
+			forward->to = ncfg_dup(ctx, found->address);
+		}
+	}
+}
+
 static int remember(ncfg_lower_ctx_t *ctx, deferred_t **list, size_t *count, const char *name,
     const char *other, ncfg_span_t span, const char *source)
 {
@@ -684,6 +756,10 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	 * read (10.591). */
 	deferred_t      *referrers = NULL;
 	size_t           referrer_count = 0;
+	/* Each interface with a forward naming a reservation, resolved once every
+	 * interface has been read (10.618). */
+	deferred_t      *forwarders = NULL;
+	size_t           forwarder_count = 0;
 	/* Where the firewall block was, for a host list one of its rules names
 	 * and nothing declares. */
 	ncfg_span_t      firewall_span;
@@ -783,6 +859,15 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 			 * block's items has just moved: see `ncfg_record`. */
 			ncfg_record(&ctx, block->source, block->block->span, "interfaces[%s]",
 			    interface.name);
+			/* Its own index: `i` is the loop over blocks this sits in, and
+			 * reusing it restarted that loop forever. */
+			for (size_t named = 0; named < interface.port_forward_count; named++) {
+				if (interface.port_forwards[named].to_host) {
+					(void)remember(&ctx, &forwarders, &forwarder_count, interface.name,
+					    NULL, block->block->span, block->source);
+					break;
+				}
+			}
 			{
 				ncfg_interface_t *slot = ncfg_push(&ctx, &ctx.document->interfaces,
 				    &ctx.document->interface_count, sizeof(*slot));
@@ -930,11 +1015,13 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	check_linksets(&ctx, linksets, linkset_count);
 	resolve_host_lists(&ctx, referrers, referrer_count);
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
+	resolve_forward_hosts(&ctx, forwarders, forwarder_count);
 
 	deferred_free(memberships, membership_count);
 	deferred_free(shapers, shaper_count);
 	deferred_free(linksets, linkset_count);
 	deferred_free(referrers, referrer_count);
+	deferred_free(forwarders, forwarder_count);
 
 	/*
 	 * A table for a document nobody gets is a table of paths into nothing, so

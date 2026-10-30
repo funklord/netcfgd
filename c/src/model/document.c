@@ -1936,6 +1936,9 @@ static const ncfg_field_t port_forward_fields[] = {
 	    .offset = offsetof(ncfg_port_forward_t, port) },
 	{ .name = "to", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_port_forward_t, to) },
+	/* Absent unless `to` named a reservation (10.618), so a document written
+	 * before it existed reads and writes back unchanged. */
+	{ .name = "to_host", .kind = NCFG_F_STR, .offset = offsetof(ncfg_port_forward_t, to_host) },
 	{ .name = "to_port", .kind = NCFG_F_OPT_INT, R_U16,
 	    .offset = offsetof(ncfg_port_forward_t, to_port) },
 	{ .name = "hairpin", .kind = NCFG_F_OPT_BOOL,

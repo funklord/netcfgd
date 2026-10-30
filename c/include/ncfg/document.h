@@ -1414,7 +1414,14 @@ typedef struct {
 	char         *name; /* the label, and the sorting key */
 	int           protocol; /* ncfg_port_forward_protocol_t */
 	int64_t       port;
+	/* The host's IPv4 address: what every rule uses. */
 	char         *to;
+	/* Where `to` named a reservation rather than an address -- `to = "nas"`
+	 * -- that reservation's name, and `to` is its address, resolved by the
+	 * compiler across every interface's `dhcp_server` (10.618). NULL for a
+	 * forward written to an address. Kept beside the address so a profile
+	 * save and the GUI write the name back, not the address it stood for. */
+	char         *to_host;
 	ncfg_optint_t to_port;
 	/* Reachable from inside too (0299): absent is on, and only `false` is
 	 * ever written. */

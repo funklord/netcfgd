@@ -847,6 +847,24 @@ static void an_access_point_round_trips(void)
 	    "\t\thost \"printer\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"192.168.1.10\" }\n"
 	    "\t}\n}\n",
 	    "  and so do reservations, in either order and either case");
+	/* A forward to a reservation by name (10.618): the name is what is
+	 * written back, so a restored profile goes on following the
+	 * reservation rather than the address it stood for when saved. */
+	round_trips("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"nas\" }\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	    "\t\thost \"nas\" { mac = \"AA:BB:CC:DD:EE:03\"; address = \"192.168.1.12\" }\n"
+	    "\t}\n}\n",
+	    "  and so does a forward naming a reservation");
+	plain = rendering_of("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"nas\" }\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	    "\t\thost \"nas\" { mac = \"AA:BB:CC:DD:EE:03\"; address = \"192.168.1.12\" }\n"
+	    "\t}\n}\n");
+	check(plain && strstr(plain, "to = \"nas\"") != NULL &&
+	        strstr(plain, "to = \"192.168.1.12\"") == NULL,
+	    "    writing the name, not the address it resolved to");
+	free(plain);
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 36\n"
 	    "\twidth = 80\n\twifi { psk = \"@secret:ap\" }\n}\n", "  and so does 80 on 5 GHz");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 100\n"

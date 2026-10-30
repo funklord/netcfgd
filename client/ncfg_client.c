@@ -4211,7 +4211,12 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 				one->name = member_text(doc, entry, "name");
 				one->protocol = member_text(doc, entry, "protocol");
 				one->port = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "port"), 0);
-				one->to = member_text(doc, entry, "to");
+				/* The reservation's name where the forward named one
+				 * (10.618), so the dialog writes the name back rather than
+				 * pinning the forward to the address it stood for. */
+				one->to = member_says(doc, entry, "to_host")
+				    ? member_text(doc, entry, "to_host")
+				    : member_text(doc, entry, "to");
 				one->to_port =
 				    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "to_port"), -1);
 				one->hairpin = ncfg_json_type(doc, hairpin) == NCFG_JSON_BOOL
