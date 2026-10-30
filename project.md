@@ -12632,10 +12632,21 @@ default.
   with `hairpin = false` the same connection is refused, the control. The
   wan-side cases from 10.609 pass beside it.
 - `make check` green; `nat.sh` and `firewall.sh` pass under `NCFG_LIVE=1`.
-  **The size gate has about 4 KB left**: 1,339,296 bytes against a ceiling of
-  1,343,429 (budget 1,304,300 plus 3%). The next feature will not fit without
-  re-deriving the budget, which is a decision about what the box can carry,
-  not a number to bump in passing.
+  ~~The size gate has about 4 KB left~~ -- **re-derived on the holder's
+  instruction 2026-10-30** to 1,339,300, each commit since the wireless day
+  built from `git archive` and attributed in `size-budget.txt` (the DHCP
+  server +13,216, port forwards +13,072, hairpin +4,296, reservations
+  +4,264, the rest under 200). The ceiling is 1,379,479 with the 3%
+  tolerance. Stripped, the binary is 1,203,632 bytes, so 0024's 1 MB verdict
+  stands for the C too, by about 200 KB.
+- **The holder's direction on size, 2026-10-30**: "We will have build options
+  to remove unnecessary parts and we can optimize later by removing
+  superfluous parts." So the ratchet is what keeps growth visible and
+  attributed, not a reason to hold back a feature: when a feature crosses the
+  ceiling, re-derive the budget as above and say what bought it. Fitting a
+  small box is the build options' job (compiling out what that box does not
+  use), and trimming is later work -- neither is a cost to charge each feature
+  as it lands.
 
 ## 10.609 Port forwards
 
@@ -12687,10 +12698,8 @@ interface wan0 {
   the forward gone -- is refused.
 
 `make check` green, and `nat.sh`, `firewall.sh` and `port_forward.sh` pass under
-`NCFG_LIVE=1`. **The size budget is nearly spent**: the installed binary read
-1,335,000 bytes against 1,304,300, 2.4% over and inside the 3% tolerance, with
-about 8 KB left before its 1,343,429 ceiling -- the next feature of this size
-will need the budget re-derived (a161176f is how that was last done).
+`NCFG_LIVE=1`. The installed binary read 1,335,000 bytes against 1,304,300,
+inside the 3% tolerance -- since re-derived, 10.610.
 
 Not done, and in 0298: `to` naming a reservation, a port range, and a
 forward table in the GUI. ~~Hairpin NAT~~ -- 10.610.

@@ -1001,4 +1001,32 @@ netcfgd
 # nothing because each replaced the last.
 #
 # Recorded at 1304300 rather than left riding the tolerance.
-total 1304300
+#
+# Then the router day, 2026-10-29 to 10-30, +35,000 bytes to 1,339,296, with
+# 4,133 left under the ceiling when it was re-derived on the holder's
+# instruction. Measured by building each commit from `git archive` again; the
+# wireless day's 1,304,296 came back exact, and so did the tree's own
+# 1,339,296. The hostapd keyword probe +176 and its use of netcfgd's own
+# hostapd -80 (project.md 10.600's follow-ups); the DHCP server, dnsmasq as
+# netcfgd's eleventh backend, +13,216 (10.601, decision 0297); hostnames from
+# the leases +56 (10.602); reservations +4,264 (10.605); port forwards, the
+# prerouting chain with its writer, decoder, observation and plan, +13,072
+# (10.609, 0298); and hairpin, the reflection and return path through one
+# decoder for three roles, +4,296 (10.610, 0299). text 1,091,034 to 1,125,545,
+# data 68,900 to 72,136; bss flat. The GUI and client work between them
+# touched nothing under `c/`.
+#
+# For the flash question this file does not gate: stripped, as a packager's
+# `dh_strip` leaves it, the binary is 1,203,632 bytes on x86_64 at `-Os`. So
+# 0024's finding that design 10.2's 1 MB embedded target is out of reach still
+# holds for the C, by about 200 KB rather than the Rust's 1.75 MB.
+#
+# **What this ratchet is for, said by the holder on the same day**: "We will
+# have build options to remove unnecessary parts and we can optimize later by
+# removing superfluous parts." The gate keeps growth visible and attributed;
+# it is not a reason to hold back a feature. A feature that crosses the
+# ceiling gets the budget re-derived like this, with what it bought, and a
+# small box is met by compiling out what it does not use.
+#
+# Recorded at 1339300 rather than left riding the tolerance.
+total 1339300
