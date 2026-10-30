@@ -300,25 +300,37 @@ int main(int argc, char **argv)
 		daemon.waitForFinished(2000);
 	}
 
-	/* And a block carrying something the form cannot express. Saving must be
-	 * refused, naming it -- loading harder would not help, because there is no
-	 * field to load into.
+	/* **What Save used to drop or refuse, carried through** (10.615).
 	 *
-	 * **`ipv6_token`, because `dns` is a field now.** The refusal used to be
-	 * demonstrated with a `dns` scope, and the list of keys that trip it was
-	 * "any key that is present" -- so a compiled interface carrying `hooks: []`
-	 * and a default scope, which is what `ncfg wifi activate` writes, could not
-	 * be edited at all. What is refused now is a key that holds something no
-	 * field can. */
+	 * Dropped without a word: a static address's lifetimes, a `dhcp6`
+	 * prefix delegation request and SLAAC's privacy -- the reader saw only
+	 * the head of each entry, and the form wrote the head back. Refused: a
+	 * route's `src`, `table` and `onlink`, a delegated address (whose check
+	 * looked for a member the document does not have, so it never fired),
+	 * and an exclusive routing domain. Each is written by hand, the dialog
+	 * saves it, and both the file and the daemon's reading of it are checked.
+	 *
+	 * This case used to be the refusal. Nothing the language can write is
+	 * refused for an interface now: what is still named -- an exec backend,
+	 * a server's port, a route's scope -- has no spelling in it, so no
+	 * compiled document carries one. */
 	{
 		QTemporaryDir work;
 		QProcess daemon;
 		const QString socket = start(&daemon, work.path(),
-		    QStringLiteral("global { control { observe = \"any\" } }\n"
+		    /* `wan0`, because a delegated address names the interface whose
+		     * delegation it comes from, and the compiler refuses one naming an
+		     * interface that asks for none. */
+		    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
 		                   "device eth0 { kind = \"physical\" }\n"
-		                   "interface eth0 {\n"
-		                   "\tconfig = \"192.0.2.10/24\"\n"
-		                   "\troutes = [\"10.9.0.0/24 via 192.0.2.1 src 192.0.2.10\"]\n"
+		                   "interface wan0 { config = [\"dhcp6 pd\"] }\n"),
+		    QStringLiteral("interface eth0 {\n"
+		                   "\tconfig = [\"192.0.2.10/24 preferred_lft 600 valid_lft 900\", "
+		                   "\"10.0.0.1/32 peer 10.0.0.2\", \"dhcp6 pd pd_length 56\", "
+		                   "\"slaac privacy prefer_temporary\", \"@pd:wan0/1=::1/64\"]\n"
+		                   "\troutes = [\"10.9.0.0/24 via 192.0.2.254 src 192.0.2.10 table 100 "
+		                   "onlink\"]\n"
+		                   "\tdns { mode = \"resolved\"; domains = [\"~corp.example\"] }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -338,21 +350,59 @@ int main(int argc, char **argv)
 
 		ncfg_interface_config read;
 		check(connection.interface_config(QStringLiteral("eth0"), &read, &error)
-		        ? QStringLiteral("answered")
+		        ? read.unmodelled
 		        : error,
-		    QStringLiteral("answered"), "netcfgd answers for the interface");
+		    QString(), "netcfgd says the dialog can carry all of it");
 		ncfg_interface_dialog dialog(&connection, QStringLiteral("eth0"));
 		QMetaObject::invokeMethod(&dialog, "submit");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
-		const QString said = note ? note->text() : QStringLiteral("<no note>");
-		check(said.contains(QStringLiteral("routes (beyond destination, via, metric)")) &&
-		        said.contains(QStringLiteral("would delete"))
-		        ? QStringLiteral("refused")
-		        : said,
-		    QStringLiteral("refused"), "saving over an unmodelled key is refused");
-		/* A route's source address is among the few things left with no field
-		 * on an interface, since 10.612 gave the rest theirs; this used to be
-		 * `ipv6_token`, then a reservation, then `dot1x`. */
+		/* The outcome, not the note's wording: a note that said anything but
+		 * "would delete" -- a refusal for permission, say -- read as a save. */
+		check(!dialog.outcome().isEmpty() ? QStringLiteral("saved")
+		                                  : (note ? note->text() : QStringLiteral("<no note>")),
+		    QStringLiteral("saved"), "and it is saved");
+
+		QFile written(work.path() + QStringLiteral("/etc/conf.d/interface-eth0.conf"));
+		const QString wrote = written.open(QIODevice::ReadOnly)
+		    ? QString::fromUtf8(written.readAll())
+		    : QStringLiteral("<no file>");
+		const QStringList wanted = {
+			QStringLiteral("\"192.0.2.10/24 preferred_lft 600 valid_lft 900\""),
+			QStringLiteral("\"10.0.0.1/32 peer 10.0.0.2\""),
+			QStringLiteral("\"dhcp6 pd pd_length 56\""),
+			QStringLiteral("\"slaac privacy prefer_temporary\""),
+			QStringLiteral("\"@pd:wan0/1=::1/64\""),
+			QStringLiteral("\"10.9.0.0/24 via 192.0.2.254 src 192.0.2.10 table 100 onlink\""),
+			QStringLiteral("\"~corp.example\""),
+		};
+		QStringList missing;
+		for (const QString &one : wanted) {
+			if (!wrote.contains(one)) {
+				missing << one;
+			}
+		}
+		check(wrote.startsWith(QStringLiteral("# Written by netcfgd's gui")) && missing.isEmpty()
+		        ? QStringLiteral("written")
+		        : missing.join(QLatin1Char(' ')) + QStringLiteral("\n") + wrote,
+		    QStringLiteral("written"),
+		    "  each entry's options, the delegation, the route and the domain, as written");
+
+		ncfg_interface_config saved;
+		const bool reread = connection.interface_config(QStringLiteral("eth0"), &saved, &error);
+		QStringList options;
+		for (const ncfg_address_source_row &source : saved.sources) {
+			options << source.options;
+		}
+		check(reread && saved.sources.size() == 5 && saved.routes.size() == 1 &&
+		        saved.routes[0].src == QStringLiteral("192.0.2.10") &&
+		        saved.routes[0].table == 100 && saved.routes[0].onlink &&
+		        saved.dns.domains == QStringLiteral("~corp.example")
+		        ? options.join(QLatin1Char('|'))
+		        : QStringLiteral("%1 sources, %2 routes, %3").arg(saved.sources.size())
+		              .arg(saved.routes.size()).arg(error),
+		    QStringLiteral("preferred_lft 600 valid_lft 900|peer 10.0.0.2|pd pd_length 56|"
+		                   "privacy prefer_temporary|"),
+		    "  and netcfgd compiles it back the same");
 
 		daemon.kill();
 		daemon.waitForFinished(2000);

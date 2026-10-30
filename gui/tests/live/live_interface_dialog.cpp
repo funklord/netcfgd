@@ -56,6 +56,18 @@ static void check(const char *what, bool condition, const QString &detail = QStr
 	fflush(stdout);
 }
 
+/* Whether `widget` is in `layout` or in a layout nested inside it. */
+static bool in_layout(QLayout *layout, const QWidget *widget)
+{
+	for (int i = 0; layout && i < layout->count(); i++) {
+		QLayoutItem *item = layout->itemAt(i);
+		if (item->widget() == widget || (item->layout() && in_layout(item->layout(), widget))) {
+			return true;
+		}
+	}
+	return false;
+}
+
 int main(int argc, char **argv)
 {
 	QApplication app(argc, argv);
@@ -213,15 +225,25 @@ int main(int argc, char **argv)
 				/* A widget inside a row's layout rather than the row
 				 * itself still counts: the detection row holds the
 				 * combo beside its buttons. */
-				form->getWidgetPosition(const_cast<QWidget *>(fields[i]), &row, &role);
-				bool placed = row >= 0;
-				if (!placed) {
+				/* **And a widget inside a widget that is in a row**, which
+				 * is what the addressing list and the routes are since
+				 * 10.615: each lives in a shared editor, and the editor is
+				 * the row. Each step up must be in its parent's layout, so
+				 * an orphan inside the editor still fails. */
+				const QWidget *at = fields[i];
+				bool placed = false;
+				while (at && !placed) {
+					form->getWidgetPosition(const_cast<QWidget *>(at), &row, &role);
+					placed = row >= 0;
 					for (int r = 0; r < form->rowCount() && !placed; r++) {
 						QLayoutItem *item = form->itemAt(r, QFormLayout::FieldRole);
-						placed = item && item->layout() &&
-						     item->layout()->indexOf(
-						         const_cast<QWidget *>(fields[i])) >= 0;
+						placed = item && item->layout() && in_layout(item->layout(), at);
 					}
+					const QWidget *up = at->parentWidget();
+					if (!placed && (!up || up == &dialog || !in_layout(up->layout(), at))) {
+						break;
+					}
+					at = up;
 				}
 				check(names[i], placed, QStringLiteral("is not in the layout"));
 			}

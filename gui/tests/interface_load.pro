@@ -37,3 +37,7 @@ HEADERS += ../src/interface_dialog.h ../src/hook_dialog.h ../src/probe_dialog.h 
 # build, so these probes tested the GUI against a daemon nothing installs --
 # and one that has never heard of `dhcp_server` (project.md 10.606).
 DEFINES += NETCFGD_BINARY=\\\"$$PWD/../../c/netcfgd\\\"
+
+# The addressing list and route table both dialogs share (10.615).
+SOURCES += ../src/address_editors.cpp
+HEADERS += ../src/address_editors.h

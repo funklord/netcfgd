@@ -24,3 +24,7 @@ SOURCES += live_hook.cpp ../../src/ncfg_connection.cpp ../../src/hook_dialog.cpp
 	../../src/interface_dialog.cpp ../../src/probe_dialog.cpp
 HEADERS += ../../src/ncfg_connection.h ../../src/hook_dialog.h \
 	../../src/interface_dialog.h ../../src/probe_dialog.h
+
+# The addressing list and route table both dialogs share (10.615).
+SOURCES += ../../src/address_editors.cpp
+HEADERS += ../../src/address_editors.h

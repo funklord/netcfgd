@@ -37,6 +37,9 @@
 #include <QString>
 
 class QCheckBox;
+class ncfg_addressing_editor;
+class ncfg_hooks_editor;
+class ncfg_route_editor;
 class QComboBox;
 class QFormLayout;
 class QLabel;
@@ -68,21 +71,8 @@ private slots:
 	 * could hold and that collection did not name was reported as something
 	 * the form could not carry, and the editor refused to save the interface
 	 * at all. Three sources, two addresses, a lease beside a fixed address:
-	 * each is ordinary and none had a shape. */
-	void add_source();
-	void drop_source();
-	void move_source_up();
-	void move_source_down();
-	void add_route();
-	void drop_route();
-	/* The hooks this interface declares. A hook is shell and is edited as
-	 * shell, in `ncfg_hook_dialog`; what is kept here is the list, because a
-	 * drop-in owns the whole `interface` block and this is the form that
-	 * writes it. */
-	void add_hook();
-	void change_hook();
-	void drop_hook();
-	void addressing_changed();
+	 * each is ordinary and none had a shape. The list and the routes are
+	 * `address_editors.h`'s since 10.615, shared with the network dialog. */
 	void detection_changed();
 	/* Open the selected script, or start a new one. A probe is a shell script
 	 * and this edits it as one -- no form could express what a program is
@@ -94,13 +84,6 @@ private:
 	/* The reference the 802.1X password is written as: the one given, or
 	 * `@secret:dot1x-<interface>` (10.612). */
 	QString dot1x_reference_text() const;
-	/* Put one entry into the addressing list, or one row into the routes
-	 * table. Both keep the value on the item rather than in its text, so a
-	 * label can say more than the file does. */
-	void put_source(const QString &kind, const QString &address);
-	void put_route(const QString &destination, const QString &via, int metric);
-	/* One cell of the routes table, trimmed. */
-	QString cell(int row, int column) const;
 	/* Rebuild the list from disk, keeping the selection where it can be kept.
 	 * Called after the editor writes, because a script that was just created
 	 * is not in a list read before it existed. */
@@ -117,36 +100,17 @@ private:
 	ncfg_interface_config existing;
 
 	bool        unknown = false;
-	/* This interface's hooks, with the scripts, and whether they could all be
-	 * read back. **A hook that could not be read is a save refused**: the
-	 * block is written whole, so writing a body this form does not have is
-	 * deleting somebody's script. Reading them needs `admin`, which a client
-	 * below that tier does not have -- and could not save either way. */
-	QList<ncfg_hook_script> hook_list;
-	bool                    hooks_unknown = false;
+	/* Whether the document's hook listing could be had at all; what was in
+	 * the scripts is the hooks editor's to say (`withheld`). */
+	bool hooks_unknown = false;
 
 	void load_hooks();
-	/* One row's label: the phase, and the first line of the script that is
-	 * neither the shebang nor a comment. */
-	void put_hook(const ncfg_hook_script &hook);
 
 
-	/* The addressing sources, in the document's order. The order is not
-	 * decoration: it is what the model calls a composition, and the entries
-	 * are applied in it. */
-	QListWidget *sources;
-	QComboBox   *source_kind;
-	QLineEdit   *source_address;
-	QPushButton *source_add;
-	QPushButton *source_drop;
-	QPushButton *source_up;
-	QPushButton *source_down;
-	/* Destination, via, metric -- the three parts of a route this form
-	 * carries. A route with a table, a scope or a source address is named in
-	 * `unmodelled` rather than shortened to these. */
-	QTableWidget *routes;
-	QPushButton  *route_add;
-	QPushButton  *route_drop;
+	/* The addressing sources, in the document's order -- the order is what
+	 * the model calls a composition -- and the routes. */
+	ncfg_addressing_editor *addressing;
+	ncfg_route_editor      *route_editor;
 	/* This interface's own name resolution: its own scope, not an overlay on
 	 * the global one (0007). */
 	QComboBox   *dns_mode;
@@ -194,10 +158,7 @@ private:
 	QLineEdit   *dhcp_range;
 	QSpinBox    *dhcp_lease;
 	QLineEdit   *dhcp_dns;
-	QListWidget *hooks;
-	QPushButton *hook_add;
-	QPushButton *hook_change;
-	QPushButton *hook_drop;
+	ncfg_hooks_editor *hooks;
 	QComboBox   *detection;
 	/* What the daemon said, kept so the editor can be handed the text rather
 	 * than a path this machine would have to open. */

@@ -7,7 +7,9 @@
 #include <QDialogButtonBox>
 #include <QFontDatabase>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -187,4 +189,169 @@ void ncfg_hook_dialog::submit()
 	phase_key = phase->currentData().toString();
 	body_text = text;
 	accept();
+}
+
+/* ------------------------------------------------------------------------ */
+
+ncfg_hooks_editor::ncfg_hooks_editor(const QString &prefix, QWidget *parent)
+    : QWidget(parent)
+{
+	auto *layout = new QVBoxLayout(this);
+	layout->setContentsMargins(0, 0, 0, 0);
+
+	/* **Every program netcfgd runs for this block.** A hook belongs to the
+	 * block whose lifecycle it follows, and the drop-in a dialog writes owns
+	 * that block whole -- so the dialog is where they can be edited at all. */
+	list = new QListWidget(this);
+	list->setObjectName(prefix + QStringLiteral("_hooks"));
+	list->setSelectionMode(QAbstractItemView::SingleSelection);
+	list->setMaximumHeight(90);
+	layout->addWidget(list);
+
+	auto *row = new QHBoxLayout();
+	add_button = new QPushButton(QStringLiteral("new hook..."), this);
+	add_button->setObjectName(prefix + QStringLiteral("_hook_add"));
+	change_button = new QPushButton(QStringLiteral("view / change"), this);
+	change_button->setObjectName(prefix + QStringLiteral("_hook_change"));
+	drop_button = new QPushButton(QStringLiteral("remove"), this);
+	drop_button->setObjectName(prefix + QStringLiteral("_hook_drop"));
+	row->addWidget(add_button);
+	row->addWidget(change_button);
+	row->addWidget(drop_button);
+	row->addStretch(1);
+	layout->addLayout(row);
+
+	connect(add_button, &QPushButton::clicked, this, &ncfg_hooks_editor::add);
+	connect(change_button, &QPushButton::clicked, this, &ncfg_hooks_editor::change);
+	connect(list, &QListWidget::itemActivated, this, &ncfg_hooks_editor::change);
+	connect(drop_button, &QPushButton::clicked, this, &ncfg_hooks_editor::drop);
+}
+
+QString ncfg_hooks_editor::load(ncfg_connection *connection, const QString &name,
+    bool is_network, int declared)
+{
+	owner = name;
+	network = is_network;
+	scripts.clear();
+	list->clear();
+	unknown = false;
+	if (declared <= 0) {
+		return QString();
+	}
+	const QString noun = network ? QStringLiteral("network") : QStringLiteral("interface");
+
+	QList<ncfg_hook_script> found;
+	QString error;
+	if (!connection->hook_scripts(&found, &error)) {
+		/* Refused, or a daemon that does not know the verb. Either way this
+		 * editor has the hooks' existence and not their bodies. */
+		unknown = true;
+		return QStringLiteral("this %1 has %2 hook(s) and netcfgd would not hand over "
+		                      "what is in them: %3")
+		    .arg(noun)
+		    .arg(declared)
+		    .arg(error);
+	}
+	for (const ncfg_hook_script &script : found) {
+		/* A network's hook has no interface and an interface's no network,
+		 * so matching on the one field is enough to never take the other's. */
+		if ((network ? script.network : script.interface) != owner) {
+			continue;
+		}
+		if (!script.readable) {
+			/* The document names a file netcfgd could not open. Writing the
+			 * block back would write an empty body over it. */
+			unknown = true;
+			return QStringLiteral("netcfgd could not read %1, the script behind this "
+			                      "%2's `%3` hook")
+			    .arg(script.path, noun, script.phase);
+		}
+		scripts.append(script);
+		put(script);
+	}
+	if (scripts.size() != declared) {
+		/* The document says one number and the listing another. Not a state
+		 * anything produces today; refusing is the only safe reading of it. */
+		unknown = true;
+	}
+	return QString();
+}
+
+QStringList ncfg_hooks_editor::blocks() const
+{
+	QStringList out;
+	for (const ncfg_hook_script &hook : scripts) {
+		out << ncfg_hook_block(hook.phase, hook.text);
+	}
+	return out;
+}
+
+/*
+ * One row: the phase, and what the script does.
+ *
+ * The first line that is neither the shebang nor a comment, because a hook
+ * written from the template starts with ten lines explaining the environment
+ * and a list showing ten copies of `#!/bin/sh` says nothing about any of them.
+ */
+void ncfg_hooks_editor::put(const ncfg_hook_script &hook)
+{
+	QString first;
+	const QStringList lines = hook.text.split(QLatin1Char('\n'));
+	for (const QString &line : lines) {
+		const QString trimmed = line.trimmed();
+		if (trimmed.isEmpty() || trimmed.startsWith(QLatin1Char('#'))) {
+			continue;
+		}
+		first = trimmed;
+		break;
+	}
+	auto *item = new QListWidgetItem(
+	    first.isEmpty() ? hook.phase : QStringLiteral("%1 -- %2").arg(hook.phase, first), list);
+	item->setData(Qt::UserRole, hook.phase);
+}
+
+void ncfg_hooks_editor::add()
+{
+	ncfg_hook_dialog dialog(ncfg_hook_script(), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	ncfg_hook_script written;
+	(network ? written.network : written.interface) = owner;
+	written.phase = dialog.chosen_phase();
+	written.text = dialog.chosen_body();
+	written.readable = true;
+	scripts.append(written);
+	put(written);
+}
+
+void ncfg_hooks_editor::change()
+{
+	const int row = list->currentRow();
+	if (row < 0 || row >= scripts.size()) {
+		emit noted(QStringLiteral("choose a hook first"));
+		return;
+	}
+	ncfg_hook_dialog dialog(scripts.at(row), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	ncfg_hook_script changed = scripts.at(row);
+	changed.phase = dialog.chosen_phase();
+	changed.text = dialog.chosen_body();
+	scripts[row] = changed;
+	delete list->takeItem(row);
+	put(changed);
+	list->insertItem(row, list->takeItem(list->count() - 1));
+	list->setCurrentRow(row);
+}
+
+void ncfg_hooks_editor::drop()
+{
+	const int row = list->currentRow();
+	if (row < 0 || row >= scripts.size()) {
+		return;
+	}
+	scripts.removeAt(row);
+	delete list->takeItem(row);
 }

@@ -28,6 +28,7 @@
 #include <QComboBox>
 #include <QFile>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QSpinBox>
 
@@ -200,28 +201,28 @@ int main(int argc, char **argv)
 		        existing.unmodelled.isEmpty(),
 		    existing.unmodelled);
 		ncfg_network_dialog dialog(&connection, existing);
-		auto *addressing = dialog.findChild<QComboBox *>(QStringLiteral("network_addressing"));
+		auto *addressing = dialog.findChild<QListWidget *>(QStringLiteral("network_sources"));
 		auto *metered = dialog.findChild<QCheckBox *>(QStringLiteral("network_metered"));
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
 		check("the dialog opens on its addressing",
-		    addressing && addressing->currentData().toString() == QStringLiteral("dhcp"),
-		    addressing ? addressing->currentData().toString() : QString());
+		    addressing && addressing->count() == 1 &&
+		        addressing->item(0)->data(Qt::UserRole).toString() == QStringLiteral("dhcp"),
+		    addressing ? QString::number(addressing->count()) : QString());
 		check("and on its being metered", metered && metered->isChecked());
 		save->click();
 		ncfg_saved_network_row after;
 		check("and saving it unchanged keeps both",
 		    saved_named(&connection, QStringLiteral("metered"), &after) && after.metered &&
-		        after.addressing == QStringLiteral("dhcp"),
-		    after.addressing);
+		        after.sources.size() == 1 && after.sources[0].source == QStringLiteral("dhcp4"),
+		    QString::number(after.sources.size()));
 		/* Taken away again: the probes share one daemon, and a network left
 		 * here is one the next probe's radio would try to join. */
 		(void)connection.config_delete(QStringLiteral("wifi-metered"), &why);
 	}
 	/* 5. What the dialog refused until 10.612 and carries now: pinned access
 	 *    points, roaming, a route and a resolver scope. Opened on all of it,
-	 *    a changed metric saved with all of it. And the refusal that remains,
-	 *    for two addressing sources -- the dialog's one choice cannot hold
-	 *    them -- which Save must leave as it was. */
+	 *    a changed metric saved with all of it. And two addressing sources,
+	 *    refused until 10.615 when the dialog gained the interface's list. */
 	{
 		QString why;
 		check("a network pinned to two access points, roaming, with a route and dns, is "
@@ -269,13 +270,15 @@ int main(int argc, char **argv)
 		QString why;
 		const QString text = QStringLiteral(
 		    "network \"twice\" {\n\twifi { psk = \"@secret:twice\" }\n"
-		    "\tconfig = [\"dhcp\", \"dhcp6\"]\n}\n");
-		check("a network addressed twice is written by hand",
+		    "\tconfig = [\"dhcp\", \"dhcp6 pd pd_length 60\"]\n"
+		    "\troutes = [\"10.8.0.0/24 via 192.168.1.1 src 192.168.1.20 table 7 onlink\"]\n}\n");
+		check("a network addressed twice, with a route from a source address, is written "
+		      "by hand",
 		    connection.config_put(QStringLiteral("wifi-twice"), text, true, &why), why);
 		ncfg_saved_network_row existing;
-		check("and netcfgd names the addressing as something the dialog cannot carry",
+		check("and netcfgd says the dialog can carry all of it",
 		    saved_named(&connection, QStringLiteral("twice"), &existing) &&
-		        existing.unmodelled == QStringLiteral("addressing (beyond one DHCP source)"),
+		        existing.unmodelled.isEmpty(),
 		    existing.unmodelled);
 		ncfg_network_dialog dialog(&connection, existing);
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
@@ -285,9 +288,54 @@ int main(int argc, char **argv)
 		if (file.open(QIODevice::ReadOnly)) {
 			kept = QString::fromUtf8(file.readAll());
 		}
-		check("so Save is refused and the file is left as it was",
-		    dialog.outcome().isEmpty() && kept == text, kept);
+		check("so Save writes both sources, the delegation request and the whole route",
+		    !dialog.outcome().isEmpty() &&
+		        kept.contains(QStringLiteral("config = [\"dhcp\", \"dhcp6 pd pd_length 60\"]")) &&
+		        kept.contains(QStringLiteral("\"10.8.0.0/24 via 192.168.1.1 src 192.168.1.20 "
+		                                    "table 7 onlink\"")),
+		    kept);
 		(void)connection.config_delete(QStringLiteral("wifi-twice"), &why);
+	}
+
+	/* 5c. A network with a hook, refused until 10.616 on the belief that the
+	 *    GUI could not read a network's hooks. It opens with the hook in its
+	 *    list, and Save writes the script back byte for byte. */
+	{
+		QString why;
+		const QString body = QStringLiteral("#!/bin/sh\nlogger joined the hooked network\n");
+		check("a network with a hook is written by hand",
+		    connection.config_put(QStringLiteral("wifi-hooked"),
+		        QStringLiteral("network \"hooked\" {\n\twifi { psk = \"@secret:hooked\" }\n"
+		                       "\tpost_up {\n") + body + QStringLiteral("}\n}\n"),
+		        true, &why),
+		    why);
+		ncfg_saved_network_row existing;
+		check("and netcfgd says the dialog can carry it, counting one hook",
+		    saved_named(&connection, QStringLiteral("hooked"), &existing) &&
+		        existing.unmodelled.isEmpty() && existing.hook_count == 1,
+		    existing.unmodelled + QStringLiteral(" / ") + QString::number(existing.hook_count));
+		ncfg_network_dialog dialog(&connection, existing);
+		auto *list = dialog.findChild<QListWidget *>(QStringLiteral("network_hooks"));
+		auto *metric = dialog.findChild<QSpinBox *>(QStringLiteral("network_metric"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+		check("the dialog opens with the hook in its list",
+		    list && list->count() == 1 &&
+		        list->item(0)->text() == QStringLiteral("post_up -- logger joined the hooked network"),
+		    list && list->count() ? list->item(0)->text() : QString());
+		metric->setValue(30);
+		save->click();
+		QString text;
+		QList<ncfg_hook_script> scripts;
+		if (connection.hook_scripts(&scripts, &why)) {
+			for (const ncfg_hook_script &one : scripts) {
+				if (one.network == QStringLiteral("hooked")) {
+					text = one.text;
+				}
+			}
+		}
+		check("and Save keeps the script, byte for byte", !dialog.outcome().isEmpty() &&
+		        text == body, dialog.outcome().isEmpty() ? QStringLiteral("<not saved>") : text);
+		(void)connection.config_delete(QStringLiteral("wifi-hooked"), &why);
 	}
 
 	/* 6. An enterprise network, and a passphrase the keyring holds (10.611).

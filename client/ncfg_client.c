@@ -554,6 +554,7 @@ void ncfg_links_free(ncfg_links_t *links)
 		for (size_t at = 0; at < links->items[i].route_count; at++) {
 			free(links->items[i].routes[at].destination);
 			free(links->items[i].routes[at].via);
+			free(links->items[i].routes[at].src);
 		}
 		free(links->items[i].routes);
 	}
@@ -1818,11 +1819,13 @@ void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 		for (size_t at = 0; at < item->source_count; at++) {
 			free(item->sources[at].source);
 			free(item->sources[at].address);
+			free(item->sources[at].options);
 		}
 		free(item->sources);
 		for (size_t at = 0; at < item->route_count; at++) {
 			free(item->routes[at].destination);
 			free(item->routes[at].via);
+			free(item->routes[at].src);
 		}
 		free(item->routes);
 		free(item->dns.mode);
@@ -1915,22 +1918,12 @@ static char *cert_text(const ncfg_json_doc_t *doc, uint32_t source)
 static void network_unmodelled(const ncfg_json_doc_t *doc, uint32_t entry,
                                ncfg_saved_network_t *item)
 {
-	/* `bssid` and `roam` left this list in 10.612, with routes and DNS; a
-	 * network's hooks have no read path in the GUI, which edits an
-	 * interface's through the hook requests, so they stay. */
-	static const char *const beyond[] = { "hooks" };
-	const ncfg_address_source_t *only = item->source_count == 1u ? &item->sources[0] : NULL;
-
-	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
-		if (member_says(doc, entry, beyond[i])) {
-			note_unmodelled(&item->unmodelled, beyond[i]);
-		}
-	}
-	/* The dialog's one addressing choice: none, or a single DHCP source. */
-	if (item->source_count > 1u ||
-	    (only && strcmp(only->source, "dhcp4") != 0 && strcmp(only->source, "dhcp6") != 0)) {
-		note_unmodelled(&item->unmodelled, "addressing (beyond one DHCP source)");
-	}
+	/* `bssid` and `roam` left this list in 10.612, with routes and DNS;
+	 * addressing in 10.615, when the dialog gained the interface's list; and
+	 * `hooks` in 10.616, counted here and read through the hook scripts,
+	 * which have named a network's since 10.34 -- the list had kept them on
+	 * the belief that the GUI could not read them. */
+	item->hook_count = ncfg_json_count(doc, ncfg_json_member(doc, entry, "hooks"));
 
 	/* An enterprise network's 802.1X was here until 10.611, when this struct
 	 * learned to carry it. */
@@ -2863,11 +2856,13 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	for (size_t i = 0; i < config->source_count; i++) {
 		free(config->sources[i].source);
 		free(config->sources[i].address);
+		free(config->sources[i].options);
 	}
 	free(config->sources);
 	for (size_t i = 0; i < config->route_count; i++) {
 		free(config->routes[i].destination);
 		free(config->routes[i].via);
+		free(config->routes[i].src);
 	}
 	free(config->routes);
 	free(config->dns.mode);
@@ -2930,6 +2925,140 @@ static void note_unmodelled(char **list, const char *key)
 	*list = joined;
 }
 
+/* Append ` word` or ` word value` to an entry's options. */
+static int add_option(char **options, const char *word, const char *value)
+{
+	size_t had = strlen(*options);
+	size_t length = had + strlen(word) + (value ? strlen(value) + 1u : 0u) + 2u;
+	char  *grown = realloc(*options, length);
+
+	if (!grown) {
+		return 0;
+	}
+	(void)snprintf(grown + had, length - had, "%s%s%s%s", had ? " " : "", word,
+	    value ? " " : "", value ? value : "");
+	*options = grown;
+	return 1;
+}
+
+static int add_number_option(char **options, const char *word, const ncfg_json_doc_t *doc,
+                             uint32_t entry, const char *member)
+{
+	uint32_t value = ncfg_json_member(doc, entry, member);
+	char     number[24];
+
+	if (ncfg_json_type(doc, value) != NCFG_JSON_NUMBER) {
+		return 1;
+	}
+	(void)snprintf(number, sizeof(number), "%lld", (long long)ncfg_json_int(doc, value, 0));
+	return add_option(options, word, number);
+}
+
+/*
+ * One addressing entry back in the language's words: its `address` (the CIDR,
+ * or the `@pd:` reference) and its `options`, the modifiers after the head.
+ *
+ * **Only what the language can say.** A `dhcp6` mode other than `managed` or
+ * rapid commit, a `dhcp4` with anything set, a delegation's index: the
+ * compiler never produces them, so a document holding one came from
+ * somewhere a form should not overwrite, and it is named rather than dropped.
+ */
+static int source_text(const ncfg_json_doc_t *doc, uint32_t entry, const char *source,
+                       ncfg_address_source_t *out, char **unmodelled)
+{
+	out->options = dup_string("");
+	if (!out->options) {
+		return 0;
+	}
+	if (strcmp(source, "delegated") == 0) {
+		uint32_t prefix = ncfg_json_member(doc, entry, "prefix");
+		char    *from = member_text(doc, prefix, "source");
+		char    *suffix = member_text(doc, entry, "suffix");
+		long long subnet = (long long)ncfg_json_int(doc, ncfg_json_member(doc, prefix, "subnet"), 0);
+		char      text[256];
+
+		if (!from || !suffix) {
+			free(from);
+			free(suffix);
+			return 0;
+		}
+		if (ncfg_json_int(doc, ncfg_json_member(doc, prefix, "index"), 0) != 0) {
+			note_unmodelled(unmodelled, "addressing (a delegation's index)");
+		}
+		if (subnet) {
+			(void)snprintf(text, sizeof(text), "@pd:%s/%lld=%s", from, subnet, suffix);
+		} else {
+			(void)snprintf(text, sizeof(text), "@pd:%s=%s", from, suffix);
+		}
+		free(from);
+		free(suffix);
+		out->address = dup_string(text);
+		return out->address != NULL;
+	}
+	out->address = member_text(doc, entry, "address");
+	if (!out->address) {
+		return 0;
+	}
+	if (strcmp(source, "static") == 0) {
+		char *peer = member_text(doc, entry, "peer");
+		int   ok = peer && (!peer[0] || add_option(&out->options, "peer", peer));
+
+		free(peer);
+		return ok && add_number_option(&out->options, "preferred_lft", doc, entry,
+		                 "preferred_lifetime")
+		    && add_number_option(&out->options, "valid_lft", doc, entry, "valid_lifetime");
+	}
+	if (strcmp(source, "dhcp6") == 0) {
+		uint32_t pd = ncfg_json_member(doc, entry, "prefix_delegation");
+		char    *mode = member_text(doc, entry, "mode");
+
+		if (!mode) {
+			return 0;
+		}
+		if ((mode[0] && strcmp(mode, "managed") != 0)
+		    || ncfg_json_bool(doc, ncfg_json_member(doc, entry, "rapid_commit"), 0)) {
+			note_unmodelled(unmodelled, "addressing (a dhcp6 mode or rapid commit)");
+		}
+		free(mode);
+		if (ncfg_json_type(doc, pd) != NCFG_JSON_OBJECT) {
+			return 1;
+		}
+		char *hint = member_text(doc, pd, "hint");
+		int   ok = hint && add_option(&out->options, "pd", NULL)
+		    && (!hint[0] || add_option(&out->options, "pd_hint", hint))
+		    && add_number_option(&out->options, "pd_length", doc, pd, "length");
+
+		free(hint);
+		return ok;
+	}
+	if (strcmp(source, "slaac") == 0) {
+		char *privacy = member_text(doc, entry, "privacy");
+		int   ok = privacy && (!privacy[0] || strcmp(privacy, "none") == 0
+		                       || add_option(&out->options, "privacy", privacy));
+
+		free(privacy);
+		return ok;
+	}
+	if (strcmp(source, "dhcp4") == 0) {
+		char *mode = member_text(doc, entry, "hostname_mode");
+		char *backend = member_text(doc, entry, "backend");
+		char *client_id = member_text(doc, entry, "client_id");
+		int   beyond = (mode && mode[0] && strcmp(mode, "none") != 0)
+		    || (backend && backend[0] && strcmp(backend, "auto") != 0)
+		    || (client_id && client_id[0])
+		    || ncfg_json_type(doc, ncfg_json_member(doc, entry, "metric")) == NCFG_JSON_NUMBER
+		    || ncfg_json_count(doc, ncfg_json_member(doc, entry, "request_options")) != 0;
+
+		free(mode);
+		free(backend);
+		free(client_id);
+		if (beyond) {
+			note_unmodelled(unmodelled, "addressing (a dhcp4 option)");
+		}
+	}
+	return 1;
+}
+
 /*
  * The `addressing` list, as a form carries it.
  *
@@ -2955,19 +3084,11 @@ static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
 		uint32_t entry = ncfg_json_at(doc, list, i);
 
 		(*into)[i].source = member_text(doc, entry, "source");
-		(*into)[i].address = member_text(doc, entry, "address");
-		if (!(*into)[i].source || !(*into)[i].address) {
+		if (!(*into)[i].source) {
 			return 0;
 		}
-		/* A peer, a lifetime or a delegated prefix has nowhere to go on the
-		 * form, and each is content a save would drop. */
-		char *peer = member_text(doc, entry, "peer");
-		if (peer && peer[0]) {
-			note_unmodelled(unmodelled, "addressing (peer)");
-		}
-		free(peer);
-		if (has_member(doc, entry, "from")) {
-			note_unmodelled(unmodelled, "addressing (delegated)");
+		if (!source_text(doc, entry, (*into)[i].source, &(*into)[i], unmodelled)) {
+			return 0;
 		}
 	}
 	return 1;
@@ -3000,23 +3121,22 @@ static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_route_t *
 		(*into)[i].via = member_text(doc, entry, "via");
 		(*into)[i].metric =
 		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "metric"), -1);
-		if (!(*into)[i].destination || !(*into)[i].via) {
+		(*into)[i].src = member_text(doc, entry, "src");
+		(*into)[i].table = (long long)ncfg_json_int(doc, ncfg_json_member(doc, entry, "table"), -1);
+		(*into)[i].onlink = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "onlink"), 0);
+		if (!(*into)[i].destination || !(*into)[i].via || !(*into)[i].src) {
 			return 0;
 		}
-		static const char *const beyond[] = { "src", "table", "scope", "onlink", "proto" };
+		/* `scope` and `proto` alone (10.615): the route line has no word for
+		 * either, so a document holding one came from somewhere a form
+		 * should not overwrite. `src`, `table` and `onlink` are columns now. */
+		static const char *const beyond[] = { "scope", "proto" };
 		for (size_t j = 0; j < sizeof(beyond) / sizeof(beyond[0]); j++) {
 			uint32_t extra = ncfg_json_member(doc, entry, beyond[j]);
 			if (extra == NCFG_JSON_NONE || ncfg_json_type(doc, extra) == NCFG_JSON_NULL) {
 				continue;
 			}
-			/* `onlink: false` and a null table are the defaults, which are
-			 * not content: a route that states neither is exactly what the
-			 * three columns above can write back. */
-			if (ncfg_json_type(doc, extra) == NCFG_JSON_BOOL
-			    && !ncfg_json_bool(doc, extra, 0)) {
-				continue;
-			}
-			note_unmodelled(unmodelled, "routes (beyond destination, via, metric)");
+			note_unmodelled(unmodelled, "routes (a scope or protocol)");
 			break;
 		}
 	}
@@ -3093,6 +3213,47 @@ static char *joined_field(const ncfg_json_doc_t *doc, uint32_t array, const char
 }
 
 /*
+ * The routing domains, space-joined as the language writes them: `~corp.example`
+ * for an exclusive one, which is resolved's spelling and the compiler's
+ * (lower_global.c). It was refused as unmodelled until 10.615, when the
+ * prefix turned out to be all a form needed to carry it.
+ */
+static char *routing_domains(const ncfg_json_doc_t *doc, uint32_t array)
+{
+	char  *joined = dup_string("");
+	size_t length = 0;
+
+	for (uint32_t i = 0; joined && i < ncfg_json_count(doc, array); i++) {
+		uint32_t    domain = ncfg_json_at(doc, array, i);
+		size_t      one_length = 0;
+		const char *one = ncfg_json_string(doc, ncfg_json_member(doc, domain, "suffix"),
+		    &one_length);
+		int         tilde = ncfg_json_bool(doc, ncfg_json_member(doc, domain, "exclusive"), 0);
+		char       *grown;
+
+		if (!one || !one_length) {
+			continue;
+		}
+		grown = realloc(joined, length + 1u + (size_t)tilde + one_length + 1u);
+		if (!grown) {
+			free(joined);
+			return NULL;
+		}
+		joined = grown;
+		if (length) {
+			joined[length++] = ' ';
+		}
+		if (tilde) {
+			joined[length++] = '~';
+		}
+		memcpy(joined + length, one, one_length);
+		length += one_length;
+		joined[length] = '\0';
+	}
+	return joined;
+}
+
+/*
  * The interface's own DNS scope.
  *
  * A scope that says nothing is not content: `mode` `none` with three empty
@@ -3119,7 +3280,7 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t
 	 * would drop the port somebody chose. */
 	dns->servers = joined_field(doc, ncfg_json_member(doc, scope, "servers"), "addr");
 	dns->search = joined_words(doc, ncfg_json_member(doc, scope, "search"));
-	dns->domains = joined_field(doc, ncfg_json_member(doc, scope, "domains"), "suffix");
+	dns->domains = routing_domains(doc, ncfg_json_member(doc, scope, "domains"));
 	if (!dns->mode || !dns->servers || !dns->search || !dns->domains) {
 		return 0;
 	}
@@ -3129,8 +3290,9 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t
 	if (ncfg_json_count(doc, ncfg_json_member(doc, scope, "options"))) {
 		note_unmodelled(unmodelled, "dns (options)");
 	}
-	/* A server with a port or an SNI name, or an exclusive routing domain:
-	 * each is a field the form does not carry and a save would drop. */
+	/* A server with a port or an SNI name: neither has a spelling in the
+	 * language, which takes a server as a bare address, so a document holding
+	 * one came from somewhere a form should not overwrite. */
 	uint32_t servers = ncfg_json_member(doc, scope, "servers");
 	for (uint32_t i = 0; i < ncfg_json_count(doc, servers); i++) {
 		uint32_t server = ncfg_json_at(doc, servers, i);
@@ -3143,14 +3305,6 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t
 		free(sni);
 		if (named) {
 			note_unmodelled(unmodelled, "dns (a server's sni)");
-			break;
-		}
-	}
-	uint32_t domains = ncfg_json_member(doc, scope, "domains");
-	for (uint32_t i = 0; i < ncfg_json_count(doc, domains); i++) {
-		if (ncfg_json_bool(doc, ncfg_json_member(doc, ncfg_json_at(doc, domains, i),
-		        "exclusive"), 0)) {
-			note_unmodelled(unmodelled, "dns (an exclusive routing domain)");
 			break;
 		}
 	}

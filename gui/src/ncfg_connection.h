@@ -331,7 +331,10 @@ struct ncfg_hook_row {
  * then empty, which is **not** a hook with nothing in it: writing that back
  * would delete somebody's script. */
 struct ncfg_hook_script {
+	/* Whose hook it is: an interface's, or a network's -- exactly one is set,
+	 * which is how an editor never takes the other's for its own. */
 	QString interface;
+	QString network;
 	QString phase;
 	QString path;
 	QString text;
@@ -367,6 +370,9 @@ struct ncfg_globals {
 struct ncfg_address_source_row {
 	QString source;
 	QString address;
+	/* What the language writes after the head -- `preferred_lft 600`,
+	 * `pd pd_length 56` -- carried so a Save writes it back (10.615). */
+	QString options;
 };
 
 /* One route, as the editor's three columns carry it. */
@@ -376,6 +382,11 @@ struct ncfg_route_row {
 	/* -1 where the document states none: 0 is a legal metric, and the
 	 * strongest one. */
 	int     metric = -1;
+	/* A preferred source address, a table other than main (-1), and
+	 * `onlink` (10.615). */
+	QString src;
+	qint64  table = -1;
+	bool    onlink = false;
 };
 
 /* An interface's own name resolution. Empty `mode` means it states none and
@@ -673,10 +684,12 @@ struct ncfg_saved_network_row {
 	bool    autoconnect = false;
 	bool    hidden = false;
 	bool    metered = false;
-	/* The network's own addressing as the network dialog's choice spells it:
-	 * empty for none, `dhcp` or `dhcp6` for a single DHCP source. Anything
-	 * else is in `unmodelled`, and this is empty. */
-	QString addressing;
+	/* The network's own addressing, every source in order, as an interface's
+	 * is: it was one choice of `dhcp` or `dhcp6`, and anything more was
+	 * refused (10.615). Empty leaves addressing to the interface. */
+	QList<ncfg_address_source_row> sources;
+	/* How many hooks it declares; the scripts come from `hook_scripts`. */
+	int hook_count = 0;
 	/* Pinned access points, space-joined; roaming; and the network's own
 	 * routes and resolution, which apply while it is joined (10.612). */
 	QString bssid;

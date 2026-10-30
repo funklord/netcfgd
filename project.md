@@ -12597,6 +12597,74 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.616 A network's hooks are edited, as an interface's are
+
+The last refusal a configuration file could reach, and it rested on a claim
+that had stopped being true: that the GUI had no way to read a network's
+hooks. `hook_scripts` has named the network a hook belongs to since 10.34;
+the Qt row simply dropped the field, so nothing could match on it.
+
+- **One hooks editor**, `ncfg_hooks_editor` in `hook_dialog.h`, moved out of
+  the interface dialog and used by the network dialog too -- the same move
+  10.615 made for addressing and routes. It loads one block's hooks, the
+  interface's or the network's, refuses where a body was withheld or the
+  count disagrees, and writes each back verbatim.
+- **The client counts a network's hooks** (`hook_count`) rather than naming
+  them; the scripts are checked against that count, as an interface's are.
+- `live_network_dialog` writes a network with a `post_up` hook, opens it, saves
+  it with a changed metric, and reads the script back byte for byte.
+
+**After 10.615 and this, nothing a configuration file can say is refused by a
+dialog.** What is still named -- a device's `match`, an `advertise` exec
+backend, a DNS server's port, a route's scope and the rest 10.615 lists -- has
+no spelling in the language, so it can only arrive in a document netcfgd did
+not compile, and the refusal is there for that.
+
+## 10.615 Addressing and routes carry everything the language writes
+
+**Asked for by the holder 2026-10-30** ("go ahead with the remaining dialog
+refusals"). Measured first: which refusals a configuration file can reach at
+all, by compiling each key the reader named. That found worse than refusals.
+
+**Three silent drops on an interface's Save**, the class `wds` was in 10.613.
+The client read each addressing entry's head and nothing after it, and the
+dialog wrote the head back, so a static address's `preferred_lft` and
+`valid_lft`, a `dhcp6` prefix delegation request (`pd`, `pd_hint`,
+`pd_length` -- what a router's uplink asks for) and SLAAC's `privacy` were
+deleted by pressing Save. **And the delegated-address refusal never fired**:
+it looked for a member called `from`, and the document's delegated entry has
+`prefix` and `suffix`.
+
+- **Each entry carries its options**, the language's own words after the head
+  (`peer 10.0.0.2 preferred_lft 600`, `pd pd_length 56`, `privacy
+  prefer_temporary`), and a delegated entry its `@pd:wan0/1=::1/64`. A
+  `dhcp6` mode, rapid commit, any `dhcp4` option and a delegation's index have
+  no spelling in the language, so they are named rather than written.
+- **One addressing list and one route table**, `gui/src/address_editors.h`,
+  used by the interface and network dialogs. The network dialog had one
+  addressing choice and refused a network addressed twice; it has the list
+  now, and the two cannot drift because there is one copy.
+- **A route's `src`, `table` and `onlink` are columns** in both. `scope` and
+  `proto` have no word in a route line and stay named.
+- **An exclusive routing domain reads back as `~suffix`**, the language's
+  spelling, rather than being refused.
+
+**What is still named, and why nothing compiled can reach it**: an `advertise`
+exec backend and a prefix's delegation index, a DNS server's port or SNI,
+resolver options, DNSSEC and transport, a route's scope or protocol, and a
+neighbour's `signal` or `band` (a `neighbour` takes `channel` alone; the
+`signal` and `band` keys are `steering`'s, which 10.607 carries). Each refusal
+guards a document from elsewhere, as `match` does on a device. A network's
+`hooks` were the one a configuration could still reach, and 10.616 took them.
+
+`interface_load`'s refusal case is now this round trip: an interface carrying
+each of the above is opened, saved, and found in the file and in the daemon's
+reading. It found its own fault on the first run -- its "it is saved" check
+matched the note's wording, so a permission refusal read as a save; it asks the
+dialog's outcome now. `live_interface_dialog`'s layout check walks up through
+the shared editor, requiring each step to be in its parent's layout, so an
+orphan inside it still fails.
+
 ## 10.614 The `live_wifi` intermittent was the fake supplicant's `-B`
 
 **Asked for by the holder 2026-10-30** ("go ahead with the live_wifi flake").

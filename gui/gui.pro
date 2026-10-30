@@ -96,6 +96,7 @@ SOURCES += \
 	src/access_view.cpp \
 	src/dns_view.cpp \
 	src/network_dialog.cpp \
+	src/address_editors.cpp \
 	src/linkset_dialog.cpp \
 	src/hook_dialog.cpp \
 	src/interface_dialog.cpp \
@@ -132,6 +133,7 @@ HEADERS += \
 	src/access_view.h \
 	src/dns_view.h \
 	src/network_dialog.h \
+	src/address_editors.h \
 	src/linkset_dialog.h \
 	src/hook_dialog.h \
 	src/interface_dialog.h \

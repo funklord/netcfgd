@@ -766,6 +766,9 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 			route.destination = from_c(networks.items[i].routes[at].destination);
 			route.via = from_c(networks.items[i].routes[at].via);
 			route.metric = networks.items[i].routes[at].metric;
+			route.src = from_c(networks.items[i].routes[at].src);
+			route.table = networks.items[i].routes[at].table;
+			route.onlink = networks.items[i].routes[at].onlink != 0;
 			row.routes << route;
 		}
 		row.dns_mode = from_c(networks.items[i].dns.mode);
@@ -782,13 +785,13 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		row.client_cert = from_c(networks.items[i].client_cert);
 		row.private_key = from_c(networks.items[i].private_key);
 		row.unmodelled = from_c(networks.items[i].unmodelled);
-		if (row.unmodelled.isEmpty() && networks.items[i].source_count == 1) {
-			const char *source = networks.items[i].sources[0].source;
-			/* The document's word is not the language's: `dhcp` compiles to
-			 * `dhcp4`, as the interface dialog's loader also says. */
-			row.addressing = source && strcmp(source, "dhcp4") == 0
-			    ? QStringLiteral("dhcp")
-			    : from_c(source);
+		row.hook_count = int(networks.items[i].hook_count);
+		for (size_t at = 0; at < networks.items[i].source_count; at++) {
+			ncfg_address_source_row source;
+			source.source = from_c(networks.items[i].sources[at].source);
+			source.address = from_c(networks.items[i].sources[at].address);
+			source.options = from_c(networks.items[i].sources[at].options);
+			row.sources << source;
 		}
 		out->append(row);
 	}
@@ -1279,6 +1282,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 		ncfg_address_source_row source;
 		source.source = from_c(found.sources[i].source);
 		source.address = from_c(found.sources[i].address);
+		source.options = from_c(found.sources[i].options);
 		out->sources << source;
 	}
 	for (size_t i = 0; i < found.route_count; i++) {
@@ -1286,6 +1290,9 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 		route.destination = from_c(found.routes[i].destination);
 		route.via = from_c(found.routes[i].via);
 		route.metric = found.routes[i].metric;
+		route.src = from_c(found.routes[i].src);
+		route.table = found.routes[i].table;
+		route.onlink = found.routes[i].onlink != 0;
 		out->routes << route;
 	}
 	out->dns.mode = from_c(found.dns.mode);
@@ -1482,6 +1489,7 @@ bool ncfg_connection::hook_scripts(QList<ncfg_hook_script> *out, QString *error)
 	for (size_t i = 0; i < found.count; i++) {
 		ncfg_hook_script row;
 		row.interface = from_c(found.items[i].interface);
+		row.network = from_c(found.items[i].network);
 		row.phase = from_c(found.items[i].phase);
 		row.path = from_c(found.items[i].path);
 		row.text = from_c(found.items[i].text);

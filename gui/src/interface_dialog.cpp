@@ -1,5 +1,7 @@
 #include "interface_dialog.h"
 
+#include "address_editors.h"
+
 #include "hook_dialog.h"
 #include "probe_dialog.h"
 
@@ -104,20 +106,6 @@ struct choice {
 	const char *key;
 };
 
-/* What an interface may be given. `dhcp` first because it is what a wired port
- * almost always wants, and "none" last because it is the deliberate one. */
-/* The sources an `addressing` list can hold, spelled as the config language
- * spells them. `null` is deliberately absent: "no address" is an empty list
- * rather than a source, which is what `config = "null"` compiles to. */
-const choice sources[] = {
-	{ "DHCP (IPv4)", "dhcp" },
-	{ "DHCPv6", "dhcp6" },
-	{ "SLAAC (IPv6)", "slaac" },
-	{ "a fixed address", "static" },
-	{ "link-local only", "link-local" },
-	{ "reported by a helper", "reported" },
-};
-
 /* Name resolution for this interface. "leave to the global policy" is first
  * and is the ordinary answer: an interface that states no scope is one the
  * host-wide `dns` block answers for. */
@@ -185,65 +173,13 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	auto *form = new QFormLayout();
 	form_layout = form;
 
-	/* **The addressing list, as a list.** An interface composes its addresses
-	 * out of several sources -- a lease and a fixed address, DHCP and SLAAC,
-	 * a helper's report -- and the order is applied in. One combo naming a
-	 * handful of arrangements could not carry that, and everything it could
-	 * not carry was refused rather than shown. */
-	this->sources = new QListWidget(this);
-	this->sources->setObjectName(QStringLiteral("iface_sources"));
-	this->sources->setSelectionMode(QAbstractItemView::SingleSelection);
-	this->sources->setMaximumHeight(110);
-	form->addRow(QStringLiteral("addressing"), this->sources);
-
-	auto *source_row = new QHBoxLayout();
-	source_kind = new QComboBox(this);
-	source_kind->setObjectName(QStringLiteral("iface_source_kind"));
-	fill(source_kind, ::sources, sizeof(::sources) / sizeof(::sources[0]));
-	source_address = new QLineEdit(this);
-	source_address->setObjectName(QStringLiteral("iface_source_address"));
-	source_address->setPlaceholderText(QStringLiteral("192.0.2.10/24"));
-	source_add = new QPushButton(QStringLiteral("add"), this);
-	source_add->setObjectName(QStringLiteral("iface_source_add"));
-	source_drop = new QPushButton(QStringLiteral("remove"), this);
-	source_drop->setObjectName(QStringLiteral("iface_source_drop"));
-	source_up = new QPushButton(QStringLiteral("up"), this);
-	source_up->setObjectName(QStringLiteral("iface_source_up"));
-	source_down = new QPushButton(QStringLiteral("down"), this);
-	source_down->setObjectName(QStringLiteral("iface_source_down"));
-	source_row->addWidget(source_kind);
-	source_row->addWidget(source_address, 1);
-	source_row->addWidget(source_add);
-	source_row->addWidget(source_drop);
-	source_row->addWidget(source_up);
-	source_row->addWidget(source_down);
-	form->addRow(QString(), source_row);
-
-	/* Routes, as a table rather than one gateway box. A machine with a second
-	 * subnet behind it has a static route to it, and the one box could only
-	 * hold a default -- so an interface with any other route was refused. */
-	this->routes = new QTableWidget(0, 3, this);
-	this->routes->setObjectName(QStringLiteral("iface_routes"));
-	QStringList route_columns;
-	route_columns << QStringLiteral("destination") << QStringLiteral("via")
-	              << QStringLiteral("metric");
-	this->routes->setHorizontalHeaderLabels(route_columns);
-	this->routes->verticalHeader()->setVisible(false);
-	this->routes->horizontalHeader()->setStretchLastSection(true);
-	this->routes->setSelectionBehavior(QAbstractItemView::SelectRows);
-	this->routes->setSelectionMode(QAbstractItemView::SingleSelection);
-	this->routes->setMaximumHeight(110);
-	form->addRow(QStringLiteral("routes"), this->routes);
-
-	auto *route_row = new QHBoxLayout();
-	route_add = new QPushButton(QStringLiteral("add route"), this);
-	route_add->setObjectName(QStringLiteral("iface_route_add"));
-	route_drop = new QPushButton(QStringLiteral("remove route"), this);
-	route_drop->setObjectName(QStringLiteral("iface_route_drop"));
-	route_row->addWidget(route_add);
-	route_row->addWidget(route_drop);
-	route_row->addStretch(1);
-	form->addRow(QString(), route_row);
+	/* **The addressing list and the routes**, shared with the network dialog
+	 * since 10.615 so the two cannot drift: the network dialog had one
+	 * addressing choice and its own copy of a three-column route table. */
+	addressing = new ncfg_addressing_editor(QStringLiteral("iface"), this);
+	form->addRow(QStringLiteral("addressing"), addressing);
+	route_editor = new ncfg_route_editor(QStringLiteral("iface"), this);
+	form->addRow(QStringLiteral("routes"), route_editor);
 
 	dns_mode = new QComboBox(this);
 	dns_mode->setObjectName(QStringLiteral("iface_dns_mode"));
@@ -519,27 +455,10 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	                        "say; blank for no guard"));
 	form->addRow(QStringLiteral("guard"), guard);
 
-	/* **Every program netcfgd runs for this interface.** A hook belongs to the
-	 * interface whose lifecycle it follows, and the drop-in this form writes
-	 * owns that block whole -- so this is where they can be edited at all. */
-	hooks = new QListWidget(this);
-	hooks->setObjectName(QStringLiteral("iface_hooks"));
-	hooks->setSelectionMode(QAbstractItemView::SingleSelection);
-	hooks->setMaximumHeight(90);
+	/* **Every program netcfgd runs for this interface**, as a list: the shared
+	 * editor since 10.616, when the network dialog gained one too. */
+	hooks = new ncfg_hooks_editor(QStringLiteral("iface"), this);
 	form->addRow(QStringLiteral("hooks"), hooks);
-
-	auto *hook_row = new QHBoxLayout();
-	hook_add = new QPushButton(QStringLiteral("new hook..."), this);
-	hook_add->setObjectName(QStringLiteral("iface_hook_add"));
-	hook_change = new QPushButton(QStringLiteral("view / change"), this);
-	hook_change->setObjectName(QStringLiteral("iface_hook_change"));
-	hook_drop = new QPushButton(QStringLiteral("remove"), this);
-	hook_drop->setObjectName(QStringLiteral("iface_hook_drop"));
-	hook_row->addWidget(hook_add);
-	hook_row->addWidget(hook_change);
-	hook_row->addWidget(hook_drop);
-	hook_row->addStretch(1);
-	form->addRow(QString(), hook_row);
 
 	/* In a scroll area since 10.612: the router keys made the form taller
 	 * than a laptop's screen, and a row below the edge is a row nobody can
@@ -563,26 +482,13 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_interface_dialog::submit);
-	connect(source_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_source);
-	connect(source_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_source);
-	connect(source_up, &QPushButton::clicked, this, &ncfg_interface_dialog::move_source_up);
-	connect(source_down, &QPushButton::clicked, this, &ncfg_interface_dialog::move_source_down);
-	connect(hook_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_hook);
-	connect(hook_change, &QPushButton::clicked, this, &ncfg_interface_dialog::change_hook);
-	connect(hooks, &QListWidget::itemActivated, this, &ncfg_interface_dialog::change_hook);
-	connect(hook_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_hook);
-	connect(route_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_route);
-	connect(route_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_route);
-	connect(source_kind, &QComboBox::currentIndexChanged, this,
-	    &ncfg_interface_dialog::addressing_changed);
-	connect(this->sources, &QListWidget::itemSelectionChanged, this,
-	    &ncfg_interface_dialog::addressing_changed);
+	connect(addressing, &ncfg_addressing_editor::noted, note, &QLabel::setText);
+	connect(hooks, &ncfg_hooks_editor::noted, note, &QLabel::setText);
 	connect(detection, &QComboBox::currentIndexChanged, this,
 	    &ncfg_interface_dialog::detection_changed);
 
 	load_existing();
 	load_hooks();
-	addressing_changed();
 	detection_changed();
 }
 
@@ -623,18 +529,8 @@ void ncfg_interface_dialog::load_existing()
 		return;
 	}
 
-	for (const ncfg_address_source_row &source : existing.sources) {
-		/* The document's word for a source is not always the config
-		 * language's: it compiles `dhcp` into `dhcp4`, and writing that back
-		 * would be writing a spelling the file never had. */
-		const QString kind = source.source == QLatin1String("dhcp4")
-		    ? QStringLiteral("dhcp")
-		    : source.source;
-		put_source(kind, source.address);
-	}
-	for (const ncfg_route_row &route : existing.routes) {
-		put_route(route.destination, route.via, route.metric);
-	}
+	addressing->load(existing.sources);
+	route_editor->load(existing.routes);
 	const int mode = dns_mode->findData(existing.dns.mode);
 	if (mode >= 0) {
 		dns_mode->setCurrentIndex(mode);
@@ -713,18 +609,9 @@ void ncfg_interface_dialog::load_existing()
 }
 
 /*
- * This interface's hooks, and their scripts.
- *
- * **Two questions, two tiers, and both answers are needed.** Whether this
- * interface has hooks comes from the document, which is `observe`; what is in
- * them comes from the file the compiler materialised, which is `admin` --
- * netcfgd keeps that file at 0700 because it runs as root. A client that can
- * see the first and not the second knows there is a hook and not what it says,
- * and must refuse to save rather than write a block without it.
- *
- * That is also the honest answer for a client below `admin`: it could not have
- * saved anything anyway, since writing a hook is the production `check_content`
- * refuses from anybody but root.
+ * This interface's hooks, and their scripts: how many the document declares,
+ * which is `observe`, and then the bodies, which are `admin` -- the editor's
+ * `load` says why both are needed.
  */
 void ncfg_interface_dialog::load_hooks()
 {
@@ -740,112 +627,10 @@ void ncfg_interface_dialog::load_hooks()
 			mine++;
 		}
 	}
-	if (mine == 0) {
-		return;
+	const QString said = hooks->load(connection, interface, false, mine);
+	if (!said.isEmpty()) {
+		note->setText(said);
 	}
-
-	QList<ncfg_hook_script> scripts;
-	if (!connection->hook_scripts(&scripts, &error)) {
-		/* Refused, or a daemon that does not know the verb. Either way this
-		 * form has the hooks' existence and not their bodies. */
-		hooks_unknown = true;
-		note->setText(QStringLiteral("this interface has %1 hook(s) and netcfgd would not "
-		              "hand over what is in them: %2")
-		                  .arg(mine)
-		                  .arg(error));
-		return;
-	}
-	for (const ncfg_hook_script &script : scripts) {
-		if (script.interface != interface) {
-			continue;
-		}
-		if (!script.readable) {
-			/* The document names a file netcfgd could not open. Writing the
-			 * block back would write an empty body over it. */
-			hooks_unknown = true;
-			note->setText(QStringLiteral("netcfgd could not read %1, the script behind "
-			              "this interface's `%2` hook")
-			                  .arg(script.path, script.phase));
-			return;
-		}
-		hook_list.append(script);
-		put_hook(script);
-	}
-	if (hook_list.size() != mine) {
-		/* The document says one number and the listing another. Not a state
-		 * anything produces today; refusing is the only safe reading of it. */
-		hooks_unknown = true;
-	}
-}
-
-/*
- * One row: the phase, and what the script does.
- *
- * The first line that is neither the shebang nor a comment, because a hook
- * written from the template starts with ten lines explaining the environment
- * and a list showing ten copies of `#!/bin/sh` says nothing about any of them.
- */
-void ncfg_interface_dialog::put_hook(const ncfg_hook_script &hook)
-{
-	QString first;
-	const QStringList lines = hook.text.split(QLatin1Char('\n'));
-	for (const QString &line : lines) {
-		const QString trimmed = line.trimmed();
-		if (trimmed.isEmpty() || trimmed.startsWith(QLatin1Char('#'))) {
-			continue;
-		}
-		first = trimmed;
-		break;
-	}
-	auto *item = new QListWidgetItem(
-	    first.isEmpty() ? hook.phase : QStringLiteral("%1 -- %2").arg(hook.phase, first), hooks);
-	item->setData(Qt::UserRole, hook.phase);
-}
-
-void ncfg_interface_dialog::add_hook()
-{
-	ncfg_hook_dialog dialog(ncfg_hook_script(), this);
-	if (dialog.exec() != QDialog::Accepted) {
-		return;
-	}
-	ncfg_hook_script written;
-	written.interface = interface;
-	written.phase = dialog.chosen_phase();
-	written.text = dialog.chosen_body();
-	written.readable = true;
-	hook_list.append(written);
-	put_hook(written);
-}
-
-void ncfg_interface_dialog::change_hook()
-{
-	const int row = hooks->currentRow();
-	if (row < 0 || row >= hook_list.size()) {
-		note->setText(QStringLiteral("choose a hook first"));
-		return;
-	}
-	ncfg_hook_dialog dialog(hook_list.at(row), this);
-	if (dialog.exec() != QDialog::Accepted) {
-		return;
-	}
-	ncfg_hook_script changed = hook_list.at(row);
-	changed.phase = dialog.chosen_phase();
-	changed.text = dialog.chosen_body();
-	hook_list[row] = changed;
-	delete hooks->takeItem(row);
-	put_hook(changed);
-	hooks->insertItem(row, hooks->takeItem(hooks->count() - 1));
-	hooks->setCurrentRow(row);
-}
-
-void ncfg_interface_dialog::drop_hook()
-{
-	const int row = hooks->currentRow();
-	if (row < 0 || row >= hook_list.size()) {
-		return;
-	}
-	hook_list.removeAt(row);
-	delete hooks->takeItem(row);
 }
 
 /*
@@ -942,99 +727,6 @@ void ncfg_interface_dialog::edit_detection()
 	note->setText(dialog.outcome());
 }
 
-void ncfg_interface_dialog::addressing_changed()
-{
-	/* The address box belongs to one kind of source. Enabled rather than
-	 * hidden, so the row does not jump about while somebody is using it. */
-	const bool fixed = source_kind->currentData().toString() == QStringLiteral("static");
-	source_address->setEnabled(fixed);
-	const int row = sources->currentRow();
-	source_drop->setEnabled(row >= 0);
-	source_up->setEnabled(row > 0);
-	source_down->setEnabled(row >= 0 && row + 1 < sources->count());
-}
-
-/* One entry in the addressing list: the kind, and the address where it has
- * one. The kind is kept on the item rather than parsed back out of its text,
- * which is the mistake that would make a translated label unwritable. */
-void ncfg_interface_dialog::put_source(const QString &kind, const QString &address)
-{
-	const QString shown = address.isEmpty()
-	    ? kind
-	    : QStringLiteral("%1  %2").arg(kind, address);
-	auto *item = new QListWidgetItem(shown, sources);
-	item->setData(Qt::UserRole, kind);
-	item->setData(Qt::UserRole + 1, address);
-}
-
-void ncfg_interface_dialog::put_route(const QString &destination, const QString &via, int metric)
-{
-	const int row = routes->rowCount();
-	routes->insertRow(row);
-	routes->setItem(row, 0, new QTableWidgetItem(destination));
-	routes->setItem(row, 1, new QTableWidgetItem(via));
-	routes->setItem(row, 2,
-	    new QTableWidgetItem(metric >= 0 ? QString::number(metric) : QString()));
-}
-
-void ncfg_interface_dialog::add_source()
-{
-	const QString kind = source_kind->currentData().toString();
-	const QString address = source_address->text().trimmed();
-
-	if (kind == QLatin1String("static") && address.isEmpty()) {
-		note->setText(QStringLiteral("a fixed address needs an address"));
-		return;
-	}
-	put_source(kind, kind == QLatin1String("static") ? address : QString());
-	source_address->clear();
-	addressing_changed();
-}
-
-void ncfg_interface_dialog::drop_source()
-{
-	delete sources->takeItem(sources->currentRow());
-	addressing_changed();
-}
-
-void ncfg_interface_dialog::move_source_up()
-{
-	const int row = sources->currentRow();
-	if (row <= 0) {
-		return;
-	}
-	sources->insertItem(row - 1, sources->takeItem(row));
-	sources->setCurrentRow(row - 1);
-	addressing_changed();
-}
-
-void ncfg_interface_dialog::move_source_down()
-{
-	const int row = sources->currentRow();
-	if (row < 0 || row + 1 >= sources->count()) {
-		return;
-	}
-	sources->insertItem(row + 1, sources->takeItem(row));
-	sources->setCurrentRow(row + 1);
-	addressing_changed();
-}
-
-void ncfg_interface_dialog::add_route()
-{
-	/* An empty row rather than a dialog: three cells the operator fills in,
-	 * and `submit` refuses one with no destination. */
-	put_route(QStringLiteral("default"), QString(), -1);
-	routes->setCurrentCell(routes->rowCount() - 1, 1);
-}
-
-void ncfg_interface_dialog::drop_route()
-{
-	const int row = routes->currentRow();
-	if (row >= 0) {
-		routes->removeRow(row);
-	}
-}
-
 void ncfg_interface_dialog::detection_changed()
 {
 	const QString how = detection->currentData().toString();
@@ -1076,13 +768,6 @@ void ncfg_interface_dialog::detection_changed()
 	}
 }
 
-/* One cell of the routes table, trimmed, empty where there is none. */
-QString ncfg_interface_dialog::cell(int row, int column) const
-{
-	const QTableWidgetItem *item = routes->item(row, column);
-	return item ? item->text().trimmed() : QString();
-}
-
 QString ncfg_interface_dialog::block_text() const
 {
 	QStringList body;
@@ -1091,34 +776,14 @@ QString ncfg_interface_dialog::block_text() const
 	 * contributes; a fixed address is written as the address itself, which is
 	 * how the language spells that source. An empty list is `null`, which is
 	 * what a bridge member wants and what "no address at all" means. */
-	QStringList entries;
-	for (int row = 0; row < sources->count(); row++) {
-		const QString kind = sources->item(row)->data(Qt::UserRole).toString();
-		const QString address = sources->item(row)->data(Qt::UserRole + 1).toString();
-		entries << QStringLiteral("\"%1\"").arg(kind == QLatin1String("static") ? address
-		                                                                       : kind);
-	}
+	const QStringList entries = addressing->entries();
 	if (entries.isEmpty()) {
 		body << QStringLiteral("\tconfig = \"null\"");
 	} else {
 		body << QStringLiteral("\tconfig = [%1]").arg(entries.join(QStringLiteral(", ")));
 	}
 
-	QStringList lines;
-	for (int row = 0; row < routes->rowCount(); row++) {
-		const QString destination = cell(row, 0);
-		if (destination.isEmpty()) {
-			continue;
-		}
-		QString line = destination;
-		if (!cell(row, 1).isEmpty()) {
-			line += QStringLiteral(" via %1").arg(cell(row, 1));
-		}
-		if (!cell(row, 2).isEmpty()) {
-			line += QStringLiteral(" metric %1").arg(cell(row, 2));
-		}
-		lines << QStringLiteral("\"%1\"").arg(line);
-	}
+	const QStringList lines = route_editor->lines();
 	if (!lines.isEmpty()) {
 		body << QStringLiteral("\troutes = [%1]").arg(lines.join(QStringLiteral(", ")));
 	}
@@ -1309,9 +974,7 @@ QString ncfg_interface_dialog::block_text() const
 	 * language keeps byte for byte, so it is written unindented -- see
 	 * `ncfg_hook_block`, where the reason is that an indented `#!/bin/sh` is
 	 * not a shebang and the materialiser would add another on every save. */
-	for (const ncfg_hook_script &hook : hook_list) {
-		body << ncfg_hook_block(hook.phase, hook.text);
-	}
+	body << hooks->blocks();
 
 	QStringList block;
 	block << QStringLiteral("# Written by netcfgd's gui. Ordinary netcfgd configuration:");
@@ -1335,7 +998,7 @@ QString ncfg_interface_dialog::dot1x_reference_text() const
 
 void ncfg_interface_dialog::submit()
 {
-	const QLineEdit *values[] = { source_address, dns_servers, dns_search, dns_domains,
+	const QLineEdit *values[] = { dns_servers, dns_search, dns_domains,
 		probe_command, probe_args, dhcp_range, dhcp_dns, advertise_prefixes, ipv6_token,
 		guard, dot1x_identity, dot1x_anonymous_identity, dot1x_phase2, dot1x_ca_cert,
 		dot1x_domain_suffix_match, dot1x_client_cert, dot1x_private_key, dot1x_reference };
@@ -1371,12 +1034,9 @@ void ncfg_interface_dialog::submit()
 			return;
 		}
 	}
-	for (int row = 0; row < routes->rowCount(); row++) {
-		if (cell(row, 0).isEmpty()) {
-			note->setText(QStringLiteral("a route needs a destination: `default`, or a "
-			              "network like 10.0.0.0/8"));
-			return;
-		}
+	if (!route_editor->refusal().isEmpty()) {
+		note->setText(route_editor->refusal());
+		return;
 	}
 	if (detection->currentData().toString() == QStringLiteral("command") &&
 	    !probe_command->text().trimmed().startsWith(QLatin1Char('/'))) {
@@ -1401,7 +1061,7 @@ void ncfg_interface_dialog::submit()
 	 * whole, so saving would write the hook with nothing in it -- which is to
 	 * say, delete the script. The tier is usually why: reading a hook body is
 	 * `admin`, and a client below it could not have saved this anyway. */
-	if (hooks_unknown) {
+	if (hooks_unknown || hooks->withheld()) {
 		note->setText(QStringLiteral(
 		    "this interface declares a hook whose script netcfgd would not hand over, "
 		    "so saving would write the hook empty. Editing a hook needs root, which is "

@@ -34,6 +34,9 @@ class QCheckBox;
 class QComboBox;
 class QFormLayout;
 class QTableWidget;
+class ncfg_addressing_editor;
+class ncfg_route_editor;
+class ncfg_hooks_editor;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -93,7 +96,9 @@ private:
 	QCheckBox   *autoconnect;
 	QCheckBox   *hidden;
 	QCheckBox   *metered;
-	QComboBox   *addressing;
+	/* The addressing list and route table the interface dialog uses too
+	 * (10.615). */
+	ncfg_addressing_editor *addressing;
 	/* Fields since 10.612: the access points it is pinned to, roaming, and
 	 * the network's own routes and resolution. */
 	QLineEdit    *bssid;
@@ -101,7 +106,9 @@ private:
 	QSpinBox     *roam_signal;
 	QSpinBox     *roam_interval;
 	QSpinBox     *roam_slow_interval;
-	QTableWidget *routes;
+	ncfg_route_editor *routes;
+	/* The network's hooks, and whether their scripts could be read (10.616). */
+	ncfg_hooks_editor *hooks;
 	QComboBox    *dns_mode;
 	QLineEdit    *dns_servers;
 	QLineEdit    *dns_search;

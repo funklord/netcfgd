@@ -2302,11 +2302,13 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
 	    "{\"id\":\"office\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
 	    "\"autoconnect\":true,\"metered\":false,\"bssid\":[\"02:00:00:00:00:01\"],"
-	    "\"addressing\":[{\"source\":\"dhcp4\"},{\"source\":\"dhcp6\"}],"
+	    "\"addressing\":[{\"source\":\"dhcp4\"},{\"source\":\"dhcp6\","
+	    "\"mode\":\"managed\",\"prefix_delegation\":{\"length\":56}}],"
 	    "\"routes\":[{\"destination\":\"10.0.0.0/8\",\"via\":\"192.168.1.1\"}],"
 	    "\"hooks\":[]},"
 	    "{\"id\":\"plain\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
-	    "\"autoconnect\":true,\"metered\":false,\"addressing\":[{\"source\":\"dhcp6\"}],"
+	    "\"autoconnect\":true,\"metered\":false,\"addressing\":[{\"source\":\"dhcp6\","
+	    "\"mode\":\"other_conf\"}],"
 	    "\"routes\":[],\"hooks\":[]}"
 	    "],\"globals\":{}}\n"
 	    "{\"response\":\"document\",\"schema_version\":1,\"access_points\":["
@@ -2324,13 +2326,23 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	int got = ncfg_client_saved_networks(staged.client, &networks, err, sizeof(err));
 	ok("the saved networks arrive", got == 1 && networks.count == 2, err);
 	if (got == 1 && networks.count == 2) {
-		/* A pinned BSSID and a route are fields since 10.612; two addressing
-		 * sources are still beyond the dialog's one choice. */
-		equals("two addressing sources are named, the BSSID and the route are not",
-		    networks.items[0].unmodelled, "addressing (beyond one DHCP source)");
+		/* A pinned BSSID and a route are fields since 10.612, and two
+		 * addressing sources since 10.615, when the network dialog gained the
+		 * interface's list. */
+		equals("a network addressed twice, pinned and routed, names nothing",
+		    networks.items[0].unmodelled, "");
 		equals("  the pinned BSSID is read", networks.items[0].bssid, "02:00:00:00:00:01");
-		equals("and a network the dialog can write whole names nothing",
-		    networks.items[1].unmodelled, "");
+		ok("  both sources are read", networks.items[0].source_count == 2, NULL);
+		if (networks.items[0].source_count == 2) {
+			/* **The part after the head**, which Save dropped until 10.615:
+			 * a prefix delegation request read as the language writes it. */
+			equals("  with the dhcp6 one's prefix delegation as its options",
+			    networks.items[0].sources[1].options, "pd pd_length 56");
+		}
+		/* A `dhcp6` mode the language cannot write -- it has no word for one
+		 * -- is named rather than dropped by a form that writes `dhcp6`. */
+		equals("and a dhcp6 mode no configuration can say is named",
+		    networks.items[1].unmodelled, "addressing (a dhcp6 mode or rapid commit)");
 	}
 	ncfg_saved_networks_free(&networks);
 

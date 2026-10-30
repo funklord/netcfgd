@@ -37,3 +37,11 @@ SOURCES += live_wifi.cpp ../../src/ncfg_connection.cpp ../../src/wifi_view.cpp \
 HEADERS += ../../src/ncfg_connection.h ../../src/wifi_view.h \
 	../../src/add_network_dialog.h ../../src/network_dialog.h \
 	../../src/access_point_dialog.h
+
+# The addressing list and route table both dialogs share (10.615).
+SOURCES += ../../src/address_editors.cpp
+HEADERS += ../../src/address_editors.h
+
+# The network dialog carries hooks with the shared editor (10.616).
+SOURCES += ../../src/hook_dialog.cpp
+HEADERS += ../../src/hook_dialog.h

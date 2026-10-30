@@ -152,6 +152,12 @@ typedef struct {
 	/* -1 where none is stated: 0 is a legal metric and the strongest one, so
 	 * an absent metric must not arrive as 0. */
 	int   metric;
+	/* The rest a configured route can say (10.615): a preferred source
+	 * address ("" for none), a table (-1 for the main one) and `onlink`. An
+	 * observed route leaves them at "", -1 and 0. */
+	char     *src;
+	long long table;
+	int       onlink;
 } ncfg_route_t;
 
 /* One interface, as `status` reports it. */
@@ -1280,11 +1286,21 @@ void ncfg_globals_free(ncfg_globals_t *globals);
  * something a form could not carry, and the editor refused to save the
  * interface at all. The model's own word for it is a list, so this is one.
  *
- * `address` is the CIDR for a `static` source and "" for every other kind.
+ * `address` is the CIDR for a `static` source, the `@pd:` reference as the
+ * language spells it for a `delegated` one (`@pd:wan0/1=::1/64`), and "" for
+ * every other kind.
+ *
+ * `options` is the rest of the entry as the language writes it after the
+ * head -- `peer 10.0.0.2 preferred_lft 600`, `pd pd_length 56`, `privacy
+ * prefer_temporary` -- and "" for an entry with none. **It used to be
+ * absent**, and a form that wrote the head back alone dropped a static
+ * address's lifetimes, a `dhcp6` prefix delegation request and SLAAC's
+ * privacy on Save (10.615).
  */
 typedef struct {
-	char *source; /* dhcp4, dhcp6, slaac, static, reported, null */
+	char *source; /* dhcp4, dhcp6, slaac, static, delegated, reported, link_local */
 	char *address;
+	char *options;
 } ncfg_address_source_t;
 
 
@@ -2111,11 +2127,16 @@ typedef struct {
 	/*
 	 * What the network dialog has no field for, comma-joined, by the
 	 * interface editor's rule: only what a save would delete. Empty for a
-	 * network that dialog can write back whole. A pinned `bssid`, `roam`,
-	 * `hooks`, any route or DNS, and addressing beyond one DHCP source
-	 * (project.md 10.606).
+	 * network that dialog can write back whole. It named a pinned `bssid`,
+	 * `roam`, routes, DNS, addressing beyond one DHCP source and `hooks`
+	 * (10.606); each is a field now (10.612, 10.615, 10.616), and what is
+	 * left is what the language cannot write.
 	 */
 	char                  *unmodelled;
+	/* How many hooks the network declares. The bodies are `admin` and come
+	 * from `ncfg_client_hook_scripts`, which names the network; this is the
+	 * count a dialog checks them against (10.616). */
+	size_t                 hook_count;
 } ncfg_saved_network_t;
 
 /*

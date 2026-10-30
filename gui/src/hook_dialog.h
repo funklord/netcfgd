@@ -26,9 +26,11 @@
 
 #include <QDialog>
 #include <QString>
+#include <QWidget>
 
 class QComboBox;
 class QLabel;
+class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 
@@ -90,5 +92,63 @@ QString ncfg_hook_block(const QString &phase, const QString &body);
  * operator wrote shell on. Cheaper to say so beside the field.
  */
 bool ncfg_hook_body_terminates_early(const QString &body);
+
+/*
+ * The hooks one block declares, as a list: shown, added, changed, removed.
+ *
+ * **Shared by the interface and network dialogs** (10.616). The interface
+ * dialog had this; a network's hooks had no editor, on the reasoning that the
+ * GUI had no way to read them -- which stopped being true when 10.34 made
+ * `hook_scripts` list a network's too, so a network carrying a hook was
+ * refused for a reason that was no longer so.
+ *
+ * `prefix` names the widgets (`iface_hooks`), which the probes find them by.
+ */
+class ncfg_hooks_editor : public QWidget {
+	Q_OBJECT
+
+public:
+	ncfg_hooks_editor(const QString &prefix, QWidget *parent = nullptr);
+
+	/*
+	 * Load the hooks one block declares: an interface's, or a network's when
+	 * `network` is true. `declared` is how many the document says it has.
+	 *
+	 * **Two questions, two tiers, and both answers are needed.** Whether
+	 * there are hooks comes from the document, which is `observe`; what is in
+	 * them comes from the file the compiler materialised, which is `admin` --
+	 * netcfgd keeps it at 0700 because it runs as root. An editor that can see
+	 * the first and not the second knows there is a hook and not what it
+	 * says, and `withheld` is then true: its block must not be saved, since
+	 * that would write the hook empty.
+	 *
+	 * Answers a sentence for the dialog's note where that happened, and
+	 * empty where every script was read.
+	 */
+	QString load(ncfg_connection *connection, const QString &owner, bool network, int declared);
+	/* Each hook as its block, verbatim, in order: see `ncfg_hook_block`. */
+	QStringList blocks() const;
+	bool        withheld() const { return unknown; }
+
+signals:
+	void noted(const QString &text);
+
+private slots:
+	void add();
+	void change();
+	void drop();
+
+private:
+	void put(const ncfg_hook_script &hook);
+
+	QListWidget            *list;
+	QPushButton            *add_button;
+	QPushButton            *change_button;
+	QPushButton            *drop_button;
+	QList<ncfg_hook_script> scripts;
+	QString                 owner;
+	bool                    network = false;
+	bool                    unknown = false;
+};
 
 #endif /* NCFG_HOOK_DIALOG_H */

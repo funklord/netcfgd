@@ -1,5 +1,8 @@
 #include "network_dialog.h"
 
+#include "address_editors.h"
+#include "hook_dialog.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -46,9 +49,6 @@ const choice methods[] = {
 	{ "PWD", "pwd" },
 };
 
-/* Addressing for this network, overriding the interface's while it is joined.
- * "leave to the interface" is first and is the ordinary answer: a network block
- * that says nothing about addressing is one the interface configures. */
 /* The same modes the interface dialog offers, for a network's own scope. */
 const choice dns_modes[] = {
 	{ "leave to the interface and the global policy", "" },
@@ -59,13 +59,6 @@ const choice dns_modes[] = {
 	{ "systemd-resolved", "resolved" },
 	{ "dnsmasq", "dnsmasq" },
 	{ "unbound", "unbound" },
-};
-
-const choice addressings[] = {
-	{ "leave to the interface", "" },
-	{ "DHCP (IPv4)", "dhcp" },
-	{ "DHCPv6", "dhcp6" },
-	{ "none -- no address on this network", "null" },
 };
 
 void fill(QComboBox *box, const choice *from, size_t count)
@@ -227,18 +220,14 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	    "own preference in force."));
 	form->addRow(QStringLiteral("metric (lower wins)"), metric);
 
-	addressing = new QComboBox(this);
-	addressing->setObjectName(QStringLiteral("network_addressing"));
-	fill(addressing, addressings, sizeof(addressings) / sizeof(addressings[0]));
-	/* What the document holds, which this used not to read: the combo opened
-	 * on "leave to the interface" for every network and Save wrote that back
-	 * (10.606). An empty list and `null` are one document, so both open on
-	 * the first choice and neither loses anything. */
+	/* **Addressing for this network**, overriding the interface's while it is
+	 * joined: the interface dialog's list since 10.615. It was one choice of
+	 * DHCP or DHCPv6, and a network addressed any other way was refused.
+	 * Empty leaves addressing to the interface; an empty list and `null` are
+	 * one document, so nothing is lost by writing neither. */
+	addressing = new ncfg_addressing_editor(QStringLiteral("network"), this);
 	if (editing) {
-		const int at = addressing->findData(existing.addressing);
-		if (at >= 0) {
-			addressing->setCurrentIndex(at);
-		}
+		addressing->load(existing.sources);
 	}
 	form->addRow(QStringLiteral("addressing"), addressing);
 
@@ -285,32 +274,8 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	};
 	connect(roam, &QCheckBox::toggled, this, roaming);
 
-	routes = new QTableWidget(0, 3, this);
-	routes->setObjectName(QStringLiteral("network_routes"));
-	routes->setHorizontalHeaderLabels(
-	    { QStringLiteral("destination"), QStringLiteral("via"), QStringLiteral("metric") });
-	routes->verticalHeader()->setVisible(false);
-	routes->horizontalHeader()->setStretchLastSection(true);
-	routes->setMaximumHeight(100);
+	routes = new ncfg_route_editor(QStringLiteral("network"), this);
 	form->addRow(QStringLiteral("routes"), routes);
-	{
-		auto *row = new QHBoxLayout();
-		auto *add = new QPushButton(QStringLiteral("add route"), this);
-		auto *drop = new QPushButton(QStringLiteral("remove route"), this);
-		row->addWidget(add);
-		row->addWidget(drop);
-		row->addStretch(1);
-		form->addRow(QString(), row);
-		connect(add, &QPushButton::clicked, this, [this]() {
-			routes->insertRow(routes->rowCount());
-			routes->setCurrentCell(routes->rowCount() - 1, 0);
-		});
-		connect(drop, &QPushButton::clicked, this, [this]() {
-			if (routes->currentRow() >= 0) {
-				routes->removeRow(routes->currentRow());
-			}
-		});
-	}
 
 	dns_mode = new QComboBox(this);
 	dns_mode->setObjectName(QStringLiteral("network_dns_mode"));
@@ -327,20 +292,20 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	                          "servers"));
 	form->addRow(QStringLiteral("routing domains"), dns_domains);
 
+	/* **The programs netcfgd runs as this network is joined and left**, the
+	 * interface dialog's editor (10.616). They were refused, on the belief
+	 * that the GUI could not read a network's hooks; the hook scripts have
+	 * named the network since 10.34. Loaded below, once the note exists. */
+	hooks = new ncfg_hooks_editor(QStringLiteral("network"), this);
+	form->addRow(QStringLiteral("hooks"), hooks);
+
 	roam_signal->setValue(existing.roam_signal);
 	roam_interval->setValue(existing.roam_interval);
 	roam_slow_interval->setValue(existing.roam_slow_interval);
 	if (editing) {
 		bssid->setText(existing.bssid);
 		roam->setChecked(existing.roam);
-		for (const ncfg_route_row &route : existing.routes) {
-			const int row = routes->rowCount();
-			routes->insertRow(row);
-			routes->setItem(row, 0, new QTableWidgetItem(route.destination));
-			routes->setItem(row, 1, new QTableWidgetItem(route.via));
-			routes->setItem(row, 2, new QTableWidgetItem(
-			    route.metric >= 0 ? QString::number(route.metric) : QString()));
-		}
+		routes->load(existing.routes);
 		const int mode = dns_mode->findData(existing.dns_mode);
 		if (mode >= 0) {
 			dns_mode->setCurrentIndex(mode);
@@ -364,6 +329,14 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	note = new QLabel(this);
 	note->setWordWrap(true);
 	note->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	connect(addressing, &ncfg_addressing_editor::noted, note, &QLabel::setText);
+	connect(hooks, &ncfg_hooks_editor::noted, note, &QLabel::setText);
+	if (editing) {
+		const QString said = hooks->load(connection, existing.id, true, existing.hook_count);
+		if (!said.isEmpty()) {
+			note->setText(said);
+		}
+	}
 	layout->addWidget(note);
 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
@@ -517,9 +490,9 @@ QString ncfg_network_dialog::block_text() const
 	if (metered->isChecked()) {
 		block << QStringLiteral("\tmetered = true");
 	}
-	const QString addressed = addressing->currentData().toString();
+	const QStringList addressed = addressing->entries();
 	if (!addressed.isEmpty()) {
-		block << QStringLiteral("\tconfig = \"%1\"").arg(addressed);
+		block << QStringLiteral("\tconfig = [%1]").arg(addressed.join(QStringLiteral(", ")));
 	}
 	const QStringList pinned = bssid->text().split(QLatin1Char(' '), Qt::SkipEmptyParts);
 	if (!pinned.isEmpty()) {
@@ -529,21 +502,7 @@ QString ncfg_network_dialog::block_text() const
 		}
 		block << QStringLiteral("\tbssid = [%1]").arg(quoted.join(QStringLiteral(", ")));
 	}
-	QStringList lines;
-	for (int row = 0; row < routes->rowCount(); row++) {
-		const auto at = [this, row](int column) {
-			const QTableWidgetItem *item = routes->item(row, column);
-			return item ? item->text().trimmed() : QString();
-		};
-		QString line = at(0);
-		if (!at(1).isEmpty()) {
-			line += QStringLiteral(" via %1").arg(at(1));
-		}
-		if (!at(2).isEmpty()) {
-			line += QStringLiteral(" metric %1").arg(at(2));
-		}
-		lines << QStringLiteral("\"%1\"").arg(line);
-	}
+	const QStringList lines = routes->lines();
 	if (!lines.isEmpty()) {
 		block << QStringLiteral("\troutes = [%1]").arg(lines.join(QStringLiteral(", ")));
 	}
@@ -575,6 +534,8 @@ QString ncfg_network_dialog::block_text() const
 		}
 		block << QStringLiteral("\t}");
 	}
+	/* Last and verbatim, as in an interface: see `ncfg_hook_block`. */
+	block << hooks->blocks();
 	block << QStringLiteral("}");
 	return block.join(QStringLiteral("\n")) + QStringLiteral("\n");
 }
@@ -602,6 +563,16 @@ void ncfg_network_dialog::submit()
 	 * form has no field for -- a pinned BSSID, a route, a hook, an
 	 * enterprise network's identity -- would be deleted by saving, and the
 	 * operator would find out when the network stopped working. */
+	/* **A hook whose body this dialog does not have.** The block is written
+	 * whole, so saving would write the hook empty -- delete the script. */
+	if (hooks->withheld()) {
+		note->setText(QStringLiteral(
+		    "this network declares a hook whose script netcfgd would not hand over, so "
+		    "saving would write the hook empty. Editing a hook needs root, which is what "
+		    "runs it. Use `ncfg config edit wifi-%1` instead.")
+		        .arg(before.id));
+		return;
+	}
 	if (editing && !before.unmodelled.isEmpty()) {
 		note->setText(QStringLiteral(
 		    "this network's configuration carries %1, which this dialog has no field "
@@ -626,24 +597,11 @@ void ncfg_network_dialog::submit()
 	}
 
 	/* A route's cells are text inside a quoted list entry: refused if they
-	 * could close it, a metric only as a number, and a route needs where it
-	 * goes (10.612). */
-	for (int row = 0; row < routes->rowCount(); row++) {
-		bool          number = true;
-		const QString cells[3] = {
-			routes->item(row, 0) ? routes->item(row, 0)->text().trimmed() : QString(),
-			routes->item(row, 1) ? routes->item(row, 1)->text().trimmed() : QString(),
-			routes->item(row, 2) ? routes->item(row, 2)->text().trimmed() : QString(),
-		};
-		if (!cells[2].isEmpty()) {
-			(void)cells[2].toUInt(&number);
-		}
-		if (cells[0].isEmpty() || !number || !safe_value(cells[0]) || !safe_value(cells[1]) ||
-		    cells[0].contains(QLatin1Char(' ')) || cells[1].contains(QLatin1Char(' '))) {
-			note->setText(QStringLiteral("route %1 needs a destination, and a gateway and "
-			              "metric are one word each").arg(row + 1));
-			return;
-		}
+	 * could close it, a metric and a table only as numbers, and a route needs
+	 * where it goes (10.612, 10.615). */
+	if (!routes->refusal().isEmpty()) {
+		note->setText(routes->refusal());
+		return;
 	}
 
 	/* The credential first, so a network is never written pointing at a secret
