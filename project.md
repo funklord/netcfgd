@@ -12617,6 +12617,11 @@ Both inputs are in the corpus as `regress-*.conf`, replay clean under
 LeakSanitizer, and `lower_test` has the refusals and the second probe winning.
 Ten more minutes across `config_parse` and `document_json` (1.2 and 0.7 million
 runs) found nothing further.
+`document_json` had the same gap -- four seeds, none a router -- and has
+`seed-router.json` now, the router seed compiled; five minutes from it (4.2
+million runs) found nothing. `observed_json`, `socket_message` and
+`backend_ipc` are still seeded only from the laptop side, which is where to
+look next.
 
 ## 10.620 What netcfgd runs, against what its own firewall drops
 
