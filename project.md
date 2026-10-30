@@ -12597,6 +12597,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.624 SLAAC on a forwarding interface, against hull's advertiser
+
+**Asked for by the holder 2026-10-30** ("go ahead with the slaac.sh hull
+advertiser"), on hull's session's suggestion. `tests/live/slaac.sh` needs
+dnsmasq to advertise, and skipped on every machine without it -- this one
+included -- so 0073's fix, that netcfgd sets `accept_ra` to 2 on an interface
+that forwards and does so before the link comes up, was carried by a test that
+never ran here.
+
+`make hull-slaac` (`tests/hull/slaac`) is its twin and **the first netcfgd rig
+on hull's chroot engine**: one machine of `(network none)` on a segment of
+`(subnet6 "fd42:84::/64") (advertise true)`, its `eth0` the segment's, the
+host's build of netcfgd run from the repository mounted read-only. **hull
+advertises only when solicited, and a kernel solicits only when it would act on
+the answer**, so the wire is proved first at `accept_ra` 2 before anything is
+concluded from an address that does not arrive at 1; and the ordering
+assertion matters more here than under dnsmasq, since with no unsolicited
+advertisement a sysctl written after `link.up` would leave the interface with
+none at all rather than a late one. Eleven checks, all passing on the first
+run: the wire, the counter-proof, the plan's sysctl with its reason and its
+place before `link.up`, the address from the prefix after the apply, a second
+plan with nothing to do, the handback to 1, and a value netcfgd never wrote left
+alone. `slaac.sh` stays, for a machine with dnsmasq and no hull.
+
 ## 10.623 A forward rule may match where a packet leaves
 
 **Asked for by the holder 2026-10-30** ("go ahead with the forward chain
