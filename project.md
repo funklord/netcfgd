@@ -15277,7 +15277,17 @@ connection error, harder to tell from a machine that is merely slow.
   addressed segment are refused an address already held (a2f99fe), and hull
   answers ARP and DNS -- A and PTR -- at the segment's `.1` (cbcd38c), but only
   a machine whose sole network is its segments is pointed at it; these vms
-  have passt and keep its resolver. Not built in hull: docker, IPv6.
+  have passt and keep its resolver. Not built in hull: docker. **IPv6 is
+  built since hull 3751f1e, 1ae8cc9 and 7866106 (told by its session
+  2026-10-30)**: a segment may carry `(subnet6 "PREFIX/n")` or be IPv6 alone,
+  each machine a stable address set with no DAD window, `::1` answering
+  neighbour discovery and DNS; and `(advertise true)` makes hull answer
+  router solicitations with the prefix for SLAAC, `::1` as RDNSS and router
+  lifetime 0. Opt-in, so no rig here changes. **Open, not taken up**: hull's
+  session suggests `tests/live/slaac.sh`, which needs `unshare --map-auto`
+  for dnsmasq, could receive from hull's advertiser on a chroot machine
+  instead -- the advertiser other than radvd its own comment asks for. Do not
+  set `advertise` on a segment where a rig runs radvd itself.
   **And if this tree's images are ever collected with `hull gc`**, take hull
   0f96d36 first: a store with no refs left passed NULL to qsort and bsearch.
 
