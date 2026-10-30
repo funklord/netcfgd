@@ -13594,13 +13594,18 @@ WPA2 station in a namespace:
   twice, a channel no class covers, neighbours with reports off. Found by
   `lower_test`'s extreme sweep (`"a:b"`, channel 0), which is that sweep
   doing its job.
-- **`supplicant_launch_test` fails under a long `TMPDIR`**: the refusal for
-  a radio another manager holds quotes the run directory, and under
-  `/tmp/claude-1000` it runs past `NCFG_ERROR_MAX` and the check that the
-  advice is not truncated fails. With the default `TMPDIR` it passes, and
-  `/run/netcfgd` is shorter still, so it is not a fault users meet; it does
-  mean `make check` under a long `TMPDIR` is red for a reason that is not
-  the change being checked. Open, low.
+- **~~`supplicant_launch_test` fails under a long `TMPDIR`~~, closed
+  2026-10-30, and it was a fault users could meet.** The refusal for a radio
+  another manager holds was 437 bytes of prose with the `-P` path in the
+  middle, so the 512-byte `err` had room for about forty characters of run
+  directory: `/run/netcfgd` fits, but any longer `NCFG_RUN_DIR` cut the
+  message off before what to do -- this test under `/tmp/claude-1000` was
+  enough. Tightened to 384 bytes and reordered so the advice comes first and
+  the path last, where a path too long even for that loses its tail and not
+  the instructions. The test now builds a run directory 300 bytes longer
+  itself, rather than depending on the run's `TMPDIR`; with the old message
+  back it fails. The 108-byte socket path limit was the first guess and was
+  not the cause.
 
 ### Item 2 built
 

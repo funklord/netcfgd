@@ -950,6 +950,30 @@ static void a_supplicant_somebody_else_is_answering_is_declined(void)
 	(void)recorded_pid("wlan-other");
 	check(strlen(message) < NCFG_ERROR_MAX - 1u,
 	    "  and saying all of it: a refusal `err` truncated loses the advice at the end");
+	/* **A run directory too long for all of it.** The path came before the
+	 * advice, so a run directory of about forty characters or more -- this
+	 * test under `TMPDIR=/tmp/claude-1000` was enough -- cut off what to do.
+	 * Measured here rather than left to whatever `TMPDIR` a run has: a run
+	 * directory some 300 bytes longer, which nothing is created under, since
+	 * the refusal is decided before anything is. Three components of 100,
+	 * because one of 300 is past `NAME_MAX` and refused for that instead. */
+	{
+		ncfg_service_t deep = a_context();
+		char           long_run[1024];
+		char           part[101];
+
+		memset(part, 'r', sizeof(part) - 1u);
+		part[sizeof(part) - 1u] = '\0';
+		(void)snprintf(long_run, sizeof(long_run), "%s/%s/%s/%s", run_dir, part, part, part);
+		deep.run_dir = long_run;
+		message[0] = '\0';
+		refused(ncfg_service_backend_start(&deep, NCFG_BACKEND_SUPPLICANT, "wlan-other",
+		    message, sizeof(message)), message, "managed = false",
+		    "  and with a run directory too long to quote whole, the advice still comes "
+		    "first");
+		refused(0, message, "systemctl stop wpa_supplicant",
+		    "  both units included");
+	}
 	fixture_device.name = text("wlan-test0");
 }
 

@@ -332,15 +332,22 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 			 * bytes and two absolute paths do not both fit beside this much
 			 * prose; the `-P` path is the one that has to be there, because
 			 * it is the check that was made.
+			 *
+			 * **And it comes last, after the advice.** The prose was 437
+			 * bytes with the path in the middle, so a run directory longer
+			 * than about forty characters -- any `NCFG_RUN_DIR` beyond the
+			 * default, and every test under a longer `TMPDIR` -- cut the
+			 * message off before what to do about it. Tightened to 384, and
+			 * reordered so that where a path is too long for even that, it
+			 * is the path's tail that is lost and not the instructions.
 			 */
 			ncfg_error_set(err, err_size,
-			    "a supplicant netcfgd did not start is answering on %s, and no "
-			    "process on this machine carries `-P %s` -- which is how netcfgd "
-			    "marks its own. netcfgd will not take a radio from a manager that "
-			    "is still running: stop the other one and it picks the radio up on "
-			    "the next reconcile. On Debian that means BOTH `systemctl stop "
-			    "NetworkManager` and `systemctl stop wpa_supplicant`, the second "
-			    "running on its own. Or set `managed = false` on the device",
+			    "a supplicant netcfgd did not start is answering on %s. netcfgd will "
+			    "not take a radio from a manager still running: stop it and the radio "
+			    "is picked up on the next reconcile -- on Debian BOTH `systemctl stop "
+			    "NetworkManager` and `systemctl stop wpa_supplicant`, which runs on "
+			    "its own -- or set `managed = false` on the device. No process "
+			    "carries `-P %s`, the mark netcfgd starts its own with",
 			    iface, pid_path);
 			return 0;
 		}
