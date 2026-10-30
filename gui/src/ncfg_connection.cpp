@@ -1275,6 +1275,16 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 		one.hairpin = found.port_forwards[i].hairpin;
 		out->port_forwards << one;
 	}
+	out->dot1x = found.dot1x != 0;
+	out->dot1x_method = from_c(found.dot1x_method);
+	out->dot1x_identity = from_c(found.dot1x_identity);
+	out->dot1x_anonymous_identity = from_c(found.dot1x_anonymous_identity);
+	out->dot1x_phase2 = from_c(found.dot1x_phase2);
+	out->dot1x_domain_suffix_match = from_c(found.dot1x_domain_suffix_match);
+	out->dot1x_ca_cert = from_c(found.dot1x_ca_cert);
+	out->dot1x_client_cert = from_c(found.dot1x_client_cert);
+	out->dot1x_private_key = from_c(found.dot1x_private_key);
+	out->dot1x_password = from_c(found.dot1x_password);
 	out->ipv6_token = from_c(found.ipv6_token);
 	out->guard = from_c(found.guard);
 	out->advertise = found.advertise != 0;

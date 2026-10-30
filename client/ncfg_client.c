@@ -2857,6 +2857,15 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->guard);
 	free(config->advertise_backend);
 	free(config->advertise_prefixes);
+	free(config->dot1x_method);
+	free(config->dot1x_identity);
+	free(config->dot1x_anonymous_identity);
+	free(config->dot1x_phase2);
+	free(config->dot1x_domain_suffix_match);
+	free(config->dot1x_ca_cert);
+	free(config->dot1x_client_cert);
+	free(config->dot1x_private_key);
+	free(config->dot1x_password);
 	free(config->unmodelled);
 	memset(config, 0, sizeof(*config));
 }
@@ -4015,6 +4024,29 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 			out->advertise_prefixes = joined;
 		}
 	}
+	{
+		uint32_t eap = ncfg_json_member(doc, found, "dot1x");
+		uint32_t password = ncfg_json_member(doc, eap, "password");
+
+		out->dot1x = ncfg_json_type(doc, eap) == NCFG_JSON_OBJECT;
+		out->dot1x_method = member_text(doc, eap, "method");
+		out->dot1x_identity = member_text(doc, eap, "identity");
+		out->dot1x_anonymous_identity = member_text(doc, eap, "anonymous_identity");
+		out->dot1x_phase2 = member_text(doc, eap, "phase2");
+		out->dot1x_domain_suffix_match = member_text(doc, eap, "domain_suffix_match");
+		out->dot1x_ca_cert = cert_text(doc, ncfg_json_member(doc, eap, "ca_cert"));
+		out->dot1x_client_cert = cert_text(doc, ncfg_json_member(doc, eap, "client_cert"));
+		out->dot1x_private_key = cert_text(doc, ncfg_json_member(doc, eap, "private_key"));
+		out->dot1x_password = ncfg_json_type(doc, password) == NCFG_JSON_OBJECT
+		    ? reference_text(doc, password) : dup_string("");
+		if (!out->dot1x_method || !out->dot1x_identity || !out->dot1x_anonymous_identity ||
+		    !out->dot1x_phase2 || !out->dot1x_domain_suffix_match || !out->dot1x_ca_cert ||
+		    !out->dot1x_client_cert || !out->dot1x_private_key || !out->dot1x_password) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+	}
 	if (!out->advertise_backend) {
 		out->advertise_backend = dup_string("");
 	}
@@ -4032,15 +4064,9 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		ncfg_json_free(doc);
 		return 0;
 	}
-	/* `dot1x` alone now: `advertise`, `guard`, `ipv6_token` and
-	 * `port_forwards` are fields since 10.612, and what of `advertise` the
-	 * dialog cannot write is named above. */
-	static const char *const beyond[] = { "dot1x" };
-	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
-		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
-			note_unmodelled(&out->unmodelled, beyond[i]);
-		}
-	}
+	/* Nothing left on this list since 10.612: `advertise`, `dot1x`, `guard`,
+	 * `ipv6_token` and `port_forwards` all have fields, and what of
+	 * `advertise` the dialog cannot write is named above. */
 	/* **`hooks` is no longer on that list.** It was, and correctly so while no
 	 * client could carry one: a form that loaded the keys it knew and saved
 	 * the block deleted the hooks. Since 0258 the interface editor renders

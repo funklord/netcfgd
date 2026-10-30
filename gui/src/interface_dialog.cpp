@@ -461,6 +461,54 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	connect(advertise, &QCheckBox::toggled, this, advertising);
 	advertising(false);
 
+	/* Wired 802.1X (0008): a campus port that will not pass traffic until
+	 * the machine has authenticated. */
+	dot1x = new QCheckBox(QStringLiteral("authenticate this port with 802.1X"), this);
+	dot1x->setObjectName(QStringLiteral("iface_dot1x"));
+	form->addRow(QString(), dot1x);
+	dot1x_method = new QComboBox(this);
+	dot1x_method->setObjectName(QStringLiteral("iface_dot1x_method"));
+	dot1x_method->addItem(QStringLiteral("PEAP"), QStringLiteral("peap"));
+	dot1x_method->addItem(QStringLiteral("TTLS"), QStringLiteral("ttls"));
+	dot1x_method->addItem(QStringLiteral("TLS (certificate)"), QStringLiteral("tls"));
+	dot1x_method->addItem(QStringLiteral("PWD"), QStringLiteral("pwd"));
+	form->addRow(QStringLiteral("eap method"), dot1x_method);
+	const auto line = [this, form](QLineEdit **into, const char *name, const QString &label,
+	                      const QString &hint) {
+		*into = new QLineEdit(this);
+		(*into)->setObjectName(QString::fromLatin1(name));
+		(*into)->setPlaceholderText(hint);
+		form->addRow(label, *into);
+	};
+	line(&dot1x_identity, "iface_dot1x_identity", QStringLiteral("identity"), QString());
+	line(&dot1x_anonymous_identity, "iface_dot1x_anonymous", QStringLiteral("anonymous identity"),
+	    QStringLiteral("optional, sent in the clear"));
+	line(&dot1x_phase2, "iface_dot1x_phase2", QStringLiteral("phase 2"),
+	    QStringLiteral("mschapv2, for example"));
+	line(&dot1x_ca_cert, "iface_dot1x_ca_cert", QStringLiteral("ca certificate"),
+	    QStringLiteral("a path, or @secret:NAME"));
+	line(&dot1x_domain_suffix_match, "iface_dot1x_server", QStringLiteral("server name"),
+	    QStringLiteral("the name the server's certificate must carry"));
+	line(&dot1x_client_cert, "iface_dot1x_client_cert", QStringLiteral("client certificate"),
+	    QStringLiteral("a path, or @secret:NAME"));
+	line(&dot1x_private_key, "iface_dot1x_private_key", QStringLiteral("private key"),
+	    QStringLiteral("a path, or @secret:NAME"));
+	line(&dot1x_reference, "iface_dot1x_reference", QStringLiteral("password from"),
+	    QStringLiteral("@secret:NAME -- blank for @secret:dot1x-") + interface);
+	line(&dot1x_password, "iface_dot1x_password", QStringLiteral("password"),
+	    QStringLiteral("blank keeps the stored one"));
+	dot1x_password->setEchoMode(QLineEdit::Password);
+	const auto authenticating = [this](bool on) {
+		QWidget *fields[] = { dot1x_method, dot1x_identity, dot1x_anonymous_identity,
+			dot1x_phase2, dot1x_ca_cert, dot1x_domain_suffix_match, dot1x_client_cert,
+			dot1x_private_key, dot1x_reference, dot1x_password };
+		for (QWidget *field : fields) {
+			field->setEnabled(on);
+		}
+	};
+	connect(dot1x, &QCheckBox::toggled, this, authenticating);
+	authenticating(false);
+
 	ipv6_token = new QLineEdit(this);
 	ipv6_token->setObjectName(QStringLiteral("iface_ipv6_token"));
 	ipv6_token->setPlaceholderText(QStringLiteral("::5 -- the host part of a SLAAC address"));
@@ -631,6 +679,21 @@ void ncfg_interface_dialog::load_existing()
 	advertise_lifetime->setValue(existing.advertise_lifetime > 0 ? existing.advertise_lifetime : 0);
 	ipv6_token->setText(existing.ipv6_token);
 	guard->setText(existing.guard);
+	dot1x->setChecked(existing.dot1x);
+	{
+		const int at = dot1x_method->findData(existing.dot1x_method);
+		if (at >= 0) {
+			dot1x_method->setCurrentIndex(at);
+		}
+	}
+	dot1x_identity->setText(existing.dot1x_identity);
+	dot1x_anonymous_identity->setText(existing.dot1x_anonymous_identity);
+	dot1x_phase2->setText(existing.dot1x_phase2);
+	dot1x_ca_cert->setText(existing.dot1x_ca_cert);
+	dot1x_domain_suffix_match->setText(existing.dot1x_domain_suffix_match);
+	dot1x_client_cert->setText(existing.dot1x_client_cert);
+	dot1x_private_key->setText(existing.dot1x_private_key);
+	dot1x_reference->setText(existing.dot1x_password);
 
 	if (!existing.probe_command.isEmpty()) {
 		const int known = detection->findData(existing.probe_command);
@@ -1179,6 +1242,28 @@ QString ncfg_interface_dialog::block_text() const
 		}
 		body << QStringLiteral("\t}");
 	}
+	if (dot1x->isChecked()) {
+		const QLineEdit *keys[] = { dot1x_identity, dot1x_anonymous_identity,
+			dot1x_domain_suffix_match, dot1x_ca_cert, dot1x_client_cert, dot1x_private_key,
+			dot1x_phase2 };
+		static const char *const words[] = { "identity", "anonymous_identity",
+			"domain_suffix_match", "ca_cert", "client_cert", "private_key", "phase2" };
+		body << QStringLiteral("\tdot1x {");
+		body << QStringLiteral("\t\teap = \"%1\"").arg(dot1x_method->currentData().toString());
+		for (size_t at = 0; at < sizeof(words) / sizeof(words[0]); at++) {
+			if (!keys[at]->text().trimmed().isEmpty()) {
+				body << QStringLiteral("\t\t%1 = \"%2\"")
+				            .arg(QString::fromLatin1(words[at]), keys[at]->text().trimmed());
+			}
+		}
+		/* A password for every method but TLS, and for TLS where one is
+		 * already referred to. */
+		if (dot1x_method->currentData().toString() != QLatin1String("tls") ||
+		    !dot1x_reference->text().trimmed().isEmpty()) {
+			body << QStringLiteral("\t\tpassword = \"%1\"").arg(dot1x_reference_text());
+		}
+		body << QStringLiteral("\t}");
+	}
 	if (!ipv6_token->text().trimmed().isEmpty()) {
 		body << QStringLiteral("\tipv6_token = \"%1\"").arg(ipv6_token->text().trimmed());
 	}
@@ -1242,11 +1327,18 @@ QString ncfg_interface_dialog::block_text() const
 	return block.join(QStringLiteral("\n")) + QStringLiteral("\n");
 }
 
+QString ncfg_interface_dialog::dot1x_reference_text() const
+{
+	const QString written = dot1x_reference->text().trimmed();
+	return written.isEmpty() ? QStringLiteral("@secret:dot1x-%1").arg(interface) : written;
+}
+
 void ncfg_interface_dialog::submit()
 {
 	const QLineEdit *values[] = { source_address, dns_servers, dns_search, dns_domains,
 		probe_command, probe_args, dhcp_range, dhcp_dns, advertise_prefixes, ipv6_token,
-		guard };
+		guard, dot1x_identity, dot1x_anonymous_identity, dot1x_phase2, dot1x_ca_cert,
+		dot1x_domain_suffix_match, dot1x_client_cert, dot1x_private_key, dot1x_reference };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
@@ -1327,6 +1419,28 @@ void ncfg_interface_dialog::submit()
 	}
 
 	QString error;
+	if (dot1x->isChecked() && dot1x_identity->text().trimmed().isEmpty()) {
+		note->setText(QStringLiteral("802.1X needs an identity: every method sends one"));
+		return;
+	}
+	/* A typed password into the store the reference names, under its name,
+	 * first -- so a block is never written pointing at nothing. The keyring
+	 * and `pass` are read by netcfgd and not written, as in the network
+	 * dialog (10.611). */
+	if (dot1x->isChecked() && !dot1x_password->text().isEmpty()) {
+		const QString reference = dot1x_reference_text();
+		const QString stored = reference.mid(QStringLiteral("@secret:").size());
+		if (!reference.startsWith(QStringLiteral("@secret:")) || stored.contains(QLatin1Char(':'))) {
+			note->setText(QStringLiteral("the 802.1X password is %1, which netcfgd reads and does "
+			              "not write: change it there, and leave the field here blank")
+			                  .arg(reference));
+			return;
+		}
+		if (!connection->secret_put(stored, dot1x_password->text(), true, &error)) {
+			note->setText(error);
+			return;
+		}
+	}
 	if (!connection->config_put(QStringLiteral("interface-%1").arg(interface), block_text(),
 	    true, &error)) {
 		note->setText(error);

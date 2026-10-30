@@ -91,6 +91,9 @@ private slots:
 
 private:
 	QString block_text() const;
+	/* The reference the 802.1X password is written as: the one given, or
+	 * `@secret:dot1x-<interface>` (10.612). */
+	QString dot1x_reference_text() const;
 	/* Put one entry into the addressing list, or one row into the routes
 	 * table. Both keep the value on the item rather than in its text, so a
 	 * label can say more than the file does. */
@@ -168,6 +171,19 @@ private:
 	QTableWidget *forwards;
 	QLineEdit   *ipv6_token;
 	QLineEdit   *guard;
+	/* Wired 802.1X (10.612): the same keys a network's `wifi` block takes,
+	 * and the password as its reference plus a field to store a new one. */
+	QCheckBox   *dot1x;
+	QComboBox   *dot1x_method;
+	QLineEdit   *dot1x_identity;
+	QLineEdit   *dot1x_anonymous_identity;
+	QLineEdit   *dot1x_phase2;
+	QLineEdit   *dot1x_domain_suffix_match;
+	QLineEdit   *dot1x_ca_cert;
+	QLineEdit   *dot1x_client_cert;
+	QLineEdit   *dot1x_private_key;
+	QLineEdit   *dot1x_reference;
+	QLineEdit   *dot1x_password;
 	QCheckBox   *advertise;
 	QLineEdit   *advertise_prefixes;
 	QComboBox   *advertise_backend;

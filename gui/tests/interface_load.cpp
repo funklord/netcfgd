@@ -156,6 +156,8 @@ int main(int argc, char **argv)
 		                   "\tguard = \"nfs root\"\n"
 		                   "\tadvertise { backend = \"radvd\"; prefixes = [\"@pd:wan0/1\"]; "
 		                   "managed = true; lifetime = 1800 }\n"
+		                   "\tdot1x { eap = \"peap\"; identity = \"me@example\"; "
+		                   "password = \"@secret:wired\"; ca_cert = \"/etc/ssl/ca.pem\" }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the daemon never bound its socket\n");
@@ -285,11 +287,14 @@ int main(int argc, char **argv)
 		        wrote.contains(QStringLiteral("guard = \"nfs root\"")) &&
 		        wrote.contains(QStringLiteral("\tadvertise {\n\t\tbackend = \"radvd\"\n"
 		                                    "\t\tprefixes = [\"@pd:wan0/1\"]\n"
-		                                    "\t\tmanaged = true\n\t\tlifetime = 1800\n\t}"))
+		                                    "\t\tmanaged = true\n\t\tlifetime = 1800\n\t}")) &&
+		        wrote.contains(QStringLiteral("\tdot1x {\n\t\teap = \"peap\"\n\t\tidentity = "
+		                                    "\"me@example\"\n\t\tca_cert = \"/etc/ssl/ca.pem\"\n"
+		                                    "\t\tpassword = \"@secret:wired\"\n\t}"))
 		        ? QStringLiteral("written")
 		        : wrote,
 		    QStringLiteral("written"),
-		    "  and its reservation, port forward, token, guard and advertisement with it");
+		    "  and its reservation, port forward, token, guard, advertisement and 802.1X");
 
 		daemon.kill();
 		daemon.waitForFinished(2000);
@@ -313,8 +318,7 @@ int main(int argc, char **argv)
 		                   "device eth0 { kind = \"physical\" }\n"
 		                   "interface eth0 {\n"
 		                   "\tconfig = \"192.0.2.10/24\"\n"
-		                   "\tdot1x { eap = \"peap\"; identity = \"me@example\"; "
-		                   "password = \"@secret:wired\" }\n"
+		                   "\troutes = [\"10.9.0.0/24 via 192.0.2.1 src 192.0.2.10\"]\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -341,14 +345,14 @@ int main(int argc, char **argv)
 		QMetaObject::invokeMethod(&dialog, "submit");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
 		const QString said = note ? note->text() : QStringLiteral("<no note>");
-		check(said.contains(QStringLiteral("dot1x")) &&
+		check(said.contains(QStringLiteral("routes (beyond destination, via, metric)")) &&
 		        said.contains(QStringLiteral("would delete"))
 		        ? QStringLiteral("refused")
 		        : said,
 		    QStringLiteral("refused"), "saving over an unmodelled key is refused");
-		/* Wired 802.1X is the one interface key with no field, since 10.612
-		 * gave the rest theirs; this used to be `ipv6_token` and then a
-		 * reservation. */
+		/* A route's source address is among the few things left with no field
+		 * on an interface, since 10.612 gave the rest theirs; this used to be
+		 * `ipv6_token`, then a reservation, then `dot1x`. */
 
 		daemon.kill();
 		daemon.waitForFinished(2000);

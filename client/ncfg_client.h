@@ -1367,6 +1367,19 @@ typedef struct {
 	 * `@pd:wan0/1`; the backend `auto`, `radvd` or `odhcpd`; the lifetime
 	 * -1 for the default. An `exec` backend, or a prefix naming which of
 	 * several delegations it is, has no field and stays unmodelled. */
+	/* Wired 802.1X (0008), carried since 10.612 as a network's is: `dot1x`
+	 * set where the block is there, the rest "" where unset, certificates
+	 * and the password's reference as the language writes them. */
+	int   dot1x;
+	char *dot1x_method;
+	char *dot1x_identity;
+	char *dot1x_anonymous_identity;
+	char *dot1x_phase2;
+	char *dot1x_domain_suffix_match;
+	char *dot1x_ca_cert;
+	char *dot1x_client_cert;
+	char *dot1x_private_key;
+	char *dot1x_password;
 	int   advertise;
 	char *advertise_backend;
 	char *advertise_prefixes;

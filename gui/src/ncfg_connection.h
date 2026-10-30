@@ -430,6 +430,18 @@ struct ncfg_interface_config {
 	QList<forward> port_forwards;
 	QString ipv6_token;
 	QString guard;
+	/* Wired 802.1X (0008), as a network's: references and certificates as
+	 * the language writes them. */
+	bool    dot1x = false;
+	QString dot1x_method;
+	QString dot1x_identity;
+	QString dot1x_anonymous_identity;
+	QString dot1x_phase2;
+	QString dot1x_domain_suffix_match;
+	QString dot1x_ca_cert;
+	QString dot1x_client_cert;
+	QString dot1x_private_key;
+	QString dot1x_password;
 	/* Router advertisements (0009), as the client reads them. */
 	bool    advertise = false;
 	QString advertise_backend;

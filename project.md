@@ -12619,8 +12619,17 @@ detection's row hiding, which found the form as the dialog's first layout
 item, holds it as a member instead -- the scroll area is that item now.
 
 `interface_load` saves an interface carrying all of it and finds each in the
-file the dialog wrote; its refusal case moved to a wired `dot1x` block, the
-one interface key still without a field. `gui_wifi.sh` 14 of 14.
+file the dialog wrote. `gui_wifi.sh` 14 of 14.
+
+**Then wired 802.1X**, the last interface key the client refused: an
+"authenticate this port" group with the same keys a network's `wifi` block
+takes (10.611) and the password as its reference -- blank writes
+`@secret:dot1x-<interface>` -- with a field to store a new one under that
+name, refused for the keyring as in the network dialog. The interface
+reader's unmodelled list of keys is empty now; what it still names is the
+inside of a key -- an `advertise` with an `exec` backend, a route with a
+`src`, a peer or delegated addressing source. `interface_load`'s refusal case
+is a route with a `src` now, after `ipv6_token`, a reservation and `dot1x`.
 
 ## 10.611 The network dialog edits enterprise networks
 
