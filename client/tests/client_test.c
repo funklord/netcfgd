@@ -2302,8 +2302,9 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
 	    "{\"id\":\"office\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
 	    "\"autoconnect\":true,\"metered\":false,\"bssid\":[\"02:00:00:00:00:01\"],"
-	    "\"addressing\":[{\"source\":\"dhcp4\"}],\"routes\":[{\"destination\":"
-	    "\"10.0.0.0/8\",\"via\":\"192.168.1.1\"}],\"hooks\":[]},"
+	    "\"addressing\":[{\"source\":\"dhcp4\"},{\"source\":\"dhcp6\"}],"
+	    "\"routes\":[{\"destination\":\"10.0.0.0/8\",\"via\":\"192.168.1.1\"}],"
+	    "\"hooks\":[]},"
 	    "{\"id\":\"plain\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
 	    "\"autoconnect\":true,\"metered\":false,\"addressing\":[{\"source\":\"dhcp6\"}],"
 	    "\"routes\":[],\"hooks\":[]}"
@@ -2323,8 +2324,11 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	int got = ncfg_client_saved_networks(staged.client, &networks, err, sizeof(err));
 	ok("the saved networks arrive", got == 1 && networks.count == 2, err);
 	if (got == 1 && networks.count == 2) {
-		equals("a pinned BSSID and a route are named, the one DHCP source is not",
-		    networks.items[0].unmodelled, "bssid, routes");
+		/* A pinned BSSID and a route are fields since 10.612; two addressing
+		 * sources are still beyond the dialog's one choice. */
+		equals("two addressing sources are named, the BSSID and the route are not",
+		    networks.items[0].unmodelled, "addressing (beyond one DHCP source)");
+		equals("  the pinned BSSID is read", networks.items[0].bssid, "02:00:00:00:00:01");
 		equals("and a network the dialog can write whole names nothing",
 		    networks.items[1].unmodelled, "");
 	}

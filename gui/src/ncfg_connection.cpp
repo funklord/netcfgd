@@ -756,6 +756,22 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		row.autoconnect = networks.items[i].autoconnect != 0;
 		row.hidden = networks.items[i].hidden != 0;
 		row.metered = networks.items[i].metered != 0;
+		row.bssid = from_c(networks.items[i].bssid);
+		row.roam = networks.items[i].roam != 0;
+		row.roam_signal = networks.items[i].roam_signal;
+		row.roam_interval = networks.items[i].roam_interval;
+		row.roam_slow_interval = networks.items[i].roam_slow_interval;
+		for (size_t at = 0; at < networks.items[i].route_count; at++) {
+			ncfg_route_row route;
+			route.destination = from_c(networks.items[i].routes[at].destination);
+			route.via = from_c(networks.items[i].routes[at].via);
+			route.metric = networks.items[i].routes[at].metric;
+			row.routes << route;
+		}
+		row.dns_mode = from_c(networks.items[i].dns.mode);
+		row.dns_servers = from_c(networks.items[i].dns.servers);
+		row.dns_search = from_c(networks.items[i].dns.search);
+		row.dns_domains = from_c(networks.items[i].dns.domains);
 		row.credential_reference = from_c(networks.items[i].credential_reference);
 		row.eap_method = from_c(networks.items[i].eap_method);
 		row.identity = from_c(networks.items[i].identity);

@@ -2,6 +2,10 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QTableWidget>
+#include <QScrollArea>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -45,6 +49,18 @@ const choice methods[] = {
 /* Addressing for this network, overriding the interface's while it is joined.
  * "leave to the interface" is first and is the ordinary answer: a network block
  * that says nothing about addressing is one the interface configures. */
+/* The same modes the interface dialog offers, for a network's own scope. */
+const choice dns_modes[] = {
+	{ "leave to the interface and the global policy", "" },
+	{ "none -- netcfgd writes nothing", "none" },
+	{ "write /etc/resolv.conf", "write_resolv_conf" },
+	{ "resolvconf", "resolvconf" },
+	{ "openresolv", "openresolv" },
+	{ "systemd-resolved", "resolved" },
+	{ "dnsmasq", "dnsmasq" },
+	{ "unbound", "unbound" },
+};
+
 const choice addressings[] = {
 	{ "leave to the interface", "" },
 	{ "DHCP (IPv4)", "dhcp" },
@@ -80,6 +96,7 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 
 	auto *layout = new QVBoxLayout(this);
 	auto *form = new QFormLayout();
+	form_layout = form;
 
 	id = new QLineEdit(existing.id, this);
 	id->setObjectName(QStringLiteral("network_id"));
@@ -240,7 +257,109 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	metered->setChecked(existing.metered);
 	form->addRow(QString(), metered);
 
-	layout->addLayout(form);
+	bssid = new QLineEdit(this);
+	bssid->setObjectName(QStringLiteral("network_bssid"));
+	bssid->setPlaceholderText(QStringLiteral("02:00:00:00:00:01 -- only these access points; "
+	                        "blank for any"));
+	form->addRow(QStringLiteral("pinned to"), bssid);
+	roam = new QCheckBox(QStringLiteral("move to a stronger access point of this network"), this);
+	roam->setObjectName(QStringLiteral("network_roam"));
+	form->addRow(QString(), roam);
+	roam_signal = new QSpinBox(this);
+	roam_signal->setObjectName(QStringLiteral("network_roam_signal"));
+	roam_signal->setRange(-100, -1);
+	roam_signal->setSuffix(QStringLiteral(" dBm"));
+	form->addRow(QStringLiteral("when weaker than"), roam_signal);
+	roam_interval = new QSpinBox(this);
+	roam_interval->setRange(1, 86400);
+	roam_interval->setSuffix(QStringLiteral(" s"));
+	form->addRow(QStringLiteral("look every"), roam_interval);
+	roam_slow_interval = new QSpinBox(this);
+	roam_slow_interval->setRange(1, 86400);
+	roam_slow_interval->setSuffix(QStringLiteral(" s"));
+	form->addRow(QStringLiteral("and when strong, every"), roam_slow_interval);
+	const auto roaming = [this](bool on) {
+		roam_signal->setEnabled(on);
+		roam_interval->setEnabled(on);
+		roam_slow_interval->setEnabled(on);
+	};
+	connect(roam, &QCheckBox::toggled, this, roaming);
+
+	routes = new QTableWidget(0, 3, this);
+	routes->setObjectName(QStringLiteral("network_routes"));
+	routes->setHorizontalHeaderLabels(
+	    { QStringLiteral("destination"), QStringLiteral("via"), QStringLiteral("metric") });
+	routes->verticalHeader()->setVisible(false);
+	routes->horizontalHeader()->setStretchLastSection(true);
+	routes->setMaximumHeight(100);
+	form->addRow(QStringLiteral("routes"), routes);
+	{
+		auto *row = new QHBoxLayout();
+		auto *add = new QPushButton(QStringLiteral("add route"), this);
+		auto *drop = new QPushButton(QStringLiteral("remove route"), this);
+		row->addWidget(add);
+		row->addWidget(drop);
+		row->addStretch(1);
+		form->addRow(QString(), row);
+		connect(add, &QPushButton::clicked, this, [this]() {
+			routes->insertRow(routes->rowCount());
+			routes->setCurrentCell(routes->rowCount() - 1, 0);
+		});
+		connect(drop, &QPushButton::clicked, this, [this]() {
+			if (routes->currentRow() >= 0) {
+				routes->removeRow(routes->currentRow());
+			}
+		});
+	}
+
+	dns_mode = new QComboBox(this);
+	dns_mode->setObjectName(QStringLiteral("network_dns_mode"));
+	fill(dns_mode, dns_modes, sizeof(dns_modes) / sizeof(dns_modes[0]));
+	form->addRow(QStringLiteral("dns"), dns_mode);
+	dns_servers = new QLineEdit(this);
+	dns_servers->setObjectName(QStringLiteral("network_dns_servers"));
+	dns_servers->setPlaceholderText(QStringLiteral("1.1.1.1 9.9.9.9 -- blank takes the lease's"));
+	form->addRow(QStringLiteral("nameservers"), dns_servers);
+	dns_search = new QLineEdit(this);
+	form->addRow(QStringLiteral("search domains"), dns_search);
+	dns_domains = new QLineEdit(this);
+	dns_domains->setPlaceholderText(QStringLiteral("names under these go to this network's "
+	                          "servers"));
+	form->addRow(QStringLiteral("routing domains"), dns_domains);
+
+	roam_signal->setValue(existing.roam_signal);
+	roam_interval->setValue(existing.roam_interval);
+	roam_slow_interval->setValue(existing.roam_slow_interval);
+	if (editing) {
+		bssid->setText(existing.bssid);
+		roam->setChecked(existing.roam);
+		for (const ncfg_route_row &route : existing.routes) {
+			const int row = routes->rowCount();
+			routes->insertRow(row);
+			routes->setItem(row, 0, new QTableWidgetItem(route.destination));
+			routes->setItem(row, 1, new QTableWidgetItem(route.via));
+			routes->setItem(row, 2, new QTableWidgetItem(
+			    route.metric >= 0 ? QString::number(route.metric) : QString()));
+		}
+		const int mode = dns_mode->findData(existing.dns_mode);
+		if (mode >= 0) {
+			dns_mode->setCurrentIndex(mode);
+		}
+		dns_servers->setText(existing.dns_servers);
+		dns_search->setText(existing.dns_search);
+		dns_domains->setText(existing.dns_domains);
+	}
+	roaming(roam->isChecked());
+
+	/* In a scroll area since 10.612, which made the form taller than a
+	 * laptop's screen. */
+	auto *holder = new QWidget(this);
+	holder->setLayout(form);
+	auto *scroll = new QScrollArea(this);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	scroll->setWidget(holder);
+	layout->addWidget(scroll, 1);
 
 	note = new QLabel(this);
 	note->setWordWrap(true);
@@ -273,7 +392,8 @@ void ncfg_network_dialog::security_changed()
 	/* Rows are hidden rather than disabled: a greyed field still reads as
 	 * something that could apply here, and an open network has no passphrase
 	 * in any sense. */
-	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
+	/* A member: the form is inside a scroll area since 10.612. */
+	QFormLayout *form = form_layout;
 	if (form) {
 		form->setRowVisible(proto, is_psk);
 		form->setRowVisible(eap_method, is_eap);
@@ -366,6 +486,13 @@ QString ncfg_network_dialog::block_text() const
 	if (!autoconnect->isChecked()) {
 		wifi << QStringLiteral("\t\tautoconnect = false");
 	}
+	/* Inside `wifi`, where the language reads it: roaming is the radio's. */
+	if (roam->isChecked()) {
+		wifi << QStringLiteral("\t\troam { signal = %1; interval = %2; slow_interval = %3 }")
+		            .arg(roam_signal->value())
+		            .arg(roam_interval->value())
+		            .arg(roam_slow_interval->value());
+	}
 
 	QStringList block;
 	block << QStringLiteral("# Written by netcfgd's gui. Ordinary netcfgd configuration:");
@@ -393,6 +520,60 @@ QString ncfg_network_dialog::block_text() const
 	const QString addressed = addressing->currentData().toString();
 	if (!addressed.isEmpty()) {
 		block << QStringLiteral("\tconfig = \"%1\"").arg(addressed);
+	}
+	const QStringList pinned = bssid->text().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+	if (!pinned.isEmpty()) {
+		QStringList quoted;
+		for (const QString &one : pinned) {
+			quoted << QStringLiteral("\"%1\"").arg(one);
+		}
+		block << QStringLiteral("\tbssid = [%1]").arg(quoted.join(QStringLiteral(", ")));
+	}
+	QStringList lines;
+	for (int row = 0; row < routes->rowCount(); row++) {
+		const auto at = [this, row](int column) {
+			const QTableWidgetItem *item = routes->item(row, column);
+			return item ? item->text().trimmed() : QString();
+		};
+		QString line = at(0);
+		if (!at(1).isEmpty()) {
+			line += QStringLiteral(" via %1").arg(at(1));
+		}
+		if (!at(2).isEmpty()) {
+			line += QStringLiteral(" metric %1").arg(at(2));
+		}
+		lines << QStringLiteral("\"%1\"").arg(line);
+	}
+	if (!lines.isEmpty()) {
+		block << QStringLiteral("\troutes = [%1]").arg(lines.join(QStringLiteral(", ")));
+	}
+	const QString mode = dns_mode->currentData().toString();
+	if (!mode.isEmpty() || !dns_servers->text().trimmed().isEmpty() ||
+	    !dns_search->text().trimmed().isEmpty() || !dns_domains->text().trimmed().isEmpty()) {
+		const struct {
+			const char *key;
+			QString     value;
+		} scopes[] = {
+			{ "servers", dns_servers->text().trimmed() },
+			{ "search", dns_search->text().trimmed() },
+			{ "domains", dns_domains->text().trimmed() },
+		};
+		block << QStringLiteral("\tdns {");
+		if (!mode.isEmpty()) {
+			block << QStringLiteral("\t\tmode = \"%1\"").arg(mode);
+		}
+		for (const auto &one : scopes) {
+			if (one.value.isEmpty()) {
+				continue;
+			}
+			QStringList quoted;
+			for (const QString &word : one.value.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+				quoted << QStringLiteral("\"%1\"").arg(word);
+			}
+			block << QStringLiteral("\t\t%1 = [%2]")
+			             .arg(QString::fromLatin1(one.key), quoted.join(QStringLiteral(", ")));
+		}
+		block << QStringLiteral("\t}");
 	}
 	block << QStringLiteral("}");
 	return block.join(QStringLiteral("\n")) + QStringLiteral("\n");
@@ -434,11 +615,33 @@ void ncfg_network_dialog::submit()
 	 * dialog composes the block, so the only way a key an operator did not
 	 * choose could appear is through one of these fields. */
 	const QLineEdit *values[] = { id, ssid_hex, identity, anonymous_identity, phase2, ca_cert,
-		client_cert, private_key, domain_suffix_match };
+		client_cert, private_key, domain_suffix_match, bssid, dns_servers, dns_search,
+		dns_domains };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
 			              "or a newline"));
+			return;
+		}
+	}
+
+	/* A route's cells are text inside a quoted list entry: refused if they
+	 * could close it, a metric only as a number, and a route needs where it
+	 * goes (10.612). */
+	for (int row = 0; row < routes->rowCount(); row++) {
+		bool          number = true;
+		const QString cells[3] = {
+			routes->item(row, 0) ? routes->item(row, 0)->text().trimmed() : QString(),
+			routes->item(row, 1) ? routes->item(row, 1)->text().trimmed() : QString(),
+			routes->item(row, 2) ? routes->item(row, 2)->text().trimmed() : QString(),
+		};
+		if (!cells[2].isEmpty()) {
+			(void)cells[2].toUInt(&number);
+		}
+		if (cells[0].isEmpty() || !number || !safe_value(cells[0]) || !safe_value(cells[1]) ||
+		    cells[0].contains(QLatin1Char(' ')) || cells[1].contains(QLatin1Char(' '))) {
+			note->setText(QStringLiteral("route %1 needs a destination, and a gateway and "
+			              "metric are one word each").arg(row + 1));
 			return;
 		}
 	}

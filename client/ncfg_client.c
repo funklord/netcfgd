@@ -1829,6 +1829,7 @@ void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 		free(item->dns.servers);
 		free(item->dns.search);
 		free(item->dns.domains);
+		free(item->bssid);
 		free(item->credential_reference);
 		free(item->eap_method);
 		free(item->identity);
@@ -1864,6 +1865,10 @@ static int member_says(const ncfg_json_doc_t *doc, uint32_t object, const char *
 }
 
 static void note_unmodelled(char **list, const char *key);
+/* Defined below, beside the other join this file does: a saved network's
+ * BSSIDs and an access point's station list are read before the interface
+ * reader that first needed it. */
+static char *joined_words(const ncfg_json_doc_t *doc, uint32_t array);
 
 /*
  * A secret reference as the language writes it: `@secret:NAME` for the file
@@ -1910,7 +1915,10 @@ static char *cert_text(const ncfg_json_doc_t *doc, uint32_t source)
 static void network_unmodelled(const ncfg_json_doc_t *doc, uint32_t entry,
                                ncfg_saved_network_t *item)
 {
-	static const char *const beyond[] = { "bssid", "roam", "hooks" };
+	/* `bssid` and `roam` left this list in 10.612, with routes and DNS; a
+	 * network's hooks have no read path in the GUI, which edits an
+	 * interface's through the hook requests, so they stay. */
+	static const char *const beyond[] = { "hooks" };
 	const ncfg_address_source_t *only = item->source_count == 1u ? &item->sources[0] : NULL;
 
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
@@ -1923,12 +1931,7 @@ static void network_unmodelled(const ncfg_json_doc_t *doc, uint32_t entry,
 	    (only && strcmp(only->source, "dhcp4") != 0 && strcmp(only->source, "dhcp6") != 0)) {
 		note_unmodelled(&item->unmodelled, "addressing (beyond one DHCP source)");
 	}
-	if (item->route_count) {
-		note_unmodelled(&item->unmodelled, "routes");
-	}
-	if (member_says(doc, entry, "dns")) {
-		note_unmodelled(&item->unmodelled, "dns");
-	}
+
 	/* An enterprise network's 802.1X was here until 10.611, when this struct
 	 * learned to carry it. */
 }
@@ -2021,6 +2024,16 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 			item->credential_reference = ncfg_json_type(doc, held) == NCFG_JSON_OBJECT
 			    ? reference_text(doc, held) : dup_string("");
 		}
+		item->bssid = joined_words(doc, ncfg_json_member(doc, entry, "bssid"));
+		{
+			uint32_t roam = ncfg_json_member(doc, entry, "roam");
+			item->roam = ncfg_json_type(doc, roam) == NCFG_JSON_OBJECT;
+			item->roam_signal = (int)ncfg_json_int(doc, ncfg_json_member(doc, roam, "signal"), -70);
+			item->roam_interval =
+			    (int)ncfg_json_int(doc, ncfg_json_member(doc, roam, "interval"), 30);
+			item->roam_slow_interval =
+			    (int)ncfg_json_int(doc, ncfg_json_member(doc, roam, "slow_interval"), 300);
+		}
 		item->eap_method = member_text(doc, security, "method");
 		item->identity = member_text(doc, security, "identity");
 		item->anonymous_identity = member_text(doc, security, "anonymous_identity");
@@ -2029,7 +2042,7 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		item->ca_cert = cert_text(doc, ncfg_json_member(doc, security, "ca_cert"));
 		item->client_cert = cert_text(doc, ncfg_json_member(doc, security, "client_cert"));
 		item->private_key = cert_text(doc, ncfg_json_member(doc, security, "private_key"));
-		if (!item->credential_reference || !item->eap_method || !item->identity ||
+		if (!item->bssid || !item->credential_reference || !item->eap_method || !item->identity ||
 		    !item->anonymous_identity || !item->phase2 || !item->domain_suffix_match ||
 		    !item->ca_cert || !item->client_cert || !item->private_key) {
 			set_error(err, err_size, "out of memory");
@@ -2049,11 +2062,15 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		 * What the network configures, by the same readers the interface view
 		 * uses: the keys are the document's and so are their shapes.
 		 */
+		/* With the unmodelled sink since 10.612, when routes and DNS became
+		 * fields: what of them a field cannot hold is named, as on an
+		 * interface. */
 		if (!read_sources(doc, ncfg_json_member(doc, entry, "addressing"),
-		        &item->sources, &item->source_count, NULL)
+		        &item->sources, &item->source_count, &item->unmodelled)
 		    || !read_routes(doc, ncfg_json_member(doc, entry, "routes"), &item->routes,
-		        &item->route_count, NULL)
-		    || !read_dns(doc, ncfg_json_member(doc, entry, "dns"), &item->dns, NULL)) {
+		        &item->route_count, &item->unmodelled)
+		    || !read_dns(doc, ncfg_json_member(doc, entry, "dns"), &item->dns,
+		        &item->unmodelled)) {
 			set_error(err, err_size, "out of memory");
 			ncfg_json_free(doc);
 			ncfg_saved_networks_free(out);
@@ -2105,10 +2122,6 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
 	free(points->items);
 	memset(points, 0, sizeof(*points));
 }
-
-/* Defined below, beside the other join this file does: an access point's
- * station list is read before the interface reader that first needed it. */
-static char *joined_words(const ncfg_json_doc_t *doc, uint32_t array);
 
 /*
  * The station list as an editor should show it: what the block says.

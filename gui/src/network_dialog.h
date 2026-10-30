@@ -32,6 +32,8 @@
 
 class QCheckBox;
 class QComboBox;
+class QFormLayout;
+class QTableWidget;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -92,6 +94,19 @@ private:
 	QCheckBox   *hidden;
 	QCheckBox   *metered;
 	QComboBox   *addressing;
+	/* Fields since 10.612: the access points it is pinned to, roaming, and
+	 * the network's own routes and resolution. */
+	QLineEdit    *bssid;
+	QCheckBox    *roam;
+	QSpinBox     *roam_signal;
+	QSpinBox     *roam_interval;
+	QSpinBox     *roam_slow_interval;
+	QTableWidget *routes;
+	QComboBox    *dns_mode;
+	QLineEdit    *dns_servers;
+	QLineEdit    *dns_search;
+	QLineEdit    *dns_domains;
+	QFormLayout  *form_layout;
 	QLabel      *note;
 	QPushButton *save_button;
 };

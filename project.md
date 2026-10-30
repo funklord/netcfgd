@@ -12631,6 +12631,19 @@ inside of a key -- an `advertise` with an `exec` backend, a route with a
 `src`, a peer or delegated addressing source. `interface_load`'s refusal case
 is a route with a `src` now, after `ipv6_token`, a reservation and `dot1x`.
 
+**Then the network dialog**: pinned access points (`bssid`, space-separated),
+roaming (on, the threshold and the two intervals, written inside `wifi` where
+the language reads it), a routes table, and a resolver scope (mode, servers,
+search, routing domains). Routes and DNS were already read and simply had no
+field; they read with the unmodelled sink now, as an interface's do, so a
+route with a `src` is still named. **Two things stay refused**: addressing
+beyond the dialog's one DHCP choice, and a network's `hooks`, which have no
+read path in the GUI -- the hook requests serve an interface's. The form
+scrolls, as the interface dialog's does, and holds its form as a member for
+the same reason. `gui_wifi.sh`: a network pinned to two access points,
+roaming, with a route and a DNS scope opens on them and keeps every value
+through a Save; one addressed twice is refused with its file as it was.
+
 ## 10.611 The network dialog edits enterprise networks
 
 **Asked for by the holder 2026-10-30** ("go ahead with the enterprise network

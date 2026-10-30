@@ -2063,6 +2063,14 @@ typedef struct {
 	 * sources are as the language writes them, a path or an `@secret:`
 	 * reference (10.611).
 	 */
+	/* The access points it is pinned to, space-joined, "" for any; and
+	 * roaming, where `roam` is set, with its threshold and intervals
+	 * (10.612). */
+	char                  *bssid;
+	int                    roam;
+	int                    roam_signal;
+	int                    roam_interval;
+	int                    roam_slow_interval;
 	char                  *eap_method;
 	char                  *identity;
 	char                  *anonymous_identity;

@@ -656,6 +656,18 @@ struct ncfg_saved_network_row {
 	 * empty for none, `dhcp` or `dhcp6` for a single DHCP source. Anything
 	 * else is in `unmodelled`, and this is empty. */
 	QString addressing;
+	/* Pinned access points, space-joined; roaming; and the network's own
+	 * routes and resolution, which apply while it is joined (10.612). */
+	QString bssid;
+	bool    roam = false;
+	int     roam_signal = -70;
+	int     roam_interval = 30;
+	int     roam_slow_interval = 300;
+	QList<ncfg_route_row> routes;
+	QString dns_mode;
+	QString dns_servers;
+	QString dns_search;
+	QString dns_domains;
 	/* The credential's reference as the language writes it --
 	 * `@secret:home`, `@secret:keyring:eduroam` -- or empty (10.611). */
 	QString credential_reference;

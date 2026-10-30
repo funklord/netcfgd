@@ -217,29 +217,77 @@ int main(int argc, char **argv)
 		 * here is one the next probe's radio would try to join. */
 		(void)connection.config_delete(QStringLiteral("wifi-metered"), &why);
 	}
+	/* 5. What the dialog refused until 10.612 and carries now: pinned access
+	 *    points, roaming, a route and a resolver scope. Opened on all of it,
+	 *    a changed metric saved with all of it. And the refusal that remains,
+	 *    for two addressing sources -- the dialog's one choice cannot hold
+	 *    them -- which Save must leave as it was. */
+	{
+		QString why;
+		check("a network pinned to two access points, roaming, with a route and dns, is "
+		      "written by hand",
+		    connection.config_put(QStringLiteral("wifi-pinned"),
+		        QStringLiteral("network \"pinned\" {\n\twifi {\n\t\tpsk = \"@secret:pinned\"\n"
+		                       "\t\troam { signal = -72; interval = 20; slow_interval = 200 }\n"
+		                       "\t}\n\tbssid = [\"00:11:22:33:44:55\", \"00:11:22:33:44:66\"]\n"
+		                       "\troutes = [\"10.9.0.0/24 via 192.168.1.1 metric 5\"]\n"
+		                       "\tdns { mode = \"write_resolv_conf\"; servers = [\"192.168.1.53\"] }\n"
+		                       "}\n"),
+		        true, &why),
+		    why);
+		ncfg_saved_network_row existing;
+		check("and netcfgd says the dialog can carry all of it",
+		    saved_named(&connection, QStringLiteral("pinned"), &existing) &&
+		        existing.unmodelled.isEmpty(),
+		    existing.unmodelled);
+		ncfg_network_dialog dialog(&connection, existing);
+		auto *pinned = dialog.findChild<QLineEdit *>(QStringLiteral("network_bssid"));
+		auto *roam = dialog.findChild<QCheckBox *>(QStringLiteral("network_roam"));
+		auto *metric = dialog.findChild<QSpinBox *>(QStringLiteral("network_metric"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+		check("the dialog opens on its access points and its roaming",
+		    pinned && pinned->text() == QStringLiteral("00:11:22:33:44:55 00:11:22:33:44:66") &&
+		        roam && roam->isChecked(),
+		    pinned ? pinned->text() : QString());
+		metric->setValue(20);
+		save->click();
+		ncfg_saved_network_row after;
+		check("and Save keeps all of it",
+		    !dialog.outcome().isEmpty() && saved_named(&connection, QStringLiteral("pinned"), &after) &&
+		        after.metric == 20 &&
+		        after.bssid == QStringLiteral("00:11:22:33:44:55 00:11:22:33:44:66") && after.roam &&
+		        after.roam_signal == -72 && after.roam_interval == 20 &&
+		        after.roam_slow_interval == 200 && after.routes.size() == 1 &&
+		        after.routes[0].destination == QStringLiteral("10.9.0.0/24") &&
+		        after.routes[0].via == QStringLiteral("192.168.1.1") && after.routes[0].metric == 5 &&
+		        after.dns_mode == QStringLiteral("write_resolv_conf") &&
+		        after.dns_servers == QStringLiteral("192.168.1.53"),
+		    after.bssid + QStringLiteral(" / ") + after.dns_servers);
+		(void)connection.config_delete(QStringLiteral("wifi-pinned"), &why);
+	}
 	{
 		QString why;
 		const QString text = QStringLiteral(
-		    "network \"pinned\" {\n\twifi { psk = \"@secret:pinned\" }\n"
-		    "\tbssid = \"00:11:22:33:44:55\"\n}\n");
-		check("a network pinned to a BSSID is written by hand",
-		    connection.config_put(QStringLiteral("wifi-pinned"), text, true, &why), why);
+		    "network \"twice\" {\n\twifi { psk = \"@secret:twice\" }\n"
+		    "\tconfig = [\"dhcp\", \"dhcp6\"]\n}\n");
+		check("a network addressed twice is written by hand",
+		    connection.config_put(QStringLiteral("wifi-twice"), text, true, &why), why);
 		ncfg_saved_network_row existing;
-		check("and netcfgd names the BSSID as something the dialog cannot carry",
-		    saved_named(&connection, QStringLiteral("pinned"), &existing) &&
-		        existing.unmodelled == QStringLiteral("bssid"),
+		check("and netcfgd names the addressing as something the dialog cannot carry",
+		    saved_named(&connection, QStringLiteral("twice"), &existing) &&
+		        existing.unmodelled == QStringLiteral("addressing (beyond one DHCP source)"),
 		    existing.unmodelled);
 		ncfg_network_dialog dialog(&connection, existing);
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
 		save->click();
-		QFile file(conf + QStringLiteral("wifi-pinned.conf"));
+		QFile file(conf + QStringLiteral("wifi-twice.conf"));
 		QString kept;
 		if (file.open(QIODevice::ReadOnly)) {
 			kept = QString::fromUtf8(file.readAll());
 		}
 		check("so Save is refused and the file is left as it was",
 		    dialog.outcome().isEmpty() && kept == text, kept);
-		(void)connection.config_delete(QStringLiteral("wifi-pinned"), &why);
+		(void)connection.config_delete(QStringLiteral("wifi-twice"), &why);
 	}
 
 	/* 6. An enterprise network, and a passphrase the keyring holds (10.611).
