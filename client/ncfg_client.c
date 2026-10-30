@@ -4046,6 +4046,9 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	memset(out, 0, sizeof(*out));
 	out->preference = -1;
 	out->enabled = 1;
+	out->probe_down_after = 3;
+	out->probe_up_after = 2;
+	out->probe_require_lease = 1;
 
 	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
 	if (!doc) {
@@ -4102,6 +4105,13 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->probe_command = member_text(doc, probe, "command");
 		out->probe_interval = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "interval"), 0);
 		out->probe_timeout = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "timeout"), 0);
+		out->probe_down_after =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "down_after"), 3);
+		out->probe_up_after = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "up_after"), 2);
+		out->probe_hold_down =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "hold_down"), 0);
+		out->probe_require_lease =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, probe, "require_lease"), 1);
 		uint32_t args = ncfg_json_member(doc, probe, "args");
 		uint32_t args_count = ncfg_json_count(doc, args);
 		char *joined = dup_string("");

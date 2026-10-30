@@ -1367,6 +1367,13 @@ typedef struct {
 	char *probe_args;
 	int   probe_interval;
 	int   probe_timeout;
+	/* How many results flip the link, how long it is held down, and whether a
+	 * lease is needed first (10.617): the parser's defaults, 3, 2, 0 and on,
+	 * where the document states none. A Save used to drop all four. */
+	int   probe_down_after;
+	int   probe_up_after;
+	int   probe_hold_down;
+	int   probe_require_lease;
 	/* A DHCP server on it (0297, project.md 10.608): `dhcp_range` as the
 	 * language writes it, "A-B", or "" for the default; `dhcp_lease` -1 for
 	 * the default; `dhcp_dns` space-joined. Reservations are not carried and

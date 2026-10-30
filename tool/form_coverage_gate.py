@@ -45,6 +45,9 @@ import re
 import sys
 
 MODEL = pathlib.Path("c/src/model/document.c")
+# Every model file, because a sub-block's table can live beside its type
+# rather than in document.c.
+MODEL_DIR = pathlib.Path("c/src/model")
 CLIENT = pathlib.Path("client/ncfg_client.c")
 WAIVED = pathlib.Path("tool/form-unread-keys.txt")
 
@@ -62,12 +65,34 @@ FORMS = {
 
 # Sub-blocks a dialog reads field by field, held to the same rule. Each names
 # the reader of the block it sits in.
+INTERFACE_READER = ("ncfg_client_interface_config",
+    ["read_routes", "read_dns", "read_sources", "source_text", "routing_domains"])
+NETWORK_READER = ("ncfg_client_saved_networks",
+    ["network_unmodelled", "read_routes", "read_dns", "read_sources", "source_text",
+     "routing_domains"])
+ACCESS_POINT_READER = ("ncfg_client_access_points", ["editable_stations"])
 NESTED = {
 	"wifi_device_fields": DEVICE_READER,
 	"modem_fields": DEVICE_READER,
 	"link_settings_fields": DEVICE_READER,
 	"qdisc_fields": DEVICE_READER,
 	"bridge_vlan_fields": DEVICE_READER,
+	# Since 10.617: every sub-block the other three dialogs read field by
+	# field. `routes` and `dns` are shared by an interface and a network and
+	# read by the same helpers, so one entry each covers both.
+	"route_fields": INTERFACE_READER,
+	"dns_policy_fields": INTERFACE_READER,
+	"eap_fields": INTERFACE_READER,
+	"ra_fields": INTERFACE_READER,
+	"dhcp_server_fields": INTERFACE_READER,
+	"dhcp_host_fields": INTERFACE_READER,
+	"port_forward_fields": INTERFACE_READER,
+	"guard_fields": INTERFACE_READER,
+	"probe_fields": INTERFACE_READER,
+	"roam_fields": NETWORK_READER,
+	"access_control_fields": ACCESS_POINT_READER,
+	"neighbour_fields": ACCESS_POINT_READER,
+	"steering_fields": ACCESS_POINT_READER,
 }
 
 
@@ -87,16 +112,23 @@ def table_keys(source, table):
 
 
 def function_body(source, name):
-	"""One function's text, from its definition to the closing brace in column 0."""
-	start = re.search(r"^(?:static\s+)?[a-z_][\w\s\*]*\b" + re.escape(name) + r"\(", source,
-	    flags=re.M)
-	if not start:
-		return None
-	opening = source.find("\n{", start.end())
-	closing = source.find("\n}", opening)
-	if opening < 0 or closing < 0:
-		return None
-	return source[start.start():closing]
+	"""One function's text, from its definition to the closing brace in column 0.
+
+	The definition, not a prototype: a forward declaration ends at `;` before
+	any `{`, and taking it would read whatever function happens to follow --
+	which is how a helper with a prototype would have been checked against the
+	wrong code entirely."""
+	for start in re.finditer(r"^(?:static\s+)?[a-z_][\w\s\*]*\b" + re.escape(name) + r"\(", source,
+	    flags=re.M):
+		opening = source.find("\n{", start.end())
+		ending = source.find(";", start.end())
+		if opening < 0 or (0 <= ending < opening):
+			continue
+		closing = source.find("\n}", opening)
+		if closing < 0:
+			return None
+		return source[start.start():closing]
+	return None
 
 
 def waivers():
@@ -119,7 +151,8 @@ def main():
 	for path in (MODEL, CLIENT):
 		if not path.exists():
 			sys.exit(f"{path}: missing, so this gate would check nothing")
-	model = without_comments(MODEL.read_text(encoding="utf-8"))
+	model = without_comments("\n".join(
+	    path.read_text(encoding="utf-8") for path in sorted(MODEL_DIR.glob("*.c"))))
 	client = without_comments(CLIENT.read_text(encoding="utf-8"))
 	waived = waivers()
 

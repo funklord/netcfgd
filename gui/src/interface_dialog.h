@@ -168,6 +168,10 @@ private:
 	QLineEdit   *probe_args;
 	QSpinBox    *probe_interval;
 	QSpinBox    *probe_timeout;
+	QSpinBox    *probe_down_after;
+	QSpinBox    *probe_up_after;
+	QSpinBox    *probe_hold_down;
+	QCheckBox   *probe_require_lease;
 	QLabel      *note = nullptr;
 	QPushButton *save_button;
 };

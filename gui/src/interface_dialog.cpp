@@ -293,6 +293,30 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	probe_timeout->setSpecialValueText(QStringLiteral("default (5s)"));
 	form->addRow(QStringLiteral("timeout, seconds"), probe_timeout);
 
+	/* **When a result counts** (10.617): how many in a row take the link down
+	 * or bring it back, how long it stays down, and whether it needs a lease
+	 * before a pass means anything. The language has had all four; a Save
+	 * dropped them, so a probe tuned not to flap was reset to the defaults. */
+	probe_down_after = new QSpinBox(this);
+	probe_down_after->setObjectName(QStringLiteral("iface_probe_down_after"));
+	probe_down_after->setRange(1, 1000);
+	probe_down_after->setValue(3);
+	form->addRow(QStringLiteral("failures before down"), probe_down_after);
+	probe_up_after = new QSpinBox(this);
+	probe_up_after->setObjectName(QStringLiteral("iface_probe_up_after"));
+	probe_up_after->setRange(1, 1000);
+	probe_up_after->setValue(2);
+	form->addRow(QStringLiteral("passes before up"), probe_up_after);
+	probe_hold_down = new QSpinBox(this);
+	probe_hold_down->setObjectName(QStringLiteral("iface_probe_hold_down"));
+	probe_hold_down->setRange(0, 86400);
+	probe_hold_down->setSpecialValueText(QStringLiteral("none"));
+	form->addRow(QStringLiteral("held down, seconds"), probe_hold_down);
+	probe_require_lease = new QCheckBox(QStringLiteral("only count a pass once there is a lease"), this);
+	probe_require_lease->setObjectName(QStringLiteral("iface_probe_require_lease"));
+	probe_require_lease->setChecked(true);
+	form->addRow(QString(), probe_require_lease);
+
 	enabled = new QCheckBox(QStringLiteral("configure this interface"), this);
 	enabled->setObjectName(QStringLiteral("iface_enabled"));
 	enabled->setChecked(true);
@@ -605,6 +629,10 @@ void ncfg_interface_dialog::load_existing()
 		}
 		probe_interval->setValue(existing.probe_interval);
 		probe_timeout->setValue(existing.probe_timeout);
+		probe_down_after->setValue(existing.probe_down_after);
+		probe_up_after->setValue(existing.probe_up_after);
+		probe_hold_down->setValue(existing.probe_hold_down);
+		probe_require_lease->setChecked(existing.probe_require_lease);
 	}
 }
 
@@ -739,6 +767,10 @@ void ncfg_interface_dialog::detection_changed()
 		form->setRowVisible(probe_args, custom);
 		form->setRowVisible(probe_interval, !how.isEmpty());
 		form->setRowVisible(probe_timeout, !how.isEmpty());
+		form->setRowVisible(probe_down_after, !how.isEmpty());
+		form->setRowVisible(probe_up_after, !how.isEmpty());
+		form->setRowVisible(probe_hold_down, !how.isEmpty());
+		form->setRowVisible(probe_require_lease, !how.isEmpty());
 	}
 
 	if (how.isEmpty()) {
@@ -966,6 +998,20 @@ QString ncfg_interface_dialog::block_text() const
 		}
 		if (probe_timeout->value() > 0) {
 			body << QStringLiteral("\t\ttimeout = %1").arg(probe_timeout->value());
+		}
+		/* Only what differs from the parser's default, as the renderer
+		 * writes a probe: `require_lease` therefore only when it is off. */
+		if (probe_down_after->value() != 3) {
+			body << QStringLiteral("\t\tdown_after = %1").arg(probe_down_after->value());
+		}
+		if (probe_up_after->value() != 2) {
+			body << QStringLiteral("\t\tup_after = %1").arg(probe_up_after->value());
+		}
+		if (probe_hold_down->value() > 0) {
+			body << QStringLiteral("\t\thold_down = %1").arg(probe_hold_down->value());
+		}
+		if (!probe_require_lease->isChecked()) {
+			body << QStringLiteral("\t\trequire_lease = false");
 		}
 		body << QStringLiteral("\t}");
 	}

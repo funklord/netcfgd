@@ -12597,6 +12597,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.617 The form gate reads every sub-block, and found the probe's counts
+
+A `/go` run 2026-10-30, from the lens of 10.613 and 10.615: each silent drop
+on Save had been a member the reader never mentioned, inside a sub-block the
+gate did not read. **`tool/form_coverage_gate.py` now holds every sub-block
+the four dialogs read field by field** -- routes, DNS, 802.1X, `advertise`,
+the DHCP server and its reservations, port forwards, guard, probe, roam,
+access control, neighbours and steering: 155 members of 4 blocks and 18
+sub-blocks. It reads every model file, since some tables live beside their
+types, and its function finder now skips a prototype, which would otherwise
+have checked a helper with a forward declaration against whatever function
+followed it. A copy of the client with route `src` removed fails it by name.
+
+**It found one more, in the probe**: `down_after`, `up_after`, `hold_down` and
+`require_lease`, which the language has had all along, were dropped by an
+interface's Save -- a probe tuned not to flap went back to the defaults. The
+client reads them (the parser's 3, 2, 0 and on where none is stated), the
+dialog has a field for each and writes only what differs, and
+`live_interface_dialog` sets all four and finds them in the file and in the
+daemon's reading. In the live test rather than `interface_load`: a probe is a
+program netcfgd runs as root, and the daemon takes one only from root.
+
+**The same lens on the other writers found nothing.** `ncfg wifi add` refuses
+to overwrite a network or a credential, the radio switch replaces only its own
+drop-in, and the TUI writes no configuration. The profile renderer mentions
+every member added since its audit (port forwards, hairpin, reservations,
+`wds`, the probe's counts).
+
 ## 10.616 A network's hooks are edited, as an interface's are
 
 The last refusal a configuration file could reach, and it rested on a claim

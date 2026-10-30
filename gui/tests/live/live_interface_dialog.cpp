@@ -157,6 +157,23 @@ int main(int argc, char **argv)
 
 	preference->setValue(50);
 	detection->setCurrentIndex(at);
+	/* **When a result counts** (10.617): a probe tuned not to flap, which a
+	 * Save reset to the defaults because the form had no field for it. Here
+	 * rather than in `interface_load`, because a probe is a program netcfgd
+	 * runs as root and the daemon takes one only from root. */
+	auto *down_after = dialog.findChild<QSpinBox *>(QStringLiteral("iface_probe_down_after"));
+	auto *up_after = dialog.findChild<QSpinBox *>(QStringLiteral("iface_probe_up_after"));
+	auto *hold_down = dialog.findChild<QSpinBox *>(QStringLiteral("iface_probe_hold_down"));
+	auto *require_lease =
+	    dialog.findChild<QCheckBox *>(QStringLiteral("iface_probe_require_lease"));
+	check("the probe's counting fields are there",
+	    down_after && up_after && hold_down && require_lease);
+	if (down_after && up_after && hold_down && require_lease) {
+		down_after->setValue(5);
+		up_after->setValue(4);
+		hold_down->setValue(60);
+		require_lease->setChecked(false);
+	}
 	save->click();
 
 	/* The file, because the probe's argv is the part that has to be exactly
@@ -190,6 +207,12 @@ int main(int argc, char **argv)
 		    !text.contains(QStringLiteral("interval")) &&
 		        !text.contains(QStringLiteral("timeout")),
 		    text);
+		check("and writes the counts it was given",
+		    text.contains(QStringLiteral("down_after = 5")) &&
+		        text.contains(QStringLiteral("up_after = 4")) &&
+		        text.contains(QStringLiteral("hold_down = 60")) &&
+		        text.contains(QStringLiteral("require_lease = false")),
+		    text);
 		written.close();
 	}
 
@@ -198,6 +221,16 @@ int main(int argc, char **argv)
 	 * document does not compile. */
 	ncfg_plan_data plan;
 	check("netcfgd compiled the interface block", connection.plan(&plan, &error), error);
+	{
+		ncfg_interface_config read;
+		check("and reads the probe's counts back as written",
+		    connection.interface_config(iface, &read, &error) && read.probe_down_after == 5 &&
+		        read.probe_up_after == 4 && read.probe_hold_down == 60 &&
+		        !read.probe_require_lease,
+		    QStringLiteral("%1 %2 %3 %4 %5").arg(error).arg(read.probe_down_after)
+		        .arg(read.probe_up_after).arg(read.probe_hold_down)
+		        .arg(read.probe_require_lease));
+	}
 
 	/* Removed, because the daemon and this directory outlive this probe and
 	 * the next one should not inherit a configuration it did not write. */
