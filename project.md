@@ -12597,6 +12597,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.614 The `live_wifi` intermittent was the fake supplicant's `-B`
+
+**Asked for by the holder 2026-10-30** ("go ahead with the live_wifi flake").
+Recorded three times and never explained (10.604, and two entries under
+10.6x): `live_wifi` failing *"activating scans straight away, so the table is
+already filled"* and *"and pressing scan again refills it"*, with 0 rows and
+then 6, during sabotage runs and other loaded moments, and passing otherwise.
+
+**The cause is in the harness, and netcfgd's assumption is right.** A real
+`wpa_supplicant -B` forks only once its control interface is up, and netcfgd
+relies on it: `start_supplicant` gives the new supplicant its networks over
+the socket the moment the start returns. `tests/live/fake_supplicant.py`
+returned from the parent straight after the fork -- under a comment saying it
+must not -- and bound its socket in the child a moment later. On a loaded
+machine the child lost that race, the start failed at the socket,
+`set_radio` answered with the failure, and the view's `activate()` showed it
+and never scanned: 0 rows. The supplicant came up anyway, so the next scan
+found all six.
+
+**Measured, both ways.** The child delayed by a second before binding: those
+two checks fail with those two numbers. The parent made to wait for the
+child's word that it has bound, with the same one-second delay: `gui_wifi.sh`
+14 of 14. The wait is a pipe the child writes after `bind`, bounded at ten
+seconds, so a child that dies before binding fails the start rather than
+hanging it. Every live script that starts the fake was rerun against it.
+
+**Two lenses were wrong, and are worth naming.** 10.6x's negative sweep looked
+for a scan that does not fill the table, and the fault was the activation
+before it; and "nothing in `secrets_view` can reach the wifi scan" was true and
+beside the point, because what the sabotage run supplied was load.
+
 ## 10.613 The device dialog carries a bridge port, and stops dropping wds
 
 **Asked for by the holder 2026-10-30** ("go ahead with the device dialog"),
@@ -12971,10 +13002,10 @@ still refused.
   member read is not a member written back -- the network's routes and DNS
   were read and still dropped by a dialog with no field for them.
 - **The first run had two failures in `live_wifi`** (the table empty right
-  after activation, six rows after a second scan), with the two networks this
-  test wrote still configured on the shared daemon. They are removed at the
-  end of their cases now, and the rerun passed; whether they were the cause
-  or the scan is flaky was not established.
+  after activation, six rows after a second scan). The two networks this
+  test wrote are removed at the end of their cases now, but they were not the
+  cause: the fake supplicant's `-B` returned before its socket was bound
+  (10.614).
 
 ## 10.605 Reservations: a fixed address for a named host
 
@@ -51843,6 +51874,10 @@ and anything about association timing with a real access point. **Every one of
 those is a candidate the harness structurally cannot reach**, which is the
 next lens rather than a reason to believe the fault is absent.
 
+**Explained since, in 10.614**: the fake supplicant's `-B` returned before
+binding its socket, so under load the activation failed before any scan. The
+lens above was looking at the scan, one step too late.
+
 ## 10.65 A tier is about netcfgd, and the argument kept being about the disk
 
 Two corrections from the copyright holder, in one exchange:
@@ -52132,7 +52167,9 @@ passed them on every other run of the day. Nothing in `secrets_view` can reach
 the wifi scan, so this is that probe's own timing rather than anything the
 sabotage did. Recorded rather than investigated: an intermittent named in a
 document is one the next person can recognise instead of rediscovering, and
-non-reproduction is not evidence against it.
+non-reproduction is not evidence against it. **Explained in 10.614**: what the
+sabotage run supplied was load, and the fake supplicant's `-B` lost a race
+under it.
 
 ## 10.61 The build fetches what it needs, and the package puts its unit in force
 

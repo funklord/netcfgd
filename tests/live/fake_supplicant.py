@@ -40,6 +40,7 @@ own address, sends a command, and gets one reply.
 
 import atexit
 import os
+import select
 import socket
 import sys
 
@@ -412,14 +413,29 @@ def main():
 	if parsed is not None:
 		ctrl_dir, interface, pidfile, daemonise = parsed
 		if daemonise:
-			# `-B` means background, and netcfgd waits for the control socket
-			# to appear rather than for the process -- so the parent must not
-			# exit before the child has bound it. Forking here and letting the
-			# parent return is what a real supplicant does; the socket is
-			# created below, in the child.
+			# `-B` means background, and a real supplicant forks only once its
+			# control interface is up -- netcfgd relies on that, and talks to
+			# the socket the moment the start returns, to give it its
+			# networks. So the parent waits for the child to say it has bound
+			# the socket, and exits only then.
+			#
+			# **It used to return straight after the fork**, under a comment
+			# saying it must not, and the child bound its socket a moment
+			# later. Usually that was soon enough; on a loaded machine it was
+			# not, the start failed at the socket, and `live_wifi` saw an
+			# activation that never scanned -- 0 rows, then 6 on the next
+			# scan. Measured by delaying the child's bind by a second: those
+			# two checks, with those two numbers (10.614).
+			ready, told = os.pipe()
 			if os.fork() > 0:
-				return 0
+				os.close(told)
+				# Bounded, so a child that dies before binding fails the start
+				# rather than hanging it: EOF or ten seconds, whichever first.
+				readable, _, _ = select.select([ready], [], [], 10)
+				return 0 if readable and os.read(ready, 1) == b"1" else 1
+			os.close(ready)
 			os.setsid()
+			return serve(ctrl_dir, interface, pidfile, told)
 		return serve(ctrl_dir, interface, pidfile)
 
 	if len(sys.argv) not in (3, 4):
@@ -428,7 +444,7 @@ def main():
 	return serve(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else None)
 
 
-def serve(ctrl_dir, interface, pidfile):
+def serve(ctrl_dir, interface, pidfile, told=None):
 	# An optional pid file, because since 0080 a control socket does not prove a
 	# supplicant is running and netcfgd is right about that: it asks whether the
 	# pid file at $run/supplicant/<iface>.pid names a live process *whose own
@@ -453,8 +469,11 @@ def serve(ctrl_dir, interface, pidfile):
 	server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 	server.bind(path)
 	# Announce readiness on stdout so the shell can wait for it rather than
-	# sleeping and hoping.
+	# sleeping and hoping -- and to a `-B` parent, which is waiting to exit.
 	print("ready", flush=True)
+	if told is not None:
+		os.write(told, b"1")
+		os.close(told)
 
 	# Who has sent ATTACH. A real wpa_supplicant sends unsolicited events only
 	# to connections that asked, which is the whole reason netcfgd's roam
