@@ -796,6 +796,9 @@ static void render_port_forwards(const ncfg_interface_t *interface, ncfg_buf_t *
 		if (forward->to_port.has) {
 			ncfg_buf_addf(body, "\t\tto_port = %lld\n", (long long)forward->to_port.value);
 		}
+		if (forward->hairpin.has) {
+			ncfg_buf_addf(body, "\t\thairpin = %s\n", forward->hairpin.value ? "true" : "false");
+		}
 		ncfg_buf_add_text(body, "\t}\n");
 	}
 }

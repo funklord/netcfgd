@@ -471,6 +471,20 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 	if (!forward.name) {
 		return;
 	}
+	/* The identity in the kernel is `IF/NAME@ROLE` (0299), so the label may
+	 * hold neither separator -- nor anything else a comment would carry
+	 * badly. */
+	for (i = 0; forward.name[i]; i++) {
+		const char one = forward.name[i];
+
+		if (!((one >= 'a' && one <= 'z') || (one >= 'A' && one <= 'Z') ||
+		        (one >= '0' && one <= '9') || one == '-' || one == '_' || one == '.')) {
+			ncfg_diag(ctx, block->span, "port_forward `%s`: a name is letters, digits, `-`, "
+			    "`_` and `.`", forward.name);
+			free(forward.name);
+			return;
+		}
+	}
 	for (i = 0; i < block->items.count; i++) {
 		const ncfg_ast_item_t       *item = block->items.at[i];
 		const ncfg_ast_assignment_t *assignment;
@@ -517,6 +531,13 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 				forward.to_port.has = 1;
 				forward.to_port.value = value;
 			}
+		} else if (strcmp(assignment->key, "hairpin") == 0) {
+			int flag;
+
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				forward.hairpin.has = 1;
+				forward.hairpin.value = flag;
+			}
 		} else if (strcmp(assignment->key, "to") == 0) {
 			char          *text = ncfg_as_string(ctx, assignment->value);
 			ncfg_address_t address;
@@ -537,7 +558,7 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 			forward.to = text;
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown port_forward key `%s`: protocol, port, to and to_port",
+			    "unknown port_forward key `%s`: protocol, port, to, to_port and hairpin",
 			    assignment->key);
 		}
 	}

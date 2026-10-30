@@ -419,8 +419,10 @@ static void forwards_are_written_and_read_back(void)
 {
 	static const char *const  uplinks[] = { "wan0" };
 	const ncfg_forward_rule_t forwards[2] = {
-		{ "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10", 8443u },
-		{ "wan0", "dns", NCFG_PORT_FORWARD_UDP, 53u, "192.168.1.11", 53u },
+		{ NCFG_FORWARD_RULE_FORWARD, "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10",
+		    8443u, NULL, NULL, NULL },
+		{ NCFG_FORWARD_RULE_FORWARD, "wan0", "dns", NCFG_PORT_FORWARD_UDP, 53u, "192.168.1.11",
+		    53u, NULL, NULL, NULL },
 	};
 	ncfg_forward_rule_t       bad;
 	ncfg_buf_t                out;
@@ -498,6 +500,69 @@ static void forwards_are_written_and_read_back(void)
 	check(!ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &bad, 1u, &batch, err,
 	          sizeof(err)) && out.length == 0u,
 	    "  and one on an interface name no register holds");
+}
+
+/*
+ * Hairpin (0299): a reflection in `prerouting` and a return path in
+ * `postrouting`, each read back as its role with what it matches, and a
+ * return path alone still bringing the `postrouting` chain with it.
+ */
+static void reflections_and_return_paths_are_read_back(void)
+{
+	const ncfg_forward_rule_t rules[3] = {
+		{ NCFG_FORWARD_RULE_FORWARD, "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10",
+		    8443u, NULL, NULL, NULL },
+		{ NCFG_FORWARD_RULE_REFLECT, "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10",
+		    8443u, "203.0.113.1", NULL, NULL },
+		{ NCFG_FORWARD_RULE_HAIRPIN, "wan0", "web", NCFG_PORT_FORWARD_TCP, 8443u, "192.168.1.10",
+		    8443u, NULL, "192.168.1.0/24", "lan0" },
+	};
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	int                  kinds[3] = { 0, 0, 0 };
+	int                  right = 0;
+	int                  chains = 0;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, rules, 3u, &batch, err,
+	          sizeof(err)),
+	    "a forward with its reflection and return path builds");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_forward_t one;
+		char                      uplink[NCFG_NFT_IFNAME_MAX];
+
+		if ((message.header.kind & 0xffu) == NFT_MSG_NEWCHAIN) {
+			chains++;
+		}
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE ||
+		    !ncfg_nft_forward_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			continue;
+		}
+		kinds[one.kind]++;
+		if (one.kind == NCFG_FORWARD_RULE_REFLECT && strcmp(one.address, "203.0.113.1") == 0 &&
+		    one.port == 443u && strcmp(one.to, "192.168.1.10") == 0 && one.to_port == 8443u) {
+			right++;
+		}
+		if (one.kind == NCFG_FORWARD_RULE_HAIRPIN && strcmp(one.network, "192.168.1.0/24") == 0 &&
+		    strcmp(one.via, "lan0") == 0 && strcmp(one.to, "192.168.1.10") == 0 &&
+		    one.port == 8443u && one.to_port == 8443u && strcmp(one.interface, "wan0") == 0 &&
+		    strcmp(one.name, "web") == 0 &&
+		    !ncfg_nft_rule_uplink(message.payload, message.payload_length, uplink,
+		        sizeof(uplink), NULL, 0)) {
+			right++;
+		}
+	}
+	check(kinds[0] == 1 && kinds[1] == 1 && kinds[2] == 1,
+	    "  each rule is read back as its own role");
+	check(right == 2, "  the reflection with its address, the return path with its network, "
+	    "neither taken for an uplink");
+	check(chains == 2, "  and a return path with no masquerade still has its postrouting chain");
+	ncfg_buf_free(&out);
 }
 
 int main(void)
@@ -1252,6 +1317,7 @@ int main(void)
 	a_rule_is_bounded_in_what_it_becomes();
 	what_is_written_is_read_back();
 	forwards_are_written_and_read_back();
+	reflections_and_return_paths_are_read_back();
 
 	if (failures) {
 		printf("nft: %d check(s) failed\n", failures);

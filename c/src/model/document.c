@@ -1937,7 +1937,9 @@ static const ncfg_field_t port_forward_fields[] = {
 	{ .name = "to", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_port_forward_t, to) },
 	{ .name = "to_port", .kind = NCFG_F_OPT_INT, R_U16,
-	    .offset = offsetof(ncfg_port_forward_t, to_port) }
+	    .offset = offsetof(ncfg_port_forward_t, to_port) },
+	{ .name = "hairpin", .kind = NCFG_F_OPT_BOOL,
+	    .offset = offsetof(ncfg_port_forward_t, hairpin) }
 };
 static const ncfg_type_t port_forward_type = TYPE("port forward", port_forward_fields);
 

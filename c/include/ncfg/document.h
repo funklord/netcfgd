@@ -1416,21 +1416,38 @@ typedef struct {
 	int64_t       port;
 	char         *to;
 	ncfg_optint_t to_port;
+	/* Reachable from inside too (0299): absent is on, and only `false` is
+	 * ever written. */
+	ncfg_optbool_t hairpin;
 } ncfg_port_forward_t;
 
 /*
- * One port forward resolved for the table (0298): which interface it arrives
- * on, and `to_port` never 0 -- "the same port" already worked out. What the
- * planner hands the `nftables.replace` op and what `nft.c` writes; borrowed
- * strings.
+ * One kernel rule a port forward becomes, resolved for the table (0298,
+ * 0299): which interface it arrives on, and `to_port` never 0 -- "the same
+ * port" already worked out. What the planner hands the `nftables.replace` op
+ * and what `nft.c` writes; borrowed strings.
+ *
+ * A forward is one `FORWARD` rule, a `REFLECT` per address of its uplink --
+ * `address`, matched for traffic arriving anywhere else -- and a `HAIRPIN`
+ * return path masquerading `network` leaving on `via` towards the host.
  */
+typedef enum {
+	NCFG_FORWARD_RULE_FORWARD,
+	NCFG_FORWARD_RULE_REFLECT,
+	NCFG_FORWARD_RULE_HAIRPIN
+} ncfg_forward_rule_kind_t;
+
 typedef struct {
+	int         kind; /* ncfg_forward_rule_kind_t */
 	const char *interface;
 	const char *name;
 	int         protocol; /* ncfg_port_forward_protocol_t */
 	uint16_t    port;
 	const char *to;
 	uint16_t    to_port;
+	const char *address; /* REFLECT: the uplink address, bare */
+	const char *network; /* HAIRPIN: the host's network, as a CIDR */
+	const char *via;     /* HAIRPIN: the interface towards the host */
 } ncfg_forward_rule_t;
 
 #define NCFG_DHCP_SERVER_LEASE_DEFAULT 43200

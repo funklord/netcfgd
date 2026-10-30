@@ -15,6 +15,9 @@
 #     of the rule back as the document's;
 #   - `ncfg status` lists the forward on `wan0`;
 #   - a connection to 203.0.113.1:443 from the wan side reaches the lan server;
+#   - the rule is reflected and given a return path (0299), and a host on the
+#     lan dialling the same public address reaches the server too -- and does
+#     not once the forward says `hairpin = false`;
 #   - a rule added by hand to the prerouting chain is a difference, and the
 #     next apply replaces it;
 #   - and a document with no forward leaves no prerouting chain.
@@ -24,9 +27,9 @@
 # `nft_nat` and `nft_chain_nat`, which a namespace cannot load, so their
 # absence is a skip that says so.
 #
-# HOW IT STOPS: a fixed list of steps. The two child namespaces are `sleep 120`
-# processes killed by the EXIT trap; the server lives at most 20 s and the
-# client 5 s, each under `timeout`; every wait is a bounded loop. Everything is
+# HOW IT STOPS: a fixed list of steps. The three child namespaces are `sleep
+# 120` processes killed by the EXIT trap; each server lives at most 10 s and
+# each client 5 s, under `timeout`; every wait is a bounded loop. Everything is
 # in namespaces this process owns, so the table and the links go with it.
 
 set -eu
@@ -56,9 +59,11 @@ grep -q '^nft_chain_nat ' /proc/modules 2>/dev/null ||
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pf.XXXXXX")
 wan_pid=
 lan_pid=
+inside_pid=
 cleanup() {
 	[ -n "$wan_pid" ] && kill "$wan_pid" 2>/dev/null || true
 	[ -n "$lan_pid" ] && kill "$lan_pid" 2>/dev/null || true
+	[ -n "$inside_pid" ] && kill "$inside_pid" 2>/dev/null || true
 	rm -rf "$work"
 	return 0
 }
@@ -79,20 +84,27 @@ has() { # $1 what, $2 file, $3 fixed text it must hold
 	check "$1" "$(grep -cF -- "$3" "$2" || true)" "1"
 }
 
-# Two namespaces of our own, each held open by a sleep.
+# Three namespaces of our own, each held open by a sleep: a host outside on
+# the wan side, the server on the lan side, and a second lan host beside it --
+# the client hairpin is for (0299). The lan side is a bridge, so the two lan
+# hosts share one segment with the router, as a home network does.
 unshare -n sleep 120 &
 wan_pid=$!
 unshare -n sleep 120 &
 lan_pid=$!
+unshare -n sleep 120 &
+inside_pid=$!
 own=$(readlink /proc/$$/ns/net)
 n=0
 while { [ "$(readlink "/proc/$wan_pid/ns/net" 2>/dev/null)" = "$own" ] ||
-    [ "$(readlink "/proc/$lan_pid/ns/net" 2>/dev/null)" = "$own" ]; } && [ "$n" -lt 50 ]; do
+    [ "$(readlink "/proc/$lan_pid/ns/net" 2>/dev/null)" = "$own" ] ||
+    [ "$(readlink "/proc/$inside_pid/ns/net" 2>/dev/null)" = "$own" ]; } && [ "$n" -lt 50 ]; do
 	sleep 0.1
 	n=$((n + 1))
 done
 W() { nsenter --net="/proc/$wan_pid/ns/net" "$@"; }
 L() { nsenter --net="/proc/$lan_pid/ns/net" "$@"; }
+I() { nsenter --net="/proc/$inside_pid/ns/net" "$@"; }
 
 ip link set lo up
 ip link add wan0 type veth peer name peer0
@@ -103,8 +115,50 @@ W ip link set lo up
 W ip addr add 203.0.113.2/24 dev peer0
 W ip link set peer0 up
 L ip link set lo up
-L ip addr add 192.168.1.10/24 dev peer1
+L ip link add br0 type bridge
+L ip link set peer1 master br0
+L ip link add side0 type veth peer name side1
+L ip link set side1 netns "$inside_pid"
+L ip link set side0 master br0
 L ip link set peer1 up
+L ip link set side0 up
+L ip addr add 192.168.1.10/24 dev br0
+L ip link set br0 up
+I ip link set lo up
+I ip addr add 192.168.1.20/24 dev side1
+I ip link set side1 up
+
+# One connection answered by the server, which says who it saw; and one made,
+# printing the answer or `refused`. Each bounded, each one connection.
+serve() { # $1 how long to wait for a client
+	rm -f "$work/listening"
+	L timeout "$1" python3 -c '
+import socket, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("192.168.1.10", 8443)); s.listen(1)
+open(sys.argv[1], "w").close()
+s.settimeout(int(sys.argv[2]) - 1)
+try:
+    c, peer = s.accept(); c.sendall(("through, from %s\n" % peer[0]).encode()); c.close()
+except OSError:
+    pass
+' "$work/listening" "$1" > "$work/server.log" 2>&1 &
+	n=0
+	while [ ! -e "$work/listening" ] && [ "$n" -lt 50 ]; do
+		sleep 0.1
+		n=$((n + 1))
+	done
+}
+dial() { # $1 the namespace function to dial from
+	"$1" timeout 5 python3 -c '
+import socket
+try:
+    s = socket.create_connection(("203.0.113.1", 443), timeout=3)
+    print(s.recv(100).decode().strip() or "refused")
+except OSError:
+    print("refused")
+' 2>&1 || true
+}
 
 mkdir -p "$work/etc" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
@@ -132,6 +186,10 @@ has "the prerouting chain is a nat chain at dstnat" "$work/listed" \
 	"type nat hook prerouting priority dstnat; policy accept;"
 has "and the rule is what nft writes for the forward, with its identity" "$work/listed" \
 	'iifname "wan0" tcp dport 443 dnat ip to 192.168.1.10:8443 comment "name=wan0/web sha256='
+has "its reflection, for the uplink's address arriving anywhere else" "$work/listed" \
+	'iifname != "wan0" ip daddr 203.0.113.1 tcp dport 443 dnat ip to 192.168.1.10:8443 comment "name=wan0/web@reflect sha256='
+has "and its return path, masquerading the host's own network towards it" "$work/listed" \
+	'oifname "lan0" ip saddr 192.168.1.0/24 ip daddr 192.168.1.10 tcp dport 8443 masquerade comment "name=wan0/web@hairpin sha256='
 "$ncfg" plan > "$work/plan.log" 2>&1 || true
 check "a second plan has nothing to do, so the kernel's form reads back" \
 	"$(head -1 "$work/plan.log")" "nothing to do"
@@ -142,25 +200,25 @@ has "ncfg status lists the forward on wan0" "$work/status.log" \
 # A server behind the router, and a client outside it aimed at the router.
 L ip route add default via 192.168.1.1
 W ip route add default via 203.0.113.1
-L timeout 20 python3 -c '
-import socket, sys
-s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("192.168.1.10", 8443)); s.listen(1)
-open(sys.argv[1], "w").close()
-c, peer = s.accept(); c.sendall(("through, from %s\n" % peer[0]).encode()); c.close()
-' "$work/listening" > "$work/server.log" 2>&1 &
-n=0
-while [ ! -e "$work/listening" ] && [ "$n" -lt 50 ]; do
-	sleep 0.1
-	n=$((n + 1))
-done
-W timeout 5 python3 -c '
-import socket
-s = socket.create_connection(("203.0.113.1", 443), timeout=4)
-print(s.recv(100).decode().strip())
-' > "$work/client.log" 2>&1 || true
+I ip route add default via 192.168.1.1
+serve 10
 check "a connection to the router's port 443 reaches the server behind it" \
-	"$(cat "$work/client.log")" "through, from 203.0.113.2"
+	"$(dial W)" "through, from 203.0.113.2"
+
+# Hairpin (0299): the host beside the server dials the same public address.
+# The server sees the router, which is what the return path costs and is how
+# the answer comes back the way the client expects.
+serve 10
+check "a lan host dialling the router's public address reaches the server" \
+	"$(dial I)" "through, from 192.168.1.1"
+
+# **The hairpin control**: the same, not reflected, must not get through.
+write_config '	port_forward "web" { protocol = "tcp"; port = 443; to = "192.168.1.10"; to_port = 8443; hairpin = false }'
+"$ncfg" apply > "$work/apply.log" 2>&1 || true
+serve 8
+check "and with hairpin = false it does not" "$(dial I)" "refused"
+write_config '	port_forward "web" { protocol = "tcp"; port = 443; to = "192.168.1.10"; to_port = 8443 }'
+"$ncfg" apply > "$work/apply.log" 2>&1 || true
 
 # A hand edit inside netcfgd's prerouting chain is not netcfgd's.
 nft add rule inet netcfgd prerouting tcp dport 80 dnat ip to 192.168.1.10
@@ -169,8 +227,8 @@ check "a rule added by hand is a difference the plan replaces" \
 	"$(grep -c 'nftables.replace' "$work/plan.log" || true)" "1"
 "$ncfg" apply > "$work/apply.log" 2>&1 || true
 nft list ruleset > "$work/listed" 2>&1 || true
-check "and the apply leaves only the document's forward" \
-	"$(grep -c 'dnat ip to' "$work/listed" || true)" "1"
+check "and the apply leaves only the document's forward and its reflection" \
+	"$(grep -c 'dnat ip to' "$work/listed" || true)" "2"
 
 write_config ""
 "$ncfg" apply > "$work/apply.log" 2>&1 || true
@@ -181,33 +239,8 @@ check "a document with no forward leaves no prerouting chain" \
 # **The control.** The same server and the same connection with no forward:
 # it must fail, or the connection above proved something other than the
 # translation -- a route, or a listener on the router itself.
-rm -f "$work/listening"
-L timeout 10 python3 -c '
-import socket, sys
-s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("192.168.1.10", 8443)); s.listen(1)
-open(sys.argv[1], "w").close()
-s.settimeout(8)
-try:
-    c, peer = s.accept(); c.sendall(b"through\n"); c.close()
-except OSError:
-    pass
-' "$work/listening" > /dev/null 2>&1 &
-n=0
-while [ ! -e "$work/listening" ] && [ "$n" -lt 50 ]; do
-	sleep 0.1
-	n=$((n + 1))
-done
-W timeout 5 python3 -c '
-import socket
-try:
-    s = socket.create_connection(("203.0.113.1", 443), timeout=3)
-    print(s.recv(100).decode().strip())
-except OSError as e:
-    print("refused")
-' > "$work/client.log" 2>&1 || true
-check "and with no forward the same connection does not get through" \
-	"$(cat "$work/client.log")" "refused"
+serve 8
+check "and with no forward the same connection does not get through" "$(dial W)" "refused"
 
 if [ "$failures" -ne 0 ]; then
 	echo "port_forward.sh: $failures check(s) failed; the last apply said:"

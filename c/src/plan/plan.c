@@ -486,6 +486,11 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 				    ncfg_plan_intern(plan, in->u.nftables.forwards[at].interface);
 				forwards[at].name = ncfg_plan_intern(plan, in->u.nftables.forwards[at].name);
 				forwards[at].to = ncfg_plan_intern(plan, in->u.nftables.forwards[at].to);
+				forwards[at].address =
+				    ncfg_plan_intern(plan, in->u.nftables.forwards[at].address);
+				forwards[at].network =
+				    ncfg_plan_intern(plan, in->u.nftables.forwards[at].network);
+				forwards[at].via = ncfg_plan_intern(plan, in->u.nftables.forwards[at].via);
 			}
 			out->u.nftables.forwards = forwards;
 		}

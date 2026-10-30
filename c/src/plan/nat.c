@@ -29,6 +29,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/nft.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -303,78 +304,214 @@ static size_t observed_in(const ncfg_observed_firewall_t *observed, const char *
  * Port forwards (0298)
  * ------------------------------------------------------------------------ */
 
-/*
- * The document's forwards in the order the table writes them -- interfaces in
- * the document's order, each one's forwards by name -- with `to_port`
- * resolved. Borrowed strings; the array is the caller's. NULL with a count of
- * 0 where there are none, and on out of memory with `failed` set.
- */
-static ncfg_forward_rule_t *wanted_forwards(const ncfg_document_t *desired, size_t *count,
-    int *failed)
+/* A bare IPv4 address out of a CIDR, interned in the plan; NULL for one that
+ * is not IPv4. */
+static const char *bare_ipv4(ncfg_plan_t *plan, const char *cidr)
 {
-	ncfg_forward_rule_t *rules;
-	size_t               total = 0;
-	size_t               i;
-	size_t               at;
+	ncfg_address_t address;
+	char           text[NCFG_ADDRESS_MAX];
+
+	if (!cidr || !ncfg_address_parse(cidr, &address, NULL, 0) || address.is_ipv6) {
+		return NULL;
+	}
+	(void)snprintf(text, sizeof(text), "%u.%u.%u.%u", address.bytes[0], address.bytes[1],
+	    address.bytes[2], address.bytes[3]);
+	return ncfg_plan_intern(plan, text);
+}
+
+/*
+ * The interface whose static IPv4 network holds `host`, and that network as a
+ * CIDR, interned: where a return path for a hairpinned connection leaves
+ * (0299). 0 where no interface in the document holds it.
+ */
+static int network_of(ncfg_plan_t *plan, const ncfg_document_t *desired, const char *host,
+    const char **via, const char **network)
+{
+	ncfg_address_t target;
+	size_t         i;
+	size_t         at;
+
+	if (!host || !ncfg_address_parse(host, &target, NULL, 0) || target.is_ipv6) {
+		return 0;
+	}
+	for (i = 0; i < desired->interface_count; i++) {
+		const ncfg_interface_t *interface = &desired->interfaces[i];
+
+		for (at = 0; at < interface->addressing_count; at++) {
+			const ncfg_address_source_t *source = &interface->addressing[at];
+			ncfg_address_t               own;
+			uint32_t                     mask;
+			uint32_t                     mine;
+			uint32_t                     theirs;
+			char                         text[NCFG_ADDRESS_MAX];
+
+			if (source->kind != NCFG_ADDRESS_SOURCE_STATIC || !source->static_address.address ||
+			    !ncfg_address_parse(source->static_address.address, &own, NULL, 0) ||
+			    own.is_ipv6 || !own.has_prefix || own.prefix == 0u || own.prefix > 30u) {
+				continue;
+			}
+			mask = 0xffffffffu << (32u - own.prefix);
+			mine = ((uint32_t)own.bytes[0] << 24) | ((uint32_t)own.bytes[1] << 16) |
+			    ((uint32_t)own.bytes[2] << 8) | own.bytes[3];
+			theirs = ((uint32_t)target.bytes[0] << 24) | ((uint32_t)target.bytes[1] << 16) |
+			    ((uint32_t)target.bytes[2] << 8) | target.bytes[3];
+			if ((mine & mask) != (theirs & mask)) {
+				continue;
+			}
+			mine &= mask;
+			(void)snprintf(text, sizeof(text), "%u.%u.%u.%u/%u", (unsigned)(mine >> 24),
+			    (unsigned)(mine >> 16) & 255u, (unsigned)(mine >> 8) & 255u,
+			    (unsigned)mine & 255u, own.prefix);
+			*via = interface->name;
+			*network = ncfg_plan_intern(plan, text);
+			return *network != NULL;
+		}
+	}
+	return 0;
+}
+
+/* Append one rule to a growing list. 0 on out of memory. */
+static int add_rule(ncfg_forward_rule_t **rules, size_t *count, size_t *room,
+    const ncfg_forward_rule_t *rule)
+{
+	if (*count == *room) {
+		size_t               more = *room ? *room * 2u : 8u;
+		ncfg_forward_rule_t *grown = realloc(*rules, more * sizeof(*grown));
+
+		if (!grown) {
+			return 0;
+		}
+		*rules = grown;
+		*room = more;
+	}
+	(*rules)[(*count)++] = *rule;
+	return 1;
+}
+
+static int text_order(const char *one, const char *other)
+{
+	return strcmp(one ? one : "", other ? other : "");
+}
+
+/* The order both sides are compared in: by forward, then kind, then what
+ * tells two of one kind apart. The kernel's order is per chain, which is not
+ * the document's, so neither side's order is the comparison's. */
+static int rule_order(const void *left, const void *right)
+{
+	const ncfg_forward_rule_t *one = left;
+	const ncfg_forward_rule_t *other = right;
+	int                        by;
+
+	if ((by = text_order(one->interface, other->interface)) != 0 ||
+	    (by = text_order(one->name, other->name)) != 0) {
+		return by;
+	}
+	if (one->kind != other->kind) {
+		return one->kind < other->kind ? -1 : 1;
+	}
+	if ((by = text_order(one->address, other->address)) != 0) {
+		return by;
+	}
+	return text_order(one->network, other->network);
+}
+
+/*
+ * The kernel rules the document's forwards become (0298, 0299): each forward,
+ * its reflection at every IPv4 address the uplink has -- the document's static
+ * ones and the observed ones, a lease's included -- and the return path where
+ * an interface holds the host's network, unless the forward says `hairpin =
+ * false`. Sorted by `rule_order`. Strings borrowed from the document or
+ * interned in the plan; the array is the caller's.
+ */
+static ncfg_forward_rule_t *wanted_forwards(ncfg_builder_t *builder, size_t *count, int *failed)
+{
+	const ncfg_document_t *desired = builder->desired;
+	const ncfg_observed_t *observed = builder->observed;
+	ncfg_forward_rule_t   *rules = NULL;
+	size_t                 room = 0;
+	size_t                 i;
+	size_t                 at;
 
 	*count = 0;
-	for (i = 0; i < desired->interface_count; i++) {
-		total += desired->interfaces[i].port_forward_count;
-	}
-	if (total == 0u) {
-		return NULL;
-	}
-	rules = calloc(total, sizeof(*rules));
-	if (!rules) {
-		*failed = 1;
-		return NULL;
-	}
 	for (i = 0; i < desired->interface_count; i++) {
 		const ncfg_interface_t *interface = &desired->interfaces[i];
 
 		for (at = 0; at < interface->port_forward_count; at++) {
 			const ncfg_port_forward_t *forward = &interface->port_forwards[at];
-			ncfg_forward_rule_t       *rule = &rules[(*count)++];
+			ncfg_forward_rule_t        rule;
+			const char                *via = NULL;
+			const char                *network = NULL;
+			size_t                     a;
 
-			rule->interface = interface->name;
-			rule->name = forward->name;
-			rule->protocol = forward->protocol;
-			rule->port = (uint16_t)forward->port;
-			rule->to = forward->to;
-			rule->to_port = (uint16_t)(forward->to_port.has ? forward->to_port.value
-			                                                : forward->port);
+			memset(&rule, 0, sizeof(rule));
+			rule.kind = NCFG_FORWARD_RULE_FORWARD;
+			rule.interface = interface->name;
+			rule.name = forward->name;
+			rule.protocol = forward->protocol;
+			rule.port = (uint16_t)forward->port;
+			rule.to = forward->to;
+			rule.to_port = (uint16_t)(forward->to_port.has ? forward->to_port.value
+			                                               : forward->port);
+			if (!add_rule(&rules, count, &room, &rule)) {
+				goto oom;
+			}
+			if (forward->hairpin.has && !forward->hairpin.value) {
+				continue;
+			}
+			rule.kind = NCFG_FORWARD_RULE_REFLECT;
+			for (a = 0; a < interface->addressing_count; a++) {
+				const ncfg_address_source_t *source = &interface->addressing[a];
+
+				if (source->kind == NCFG_ADDRESS_SOURCE_STATIC &&
+				    (rule.address = bare_ipv4(builder->plan, source->static_address.address)) &&
+				    !add_rule(&rules, count, &room, &rule)) {
+					goto oom;
+				}
+			}
+			for (a = 0; a < observed->address_count; a++) {
+				const ncfg_observed_address_t *seen = &observed->addresses[a];
+
+				if (seen->interface && strcmp(seen->interface, interface->name) == 0 &&
+				    (rule.address = bare_ipv4(builder->plan, seen->address)) &&
+				    !add_rule(&rules, count, &room, &rule)) {
+					goto oom;
+				}
+			}
+			rule.address = NULL;
+			if (network_of(builder->plan, desired, forward->to, &via, &network)) {
+				rule.kind = NCFG_FORWARD_RULE_HAIRPIN;
+				rule.port = rule.to_port;
+				rule.network = network;
+				rule.via = via;
+				if (!add_rule(&rules, count, &room, &rule)) {
+					goto oom;
+				}
+			}
 		}
+	}
+	if (*count > 1u) {
+		size_t kept = 1;
+
+		qsort(rules, *count, sizeof(*rules), rule_order);
+		/* A static address is observed once it is applied, so it arrives from
+		 * both sides: one reflection per address. */
+		for (at = 1; at < *count; at++) {
+			if (rule_order(&rules[at], &rules[kept - 1u]) != 0) {
+				rules[kept++] = rules[at];
+			}
+		}
+		*count = kept;
 	}
 	return rules;
+oom:
+	free(rules);
+	*count = 0;
+	*failed = 1;
+	return NULL;
 }
 
-/* Whether the installed forwards are the document's, in order, with nothing
- * the decoder refused beside them. */
-static int same_forwards(const ncfg_forward_rule_t *wanted, size_t count,
-    const ncfg_observed_t *observed)
-{
-	size_t at;
-
-	if (observed->port_forward_unread_count != 0u || observed->port_forward_count != count) {
-		return 0;
-	}
-	for (at = 0; at < count; at++) {
-		const ncfg_observed_forward_t *seen = &observed->port_forwards[at];
-		const char *protocol = wanted[at].protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp";
-
-		if (!seen->interface || !seen->name || !seen->protocol || !seen->to ||
-		    strcmp(seen->interface, wanted[at].interface) != 0 ||
-		    strcmp(seen->name, wanted[at].name) != 0 || strcmp(seen->protocol, protocol) != 0 ||
-		    seen->port != wanted[at].port || strcmp(seen->to, wanted[at].to) != 0 ||
-		    seen->to_port != wanted[at].to_port) {
-			return 0;
-		}
-	}
-	return 1;
-}
-
-/* The installed forwards as the op's inverse wants them, borrowing the
- * observation's strings. NULL with a count of 0 where there are none. */
+/* The installed rules as the op's inverse and the comparison want them,
+ * borrowing the observation's strings, sorted by `rule_order`. */
 static ncfg_forward_rule_t *installed_forwards(const ncfg_observed_t *observed, int *failed)
 {
 	ncfg_forward_rule_t *rules;
@@ -391,6 +528,10 @@ static ncfg_forward_rule_t *installed_forwards(const ncfg_observed_t *observed, 
 	for (at = 0; at < observed->port_forward_count; at++) {
 		const ncfg_observed_forward_t *seen = &observed->port_forwards[at];
 
+		rules[at].kind = seen->kind && strcmp(seen->kind, "reflect") == 0
+		    ? NCFG_FORWARD_RULE_REFLECT
+		    : seen->kind && strcmp(seen->kind, "hairpin") == 0 ? NCFG_FORWARD_RULE_HAIRPIN
+		                                                       : NCFG_FORWARD_RULE_FORWARD;
 		rules[at].interface = seen->interface;
 		rules[at].name = seen->name;
 		rules[at].protocol = seen->protocol && strcmp(seen->protocol, "udp") == 0
@@ -398,28 +539,64 @@ static ncfg_forward_rule_t *installed_forwards(const ncfg_observed_t *observed, 
 		rules[at].port = (uint16_t)seen->port;
 		rules[at].to = seen->to;
 		rules[at].to_port = (uint16_t)seen->to_port;
+		rules[at].address = seen->address;
+		rules[at].network = seen->network;
+		rules[at].via = seen->via;
 	}
+	qsort(rules, observed->port_forward_count, sizeof(*rules), rule_order);
 	return rules;
 }
 
-/* `wan0/web tcp 443 -> 192.168.1.10:8443; ...`, for a plan's reason line. */
+/* Whether the installed rules are the document's, with nothing the decoder
+ * refused beside them. Both sorted by `rule_order`. */
+static int same_forwards(const ncfg_forward_rule_t *wanted, size_t count,
+    const ncfg_forward_rule_t *installed, const ncfg_observed_t *observed)
+{
+	size_t at;
+
+	if (observed->port_forward_unread_count != 0u || observed->port_forward_count != count) {
+		return 0;
+	}
+	for (at = 0; at < count; at++) {
+		if (rule_order(&wanted[at], &installed[at]) != 0 ||
+		    wanted[at].protocol != installed[at].protocol ||
+		    wanted[at].port != installed[at].port || wanted[at].to_port != installed[at].to_port ||
+		    text_order(wanted[at].to, installed[at].to) != 0 ||
+		    text_order(wanted[at].via, installed[at].via) != 0) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* `wan0/web tcp 443 -> 192.168.1.10:8443, reflected at 203.0.113.1, hairpin
+ * via lan0; ...`, for a plan's reason line. */
 static const char *describe_forwards(ncfg_plan_t *plan, const ncfg_forward_rule_t *rules,
     size_t count)
 {
 	ncfg_buf_t  buf;
 	const char *text;
 	size_t      at;
+	int         first = 1;
 
 	if (count == 0u) {
 		return "<none>";
 	}
 	ncfg_buf_init(&buf, 0);
 	for (at = 0; at < count; at++) {
-		ncfg_buf_addf(&buf, "%s%s/%s %s %u -> %s:%u", at ? "; " : "",
-		    rules[at].interface ? rules[at].interface : "", rules[at].name ? rules[at].name : "",
-		    rules[at].protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp",
-		    (unsigned)rules[at].port, rules[at].to ? rules[at].to : "",
-		    (unsigned)rules[at].to_port);
+		const ncfg_forward_rule_t *rule = &rules[at];
+
+		if (rule->kind == NCFG_FORWARD_RULE_FORWARD) {
+			ncfg_buf_addf(&buf, "%s%s/%s %s %u -> %s:%u", first ? "" : "; ",
+			    rule->interface ? rule->interface : "", rule->name ? rule->name : "",
+			    rule->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp", (unsigned)rule->port,
+			    rule->to ? rule->to : "", (unsigned)rule->to_port);
+			first = 0;
+		} else if (rule->kind == NCFG_FORWARD_RULE_REFLECT) {
+			ncfg_buf_addf(&buf, ", reflected at %s", rule->address ? rule->address : "");
+		} else {
+			ncfg_buf_addf(&buf, ", hairpin via %s", rule->via ? rule->via : "");
+		}
 	}
 	text = ncfg_plan_intern(plan, ncfg_buf_text(&buf));
 	ncfg_buf_free(&buf);
@@ -450,6 +627,24 @@ static void warn_forwards(ncfg_builder_t *builder)
 			    "packet by the setting of the interface it arrives on, so the translated "
 			    "traffic would be dropped there. Set it on `%s`", interface->name,
 			    interface->name);
+		}
+		/* 0299: a reflected forward whose host is on no network the document
+		 * holds has no return path to write, so a client beside the host is
+		 * answered from the wrong address. */
+		for (at = 0; at < interface->port_forward_count; at++) {
+			const ncfg_port_forward_t *forward = &interface->port_forwards[at];
+			const char                *via = NULL;
+			const char                *network = NULL;
+
+			if ((!forward->hairpin.has || forward->hairpin.value) &&
+			    !network_of(builder->plan, desired, forward->to, &via, &network)) {
+				ncfg_plan_warnf(builder->plan, interface->name,
+				    "port forward `%s/%s` is reflected for clients inside, but no interface "
+				    "here has a static address on %s's network, so there is no return path "
+				    "and a client beside that host is answered from the wrong address. Give "
+				    "the interface towards it a static address, or set `hairpin = false`",
+				    interface->name, forward->name, forward->to);
+			}
 		}
 		if (!desired->firewall || desired->firewall->forward.policy != NCFG_FIREWALL_POLICY_DROP) {
 			continue;
@@ -541,13 +736,16 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	}
 
 	warn_forwards(builder);
-	forwards = wanted_forwards(desired, &forward_count, &failed);
+	forwards = wanted_forwards(builder, &forward_count, &failed);
+	forwards_was = installed_forwards(builder->observed, &failed);
 	if (failed) {
 		builder->plan->failed = 1;
+		free(forwards_was);
+		free(forwards);
 		free(wanted);
 		return;
 	}
-	forwards_same = same_forwards(forwards, forward_count, builder->observed);
+	forwards_same = same_forwards(forwards, forward_count, forwards_was, builder->observed);
 	uplinks_same = same_uplinks((const char *const *)wanted, count,
 	    (const char *const *)builder->observed->nat, builder->observed->nat_count);
 	firewall_same = ncfg_nft_firewall_matches(desired->firewall, builder->observed->firewall,
@@ -576,6 +774,7 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		ncfg_buf_free(&buf);
 	}
 	if (uplinks_same && firewall_same && forwards_same) {
+		free(forwards_was);
 		free(forwards);
 		free(wanted);
 		return;
@@ -610,7 +809,6 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	 * together, so undoing this op does not leave the host unprotected. */
 	inverse.u.nftables.uplinks = (const char *const *)builder->observed->nat;
 	inverse.u.nftables.uplink_count = builder->observed->nat_count;
-	forwards_was = installed_forwards(builder->observed, &failed);
 	inverse.u.nftables.forwards = forwards_was;
 	inverse.u.nftables.forward_count = forwards_was ? builder->observed->port_forward_count : 0u;
 	if (builder->observed->firewall) {

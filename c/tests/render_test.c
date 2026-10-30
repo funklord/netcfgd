@@ -839,6 +839,9 @@ static void an_access_point_round_trips(void)
 	    "to_port = 8443 }\n"
 	    "\tport_forward \"dns\" { protocol = \"udp\"; port = 53; to = \"192.168.1.11\" }\n"
 	    "}\n", "port forwards round-trip, a default to_port left unwritten");
+	round_trips("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\"; "
+	    "hairpin = false }\n}\n", "  and so does one that is not reflected");
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
 	    "\t\thost \"tv\" { mac = \"AA:BB:CC:DD:EE:02\"; address = \"192.168.1.11\" }\n"
 	    "\t\thost \"printer\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"192.168.1.10\" }\n"

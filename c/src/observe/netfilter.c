@@ -543,6 +543,14 @@ static int read_forwards(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 		observed->port_forwards = grown;
 		slot = &grown[observed->port_forward_count++];
 		memset(slot, 0, sizeof(*slot));
+		slot->kind = observe_dup(one.kind == NCFG_FORWARD_RULE_REFLECT ? "reflect"
+		    : one.kind == NCFG_FORWARD_RULE_HAIRPIN ? "hairpin" : "forward");
+		if ((one.address[0] && !(slot->address = observe_dup(one.address))) ||
+		    (one.network[0] && !(slot->network = observe_dup(one.network))) ||
+		    (one.via[0] && !(slot->via = observe_dup(one.via))) || !slot->kind) {
+			ncfg_error_set(err, err_size, "out of memory recording the port forwards");
+			return 0;
+		}
 		slot->interface = observe_dup(one.interface);
 		slot->name = observe_dup(one.name);
 		slot->digest = observe_dup(one.digest);

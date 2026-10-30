@@ -12597,6 +12597,46 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.610 Hairpin: a forward reachable from inside
+
+**Asked for by the holder 2026-10-30** ("go ahead with hairpin NAT"). Decision
+[0299](doc/decision/0299-a-forward-is-reachable-from-inside-by-default.md):
+every forward is reflected unless it says `hairpin = false`, OpenWrt's
+default.
+
+- **Reflection**, in `prerouting`, `name=IF/NAME@reflect`: nft's `iifname !=
+  "wan0" ip daddr U tcp dport 443 dnat ip to A:Q`, measured. One per IPv4
+  address the uplink has -- the document's static ones and the observed ones,
+  deduplicated -- so a DHCP uplink is reflected at its lease and the table is
+  replaced when the lease's address moves. `fib daddr type local` was
+  rejected: it would capture the router's own LAN address too.
+- **Return path**, in `postrouting`, `name=IF/NAME@hairpin`: `oifname "lan0"
+  ip saddr NET ip daddr A tcp dport Q masquerade`, from the interface whose
+  static IPv4 network holds the host. None, and a plan warning, where no
+  interface holds it. Addresses are matched as the firewall matches them --
+  four bytes, masked where the prefix is short -- not nft's three-byte load
+  for a /24; the kernel takes both. `postrouting` now exists where an uplink
+  is masqueraded or a return path written.
+- **One decoder for the three roles**: it walks the expressions recording
+  what each comparison matched and then holds the result to the shape its
+  role is written with. The return path carries only the host's port, so its
+  `port` is the host's on both sides. The planner compares the rule sets
+  sorted, since the kernel's order is per chain. A forward's own digest has no
+  role line, so a forward installed by 10.609 reads back as itself.
+- A forward's label is letters, digits, `-`, `_` and `.`, so `/` and `@`
+  cannot be in the identity. Scope number `port_forward.hairpin` 0x0002002c.
+- **Live, `tests/live/port_forward.sh`**: the lan side is a bridge with the
+  server and a second host on it. The rule set lists as nft writes it; a
+  second plan is empty; the lan host dialling 203.0.113.1:443 is answered
+  "through, from 192.168.1.1" -- the router, as the return path costs -- and
+  with `hairpin = false` the same connection is refused, the control. The
+  wan-side cases from 10.609 pass beside it.
+- `make check` green; `nat.sh` and `firewall.sh` pass under `NCFG_LIVE=1`.
+  **The size gate has about 4 KB left**: 1,339,296 bytes against a ceiling of
+  1,343,429 (budget 1,304,300 plus 3%). The next feature will not fit without
+  re-deriving the budget, which is a decision about what the box can carry,
+  not a number to bump in passing.
+
 ## 10.609 Port forwards
 
 **Asked for by the holder 2026-10-30** ("go ahead with port forwards"). Decision
@@ -12652,8 +12692,8 @@ interface wan0 {
 about 8 KB left before its 1,343,429 ceiling -- the next feature of this size
 will need the budget re-derived (a161176f is how that was last done).
 
-Not done, and in 0298: `to` naming a reservation, hairpin NAT, a port range,
-and a forward table in the GUI.
+Not done, and in 0298: `to` naming a reservation, a port range, and a
+forward table in the GUI. ~~Hairpin NAT~~ -- 10.610.
 
 ## 10.608 The interface dialog serves DHCP
 

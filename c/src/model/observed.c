@@ -1374,6 +1374,12 @@ void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall)
 }
 
 static const ncfg_field_t observed_forward_fields[] = {
+	{ .name = "kind", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, kind) },
+	{ .name = "address", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_forward_t, address) },
+	{ .name = "network", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_forward_t, network) },
+	{ .name = "via", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, via) },
 	{ .name = "interface", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_forward_t, interface) },
 	{ .name = "name", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, name) },

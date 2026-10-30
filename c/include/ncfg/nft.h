@@ -309,8 +309,11 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
  * is for a firewall rule: every field, one fixed order. */
 int ncfg_nft_forward_text(const ncfg_forward_rule_t *forward, ncfg_buf_t *out);
 
-/* One port forward read back out of the `prerouting` chain. */
+/* One port forward rule read back (0298, 0299): a forward or a reflection out
+ * of `prerouting`, or a return path out of `postrouting`. For a return path
+ * `port` is the host's, as the planner gives it. */
 typedef struct {
+	int      kind; /* ncfg_forward_rule_kind_t */
 	char     interface[NCFG_NFT_IFNAME_MAX];
 	char     name[NCFG_NFT_COMMENT_MAX + 1u];
 	char     digest[NCFG_NFT_DIGEST_HEX + 1u];
@@ -318,13 +321,16 @@ typedef struct {
 	uint16_t port;
 	char     to[16];
 	uint16_t to_port;
+	char     address[16];  /* reflect */
+	char     network[20];  /* hairpin, a CIDR */
+	char     via[NCFG_NFT_IFNAME_MAX]; /* hairpin */
 } ncfg_nft_kernel_forward_t;
 
 /*
- * Read one entry of a rule dump as a port forward netcfgd wrote: a rule in
- * netcfgd's `prerouting` chain with exactly the expressions the builder
- * writes and a `name=IF/NAME sha256=...` comment whose interface is the one
- * the rule matches. Anything else is refused, saying what.
+ * Read one entry of a rule dump as a port forward rule netcfgd wrote: in
+ * netcfgd's `prerouting` chain, or a return path in `postrouting`, with
+ * exactly the matches the builder writes for the role its `name=IF/NAME[@ROLE]
+ * sha256=...` comment names. Anything else is refused, saying what.
  */
 int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_forward_t *out,
     char *err, size_t err_size);

@@ -1522,6 +1522,12 @@ static void access_point_cases(void)
 	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\" }\n"
 	    "\tport_forward \"web2\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.12\" }\n"
 	    "}\n", "would never match", "  and two of one port and protocol on one interface");
+	refuses("interface wan0 {\n\tport_forward \"web/x\" { protocol = \"tcp\"; port = 443; "
+	    "to = \"192.168.1.10\" }\n}\n", "a name is letters, digits",
+	    "  and a name holding the identity's separators (0299)");
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
+	    "to = \"192.168.1.10\"; hairpin = \"no\" }\n}\n", "expected true or false",
+	    "  and a hairpin that is not a boolean");
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { pool = 5 }\n}\n",
 	    "unknown dhcp_server key", "  and a key it does not have");
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { }\n"

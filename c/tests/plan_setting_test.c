@@ -187,7 +187,8 @@ static void port_forwards_ride_the_table(void)
 	check(plan && planfix_count(plan, "nftables.replace") == 1u &&
 	    planfix_for_field(plan, "nftables.replace", "port_forwards") != NULL,
 	    "a forward the table lacks replaces the table, the reason naming port_forwards");
-	check(plan && wrote(plan, "\"port_forwards\":[{\"interface\":\"wan0\",\"name\":\"web\","
+	check(plan && wrote(plan, "\"port_forwards\":[{\"kind\":\"forward\",\"interface\":\"wan0\","
+	                          "\"name\":\"web\","
 	                          "\"protocol\":\"tcp\",\"port\":443,\"to\":\"192.168.1.10\","
 	                          "\"to_port\":8443"),
 	    "  carrying the forward whole");
@@ -231,6 +232,71 @@ static void port_forwards_ride_the_table(void)
 	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "]", &document, &observed);
 	check(plan && !planfix_warned(plan, "the firewall's forward chain drops by default"),
 	    "  and not once an accept rule names the host");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * Hairpin (0299): reflected at every address the uplink has -- the document's
+ * static one, and an observed lease on an uplink addressed by DHCP -- with a
+ * return path from the network that holds the host; none with `hairpin =
+ * false`; and a warning where no interface holds the host's network.
+ */
+#define LAN_HOLDING "{\"name\":\"lan0\",\"addressing\":[{\"source\":\"static\"," \
+	"\"address\":\"192.168.1.1/24\"}],\"forwarding\":true}"
+#define WEB_FORWARD(extra) \
+	"\"port_forwards\":[{\"name\":\"web\",\"protocol\":\"tcp\",\"port\":443," \
+	"\"to\":\"192.168.1.10\",\"to_port\":8443" extra "}]"
+
+static void a_forward_is_reachable_from_inside(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = plan_of(DEVICE("wan0") "," DEVICE("lan0"),
+	    "{\"name\":\"wan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"203.0.113.1/24\"}],\"forwarding\":true," WEB_FORWARD("") "},"
+	    LAN_HOLDING,
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") ","
+	    PLANFIX_LINK("lan0", ",\"forwarding\":true") "]", &document, &observed);
+
+	check(plan && wrote(plan, "{\"kind\":\"reflect\",\"interface\":\"wan0\",\"name\":\"web\","
+	                          "\"protocol\":\"tcp\",\"port\":443,\"to\":\"192.168.1.10\","
+	                          "\"to_port\":8443,\"address\":\"203.0.113.1\""),
+	    "a forward is reflected at its uplink's static address");
+	check(plan && wrote(plan, "{\"kind\":\"hairpin\",\"interface\":\"wan0\",\"name\":\"web\","
+	                          "\"protocol\":\"tcp\",\"port\":8443,\"to\":\"192.168.1.10\","
+	                          "\"to_port\":8443,\"network\":\"192.168.1.0/24\",\"via\":\"lan0\""),
+	    "  with a return path from the network that holds the host, out of its interface");
+	check(plan && !planfix_warned(plan, "no return path"),
+	    "  and no warning, since the network is known");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(DEVICE("wan0") "," DEVICE("lan0"),
+	    "{\"name\":\"wan0\",\"addressing\":[{\"source\":\"dhcp4\"}],\"forwarding\":true,"
+	    WEB_FORWARD("") "}," LAN_HOLDING,
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") ","
+	    PLANFIX_LINK("lan0", ",\"forwarding\":true") "],\"addresses\":[{\"interface\":\"wan0\","
+	    "\"address\":\"198.51.100.7/24\",\"ownership\":\"ours\"}]", &document, &observed);
+	check(plan && wrote(plan, "\"address\":\"198.51.100.7\""),
+	    "an uplink addressed by DHCP is reflected at the lease observed on it");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(DEVICE("wan0") "," DEVICE("lan0"),
+	    "{\"name\":\"wan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"203.0.113.1/24\"}],\"forwarding\":true,"
+	    WEB_FORWARD(",\"hairpin\":false") "}," LAN_HOLDING,
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") ","
+	    PLANFIX_LINK("lan0", ",\"forwarding\":true") "]", &document, &observed);
+	check(plan && !wrote(plan, "\"kind\":\"reflect\"") && !wrote(plan, "\"kind\":\"hairpin\""),
+	    "a forward with `hairpin = false` is neither reflected nor given a return path");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(DEVICE("wan0"),
+	    "{\"name\":\"wan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"203.0.113.1/24\"}],\"forwarding\":true," WEB_FORWARD("") "}",
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "]", &document, &observed);
+	check(plan && planfix_warned(plan, "no return path") && wrote(plan, "\"kind\":\"reflect\"") &&
+	    !wrote(plan, "\"kind\":\"hairpin\""),
+	    "with no interface holding the host's network it is reflected, warned, and given no return");
 	planfix_release(plan, document, observed);
 }
 
@@ -553,6 +619,7 @@ int main(void)
 {
 	the_uplinks_are_a_sorted_list_replaced_whole();
 	port_forwards_ride_the_table();
+	a_forward_is_reachable_from_inside();
 	the_firewall_is_planned_with_the_table();
 	a_document_that_stops_asking_removes_the_table();
 	a_second_table_translating_is_reported_and_not_deleted();

@@ -357,6 +357,7 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "port_forward.port", 0x00020029u },
 	{ NCFG_BLOCK_INTERFACE, "port_forward.to", 0x0002002au },
 	{ NCFG_BLOCK_INTERFACE, "port_forward.to_port", 0x0002002bu },
+	{ NCFG_BLOCK_INTERFACE, "port_forward.hairpin", 0x0002002cu },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the

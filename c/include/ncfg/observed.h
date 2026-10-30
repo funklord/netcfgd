@@ -1443,9 +1443,15 @@ typedef struct {
 	size_t                        port_forward_unread_count;
 } ncfg_observed_t;
 
-/* One port forward as the decoder read it (0298). `protocol` is the word,
- * `tcp` or `udp`, as `ncfg status` shows it. */
+/* One port forward rule as the decoder read it (0298, 0299). `protocol` is
+ * the word, `tcp` or `udp`, as `ncfg status` shows it; `kind` is `forward`,
+ * `reflect` or `hairpin`, and only the last two carry `address`, or
+ * `network` and `via`. */
 typedef struct ncfg_observed_forward {
+	char   *kind;
+	char   *address;
+	char   *network;
+	char   *via;
 	char   *interface;
 	char   *name;
 	char   *digest;

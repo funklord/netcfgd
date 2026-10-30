@@ -346,6 +346,9 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 				ncfg_sha256_hex(text.data, text.length, digest);
 				ncfg_buf_free(&text);
 				ncfg_json_write_object_begin(writer);
+				ncfg_json_write_member_string(writer, "kind",
+				    forward->kind == NCFG_FORWARD_RULE_REFLECT ? "reflect"
+				    : forward->kind == NCFG_FORWARD_RULE_HAIRPIN ? "hairpin" : "forward");
 				member_text(writer, "interface", forward->interface);
 				member_text(writer, "name", forward->name);
 				ncfg_json_write_member_string(writer, "protocol",
@@ -353,6 +356,13 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 				ncfg_json_write_member_int(writer, "port", forward->port);
 				member_text(writer, "to", forward->to);
 				ncfg_json_write_member_int(writer, "to_port", forward->to_port);
+				if (forward->address) {
+					member_text(writer, "address", forward->address);
+				}
+				if (forward->network) {
+					member_text(writer, "network", forward->network);
+					member_text(writer, "via", forward->via);
+				}
 				digest[NCFG_NFT_DIGEST_HEX] = '\0';
 				ncfg_json_write_member_string(writer, "digest", digest);
 				ncfg_json_write_object_end(writer);

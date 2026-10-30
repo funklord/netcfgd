@@ -329,6 +329,12 @@ interface it arrives on, and, where `forward` drops by default, the `accept`
 rule that lets the translated traffic through. IPv4 only, since IPv6 has no
 translation to undo.
 
+A forward works from inside too: a host on the LAN dialling the router's
+public address reaches the same server, because netcfgd reflects the forward
+at every address the uplink has -- a DHCP lease included, followed when it
+changes -- and masquerades the return path on the host's own network. The
+server then sees the router as that client; `hairpin = false` turns it off.
+
 ## Profiles
 
 A profile is a directory of drop-ins layered over your configuration, so one
