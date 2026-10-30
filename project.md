@@ -12647,6 +12647,16 @@ default.
   small box is the build options' job (compiling out what that box does not
   use), and trimming is later work -- neither is a cost to charge each feature
   as it lands.
+- **And the holder's priority, the same day**, on asking for build options
+  and then stopping them before any code: "let's work on making everything
+  work before lower priority work like this". Build options and size work
+  wait; what comes first is that every feature netcfgd has works end to end.
+  The measurement taken for the options is kept here so it is not retaken:
+  by object file, wifi is the largest separable part but reaches every layer;
+  the nftables half (NAT, firewall, forwards) is about 60 KB in five files
+  behind one op and one planner call; the TUI is about 20 KB behind
+  `ncfg_tui_run`. An optioned build would run the suite minus the test files
+  whose subject is the feature, plus a test of the refusals.
 
 ## 10.609 Port forwards
 
