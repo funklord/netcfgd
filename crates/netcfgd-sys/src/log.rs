@@ -244,10 +244,21 @@ mod tests {
 		assert!(Severity::Verbose < Severity::Debug);
 	}
 
+	/// The level is one process-wide atomic and the test harness runs tests on
+	/// several threads, so the tests that read or set it take this first.
+	/// Without it `every_level_is_reachable_by_name` set the level to each
+	/// severity in turn while the default was being asserted on another
+	/// thread, and `make check` failed or passed by interleaving (project.md
+	/// 10.622).
+	static LEVEL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 	/// **Info by default**, because a change of shape must not be a change of
 	/// what an ordinary machine prints.
 	#[test]
 	fn the_default_level_is_what_netcfgd_printed_before_it_had_levels() {
+		let _held = LEVEL
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
 		assert_eq!(accepted(), Severity::Info);
 		assert!(Severity::Error <= accepted(), "an error is taken");
 		assert!(Severity::Note <= accepted(), "a note is taken");
@@ -258,6 +269,9 @@ mod tests {
 	/// environment variable can name a level nothing can select.
 	#[test]
 	fn every_level_is_reachable_by_name() {
+		let _held = LEVEL
+			.lock()
+			.unwrap_or_else(std::sync::PoisonError::into_inner);
 		for level in [
 			Severity::Critical,
 			Severity::Error,

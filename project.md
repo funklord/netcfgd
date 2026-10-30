@@ -12633,6 +12633,15 @@ line is whatever a LAN client sent. The parser is split from its file read
 a client that called itself `$(reboot);evil`, which the plain-name filter must
 drop. Four minutes each -- 0.8, 0.4 and 1.7 million runs -- found nothing.
 
+**And an intermittent in `make check`, found while verifying it**: the Rust
+`netcfgd-sys` log tests share one process-wide level, and
+`every_level_is_reachable_by_name` sets it to each severity in turn while
+`the_default_level_...` asserts the default on another thread. It failed once
+reading `Warning` -- the third value the other test's loop stores, which is
+the trace of the interleaving and nothing else sets it. Both take one lock now.
+Thirty runs of the unlocked pair did not reproduce it, which is what an
+intermittent does, so the evidence is the value it failed on, not the reruns.
+
 ## 10.620 What netcfgd runs, against what its own firewall drops
 
 A `/go` run 2026-10-30, from the lens of the last fix: 10.619 found that a
