@@ -1045,4 +1045,5 @@ netcfgd
 # **1347760, 2026-10-30, the input-chain warnings** (10.620): four plan
 # warnings for services netcfgd runs behind an `input` chain that drops,
 # +176 over 1,347,584.
-total 1347760
+# And the masquerade whose forward chain drops replies, +40.
+total 1347800

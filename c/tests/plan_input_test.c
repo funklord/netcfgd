@@ -140,8 +140,33 @@ static void a_rule_for_replies_lets_no_request_in(void)
 	planfix_release(plan, document, observed);
 }
 
+/* A masquerading router whose forward chain drops the replies. */
+#define FORWARD_DROPPING(rules) \
+	",\"firewall\":{\"input\":{\"policy\":\"accept\"},\"forward\":{\"policy\":\"drop\"," \
+	"\"rules\":[" rules "]},\"output\":{\"policy\":\"accept\"}}"
+#define MASQUERADING "{\"name\":\"wan0\",\"nat\":true,\"addressing\":[" DHCP4 "]}"
+
+static void a_masquerade_whose_replies_are_dropped_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = plan_of(WAN_DEVICE, MASQUERADING, FORWARD_DROPPING(""), &document,
+	    &observed);
+
+	check(plan && planfix_warned(plan, "wan0 masquerades and the firewall's forward chain") &&
+	        planfix_warned(plan, "to `forward`"),
+	    "a masquerade whose forward chain drops every reply is said");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(WAN_DEVICE, MASQUERADING, FORWARD_DROPPING(REPLIES), &document, &observed);
+	check(plan && !planfix_warned(plan, "masquerades"),
+	    "  and is silent once replies are accepted there");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
+	a_masquerade_whose_replies_are_dropped_is_said();
 	no_replies_is_said_once();
 	a_dhcpv6_client_and_ipv6_are_said();
 	a_wireguard_listener_is_said();

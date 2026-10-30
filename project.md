@@ -12619,6 +12619,10 @@ firewall_warn.c`), warned and never opened, as 0298 does for a forward:
   solicitations and the link's IPv6 itself stop.
 - **A WireGuard device with a `listen_port`** (that UDP port, on any
   interface): a peer that starts the handshake is never answered.
+- **And one chain over, a masquerade whose `forward` chain drops replies**:
+  every connection the LAN opens is answered and the answer dropped, which
+  reads as a dead uplink. Warned where an interface has `nat` and nothing in
+  `forward` accepts established traffic.
 
 **And a fault in 10.619's own test of the same thing**, found writing these: it
 counted any accept rule with no protocol and no port, so `accept "established"

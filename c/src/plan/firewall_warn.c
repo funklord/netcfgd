@@ -135,11 +135,43 @@ static int asks_dhcp6(const ncfg_interface_t *interface)
 	return 0;
 }
 
+/*
+ * A masquerading router whose `forward` chain drops replies: every connection
+ * the LAN opens goes out and its answer is dropped on the way back, which
+ * reads as a dead uplink rather than a firewall.
+ */
+static void warn_forward_replies(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	const char            *masquerading = NULL;
+	size_t                 at;
+
+	if (!desired || !desired->firewall ||
+	    desired->firewall->forward.policy != NCFG_FIREWALL_POLICY_DROP ||
+	    accepts_replies(&desired->firewall->forward)) {
+		return;
+	}
+	for (at = 0; !masquerading && at < desired->interface_count; at++) {
+		if (desired->interfaces[at].nat.has && desired->interfaces[at].nat.value) {
+			masquerading = desired->interfaces[at].name;
+		}
+	}
+	if (masquerading) {
+		ncfg_plan_warnf(builder->plan, masquerading,
+		    "%s masquerades and the firewall's forward chain drops by default with nothing "
+		    "accepting replies, so every connection the network behind it opens is answered "
+		    "and the answer dropped. Add `accept \"established\" { state = "
+		    "[\"established\", \"related\"] }` to `forward`, and a rule accepting what "
+		    "may go out", masquerading);
+	}
+}
+
 void ncfg_plan_input_warnings(ncfg_builder_t *builder)
 {
 	const ncfg_document_t *desired = builder->desired;
 	size_t                 at;
 
+	warn_forward_replies(builder);
 	if (!ncfg_plan_input_drops(desired)) {
 		return;
 	}

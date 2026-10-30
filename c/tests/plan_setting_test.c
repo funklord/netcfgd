@@ -230,7 +230,10 @@ static void port_forwards_ride_the_table(void)
 	    "\"rules\":[{\"name\":\"web\",\"action\":\"accept\",\"protocol\":\"tcp\","
 	    "\"ports\":[8443],\"to\":[\"192.168.1.10\"]}]},\"output\":{\"policy\":\"accept\"}}",
 	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "]", &document, &observed);
-	check(plan && !planfix_warned(plan, "the firewall's forward chain drops by default"),
+	/* The forward's own warning by its own words: the masquerade's (10.620)
+	 * shares the opening, and this fixture masquerades with no replies rule,
+	 * so that one is right to stay. */
+	check(plan && !planfix_warned(plan, "with no accept rule naming that address"),
 	    "  and not once an accept rule names the host");
 	planfix_release(plan, document, observed);
 }
