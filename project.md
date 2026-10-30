@@ -12597,6 +12597,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.620 What netcfgd runs, against what its own firewall drops
+
+A `/go` run 2026-10-30, from the lens of the last fix: 10.619 found that a
+firewall whose `input` chain drops by default silently starved the DHCP
+server, because netcfgd adds no rule of its own (0294) and nothing said so.
+The same shape, searched for: every service netcfgd runs that listens for
+traffic arriving at the router.
+
+**Four more, now plan warnings naming the rule to write** (`c/src/plan/
+firewall_warn.c`), warned and never opened, as 0298 does for a forward:
+
+- **No rule accepting replies at all**: the router's own DNS, DHCP renewals and
+  every connection it opens are answered and the answers dropped. Said once.
+- **A DHCPv6 client** (UDP 546): the reply comes from the server's link-local
+  address to a request sent to a multicast group, so conntrack does not call
+  it established, and the lease and any delegated prefix never arrive even
+  with replies accepted. OpenWrt carries a rule for exactly this.
+- **IPv6 on an interface that uses it** (ICMPv6): neighbour discovery and
+  router advertisements are never established, so SLAAC, an RA server's
+  solicitations and the link's IPv6 itself stop.
+- **A WireGuard device with a `listen_port`** (that UDP port, on any
+  interface): a peer that starts the handshake is never answered.
+
+**And a fault in 10.619's own test of the same thing**, found writing these: it
+counted any accept rule with no protocol and no port, so `accept "established"
+{ state = ["established"] }` -- the most common rule there is -- silenced the
+DHCP server's warning while letting no request in. A rule limited to states
+now counts only for the states it names. `plan_input_test` covers each warning,
+that the rule it names silences it, and that regression; with the state check
+taken out, 4 of its 10 checks fail.
+
 ## 10.619 The LAN is answered by a DNS forwarder
 
 **Asked for by the holder 2026-10-30** ("go ahead with the LAN DNS

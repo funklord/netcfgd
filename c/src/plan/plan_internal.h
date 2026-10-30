@@ -351,6 +351,18 @@ void ncfg_plan_offloads(ncfg_builder_t *builder);
  */
 void ncfg_plan_ipv6_token(ncfg_builder_t *builder);
 void ncfg_plan_nat(ncfg_builder_t *builder);
+/*
+ * The services netcfgd runs, against an `input` chain that drops by default
+ * (project.md 10.620): a warning for each the operator's rules would starve.
+ * `ncfg_plan_input_accepts` is the test, shared with the DHCP server's
+ * warnings: whether some accept rule could let new traffic of `protocol` to
+ * `port` (-1 for none) in on `iface` (NULL for any). True where the chain
+ * accepts by default or there is no firewall.
+ */
+void ncfg_plan_input_warnings(ncfg_builder_t *builder);
+int  ncfg_plan_input_drops(const ncfg_document_t *desired);
+int  ncfg_plan_input_accepts(const ncfg_document_t *desired, const char *iface, int protocol,
+    int64_t port);
 void ncfg_plan_rules(ncfg_builder_t *builder);
 void ncfg_plan_qdisc(ncfg_builder_t *builder);
 void ncfg_plan_ingress(ncfg_builder_t *builder);

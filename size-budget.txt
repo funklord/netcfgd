@@ -1041,4 +1041,8 @@ netcfgd
 # forwarder's dnsmasq lines and summary, the lowering, and the two firewall
 # warnings for DHCP and DNS, +4,136 over 1,343,448, which was this tree's
 # HEAD measured the hour before.
-total 1347590
+#
+# **1347760, 2026-10-30, the input-chain warnings** (10.620): four plan
+# warnings for services netcfgd runs behind an `input` chain that drops,
+# +176 over 1,347,584.
+total 1347760
