@@ -242,6 +242,89 @@ int main(int argc, char **argv)
 		(void)connection.config_delete(QStringLiteral("wifi-pinned"), &why);
 	}
 
+	/* 6. An enterprise network, and a passphrase the keyring holds (10.611).
+	 *    The dialog opened both with empty fields and rebuilt each reference
+	 *    from the network's id, so Save lost the identity and certificates
+	 *    and repointed the credential; then it refused them outright. Now it
+	 *    opens on them and writes them back as they were. */
+	{
+		QString why;
+		check("an enterprise network is written by hand",
+		    connection.config_put(QStringLiteral("wifi-campus"),
+		        QStringLiteral("network \"campus\" {\n\twifi {\n\t\teap = \"peap\"\n"
+		                       "\t\tidentity = \"me@uni.example\"\n"
+		                       "\t\tpassword = \"@secret:uni-login\"\n"
+		                       "\t\tca_cert = \"/etc/ssl/uni-ca.pem\"\n"
+		                       "\t\tdomain_suffix_match = \"radius.uni.example\"\n"
+		                       "\t\tphase2 = \"mschapv2\"\n\t}\n}\n"),
+		        true, &why),
+		    why);
+		ncfg_saved_network_row existing;
+		check("and netcfgd says the dialog can carry all of it",
+		    saved_named(&connection, QStringLiteral("campus"), &existing) &&
+		        existing.unmodelled.isEmpty(),
+		    existing.unmodelled);
+		ncfg_network_dialog dialog(&connection, existing);
+		auto *identity = dialog.findChild<QLineEdit *>(QStringLiteral("network_identity"));
+		auto *ca = dialog.findChild<QLineEdit *>(QStringLiteral("network_ca_cert"));
+		auto *server = dialog.findChild<QLineEdit *>(QStringLiteral("network_domain_suffix_match"));
+		auto *metric = dialog.findChild<QSpinBox *>(QStringLiteral("network_metric"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+		check("the dialog opens on its identity, certificate and server name",
+		    identity && identity->text() == QStringLiteral("me@uni.example") && ca &&
+		        ca->text() == QStringLiteral("/etc/ssl/uni-ca.pem") && server &&
+		        server->text() == QStringLiteral("radius.uni.example"),
+		    identity ? identity->text() : QString());
+		metric->setValue(30);
+		save->click();
+		ncfg_saved_network_row after;
+		check("and Save keeps all of it, the password still under its own name",
+		    !dialog.outcome().isEmpty() &&
+		        saved_named(&connection, QStringLiteral("campus"), &after) &&
+		        after.metric == 30 && after.identity == QStringLiteral("me@uni.example") &&
+		        after.ca_cert == QStringLiteral("/etc/ssl/uni-ca.pem") &&
+		        after.domain_suffix_match == QStringLiteral("radius.uni.example") &&
+		        after.phase2 == QStringLiteral("mschapv2") && after.eap_method == QStringLiteral("peap") &&
+		        after.credential_reference == QStringLiteral("@secret:uni-login"),
+		    after.credential_reference + QStringLiteral(" ") + after.identity);
+		(void)connection.config_delete(QStringLiteral("wifi-campus"), &why);
+	}
+	{
+		QString why;
+		check("a network whose passphrase the keyring holds is written by hand",
+		    connection.config_put(QStringLiteral("wifi-house"),
+		        QStringLiteral("network \"house\" {\n\twifi { psk = \"@secret:keyring:house-psk\" }\n}\n"),
+		        true, &why),
+		    why);
+		ncfg_saved_network_row existing;
+		check("  its reference read as written",
+		    saved_named(&connection, QStringLiteral("house"), &existing) &&
+		        existing.credential_reference == QStringLiteral("@secret:keyring:house-psk"),
+		    existing.credential_reference);
+		{
+			ncfg_network_dialog dialog(&connection, existing);
+			auto *metric = dialog.findChild<QSpinBox *>(QStringLiteral("network_metric"));
+			auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+			metric->setValue(40);
+			save->click();
+		}
+		ncfg_saved_network_row after;
+		check("  and Save keeps it pointing at the keyring",
+		    saved_named(&connection, QStringLiteral("house"), &after) && after.metric == 40 &&
+		        after.credential_reference == QStringLiteral("@secret:keyring:house-psk"),
+		    after.credential_reference);
+		{
+			ncfg_network_dialog dialog(&connection, after);
+			auto *credential = dialog.findChild<QLineEdit *>(QStringLiteral("network_credential"));
+			auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+			credential->setText(QStringLiteral("a-new-passphrase"));
+			save->click();
+			check("  and a new passphrase for it is refused, naming where to change it",
+			    dialog.outcome().isEmpty());
+		}
+		(void)connection.config_delete(QStringLiteral("wifi-house"), &why);
+	}
+
 	printf("\n");
 	if (failures) {
 		printf("live_network_dialog: %d failed\n", failures);

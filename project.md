@@ -12597,6 +12597,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.611 The network dialog edits enterprise networks
+
+**Asked for by the holder 2026-10-30** ("go ahead with the enterprise network
+dialog"), the first of the items the holder ranked under "making everything
+work": since 10.606 the GUI refused to save any 802.1X network -- eduroam
+included -- because the client did not carry its identity or certificates,
+and before 10.606 it saved them away.
+
+- **The client carries the 802.1X block**: method, identity, anonymous
+  identity, phase 2, `domain_suffix_match`, and `ca_cert`, `client_cert` and
+  `private_key` as the language writes them -- a path, or an `@secret:`
+  reference for a stored one. `eap` left the unmodelled list.
+- **And the credential's reference as written**, `credential_reference`:
+  `@secret:NAME`, or `@secret:keyring:NAME` and the other providers, the
+  renderer's spelling. **This was a second fault, in PSK networks too**: the
+  dialog wrote `psk = "@secret:<id>"` whatever the document said, so Save
+  repointed a passphrase kept under another name or in the keyring, and the
+  network stopped joining at the next apply. The bare `credential` name could
+  not have said which store it was in.
+- **The dialog** opens on every one of those, gains a server-name field
+  (0206's reason: `ca_cert` alone accepts any certificate a public CA signed)
+  and a private-key field for TLS, and writes each reference back as it was
+  while the network keeps the same kind of credential; a new network, or one
+  changing kind, gets `@secret:<id>` as before. **A new passphrase goes into
+  the store the reference names, under its name**; for one in the keyring or
+  `pass`, which netcfgd reads and does not write, Save refuses and says to
+  change it there.
+- `client_test` reads an enterprise network with a CA path, a stored client
+  certificate and key and a password named apart from the network, and a
+  keyring passphrase, each as written. `gui_wifi.sh`, all 14 probes: a PEAP
+  network written by hand opens on its identity, CA and server name, and a
+  changed metric saves with all of it and the password still `@secret:
+  uni-login`; a keyring network keeps its reference through Save, and a new
+  passphrase for it is refused.
+
 ## 10.610 Hairpin: a forward reachable from inside
 
 **Asked for by the holder 2026-10-30** ("go ahead with hairpin NAT"). Decision
@@ -12797,7 +12832,9 @@ and `ncfg_access_point_config_t`; both dialogs refuse Save while editing one
 that has any, naming them and pointing at `ncfg config edit`; the network
 dialog now opens on its addressing and metered; `dhcp_server` joined the
 interface list. Carrying the fields rather than refusing is the better end
-state and is open: refusing is what makes it safe meanwhile.
+state: 10.607 did it for the access point's simple fields, 10.608 for the
+interface's DHCP server and 10.611 for an enterprise network; the rest is
+still refused.
 
 - `client_test`: a network with a pinned BSSID and a route names `bssid,
   routes`, one with a single DHCPv6 source names nothing; an access point

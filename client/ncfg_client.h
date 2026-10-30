@@ -1997,12 +1997,34 @@ typedef struct {
 	size_t                 route_count;
 	ncfg_dns_scope_t       dns;
 	/*
+	 * The credential's reference **as the language writes it** --
+	 * `@secret:home`, `@secret:keyring:eduroam` -- for a PSK's passphrase or
+	 * an EAP network's password, "" where there is none (project.md 10.611).
+	 * `credential` above is the bare name, which loses the provider and so
+	 * cannot be written back: an editor that rebuilt the reference from the
+	 * network's id repointed every network whose secret had another name.
+	 */
+	char                  *credential_reference;
+	/*
+	 * An enterprise network's 802.1X configuration, each "" where unset:
+	 * `eap_method` is `peap`, `ttls`, `tls` or `pwd`; the three certificate
+	 * sources are as the language writes them, a path or an `@secret:`
+	 * reference (10.611).
+	 */
+	char                  *eap_method;
+	char                  *identity;
+	char                  *anonymous_identity;
+	char                  *phase2;
+	char                  *domain_suffix_match;
+	char                  *ca_cert;
+	char                  *client_cert;
+	char                  *private_key;
+	/*
 	 * What the network dialog has no field for, comma-joined, by the
 	 * interface editor's rule: only what a save would delete. Empty for a
 	 * network that dialog can write back whole. A pinned `bssid`, `roam`,
-	 * `hooks`, any route or DNS, addressing beyond one DHCP source, and an
-	 * enterprise network's identity and certificates, which this struct does
-	 * not carry (project.md 10.606).
+	 * `hooks`, any route or DNS, and addressing beyond one DHCP source
+	 * (project.md 10.606).
 	 */
 	char                  *unmodelled;
 } ncfg_saved_network_t;

@@ -61,6 +61,10 @@ private slots:
 
 private:
 	QString block_text() const;
+	/* The reference the credential is written as: the one the document
+	 * already holds where this network keeps the same kind of credential,
+	 * and `@secret:<id>` for one being made (10.611). */
+	QString credential_reference() const;
 
 	ncfg_connection *connection;
 	ncfg_saved_network_row  before;
@@ -77,6 +81,11 @@ private:
 	QLineEdit   *phase2;
 	QLineEdit   *ca_cert;
 	QLineEdit   *client_cert;
+	/* The two an enterprise network can carry that the dialog had no field
+	 * for, so Save dropped them (10.611): the name the server's certificate
+	 * must carry, and a TLS client's key. */
+	QLineEdit   *domain_suffix_match;
+	QLineEdit   *private_key;
 	QLineEdit   *credential;
 	QSpinBox    *metric;
 	QCheckBox   *autoconnect;

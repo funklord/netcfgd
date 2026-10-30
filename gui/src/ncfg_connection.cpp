@@ -756,6 +756,15 @@ bool ncfg_connection::saved_networks(QList<ncfg_saved_network_row> *out, QString
 		row.autoconnect = networks.items[i].autoconnect != 0;
 		row.hidden = networks.items[i].hidden != 0;
 		row.metered = networks.items[i].metered != 0;
+		row.credential_reference = from_c(networks.items[i].credential_reference);
+		row.eap_method = from_c(networks.items[i].eap_method);
+		row.identity = from_c(networks.items[i].identity);
+		row.anonymous_identity = from_c(networks.items[i].anonymous_identity);
+		row.phase2 = from_c(networks.items[i].phase2);
+		row.domain_suffix_match = from_c(networks.items[i].domain_suffix_match);
+		row.ca_cert = from_c(networks.items[i].ca_cert);
+		row.client_cert = from_c(networks.items[i].client_cert);
+		row.private_key = from_c(networks.items[i].private_key);
 		row.unmodelled = from_c(networks.items[i].unmodelled);
 		if (row.unmodelled.isEmpty() && networks.items[i].source_count == 1) {
 			const char *source = networks.items[i].sources[0].source;

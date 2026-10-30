@@ -1829,6 +1829,15 @@ void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 		free(item->dns.servers);
 		free(item->dns.search);
 		free(item->dns.domains);
+		free(item->credential_reference);
+		free(item->eap_method);
+		free(item->identity);
+		free(item->anonymous_identity);
+		free(item->phase2);
+		free(item->domain_suffix_match);
+		free(item->ca_cert);
+		free(item->client_cert);
+		free(item->private_key);
 		free(item->unmodelled);
 	}
 	free(networks->items);
@@ -1856,6 +1865,48 @@ static int member_says(const ncfg_json_doc_t *doc, uint32_t object, const char *
 
 static void note_unmodelled(char **list, const char *key);
 
+/*
+ * A secret reference as the language writes it: `@secret:NAME` for the file
+ * store, `@secret:PROVIDER:NAME` for the others -- the renderer's spelling, so
+ * what an editor writes back compiles to the reference it read (10.611). ""
+ * where the node names nothing.
+ */
+static char *reference_text(const ncfg_json_doc_t *doc, uint32_t reference)
+{
+	char  *provider = member_text(doc, reference, "provider");
+	char  *name = member_text(doc, reference, "name");
+	char  *text = NULL;
+	size_t length;
+
+	if (provider && name && *name) {
+		const int file = !*provider || strcmp(provider, "file") == 0;
+
+		length = strlen("@secret:") + strlen(provider) + 1 + strlen(name) + 1;
+		text = malloc(length);
+		if (text) {
+			snprintf(text, length, "@secret:%s%s%s", file ? "" : provider, file ? "" : ":",
+			    name);
+		}
+	} else if (provider && name) {
+		text = dup_string("");
+	}
+	free(provider);
+	free(name);
+	return text;
+}
+
+/* A certificate source as the language writes it: its path, or the
+ * reference to where netcfgd stores it. "" where it is unset. */
+static char *cert_text(const ncfg_json_doc_t *doc, uint32_t source)
+{
+	uint32_t stored = ncfg_json_member(doc, source, "stored");
+
+	if (ncfg_json_type(doc, stored) == NCFG_JSON_OBJECT) {
+		return reference_text(doc, stored);
+	}
+	return member_text(doc, source, "path");
+}
+
 static void network_unmodelled(const ncfg_json_doc_t *doc, uint32_t entry,
                                ncfg_saved_network_t *item)
 {
@@ -1878,9 +1929,8 @@ static void network_unmodelled(const ncfg_json_doc_t *doc, uint32_t entry,
 	if (member_says(doc, entry, "dns")) {
 		note_unmodelled(&item->unmodelled, "dns");
 	}
-	if (item->security && strcmp(item->security, "eap") == 0) {
-		note_unmodelled(&item->unmodelled, "eap (its identity and certificates)");
-	}
+	/* An enterprise network's 802.1X was here until 10.611, when this struct
+	 * learned to carry it. */
 }
 
 int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out, char *err,
@@ -1958,6 +2008,34 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 			if (!item->credential) {
 				item->credential = dup_string("");
 			}
+		}
+		/* The same credential as the language writes it, and an enterprise
+		 * network's 802.1X, so an editor can put them back as they were
+		 * (10.611). */
+		{
+			uint32_t held = ncfg_json_member(doc, security, "passphrase");
+
+			if (ncfg_json_type(doc, held) != NCFG_JSON_OBJECT) {
+				held = ncfg_json_member(doc, security, "password");
+			}
+			item->credential_reference = ncfg_json_type(doc, held) == NCFG_JSON_OBJECT
+			    ? reference_text(doc, held) : dup_string("");
+		}
+		item->eap_method = member_text(doc, security, "method");
+		item->identity = member_text(doc, security, "identity");
+		item->anonymous_identity = member_text(doc, security, "anonymous_identity");
+		item->phase2 = member_text(doc, security, "phase2");
+		item->domain_suffix_match = member_text(doc, security, "domain_suffix_match");
+		item->ca_cert = cert_text(doc, ncfg_json_member(doc, security, "ca_cert"));
+		item->client_cert = cert_text(doc, ncfg_json_member(doc, security, "client_cert"));
+		item->private_key = cert_text(doc, ncfg_json_member(doc, security, "private_key"));
+		if (!item->credential_reference || !item->eap_method || !item->identity ||
+		    !item->anonymous_identity || !item->phase2 || !item->domain_suffix_match ||
+		    !item->ca_cert || !item->client_cert || !item->private_key) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			ncfg_saved_networks_free(out);
+			return 0;
 		}
 		/* -1 for absent, because 0 is a legal metric and the strongest one.
 		 * The document omits the key entirely when a network is unranked. */

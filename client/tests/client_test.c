@@ -2352,6 +2352,58 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 }
 
 /*
+ * An enterprise network and a passphrase kept somewhere other than the file
+ * store, read as the language writes them (10.611): the network dialog writes
+ * these back, so a reference rebuilt from the network's id would repoint the
+ * credential, and an 802.1X block it could not read was one it refused.
+ */
+static void credentials_and_eap_are_read_as_written(void)
+{
+	struct staged         staged;
+	ncfg_saved_networks_t networks = {};
+	char                  err[NCFG_ERROR_MAX];
+
+	if (!staged_open(&staged, "a client asking for an enterprise network connects",
+	    "{\"response\":\"document\",\"schema_version\":1,\"networks\":["
+	    "{\"id\":\"home\",\"hidden\":false,\"autoconnect\":true,\"metered\":false,"
+	    "\"security\":{\"type\":\"psk\",\"passphrase\":{\"provider\":\"keyring\","
+	    "\"name\":\"house\"}},\"routes\":[],\"hooks\":[]},"
+	    "{\"id\":\"eduroam\",\"hidden\":false,\"autoconnect\":true,\"metered\":false,"
+	    "\"security\":{\"type\":\"eap\",\"method\":\"tls\",\"identity\":\"me@uni.example\","
+	    "\"domain_suffix_match\":\"radius.uni.example\","
+	    "\"ca_cert\":{\"path\":\"/etc/ssl/uni-ca.pem\"},"
+	    "\"client_cert\":{\"stored\":{\"provider\":\"file\",\"name\":\"uni-cert\"}},"
+	    "\"private_key\":{\"stored\":{\"provider\":\"file\",\"name\":\"uni-key\"}},"
+	    "\"password\":{\"provider\":\"file\",\"name\":\"campus\"}},"
+	    "\"routes\":[],\"hooks\":[]}"
+	    "],\"globals\":{}}\n")) {
+		return;
+	}
+	int got = ncfg_client_saved_networks(staged.client, &networks, err, sizeof(err));
+	ok("the saved networks arrive", got == 1 && networks.count == 2, err);
+	if (got == 1 && networks.count == 2) {
+		equals("a passphrase in the keyring is referenced as the language writes it",
+		    networks.items[0].credential_reference, "@secret:keyring:house");
+		equals("an enterprise network's method is read", networks.items[1].eap_method, "tls");
+		equals("  and its identity", networks.items[1].identity, "me@uni.example");
+		equals("  and the server name its certificate must carry",
+		    networks.items[1].domain_suffix_match, "radius.uni.example");
+		equals("  a CA certificate on disk as its path", networks.items[1].ca_cert,
+		    "/etc/ssl/uni-ca.pem");
+		equals("  a stored client certificate as its reference", networks.items[1].client_cert,
+		    "@secret:uni-cert");
+		equals("  and the private key the same way", networks.items[1].private_key,
+		    "@secret:uni-key");
+		equals("  and a password under another name than the network's",
+		    networks.items[1].credential_reference, "@secret:campus");
+		equals("and none of it is something the dialog cannot carry",
+		    networks.items[1].unmodelled, "");
+	}
+	ncfg_saved_networks_free(&networks);
+	staged_close(&staged);
+}
+
+/*
  * A default route is what separates "addressed" from "connected".
  *
  * The tray drew a radio as connected on association alone, which is true of a
@@ -2519,6 +2571,7 @@ int main(int argc, char **argv)
 	a_station_list_carries_who_and_the_lease_they_hold();
 	saved_networks_come_from_the_document_not_a_scan();
 	join_choices_are_the_saved_networks_heard();
+	credentials_and_eap_are_read_as_written();
 	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();
 	dns_reports_that_it_is_not_managing_resolution();

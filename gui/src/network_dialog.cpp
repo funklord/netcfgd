@@ -147,7 +147,38 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	ca_cert->setPlaceholderText(QStringLiteral("path to the issuer's certificate"));
 	form->addRow(QStringLiteral("ca certificate"), ca_cert);
 	client_cert = new QLineEdit(this);
+	client_cert->setPlaceholderText(QStringLiteral("a path, or @secret:NAME"));
 	form->addRow(QStringLiteral("client certificate"), client_cert);
+	private_key = new QLineEdit(this);
+	private_key->setObjectName(QStringLiteral("network_private_key"));
+	private_key->setPlaceholderText(QStringLiteral("the client's key: a path, or @secret:NAME"));
+	form->addRow(QStringLiteral("private key"), private_key);
+	domain_suffix_match = new QLineEdit(this);
+	domain_suffix_match->setObjectName(QStringLiteral("network_domain_suffix_match"));
+	/* 0206: `ca_cert` alone says who signed the server's certificate, not
+	 * whose it is, so a public CA's signature would do for any server. */
+	domain_suffix_match->setPlaceholderText(
+	    QStringLiteral("the name the server's certificate must carry"));
+	form->addRow(QStringLiteral("server name"), domain_suffix_match);
+	identity->setObjectName(QStringLiteral("network_identity"));
+	ca_cert->setObjectName(QStringLiteral("network_ca_cert"));
+	client_cert->setObjectName(QStringLiteral("network_client_cert"));
+	/* What the document holds, put back (10.611). Before this the fields
+	 * opened empty and Save wrote them so, which is how an enterprise
+	 * network lost its identity and certificates. */
+	if (editing) {
+		const int at = eap_method->findData(existing.eap_method);
+		if (at >= 0) {
+			eap_method->setCurrentIndex(at);
+		}
+		identity->setText(existing.identity);
+		anonymous_identity->setText(existing.anonymous_identity);
+		phase2->setText(existing.phase2);
+		ca_cert->setText(existing.ca_cert);
+		client_cert->setText(existing.client_cert);
+		private_key->setText(existing.private_key);
+		domain_suffix_match->setText(existing.domain_suffix_match);
+	}
 
 	credential = new QLineEdit(this);
 	credential->setObjectName(QStringLiteral("network_credential"));
@@ -251,6 +282,8 @@ void ncfg_network_dialog::security_changed()
 		form->setRowVisible(phase2, is_eap);
 		form->setRowVisible(ca_cert, is_eap);
 		form->setRowVisible(client_cert, is_eap);
+		form->setRowVisible(private_key, is_eap);
+		form->setRowVisible(domain_suffix_match, is_eap);
 		form->setRowVisible(credential, is_eap || is_psk);
 	}
 	revalidate();
@@ -283,7 +316,7 @@ QString ncfg_network_dialog::block_text() const
 
 	QStringList wifi;
 	if (kind == QStringLiteral("psk")) {
-		wifi << QStringLiteral("\t\tpsk = \"@secret:%1\"").arg(name);
+		wifi << QStringLiteral("\t\tpsk = \"%1\"").arg(credential_reference());
 		const QString generation = proto->currentData().toString();
 		if (!generation.isEmpty()) {
 			wifi << QStringLiteral("\t\tproto = \"%1\"").arg(generation);
@@ -307,8 +340,20 @@ QString ncfg_network_dialog::block_text() const
 			wifi << QStringLiteral("\t\tclient_cert = \"%1\"")
 			        .arg(client_cert->text().trimmed());
 		}
-		if (eap_method->currentData().toString() != QStringLiteral("tls")) {
-			wifi << QStringLiteral("\t\tpassword = \"@secret:%1\"").arg(name);
+		if (!private_key->text().trimmed().isEmpty()) {
+			wifi << QStringLiteral("\t\tprivate_key = \"%1\"")
+			        .arg(private_key->text().trimmed());
+		}
+		if (!domain_suffix_match->text().trimmed().isEmpty()) {
+			wifi << QStringLiteral("\t\tdomain_suffix_match = \"%1\"")
+			        .arg(domain_suffix_match->text().trimmed());
+		}
+		/* A password for every method but TLS, and for a TLS network that
+		 * already refers to one, whatever it is for. */
+		if (eap_method->currentData().toString() != QStringLiteral("tls") ||
+		    (editing && before.security == QStringLiteral("eap") &&
+		    !before.credential_reference.isEmpty())) {
+			wifi << QStringLiteral("\t\tpassword = \"%1\"").arg(credential_reference());
 		}
 	} else if (kind == QStringLiteral("owe")) {
 		wifi << QStringLiteral("\t\towe = true");
@@ -353,6 +398,19 @@ QString ncfg_network_dialog::block_text() const
 	return block.join(QStringLiteral("\n")) + QStringLiteral("\n");
 }
 
+QString ncfg_network_dialog::credential_reference() const
+{
+	/* Kept where the network keeps the same kind of credential: a passphrase
+	 * stays a passphrase and a password a password, each under the name and
+	 * the store the document gave it. Changing the kind is a new credential,
+	 * and a new one is stored under the network's own name. */
+	if (editing && before.security == security->currentData().toString() &&
+	    !before.credential_reference.isEmpty()) {
+		return before.credential_reference;
+	}
+	return QStringLiteral("@secret:%1").arg(id->text().trimmed());
+}
+
 void ncfg_network_dialog::submit()
 {
 	const QString name = id->text().trimmed();
@@ -376,7 +434,7 @@ void ncfg_network_dialog::submit()
 	 * dialog composes the block, so the only way a key an operator did not
 	 * choose could appear is through one of these fields. */
 	const QLineEdit *values[] = { id, ssid_hex, identity, anonymous_identity, phase2, ca_cert,
-		client_cert };
+		client_cert, private_key, domain_suffix_match };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
@@ -389,7 +447,20 @@ void ncfg_network_dialog::submit()
 	 * that is not there. Blank leaves the stored one alone, which is what
 	 * editing anything other than the passphrase looks like. */
 	if (!credential->text().isEmpty()) {
-		if (!connection->secret_put(name, credential->text(), true, &error)) {
+		/* Into the store the reference names, under its name (10.611): the
+		 * network's id is only the name of a credential this dialog made. A
+		 * reference to the keyring or to `pass` is somebody else's store, which
+		 * netcfgd reads and does not write, so a new passphrase for one is set
+		 * there rather than here. */
+		const QString reference = credential_reference();
+		const QString stored = reference.mid(QStringLiteral("@secret:").size());
+		if (!reference.startsWith(QStringLiteral("@secret:")) || stored.contains(QLatin1Char(':'))) {
+			note->setText(QStringLiteral("this network's credential is %1, which netcfgd reads "
+			              "and does not write: change it there, and leave the field here blank")
+			                  .arg(reference));
+			return;
+		}
+		if (!connection->secret_put(stored, credential->text(), true, &error)) {
 			note->setText(error);
 			return;
 		}

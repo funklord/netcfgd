@@ -617,6 +617,19 @@ struct ncfg_saved_network_row {
 	 * empty for none, `dhcp` or `dhcp6` for a single DHCP source. Anything
 	 * else is in `unmodelled`, and this is empty. */
 	QString addressing;
+	/* The credential's reference as the language writes it --
+	 * `@secret:home`, `@secret:keyring:eduroam` -- or empty (10.611). */
+	QString credential_reference;
+	/* An enterprise network's 802.1X, each empty where unset; certificates
+	 * as the language writes them, a path or an `@secret:` reference. */
+	QString eap_method;
+	QString identity;
+	QString anonymous_identity;
+	QString phase2;
+	QString domain_suffix_match;
+	QString ca_cert;
+	QString client_cert;
+	QString private_key;
 	/* What the network dialog has no field for, comma-joined; empty for a
 	 * network it can write back whole (project.md 10.606). */
 	QString unmodelled;
