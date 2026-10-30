@@ -12619,9 +12619,19 @@ Ten more minutes across `config_parse` and `document_json` (1.2 and 0.7 million
 runs) found nothing further.
 `document_json` had the same gap -- four seeds, none a router -- and has
 `seed-router.json` now, the router seed compiled; five minutes from it (4.2
-million runs) found nothing. `observed_json`, `socket_message` and
-`backend_ipc` are still seeded only from the laptop side, which is where to
-look next.
+million runs) found nothing.
+
+**10.622, the other three targets, asked for by the holder the same day.**
+`observed_json` has a real router observation -- forward, reflection and
+hairpin rules, the masquerade and the firewall's chains, read back from a
+namespace after `ncfg apply` -- and `socket_message` a `config_put` of a
+forward by reservation name, `show`, and the router document as a reply.
+**`backend_ipc` gains dnsmasq's lease file**, which no target reached: it is
+the most hostile text netcfgd reads on the router side, since the name in each
+line is whatever a LAN client sent. The parser is split from its file read
+(`ncfg_dhcp_server_lease_in_text`) so the fuzzer can drive it; the seed carries
+a client that called itself `$(reboot);evil`, which the plain-name filter must
+drop. Four minutes each -- 0.8, 0.4 and 1.7 million runs -- found nothing.
 
 ## 10.620 What netcfgd runs, against what its own firewall drops
 

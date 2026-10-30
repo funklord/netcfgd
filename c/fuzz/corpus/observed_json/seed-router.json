@@ -1,0 +1,590 @@
+{
+  "connectivity": {
+    "rung": "local"
+  },
+  "inventory": [
+    {
+      "name": "erspan0",
+      "category": "other",
+      "presence": "present",
+      "configured": false,
+      "subject": "interface"
+    },
+    {
+      "name": "gre0",
+      "category": "tunnel",
+      "presence": "present",
+      "configured": false,
+      "subject": "interface"
+    },
+    {
+      "name": "gretap0",
+      "category": "tunnel",
+      "presence": "present",
+      "configured": false,
+      "subject": "interface"
+    },
+    {
+      "name": "lan0",
+      "category": "virtual",
+      "presence": "present",
+      "configured": true,
+      "subject": "interface"
+    },
+    {
+      "name": "lo",
+      "category": "loopback",
+      "presence": "present",
+      "configured": false,
+      "subject": "interface"
+    },
+    {
+      "name": "sit0",
+      "category": "tunnel",
+      "presence": "present",
+      "configured": false,
+      "subject": "interface"
+    },
+    {
+      "name": "wan0",
+      "category": "virtual",
+      "presence": "present",
+      "configured": true,
+      "subject": "interface"
+    }
+  ],
+  "links": [
+    {
+      "name": "erspan0",
+      "index": 4,
+      "kind": "erspan",
+      "wireless": false,
+      "category": "other",
+      "up": false,
+      "carrier": true,
+      "mtu": 1450,
+      "mac": "00:00:00:00:00:00",
+      "offloads": [
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation"
+      ],
+      "qdisc_ingress": false,
+      "forwarding": false,
+      "privacy": false,
+      "accept_ra": {
+        "value": 1,
+        "effective": true
+      },
+      "ownership": "unknown",
+      "private_key_loaded": false
+    },
+    {
+      "name": "gre0",
+      "index": 2,
+      "kind": "gre",
+      "wireless": false,
+      "category": "tunnel",
+      "up": false,
+      "carrier": true,
+      "mtu": 1476,
+      "offloads": [
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation",
+        "tx-tcp-segmentation"
+      ],
+      "qdisc_ingress": false,
+      "ownership": "unknown",
+      "private_key_loaded": false,
+      "tunnel": {
+        "ttl": 0
+      }
+    },
+    {
+      "name": "gretap0",
+      "index": 3,
+      "kind": "gretap",
+      "wireless": false,
+      "category": "tunnel",
+      "up": false,
+      "carrier": true,
+      "mtu": 1462,
+      "mac": "00:00:00:00:00:00",
+      "offloads": [
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation",
+        "tx-tcp-segmentation"
+      ],
+      "qdisc_ingress": false,
+      "forwarding": false,
+      "privacy": false,
+      "accept_ra": {
+        "value": 1,
+        "effective": true
+      },
+      "ownership": "unknown",
+      "private_key_loaded": false,
+      "tunnel": {
+        "ttl": 0
+      }
+    },
+    {
+      "name": "lan0",
+      "index": 7,
+      "kind": "dummy",
+      "wireless": false,
+      "category": "virtual",
+      "up": true,
+      "carrier": true,
+      "mtu": 1500,
+      "mac": "42:2d:e9:97:47:c8",
+      "offloads": [
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation",
+        "tx-tcp-segmentation"
+      ],
+      "qdisc": "noqueue",
+      "qdisc_ingress": false,
+      "forwarding": true,
+      "privacy": false,
+      "accept_ra": {
+        "value": 1,
+        "effective": false
+      },
+      "ownership": "unknown",
+      "private_key_loaded": false
+    },
+    {
+      "name": "lo",
+      "index": 1,
+      "kind": "",
+      "wireless": false,
+      "category": "loopback",
+      "up": true,
+      "carrier": true,
+      "mtu": 65536,
+      "mac": "00:00:00:00:00:00",
+      "offloads": [
+        "rx-checksum",
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation",
+        "tx-tcp-segmentation"
+      ],
+      "offloads_fixed": [
+        "rx-checksum",
+        "tx-checksum-ip-generic"
+      ],
+      "qdisc": "noqueue",
+      "qdisc_ingress": false,
+      "forwarding": false,
+      "privacy": false,
+      "accept_ra": {
+        "value": 1,
+        "effective": true
+      },
+      "ownership": "unknown",
+      "private_key_loaded": false
+    },
+    {
+      "name": "sit0",
+      "index": 5,
+      "kind": "sit",
+      "wireless": false,
+      "category": "tunnel",
+      "up": false,
+      "carrier": true,
+      "mtu": 1480,
+      "offloads": [
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation",
+        "tx-tcp-segmentation"
+      ],
+      "qdisc_ingress": false,
+      "forwarding": false,
+      "privacy": false,
+      "accept_ra": {
+        "value": 1,
+        "effective": true
+      },
+      "ownership": "unknown",
+      "private_key_loaded": false,
+      "tunnel": {
+        "ttl": 64
+      }
+    },
+    {
+      "name": "wan0",
+      "index": 6,
+      "kind": "dummy",
+      "wireless": false,
+      "category": "virtual",
+      "up": true,
+      "carrier": true,
+      "mtu": 1500,
+      "mac": "76:3f:cf:8e:44:d7",
+      "offloads": [
+        "rx-gro",
+        "tx-checksum-ip-generic",
+        "tx-generic-segmentation",
+        "tx-tcp-segmentation"
+      ],
+      "qdisc": "noqueue",
+      "qdisc_ingress": false,
+      "forwarding": true,
+      "privacy": false,
+      "accept_ra": {
+        "value": 1,
+        "effective": false
+      },
+      "ownership": "unknown",
+      "private_key_loaded": false
+    }
+  ],
+  "hostapd_has_he": true,
+  "addresses": [
+    {
+      "interface": "lan0",
+      "address": "192.168.1.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "static"
+    },
+    {
+      "interface": "lan0",
+      "address": "fe80::402d:e9ff:fe97:47c8/64",
+      "proto": 3,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lo",
+      "address": "127.0.0.1/8",
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lo",
+      "address": "::1/128",
+      "proto": 1,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "address": "203.0.113.1/24",
+      "proto": 110,
+      "ownership": "ours",
+      "origin": "static"
+    },
+    {
+      "interface": "wan0",
+      "address": "fe80::743f:cfff:fe8e:44d7/64",
+      "proto": 3,
+      "ownership": "foreign"
+    }
+  ],
+  "routes": [
+    {
+      "interface": "lan0",
+      "destination": "192.168.1.0/24",
+      "table": 254,
+      "src": "192.168.1.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lan0",
+      "destination": "192.168.1.1/32",
+      "table": 255,
+      "src": "192.168.1.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lan0",
+      "destination": "192.168.1.255/32",
+      "table": 255,
+      "src": "192.168.1.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lan0",
+      "destination": "fe80::/128",
+      "metric": 0,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lan0",
+      "destination": "fe80::/64",
+      "metric": 256,
+      "table": 254,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lan0",
+      "destination": "fe80::402d:e9ff:fe97:47c8/128",
+      "metric": 0,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lan0",
+      "destination": "ff00::/8",
+      "metric": 256,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lo",
+      "destination": "127.0.0.0/8",
+      "table": 255,
+      "src": "127.0.0.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lo",
+      "destination": "127.0.0.1/32",
+      "table": 255,
+      "src": "127.0.0.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lo",
+      "destination": "127.255.255.255/32",
+      "table": 255,
+      "src": "127.0.0.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "lo",
+      "destination": "::1/128",
+      "metric": 0,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "203.0.113.0/24",
+      "table": 254,
+      "src": "203.0.113.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "203.0.113.1/32",
+      "table": 255,
+      "src": "203.0.113.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "203.0.113.255/32",
+      "table": 255,
+      "src": "203.0.113.1",
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "fe80::/128",
+      "metric": 0,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "fe80::/64",
+      "metric": 256,
+      "table": 254,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "fe80::743f:cfff:fe8e:44d7/128",
+      "metric": 0,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    },
+    {
+      "interface": "wan0",
+      "destination": "ff00::/8",
+      "metric": 256,
+      "table": 255,
+      "proto": 2,
+      "ownership": "foreign"
+    }
+  ],
+  "backends": [],
+  "dns": [],
+  "rules": [
+    {
+      "priority": 0,
+      "family": "inet",
+      "table": 255,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    },
+    {
+      "priority": 32766,
+      "family": "inet",
+      "table": 254,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    },
+    {
+      "priority": 32767,
+      "family": "inet",
+      "table": 253,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    },
+    {
+      "priority": 32767,
+      "family": "inet",
+      "table": 253,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    },
+    {
+      "priority": 32767,
+      "family": "inet",
+      "table": 254,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    },
+    {
+      "priority": 0,
+      "family": "inet6",
+      "table": 255,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    },
+    {
+      "priority": 32766,
+      "family": "inet6",
+      "table": 254,
+      "action": "lookup",
+      "l3mdev": false,
+      "invert": false,
+      "ownership": "foreign"
+    }
+  ],
+  "bridge_vlans": [],
+  "delegations": [],
+  "reports": [],
+  "qdisc_applied": [],
+  "ingress_applied": [],
+  "privacy_applied": [],
+  "backend_restarts": [],
+  "accept_ra_applied": [],
+  "forwarding_applied": [
+    "lan0",
+    "wan0"
+  ],
+  "nat": [
+    "wan0"
+  ],
+  "nat_conflicts": [],
+  "hook_state": [],
+  "hostname": "ml350g6-01",
+  "address_proto_supported": true,
+  "firewall": {
+    "input": "drop",
+    "forward": "drop",
+    "output": "accept",
+    "rules": [
+      {
+        "chain": "input",
+        "name": "established",
+        "digest": "1d3e28de0333bcb3",
+        "action": "accept",
+        "protocol": "any",
+        "states": [
+          "established",
+          "related"
+        ]
+      },
+      {
+        "chain": "input",
+        "name": "ssh",
+        "digest": "d27001558b360116",
+        "action": "accept",
+        "protocol": "tcp",
+        "port": 22,
+        "from": "192.168.1.0/24"
+      },
+      {
+        "chain": "forward",
+        "name": "out",
+        "digest": "63b413551e67b57b",
+        "action": "accept",
+        "protocol": "any",
+        "interface": "lan0"
+      }
+    ]
+  },
+  "port_forwards": [
+    {
+      "kind": "hairpin",
+      "network": "192.168.1.0/24",
+      "via": "lan0",
+      "interface": "wan0",
+      "name": "web",
+      "digest": "7711a9a1407b9e53",
+      "protocol": "tcp",
+      "port": 8443,
+      "to": "192.168.1.10",
+      "to_port": 8443
+    },
+    {
+      "kind": "forward",
+      "interface": "wan0",
+      "name": "web",
+      "digest": "ca8c3bb8fd97e7ba",
+      "protocol": "tcp",
+      "port": 443,
+      "to": "192.168.1.10",
+      "to_port": 8443
+    },
+    {
+      "kind": "reflect",
+      "address": "203.0.113.1",
+      "interface": "wan0",
+      "name": "web",
+      "digest": "072688592cfc9f04",
+      "protocol": "tcp",
+      "port": 443,
+      "to": "192.168.1.10",
+      "to_port": 8443
+    }
+  ]
+}

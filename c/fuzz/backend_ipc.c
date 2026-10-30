@@ -20,6 +20,7 @@
 
 #include "ncfg/base.h"
 #include "ncfg/apply.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/supplicant.h"
 
@@ -114,6 +115,34 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		char payload[512];
 
 		(void)ncfg_dhcpcd_control_payload(data, length, payload, sizeof(payload));
+	}
+
+	/*
+	 * dnsmasq's lease file (project.md 10.622): read from disk, written by the
+	 * DHCP server netcfgd runs, and the most hostile text on this boundary,
+	 * because the name in each line is whatever a client on the LAN chose to
+	 * send. Asked for a MAC the seed holds, one in the text's own first line
+	 * so a mutated line can still match, and at two times so the expiry
+	 * comparison runs both ways.
+	 */
+	{
+		char        hostname[NCFG_DHCP_SERVER_HOSTNAME_MAX];
+		char        address[64];
+		char        first[32] = "";
+		const char *space = strchr(text, ' ');
+
+		if (space && space[1]) {
+			size_t length_of = strcspn(space + 1, " \n");
+
+			if (length_of < sizeof(first)) {
+				memcpy(first, space + 1, length_of);
+				first[length_of] = '\0';
+			}
+		}
+		(void)ncfg_dhcp_server_lease_in_text(text, "aa:bb:cc:dd:ee:01", 0, hostname,
+		    sizeof(hostname), address, sizeof(address));
+		(void)ncfg_dhcp_server_lease_in_text(text, first, 1893456000LL, hostname,
+		    sizeof(hostname), address, sizeof(address));
 	}
 
 	/* Line by line. The text is NUL-terminated by `ncfg_fuzz_text`, and an

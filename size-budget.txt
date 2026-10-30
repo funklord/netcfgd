@@ -1046,4 +1046,6 @@ netcfgd
 # warnings for services netcfgd runs behind an `input` chain that drops,
 # +176 over 1,347,584.
 # And the masquerade whose forward chain drops replies, +40.
-total 1347800
+# And the lease file's parser split from its read so a fuzzer can drive it
+# (10.622), +56.
+total 1347856

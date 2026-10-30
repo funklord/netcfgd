@@ -1,0 +1,4 @@
+1893456000 aa:bb:cc:dd:ee:01 192.168.1.10 nas ff:dd:ee:01:00:01:00:01:2a:3b:4c:5d:aa:bb:cc:dd:ee:01
+0 AA:BB:CC:DD:EE:02 192.168.1.11 * *
+1700000000 aa:bb:cc:dd:ee:03 192.168.1.12 laptop-of-bob.lan 01:aa:bb:cc:dd:ee:03
+1893456000 aa:bb:cc:dd:ee:04 192.168.1.13 $(reboot);evil 01:aa:bb:cc:dd:ee:04

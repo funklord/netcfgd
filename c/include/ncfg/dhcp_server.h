@@ -93,5 +93,8 @@ pid_t ncfg_dhcp_server_running_pid(const char *run, const char *iface);
 #define NCFG_DHCP_SERVER_HOSTNAME_MAX 64
 int ncfg_dhcp_server_lease_of(const char *run, const char *mac, long long now, char *hostname,
     size_t hostname_size, char *address, size_t address_size);
+/* The same for one lease file's text, which is what the fuzzer drives. */
+int ncfg_dhcp_server_lease_in_text(const char *text, const char *mac, long long now,
+    char *hostname, size_t hostname_size, char *address, size_t address_size);
 
 #endif /* NCFG_DHCP_SERVER_H */

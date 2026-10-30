@@ -381,14 +381,21 @@ int ncfg_dhcp_server_stop(const char *run, const char *iface, char *err, size_t 
 }
 
 /* One lease file's answer for `mac`, or 0. */
-static int lease_in(const char *path, const char *mac, long long now, char *hostname,
-    size_t hostname_size, char *address, size_t address_size)
+/*
+ * The lease of one MAC in a lease file's text.
+ *
+ * Split from the reading so the fuzzer can reach it (project.md 10.622): the
+ * name in each line is whatever the client sent, so this is the most hostile
+ * input netcfgd parses on the router side -- chosen by any machine on the LAN,
+ * written verbatim by dnsmasq, read here.
+ */
+int ncfg_dhcp_server_lease_in_text(const char *text, const char *mac, long long now,
+    char *hostname, size_t hostname_size, char *address, size_t address_size)
 {
-	char       *text = ncfg_backend_read_file(path, NULL, 1024u * 1024u);
 	const char *line;
 	int         found = 0;
 
-	if (!text) {
+	if (!text || !mac || !hostname || !hostname_size || !address || !address_size) {
 		return 0;
 	}
 	for (line = text; !found && line && *line;
@@ -407,6 +414,20 @@ static int lease_in(const char *path, const char *mac, long long now, char *host
 		(void)snprintf(hostname, hostname_size, "%s",
 		    strcmp(name, "*") != 0 && ncfg_dhcp_server_plain_name(name) ? name : "");
 	}
+	return found;
+}
+
+static int lease_in(const char *path, const char *mac, long long now, char *hostname,
+    size_t hostname_size, char *address, size_t address_size)
+{
+	char *text = ncfg_backend_read_file(path, NULL, 1024u * 1024u);
+	int   found;
+
+	if (!text) {
+		return 0;
+	}
+	found = ncfg_dhcp_server_lease_in_text(text, mac, now, hostname, hostname_size, address,
+	    address_size);
 	free(text);
 	return found;
 }
