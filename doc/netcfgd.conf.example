@@ -417,7 +417,9 @@
 #     is the rule's identity: what `ncfg plan` and a red row say.
 #   - A rule matches on `protocol` (tcp, udp, icmp, icmpv6), `port` (with a
 #     protocol that has ports), `from` and `to` (addresses or CIDRs),
-#     `interface`, `state` (new, established, related, invalid), and `mac` --
+#     `interface` (in `forward`, the one a packet arrives on), `out_interface`
+#     (in `forward` only, the one it leaves by), `state` (new, established,
+#     related, invalid), and `mac` --
 #     the sending station, by address, by manufacturer prefix (`aa:bb:cc:*`)
 #     or by `"@host_list:NAME"`, in `input` and `forward` only.
 #   - With `policy = "drop"` on input, allow established traffic first, or
@@ -452,6 +454,17 @@
 #	}
 #	forward {
 #		policy = "drop"
+#		accept "established" {
+#			state = ["established", "related"]
+#		}
+#		# A guest network that reaches the internet and not the LAN.
+#		drop "guest-lan" {
+#			interface     = "guest0"
+#			out_interface = "lan0"
+#		}
+#		accept "out" {
+#			out_interface = "wan0"
+#		}
 #	}
 #	output {
 #		policy = "accept"

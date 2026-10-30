@@ -53,6 +53,7 @@ static void rule_free(ncfg_firewall_rule_t *rule)
 	ncfg_strings_free(rule->from, rule->from_count);
 	ncfg_strings_free(rule->to, rule->to_count);
 	free(rule->interface);
+	free(rule->out_interface);
 	ncfg_strings_free(rule->states, rule->state_count);
 	ncfg_strings_free(rule->mac, rule->mac_count);
 	ncfg_strings_free(rule->mac_lists, rule->mac_list_count);
@@ -382,6 +383,9 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 		} else if (strcmp(key, "interface") == 0) {
 			free(rule.interface);
 			rule.interface = ncfg_as_interface_name(ctx, assignment->value);
+		} else if (strcmp(key, "out_interface") == 0) {
+			free(rule.out_interface);
+			rule.out_interface = ncfg_as_interface_name(ctx, assignment->value);
 		} else if (strcmp(key, "state") == 0) {
 			rule_states(ctx, assignment, &rule);
 		} else if (strcmp(key, "mac") == 0) {
@@ -389,7 +393,7 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, state, mac", key);
+			    "interface, out_interface, state, mac", key);
 		}
 	}
 	/* What was written is the resolved set again where no list is named. */
@@ -466,6 +470,19 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			/* A packet this host sends has no sending station yet: its link
 			 * header is built after the output hook, so `ether saddr` there
 			 * would compile into a rule that never matches. */
+			/* **Where a packet leaves, in the one chain that has both ends**
+			 * (0302). In `input` nothing leaves, and in `output` the
+			 * interface a packet leaves by is already `interface`. */
+			if (rule.out_interface && strcmp(chain_name, "forward") != 0) {
+				ncfg_diag(ctx, item->as.block.span,
+				    "rule `%s` matches `out_interface` in the %s chain: only a forwarded "
+				    "packet has an interface it arrives on and one it leaves by%s",
+				    rule.name, chain_name,
+				    strcmp(chain_name, "output") == 0
+				        ? "; in `output`, `interface` is the one it leaves by" : "");
+				rule_free(&rule);
+				continue;
+			}
 			if (strcmp(chain_name, "output") == 0 &&
 			    (rule.mac_count || rule.mac_list_count)) {
 				ncfg_diag(ctx, item->as.block.span,

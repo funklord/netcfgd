@@ -1226,6 +1226,19 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		    rule->name ? rule->name : "(unnamed)");
 		return;
 	}
+	/* An interface the compiler would refuse is refused here rather than
+	 * written: the extreme sweep found it once the example configuration's
+	 * forward chain named one (10.623), for `interface` as much as for the
+	 * new `out_interface`. */
+	if ((rule->interface && ncfg_usable_name(rule->interface)) ||
+	    (rule->out_interface && ncfg_usable_name(rule->out_interface))) {
+		ncfg_render_refuse(missing, "firewall", chain,
+		    "rule `%s` names an interface that is not one: %s",
+		    rule->name ? rule->name : "(unnamed)",
+		    ncfg_usable_name(rule->interface && ncfg_usable_name(rule->interface)
+		                         ? rule->interface : rule->out_interface));
+		return;
+	}
 	ncfg_buf_addf(body, "\t\t%s ", action);
 	ncfg_render_quote(body, rule->name);
 	ncfg_buf_add_text(body, " {\n");
@@ -1268,6 +1281,11 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 	if (rule->interface) {
 		ncfg_buf_add_text(body, "\t\t\tinterface = ");
 		ncfg_render_quote(body, rule->interface);
+		ncfg_buf_add_text(body, "\n");
+	}
+	if (rule->out_interface) {
+		ncfg_buf_add_text(body, "\t\t\tout_interface = ");
+		ncfg_render_quote(body, rule->out_interface);
 		ncfg_buf_add_text(body, "\n");
 	}
 	if (rule->state_count != 0u) {

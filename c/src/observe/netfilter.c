@@ -345,6 +345,7 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 	if ((one->from[0] && !(out->from = observe_dup(one->from))) ||
 	    (one->to[0] && !(out->to = observe_dup(one->to))) ||
 	    (one->interface[0] && !(out->interface = observe_dup(one->interface))) ||
+	    (one->out_interface[0] && !(out->out_interface = observe_dup(one->out_interface))) ||
 	    (one->mac[0] && !(out->mac = observe_dup(one->mac)))) {
 		return 0;
 	}

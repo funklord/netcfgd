@@ -240,6 +240,9 @@ static void print_firewall(const ncfg_observed_t *observed)
 			if (rule->interface) {
 				ncfg_out_writef(" interface %s", rule->interface);
 			}
+			if (rule->out_interface) {
+				ncfg_out_writef(" out_interface %s", rule->out_interface);
+			}
 			for (state = 0; state < rule->state_count; state++) {
 				ncfg_out_writef("%s%s", state ? "," : " state ", rule->states[state]);
 			}

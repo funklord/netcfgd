@@ -232,7 +232,9 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 			rule->action = action_of(one->action);
 			rule->protocol = protocol_of(one->protocol);
 			rule->interface = one->interface ? strdup(one->interface) : NULL;
-			if (!rule->name || (one->interface && !rule->interface)) {
+			rule->out_interface = one->out_interface ? strdup(one->out_interface) : NULL;
+			if (!rule->name || (one->interface && !rule->interface) ||
+			    (one->out_interface && !rule->out_interface)) {
 				ncfg_firewall_free(firewall);
 				return NULL;
 			}

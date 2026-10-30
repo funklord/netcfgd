@@ -2632,6 +2632,10 @@ static const ncfg_field_t firewall_rule_fields[] = {
 	    .count_offset = offsetof(ncfg_firewall_rule_t, to_count) },
 	{ .name = "interface", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_firewall_rule_t, interface) },
+	/* Absent where unset (0302), so every ruleset written before it reads and
+	 * writes back unchanged. */
+	{ .name = "out_interface", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_firewall_rule_t, out_interface) },
 	{ .name = "states", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_firewall_rule_t, states),
 	    .count_offset = offsetof(ncfg_firewall_rule_t, state_count) },

@@ -1774,6 +1774,38 @@ static void host_list_cases(void)
 	}
 }
 
+/* Where a forwarded packet leaves (0302): the forward chain's own match, and
+ * refused where it has no meaning. */
+static void firewall_out_interface_cases(void)
+{
+	ncfg_document_t *document = compiles("firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\" }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n",
+	    "a forward rule matching where a packet arrives and where it leaves compiles");
+
+	if (document && document->firewall && document->firewall->forward.rule_count == 1) {
+		const ncfg_firewall_rule_t *rule = &document->firewall->forward.rules[0];
+
+		check(rule->interface && strcmp(rule->interface, "guest0") == 0 &&
+		        rule->out_interface && strcmp(rule->out_interface, "lan0") == 0,
+		    "  each interface in its own field");
+	} else {
+		check(0, "  the rule is there");
+	}
+	if (document) {
+		ncfg_document_free(document);
+	}
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { out_interface = \"lan0\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "only a forwarded packet", "  and refused in input, where nothing leaves");
+	refuses("firewall {\n\tinput { policy = \"accept\" }\n\tforward { policy = \"accept\" }\n"
+	    "\toutput {\n\t\tpolicy = \"accept\"\n\t\tdrop \"x\" { out_interface = \"wan0\" }\n\t}\n}\n",
+	    "`interface` is the one it leaves by",
+	    "  and in output, where `interface` already is the leaving one");
+}
+
 /* Host lists in the firewall (10.592): a rule's `mac`. */
 static void firewall_mac_cases(void)
 {
@@ -3802,6 +3834,7 @@ int main(void)
 	access_point_cases();
 	host_list_cases();
 	firewall_mac_cases();
+	firewall_out_interface_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();

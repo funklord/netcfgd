@@ -2372,6 +2372,9 @@ typedef struct {
 	 * chain reads it as the arriving interface and an output chain as the
 	 * leaving one. */
 	char    *interface;
+	/* The interface a forwarded packet leaves by (0302): forward chain only,
+	 * where `interface` is the one it arrived on. NULL for any. */
+	char    *out_interface;
 	/*
 	 * Conntrack states as the document spells them -- `new`, `established`,
 	 * `related`, `invalid` -- and **the lowerer refuses any other word**, so

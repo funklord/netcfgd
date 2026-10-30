@@ -891,6 +891,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	if (rule->interface) {
 		ncfg_buf_addf(out, "interface %s\n", rule->interface);
 	}
+	/* Only where set, so no digest written before 0302 changes. */
+	if (rule->out_interface) {
+		ncfg_buf_addf(out, "out_interface %s\n", rule->out_interface);
+	}
 	for (at = 0; at < sizeof(states) / sizeof(states[0]); at++) {
 		size_t one;
 
@@ -996,6 +1000,13 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 		put_meta(&expressions, strcmp(chain, NCFG_NFT_CHAIN_OUTPUT) == 0 ? NFT_META_OIFNAME
 		                                                              : NFT_META_IIFNAME);
 		put_cmp(&expressions, NFT_CMP_EQ, rule->interface, strlen(rule->interface) + 1u);
+	}
+	/* `oifname`, in the forward chain where `interface` was `iifname` (0302).
+	 * The compiler refuses it in the other two chains. */
+	if (rule->out_interface) {
+		put_meta(&expressions, NFT_META_OIFNAME);
+		put_cmp(&expressions, NFT_CMP_EQ, rule->out_interface,
+		    strlen(rule->out_interface) + 1u);
 	}
 	if (rule->state_count) {
 		uint32_t bits = 0;
@@ -2066,13 +2077,24 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 			}
 			break;
 		case NFT_META_IIFNAME:
-		case NFT_META_OIFNAME:
-			if (length == 0u || length > sizeof(out->interface) ||
-			    memchr(value, '\0', length) == NULL) {
+		case NFT_META_OIFNAME: {
+			/* `oifname` in the forward chain is where the packet leaves
+			 * (0302); in `output` it is the rule's `interface`, as
+			 * `iifname` is in `input` and `forward`. The chain was read
+			 * before the expressions. A second match into one field is not
+			 * a rule netcfgd writes. */
+			char *into = reading->key == NFT_META_OIFNAME &&
+			        strcmp(out->chain, NCFG_NFT_CHAIN_FORWARD) == 0
+			    ? out->out_interface
+			    : out->interface;
+
+			if (length == 0u || length > NCFG_NFT_IFNAME_MAX ||
+			    memchr(value, '\0', length) == NULL || into[0]) {
 				break;
 			}
-			memcpy(out->interface, value, length);
+			memcpy(into, value, length);
 			return 1;
+		}
 		case NFT_META_IIFTYPE: {
 			uint16_t type = 0;
 
@@ -2728,6 +2750,7 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    (expected->has_port && (int64_t)expected->port != observed->port.value) ||
 	    !same_text(expected->from, observed->from) || !same_text(expected->to, observed->to) ||
 	    !same_text(expected->interface, observed->interface) ||
+	    !same_text(expected->out_interface, observed->out_interface) ||
 	    !same_text(expected->mac, observed->mac)) {
 		return 0;
 	}

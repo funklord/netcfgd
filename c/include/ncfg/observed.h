@@ -1480,6 +1480,7 @@ typedef struct {
 	char         *from;
 	char         *to;
 	char         *interface;
+	char         *out_interface; /* forward chain only, 0302 */
 	char        **states;
 	size_t        state_count;
 	char         *mac;

@@ -66,6 +66,7 @@ static void print_rule(const ncfg_nft_kernel_rule_t *one)
 	rule.to = one->to[0] ? &to : NULL;
 	rule.to_count = one->to[0] ? 1u : 0u;
 	rule.interface = one->interface[0] ? (char *)one->interface : NULL;
+	rule.out_interface = one->out_interface[0] ? (char *)one->out_interface : NULL;
 	rule.states = state_count ? states : NULL;
 	rule.state_count = state_count;
 	rule.mac = one->mac[0] ? &mac : NULL;
@@ -88,6 +89,9 @@ static void print_rule(const ncfg_nft_kernel_rule_t *one)
 	}
 	if (one->interface[0]) {
 		printf(" interface=%s", one->interface);
+	}
+	if (one->out_interface[0]) {
+		printf(" out_interface=%s", one->out_interface);
 	}
 	for (at = 0; at < state_count; at++) {
 		printf(" state=%s", states[at]);

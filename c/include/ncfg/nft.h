@@ -393,6 +393,7 @@ typedef struct {
 	char     from[64]; /* "" where the rule matches no source address */
 	char     to[64];
 	char     interface[NCFG_NFT_IFNAME_MAX];
+	char     out_interface[NCFG_NFT_IFNAME_MAX]; /* forward chain only, 0302 */
 	/* Conntrack states as bits: new, established, related, invalid, in the
 	 * language's order -- bit 0 is `new`. */
 	unsigned states;

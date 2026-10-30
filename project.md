@@ -12597,6 +12597,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.623 A forward rule may match where a packet leaves
+
+**Asked for by the holder 2026-10-30** ("go ahead with the forward chain
+out-interface match"), after the last `/go` run named it as 0294's to widen.
+Decided in [0302](doc/decision/0302-a-forward-rule-may-match-where-a-packet-leaves.md):
+`out_interface` in the forward chain, encoded as `oifname`, refused in `input`
+and `output`. It runs through every layer a firewall rule has -- the model, the
+lowering, the digest text (only where set, so no installed rule changes
+identity), the encoder, the decoder (`oifname` in `forward` is
+`out_interface`, in `output` still `interface`), the kernel rule and the
+observation, the comparison and the planner's undo copy, `ncfg status` and the
+profile renderer.
+
+`tests/live/firewall.sh` installs `drop "guest-lan" { interface = "guest0";
+out_interface = "lan0" }` in a real kernel: nft lists it as `iifname "guest0"
+oifname "lan0" drop`, and the probe reads both interfaces back into their own
+fields with the digest recomputing. `lower_test` has the refusals in `input` and
+`output`; `render_test` the round trip. The example configuration shows a
+guest network in its forward chain.
+
 ## 10.621 The compiler's fuzzer, seeded with a router, found two leaks
 
 A `/go` run 2026-10-30. `c/fuzz/corpus/config_parse` held five seeds, none of

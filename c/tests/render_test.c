@@ -1844,6 +1844,11 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\taccept \"ours\" { mac = [\"aa:bb:cc:*\", \"00:00:00:00:00:01\"] }\n"
 	    "\t}\n\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so does one naming addresses and a prefix alone");
+	round_trips("firewall {\n\tinput { policy = \"accept\" }\n\tforward {\n"
+	    "\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\" }\n"
+	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so does a forward rule matching both interfaces (0302)");
 }
 
 static void a_firewall_round_trips(void)

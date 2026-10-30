@@ -61,7 +61,10 @@ firewall {
 		drop "one-station" { mac = ["02:00:00:00:01:00"] }
 		reject "one" { from = ["2001:DB8::1"]; interface = "eth0" }
 	}
-	forward { policy = "drop" }
+	forward {
+		policy = "drop"
+		drop "guest-lan" { interface = "guest0"; out_interface = "lan0" }
+	}
 	output {
 		policy = "accept"
 		drop "smtp-out" { protocol = "tcp"; port = 25; to = ["198.51.100.0/24"]; interface = "wan0" }
@@ -76,6 +79,10 @@ nft list ruleset > "$work/listed" 2>&1 || true
 has "the input chain is a filter chain at its hook, with the document's policy" \
 	"type filter hook input priority filter; policy drop;"
 has "and so is forward" "type filter hook forward priority filter; policy drop;"
+# 0302: a forwarded packet is matched by both ends, which is what keeps a
+# guest network off the LAN while it still reaches the uplink.
+has "in forward, the arriving and the leaving interface both" \
+	'iifname "guest0" oifname "lan0" drop comment "name=guest-lan sha256='
 has "and output" "type filter hook output priority filter; policy accept;"
 has "a state set reads back as nft writes one" \
 	'ct state established,related accept comment "name=established sha256='
@@ -111,11 +118,13 @@ read_has "an exact station as an address" \
 	"input one-station drop protocol=0 mac=02:00:00:00:01:00 digest=recomputed"
 read_has "an IPv6 source, an interface and a reject" \
 	"input one reject protocol=0 from=2001:db8::1 interface=eth0 digest=recomputed"
+read_has "and in forward, both interfaces, each to its own field" \
+	"forward guest-lan drop protocol=0 interface=guest0 out_interface=lan0 digest=recomputed"
 read_has "and in output, the destination and the leaving interface" \
 	"output smtp-out drop protocol=1 port=25 to=198.51.100.0/24 interface=wan0 digest=recomputed"
 check "every rule the probe wrote is read, and none is refused" \
 	"$(grep -c 'digest=recomputed' "$work/read" || true) $(grep -c '^refused' "$work/read" || true)" \
-	"7 0"
+	"8 0"
 
 # A rule somebody added inside netcfgd's table by hand is not netcfgd's as
 # written, and the reader says so rather than describing it.
