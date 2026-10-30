@@ -469,6 +469,26 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 				out->u.nftables.firewall = copy;
 			}
 		}
+		/* The forwards, as the uplinks are: the array the plan's, the
+		 * strings interned (0298). */
+		out->u.nftables.forwards = NULL;
+		if (in->u.nftables.forward_count != 0u && !plan->failed) {
+			ncfg_forward_rule_t *forwards =
+			    calloc(in->u.nftables.forward_count, sizeof(*forwards));
+			size_t               at;
+
+			if (!keep(plan, forwards)) {
+				return;
+			}
+			for (at = 0; at < in->u.nftables.forward_count; at++) {
+				forwards[at] = in->u.nftables.forwards[at];
+				forwards[at].interface =
+				    ncfg_plan_intern(plan, in->u.nftables.forwards[at].interface);
+				forwards[at].name = ncfg_plan_intern(plan, in->u.nftables.forwards[at].name);
+				forwards[at].to = ncfg_plan_intern(plan, in->u.nftables.forwards[at].to);
+			}
+			out->u.nftables.forwards = forwards;
+		}
 		return;
 	case NCFG_OP_HOOK_RUN:
 		out->u.hook.iface = ncfg_plan_intern(plan, in->u.hook.iface);

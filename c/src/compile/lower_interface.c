@@ -450,6 +450,130 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 	return server;
 }
 
+/*
+ * `port_forward "web" { protocol = "tcp"  port = 443  to = "192.168.1.10"
+ * to_port = 8443 }` (0298): one inbound port on this interface, translated to
+ * a host behind it. The label is its identity; two of one name, or of one
+ * protocol and port, on an interface are refused -- the second would never
+ * match.
+ */
+static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_interface_t *interface)
+{
+	ncfg_port_forward_t  forward;
+	ncfg_port_forward_t *grown;
+	int                  has_protocol = 0;
+	int                  has_port = 0;
+	size_t               i;
+
+	memset(&forward, 0, sizeof(forward));
+	forward.name = ncfg_require_label(ctx, block);
+	if (!forward.name) {
+		return;
+	}
+	for (i = 0; i < block->items.count; i++) {
+		const ncfg_ast_item_t       *item = block->items.at[i];
+		const ncfg_ast_assignment_t *assignment;
+		int64_t                      value;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `port_forward`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "protocol") == 0) {
+			char *text = ncfg_as_string(ctx, assignment->value);
+
+			if (!text) {
+				continue;
+			}
+			if (strcmp(text, "tcp") == 0 || strcmp(text, "udp") == 0) {
+				forward.protocol = text[0] == 't' ? NCFG_PORT_FORWARD_TCP
+				                                  : NCFG_PORT_FORWARD_UDP;
+				has_protocol = 1;
+			} else {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a protocol a port forward can match: tcp or udp", text);
+			}
+			free(text);
+		} else if (strcmp(assignment->key, "port") == 0 ||
+		    strcmp(assignment->key, "to_port") == 0) {
+			if (!ncfg_as_i64(ctx, assignment->value, &value)) {
+				continue;
+			}
+			if (value < 1 || value > 65535) {
+				ncfg_diag(ctx, assignment->span, "`%s = %lld` is not a port: 1 to 65535",
+				    assignment->key, (long long)value);
+				continue;
+			}
+			if (assignment->key[0] == 'p') {
+				forward.port = value;
+				has_port = 1;
+			} else {
+				forward.to_port.has = 1;
+				forward.to_port.value = value;
+			}
+		} else if (strcmp(assignment->key, "to") == 0) {
+			char          *text = ncfg_as_string(ctx, assignment->value);
+			ncfg_address_t address;
+
+			if (!text) {
+				continue;
+			}
+			if (!ncfg_address_parse(text, &address, NULL, 0) || address.is_ipv6 ||
+			    address.has_prefix || address.bytes[0] == 0u || address.bytes[0] == 127u ||
+			    address.bytes[0] >= 224u) {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a host a port can be forwarded to: one IPv4 address, not "
+				    "loopback, multicast, broadcast or unspecified", text);
+				free(text);
+				continue;
+			}
+			free(forward.to);
+			forward.to = text;
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown port_forward key `%s`: protocol, port, to and to_port",
+			    assignment->key);
+		}
+	}
+	if (!has_protocol || !has_port || !forward.to) {
+		ncfg_diag(ctx, block->span, "port_forward `%s` needs a `protocol`, a `port` and a `to`",
+		    forward.name);
+		free(forward.name);
+		free(forward.to);
+		return;
+	}
+	for (i = 0; i < interface->port_forward_count; i++) {
+		const ncfg_port_forward_t *earlier = &interface->port_forwards[i];
+
+		if (strcmp(earlier->name, forward.name) == 0 ||
+		    (earlier->protocol == forward.protocol && earlier->port == forward.port)) {
+			ncfg_diag(ctx, block->span,
+			    "port_forward `%s` on `%s` has the name or the port of `%s`: the first would "
+			    "win and the second would never match", forward.name, interface->name,
+			    earlier->name);
+			free(forward.name);
+			free(forward.to);
+			return;
+		}
+	}
+	grown = realloc(interface->port_forwards,
+	    (interface->port_forward_count + 1u) * sizeof(*grown));
+	if (!grown) {
+		ncfg_lower_oom(ctx);
+		free(forward.name);
+		free(forward.to);
+		return;
+	}
+	interface->port_forwards = grown;
+	interface->port_forwards[interface->port_forward_count++] = forward;
+}
+
 static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
     ncfg_ra_policy_t *out)
 {
@@ -903,6 +1027,8 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 				    "duplex and autonegotiation are settings of the adapter rather than of "
 				    "a connection over it: write `device <name> { ethtool { ... } }` and "
 				    "move the block there unchanged");
+			} else if (strcmp(head, "port_forward") == 0) {
+				lower_port_forward(ctx, inner, &interface);
 			} else if (strcmp(head, "dhcp_server") == 0) {
 				if (interface.dhcp_server) {
 					ncfg_diag(ctx, inner->span,

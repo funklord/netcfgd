@@ -1373,6 +1373,32 @@ void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall)
 	free(firewall);
 }
 
+static const ncfg_field_t observed_forward_fields[] = {
+	{ .name = "interface", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_forward_t, interface) },
+	{ .name = "name", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, name) },
+	{ .name = "digest", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, digest) },
+	{ .name = "protocol", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_forward_t, protocol) },
+	{ .name = "port", .kind = NCFG_F_INT, R_U16,
+	    .offset = offsetof(ncfg_observed_forward_t, port) },
+	{ .name = "to", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, to) },
+	{ .name = "to_port", .kind = NCFG_F_INT, R_U16,
+	    .offset = offsetof(ncfg_observed_forward_t, to_port) }
+};
+static const ncfg_type_t observed_forward_type =
+    TYPE("observed port forward", observed_forward_fields);
+
+void ncfg_observed_forwards_free(ncfg_observed_forward_t *forwards, size_t count)
+{
+	size_t at;
+
+	for (at = 0; forwards && at < count; at++) {
+		ncfg_type_free(&observed_forward_type, &forwards[at]);
+	}
+	free(forwards);
+}
+
 static const ncfg_field_t observed_fields[] = {
 	{ .name = "connectivity", .kind = NCFG_F_OPT_STRUCT, .type = &connectivity_type,
 	    .element_size = sizeof(ncfg_connectivity_t),
@@ -1471,7 +1497,14 @@ static const ncfg_field_t observed_fields[] = {
 	    .offset = offsetof(ncfg_observed_t, firewall) },
 	{ .name = "filter_neighbours", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_t, filter_neighbours),
-	    .count_offset = offsetof(ncfg_observed_t, filter_neighbour_count) }
+	    .count_offset = offsetof(ncfg_observed_t, filter_neighbour_count) },
+	{ .name = "port_forwards", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_forward_type, .element_size = sizeof(ncfg_observed_forward_t),
+	    .offset = offsetof(ncfg_observed_t, port_forwards),
+	    .count_offset = offsetof(ncfg_observed_t, port_forward_count) },
+	{ .name = "port_forwards_unread", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_t, port_forwards_unread),
+	    .count_offset = offsetof(ncfg_observed_t, port_forward_unread_count) }
 };
 static const ncfg_type_t observed_type = TYPE("observation", observed_fields);
 /* The same members under a status answer's envelope, whose `response` the

@@ -12597,6 +12597,64 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.609 Port forwards
+
+**Asked for by the holder 2026-10-30** ("go ahead with port forwards"). Decision
+[0298](doc/decision/0298-a-port-forward-is-translation-on-the-uplink.md)
+amends 0294, which had left nat redirection out of layer one.
+
+```
+interface wan0 {
+	nat = true
+	forwarding = true
+	port_forward "web" { protocol = "tcp"; port = 443; to = "192.168.1.10"; to_port = 8443 }
+}
+```
+
+- **On the interface, not in `firewall`**: translation is addressing (0022's
+  own test), and a forward is the inverse of the masquerade the uplink
+  already carries. Labelled; `protocol` tcp or udp; one `port`; `to` one
+  IPv4 host; `to_port` defaults to `port`. Two of one name, or one protocol
+  and port, on an interface are refused. Scope numbers 0x00020028-2b.
+- **A fourth chain in netcfgd's table, `prerouting`**, type `nat` at
+  `dstnat`, written only where a forward exists. Each forward is the
+  expressions nft 1.1.3 writes for `iifname "wan0" tcp dport 443 dnat ip to
+  192.168.1.10:8443`, measured with `--debug=netlink` -- no `nfproto` guard,
+  the port always loaded into register 2 and `flags 0x2` -- with 0295's
+  comment, `name=wan0/web sha256=...`. Same transaction as NAT and the
+  firewall (`ncfg_nft_build_replace_all`); the audit admits the one new chain
+  name.
+- **Read back** by `ncfg_nft_forward_read`, which takes only the shape the
+  builder writes and accepts the range maximum the kernel echoes; the
+  observation gains `port_forwards` and `port_forwards_unread`, both omitted
+  when empty. The planner compares them in order and plans `nftables.replace`
+  under `port_forwards` where they differ, with a reason in words (`wan0/web
+  tcp 443 -> 192.168.1.10:8443`) and the installed forwards as the inverse.
+- **Two warnings, no hidden rules**: a forward on an interface without
+  `forwarding = true` (IPv4 forwards by the arriving interface's setting),
+  and a `forward { policy = "drop" }` with no accept rule naming the host --
+  the warning writes out the rule. OpenWrt's implicit `ct status dnat accept`
+  was rejected, 0298 says why.
+- `ncfg status` lists each forward under its link; the GUI's interface dialog
+  refuses to save over forwards (the client names them unmodelled), which
+  `form_coverage_gate.py` caught before the client did -- its first catch.
+- **Live, `tests/live/port_forward.sh` under `unshare -rn`, in `make live`**:
+  wan and lan namespaces on veth pairs; `ncfg apply`; `nft list ruleset`
+  shows the chain and the rule as nft writes it; a second plan is empty; a
+  connection from 203.0.113.2 to the router's 443 reaches the lan server
+  ("through, from 203.0.113.2"); a hand-added prerouting rule is replaced;
+  no forward leaves no chain; and the control -- the same connection with
+  the forward gone -- is refused.
+
+`make check` green, and `nat.sh`, `firewall.sh` and `port_forward.sh` pass under
+`NCFG_LIVE=1`. **The size budget is nearly spent**: the installed binary read
+1,335,000 bytes against 1,304,300, 2.4% over and inside the 3% tolerance, with
+about 8 KB left before its 1,343,429 ceiling -- the next feature of this size
+will need the budget re-derived (a161176f is how that was last done).
+
+Not done, and in 0298: `to` naming a reservation, hairpin NAT, a port range,
+and a forward table in the GUI.
+
 ## 10.608 The interface dialog serves DHCP
 
 A `/go` run 2026-10-30. 10.606 put `dhcp_server` on the interface dialog's

@@ -27,6 +27,7 @@
 #include <linux/if_arp.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_conntrack_common.h>
+#include <linux/netfilter/nf_nat.h>
 #include <linux/netfilter/nf_tables.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter_ipv4.h>
@@ -195,7 +196,7 @@ static int name_must_be(const ncfg_wire_attrs_t *area, uint16_t kind, const char
 /* The chains netcfgd's table holds: the NAT chain of 0022 and the three filter
  * chains of 0294. A fifth name in a message is refused by the audit. */
 static const char *const OUR_CHAINS[] = { NCFG_NFT_CHAIN, NCFG_NFT_CHAIN_INPUT,
-	NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT };
+	NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT, NCFG_NFT_CHAIN_PREROUTING };
 
 static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char *err,
     size_t err_size)
@@ -214,7 +215,8 @@ static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char
 	}
 	ncfg_error_set(err, err_size,
 	    "a message would write to chain `%s`; netcfgd's table holds `postrouting`, "
-	    "`input`, `forward` and `output` and nothing else (0022, 0294)", name);
+	    "`prerouting`, `input`, `forward` and `output` and nothing else (0022, 0294, "
+	    "0298)", name);
 	return 0;
 }
 
@@ -1177,6 +1179,147 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 	return 1;
 }
 
+/* ------------------------------------------------------------------------ *
+ * Port forwards (0298)
+ * ------------------------------------------------------------------------ */
+
+/* `type nat hook prerouting priority dstnat`, for the forwards. */
+static void prerouting_chain(ncfg_buf_t *attrs)
+{
+	ncfg_buf_t hook;
+
+	ncfg_buf_init(&hook, 0);
+	put_be32(&hook, NFTA_HOOK_HOOKNUM, NF_INET_PRE_ROUTING);
+	put_be32(&hook, NFTA_HOOK_PRIORITY, (uint32_t)NF_IP_PRI_NAT_DST);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_NAME, NCFG_NFT_CHAIN_PREROUTING);
+	ncfg_wire_attr_put_nested(attrs, NFTA_CHAIN_HOOK, &hook);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_TYPE, "nat");
+	ncfg_buf_free(&hook);
+}
+
+int ncfg_nft_forward_text(const ncfg_forward_rule_t *forward, ncfg_buf_t *out)
+{
+	if (!forward || !out || !forward->interface || !forward->name || !forward->to) {
+		return 0;
+	}
+	ncfg_buf_addf(out, "chain %s\ninterface %s\nprotocol %s\nport %u\nto %s\nto_port %u\n",
+	    NCFG_NFT_CHAIN_PREROUTING, forward->interface,
+	    forward->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp", (unsigned)forward->port,
+	    forward->to, (unsigned)forward->to_port);
+	return !ncfg_buf_failed(out);
+}
+
+/* Everything a forward must be before a byte of it is written, and its
+ * comment: `name=IF/NAME sha256=DIGEST`. */
+static int forward_checked(const ncfg_forward_rule_t *forward, uint8_t to[4], char *comment,
+    size_t comment_size, char *err, size_t err_size)
+{
+	ncfg_buf_t text;
+	char       digest[NCFG_SHA256_HEX_SIZE];
+	int        wrote;
+
+	if (!forward->name || !forward->to || !valid_uplink(forward->interface, err, err_size)) {
+		if (!forward->name || !forward->to) {
+			ncfg_error_set(err, err_size, "a port forward with no name or no address");
+		}
+		return 0;
+	}
+	if (inet_pton(AF_INET, forward->to, to) != 1) {
+		ncfg_error_set(err, err_size, "port forward `%s/%s` sends to `%s`, which is not an "
+		    "IPv4 address", forward->interface, forward->name, forward->to);
+		return 0;
+	}
+	if (forward->port == 0u || forward->to_port == 0u) {
+		ncfg_error_set(err, err_size, "port forward `%s/%s` has a port of 0",
+		    forward->interface, forward->name);
+		return 0;
+	}
+	ncfg_buf_init(&text, 0);
+	if (!ncfg_nft_forward_text(forward, &text)) {
+		ncfg_buf_free(&text);
+		ncfg_error_set(err, err_size, "out of memory describing port forward `%s`",
+		    forward->name);
+		return 0;
+	}
+	ncfg_sha256_hex(text.data, text.length, digest);
+	ncfg_buf_free(&text);
+	wrote = snprintf(comment, comment_size, "name=%s/%s sha256=%.*s", forward->interface,
+	    forward->name, (int)NCFG_NFT_DIGEST_HEX, digest);
+	if (wrote < 0 || (size_t)wrote > NCFG_NFT_COMMENT_MAX || (size_t)wrote >= comment_size) {
+		ncfg_error_set(err, err_size,
+		    "port forward `%s/%s` has a name too long for the %u characters an nftables "
+		    "comment holds beside its digest", forward->interface, forward->name,
+		    (unsigned)NCFG_NFT_COMMENT_MAX);
+		return 0;
+	}
+	return 1;
+}
+
+/* An `immediate` loading BYTES into REGISTER. */
+static void put_immediate(ncfg_buf_t *list, uint32_t reg, const void *bytes, size_t length)
+{
+	ncfg_buf_t data;
+
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_IMMEDIATE_DREG, reg);
+	put_data(&data, NFTA_IMMEDIATE_DATA, bytes, length);
+	put_expression(list, "immediate", &data);
+	ncfg_buf_free(&data);
+}
+
+/*
+ * One forward, as nft 1.1.3 writes `iifname "IF" tcp dport P dnat ip to A:Q`
+ * (0298, measured with `--debug=netlink`): the interface, the protocol, the
+ * port, the address and port into registers 1 and 2, and `nat dnat ip` with
+ * the port marked specified. The port is always written, so the decoder has
+ * one shape to read.
+ */
+static void forward_rule(ncfg_buf_t *attrs, const ncfg_forward_rule_t *forward,
+    const uint8_t to[4], const char *comment)
+{
+	ncfg_buf_t     expressions;
+	ncfg_buf_t     nat;
+	ncfg_buf_t     userdata;
+	const uint8_t  number = forward->protocol == NCFG_PORT_FORWARD_UDP ? IPPROTO_UDP
+	                                                                   : IPPROTO_TCP;
+	const uint16_t port = htons(forward->port);
+	const uint16_t to_port = htons(forward->to_port);
+
+	ncfg_buf_init(&expressions, 0);
+	put_meta(&expressions, NFT_META_IIFNAME);
+	put_cmp(&expressions, NFT_CMP_EQ, forward->interface, strlen(forward->interface) + 1u);
+	put_meta(&expressions, NFT_META_L4PROTO);
+	put_cmp(&expressions, NFT_CMP_EQ, &number, 1u);
+	put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 2u, 2u);
+	put_cmp(&expressions, NFT_CMP_EQ, &port, sizeof(port));
+	put_immediate(&expressions, NFT_REG_1, to, 4u);
+	put_immediate(&expressions, NFT_REG_2, &to_port, sizeof(to_port));
+
+	ncfg_buf_init(&nat, 0);
+	put_be32(&nat, NFTA_NAT_TYPE, NFT_NAT_DNAT);
+	put_be32(&nat, NFTA_NAT_FAMILY, NFPROTO_IPV4);
+	put_be32(&nat, NFTA_NAT_REG_ADDR_MIN, NFT_REG_1);
+	put_be32(&nat, NFTA_NAT_REG_PROTO_MIN, NFT_REG_2);
+	put_be32(&nat, NFTA_NAT_FLAGS, NF_NAT_RANGE_PROTO_SPECIFIED);
+	put_expression(&expressions, "nat", &nat);
+	ncfg_buf_free(&nat);
+
+	ncfg_buf_init(&userdata, 0);
+	{
+		const uint8_t head[2] = { 0u, (uint8_t)(strlen(comment) + 1u) };
+
+		ncfg_buf_add(&userdata, head, sizeof(head));
+		ncfg_buf_add(&userdata, comment, strlen(comment) + 1u);
+	}
+	ncfg_wire_attr_put_str(attrs, NFTA_RULE_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(attrs, NFTA_RULE_CHAIN, NCFG_NFT_CHAIN_PREROUTING);
+	ncfg_wire_attr_put_nested(attrs, NFTA_RULE_EXPRESSIONS, &expressions);
+	ncfg_wire_attr_put(attrs, NFTA_RULE_USERDATA, userdata.data, userdata.length);
+	ncfg_buf_free(&userdata);
+	ncfg_buf_free(&expressions);
+}
+
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size)
@@ -1188,6 +1331,15 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
     ncfg_nft_batch_t *batch, char *err, size_t err_size)
+{
+	return ncfg_nft_build_replace_all(out, first_seq, table_exists, uplinks, uplink_count,
+	    firewall, NULL, 0, batch, err, err_size);
+}
+
+int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
+    const ncfg_forward_rule_t *forwards, size_t forward_count, ncfg_nft_batch_t *batch,
+    char *err, size_t err_size)
 {
 	ncfg_buf_t transaction;
 	ncfg_buf_t attrs;
@@ -1216,7 +1368,21 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
 			return 0;
 		}
 	}
-	if (!table_exists && uplink_count == 0 && !firewall) {
+	if (forward_count > 0 && !forwards) {
+		ncfg_error_set(err, err_size, "%zu port forwards with nothing behind them",
+		    forward_count);
+		return 0;
+	}
+	/* The forwards too, before anything is written. */
+	for (at = 0; at < forward_count; at++) {
+		uint8_t to[4];
+		char    comment[NCFG_NFT_COMMENT_MAX + 1u];
+
+		if (!forward_checked(&forwards[at], to, comment, sizeof(comment), err, err_size)) {
+			return 0;
+		}
+	}
+	if (!table_exists && uplink_count == 0 && !firewall && forward_count == 0) {
 		/* Nothing to remove and nothing to create. See `empty` in nft.h:
 		 * the begin-and-end transaction this would otherwise produce asks
 		 * for no acknowledgement and receives no reply, so a caller that
@@ -1244,7 +1410,7 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
 		ncfg_buf_free(&attrs);
 	}
 
-	if (ok && (uplink_count > 0 || firewall)) {
+	if (ok && (uplink_count > 0 || firewall || forward_count > 0)) {
 		ncfg_buf_init(&attrs, 0);
 		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_TABLE);
 		last_acked = seq;
@@ -1271,6 +1437,32 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
 			    (uint16_t)(NLM_F_ACK | NLM_F_CREATE), seq++, NFPROTO_INET, &attrs,
 			    err, err_size);
 			ncfg_buf_free(&attrs);
+		}
+		/* The forwards' chain before the filter chains: translation happens at
+		 * prerouting, and `nft list ruleset` then reads in packet order. */
+		if (ok && forward_count > 0) {
+			ncfg_buf_init(&attrs, 0);
+			prerouting_chain(&attrs);
+			last_acked = seq;
+			ok = build(&transaction, NFT_MSG_NEWCHAIN,
+			    (uint16_t)(NLM_F_ACK | NLM_F_CREATE), seq++, NFPROTO_INET, &attrs,
+			    err, err_size);
+			ncfg_buf_free(&attrs);
+		}
+		for (at = 0; ok && at < forward_count; at++) {
+			uint8_t to[4];
+			char    comment[NCFG_NFT_COMMENT_MAX + 1u];
+
+			ok = forward_checked(&forwards[at], to, comment, sizeof(comment), err, err_size);
+			if (ok) {
+				ncfg_buf_init(&attrs, 0);
+				forward_rule(&attrs, &forwards[at], to, comment);
+				last_acked = seq;
+				ok = build(&transaction, NFT_MSG_NEWRULE,
+				    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), seq++,
+				    NFPROTO_INET, &attrs, err, err_size);
+				ncfg_buf_free(&attrs);
+			}
 		}
 		if (ok && firewall) {
 			const ncfg_firewall_chain_t *chains[3] = { &firewall->input, &firewall->forward,
@@ -1989,6 +2181,220 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 	}
 	if (!verdict) {
 		ncfg_error_set(err, err_size, "rule `%s` has no verdict", out->name);
+		return 0;
+	}
+	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Reading port forwards back (0298)
+ * ------------------------------------------------------------------------ */
+
+/* The register a `be32` member names, or 0 where it is missing. */
+static uint32_t register_of(const ncfg_wire_attrs_t *area, uint16_t kind)
+{
+	uint32_t reg = 0;
+
+	(void)be32_member(area, kind, &reg);
+	return reg;
+}
+
+int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_forward_t *out,
+    char *err, size_t err_size)
+{
+	/* The expressions in the order the builder writes them. */
+	static const char *const shape[] = { "meta", "cmp", "meta", "cmp", "payload", "cmp",
+		"immediate", "immediate", "nat" };
+	ncfg_wire_attrs_t      area;
+	ncfg_wire_attrs_t      expressions;
+	ncfg_wire_attr_t       attr;
+	ncfg_wire_attr_t       element;
+	ncfg_nft_kernel_rule_t identity;
+	char                   name[NCFG_NFT_NAME_MAX];
+	char                   chain[NCFG_NFT_NAME_MAX];
+	char                   matched[NCFG_NFT_IFNAME_MAX];
+	const char            *slash;
+	size_t                 step = 0;
+	uint8_t                to[4];
+	int                    have_to = 0;
+	int                    have_to_port = 0;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "a forward read needs somewhere to go");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	memset(&identity, 0, sizeof(identity));
+	matched[0] = '\0';
+	if (!payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	if (((const uint8_t *)payload)[0] != NFPROTO_INET ||
+	    !read_name(&area, NFTA_RULE_TABLE, name, sizeof(name), err, err_size) ||
+	    strcmp(name, NCFG_NFT_TABLE) != 0) {
+		ncfg_error_set(err, err_size, "a rule outside netcfgd's table, which is not read");
+		return 0;
+	}
+	if (!read_name(&area, NFTA_RULE_CHAIN, chain, sizeof(chain), err, err_size) ||
+	    strcmp(chain, NCFG_NFT_CHAIN_PREROUTING) != 0) {
+		ncfg_error_set(err, err_size, "a rule outside the prerouting chain");
+		return 0;
+	}
+	if (!read_comment(&area, &identity) || !(slash = strchr(identity.name, '/')) ||
+	    slash == identity.name || slash[1] == '\0' ||
+	    (size_t)(slash - identity.name) >= sizeof(out->interface)) {
+		ncfg_error_set(err, err_size,
+		    "a prerouting rule with no `name=IF/NAME sha256=...` comment, so not one netcfgd "
+		    "wrote");
+		return 0;
+	}
+	memcpy(out->interface, identity.name, (size_t)(slash - identity.name));
+	out->interface[slash - identity.name] = '\0';
+	(void)snprintf(out->name, sizeof(out->name), "%s", slash + 1);
+	memcpy(out->digest, identity.digest, sizeof(out->digest));
+
+	if (ncfg_wire_attrs_find(&area, NFTA_RULE_EXPRESSIONS, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		ncfg_error_set(err, err_size, "forward `%s` has no expressions", identity.name);
+		return 0;
+	}
+	ncfg_wire_attrs_start(&expressions, attr.value, attr.length);
+	while (ncfg_wire_attrs_next(&expressions, &element, err, err_size) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t expression;
+		ncfg_wire_attrs_t data;
+		ncfg_wire_attr_t  data_attr;
+		const uint8_t    *bytes = NULL;
+		size_t            bytes_length = 0;
+		uint32_t          value = 0;
+
+		if (element.kind != NFTA_LIST_ELEM) {
+			continue;
+		}
+		ncfg_wire_attrs_start(&expression, element.value, element.length);
+		if (!read_name(&expression, NFTA_EXPR_NAME, name, sizeof(name), NULL, 0) ||
+		    step >= sizeof(shape) / sizeof(shape[0]) || strcmp(name, shape[step]) != 0) {
+			ncfg_error_set(err, err_size,
+			    "forward `%s` is not the shape netcfgd writes, at expression %zu",
+			    identity.name, step + 1u);
+			return 0;
+		}
+		memset(&data, 0, sizeof(data));
+		if (ncfg_wire_attrs_find(&expression, NFTA_EXPR_DATA, &data_attr, NULL, 0) ==
+		    NCFG_WIRE_OK) {
+			ncfg_wire_attrs_start(&data, data_attr.value, data_attr.length);
+		}
+		switch (step) {
+		case 0:
+		case 2:
+			if (!be32_member(&data, NFTA_META_KEY, &value) ||
+			    value != (step == 0 ? (uint32_t)NFT_META_IIFNAME : (uint32_t)NFT_META_L4PROTO)) {
+				ncfg_error_set(err, err_size, "forward `%s` loads something else",
+				    identity.name);
+				return 0;
+			}
+			break;
+		case 4:
+			if (register_of(&data, NFTA_PAYLOAD_BASE) != NFT_PAYLOAD_TRANSPORT_HEADER ||
+			    register_of(&data, NFTA_PAYLOAD_OFFSET) != 2u ||
+			    register_of(&data, NFTA_PAYLOAD_LEN) != 2u) {
+				ncfg_error_set(err, err_size, "forward `%s` matches something other than a "
+				    "destination port", identity.name);
+				return 0;
+			}
+			break;
+		case 1:
+		case 3:
+		case 5:
+			if (!be32_member(&data, NFTA_CMP_OP, &value) || value != NFT_CMP_EQ ||
+			    !data_value(&data, NFTA_CMP_DATA, &bytes, &bytes_length)) {
+				ncfg_error_set(err, err_size, "forward `%s` has a comparison netcfgd does not "
+				    "write", identity.name);
+				return 0;
+			}
+			if (step == 1) {
+				if (bytes_length == 0u || bytes_length > sizeof(matched) ||
+				    bytes[bytes_length - 1u] != '\0') {
+					ncfg_error_set(err, err_size, "forward `%s` matches an interface name it "
+					    "cannot read", identity.name);
+					return 0;
+				}
+				memcpy(matched, bytes, bytes_length);
+			} else if (step == 3) {
+				if (bytes_length != 1u || (bytes[0] != IPPROTO_TCP && bytes[0] != IPPROTO_UDP)) {
+					ncfg_error_set(err, err_size, "forward `%s` matches a protocol netcfgd does "
+					    "not forward", identity.name);
+					return 0;
+				}
+				out->protocol = bytes[0] == IPPROTO_UDP ? NCFG_PORT_FORWARD_UDP
+				                                        : NCFG_PORT_FORWARD_TCP;
+			} else {
+				uint16_t port;
+
+				if (bytes_length != 2u) {
+					ncfg_error_set(err, err_size, "forward `%s` matches a port it cannot read",
+					    identity.name);
+					return 0;
+				}
+				memcpy(&port, bytes, 2u);
+				out->port = ntohs(port);
+			}
+			break;
+		case 6:
+		case 7:
+			if (ncfg_wire_attrs_find(&data, NFTA_IMMEDIATE_DATA, &data_attr, NULL, 0) !=
+			        NCFG_WIRE_OK ||
+			    register_of(&data, NFTA_IMMEDIATE_DREG) !=
+			        (step == 6 ? (uint32_t)NFT_REG_1 : (uint32_t)NFT_REG_2) ||
+			    !data_value(&data, NFTA_IMMEDIATE_DATA, &bytes, &bytes_length) ||
+			    bytes_length != (step == 6 ? 4u : 2u)) {
+				ncfg_error_set(err, err_size, "forward `%s` loads a %s netcfgd does not write",
+				    identity.name, step == 6 ? "destination" : "port");
+				return 0;
+			}
+			if (step == 6) {
+				memcpy(to, bytes, 4u);
+				have_to = 1;
+			} else {
+				uint16_t port;
+
+				memcpy(&port, bytes, 2u);
+				out->to_port = ntohs(port);
+				have_to_port = 1;
+			}
+			break;
+		case 8:
+			/* The kernel echoes a range's maximum as its minimum where none
+			 * was given, so both are allowed and must agree. */
+			if (register_of(&data, NFTA_NAT_TYPE) != NFT_NAT_DNAT ||
+			    register_of(&data, NFTA_NAT_FAMILY) != NFPROTO_IPV4 ||
+			    register_of(&data, NFTA_NAT_REG_ADDR_MIN) != NFT_REG_1 ||
+			    register_of(&data, NFTA_NAT_REG_PROTO_MIN) != NFT_REG_2 ||
+			    (register_of(&data, NFTA_NAT_REG_ADDR_MAX) != 0u &&
+			    register_of(&data, NFTA_NAT_REG_ADDR_MAX) != NFT_REG_1) ||
+			    (register_of(&data, NFTA_NAT_REG_PROTO_MAX) != 0u &&
+			    register_of(&data, NFTA_NAT_REG_PROTO_MAX) != NFT_REG_2)) {
+				ncfg_error_set(err, err_size, "forward `%s` translates in a way netcfgd does "
+				    "not write", identity.name);
+				return 0;
+			}
+			break;
+		default:
+			break;
+		}
+		step++;
+	}
+	if (step != sizeof(shape) / sizeof(shape[0]) || !have_to || !have_to_port) {
+		ncfg_error_set(err, err_size, "forward `%s` is not the shape netcfgd writes",
+		    identity.name);
+		return 0;
+	}
+	if (strcmp(matched, out->interface) != 0) {
+		ncfg_error_set(err, err_size, "forward `%s` matches interface `%s`, not the one its "
+		    "comment names", identity.name, matched);
+		return 0;
+	}
+	if (!inet_ntop(AF_INET, to, out->to, sizeof(out->to))) {
+		ncfg_error_set(err, err_size, "forward `%s` sends to an address it cannot print",
+		    identity.name);
 		return 0;
 	}
 	return 1;

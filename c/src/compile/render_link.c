@@ -772,6 +772,34 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 	ncfg_buf_add_text(body, "\t}\n");
 }
 
+/* An interface's port forwards (0298), one block each. Every value was
+ * checked by the compiler, and a name or address the renderer could not write
+ * back is refused rather than quoted wrong. */
+static void render_port_forwards(const ncfg_interface_t *interface, ncfg_buf_t *body,
+    ncfg_unrenderable_t *missing)
+{
+	size_t at;
+
+	for (at = 0; at < interface->port_forward_count; at++) {
+		const ncfg_port_forward_t *forward = &interface->port_forwards[at];
+
+		if (!forward->name || !forward->to || strchr(forward->name, '"') ||
+		    strchr(forward->to, '"') || forward->port < 1 || forward->port > 65535) {
+			ncfg_render_refuse(missing, "interface", interface->name, "a port forward `%s`",
+			    forward->name ? forward->name : "");
+			continue;
+		}
+		ncfg_buf_addf(body, "\tport_forward \"%s\" {\n\t\tprotocol = \"%s\"\n"
+		    "\t\tport = %lld\n\t\tto = \"%s\"\n", forward->name,
+		    forward->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp",
+		    (long long)forward->port, forward->to);
+		if (forward->to_port.has) {
+			ncfg_buf_addf(body, "\t\tto_port = %lld\n", (long long)forward->to_port.value);
+		}
+		ncfg_buf_add_text(body, "\t}\n");
+	}
+}
+
 void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {
@@ -837,6 +865,7 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 	if (interface->dhcp_server) {
 		render_dhcp_server(interface, &body, missing);
 	}
+	render_port_forwards(interface, &body, missing);
 
 	ncfg_render_opening(text, "interface", name, overrides);
 	ncfg_render_label(text, name);

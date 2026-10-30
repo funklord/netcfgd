@@ -98,8 +98,9 @@ int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
 	 */
 	/* The firewall rides in the same transaction (10.592): the table is
 	 * replaced whole, so a NAT change that left it out would delete it. */
-	return ncfg_nft_build_replace(out, first_seq, table_exists, op->u.nftables.uplinks,
-	    op->u.nftables.uplink_count, op->u.nftables.firewall, batch, err, err_size);
+	return ncfg_nft_build_replace_all(out, first_seq, table_exists, op->u.nftables.uplinks,
+	    op->u.nftables.uplink_count, op->u.nftables.firewall, op->u.nftables.forwards,
+	    op->u.nftables.forward_count, batch, err, err_size);
 }
 
 /*

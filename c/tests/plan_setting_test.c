@@ -162,6 +162,79 @@ static void the_uplinks_are_a_sorted_list_replaced_whole(void)
 }
 
 /*
+ * Port forwards ride the same op (0298): planned where the table's forwards
+ * differ from the document's, the reason naming `port_forwards`; nothing
+ * planned where the table holds them; and the two things a forward needs and
+ * does not set -- forwarding on the interface it arrives on, and an accept in
+ * a forward chain that drops by default -- said before the apply.
+ */
+#define WAN_FORWARDING \
+	"{\"name\":\"wan0\",\"addressing\":[],\"nat\":true,\"forwarding\":true," \
+	"\"port_forwards\":[{\"name\":\"web\",\"protocol\":\"tcp\",\"port\":443," \
+	"\"to\":\"192.168.1.10\",\"to_port\":8443}]}"
+#define WEB_INSTALLED \
+	",\"port_forwards\":[{\"interface\":\"wan0\",\"name\":\"web\",\"digest\":\"0\"," \
+	"\"protocol\":\"tcp\",\"port\":443,\"to\":\"192.168.1.10\",\"to_port\":8443}]"
+
+static void port_forwards_ride_the_table(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = plan_of(DEVICE("wan0"), WAN_FORWARDING,
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "],\"nat\":[\"wan0\"]",
+	    &document, &observed);
+
+	check(plan && planfix_count(plan, "nftables.replace") == 1u &&
+	    planfix_for_field(plan, "nftables.replace", "port_forwards") != NULL,
+	    "a forward the table lacks replaces the table, the reason naming port_forwards");
+	check(plan && wrote(plan, "\"port_forwards\":[{\"interface\":\"wan0\",\"name\":\"web\","
+	                          "\"protocol\":\"tcp\",\"port\":443,\"to\":\"192.168.1.10\","
+	                          "\"to_port\":8443"),
+	    "  carrying the forward whole");
+	check(plan && planfix_for_field(plan, "nftables.replace", "port_forwards") &&
+	    strstr(planfix_for_field(plan, "nftables.replace", "port_forwards")->reason.desired,
+	        "wan0/web tcp 443 -> 192.168.1.10:8443") != NULL,
+	    "  and saying what it forwards, in words");
+	check(plan && !planfix_warned(plan, "does not have `forwarding = true`"),
+	    "  with no forwarding warning where the interface forwards");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(DEVICE("wan0"), WAN_FORWARDING,
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "],\"nat\":[\"wan0\"]"
+	    WEB_INSTALLED, &document, &observed);
+	check(plan && ncfg_plan_is_empty(plan), "a table already holding the forward plans nothing");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(DEVICE("wan0"),
+	    "{\"name\":\"wan0\",\"addressing\":[],\"nat\":true,"
+	    "\"port_forwards\":[{\"name\":\"web\",\"protocol\":\"tcp\",\"port\":443,"
+	    "\"to\":\"192.168.1.10\"}]}",
+	    "\"links\":[" PLANFIX_LINK("wan0", "") "],\"nat\":[\"wan0\"]", &document, &observed);
+	check(plan && planfix_warned(plan, "`wan0` forwards ports but does not have `forwarding = true`"),
+	    "a forward on an interface that does not forward is warned about");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("wan0"), WAN_FORWARDING, "",
+	    ",\"firewall\":{\"input\":{\"policy\":\"accept\"},\"forward\":{\"policy\":\"drop\"},"
+	    "\"output\":{\"policy\":\"accept\"}}",
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "]", &document, &observed);
+	check(plan && planfix_warned(plan, "the firewall's forward chain drops by default") &&
+	    planfix_warned(plan, "accept \"web\" { protocol = \"tcp\"; port = [8443]; "
+	                         "to = [\"192.168.1.10\"] }"),
+	    "a forward chain dropping by default is warned about, naming the rule to add");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("wan0"), WAN_FORWARDING, "",
+	    ",\"firewall\":{\"input\":{\"policy\":\"accept\"},\"forward\":{\"policy\":\"drop\","
+	    "\"rules\":[{\"name\":\"web\",\"action\":\"accept\",\"protocol\":\"tcp\","
+	    "\"ports\":[8443],\"to\":[\"192.168.1.10\"]}]},\"output\":{\"policy\":\"accept\"}}",
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "the firewall's forward chain drops by default"),
+	    "  and not once an accept rule names the host");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * The firewall rides the same op (10.592): the table is netcfgd's and is
  * replaced whole, so it is planned wherever NAT or the firewall differs, and a
  * machine already holding both plans nothing.
@@ -479,6 +552,7 @@ static void a_token_on_a_new_link_waits_for_the_link(void)
 int main(void)
 {
 	the_uplinks_are_a_sorted_list_replaced_whole();
+	port_forwards_ride_the_table();
 	the_firewall_is_planned_with_the_table();
 	a_document_that_stops_asking_removes_the_table();
 	a_second_table_translating_is_reported_and_not_deleted();

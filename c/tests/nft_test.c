@@ -26,6 +26,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/nft.h"
+#include "ncfg/sha256.h"
 #include "ncfg/wire.h"
 
 #include <arpa/inet.h>
@@ -408,6 +409,97 @@ static void what_is_written_is_read_back(void)
 	ncfg_buf_free(&out);
 }
 
+/*
+ * Port forwards (0298): a `prerouting` nat chain written only when there are
+ * some, each forward one rule, read back by its own decoder and passed over
+ * by the other two -- and refused before a byte is built where one cannot be
+ * expressed.
+ */
+static void forwards_are_written_and_read_back(void)
+{
+	static const char *const  uplinks[] = { "wan0" };
+	const ncfg_forward_rule_t forwards[2] = {
+		{ "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10", 8443u },
+		{ "wan0", "dns", NCFG_PORT_FORWARD_UDP, 53u, "192.168.1.11", 53u },
+	};
+	ncfg_forward_rule_t       bad;
+	ncfg_buf_t                out;
+	ncfg_nft_batch_t          batch;
+	ncfg_wire_messages_t      walk;
+	ncfg_wire_message_t       message;
+	char                      err[NCFG_ERROR_MAX];
+	int                       chains = 0;
+	int                       read = 0;
+	int                       right = 0;
+	int                       others_pass = 1;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, forwards, 2u, &batch, err,
+	          sizeof(err)) && !batch.empty,
+	    "a table with an uplink and two port forwards builds");
+	check(message_count(&out) == 8u,
+	    "  as begin, table, nat chain, masquerade, prerouting chain, two forwards, end");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_forward_t one;
+		ncfg_nft_kernel_rule_t    rule;
+		char                      uplink[NCFG_NFT_IFNAME_MAX];
+		ncfg_buf_t                text;
+		char                      digest[NCFG_SHA256_HEX_SIZE];
+
+		if ((message.header.kind & 0xffu) == NFT_MSG_NEWCHAIN) {
+			chains++;
+		}
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE ||
+		    !ncfg_nft_forward_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			continue;
+		}
+		read++;
+		others_pass = others_pass &&
+		    !ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &rule, NULL,
+		        0) &&
+		    !ncfg_nft_rule_uplink(message.payload, message.payload_length, uplink,
+		        sizeof(uplink), NULL, 0);
+		ncfg_buf_init(&text, 0);
+		(void)ncfg_nft_forward_text(&forwards[read - 1], &text);
+		ncfg_sha256_hex(text.data, text.length, digest);
+		ncfg_buf_free(&text);
+		if (strcmp(one.interface, "wan0") == 0 && strcmp(one.name, forwards[read - 1].name) == 0 &&
+		    one.protocol == forwards[read - 1].protocol && one.port == forwards[read - 1].port &&
+		    strcmp(one.to, forwards[read - 1].to) == 0 &&
+		    one.to_port == forwards[read - 1].to_port &&
+		    strncmp(one.digest, digest, NCFG_NFT_DIGEST_HEX) == 0) {
+			right++;
+		}
+	}
+	check(chains == 2, "  the prerouting chain beside the masquerade chain");
+	check(read == 2 && right == 2,
+	    "  each forward reads back as written, its digest the one its text gives");
+	check(others_pass, "  and neither the firewall's decoder nor the uplink reader takes one");
+	ncfg_buf_free(&out);
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, forwards, 1u, &batch, err,
+	          sizeof(err)) && message_count(&out) == 5u,
+	    "a forward alone is a table, its chain and its rule, with no masquerade chain");
+	ncfg_buf_free(&out);
+
+	bad = forwards[0];
+	bad.to = "2001:db8::10";
+	ncfg_buf_init(&out, 0);
+	check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, &batch, err,
+	          sizeof(err)) && out.length == 0u && strstr(err, "not an IPv4 address") != NULL,
+	    "a forward to an IPv6 address is refused, and nothing built");
+	ncfg_buf_free(&out);
+	bad = forwards[0];
+	bad.interface = "a-name-far-too-long";
+	ncfg_buf_init(&out, 0);
+	check(!ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &bad, 1u, &batch, err,
+	          sizeof(err)) && out.length == 0u,
+	    "  and one on an interface name no register holds");
+}
+
 int main(void)
 {
 	char err[NCFG_ERROR_MAX];
@@ -531,13 +623,14 @@ int main(void)
 		ncfg_buf_init(&message, 0);
 		ncfg_buf_init(&attrs, 0);
 		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE);
-		/* `prerouting`: 0294 gave the table the three filter chains and no
-		 * fourth, so a chain of any other name is still refused. */
-		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, "prerouting");
+		/* `raw`: 0294 gave the table the three filter chains and 0298 the
+		 * `prerouting` one, and a chain of any other name is still refused.
+		 * This was `prerouting` until 0298 made that chain netcfgd's. */
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, "raw");
 		nft_message(&message, nft_type(NFT_MSG_NEWCHAIN), NFPROTO_INET, 0, &attrs);
 		check(!ncfg_nft_writes_only_our_table(message.data, message.length, err,
 		    sizeof(err)),
-		    "and so is a chain inside netcfgd's own table that is none of its five");
+		    "and so is a chain inside netcfgd's own table that is none of its six");
 		ncfg_buf_free(&attrs);
 		ncfg_buf_free(&message);
 
@@ -1158,6 +1251,7 @@ int main(void)
 
 	a_rule_is_bounded_in_what_it_becomes();
 	what_is_written_is_read_back();
+	forwards_are_written_and_read_back();
 
 	if (failures) {
 		printf("nft: %d check(s) failed\n", failures);

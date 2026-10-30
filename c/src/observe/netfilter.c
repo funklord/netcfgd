@@ -204,10 +204,15 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_
 		char                   why[NCFG_ERROR_MAX];
 		ncfg_nft_kernel_rule_t firewall;
 
+		ncfg_nft_kernel_forward_t forward;
+
 		/* The dump is the whole table now (10.592), so the firewall's rules
-		 * are in it: they are read below, and are not refusals here. */
+		 * and the port forwards (0298) are in it: they are read below, and
+		 * are not refusals here. */
 		if (ncfg_nft_firewall_rule_read(reply_of->items[at].bytes, reply_of->items[at].length,
-		        &firewall, NULL, 0)) {
+		        &firewall, NULL, 0) ||
+		    ncfg_nft_forward_read(reply_of->items[at].bytes, reply_of->items[at].length,
+		        &forward, NULL, 0)) {
 			continue;
 		}
 		if (!ncfg_nft_rule_uplink(reply_of->items[at].bytes, reply_of->items[at].length, name,
@@ -483,6 +488,76 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 	return 1;
 }
 
+/* Forget the forwards an observation holds, for a pass that has none. */
+static void clear_forwards(ncfg_observed_t *observed)
+{
+	ncfg_observed_forwards_free(observed->port_forwards, observed->port_forward_count);
+	observed->port_forwards = NULL;
+	observed->port_forward_count = 0;
+	observe_names_free(observed->port_forwards_unread, observed->port_forward_unread_count);
+	observed->port_forwards_unread = NULL;
+	observed->port_forward_unread_count = 0;
+}
+
+/*
+ * The port forwards netcfgd's table holds (0298): every rule of its
+ * `prerouting` chain, through the decoder. One the decoder refuses is kept as
+ * its reason, as a firewall rule is; a rule of any other chain is not this
+ * reader's and is passed over.
+ */
+static int read_forwards(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_reply_t *rules,
+    ncfg_observed_t *observed, char *err, size_t err_size)
+{
+	size_t at;
+
+	clear_forwards(observed);
+	for (at = 0; at < rules->count; at++) {
+		ncfg_nft_kernel_forward_t one;
+		ncfg_observed_forward_t  *grown;
+		ncfg_observed_forward_t  *slot;
+		char                      why[NCFG_ERROR_MAX];
+
+		if (!ncfg_nft_forward_read(rules->items[at].bytes, rules->items[at].length, &one, why,
+		        sizeof(why))) {
+			if (strstr(why, "outside the prerouting chain") == NULL &&
+			    strstr(why, "outside netcfgd's table") == NULL &&
+			    !observe_list_add(&observed->port_forwards_unread,
+			        &observed->port_forward_unread_count, why)) {
+				ncfg_error_set(err, err_size, "out of memory recording the port forwards");
+				return 0;
+			}
+			continue;
+		}
+		if (observed->port_forward_count >= ceiling_of(kernel)) {
+			ncfg_error_set(err, err_size,
+			    "netcfgd's table holds more than %zu port forward(s), which is more than an "
+			    "observation holds", ceiling_of(kernel));
+			return 0;
+		}
+		grown = realloc(observed->port_forwards,
+		    (observed->port_forward_count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_error_set(err, err_size, "out of memory recording the port forwards");
+			return 0;
+		}
+		observed->port_forwards = grown;
+		slot = &grown[observed->port_forward_count++];
+		memset(slot, 0, sizeof(*slot));
+		slot->interface = observe_dup(one.interface);
+		slot->name = observe_dup(one.name);
+		slot->digest = observe_dup(one.digest);
+		slot->protocol = observe_dup(one.protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp");
+		slot->to = observe_dup(one.to);
+		slot->port = one.port;
+		slot->to_port = one.to_port;
+		if (!slot->interface || !slot->name || !slot->digest || !slot->protocol || !slot->to) {
+			ncfg_error_set(err, err_size, "out of memory recording the port forwards");
+			return 0;
+		}
+	}
+	return 1;
+}
+
 int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
     char *err, size_t err_size)
 {
@@ -507,6 +582,7 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 		observed->nat_conflict_count = 0;
 		ncfg_observed_firewall_free(observed->firewall);
 		observed->firewall = NULL;
+		clear_forwards(observed);
 		return 1;
 	}
 	/*
@@ -566,7 +642,8 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 				}
 				read = read_uplinks(kernel, &rules, observed, err, err_size) &&
 				    read_conflicts(kernel, &chains, observed, err, err_size) &&
-				    read_firewall(kernel, &rules, &chains, observed, err, err_size);
+				    read_firewall(kernel, &rules, &chains, observed, err, err_size) &&
+				    read_forwards(kernel, &rules, observed, err, err_size);
 				ncfg_netlink_reply_free(&rules);
 				ncfg_netlink_reply_free(&chains);
 				if (!read) {

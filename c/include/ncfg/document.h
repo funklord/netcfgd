@@ -1397,6 +1397,42 @@ typedef struct {
 	size_t            host_count;
 } ncfg_dhcp_server_t;
 
+/*
+ * One inbound port translated to a host behind the router (decision 0298):
+ * traffic arriving on the interface that carries it, for `port`, is sent to
+ * `to`, at `to_port` where it is set and at `port` otherwise.
+ *
+ * Address translation, so it is the interface's, beside `nat` -- not a
+ * firewall rule. IPv4 only; `to` is a bare address.
+ */
+typedef enum {
+	NCFG_PORT_FORWARD_TCP,
+	NCFG_PORT_FORWARD_UDP
+} ncfg_port_forward_protocol_t;
+
+typedef struct {
+	char         *name; /* the label, and the sorting key */
+	int           protocol; /* ncfg_port_forward_protocol_t */
+	int64_t       port;
+	char         *to;
+	ncfg_optint_t to_port;
+} ncfg_port_forward_t;
+
+/*
+ * One port forward resolved for the table (0298): which interface it arrives
+ * on, and `to_port` never 0 -- "the same port" already worked out. What the
+ * planner hands the `nftables.replace` op and what `nft.c` writes; borrowed
+ * strings.
+ */
+typedef struct {
+	const char *interface;
+	const char *name;
+	int         protocol; /* ncfg_port_forward_protocol_t */
+	uint16_t    port;
+	const char *to;
+	uint16_t    to_port;
+} ncfg_forward_rule_t;
+
 #define NCFG_DHCP_SERVER_LEASE_DEFAULT 43200
 #define NCFG_DHCP_SERVER_LEASE_MIN 120
 
@@ -1460,6 +1496,9 @@ typedef struct ncfg_interface {
 	ncfg_ra_policy_t      *advertise;
 	/* A DHCPv4 server on this interface (0297), or NULL. */
 	ncfg_dhcp_server_t    *dhcp_server;
+	/* The ports translated to hosts behind it (0298), sorted by name. */
+	ncfg_port_forward_t   *port_forwards;
+	size_t                 port_forward_count;
 	/*
 	 * IP forwarding sysctl, and only that. Never a filter rule: decision 0022
 	 * lets netcfgd own one nftables table for NAT, on the grounds that

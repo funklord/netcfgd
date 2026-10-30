@@ -299,6 +299,191 @@ static size_t observed_in(const ncfg_observed_firewall_t *observed, const char *
 	return count;
 }
 
+/* ------------------------------------------------------------------------ *
+ * Port forwards (0298)
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The document's forwards in the order the table writes them -- interfaces in
+ * the document's order, each one's forwards by name -- with `to_port`
+ * resolved. Borrowed strings; the array is the caller's. NULL with a count of
+ * 0 where there are none, and on out of memory with `failed` set.
+ */
+static ncfg_forward_rule_t *wanted_forwards(const ncfg_document_t *desired, size_t *count,
+    int *failed)
+{
+	ncfg_forward_rule_t *rules;
+	size_t               total = 0;
+	size_t               i;
+	size_t               at;
+
+	*count = 0;
+	for (i = 0; i < desired->interface_count; i++) {
+		total += desired->interfaces[i].port_forward_count;
+	}
+	if (total == 0u) {
+		return NULL;
+	}
+	rules = calloc(total, sizeof(*rules));
+	if (!rules) {
+		*failed = 1;
+		return NULL;
+	}
+	for (i = 0; i < desired->interface_count; i++) {
+		const ncfg_interface_t *interface = &desired->interfaces[i];
+
+		for (at = 0; at < interface->port_forward_count; at++) {
+			const ncfg_port_forward_t *forward = &interface->port_forwards[at];
+			ncfg_forward_rule_t       *rule = &rules[(*count)++];
+
+			rule->interface = interface->name;
+			rule->name = forward->name;
+			rule->protocol = forward->protocol;
+			rule->port = (uint16_t)forward->port;
+			rule->to = forward->to;
+			rule->to_port = (uint16_t)(forward->to_port.has ? forward->to_port.value
+			                                                : forward->port);
+		}
+	}
+	return rules;
+}
+
+/* Whether the installed forwards are the document's, in order, with nothing
+ * the decoder refused beside them. */
+static int same_forwards(const ncfg_forward_rule_t *wanted, size_t count,
+    const ncfg_observed_t *observed)
+{
+	size_t at;
+
+	if (observed->port_forward_unread_count != 0u || observed->port_forward_count != count) {
+		return 0;
+	}
+	for (at = 0; at < count; at++) {
+		const ncfg_observed_forward_t *seen = &observed->port_forwards[at];
+		const char *protocol = wanted[at].protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp";
+
+		if (!seen->interface || !seen->name || !seen->protocol || !seen->to ||
+		    strcmp(seen->interface, wanted[at].interface) != 0 ||
+		    strcmp(seen->name, wanted[at].name) != 0 || strcmp(seen->protocol, protocol) != 0 ||
+		    seen->port != wanted[at].port || strcmp(seen->to, wanted[at].to) != 0 ||
+		    seen->to_port != wanted[at].to_port) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* The installed forwards as the op's inverse wants them, borrowing the
+ * observation's strings. NULL with a count of 0 where there are none. */
+static ncfg_forward_rule_t *installed_forwards(const ncfg_observed_t *observed, int *failed)
+{
+	ncfg_forward_rule_t *rules;
+	size_t               at;
+
+	if (observed->port_forward_count == 0u) {
+		return NULL;
+	}
+	rules = calloc(observed->port_forward_count, sizeof(*rules));
+	if (!rules) {
+		*failed = 1;
+		return NULL;
+	}
+	for (at = 0; at < observed->port_forward_count; at++) {
+		const ncfg_observed_forward_t *seen = &observed->port_forwards[at];
+
+		rules[at].interface = seen->interface;
+		rules[at].name = seen->name;
+		rules[at].protocol = seen->protocol && strcmp(seen->protocol, "udp") == 0
+		    ? NCFG_PORT_FORWARD_UDP : NCFG_PORT_FORWARD_TCP;
+		rules[at].port = (uint16_t)seen->port;
+		rules[at].to = seen->to;
+		rules[at].to_port = (uint16_t)seen->to_port;
+	}
+	return rules;
+}
+
+/* `wan0/web tcp 443 -> 192.168.1.10:8443; ...`, for a plan's reason line. */
+static const char *describe_forwards(ncfg_plan_t *plan, const ncfg_forward_rule_t *rules,
+    size_t count)
+{
+	ncfg_buf_t  buf;
+	const char *text;
+	size_t      at;
+
+	if (count == 0u) {
+		return "<none>";
+	}
+	ncfg_buf_init(&buf, 0);
+	for (at = 0; at < count; at++) {
+		ncfg_buf_addf(&buf, "%s%s/%s %s %u -> %s:%u", at ? "; " : "",
+		    rules[at].interface ? rules[at].interface : "", rules[at].name ? rules[at].name : "",
+		    rules[at].protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp",
+		    (unsigned)rules[at].port, rules[at].to ? rules[at].to : "",
+		    (unsigned)rules[at].to_port);
+	}
+	text = ncfg_plan_intern(plan, ncfg_buf_text(&buf));
+	ncfg_buf_free(&buf);
+	return text ? text : "<port forwards>";
+}
+
+/*
+ * What a forward needs that the forward itself does not set (0298), said
+ * before the apply: IPv4 forwards by the setting of the interface a packet
+ * arrives on, and a forward chain that drops by default drops the translated
+ * traffic like any other unless a rule accepts it.
+ */
+static void warn_forwards(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 i;
+	size_t                 at;
+
+	for (i = 0; i < desired->interface_count; i++) {
+		const ncfg_interface_t *interface = &desired->interfaces[i];
+
+		if (interface->port_forward_count == 0u) {
+			continue;
+		}
+		if (!interface->forwarding.has || !interface->forwarding.value) {
+			ncfg_plan_warnf(builder->plan, interface->name,
+			    "`%s` forwards ports but does not have `forwarding = true`: IPv4 forwards a "
+			    "packet by the setting of the interface it arrives on, so the translated "
+			    "traffic would be dropped there. Set it on `%s`", interface->name,
+			    interface->name);
+		}
+		if (!desired->firewall || desired->firewall->forward.policy != NCFG_FIREWALL_POLICY_DROP) {
+			continue;
+		}
+		for (at = 0; at < interface->port_forward_count; at++) {
+			const ncfg_port_forward_t   *forward = &interface->port_forwards[at];
+			const ncfg_firewall_chain_t *chain = &desired->firewall->forward;
+			int                          accepted = 0;
+			size_t                       r;
+			size_t                       t;
+
+			for (r = 0; !accepted && r < chain->rule_count; r++) {
+				if (chain->rules[r].action != NCFG_FIREWALL_ACCEPT) {
+					continue;
+				}
+				for (t = 0; t < chain->rules[r].to_count; t++) {
+					accepted = accepted || strcmp(chain->rules[r].to[t], forward->to) == 0;
+				}
+			}
+			if (!accepted) {
+				ncfg_plan_warnf(builder->plan, interface->name,
+				    "port forward `%s/%s` sends to %s, and the firewall's forward chain drops "
+				    "by default with no accept rule naming that address, so the translated "
+				    "traffic is dropped. Add `accept \"%s\" { protocol = \"%s\"; port = "
+				    "[%lld]; to = [\"%s\"] }` to `forward`", interface->name, forward->name,
+				    forward->to, forward->name,
+				    forward->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp",
+				    (long long)(forward->to_port.has ? forward->to_port.value : forward->port),
+				    forward->to);
+			}
+		}
+	}
+}
+
 void ncfg_plan_nat(ncfg_builder_t *builder)
 {
 	const ncfg_document_t *desired = builder->desired;
@@ -312,6 +497,11 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	char                   refusal[NCFG_ERROR_MAX];
 	int                    uplinks_same;
 	int                    firewall_same;
+	int                    forwards_same;
+	ncfg_forward_rule_t   *forwards;
+	ncfg_forward_rule_t   *forwards_was;
+	size_t                 forward_count = 0;
+	int                    failed = 0;
 	size_t                 i;
 
 	if (desired->interface_count != 0u) {
@@ -350,6 +540,14 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		    "the LAN side, not the uplink.");
 	}
 
+	warn_forwards(builder);
+	forwards = wanted_forwards(desired, &forward_count, &failed);
+	if (failed) {
+		builder->plan->failed = 1;
+		free(wanted);
+		return;
+	}
+	forwards_same = same_forwards(forwards, forward_count, builder->observed);
 	uplinks_same = same_uplinks((const char *const *)wanted, count,
 	    (const char *const *)builder->observed->nat, builder->observed->nat_count);
 	firewall_same = ncfg_nft_firewall_matches(desired->firewall, builder->observed->firewall,
@@ -377,7 +575,8 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		    "one. netcfgd does not touch them", ncfg_buf_text(&buf));
 		ncfg_buf_free(&buf);
 	}
-	if (uplinks_same && firewall_same) {
+	if (uplinks_same && firewall_same && forwards_same) {
+		free(forwards);
 		free(wanted);
 		return;
 	}
@@ -401,6 +600,8 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	op.u.nftables.uplinks = (const char *const *)wanted;
 	op.u.nftables.uplink_count = count;
 	op.u.nftables.firewall = desired->firewall;
+	op.u.nftables.forwards = forwards;
+	op.u.nftables.forward_count = forward_count;
 	memset(&inverse, 0, sizeof(inverse));
 	inverse.kind = NCFG_OP_NFTABLES_REPLACE;
 	/* The table as it stands, which is a real revert rather than a guess: an
@@ -409,16 +610,29 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	 * together, so undoing this op does not leave the host unprotected. */
 	inverse.u.nftables.uplinks = (const char *const *)builder->observed->nat;
 	inverse.u.nftables.uplink_count = builder->observed->nat_count;
+	forwards_was = installed_forwards(builder->observed, &failed);
+	inverse.u.nftables.forwards = forwards_was;
+	inverse.u.nftables.forward_count = forwards_was ? builder->observed->port_forward_count : 0u;
 	if (builder->observed->firewall) {
 		was = installed(builder->observed->firewall);
 		if (!was) {
-			builder->plan->failed = 1;
-			free(wanted);
-			return;
+			failed = 1;
 		}
 	}
+	if (failed) {
+		builder->plan->failed = 1;
+		ncfg_firewall_free(was);
+		free(forwards_was);
+		free(forwards);
+		free(wanted);
+		return;
+	}
 	inverse.u.nftables.firewall = was;
-	if (!uplinks_same) {
+	if (uplinks_same && firewall_same) {
+		reason = ncfg_plan_reason_differs(NULL, "port_forwards",
+		    describe_forwards(builder->plan, forwards, forward_count),
+		    describe_forwards(builder->plan, forwards_was, inverse.u.nftables.forward_count));
+	} else if (!uplinks_same) {
 		reason = ncfg_plan_reason_differs(NULL, "nat",
 		    describe(builder->plan, (const char *const *)wanted, count),
 		    describe(builder->plan, (const char *const *)builder->observed->nat,
@@ -440,5 +654,7 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	 * are the caller's to give back -- the same bargain every string an op
 	 * names is under. */
 	ncfg_firewall_free(was);
+	free(forwards_was);
+	free(forwards);
 	free(wanted);
 }

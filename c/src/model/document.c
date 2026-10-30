@@ -1921,6 +1921,26 @@ static const ncfg_field_t dhcp_server_fields[] = {
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 
+/* A port forward (0298). The protocol is two words, not the firewall's five:
+ * a forward of "any" protocol has no port to match. */
+static const char *const port_forward_proto_words[] = { "tcp", "udp" };
+static const ncfg_enum_t port_forward_proto_set =
+    WORD_SET("port forward protocol", port_forward_proto_words);
+
+static const ncfg_field_t port_forward_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_port_forward_t, name) },
+	{ .name = "protocol", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
+	    .choices = &port_forward_proto_set, .offset = offsetof(ncfg_port_forward_t, protocol) },
+	{ .name = "port", .kind = NCFG_F_INT, R_U16, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_port_forward_t, port) },
+	{ .name = "to", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_port_forward_t, to) },
+	{ .name = "to_port", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_port_forward_t, to_port) }
+};
+static const ncfg_type_t port_forward_type = TYPE("port forward", port_forward_fields);
+
 static const ncfg_field_t guard_fields[] = {
 	{ .name = "reason", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_guard_t, reason) }
@@ -1975,6 +1995,10 @@ static const ncfg_field_t interface_fields[] = {
 	{ .name = "dhcp_server", .kind = NCFG_F_OPT_STRUCT, .type = &dhcp_server_type,
 	    .element_size = sizeof(ncfg_dhcp_server_t),
 	    .offset = offsetof(ncfg_interface_t, dhcp_server) },
+	{ .name = "port_forwards", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &port_forward_type, .element_size = sizeof(ncfg_port_forward_t),
+	    .offset = offsetof(ncfg_interface_t, port_forwards),
+	    .count_offset = offsetof(ncfg_interface_t, port_forward_count) },
 	{ .name = "forwarding", .kind = NCFG_F_OPT_BOOL,
 	    .offset = offsetof(ncfg_interface_t, forwarding) },
 	{ .name = "nat", .kind = NCFG_F_OPT_BOOL, .offset = offsetof(ncfg_interface_t, nat) },

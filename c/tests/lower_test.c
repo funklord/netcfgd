@@ -1490,6 +1490,38 @@ static void access_point_cases(void)
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
 	    "\tdhcp_server { host \"my tv\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"10.0.0.9\" } }\n}\n",
 	    "plain host name", "  and a name dnsmasq could not carry");
+	/* Port forwards (0298): labelled, on the interface traffic arrives on,
+	 * sorted by name, `to_port` absent where it is the same port. */
+	document = compiles("interface wan0 {\n\tnat = true\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\"; "
+	    "to_port = 8443 }\n"
+	    "\tport_forward \"dns\" { protocol = \"udp\"; port = 53; to = \"192.168.1.11\" }\n"
+	    "}\n", "an interface forwarding two ports compiles");
+	if (document) {
+		const ncfg_interface_t *wan = &document->interfaces[0];
+
+		check(wan->port_forward_count == 2u && strcmp(wan->port_forwards[0].name, "dns") == 0 &&
+		    wan->port_forwards[0].protocol == NCFG_PORT_FORWARD_UDP &&
+		    !wan->port_forwards[0].to_port.has && wan->port_forwards[1].port == 443 &&
+		    wan->port_forwards[1].to_port.value == 8443 &&
+		    strcmp(wan->port_forwards[1].to, "192.168.1.10") == 0,
+		    "  sorted by name, each with its protocol, ports and host");
+		ncfg_document_free(document);
+	}
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443 }\n}\n",
+	    "needs a `protocol`, a `port` and a `to`", "  a forward with nowhere to go is refused");
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"icmp\"; port = 1; "
+	    "to = \"192.168.1.10\" }\n}\n", "tcp or udp", "  and one of a protocol with no port");
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 70000; "
+	    "to = \"192.168.1.10\" }\n}\n", "is not a port", "  and a port past 65535");
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
+	    "to = \"2001:db8::10\" }\n}\n", "one IPv4 address", "  and one to an IPv6 host");
+	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
+	    "to = \"127.0.0.1\" }\n}\n", "not loopback", "  and one to loopback");
+	refuses("interface wan0 {\n"
+	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\" }\n"
+	    "\tport_forward \"web2\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.12\" }\n"
+	    "}\n", "would never match", "  and two of one port and protocol on one interface");
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { pool = 5 }\n}\n",
 	    "unknown dhcp_server key", "  and a key it does not have");
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { }\n"

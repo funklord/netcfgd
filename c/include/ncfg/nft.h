@@ -84,6 +84,9 @@
 #define NCFG_NFT_CHAIN_INPUT   "input"
 #define NCFG_NFT_CHAIN_FORWARD "forward"
 #define NCFG_NFT_CHAIN_OUTPUT  "output"
+/* Port forwards (0298): a `nat` chain at the prerouting hook, written only
+ * when some interface forwards a port. */
+#define NCFG_NFT_CHAIN_PREROUTING "prerouting"
 
 /*
  * What a rule's comment can hold: nft refuses a comment over 128 characters,
@@ -288,6 +291,43 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
     ncfg_nft_batch_t *batch, char *err, size_t err_size);
+
+/*
+ * The whole table with port forwards as well: `ncfg_nft_build_replace` with
+ * a `prerouting` nat chain carrying one rule per forward, written only where
+ * `forward_count` is not 0. Each rule is the expressions nft 1.1.3 writes for
+ * `iifname "IF" tcp dport P dnat ip to A:Q`, measured, and carries 0295's
+ * comment with `name=IF/NAME`. Refused before a byte is written where a
+ * forward's interface, address or name cannot be expressed.
+ */
+int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
+    const ncfg_forward_rule_t *forwards, size_t forward_count, ncfg_nft_batch_t *batch,
+    char *err, size_t err_size);
+
+/* The text a forward's digest is taken over, as `ncfg_nft_firewall_rule_text`
+ * is for a firewall rule: every field, one fixed order. */
+int ncfg_nft_forward_text(const ncfg_forward_rule_t *forward, ncfg_buf_t *out);
+
+/* One port forward read back out of the `prerouting` chain. */
+typedef struct {
+	char     interface[NCFG_NFT_IFNAME_MAX];
+	char     name[NCFG_NFT_COMMENT_MAX + 1u];
+	char     digest[NCFG_NFT_DIGEST_HEX + 1u];
+	int      protocol;
+	uint16_t port;
+	char     to[16];
+	uint16_t to_port;
+} ncfg_nft_kernel_forward_t;
+
+/*
+ * Read one entry of a rule dump as a port forward netcfgd wrote: a rule in
+ * netcfgd's `prerouting` chain with exactly the expressions the builder
+ * writes and a `name=IF/NAME sha256=...` comment whose interface is the one
+ * the rule matches. Anything else is refused, saying what.
+ */
+int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_forward_t *out,
+    char *err, size_t err_size);
 
 /*
  * The text a rule's digest is taken over: every field that decides what the

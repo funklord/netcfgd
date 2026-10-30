@@ -3838,7 +3838,10 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		ncfg_json_free(doc);
 		return 0;
 	}
-	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token" };
+	/* `port_forwards` from the day they existed (0298): the dialog has no
+	 * table for them, and this list is what stops its Save deleting them. */
+	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token",
+		"port_forwards" };
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
 		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
 			note_unmodelled(&out->unmodelled, beyond[i]);

@@ -185,6 +185,12 @@ static int compare_dhcp_host(const void *left, const void *right)
 	    ((const ncfg_dhcp_host_t *)right)->name);
 }
 
+static int compare_port_forward(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_port_forward_t *)left)->name,
+	    ((const ncfg_port_forward_t *)right)->name);
+}
+
 static int compare_host_list(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_host_list_t *)left)->name,
@@ -505,6 +511,10 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 			stable_sort(server->hosts, server->host_count, sizeof(*server->hosts),
 			    compare_dhcp_host);
 		}
+		/* An interface's port forwards are a set, by name (0298). */
+		stable_sort(document->interfaces[i].port_forwards,
+		    document->interfaces[i].port_forward_count,
+		    sizeof(*document->interfaces[i].port_forwards), compare_port_forward);
 	}
 	for (i = 0; i < document->host_list_count; i++) {
 		sort_set(document->host_lists[i].mac, &document->host_lists[i].mac_count);

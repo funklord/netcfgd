@@ -1,6 +1,6 @@
 # 0294: layer one is named rules in netcfgd's own table
 
-Status: accepted
+Status: accepted, amended by [0298](0298-a-port-forward-is-translation-on-the-uplink.md)
 Date: 2026-10-25
 Milestone: M6
 Follows: [0022](0022-netcfgd-may-own-one-nftables-table.md), [0283](0283-firewall-and-queuing-are-in-scope.md), [0284](0284-the-ruleset-is-netcfgds-and-rules-arrive-in-five-layers.md), [0287](0287-a-rule-carries-its-own-standing.md), [0293](0293-an-optional-action-may-be-red-on-its-own.md)

@@ -352,6 +352,11 @@ static const struct {
 	/* A reservation (10.605), the interface's as the range is. */
 	{ NCFG_BLOCK_INTERFACE, "dhcp_server.host.mac", 0x00020026u },
 	{ NCFG_BLOCK_INTERFACE, "dhcp_server.host.address", 0x00020027u },
+	/* A port forward (0298), the interface's as `nat` is. */
+	{ NCFG_BLOCK_INTERFACE, "port_forward.protocol", 0x00020028u },
+	{ NCFG_BLOCK_INTERFACE, "port_forward.port", 0x00020029u },
+	{ NCFG_BLOCK_INTERFACE, "port_forward.to", 0x0002002au },
+	{ NCFG_BLOCK_INTERFACE, "port_forward.to_port", 0x0002002bu },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the

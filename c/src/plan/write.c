@@ -329,6 +329,36 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		if (op->u.nftables.firewall) {
 			write_firewall_summary(writer, op->u.nftables.firewall);
 		}
+		/* The forwards whole -- they are short -- with the digest their
+		 * comment will carry, which is what `ncfg status` shows (0298). */
+		if (op->u.nftables.forward_count) {
+			size_t at;
+
+			ncfg_json_write_key(writer, "port_forwards");
+			ncfg_json_write_array_begin(writer);
+			for (at = 0; at < op->u.nftables.forward_count; at++) {
+				const ncfg_forward_rule_t *forward = &op->u.nftables.forwards[at];
+				ncfg_buf_t                 text;
+				char                       digest[NCFG_SHA256_HEX_SIZE];
+
+				ncfg_buf_init(&text, 0);
+				(void)ncfg_nft_forward_text(forward, &text);
+				ncfg_sha256_hex(text.data, text.length, digest);
+				ncfg_buf_free(&text);
+				ncfg_json_write_object_begin(writer);
+				member_text(writer, "interface", forward->interface);
+				member_text(writer, "name", forward->name);
+				ncfg_json_write_member_string(writer, "protocol",
+				    forward->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp");
+				ncfg_json_write_member_int(writer, "port", forward->port);
+				member_text(writer, "to", forward->to);
+				ncfg_json_write_member_int(writer, "to_port", forward->to_port);
+				digest[NCFG_NFT_DIGEST_HEX] = '\0';
+				ncfg_json_write_member_string(writer, "digest", digest);
+				ncfg_json_write_object_end(writer);
+			}
+			ncfg_json_write_array_end(writer);
+		}
 		break;
 	case NCFG_OP_HOOK_RUN:
 		member_text(writer, "iface", op->u.hook.iface);

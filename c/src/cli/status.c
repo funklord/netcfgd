@@ -103,6 +103,22 @@ static void print_link_settings(const ncfg_observed_link_t *link,
 	if (listed(observed->nat, observed->nat_count, link->name)) {
 		ncfg_out_line("    masquerade");
 	}
+	/* Each port the table forwards from this link (0298), as installed --
+	 * read back from the kernel, not from the document. */
+	{
+		size_t one;
+
+		for (one = 0; one < observed->port_forward_count; one++) {
+			const ncfg_observed_forward_t *forward = &observed->port_forwards[one];
+
+			if (forward->interface && strcmp(forward->interface, link->name) == 0) {
+				ncfg_out_writef("    forwards %s %lld to %s:%lld (%s)\n",
+				    forward->protocol ? forward->protocol : "?", (long long)forward->port,
+				    forward->to ? forward->to : "?", (long long)forward->to_port,
+				    forward->name ? forward->name : "?");
+			}
+		}
+	}
 	if (link->forwarding.has && link->forwarding.value) {
 		ncfg_out_line("    forwarding");
 	}

@@ -3179,6 +3179,10 @@ live:
 	@# (project.md 10.592). The probe is an example, so it is built here.
 	@$(MAKE) --no-print-directory -C c examples
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/firewall.sh"
+	@# Port forwards (0298): applied by ncfg, read back, and a connection from
+	@# a wan namespace through the router to a lan one, with the control that
+	@# the same connection fails once the forward is gone.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/port_forward.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
 	@# SLAAC against a real advertisement, which is the half privacy.sh will not
 	@# do. Neither under NCFG_LIVE nor under unshare: dnsmasq is a package, and it

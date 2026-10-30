@@ -67,12 +67,12 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   between access points (802.11r, by FT-PSK or FT-SAE) with neighbour
   reports telling a station where the others are (802.11k) and steering
   that moves weak stations on and strong ones to 5 GHz (802.11v), 802.11s
-  mesh, four-address repeaters, NAT, a firewall of named rules in netcfgd's
-  own nftables table that can match a sending station by address, prefix or
-  host list, a DHCP server handing out the LAN's addresses, router
-  advertisements, a delegated prefix subnetted onto the interfaces behind
-  it, VLAN-aware bridges, bonds, policy routing and traffic shaping -- on
-  the OpenWrt-sized box it was designed for.
+  mesh, four-address repeaters, NAT and port forwards, a firewall of named
+  rules in netcfgd's own nftables table that can match a sending station by
+  address, prefix or host list, a DHCP server handing out the LAN's
+  addresses, router advertisements, a delegated prefix subnetted onto the
+  interfaces behind it, VLAN-aware bridges, bonds, policy routing and
+  traffic shaping -- on the OpenWrt-sized box it was designed for.
 - **It shows the change before making it.** `ncfg plan` lists every action in
   order -- add this address, start that client, deny this station -- each
   with the configured value and the observed one that differ. `ncfg explain`
@@ -309,6 +309,25 @@ the rules land or none do. Each rule carries its name and a digest in its
 nftables comment, `ncfg status` lists what is installed, and a rule somebody
 added inside netcfgd's table by hand is named there and replaced. Another
 table filtering at the same hooks is named in the plan and left alone.
+
+### Port forwards
+
+A port forward is address translation, so it sits on the interface the
+traffic arrives on, beside `nat`:
+
+```
+interface wan0 {
+	nat = true
+	forwarding = true
+	port_forward "web" { protocol = "tcp"; port = 443; to = "192.168.1.10"; to_port = 8443 }
+}
+```
+
+It lands in the same table and the same transaction as the firewall, and the
+plan says what a forward still needs from you: `forwarding = true` on the
+interface it arrives on, and, where `forward` drops by default, the `accept`
+rule that lets the translated traffic through. IPv4 only, since IPv6 has no
+translation to undo.
 
 ## Profiles
 

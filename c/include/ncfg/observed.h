@@ -1433,7 +1433,27 @@ typedef struct {
 	 * 0294 says to report before an apply, not to fight. Omitted when empty. */
 	char  **filter_neighbours;
 	size_t  filter_neighbour_count;
+	/* The port forwards netcfgd's table holds (0298), read back out of its
+	 * `prerouting` chain in the kernel's order; and why each rule there the
+	 * decoder could not read was refused -- a hand edit, replaced on the next
+	 * apply. Both omitted when empty. */
+	struct ncfg_observed_forward *port_forwards;
+	size_t                        port_forward_count;
+	char                        **port_forwards_unread;
+	size_t                        port_forward_unread_count;
 } ncfg_observed_t;
+
+/* One port forward as the decoder read it (0298). `protocol` is the word,
+ * `tcp` or `udp`, as `ncfg status` shows it. */
+typedef struct ncfg_observed_forward {
+	char   *interface;
+	char   *name;
+	char   *digest;
+	char   *protocol;
+	int64_t port;
+	char   *to;
+	int64_t to_port;
+} ncfg_observed_forward_t;
 
 /*
  * One kernel rule of the installed firewall, as the decoder read it.
@@ -1477,6 +1497,8 @@ typedef struct ncfg_observed_firewall {
 /* Release one and what it holds, for the pass that replaces it. NULL is
  * nothing. */
 void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall);
+/* Release an observation's port forwards, the list and each one. */
+void ncfg_observed_forwards_free(ncfg_observed_forward_t *forwards, size_t count);
 
 /* ------------------------------------------------------------------------ *
  * Which scopes a machine's DNS has, which is a rule and not a loop

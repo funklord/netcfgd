@@ -325,6 +325,10 @@ typedef struct {
 			/* NULL is a document with no `firewall` block. The plan owns
 			 * its copy. */
 			const ncfg_firewall_t *firewall;
+			/* The port forwards (0298), by interface then name. The plan
+			 * owns the array and interns its strings. */
+			const ncfg_forward_rule_t *forwards;
+			size_t                     forward_count;
 		} nftables;
 		struct {
 			const char *iface;
