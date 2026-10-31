@@ -1328,6 +1328,14 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dhcp_boot_server = from_c(found.dhcp_boot_server);
 	out->dhcp_tftp_server = from_c(found.dhcp_tftp_server);
 	out->dhcp_wpad = from_c(found.dhcp_wpad);
+	for (size_t i = 0; i < found.dhcp_option_count; i++) {
+		ncfg_interface_config::dhcp_option one;
+		one.name = from_c(found.dhcp_options[i].name);
+		one.code = found.dhcp_options[i].code;
+		one.kind = from_c(found.dhcp_options[i].kind);
+		one.value = from_c(found.dhcp_options[i].value);
+		out->dhcp_options << one;
+	}
 	for (size_t i = 0; i < found.reservation_count; i++) {
 		ncfg_interface_config::reservation one;
 		one.name = from_c(found.reservations[i].name);

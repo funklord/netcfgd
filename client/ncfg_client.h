@@ -1424,6 +1424,16 @@ typedef struct {
 	char *address;
 } ncfg_reservation_t;
 
+/* One custom DHCP option (0303), as an editor carries it: `kind` the type's
+ * word, `value` as the language writes it -- addresses space-joined, a
+ * number in decimal, a bool "true" or "false". */
+typedef struct {
+	char *name;
+	int   code;
+	char *kind;
+	char *value;
+} ncfg_dhcp_option_entry_t;
+
 /* One neighbour an access point lists (10.612): `channel` -1 where unset. */
 typedef struct {
 	char *bssid;
@@ -1495,6 +1505,9 @@ typedef struct {
 	/* The server's reservations (10.605), carried since 10.612. */
 	ncfg_reservation_t *reservations;
 	size_t              reservation_count;
+	/* Its custom options (0303). */
+	ncfg_dhcp_option_entry_t *dhcp_options;
+	size_t                    dhcp_option_count;
 	/* The ports forwarded to hosts behind it (0298, 0299). */
 	ncfg_forward_entry_t *port_forwards;
 	size_t                port_forward_count;

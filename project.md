@@ -12597,6 +12597,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.634 Custom DHCP options, typed
+
+0303's second slice: `option "voip" { code = 150; ip = [...] }` inside
+`dhcp_server`, with exactly one value keyed by its type -- `ip`, `text`, `u8`,
+`u16`, `u32`, `bool` or `hex` -- as UniFi types them. Never raw `dhcp-option=`
+text, for 0294's reason, and never left to dnsmasq's guess at a width:
+**measured in `make hull-dhcp-server`**, a `u16` of 5 written as a bare `5` is
+sent as one byte and a client declaring the code `uint16` refuses it, the value
+arriving empty. So `u8` and `bool` go as decimal, `u16` and `u32` as hex at
+their width, and a one-octet `hex` -- which has no colon and would read as a
+number -- as the decimal of its byte. The rig's client is told each code's
+width (`tests/hull/dhcp-server/dhcpcd-options.conf`) and receives all eight at it.
+
+A code a `dhcp_server` key sets, or one the protocol carries (1, 50 to 61,
+82, 255), is refused so an option has one spelling and a policy cannot forge
+the server's identity or the lease's timers; two of one name or code are
+refused. The options are a set by name and in the summary's digest. The
+interface dialog has a table for them, held by the coverage gate's new
+`dhcp_option_fields` entry and by `interface_load`'s compiled comparison, which
+a dialog writing no options fails. +4,592 bytes.
+
 ## 10.633 The DHCP server's standard options
 
 The holder, 2026-10-31: "we need fully functional dhcp and dns server config

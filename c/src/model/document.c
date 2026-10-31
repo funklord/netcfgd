@@ -1904,6 +1904,28 @@ static const ncfg_field_t dhcp_host_fields[] = {
 };
 static const ncfg_type_t dhcp_host_type = TYPE("DHCP reservation", dhcp_host_fields);
 
+/* A custom option's type (0303), in `ncfg_dhcp_option_kind_t`'s order. */
+static const char *const dhcp_option_kind_words[] = { "ip", "text", "u8", "u16", "u32", "bool",
+	"hex" };
+static const ncfg_enum_t dhcp_option_kind_set =
+    WORD_SET("DHCP option type", dhcp_option_kind_words);
+
+static const ncfg_field_t dhcp_option_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_dhcp_option_t, name) },
+	{ .name = "code", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U8,
+	    .offset = offsetof(ncfg_dhcp_option_t, code) },
+	{ .name = "kind", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
+	    .choices = &dhcp_option_kind_set, .offset = offsetof(ncfg_dhcp_option_t, kind) },
+	{ .name = "ip", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dhcp_option_t, ip),
+	    .count_offset = offsetof(ncfg_dhcp_option_t, ip_count) },
+	{ .name = "text", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_option_t, text) },
+	{ .name = "number", .kind = NCFG_F_OPT_INT,
+	    .offset = offsetof(ncfg_dhcp_option_t, number) }
+};
+static const ncfg_type_t dhcp_option_type = TYPE("DHCP option", dhcp_option_fields);
+
 static const ncfg_field_t dhcp_server_fields[] = {
 	{ .name = "range_start", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_dhcp_server_t, range_start) },
@@ -1935,7 +1957,11 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	    .offset = offsetof(ncfg_dhcp_server_t, boot_server) },
 	{ .name = "tftp_server", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_dhcp_server_t, tftp_server) },
-	{ .name = "wpad", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_server_t, wpad) }
+	{ .name = "wpad", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_server_t, wpad) },
+	{ .name = "options", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &dhcp_option_type, .element_size = sizeof(ncfg_dhcp_option_t),
+	    .offset = offsetof(ncfg_dhcp_server_t, options),
+	    .count_offset = offsetof(ncfg_dhcp_server_t, option_count) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 
@@ -2800,6 +2826,13 @@ const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const
 		}
 	}
 	return NULL;
+}
+
+void ncfg_dhcp_option_free(ncfg_dhcp_option_t *option)
+{
+	if (option) {
+		ncfg_type_free(&dhcp_option_type, option);
+	}
 }
 
 void ncfg_dhcp_server_free(ncfg_dhcp_server_t *server)

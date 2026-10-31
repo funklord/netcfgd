@@ -132,6 +132,8 @@ private:
 	 * is checked as the word or number it must be before it is written. */
 	QFormLayout *form_layout;
 	QTableWidget *reservations;
+	/* The server's custom options (0303): name, code, type, value. */
+	QTableWidget *dhcp_options;
 	QTableWidget *forwards;
 	QLineEdit   *ipv6_token;
 	QLineEdit   *guard;

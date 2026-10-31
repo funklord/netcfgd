@@ -1051,4 +1051,6 @@ netcfgd
 # And the DHCP server's standard options -- gateway, domain, NTP, network
 # boot, TFTP server, WPAD -- checked, rendered and offered (decision 0303),
 # +4,264.
-total 1352120
+# And custom DHCP options, typed and encoded at their type's width
+# (decision 0303), +4,592.
+total 1356712

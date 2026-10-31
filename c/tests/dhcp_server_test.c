@@ -234,6 +234,70 @@ int main(void)
 		server.dns_forward = 0;
 	}
 
+	/* Custom options (0303), encoded by type: a bare decimal is sent in the
+	 * fewest bytes, so only u8 and bool are decimal. */
+	{
+		char                ip0[] = "192.168.1.9";
+		char               *ips[] = { ip0 };
+		char                motd[] = "hello";
+		char                raw[] = "01:a2";
+		char                one[] = "ff";
+		char                n_voip[] = "voip", n_motd[] = "motd", n_mtu[] = "mtu",
+		                    n_big[] = "big", n_flag[] = "flag", n_raw[] = "raw",
+		                    n_one[] = "one";
+		ncfg_dhcp_option_t  options[7];
+		char                before[NCFG_DHCP_SERVER_SUMMARY_MAX];
+
+		memset(options, 0, sizeof(options));
+		options[0] = (ncfg_dhcp_option_t){ n_voip, 150, NCFG_DHCP_OPTION_IP, ips, 1u, NULL,
+			{ 0, 0 } };
+		options[1] = (ncfg_dhcp_option_t){ n_motd, 224, NCFG_DHCP_OPTION_TEXT, NULL, 0u, motd,
+			{ 0, 0 } };
+		options[2] = (ncfg_dhcp_option_t){ n_mtu, 225, NCFG_DHCP_OPTION_U16, NULL, 0u, NULL,
+			{ 1, 5 } };
+		options[3] = (ncfg_dhcp_option_t){ n_big, 226, NCFG_DHCP_OPTION_U32, NULL, 0u, NULL,
+			{ 1, 70000 } };
+		options[4] = (ncfg_dhcp_option_t){ n_flag, 227, NCFG_DHCP_OPTION_BOOL, NULL, 0u, NULL,
+			{ 1, 1 } };
+		options[5] = (ncfg_dhcp_option_t){ n_raw, 228, NCFG_DHCP_OPTION_HEX, NULL, 0u, raw,
+			{ 0, 0 } };
+		options[6] = (ncfg_dhcp_option_t){ n_one, 229, NCFG_DHCP_OPTION_HEX, NULL, 0u, one,
+			{ 0, 0 } };
+		check(ncfg_dhcp_server_summary(&lan, before, sizeof(before)), "a summary to compare");
+		server.options = options;
+		server.option_count = 7u;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "dhcp-option=150,192.168.1.9") &&
+		        has_line(text, "dhcp-option=224,\"hello\"") &&
+		        has_line(text, "dhcp-option=225,00:05") &&
+		        has_line(text, "dhcp-option=226,00:01:11:70") &&
+		        has_line(text, "dhcp-option=227,1") && has_line(text, "dhcp-option=228,01:a2") &&
+		        has_line(text, "dhcp-option=229,255"),
+		    "custom options are encoded at their type's width, never left to a guess");
+		free(text);
+		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		        strcmp(recorded, before) != 0,
+		    "  and change the summary, so adding one restarts the server");
+		options[2].number.value = 70000;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "does not fit its type"),
+		    "a u16 too large renders nothing, and says why");
+		free(text);
+		options[2].number.value = 5;
+		options[2].code = 6;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "`code`"),
+		    "  and so does a code a key already sets, so it has one spelling");
+		free(text);
+		options[2].code = 224;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "share a name or a code"),
+		    "  and two options of one code");
+		free(text);
+		server.options = NULL;
+		server.option_count = 0u;
+	}
+
 	source.static_address.address = NULL;
 	text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
 	check(!text && strstr(message, "cannot serve DHCP"),

@@ -179,6 +179,12 @@ static int compare_neighbour(const void *left, const void *right)
 	    ((const ncfg_neighbour_t *)right)->bssid);
 }
 
+static int compare_dhcp_option(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_dhcp_option_t *)left)->name,
+	    ((const ncfg_dhcp_option_t *)right)->name);
+}
+
 static int compare_dhcp_host(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_dhcp_host_t *)left)->name,
@@ -510,6 +516,9 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 		if (server) {
 			stable_sort(server->hosts, server->host_count, sizeof(*server->hosts),
 			    compare_dhcp_host);
+			/* Its custom options likewise, by name (0303). */
+			stable_sort(server->options, server->option_count, sizeof(*server->options),
+			    compare_dhcp_option);
 		}
 		/* An interface's port forwards are a set, by name (0298). */
 		stable_sort(document->interfaces[i].port_forwards,

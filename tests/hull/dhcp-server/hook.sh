@@ -8,6 +8,11 @@ case "$reason" in BOUND|RENEW|REBIND|REBOOT)
 		"$new_ip_address" "$new_routers" "$new_domain_name_servers" "$new_dhcp_lease_time" \
 		"$new_domain_name" "$new_ntp_servers" "$new_filename" "$new_tftp_server_name" \
 		"$new_wpad_url" "$new_bootfile_name" >> /tmp/dhcp-server/given
+	# The custom options, on a line of their own: empty unless the client
+	# was told about them (dhcpcd-options.conf).
+	printf 'voip=%s motd=%s mtu2=%s big=%s flag=%s raw=%s one=%s small=%s\n' \
+		"$new_tftp_servers" "$new_motd" "$new_mtu2" "$new_big" "$new_flag" "$new_raw" \
+		"$new_one" "$new_small" >> /tmp/dhcp-server/custom
 	;;
 esac
 exit 0

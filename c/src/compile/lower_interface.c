@@ -8,6 +8,7 @@
  * somebody who wrote `mtu` on an interface had a working configuration, and a
  * message that only said the key was unknown would leave them guessing.
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -303,6 +304,120 @@ static void lower_dhcp_host(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block
 	server->hosts[server->host_count++] = host;
 }
 
+/*
+ * `option "voip" { code = 150; ip = ["10.0.0.5"] }` inside `dhcp_server`
+ * (0303): a code and exactly one typed value, whose key is its type. The
+ * shapes are `ncfg_dhcp_server_range`'s to check with the rest of the block;
+ * here only that one value was given, and hex is lowercased so a document
+ * says one thing one way.
+ */
+static void lower_dhcp_option(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_dhcp_server_t *server)
+{
+	static const char *const kinds[] = { "ip", "text", "u8", "u16", "u32", "bool", "hex" };
+	ncfg_dhcp_option_t  option;
+	ncfg_dhcp_option_t *grown;
+	int                 has_code = 0;
+	int                 values = 0;
+	size_t              i;
+
+	memset(&option, 0, sizeof(option));
+	option.name = ncfg_require_label(ctx, block);
+	if (!option.name) {
+		return;
+	}
+	for (i = 0; i < block->items.count; i++) {
+		const ncfg_ast_item_t       *item = block->items.at[i];
+		const ncfg_ast_assignment_t *assignment;
+		size_t                       kind;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `option`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "code") == 0) {
+			has_code = ncfg_as_i64(ctx, assignment->value, &option.code);
+			continue;
+		}
+		for (kind = 0; kind < sizeof(kinds) / sizeof(kinds[0]); kind++) {
+			if (strcmp(assignment->key, kinds[kind]) == 0) {
+				break;
+			}
+		}
+		if (kind == sizeof(kinds) / sizeof(kinds[0])) {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown option key `%s`: code, and one of ip, text, u8, u16, u32, bool and "
+			    "hex", assignment->key);
+			continue;
+		}
+		values++;
+		option.kind = (int)kind;
+		if (kind == NCFG_DHCP_OPTION_IP) {
+			ncfg_words_t words;
+			size_t       at;
+
+			if (!ncfg_as_words(ctx, assignment->value, &words)) {
+				ncfg_words_free(&words);
+				continue;
+			}
+			for (at = 0; at < words.count; at++) {
+				char **more = realloc(option.ip, (option.ip_count + 1u) * sizeof(*more));
+
+				if (!more) {
+					ncfg_lower_oom(ctx);
+					break;
+				}
+				option.ip = more;
+				option.ip[option.ip_count] = strdup(words.at[at].text);
+				if (!option.ip[option.ip_count++]) {
+					ncfg_lower_oom(ctx);
+				}
+			}
+			ncfg_words_free(&words);
+		} else if (kind == NCFG_DHCP_OPTION_TEXT || kind == NCFG_DHCP_OPTION_HEX) {
+			char *text = ncfg_as_string(ctx, assignment->value);
+			char *c;
+
+			if (!text) {
+				continue;
+			}
+			for (c = text; kind == NCFG_DHCP_OPTION_HEX && *c; c++) {
+				*c = (char)tolower((unsigned char)*c);
+			}
+			option.text = text;
+		} else if (kind == NCFG_DHCP_OPTION_BOOL) {
+			int flag;
+
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				option.number.has = 1;
+				option.number.value = flag;
+			}
+		} else if (ncfg_as_i64(ctx, assignment->value, &option.number.value)) {
+			option.number.has = 1;
+		}
+	}
+	if (!has_code || values != 1) {
+		ncfg_diag(ctx, block->span,
+		    "option `%s` needs a `code` and exactly one value, keyed by its type: ip, text, "
+		    "u8, u16, u32, bool or hex", option.name);
+		ncfg_dhcp_option_free(&option);
+		return;
+	}
+	grown = realloc(server->options, (server->option_count + 1u) * sizeof(*grown));
+	if (!grown) {
+		ncfg_lower_oom(ctx);
+		ncfg_dhcp_option_free(&option);
+		return;
+	}
+	server->options = grown;
+	server->options[server->option_count++] = option;
+}
+
 /* The single-text options (0303): the slot a key fills, NULL for any other
  * key. */
 static char **dhcp_server_text_slot(ncfg_dhcp_server_t *server, const char *key)
@@ -351,6 +466,10 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 		if (item->kind == NCFG_AST_ITEM_BLOCK) {
 			if (strcmp(item->as.block.head, "host") == 0) {
 				lower_dhcp_host(ctx, &item->as.block, server);
+				continue;
+			}
+			if (strcmp(item->as.block.head, "option") == 0) {
+				lower_dhcp_option(ctx, &item->as.block, server);
 				continue;
 			}
 			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `dhcp_server`",
@@ -487,7 +606,7 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			ncfg_diag(ctx, assignment->span,
 			    "unknown dhcp_server key `%s`: range, lease, dns, dns_forward, gateway, "
 			    "domain, ntp, boot_file, boot_server, tftp_server and wpad, and `host` "
-			    "blocks", assignment->key);
+			    "and `option` blocks", assignment->key);
 		}
 	}
 	return server;

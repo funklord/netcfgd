@@ -788,6 +788,30 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 			}
 		}
 	}
+	/* The custom options (0303), each checked with the range: a text cannot
+	 * hold a quote or a backslash, so it is written as it is. */
+	for (at = 0; at < server->option_count; at++) {
+		static const char *const kinds[] = { "ip", "text", "u8", "u16", "u32", "bool", "hex" };
+		const ncfg_dhcp_option_t *option = &server->options[at];
+		size_t                    one;
+
+		ncfg_buf_addf(body, "\t\toption \"%s\" { code = %lld; %s = ", option->name,
+		    (long long)option->code, kinds[option->kind]);
+		if (option->kind == NCFG_DHCP_OPTION_IP) {
+			ncfg_buf_add_char(body, '[');
+			for (one = 0; one < option->ip_count; one++) {
+				ncfg_buf_addf(body, "%s\"%s\"", one ? ", " : "", option->ip[one]);
+			}
+			ncfg_buf_add_char(body, ']');
+		} else if (option->kind == NCFG_DHCP_OPTION_TEXT || option->kind == NCFG_DHCP_OPTION_HEX) {
+			ncfg_buf_addf(body, "\"%s\"", option->text);
+		} else if (option->kind == NCFG_DHCP_OPTION_BOOL) {
+			ncfg_buf_add_text(body, option->number.value ? "true" : "false");
+		} else {
+			ncfg_buf_addf(body, "%lld", (long long)option->number.value);
+		}
+		ncfg_buf_add_text(body, " }\n");
+	}
 	if (server->ntp_count) {
 		ncfg_buf_add_text(body, "\t\tntp = [");
 		for (at = 0; at < server->ntp_count; at++) {

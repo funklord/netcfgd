@@ -193,6 +193,11 @@ int main(int argc, char **argv)
 		                   "ntp = [\"192.0.2.1\", \"192.0.2.2\"]; boot_file = \"pxelinux.0\"; "
 		                   "boot_server = \"192.0.2.5\"; tftp_server = \"tftp.home.lan\"; "
 		                   "wpad = \"http://wpad.home.lan/wpad.dat\"; "
+		                   "option \"voip\" { code = 150; ip = [\"192.0.2.9\", \"192.0.2.10\"] }; "
+		                   "option \"motd\" { code = 224; text = \"hello world\" }; "
+		                   "option \"mtu\" { code = 225; u16 = 5 }; "
+		                   "option \"flag\" { code = 227; bool = false }; "
+		                   "option \"raw\" { code = 228; hex = \"01:a2\" }; "
 		                   "host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
 		                   "address = \"192.0.2.20\" } }\n"
 		                   /* To the reservation by name (10.618), which Save must

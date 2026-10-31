@@ -843,6 +843,15 @@ static void an_access_point_round_trips(void)
 	    "\t\tboot_server = \"192.168.1.5\"\n\t\ttftp_server = \"tftp.home.lan\"\n"
 	    "\t\twpad = \"http://wpad.home.lan/wpad.dat\"\n\t}\n}\n",
 	    "  and so does one offering every standard option (0303)");
+	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	    "\t\toption \"voip\" { code = 150; ip = [\"192.168.1.9\", \"192.168.1.10\"] }\n"
+	    "\t\toption \"motd\" { code = 224; text = \"hello world\" }\n"
+	    "\t\toption \"mtu\" { code = 225; u16 = 5 }\n"
+	    "\t\toption \"big\" { code = 226; u32 = 70000 }\n"
+	    "\t\toption \"flag\" { code = 227; bool = false }\n"
+	    "\t\toption \"raw\" { code = 228; hex = \"01:a2:03\" }\n"
+	    "\t\toption \"small\" { code = 230; u8 = 0 }\n\t}\n}\n",
+	    "  and so does one with a custom option of every type (0303)");
 	round_trips("interface wan0 {\n\tnat = true\n"
 	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\"; "
 	    "to_port = 8443 }\n"

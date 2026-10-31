@@ -1387,6 +1387,33 @@ typedef struct {
 	char *address;
 } ncfg_dhcp_host_t;
 
+/*
+ * A custom DHCP option (0303): a code and a typed value, never raw text. The
+ * type says how netcfgd encodes it, since dnsmasq guesses an unknown option's
+ * width from the digits. Exactly one value member is set, by `kind`: `ip`
+ * for `ip`, `text` for `text` and `hex` (colon-separated octets, lowercase),
+ * `number` for `u8`, `u16`, `u32` and `bool` (0 or 1).
+ */
+typedef enum {
+	NCFG_DHCP_OPTION_IP,
+	NCFG_DHCP_OPTION_TEXT,
+	NCFG_DHCP_OPTION_U8,
+	NCFG_DHCP_OPTION_U16,
+	NCFG_DHCP_OPTION_U32,
+	NCFG_DHCP_OPTION_BOOL,
+	NCFG_DHCP_OPTION_HEX
+} ncfg_dhcp_option_kind_t;
+
+typedef struct {
+	char         *name; /* the label, and the sorting key */
+	int64_t       code;
+	int           kind; /* ncfg_dhcp_option_kind_t */
+	char        **ip;
+	size_t        ip_count;
+	char         *text;
+	ncfg_optint_t number;
+} ncfg_dhcp_option_t;
+
 typedef struct {
 	char             *range_start;
 	char             *range_end;
@@ -1415,6 +1442,9 @@ typedef struct {
 	char             *boot_server;
 	char             *tftp_server;
 	char             *wpad;
+	/* The custom options (0303), a set sorted by name. */
+	ncfg_dhcp_option_t *options;
+	size_t              option_count;
 } ncfg_dhcp_server_t;
 
 /*
@@ -1945,6 +1975,13 @@ int ncfg_dhcp_server_plain_name(const char *name);
  * starting or ending with a hyphen, joined by single dots; 253 at most. A
  * dotted IPv4 address is one. `domain`, `tftp_server` and records (0303). */
 int ncfg_dhcp_server_dns_name(const char *name);
+
+/* A code a custom option may not use (0303): one a `dhcp_server` key sets,
+ * or one the protocol itself carries. */
+int ncfg_dhcp_option_code_taken(int64_t code);
+
+/* Colon-separated lowercase octets, "01:a2", one to 255 of them. */
+int ncfg_dhcp_option_hex(const char *text);
 
 int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
     char *router, const char **why);
@@ -2538,6 +2575,8 @@ void ncfg_firewall_free(ncfg_firewall_t *firewall);
 /* A DHCP server and every member its field table declares, then the struct:
  * one free that cannot fall behind a field added later (0303). */
 void ncfg_dhcp_server_free(ncfg_dhcp_server_t *server);
+/* One custom option's members, not the struct, which a list holds. */
+void ncfg_dhcp_option_free(ncfg_dhcp_option_t *option);
 
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size);
 

@@ -1749,6 +1749,27 @@
 #	}
 #}
 
+# CUSTOM DHCP OPTIONS, for what the keys above do not name -- a VoIP phone's
+# provisioning server, a vendor's controller address (option 43). Each is an
+# `option` block with a `code` and one value, keyed by its type, which is how
+# netcfgd puts it on the wire rather than leaving dnsmasq to guess a width:
+#
+#   ip    one or more IPv4 addresses     text  printable, no quote
+#   u8, u16, u32   an unsigned number    bool  true or false
+#   hex   octets, "01:a2:03"
+#
+# A code a key above already sets (3, 6, 15, 42, 66, 67, 252) or one the
+# protocol itself carries (1, 50 to 61, 82) is refused, so each option has one
+# spelling. A client is sent an option it asks for.
+
+#interface br0 {
+#	config = "192.168.1.1/24"
+#	dhcp_server {
+#		option "voip"       { code = 150; ip = ["192.168.1.20"] }
+#		option "controller" { code = 43;  hex = "01:04:c0:a8:01:05" }
+#	}
+#}
+
 # POLICY ROUTING. A rule sends some traffic to a different table -- which is
 # how a second uplink, or a VPN for one subnet only, is expressed.
 

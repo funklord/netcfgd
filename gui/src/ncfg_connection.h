@@ -495,6 +495,15 @@ struct ncfg_interface_config {
 		QString address;
 	};
 	QList<reservation> reservations;
+	/* Its custom options (0303): `kind` the type's word, `value` as the
+	 * language writes it. */
+	struct dhcp_option {
+		QString name;
+		int     code = 0;
+		QString kind;
+		QString value;
+	};
+	QList<dhcp_option> dhcp_options;
 	struct forward {
 		QString name;
 		QString protocol;

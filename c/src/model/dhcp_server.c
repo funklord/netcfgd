@@ -165,6 +165,124 @@ static int option_text(const char *text, size_t most, const char *refused)
 	return 1;
 }
 
+int ncfg_dhcp_option_code_taken(int64_t code)
+{
+	/* What a key of `dhcp_server` sets, and what the protocol itself
+	 * carries -- the client's request, the server's identity, the message
+	 * type, the lease's timers -- which no policy should be able to forge. */
+	static const int taken[] = { 0, 1, 3, 6, 15, 42, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+		60, 61, 66, 67, 82, 252, 255 };
+	size_t at;
+
+	for (at = 0; at < sizeof(taken) / sizeof(taken[0]); at++) {
+		if (code == taken[at]) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ncfg_dhcp_option_hex(const char *text)
+{
+	size_t at;
+	size_t octets = 0;
+
+	if (!text || !text[0]) {
+		return 0;
+	}
+	for (at = 0; text[at]; at += 3u) {
+		if (!isxdigit((unsigned char)text[at]) || !isxdigit((unsigned char)text[at + 1u]) ||
+		    isupper((unsigned char)text[at]) || isupper((unsigned char)text[at + 1u]) ||
+		    (text[at + 2u] != ':' && text[at + 2u] != '\0') ||
+		    (text[at + 2u] == ':' && text[at + 3u] == '\0')) {
+			return 0;
+		}
+		if (++octets > 255u || text[at + 2u] == '\0') {
+			return octets <= 255u;
+		}
+	}
+	return 0;
+}
+
+/* One custom option's value against its type (0303). */
+static int option_value_fits(const ncfg_dhcp_option_t *option)
+{
+	static const int64_t most[] = { 0, 0, 255, 65535, 4294967295LL, 1, 0 };
+	uint32_t             address;
+	size_t               at;
+
+	switch (option->kind) {
+	case NCFG_DHCP_OPTION_IP:
+		if (!option->ip_count || option->ip_count > 63u) {
+			return 0;
+		}
+		for (at = 0; at < option->ip_count; at++) {
+			if (!bare_ipv4(option->ip[at], &address)) {
+				return 0;
+			}
+		}
+		return !option->text && !option->number.has;
+	case NCFG_DHCP_OPTION_TEXT:
+		return option_text(option->text, 255u, "\"\\") && !option->ip_count &&
+		    !option->number.has;
+	case NCFG_DHCP_OPTION_HEX:
+		return ncfg_dhcp_option_hex(option->text) && !option->ip_count && !option->number.has;
+	case NCFG_DHCP_OPTION_U8:
+	case NCFG_DHCP_OPTION_U16:
+	case NCFG_DHCP_OPTION_U32:
+	case NCFG_DHCP_OPTION_BOOL:
+		return option->number.has && option->number.value >= 0 &&
+		    option->number.value <= most[option->kind] && !option->text && !option->ip_count;
+	default:
+		return 0;
+	}
+}
+
+static int custom_options_fit(const ncfg_dhcp_server_t *server, const char **why)
+{
+	size_t at;
+	size_t other;
+
+	for (at = 0; at < server->option_count; at++) {
+		const ncfg_dhcp_option_t *option = &server->options[at];
+
+		if (!ncfg_dhcp_server_plain_name(option->name)) {
+			if (why) {
+				*why = "an option's name is a plain name: letters, digits, hyphens and dots";
+			}
+			return 0;
+		}
+		if (option->code < 1 || option->code > 254 ||
+		    ncfg_dhcp_option_code_taken(option->code)) {
+			if (why) {
+				*why = "an option's `code` is 1 to 254, and not one a `dhcp_server` key "
+				       "already sets or the protocol itself carries: 1, 3, 6, 15, 42, 50 "
+				       "to 61, 66, 67, 82 and 252";
+			}
+			return 0;
+		}
+		if (!option_value_fits(option)) {
+			if (why) {
+				*why = "an option's value does not fit its type: `ip` IPv4 addresses, `text` "
+				       "printable with no quote or backslash, `u8`, `u16` and `u32` "
+				       "numbers in range, `bool` true or false, `hex` octets as \"01:02\"";
+			}
+			return 0;
+		}
+		for (other = 0; other < at; other++) {
+			if (strcmp(server->options[other].name, option->name) == 0 ||
+			    server->options[other].code == option->code) {
+				if (why) {
+					*why = "two options share a name or a code, and a client would be "
+					       "sent only one of them";
+				}
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
 /*
  * The standard options (0303), with the same four callers as the range and
  * the reservations. The gateway has to be on the network served, since a
@@ -336,7 +454,7 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 		}
 	}
 	if (!hosts_fit(server, own, network, broadcast, mask, why) ||
-	    !options_fit(server, network, broadcast, mask, why)) {
+	    !options_fit(server, network, broadcast, mask, why) || !custom_options_fit(server, why)) {
 		return 0;
 	}
 	if (start) {

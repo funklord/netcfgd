@@ -94,6 +94,7 @@ NESTED = {
 	"ra_fields": INTERFACE_READER,
 	"dhcp_server_fields": INTERFACE_READER,
 	"dhcp_host_fields": INTERFACE_READER,
+	"dhcp_option_fields": INTERFACE_READER,
 	"port_forward_fields": INTERFACE_READER,
 	"guard_fields": INTERFACE_READER,
 	"probe_fields": INTERFACE_READER,

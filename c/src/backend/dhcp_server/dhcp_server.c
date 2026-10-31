@@ -95,6 +95,20 @@ static int options_digest(const ncfg_dhcp_server_t *server, uint32_t *out)
 		any = 1;
 		digest = digest_text(digest, server->ntp[at]);
 	}
+	for (at = 0; at < server->option_count; at++) {
+		const ncfg_dhcp_option_t *option = &server->options[at];
+		char                      number[48];
+		size_t                    one;
+
+		any = 1;
+		(void)snprintf(number, sizeof(number), "%lld %d %lld %d", (long long)option->code,
+		    option->kind, (long long)option->number.value, option->number.has);
+		digest = digest_text(digest_text(digest, option->name), number);
+		digest = digest_text(digest, option->text);
+		for (one = 0; one < option->ip_count; one++) {
+			digest = digest_text(digest, option->ip[one]);
+		}
+	}
 	*out = digest;
 	return any;
 }
@@ -199,6 +213,53 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
 	return 1;
 }
 
+/*
+ * One custom option (0303), encoded by its type rather than left to dnsmasq's
+ * guess. dnsmasq sends a bare decimal in the fewest bytes that hold it:
+ * measured in `make hull-dhcp-server`, a `u16` of 5 written as `5` reached a
+ * client declaring the code `uint16` as nothing, the client refusing the one
+ * byte. Colon-separated hex is sent octet for octet. So `u8` and `bool` are
+ * decimal, which is one byte, and `u16` and `u32` are hex at their width; a
+ * single-octet `hex` has no colon and would read as a number, so it is written
+ * as the decimal of its one byte.
+ */
+static void render_custom_option(ncfg_buf_t *buf, const ncfg_dhcp_option_t *option)
+{
+	const unsigned long long value = (unsigned long long)option->number.value;
+	size_t                   at;
+
+	ncfg_buf_addf(buf, "dhcp-option=%lld,", (long long)option->code);
+	switch (option->kind) {
+	case NCFG_DHCP_OPTION_IP:
+		for (at = 0; at < option->ip_count; at++) {
+			ncfg_buf_addf(buf, "%s%s", at ? "," : "", option->ip[at]);
+		}
+		break;
+	case NCFG_DHCP_OPTION_TEXT:
+		ncfg_buf_addf(buf, "\"%s\"", option->text);
+		break;
+	case NCFG_DHCP_OPTION_U16:
+		ncfg_buf_addf(buf, "%02llx:%02llx", (value >> 8) & 255u, value & 255u);
+		break;
+	case NCFG_DHCP_OPTION_U32:
+		ncfg_buf_addf(buf, "%02llx:%02llx:%02llx:%02llx", (value >> 24) & 255u,
+		    (value >> 16) & 255u, (value >> 8) & 255u, value & 255u);
+		break;
+	case NCFG_DHCP_OPTION_HEX:
+		if (!strchr(option->text, ':')) {
+			/* One octet: as decimal, which is one byte. */
+			ncfg_buf_addf(buf, "%lu", strtoul(option->text, NULL, 16));
+		} else {
+			ncfg_buf_add_text(buf, option->text);
+		}
+		break;
+	default:
+		ncfg_buf_addf(buf, "%llu", value);
+		break;
+	}
+	ncfg_buf_add_char(buf, '\n');
+}
+
 char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *leases_path,
     char *err, size_t err_size)
 {
@@ -301,6 +362,9 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 	}
 	if (server->wpad) {
 		ncfg_buf_addf(&buf, "dhcp-option=252,\"%s\"\n", server->wpad);
+	}
+	for (at = 0; at < server->option_count; at++) {
+		render_custom_option(&buf, &server->options[at]);
 	}
 	if (ncfg_buf_failed(&buf)) {
 		ncfg_buf_free(&buf);

@@ -165,9 +165,34 @@ say "the client is given: $optioned"
 headered=$(client)
 say "a client not asking for option 67 is given: $headered"
 domain_name=$(ip netns exec client timeout 10 getent hosts desk.home.lan | awk '{print $1}')
+
+# Custom options (0303), each typed, read by a client that knows each code's
+# width: a u16 of 5 sent as one byte, which dnsmasq does with a bare 5, is
+# refused by it and arrives empty.
+conf "lease = 3600
+		option \"voip\" { code = 150; ip = [\"192.168.7.9\", \"192.168.7.10\"] }
+		option \"motd\" { code = 224; text = \"hello world\" }
+		option \"mtu2\" { code = 225; u16 = 5 }
+		option \"big\" { code = 226; u32 = 70000 }
+		option \"flag\" { code = 227; bool = true }
+		option \"raw\" { code = 228; hex = \"01:A2:03\" }
+		option \"one\" { code = 229; hex = \"ff\" }
+		option \"small\" { code = 230; u8 = 7 }"
+"$build/ncfg" apply > "$work/apply6.log" 2>&1
+say "ncfg apply rc=$?"
+say "  lan0.conf: $(grep '^dhcp-option=' "$work/run/dhcp-server/lan0.conf" 2>/dev/null | tr '\n' ' ')"
+sleep 1
+: > "$work/custom"
+client -f /payload/dhcpcd-options.conf > /dev/null
+custom=$(cat "$work/custom")
+say "the client is given custom options: $custom"
 say "  the client resolves desk.home.lan to '$domain_name'"
 
 failed=0
+case "$custom" in
+	*"voip=192.168.7.9 192.168.7.10 motd=hello world mtu2=5 big=70000 flag=1 raw=01a203 one=ff small=7"*) ;;
+	*) say "  the custom options did not arrive at the widths their types say"; failed=1 ;;
+esac
 [ "$options_plan" -ge 1 ] || { say "  the options were not planned as a restart naming them"; failed=1; }
 case "$optioned" in
 	*" routers=192.168.7.254 "*) ;;
@@ -219,6 +244,7 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply4: /' "$work/apply4.log" | tail -6 >> "$out"
 	sed 's/^/  upstream: /' "$work/upstream.log" | tail -4 >> "$out"
 	sed 's/^/  apply5: /' "$work/apply5.log" | tail -6 >> "$out"
+	sed 's/^/  apply6: /' "$work/apply6.log" | tail -6 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

@@ -417,6 +417,16 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	reservations->setToolTip(QStringLiteral(
 	    "A fixed address for a named host, served with the range above."));
 
+	/* Custom options (0303), typed as UniFi types them: the type is how the
+	 * value is put on the wire, never a guess. */
+	dhcp_options = a_table(this, form, QStringLiteral("DHCP options"),
+	    QStringLiteral("iface_dhcp_options"),
+	    { QStringLiteral("name"), QStringLiteral("code"), QStringLiteral("type"),
+	        QStringLiteral("value") });
+	dhcp_options->setToolTip(QStringLiteral(
+	    "type is ip, text, u8, u16, u32, bool or hex. ip takes addresses separated by "
+	    "spaces, bool true or false, hex octets as 01:a2:03."));
+
 	/* Port forwards (0298) beside NAT, where the language puts them: traffic
 	 * arriving on this interface for a port goes to a host behind it. */
 	forwards = a_table(this, form, QStringLiteral("port forwards"),
@@ -627,6 +637,9 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_boot_server->setText(existing.dhcp_boot_server);
 	dhcp_tftp_server->setText(existing.dhcp_tftp_server);
 	dhcp_wpad->setText(existing.dhcp_wpad);
+	for (const auto &one : existing.dhcp_options) {
+		put_row(dhcp_options, { one.name, QString::number(one.code), one.kind, one.value });
+	}
 	for (const auto &one : existing.reservations) {
 		put_row(reservations, { one.name, one.mac, one.address });
 	}
@@ -968,6 +981,23 @@ QString ncfg_interface_dialog::block_text() const
 			served << QStringLiteral("\t\tntp = [%1]").arg(clocks.join(QStringLiteral(", ")));
 		}
 		body << QStringLiteral("\tdhcp_server {");
+		for (int row = 0; row < dhcp_options->rowCount(); row++) {
+			const QString kind = text_at(dhcp_options, row, 2);
+			const QString value = text_at(dhcp_options, row, 3);
+			QString       written = value;
+			if (kind == QLatin1String("ip")) {
+				QStringList quoted;
+				for (const QString &one : value.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+					quoted << QStringLiteral("\"%1\"").arg(one);
+				}
+				written = QStringLiteral("[%1]").arg(quoted.join(QStringLiteral(", ")));
+			} else if (kind == QLatin1String("text") || kind == QLatin1String("hex")) {
+				written = QStringLiteral("\"%1\"").arg(value);
+			}
+			served << QStringLiteral("\t\toption \"%1\" { code = %2; %3 = %4 }")
+			              .arg(text_at(dhcp_options, row, 0), text_at(dhcp_options, row, 1), kind,
+			                  written);
+		}
 		for (int row = 0; row < reservations->rowCount(); row++) {
 			served << QStringLiteral("\t\thost \"%1\" { mac = \"%2\"; address = \"%3\" }")
 			              .arg(text_at(reservations, row, 0), text_at(reservations, row, 1),
@@ -1132,6 +1162,24 @@ void ncfg_interface_dialog::submit()
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
 			              "or a newline"));
+			return;
+		}
+	}
+	/* An option's name, code and type are words, its value text: a text
+	 * value may hold a space, never what would end the quote it is put in. */
+	static const QStringList option_kinds = { QStringLiteral("ip"), QStringLiteral("text"),
+		QStringLiteral("u8"), QStringLiteral("u16"), QStringLiteral("u32"),
+		QStringLiteral("bool"), QStringLiteral("hex") };
+	for (int row = 0; row < dhcp_options->rowCount(); row++) {
+		bool          number = false;
+		const QString value = text_at(dhcp_options, row, 3);
+		text_at(dhcp_options, row, 1).toInt(&number);
+		if (!is_word(text_at(dhcp_options, row, 0)) || !number ||
+		    !option_kinds.contains(text_at(dhcp_options, row, 2)) || value.isEmpty() ||
+		    !safe_value(value)) {
+			note->setText(QStringLiteral("DHCP option %1 needs a name, a numeric code, a type "
+			              "-- ip, text, u8, u16, u32, bool or hex -- and a value with no quote "
+			              "or backslash").arg(row + 1));
 			return;
 		}
 	}

@@ -3232,6 +3232,12 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->dhcp_boot_server);
 	free(config->dhcp_tftp_server);
 	free(config->dhcp_wpad);
+	for (size_t i = 0; i < config->dhcp_option_count; i++) {
+		free(config->dhcp_options[i].name);
+		free(config->dhcp_options[i].kind);
+		free(config->dhcp_options[i].value);
+	}
+	free(config->dhcp_options);
 	for (size_t i = 0; i < config->reservation_count; i++) {
 		free(config->reservations[i].name);
 		free(config->reservations[i].mac);
@@ -4557,6 +4563,43 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 				out->reservations[i].name = member_text(doc, host, "name");
 				out->reservations[i].mac = member_text(doc, host, "mac");
 				out->reservations[i].address = member_text(doc, host, "address");
+			}
+		}
+		/* The custom options (0303), each value in the spelling its type
+		 * is written with, so the dialog writes it back unchanged. */
+		uint32_t options = ncfg_json_member(doc, server, "options");
+		uint32_t option_count = ncfg_json_count(doc, options);
+		if (option_count) {
+			out->dhcp_options = calloc(option_count, sizeof(*out->dhcp_options));
+			if (!out->dhcp_options) {
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+			out->dhcp_option_count = option_count;
+			for (uint32_t i = 0; i < option_count; i++) {
+				uint32_t                  entry = ncfg_json_at(doc, options, i);
+				ncfg_dhcp_option_entry_t *one = &out->dhcp_options[i];
+				int64_t                   number =
+				    ncfg_json_int(doc, ncfg_json_member(doc, entry, "number"), 0);
+				char                      spelled[24];
+
+				one->name = member_text(doc, entry, "name");
+				one->code = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "code"), 0);
+				one->kind = member_text(doc, entry, "kind");
+				if (one->kind && strcmp(one->kind, "ip") == 0) {
+					one->value = joined_words(doc, ncfg_json_member(doc, entry, "ip"));
+				} else if (one->kind && (strcmp(one->kind, "text") == 0 ||
+				                            strcmp(one->kind, "hex") == 0)) {
+					one->value = member_text(doc, entry, "text");
+				} else {
+					if (one->kind && strcmp(one->kind, "bool") == 0) {
+						snprintf(spelled, sizeof(spelled), "%s", number ? "true" : "false");
+					} else {
+						snprintf(spelled, sizeof(spelled), "%lld", (long long)number);
+					}
+					one->value = dup_string(spelled);
+				}
 			}
 		}
 	}
