@@ -12597,6 +12597,22 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.628 Saving an access point moved its passphrase to a file
+
+Found while reading the access point reader for the mesh tab. It took the
+secret's *name* out of the security block, and the dialog put `@secret:` in
+front of it -- which is the file provider. So an access point with
+`psk = "@secret:keyring:ap"` (or `pass:`, `exec:`) was rewritten as
+`@secret:ap` the first time anybody pressed Save, and then asked for
+`/etc/netcfgd/secrets/ap`, which does not exist. Wrong since the dialog was
+written (56b37cf9). The reader now returns the reference as the language
+spells it, with `reference_text`, which the network and interface dialogs
+already used for the same reason (10.611); the dialog shows it as it is.
+
+`gui/tests/access_point_load.cpp` saves a keyring-backed access point
+unchanged through a real daemon. With the fix reverted it fails both checks,
+reading back `ap`.
+
 ## 10.627 Host lists have a tab
 
 10.591's host lists -- what an access point's allow or deny list and a

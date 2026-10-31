@@ -366,9 +366,8 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	if (editing) {
 		device->setCurrentText(existing.device);
 		select(security, existing.security);
-		credential->setText(existing.credential.isEmpty()
-		        ? QString()
-		        : QStringLiteral("@secret:%1").arg(existing.credential));
+		/* As written, provider and all (10.628). */
+		credential->setText(existing.credential);
 		select(band, existing.band);
 		channel->setValue(existing.channel > 0 ? existing.channel : 0);
 		regdom->setText(existing.regdom);

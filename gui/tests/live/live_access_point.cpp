@@ -137,9 +137,9 @@ int main(int argc, char **argv)
 		check("with the security kind", written.security == QStringLiteral("psk"),
 		    written.security);
 		/* The reference, and only the reference: the document cannot hold the
-		 * passphrase itself, so what comes back is the secret's name. */
-		check("and the credential as a name rather than a passphrase",
-		    written.credential == QStringLiteral("gui-ap"), written.credential);
+		 * passphrase itself, so what comes back is the reference as written. */
+		check("and the credential as a reference rather than a passphrase",
+		    written.credential == QStringLiteral("@secret:gui-ap"), written.credential);
 		check("and the channel", written.channel == 6, QString::number(written.channel));
 		check("and the station list", written.acl_policy == QStringLiteral("allow")
 		        && written.stations == QStringLiteral("00:11:22:33:44:55"),

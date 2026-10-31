@@ -2211,17 +2211,23 @@ static char *editable_stations(const ncfg_json_doc_t *doc, uint32_t acl)
 	return joined;
 }
 
-/* The `@secret:` name a security block refers to, whichever key holds it. */
+/*
+ * The secret reference a security block holds, whichever key holds it, as the
+ * language spells it -- provider included. This was the name alone, and the
+ * access point dialog put `@secret:` in front of it, so a passphrase kept in
+ * the keyring, `pass` or a program was rewritten as a file of that name the
+ * first time the access point was saved (10.628).
+ */
 static char *security_credential(const ncfg_json_doc_t *doc, uint32_t security)
 {
 	static const char *const keys[] = { "passphrase", "password", "private_key" };
 
 	for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
-		char *named = member_text(doc, ncfg_json_member(doc, security, keys[k]), "name");
-		if (named && *named) {
-			return named;
+		char *spelled = reference_text(doc, ncfg_json_member(doc, security, keys[k]));
+		if (spelled && *spelled) {
+			return spelled;
 		}
-		free(named);
+		free(spelled);
 	}
 	return dup_string("");
 }
