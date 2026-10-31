@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -22,6 +23,10 @@ constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(col
  * (0147), so writing the off switch here cannot lock out the dns tab writing
  * `50-dns` -- which is the failure that rule exists to prevent. */
 const char *const drop_in_name = "50-networking";
+
+/* The pinned country's drop-in (0296): its own file, so unpinning is
+ * removing it. */
+const char *const country_drop_in = "50-regdom";
 
 } /* namespace */
 
@@ -46,6 +51,19 @@ ncfg_global_view::ncfg_global_view(ncfg_connection *connection, QWidget *parent)
 	networking_button->setObjectName(QStringLiteral("toggle_networking"));
 	networking_button->setEnabled(false);
 	controls->addWidget(networking_button);
+	controls->addSpacing(24);
+	country = new QLineEdit(this);
+	country->setObjectName(QStringLiteral("global_country"));
+	country->setPlaceholderText(QStringLiteral("SE -- blank to follow the machine"));
+	country->setMaxLength(2);
+	country->setToolTip(QStringLiteral(
+	    "Pins the country whose radio rules apply. Left blank, netcfgd follows the country "
+	    "the access points around it advertise, which is what a laptop that travels "
+	    "wants."));
+	controls->addWidget(country);
+	country_button = new QPushButton(QStringLiteral("set country"), this);
+	country_button->setObjectName(QStringLiteral("global_set_country"));
+	controls->addWidget(country_button);
 	controls->addStretch();
 	layout->addLayout(controls);
 
@@ -56,6 +74,7 @@ ncfg_global_view::ncfg_global_view(ncfg_connection *connection, QWidget *parent)
 
 	connect(networking_button, &QPushButton::clicked, this,
 	    &ncfg_global_view::toggle_networking);
+	connect(country_button, &QPushButton::clicked, this, &ncfg_global_view::set_country);
 }
 
 void ncfg_global_view::refresh()
@@ -75,6 +94,17 @@ void ncfg_global_view::refresh()
 	networking_button->setText(networking_on ? QStringLiteral("turn networking off")
 	                                         : QStringLiteral("turn networking on"));
 	networking_button->setEnabled(true);
+	country->setText(globals.regdom);
+	/* Pinned by this tab's file, which is the one a blank removes. A country
+	 * pinned somewhere else is shown and can be overridden here -- a later
+	 * file wins a scalar -- but not unpinned from here. */
+	QList<ncfg_config_row> files;
+	pinned = false;
+	if (connection->configs(&files, nullptr)) {
+		for (const ncfg_config_row &file : files) {
+			pinned = pinned || file.name == QLatin1String(country_drop_in);
+		}
+	}
 
 	/* Named rather than numbered, so a row means the same thing after
 	 * somebody adds one above it. */
@@ -84,6 +114,9 @@ void ncfg_global_view::refresh()
 		    globals.profile.isEmpty() ? QStringLiteral("none chosen") : globals.profile },
 		{ QStringLiteral("hostname"),
 		    globals.hostname.isEmpty() ? QStringLiteral("not managed") : globals.hostname },
+		{ QStringLiteral("country"),
+		    globals.regdom.isEmpty() ? QStringLiteral("follows the machine")
+		                             : QStringLiteral("%1, pinned").arg(globals.regdom) },
 		{ QStringLiteral("on drift"), globals.on_drift },
 		{ QStringLiteral("confirm window"),
 		    globals.confirm ? QStringLiteral("%1 seconds").arg(globals.confirm)
@@ -158,6 +191,48 @@ void ncfg_global_view::toggle_networking()
 	                             "machine match it.")
 	        .arg(QString::fromLatin1(drop_in_name),
 	            networking_on ? QStringLiteral("off") : QStringLiteral("on")));
+	emit changed();
+	refresh();
+}
+
+void ncfg_global_view::set_country()
+{
+	const QString chosen = country->text().trimmed().toUpper();
+	QString       error;
+
+	if (chosen.isEmpty()) {
+		if (!pinned) {
+			emit reported(QStringLiteral("no country is pinned from here: the machine "
+			                             "already follows what it hears, unless another "
+			                             "file pins one"));
+			return;
+		}
+		if (!connection->config_delete(QString::fromLatin1(country_drop_in), &error)) {
+			emit reported(error);
+			return;
+		}
+		emit reported(QStringLiteral("removed %1: the country follows the machine. Run "
+		                             "apply to make the machine match it.")
+		        .arg(QString::fromLatin1(country_drop_in)));
+		emit changed();
+		refresh();
+		return;
+	}
+	/* Two letters, as ISO 3166 spells a country and the kernel takes it;
+	 * the compiler says the rest, `00` included. */
+	if (chosen.size() != 2 || !chosen.at(0).isLetterOrNumber() ||
+	    !chosen.at(1).isLetterOrNumber()) {
+		emit reported(QStringLiteral("a country is two letters, SE or US"));
+		return;
+	}
+	const QString text = QStringLiteral("global {\n\tregdom = \"%1\"\n}\n").arg(chosen);
+	if (!connection->config_put(QString::fromLatin1(country_drop_in), text, true, &error)) {
+		emit reported(error);
+		return;
+	}
+	emit reported(QStringLiteral("wrote %1: the country is pinned to %2. Run apply to make "
+	                             "the machine match it.")
+	        .arg(QString::fromLatin1(country_drop_in), chosen));
 	emit changed();
 	refresh();
 }

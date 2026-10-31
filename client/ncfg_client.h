@@ -1353,6 +1353,9 @@ typedef struct {
 	int   remote_observe;
 	int   remote_wifi;
 	int   remote_admin;
+	/* The country the machine is pinned to (0296), or empty where it
+	 * follows what its radios hear. */
+	char *regdom;
 } ncfg_globals_t;
 
 void ncfg_globals_free(ncfg_globals_t *globals);

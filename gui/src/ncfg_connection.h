@@ -404,6 +404,8 @@ struct ncfg_globals {
 	bool    remote_observe = false;
 	bool    remote_wifi = false;
 	bool    remote_admin = false;
+	/* The pinned country (0296), empty where it follows the machine. */
+	QString regdom;
 };
 
 /*

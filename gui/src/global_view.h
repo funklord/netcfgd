@@ -20,6 +20,11 @@
  * it had; this takes the network away deliberately, which is what somebody
  * choosing it wants.
  *
+ * **The country is the other control** (0296): a machine follows the
+ * country its radios hear unless one is pinned, and pinning is written to its
+ * own drop-in, `50-regdom`, so unpinning removes the file rather than writing
+ * an empty value somebody has to know means "follow".
+ *
  * The rest is shown and not settable yet. Reading a policy you cannot change
  * is still worth the tab: `control` says who may do what on this machine, and
  * an operator who cannot see it cannot know why a client is being refused.
@@ -30,6 +35,7 @@
 #include <QWidget>
 
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class QTableWidget;
 
@@ -51,11 +57,18 @@ signals:
 private slots:
 	/* Turn the machine's networking off, or back on. Needs `admin`. */
 	void toggle_networking();
+	/* Pin the country typed, or follow the machine again where it is blank. */
+	void set_country();
 
 private:
 	ncfg_connection *connection;
 	QTableWidget    *table;
 	QPushButton     *networking_button;
+	QLineEdit       *country;
+	QPushButton     *country_button;
+	/* Whether `50-regdom` was there at the last refresh, so a blank country
+	 * removes a pin rather than asking to remove a file that is not there. */
+	bool             pinned = false;
 	QLabel          *note;
 	/* What the last refresh read, so the button knows which way it points
 	 * without re-asking the daemon at the moment it is clicked. */

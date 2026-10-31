@@ -12597,6 +12597,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.630 The global tab pins the country
+
+0296's machine-wide `global { regdom }` was neither shown nor settable in the
+window: the global tab predates it, and the client's globals reader never
+read the key. It now shows `country` -- pinned, or "follows the machine" --
+and sets it, written to its own drop-in, `50-regdom`, because `global` takes
+contributions from several files (0147) and unpinning should be removing a
+file rather than writing a value somebody has to know means "follow". A blank
+removes only the tab's own file: a country pinned elsewhere can be overridden
+here, a later file winning a scalar, but not unpinned from here.
+`gui/tests/global_load.cpp` pins, refuses one character, and unpins through a
+real daemon; with the tab unable to see its own pin, the unpin checks fail.
+
 ## 10.629 Meshes have a tab
 
 10.588's `mesh` was the last top-level block the window could not show. A

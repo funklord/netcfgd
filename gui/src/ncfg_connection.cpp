@@ -1381,6 +1381,7 @@ bool ncfg_connection::globals(ncfg_globals *out, QString *error)
 	}
 	out->networking = from_c(found.networking);
 	out->profile = from_c(found.profile);
+	out->regdom = from_c(found.regdom);
 	out->hostname = from_c(found.hostname);
 	out->on_drift = from_c(found.on_drift);
 	out->confirm = found.confirm;
