@@ -257,7 +257,44 @@ ip netns exec client timeout 25 dhcpcd -1 -6 -t 20 -f /payload/dhcpcd-v6.conf \
 given6=$(cat "$work/given6")
 say "the client is given over DHCPv6: $given6"
 
+# A static prefix advertised with the managed flag (0304): an ordinary client,
+# waiting for the advertisement as a host does, takes an address from the
+# prefix by itself and asks the server for one more.
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface lan0 {
+	config     = ["192.168.7.1/24", "fd00:7::1/64"]
+	forwarding = true
+	advertise { prefixes = ["fd00:7::/64"]; managed = true }
+	dhcp_server {
+		dns_forward = true
+		range6 = "::100-::1ff"
+	}
+}
+CONF
+"$build/ncfg" plan > "$work/plan-ra.log" 2>&1
+ra_started=$(grep -cE 'backend\.start lan0 +advertise' "$work/plan-ra.log")
+"$build/ncfg" apply > "$work/apply9.log" 2>&1
+say "ncfg apply rc=$?"
+say "  radvd.conf: $(tr '\n' ' ' < "$work/run/radvd/lan0.conf" 2>/dev/null)"
+sleep 2
+ip -n client addr flush dev eth0 scope global 2>/dev/null
+: > "$work/given6"
+ip netns exec client timeout 30 dhcpcd -1 -6 -t 25 -f /payload/dhcpcd-ra.conf \
+	--script /payload/hook.sh eth0 > "$work/client-ra.log" 2>&1
+sleep 1
+ra_addresses=$(ip -n client -6 addr show dev eth0 scope global | awk '/inet6/ {print $2}' | tr '\n' ' ')
+say "the client, told by the advertisement, holds: $ra_addresses"
+
 failed=0
+[ "$ra_started" -ge 1 ] || { say "  a static prefix did not start the advertiser"; failed=1; }
+case " $ra_addresses" in
+	*" fd00:7::1"[0-9a-f][0-9a-f]"/128 "*) ;;
+	*) say "  the client did not ask the DHCPv6 server when the advertisement said to"; failed=1 ;;
+esac
+case " $ra_addresses" in
+	*" fd00:7::"*"/64 "*) ;;
+	*) say "  the client did not take an address from the advertised prefix"; failed=1 ;;
+esac
 [ "$v6_plan" -ge 1 ] || { say "  DHCPv6 was not planned as a restart naming its range"; failed=1; }
 [ "$v6_warned" -ge 1 ] || { say "  a range6 with no managed advertisement was not warned about"; failed=1; }
 case "$given6" in
@@ -331,6 +368,8 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply6: /' "$work/apply6.log" | tail -6 >> "$out"
 	sed 's/^/  apply7: /' "$work/apply7.log" | tail -6 >> "$out"
 	sed 's/^/  client6: /' "$work/client6.log" | tail -8 >> "$out"
+	sed 's/^/  apply9: /' "$work/apply9.log" | tail -6 >> "$out"
+	sed 's/^/  client-ra: /' "$work/client-ra.log" | tail -10 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

@@ -393,6 +393,10 @@ int main(int argc, char **argv)
 		                   "\tdns { mode = \"resolved\"; domains = [\"~corp.example\"] }\n"
 		                   /* DHCPv6 in the delegated prefix (0303). */
 		                   "\tdhcp_server { range6 = \"::100-::1ff\" }\n"
+		                   /* A static prefix beside the delegated one (0304). */
+		                   "\tconfig = [\"fd00:7::1/64\"]\n"
+		                   "\tadvertise { prefixes = [\"@pd:wan0/1\", \"fd00:7::/64\"]; "
+		                   "managed = true }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -461,7 +465,9 @@ int main(int argc, char **argv)
 		for (const ncfg_address_source_row &source : saved.sources) {
 			options << source.options;
 		}
-		check(reread && saved.sources.size() == 5 && saved.routes.size() == 1 &&
+		/* Six since 0304: the static fd00:7::1/64 the advertised prefix
+		 * needs, which carries no options of its own. */
+		check(reread && saved.sources.size() == 6 && saved.routes.size() == 1 &&
 		        saved.routes[0].src == QStringLiteral("192.0.2.10") &&
 		        saved.routes[0].table == 100 && saved.routes[0].onlink &&
 		        saved.dns.domains == QStringLiteral("~corp.example")
@@ -469,7 +475,7 @@ int main(int argc, char **argv)
 		        : QStringLiteral("%1 sources, %2 routes, %3").arg(saved.sources.size())
 		              .arg(saved.routes.size()).arg(error),
 		    QStringLiteral("preferred_lft 600 valid_lft 900|peer 10.0.0.2|pd pd_length 56|"
-		                   "privacy prefer_temporary|"),
+		                   "privacy prefer_temporary||"),
 		    "  and netcfgd compiles it back the same");
 
 		daemon.kill();

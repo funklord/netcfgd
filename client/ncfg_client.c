@@ -4780,6 +4780,23 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 				free(joined);
 				joined = grown;
 			}
+			/* The prefixes the file knows (0304), in the same field: the
+			 * language takes both in one `prefixes` list. */
+			{
+				uint32_t statics = ncfg_json_member(doc, policy, "static_prefixes");
+				char    *more = joined_words(doc, statics);
+
+				if (joined && more && *more) {
+					char *grown = malloc(strlen(joined) + strlen(more) + 2);
+
+					if (grown) {
+						sprintf(grown, "%s%s%s", joined, *joined ? " " : "", more);
+					}
+					free(joined);
+					joined = grown;
+				}
+				free(more);
+			}
 			out->advertise_prefixes = joined;
 		}
 	}

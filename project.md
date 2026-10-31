@@ -12597,6 +12597,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.637 A static prefix is advertised as itself
+
+Decision 0304, amending 0009: `advertise { prefixes = ["fd00:7::/64"] }` takes
+a prefix the configuration knows beside `@pd:` references, kept in the document
+as `static_prefixes` so the delegated references stay typed exactly as 0009
+has them. A /64 written as the network, not link-local or multicast, on an
+interface holding a static address in it -- refused otherwise, since radvd
+would hand hosts a prefix with no route back. It needs no lease: the planner
+counts it resolvable, lists it after the delegated ones in the order
+`daemon_service.c` hands radvd them, and starts radvd at once.
+
+**Measured end to end in `make hull-dhcp-server`**, which needed radvd: the
+hwsim image now installs it (its spec says why), rebuilt from the spec. lan0
+holds `fd00:7::1/64`, advertises the prefix with `managed = true` and serves
+`range6`; an ordinary dhcpcd that waits for the advertisement as a host does
+took `fd00:7::94f8:82ff:fe13:172f/64` by SLAAC and `fd00:7::12f/128` from the
+server -- which is the whole DHCPv6 path, the managed flag included. The
+interface dialog carries the prefixes in its one field, held by the coverage
+gate (`ra_fields.static_prefixes`) and by `interface_load`, which a reader that
+skipped them fails. +4,120 bytes.
+
 ## 10.636 DHCPv6, and a static prefix nothing can advertise
 
 0303's fourth slice: `dhcp_server { range6 = "::100-::1ff" }`, suffixes that
@@ -12616,15 +12637,11 @@ forwarder is on. The rig's lease check, which read `lan0.conf` at the end of
 the run, now records its answer at its own stage: later stages rewrite the
 file, and this one dropped the lease it looked for.
 
-**Found on the way, and left open: `advertise` takes delegated prefixes only.**
-`prefixes = ["fd00:7::/64"]` is refused -- "never a prefix itself, which no
-config file can know" -- which is right for an ISP's delegation and wrong for a
-ULA or a static global prefix, which the file does know. So a LAN with a static
-IPv6 prefix can carry `range6` and nothing can tell its hosts to ask; the
-warning says that instead of advice that cannot be followed. UniFi advertises
-a static prefix. Widening `advertise` to take one is a change to its decision,
-recorded here as the next router item rather than made in passing. +40 bytes,
-as measured.
+**Found on the way: `advertise` took delegated prefixes only**, refusing a
+ULA or a static global prefix as "never a prefix itself, which no config file
+can know". **Closed by 10.637** (decision 0304): `advertise` takes a static /64
+now. The warning still says, for a static prefix with no `advertise` block,
+that one is what tells the hosts to ask. +40 bytes, as measured.
 
 ## 10.635 Local DNS records
 

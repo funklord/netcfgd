@@ -2693,8 +2693,27 @@ static void interface_cases(void)
 		    "  and the second is the one kept");
 		ncfg_document_free(document);
 	}
+	/* A prefix the file knows (0304): a /64 the interface is on. */
+	document = compiles("interface lan0 {\n\tconfig = [\"192.168.1.1/24\", \"fd00:7::1/64\"]\n"
+	    "\tadvertise { prefixes = [\"fd00:7::/64\", \"@pd:wan0\"] }\n}\n",
+	    "an interface can advertise a static prefix beside a delegated one");
+	if (document) {
+		interface = interface_named(document, "lan0");
+		check(interface && interface->advertise &&
+		        interface->advertise->static_prefix_count == 1u &&
+		        strcmp(interface->advertise->static_prefixes[0], "fd00:7::/64") == 0 &&
+		        interface->advertise->prefix_count == 1u,
+		    "  each kept as itself");
+		ncfg_document_free(document);
+	}
 	refuses("interface lan0 { advertise { prefixes = [\"2001:db8::/64\"] } }\n",
-	    "is not a prefix reference", "an advertised prefix must be a reference");
+	    "holds no address in it", "a static prefix the interface is not on is refused");
+	refuses("interface lan0 {\n\tconfig = \"2001:db8::1/56\"\n"
+	    "\tadvertise { prefixes = [\"2001:db8::/56\"] }\n}\n",
+	    "is not a prefix to advertise", "  and so is one that is not a /64");
+	refuses("interface lan0 {\n\tconfig = \"2001:db8::1/64\"\n"
+	    "\tadvertise { prefixes = [\"2001:db8::1/64\"] }\n}\n",
+	    "is not a prefix to advertise", "  and one written as an address, not the network");
 	refuses("interface lan0 { advertise { managed = true } }\n",
 	    "needs a prefix to advertise", "an advertise block needs something to advertise");
 	refuses("interface lan0 { advertise { prefixes = [\"@pd:w\"]; backend = \"wombat\" } }\n",

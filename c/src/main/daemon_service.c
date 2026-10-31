@@ -199,6 +199,18 @@ size_t ncfg_main_advertising_of(ncfg_main_world_t *world, const ncfg_document_t 
 			world->advertise_prefixes[taken][prefixes] = room;
 			prefixes++;
 		}
+		/* The prefixes the file knows (0304), after the delegated ones, as
+		 * the planner lists them; the document outlives this world. */
+		for (which = 0; which < interface->advertise->static_prefix_count; which++) {
+			if (prefixes == (size_t)NCFG_MAIN_ADVERTISE_PREFIX_MAX) {
+				if (missed) {
+					(*missed)++;
+				}
+				continue;
+			}
+			world->advertise_prefixes[taken][prefixes++] =
+			    interface->advertise->static_prefixes[which];
+		}
 		/*
 		 * Nothing resolved, so there is nothing to announce. Left out rather
 		 * than entered with an empty list: `ncfg_ra_start` refuses a router

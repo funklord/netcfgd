@@ -1057,4 +1057,6 @@ netcfgd
 # renderer, plan warning and dnsmasq lines (decision 0303), +12,720.
 # And DHCPv6 ranges in the interface's prefix, with their two plan warnings
 # (decision 0303), +40 as measured -- the section's padding took the rest.
-total 1369472
+# And advertising a static prefix beside a delegated one (decision 0304),
+# +4,120.
+total 1373592

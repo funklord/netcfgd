@@ -173,6 +173,18 @@ static void a_dhcpv6_range_nobody_is_told_of_is_said(void)
 	        !planfix_warned(plan, "DHCPv6 on br0"),
 	    "  and neither with the flag set and no firewall");
 	planfix_release(plan, document, observed);
+
+	/* A static prefix (0304) needs no lease, so the advertiser starts at
+	 * once and the warning is satisfied the same way. */
+	plan = planfix_plan(LAN_DEVICE,
+	    SERVING6(STATIC6, ",\"advertise\":{\"backend\":\"auto\",\"prefixes\":[],"
+	                      "\"static_prefixes\":[\"fd00::/64\"],\"managed\":true,"
+	                      "\"other_config\":false,\"dns\":true}"),
+	    "", "", "\"links\":[" LAN_UP "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "tells the hosts to ask") &&
+	        planfix_action(plan, "backend.start") != NULL && !planfix_warned(plan, "waiting on"),
+	    "  and a static prefix starts the advertiser with no lease to wait for");
+	planfix_release(plan, document, observed);
 }
 
 static void a_server_serving_what_is_asked_is_left_alone(void)

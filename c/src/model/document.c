@@ -1882,6 +1882,11 @@ static const ncfg_field_t ra_fields[] = {
 	    .element_size = sizeof(ncfg_prefix_ref_t),
 	    .offset = offsetof(ncfg_ra_policy_t, prefixes),
 	    .count_offset = offsetof(ncfg_ra_policy_t, prefix_count) },
+	/* Absent where none (0304), so a policy written before it reads and
+	 * writes back unchanged. */
+	{ .name = "static_prefixes", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_ra_policy_t, static_prefixes),
+	    .count_offset = offsetof(ncfg_ra_policy_t, static_prefix_count) },
 	{ .name = "managed", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_ra_policy_t, managed) },
 	{ .name = "other_config", .kind = NCFG_F_BOOL,
 	    .offset = offsetof(ncfg_ra_policy_t, other_config) },

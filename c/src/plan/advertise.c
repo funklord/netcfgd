@@ -60,6 +60,10 @@ static int resolvable(const ncfg_builder_t *builder, const ncfg_ra_policy_t *pol
 {
 	size_t i;
 
+	/* A prefix the file knows needs no lease (0304). */
+	if (policy->static_prefix_count) {
+		return 1;
+	}
 	for (i = 0; i < policy->prefix_count; i++) {
 		const ncfg_delegation_t *delegation =
 		    ncfg_observed_delegation(builder->observed, policy->prefixes[i].source);
@@ -163,6 +167,11 @@ void ncfg_plan_advertise(ncfg_builder_t *builder, const ncfg_interface_t *interf
 		if (resolve(builder, &policy->prefixes[i], prefix, sizeof(prefix))) {
 			join(&wanted, prefix);
 		}
+	}
+	/* After the delegated ones, in the order `daemon_service.c` hands radvd
+	 * them, so a match reads as one. */
+	for (i = 0; i < policy->static_prefix_count; i++) {
+		join(&wanted, policy->static_prefixes[i]);
 	}
 	for (i = 0; i < running->advertised_count; i++) {
 		join(&announced, running->advertised[i] ? running->advertised[i] : "<absent>");

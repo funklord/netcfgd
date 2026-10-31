@@ -217,6 +217,7 @@ static void release_advertise(ncfg_ra_policy_t *policy)
 		free(policy->prefixes[i].source);
 	}
 	free(policy->prefixes);
+	ncfg_strings_free(policy->static_prefixes, policy->static_prefix_count);
 	free(policy->backend.command);
 }
 
@@ -858,12 +859,47 @@ static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				ncfg_prefix_ref_t *slot;
 
 				if (strncmp(value, "@pd:", 4u) != 0) {
-					ncfg_diag(ctx, assignment->span,
-					    "`%s` is not a prefix reference: a prefix to advertise is "
-					    "`@pd:wan0`, naming the interface whose delegation it comes from "
-					    "-- never a prefix itself, which no config file can know", value);
-					ncfg_words_free(&words);
-					goto drop;
+					/* **A prefix the file knows** (0304): a /64, the length a
+					 * host autoconfigures from, not link-local or multicast,
+					 * and written as the network itself. Whether the
+					 * interface is on it is asked once its addresses are all
+					 * read. */
+					ncfg_address_t prefix;
+					size_t         octet;
+					int            host_bits = 0;
+					char         **grown;
+
+					if (ncfg_address_parse(value, &prefix, NULL, 0) && prefix.is_ipv6) {
+						for (octet = 8; octet < 16u; octet++) {
+							host_bits = host_bits || prefix.bytes[octet] != 0u;
+						}
+					}
+					if (!ncfg_address_parse(value, &prefix, NULL, 0) || !prefix.is_ipv6 ||
+					    !prefix.has_prefix || prefix.prefix != 64u || host_bits ||
+					    prefix.bytes[0] == 0xffu ||
+					    (prefix.bytes[0] == 0xfeu && (prefix.bytes[1] & 0xc0u) == 0x80u)) {
+						ncfg_diag(ctx, assignment->span,
+						    "`%s` is not a prefix to advertise: a delegated one is "
+						    "`@pd:wan0`, and one the file knows is a /64 written as the "
+						    "network, \"fd00:7::/64\" -- not link-local or multicast",
+						    value);
+						ncfg_words_free(&words);
+						goto drop;
+					}
+					grown = realloc(policy.static_prefixes,
+					    (policy.static_prefix_count + 1u) * sizeof(*grown));
+					if (!grown) {
+						ncfg_lower_oom(ctx);
+						ncfg_words_free(&words);
+						goto drop;
+					}
+					policy.static_prefixes = grown;
+					policy.static_prefixes[policy.static_prefix_count] = ncfg_dup(ctx, value);
+					if (!policy.static_prefixes[policy.static_prefix_count++]) {
+						ncfg_words_free(&words);
+						goto drop;
+					}
+					continue;
 				}
 				value += 4;
 				slash = strchr(value, '/');
@@ -932,10 +968,11 @@ static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 		}
 	}
 
-	if (policy.prefix_count == 0) {
+	if (policy.prefix_count == 0 && policy.static_prefix_count == 0) {
 		ncfg_diag(ctx, block->span,
 		    "an `advertise` block needs a prefix to advertise: `prefixes = [\"@pd:wan0\"]` "
-		    "advertises what the ISP delegated to wan0");
+		    "advertises what the ISP delegated to wan0, and `[\"fd00:7::/64\"]` a prefix "
+		    "the interface is on");
 		goto drop;
 	}
 	*out = policy;
@@ -1191,6 +1228,8 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 {
 	ncfg_interface_t  interface;
 	ncfg_span_t       dhcp_server_span;
+	ncfg_span_t       advertise_span;
+	const char       *advertise_source = NULL;
 	const char       *dhcp_server_source = NULL;
 	ncfg_dns_policy_t dns;
 	int               dns_touched = 0;
@@ -1198,6 +1237,7 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 
 	memset(&interface, 0, sizeof(interface));
 	memset(&dhcp_server_span, 0, sizeof(dhcp_server_span));
+	memset(&advertise_span, 0, sizeof(advertise_span));
 	memset(&dns, 0, sizeof(dns));
 	interface.name = ncfg_require_interface_label(ctx, block->block);
 	if (!interface.name) {
@@ -1291,6 +1331,8 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 					break;
 				}
 				*interface.advertise = advertise;
+				advertise_span = inner->span;
+				advertise_source = ctx->source;
 			} else {
 				ncfg_diag(ctx, inner->span, "`%s` is not valid inside `interface`", head);
 			}
@@ -1323,6 +1365,38 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 			    interface.name, why ? why : "its range cannot be worked out");
 			ncfg_dhcp_server_free(interface.dhcp_server);
 			interface.dhcp_server = NULL;
+		}
+	}
+	/* A static prefix the interface is on (0304), now that its addresses are
+	 * all read: one it is not on hands hosts addresses with no route back. */
+	if (interface.advertise && interface.advertise->static_prefix_count) {
+		size_t at;
+
+		for (at = 0; at < interface.advertise->static_prefix_count; at++) {
+			ncfg_address_t prefix;
+			size_t         source;
+			int            on = 0;
+
+			if (!ncfg_address_parse(interface.advertise->static_prefixes[at], &prefix, NULL,
+			        0)) {
+				continue;
+			}
+			for (source = 0; !on && source < interface.addressing_count; source++) {
+				const ncfg_address_source_t *one = &interface.addressing[source];
+				ncfg_address_t               address;
+
+				on = one->kind == NCFG_ADDRESS_SOURCE_STATIC && one->static_address.address &&
+				    ncfg_address_parse(one->static_address.address, &address, NULL, 0) &&
+				    address.is_ipv6 && memcmp(address.bytes, prefix.bytes, 8u) == 0;
+			}
+			if (!on) {
+				ctx->source = advertise_source;
+				ncfg_diag(ctx, advertise_span,
+				    "interface `%s` advertises %s and holds no address in it, so its hosts "
+				    "would be handed addresses with no route back: add one to `config`, "
+				    "such as the prefix's ::1", interface.name,
+				    interface.advertise->static_prefixes[at]);
+			}
 		}
 	}
 	if (dns_touched) {

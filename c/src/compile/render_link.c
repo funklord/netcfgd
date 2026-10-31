@@ -664,7 +664,7 @@ static void render_advertise(const ncfg_ra_policy_t *policy, const char *name, n
 		ncfg_render_refuse(missing, "interface", name, "an advertise backend of exec");
 		return;
 	}
-	if (policy->prefix_count == 0) {
+	if (policy->prefix_count == 0 && policy->static_prefix_count == 0) {
 		ncfg_render_refuse(missing, "interface", name, "an advertise block with no prefix");
 		return;
 	}
@@ -686,6 +686,10 @@ static void render_advertise(const ncfg_ra_policy_t *policy, const char *name, n
 		}
 		ncfg_render_quote(ncfg_render_list_next(&prefixes), ncfg_buf_text(&reference));
 		ncfg_buf_free(&reference);
+	}
+	/* The prefixes the file knows (0304), as written. */
+	for (i = 0; i < policy->static_prefix_count; i++) {
+		ncfg_render_quote(ncfg_render_list_next(&prefixes), policy->static_prefixes[i]);
 	}
 	if (prefixes.count == 0) {
 		ncfg_render_list_free(&prefixes);

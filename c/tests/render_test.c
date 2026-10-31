@@ -1323,6 +1323,9 @@ static void an_advertise_block_round_trips(void)
 	char       *rendered;
 
 	round_trips(text, "every field of an advertise block survives a round trip");
+	round_trips("interface lan0 {\n\tconfig = [\"192.0.2.1/24\", \"fd00:7::1/64\"]\n"
+	    "\tadvertise {\n\t\tprefixes = [\"fd00:7::/64\"]\n\t\tmanaged = true\n\t}\n}\n",
+	    "  and so does one advertising a static prefix (0304)");
 	rendered = rendering_of(text);
 	check(holds(rendered, "backend = \"radvd\""),
 	    "and the backend is the daemon the policy named, not the one beside it in the enum");

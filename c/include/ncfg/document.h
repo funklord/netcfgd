@@ -1358,6 +1358,11 @@ typedef struct {
 	ncfg_ra_backend_t  backend;
 	ncfg_prefix_ref_t *prefixes;
 	size_t             prefix_count;
+	/* Prefixes the configuration knows (0304): a ULA or a static global
+	 * /64, on the interface, as written. Resolved by nothing, so always
+	 * advertised; the delegated `prefixes` above are unchanged. */
+	char             **static_prefixes;
+	size_t             static_prefix_count;
 	int                managed;
 	int                other_config;
 	int                dns; /* defaults to true */

@@ -582,6 +582,8 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 		if (interface->advertise) {
 			stable_sort(interface->advertise->prefixes, interface->advertise->prefix_count,
 			    sizeof(*interface->advertise->prefixes), compare_prefix_ref);
+			sort_set(interface->advertise->static_prefixes,
+			    &interface->advertise->static_prefix_count);
 		}
 	}
 

@@ -1690,6 +1690,18 @@
 #	}
 #}
 
+# A prefix the file knows -- a ULA, or a static prefix an ISP assigns for good
+# -- is advertised as itself (decision 0304): a /64 written as the network, on
+# an interface that holds an address in it. It needs no lease, so radvd starts
+# at once.
+
+#interface br1 {
+#	config = ["192.168.2.1/24", "fd00:7::1/64"]
+#	advertise {
+#		prefixes = ["fd00:7::/64"]
+#	}
+#}
+
 # HANDING OUT ADDRESSES. `dhcp_server` serves DHCPv4 on an interface with a
 # static IPv4 address, through dnsmasq with its DNS side off (decision 0297):
 #
