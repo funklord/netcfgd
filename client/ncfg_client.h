@@ -1140,6 +1140,58 @@ void ncfg_rules_free(ncfg_rules_t *rules);
  */
 int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_t err_size);
 
+/*
+ * One firewall rule (0294), as an editor carries it.
+ *
+ * Every list is its members joined with ", ", empty where the rule matches on
+ * none. `protocol` is `any` where the rule names none, which is the
+ * document's own word. `stations` is the `mac` key as written: each host list
+ * as `@host_list:NAME`, then the addresses beside them -- not the addresses a
+ * list resolved to, which would pin the rule to today's list on the next save.
+ */
+typedef struct {
+	char *name;
+	char *action;
+	char *protocol;
+	char *ports;
+	char *from;
+	char *to;
+	char *interface;
+	char *out_interface;
+	char *states;
+	char *stations;
+} ncfg_firewall_entry_t;
+
+/* One base chain: its policy and its rules, in the document's order -- which
+ * is the order nftables evaluates them in. */
+typedef struct {
+	char                  *policy;
+	ncfg_firewall_entry_t *rules;
+	size_t                 rule_count;
+} ncfg_firewall_chain_entry_t;
+
+/* `present` 0 where the document has no `firewall` block, which is not three
+ * chains accepting everything: netcfgd then writes no filter chains at all. */
+typedef struct {
+	int                         present;
+	ncfg_firewall_chain_entry_t input;
+	ncfg_firewall_chain_entry_t forward;
+	ncfg_firewall_chain_entry_t output;
+} ncfg_firewall_config_t;
+
+void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall);
+
+/*
+ * The firewall the configuration declares. Needs `observe`.
+ *
+ * From the document, for the editor that saves the block whole: a key this
+ * reader did not take is one Save would delete, so `tool/form_coverage_gate.py`
+ * holds it to every member the model declares.
+ */
+int ncfg_client_firewall(ncfg_client_t *client, ncfg_firewall_config_t *out, char *err,
+                         size_t err_size);
+
+
 /* One bluetooth device the configuration declares. */
 typedef struct {
 	char *id;

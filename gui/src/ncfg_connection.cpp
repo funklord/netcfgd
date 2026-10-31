@@ -1437,6 +1437,66 @@ bool ncfg_connection::rules(QList<ncfg_rule_row> *out, QString *error)
 	return true;
 }
 
+static QStringList firewall_list(const char *joined)
+{
+	return from_c(joined).split(QStringLiteral(", "), Qt::SkipEmptyParts);
+}
+
+static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t &chain)
+{
+	ncfg_firewall_chain_row row;
+
+	row.policy = from_c(chain.policy);
+	for (size_t i = 0; i < chain.rule_count; i++) {
+		const ncfg_firewall_entry_t &entry = chain.rules[i];
+		ncfg_firewall_rule_row       rule;
+
+		rule.name = from_c(entry.name);
+		rule.action = from_c(entry.action);
+		rule.protocol = from_c(entry.protocol);
+		for (const QString &port : firewall_list(entry.ports)) {
+			rule.ports << port.toInt();
+		}
+		rule.from = firewall_list(entry.from);
+		rule.to = firewall_list(entry.to);
+		rule.interface = from_c(entry.interface);
+		rule.out_interface = from_c(entry.out_interface);
+		rule.states = firewall_list(entry.states);
+		rule.stations = firewall_list(entry.stations);
+		row.rules << rule;
+	}
+	return row;
+}
+
+bool ncfg_connection::firewall(ncfg_firewall_settings *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_firewall_settings();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_firewall_config_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_firewall(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	out->present = found.present != 0;
+	out->input = firewall_chain(found.input);
+	out->forward = firewall_chain(found.forward);
+	out->output = firewall_chain(found.output);
+	ncfg_firewall_config_free(&found);
+	return true;
+}
+
 bool ncfg_connection::bluetooth(QList<ncfg_bluetooth_row> *out, QString *error)
 {
 	if (!out) {

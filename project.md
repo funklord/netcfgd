@@ -12597,6 +12597,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.626 The firewall has a tab
+
+0294's firewall, and 0302's `out_interface` on it, could be written only as
+text: the window had no view of it at all, while the router's other half --
+DHCP serving, the DNS forwarder, port forwards to a reservation -- was already
+in the interface dialog. A `firewall` tab now sits beside `rules`: the three
+chains' rules in one table in evaluation order, the three policies, and a
+dialog for one rule carrying every key the language has (protocol, ports,
+from, to, interface, out_interface, state, and `mac` with host lists by name).
+
+**The block is written whole, as the `firewall` drop-in**, because a chain's
+order is what it does and a rule cannot be a drop-in of its own the way a
+routing rule is. Moving a rule up or down, or to another chain, is an edit of
+its own. **A firewall written by hand in `netcfgd.conf` is not taken over**:
+the drop-in is then a second block, which the daemon refuses, naming where the
+first is. `override` was the alternative and was rejected: it would leave the
+hand-written block in the file and silently dead.
+
+The client reader `ncfg_client_firewall` is held by `form_coverage_gate.py`
+(the block and both sub-tables, 174 members now), proved by deleting
+`out_interface` from the reader and watching the gate name it.
+`gui/tests/firewall_load.cpp` loads a firewall using every key through a real
+daemon, saves a rule unchanged through the dialog, and compares the reloaded
+firewall field by field -- deliberately not by the tab's own block writer,
+which would pass for a key the writer drops since it would be missing on both
+sides. Proved by making the writer skip `out_interface`: two checks fail.
+
 ## 10.625 A tool in sbin is not missing because a PATH lacks sbin
 
 The shape of 10.624's correction, searched for: a live script asking `command

@@ -108,6 +108,8 @@ SOURCES += \
 	src/device_dialog.cpp \
 	src/access_point_dialog.cpp \
 	src/rule_dialog.cpp \
+	src/firewall_dialog.cpp \
+	src/firewall_view.cpp \
 	src/config_view.cpp \
 	src/explain_dialog.cpp \
 	src/global_view.cpp \
@@ -145,6 +147,8 @@ HEADERS += \
 	src/device_dialog.h \
 	src/access_point_dialog.h \
 	src/rule_dialog.h \
+	src/firewall_dialog.h \
+	src/firewall_view.h \
 	src/config_view.h \
 	src/explain_dialog.h \
 	src/global_view.h \

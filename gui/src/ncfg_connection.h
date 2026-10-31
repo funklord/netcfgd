@@ -303,6 +303,36 @@ struct ncfg_rule_row {
 	bool    l3mdev = false;
 };
 
+/* One firewall rule (0294), as the editor carries it. Lists are their members
+ * as separate strings; `protocol` is `any` where the rule names none, and
+ * `stations` holds a host list as `@host_list:NAME`, as the key is written. */
+struct ncfg_firewall_rule_row {
+	QString     name;
+	QString     action;
+	QString     protocol;
+	QList<int>  ports;
+	QStringList from;
+	QStringList to;
+	QString     interface;
+	QString     out_interface;
+	QStringList states;
+	QStringList stations;
+};
+
+struct ncfg_firewall_chain_row {
+	QString                       policy;
+	QList<ncfg_firewall_rule_row> rules;
+};
+
+/* `present` false where the document has no `firewall` block, which is not
+ * three chains accepting everything: netcfgd then writes no filter chains. */
+struct ncfg_firewall_settings {
+	bool                    present = false;
+	ncfg_firewall_chain_row input;
+	ncfg_firewall_chain_row forward;
+	ncfg_firewall_chain_row output;
+};
+
 struct ncfg_bluetooth_row {
 	QString id;
 	QString address;
@@ -1190,6 +1220,9 @@ public:
 	/* The routing rules the configuration declares -- what was asked for,
 	 * rather than what the kernel currently has, which is drift's question. */
 	bool rules(QList<ncfg_rule_row> *out, QString *error);
+	/* The firewall the configuration declares, whole, for the view that
+	 * writes the block back whole. */
+	bool firewall(ncfg_firewall_settings *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);

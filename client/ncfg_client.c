@@ -2743,6 +2743,195 @@ int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_
 	return 1;
 }
 
+static void firewall_chain_free(ncfg_firewall_chain_entry_t *chain)
+{
+	for (size_t i = 0; i < chain->rule_count; i++) {
+		ncfg_firewall_entry_t *rule = &chain->rules[i];
+
+		free(rule->name);
+		free(rule->action);
+		free(rule->protocol);
+		free(rule->ports);
+		free(rule->from);
+		free(rule->to);
+		free(rule->interface);
+		free(rule->out_interface);
+		free(rule->states);
+		free(rule->stations);
+	}
+	free(chain->rules);
+	free(chain->policy);
+	chain->rules = NULL;
+	chain->rule_count = 0;
+	chain->policy = NULL;
+}
+
+void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall)
+{
+	if (!firewall) {
+		return;
+	}
+	firewall_chain_free(&firewall->input);
+	firewall_chain_free(&firewall->forward);
+	firewall_chain_free(&firewall->output);
+	firewall->present = 0;
+}
+
+/* `text` added to a ", "-joined list in place. 0 for a failed allocation,
+ * which leaves the list as it was for the caller to free. */
+static int join_one(char **joined, const char *text)
+{
+	size_t length = strlen(*joined);
+	size_t text_length = strlen(text);
+	char  *grown = realloc(*joined, length + (length ? 2u : 0u) + text_length + 1u);
+
+	if (!grown) {
+		return 0;
+	}
+	if (length) {
+		memcpy(grown + length, ", ", 2u);
+		length += 2u;
+	}
+	memcpy(grown + length, text, text_length + 1u);
+	*joined = grown;
+	return 1;
+}
+
+/* The `mac` key as the operator wrote it, the renderer's order: each list
+ * named, then what was written beside the lists -- or `mac` itself where no
+ * list is named (10.592). */
+static char *firewall_stations(const ncfg_json_doc_t *doc, uint32_t entry)
+{
+	uint32_t lists = ncfg_json_member(doc, entry, "mac_lists");
+	uint32_t written = ncfg_json_count(doc, lists) ? ncfg_json_member(doc, entry, "mac_written")
+	                                               : ncfg_json_member(doc, entry, "mac");
+	char    *joined = dup_string("");
+
+	for (uint32_t i = 0; joined && i < ncfg_json_count(doc, lists); i++) {
+		char        named[256];
+		size_t      length = 0;
+		const char *list = ncfg_json_string(doc, ncfg_json_at(doc, lists, i), &length);
+
+		(void)snprintf(named, sizeof(named), "@host_list:%.*s", (int)length, list ? list : "");
+		if (!join_one(&joined, named)) {
+			free(joined);
+			joined = NULL;
+		}
+	}
+	if (joined) {
+		char *rest = join_strings(doc, written);
+
+		if (!rest || (rest[0] && !join_one(&joined, rest))) {
+			free(joined);
+			joined = NULL;
+		}
+		free(rest);
+	}
+	return joined;
+}
+
+static char *firewall_ports(const ncfg_json_doc_t *doc, uint32_t ports)
+{
+	char *joined = dup_string("");
+
+	for (uint32_t i = 0; joined && i < ncfg_json_count(doc, ports); i++) {
+		char number[24];
+
+		(void)snprintf(number, sizeof(number), "%lld",
+		    (long long)ncfg_json_int(doc, ncfg_json_at(doc, ports, i), 0));
+		if (!join_one(&joined, number)) {
+			free(joined);
+			joined = NULL;
+		}
+	}
+	return joined;
+}
+
+static int read_firewall_chain(const ncfg_json_doc_t *doc, uint32_t object,
+    ncfg_firewall_chain_entry_t *chain)
+{
+	uint32_t rules = ncfg_json_member(doc, object, "rules");
+	uint32_t count = ncfg_json_count(doc, rules);
+
+	chain->policy = member_text(doc, object, "policy");
+	if (!chain->policy) {
+		return 0;
+	}
+	if (!count) {
+		return 1;
+	}
+	chain->rules = calloc(count, sizeof(*chain->rules));
+	if (!chain->rules) {
+		return 0;
+	}
+	chain->rule_count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t               entry = ncfg_json_at(doc, rules, i);
+		ncfg_firewall_entry_t *rule = &chain->rules[i];
+
+		rule->name = member_text(doc, entry, "name");
+		rule->action = member_text(doc, entry, "action");
+		rule->protocol = member_text(doc, entry, "protocol");
+		rule->ports = firewall_ports(doc, ncfg_json_member(doc, entry, "ports"));
+		rule->from = join_strings(doc, ncfg_json_member(doc, entry, "from"));
+		rule->to = join_strings(doc, ncfg_json_member(doc, entry, "to"));
+		rule->interface = member_text(doc, entry, "interface");
+		rule->out_interface = member_text(doc, entry, "out_interface");
+		rule->states = join_strings(doc, ncfg_json_member(doc, entry, "states"));
+		rule->stations = firewall_stations(doc, entry);
+		if (!rule->name || !rule->action || !rule->protocol || !rule->ports || !rule->from ||
+		    !rule->to || !rule->interface || !rule->out_interface || !rule->states ||
+		    !rule->stations) {
+			return 0;
+		}
+		/* The document omits `any`; the editor shows the word. */
+		if (!rule->protocol[0]) {
+			free(rule->protocol);
+			rule->protocol = dup_string("any");
+			if (!rule->protocol) {
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+int ncfg_client_firewall(ncfg_client_t *client, ncfg_firewall_config_t *out, char *err,
+                         size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t firewall = ncfg_json_member(doc, ncfg_json_root(doc), "firewall");
+	if (ncfg_json_type(doc, firewall) != NCFG_JSON_OBJECT) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->present = 1;
+	if (!read_firewall_chain(doc, ncfg_json_member(doc, firewall, "input"), &out->input) ||
+	    !read_firewall_chain(doc, ncfg_json_member(doc, firewall, "forward"), &out->forward) ||
+	    !read_firewall_chain(doc, ncfg_json_member(doc, firewall, "output"), &out->output)) {
+		ncfg_firewall_config_free(out);
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_bluetooths_free(ncfg_bluetooths_t *devices)
 {
 	if (!devices) {

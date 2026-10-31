@@ -15,6 +15,7 @@
 #include "secrets_view.h"
 #include "profiles_view.h"
 #include "rules_view.h"
+#include "firewall_view.h"
 #include "bluetooth_view.h"
 #include "hooks_view.h"
 #include "events_view.h"
@@ -105,6 +106,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	dns = new ncfg_dns_view(connection, configuration);
 	profiles = new ncfg_profiles_view(connection, configuration);
 	rules = new ncfg_rules_view(connection, configuration);
+	firewall = new ncfg_firewall_view(connection, configuration);
 	hooks = new ncfg_hooks_view(connection, configuration);
 	secrets = new ncfg_secrets_view(connection, configuration);
 	config = new ncfg_config_view(connection, configuration);
@@ -122,6 +124,9 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	configuration->addTab(dns, QStringLiteral("dns"));
 	configuration->addTab(profiles, QStringLiteral("profiles"));
 	configuration->addTab(rules, QStringLiteral("rules"));
+	/* Beside the routing rules: both decide what happens to a packet, and
+	 * an operator looking for one looks where the other is. */
+	configuration->addTab(firewall, QStringLiteral("firewall"));
 	configuration->addTab(hooks, QStringLiteral("hooks"));
 	configuration->addTab(secrets, QStringLiteral("secrets"));
 	/* Last, and unlike `dns` that is not a place to be buried: this is the
@@ -161,6 +166,8 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * the whole of the defect: the editor worked and the plan tab went on
 	 * describing the configuration from before it. */
 	connect(rules, &ncfg_rules_view::changed, this, &ncfg_main_window::reload);
+	connect(firewall, &ncfg_firewall_view::reported, this, &ncfg_main_window::note);
+	connect(firewall, &ncfg_firewall_view::changed, this, &ncfg_main_window::reload);
 	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
 	connect(bluetooth, &ncfg_bluetooth_view::changed, this, &ncfg_main_window::reload);
 	connect(hooks, &ncfg_hooks_view::reported, this, &ncfg_main_window::note);
@@ -320,6 +327,8 @@ void ncfg_main_window::refresh()
 		profiles->refresh();
 	} else if (current == rules) {
 		rules->refresh();
+	} else if (current == firewall) {
+		firewall->refresh();
 	} else if (current == bluetooth) {
 		bluetooth->refresh();
 	} else if (current == hooks) {

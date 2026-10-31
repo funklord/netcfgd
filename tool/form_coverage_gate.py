@@ -2,8 +2,9 @@
 """Every member of a block a GUI form saves must be one the client reads.
 
 WHAT THIS ENFORCES
-  Four GUI dialogs -- device, interface, network, access point -- load a block
-  through the C client and save it whole, with `replace`. What the dialog has
+  Four GUI dialogs -- device, interface, network, access point -- and the
+  firewall tab load a block through the C client and save it whole, with
+  `replace`. What the dialog has
   no field for, the client must name in `unmodelled` so the dialog can refuse;
   what the client never reads, it cannot name, and Save deletes it.
 
@@ -52,6 +53,8 @@ CLIENT = pathlib.Path("client/ncfg_client.c")
 WAIVED = pathlib.Path("tool/form-unread-keys.txt")
 
 DEVICE_READER = ("ncfg_client_device_config", ["read_qdisc", "read_kind", "read_port"])
+FIREWALL_READER = ("ncfg_client_firewall",
+    ["read_firewall_chain", "firewall_ports", "firewall_stations"])
 
 # Each saved block, the reader its dialog loads it through, and the helpers
 # that reader hands members to. Written out rather than derived, because a
@@ -61,6 +64,9 @@ FORMS = {
 	"interface_fields": ("ncfg_client_interface_config", []),
 	"network_fields": ("ncfg_client_saved_networks", ["network_unmodelled"]),
 	"access_point_fields": ("ncfg_client_access_points", ["editable_stations"]),
+	# The firewall tab saves the whole block on every edit (0294), so a member
+	# its reader skips is a match deleted from a rule nobody touched.
+	"firewall_fields": FIREWALL_READER,
 }
 
 # Sub-blocks a dialog reads field by field, held to the same rule. Each names
@@ -93,6 +99,8 @@ NESTED = {
 	"access_control_fields": ACCESS_POINT_READER,
 	"neighbour_fields": ACCESS_POINT_READER,
 	"steering_fields": ACCESS_POINT_READER,
+	"firewall_chain_fields": FIREWALL_READER,
+	"firewall_rule_fields": FIREWALL_READER,
 }
 
 
