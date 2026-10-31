@@ -12597,6 +12597,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.647 `make hull` on 2026-10-31: 17 of 18, and a steer plan that missed once
+
+All eighteen rigs with `make -k hull` against hull b01be07: seventeen pass,
+the lossy delegation rig among them. `hull-steer`'s band machine failed once:
+the plan taken a minute after the join carried no steer, and the apply a
+moment later steered the station to 5 GHz all the same. Three reruns pass.
+
+**Two explanations measured and set aside.** A steer waits for
+`connected_time` 60 and skips a station silent past `inactive_msec` 30000
+(`plan/wifi.c`). The payload now prints both from hostapd as the plan is
+taken, and across the three reruns it read 65 s connected and 1.4 to 6.4 s
+silent, nowhere near either bound. The observation is taken fresh for each
+plan (`observe/current.c`), so it is not a stale one either.
+
+**One left standing, unproven.** `ncfg_observe_hostapd_stations` stops its
+STA-FIRST/STA-NEXT walk at the first request that fails and returns what it
+has, so a request that timed out on a loaded host reads as nobody
+associated, with no warning -- which fits a plan that was simply empty. The
+failed run left no trace that would confirm it. Distinguishing the two would
+not have planned the steer either, since an unreadable list plans none, so
+what a fix buys is a plan that says why; whether that is worth a warning on
+every slow hostapd is open. Until then a red `hull-steer` with an empty plan
+is a reading to repeat, and the hostapd line beside it says which bound, if
+either, held the steer.
+
 ## 10.646 SLAAC turned on for an interface already up
 
 hull 5be9f34 lets a segment advertise unasked, `(advertise_every D)`, which

@@ -142,6 +142,11 @@ say "a minute later, unasked, the station is on: $stayed"
 "$build/ncfg" plan > "$work/plan.log" 2>&1
 planned=$(grep -cE '^ +[0-9]+ +station\.steer ' "$work/plan.log")
 say "the plan after a minute: $(grep -E '^ +[0-9]+ +station\.steer ' "$work/plan.log" | head -1)"
+# What hostapd says of the station as the plan was taken: a steer waits for
+# `connected_time` 60 and skips one silent past `inactive_msec` 30000, so a
+# plan with none says which of the two it was.
+say "  hostapd, at the plan: $(hostapd_cli -p "$work/run/hostapd" -i wlan0 all_sta 2>&1 |
+	grep -E '^(connected_time|inactive_msec)=' | tr '\n' ' ')"
 "$build/ncfg" apply > "$work/apply3.log" 2>&1
 say "ncfg apply rc=$?"
 n=0
