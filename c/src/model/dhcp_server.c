@@ -470,3 +470,85 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 	}
 	return 1;
 }
+
+/* A bare address of either family, as a record answers it or a forward asks. */
+static int bare_address(const char *text)
+{
+	ncfg_address_t address;
+
+	return text && ncfg_address_parse(text, &address, NULL, 0) && !address.has_prefix;
+}
+
+/* A service name, `_sip._udp.home.lan`: a DNS name whose leading labels may
+ * start with an underscore, as RFC 2782 spells them. */
+static int service_name(const char *name)
+{
+	char   copy[254];
+	size_t at;
+
+	if (!name || name[0] != '_' || strlen(name) >= sizeof(copy)) {
+		return 0;
+	}
+	strcpy(copy, name);
+	for (at = 0; copy[at]; at++) {
+		if (copy[at] == '_' && (at == 0u || copy[at - 1u] == '.')) {
+			copy[at] = 'x';
+		}
+	}
+	return ncfg_dhcp_server_dns_name(copy);
+}
+
+int ncfg_dns_record_check(const ncfg_dns_record_t *record, const char **why)
+{
+	const char *reason = NULL;
+	size_t      at;
+	int         kinds;
+
+	if (!record) {
+		return 0;
+	}
+	kinds = (record->address_count != 0u) + (record->mx != NULL) + (record->txt != NULL) +
+	    (record->srv != NULL);
+	if (!(record->srv ? service_name(record->name) : ncfg_dhcp_server_dns_name(record->name))) {
+		reason = record->srv
+		    ? "a record with `srv` is named for the service, as \"_sip._udp.home.lan\""
+		    : "a record's name is a DNS name, as \"nas.home.lan\"";
+	} else if (record->cname && (kinds || record->forward_count)) {
+		reason = "a `cname` stands alone: DNS gives an alias no other record";
+	} else if (record->forward_count && kinds) {
+		reason = "a `forward` stands alone: the name's queries go to those servers, so "
+		         "nothing here would be asked for its records";
+	} else if (!kinds && !record->cname && !record->forward_count) {
+		reason = "a record says what the name answers: `address`, `cname`, `mx`, `txt`, "
+		         "`srv` or `forward`";
+	} else if (record->cname && !ncfg_dhcp_server_dns_name(record->cname)) {
+		reason = "a `cname` is the DNS name the alias stands for";
+	} else if (record->mx && !ncfg_dhcp_server_dns_name(record->mx)) {
+		reason = "an `mx` is the DNS name of the mail server";
+	} else if (record->preference.has && !record->mx) {
+		reason = "a `preference` belongs to an `mx`";
+	} else if (record->txt && !option_text(record->txt, 255u, "\"\\")) {
+		reason = "a `txt` is printable text, at most 255 characters, with no quote or "
+		         "backslash";
+	} else if (record->srv && !ncfg_dhcp_server_dns_name(record->srv)) {
+		reason = "an `srv` is the DNS name of the host offering the service";
+	} else if (record->srv && (!record->port.has || record->port.value < 1)) {
+		reason = "an `srv` needs the `port` the service is on";
+	} else if (!record->srv && (record->port.has || record->priority.has || record->weight.has)) {
+		reason = "a `port`, `priority` or `weight` belongs to an `srv`";
+	}
+	for (at = 0; !reason && at < record->address_count; at++) {
+		if (!bare_address(record->address[at])) {
+			reason = "an `address` is an IPv4 or IPv6 address, with no prefix";
+		}
+	}
+	for (at = 0; !reason && at < record->forward_count; at++) {
+		if (!bare_address(record->forward[at])) {
+			reason = "a `forward` server is an IPv4 or IPv6 address";
+		}
+	}
+	if (why) {
+		*why = reason;
+	}
+	return reason == NULL;
+}

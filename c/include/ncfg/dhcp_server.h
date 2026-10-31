@@ -45,7 +45,10 @@ int ncfg_dhcp_server_leases_path(const char *run, const char *iface, char *out, 
  * from the document, so a changed policy is a difference an operator can
  * read in the plan. 0 where the interface serves nothing it can work out.
  */
-int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_t out_size);
+/* `document` supplies the router's DNS records (0303), which a forwarding
+ * server answers; NULL for none. */
+int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interface_t *interface,
+    char *out, size_t out_size);
 
 /* The summary a running server's file carries, into `out`; 0 for none. */
 int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, size_t out_size);
@@ -55,15 +58,15 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
  * checked without serving it. Allocated; free with `free`. NULL with a
  * sentence where the interface's policy cannot be worked out.
  */
-char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *leases_path,
-    char *err, size_t err_size);
+char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
+    const char *leases_path, char *err, size_t err_size);
 
 /*
  * Start serving on one interface. `program` is the dnsmasq to run, or NULL
  * to find one. 0 with a sentence naming what failed, quoting dnsmasq.
  */
-int ncfg_dhcp_server_start(const char *run, const ncfg_interface_t *interface,
-    const char *program, char *err, size_t err_size);
+int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
+    const ncfg_interface_t *interface, const char *program, char *err, size_t err_size);
 
 /*
  * Stop serving on one interface: by the pid file dnsmasq wrote, checked

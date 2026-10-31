@@ -1053,4 +1053,6 @@ netcfgd
 # +4,264.
 # And custom DHCP options, typed and encoded at their type's width
 # (decision 0303), +4,592.
-total 1356712
+# And local DNS records, a top-level block with its own lowering, check,
+# renderer, plan warning and dnsmasq lines (decision 0303), +12,720.
+total 1369432

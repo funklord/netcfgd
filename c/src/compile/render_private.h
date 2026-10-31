@@ -117,6 +117,10 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 void ncfg_render_access_point(const ncfg_access_point_t *point,
     const ncfg_overrides_t *overrides, ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 
+/* One `dns_record` block (0303). */
+void ncfg_render_dns_record(const ncfg_dns_record_t *record, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing);
+
 /* One `host_list` block (10.591). */
 void ncfg_render_host_list(const ncfg_host_list_t *list, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);

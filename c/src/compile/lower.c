@@ -944,6 +944,34 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 					*slot = network;
 				}
 			}
+		} else if (strcmp(head, "dns_record") == 0) {
+			ncfg_dns_record_t  record;
+			ncfg_dns_record_t *slot;
+			size_t             at;
+			int                repeated = 0;
+
+			if (!ncfg_lower_dns_record(&ctx, block, &record)) {
+				continue;
+			}
+			for (at = 0; at < ctx.document->dns_record_count; at++) {
+				repeated = repeated || strcmp(ctx.document->dns_records[at].name, record.name) == 0;
+			}
+			if (repeated) {
+				/* The merge joins blocks of one label, so this is two
+				 * spellings of one name the merge saw as different. */
+				ncfg_diag(&ctx, block->block->span, "dns_record `%s` is declared twice",
+				    record.name);
+				ncfg_dns_record_free(&record);
+				continue;
+			}
+			ncfg_record(&ctx, block->source, block->block->span, "dns_record.%s", record.name);
+			slot = ncfg_push(&ctx, &ctx.document->dns_records, &ctx.document->dns_record_count,
+			    sizeof(*slot));
+			if (slot) {
+				*slot = record;
+			} else {
+				ncfg_dns_record_free(&record);
+			}
 		} else if (strcmp(head, "host_list") == 0) {
 			ncfg_host_list_t list;
 			size_t           at;
@@ -1005,7 +1033,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		} else {
 			ncfg_diag(&ctx, block->block->span,
 			    "unknown top-level block `%s`: the top-level blocks are interface, network, "
-			    "device, rule, linkset, access_point, mesh, host_list, firewall and global",
+			    "device, rule, linkset, access_point, mesh, host_list, dns_record, firewall "
+			    "and global",
 			    head);
 		}
 	}

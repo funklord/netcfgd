@@ -166,6 +166,48 @@ headered=$(client)
 say "a client not asking for option 67 is given: $headered"
 domain_name=$(ip netns exec client timeout 10 getent hosts desk.home.lan | awk '{print $1}')
 
+# DNS records (0303), answered by the forwarder. The router's own upstream
+# (127.0.0.2) knows nothing of corp.example; a second one (127.0.0.3) does, and
+# the `forward` record is what sends the name there.
+timeout -k 2 120 dnsmasq -k --conf-file=/dev/null --port=53 --listen-address=127.0.0.3 \
+	--bind-interfaces --no-resolv --address=/corp.example/10.7.7.7 --pid-file= --user=root \
+	> "$work/corp.log" 2>&1 &
+corp=$!
+timeout -k 2 120 dnsmasq -k --conf-file=/dev/null --port=53 --listen-address=127.0.0.2 \
+	--bind-interfaces --no-resolv --address=/example.test/10.9.9.9 --pid-file= --user=root \
+	> "$work/upstream2.log" 2>&1 &
+upstream=$!
+cat >> "$work/etc/netcfgd.conf" <<'RECORDS'
+dns_record "nas.home.lan" { address = ["192.168.7.10", "fd00::10"] }
+dns_record "files.home.lan" { cname = "nas.home.lan" }
+dns_record "home.lan" { mx = "mail.home.lan"; preference = 5; txt = "v=spf1 -all" }
+dns_record "_sip._udp.home.lan" { srv = "pbx.home.lan"; port = 5060; priority = 1; weight = 2 }
+dns_record "corp.example" { forward = ["127.0.0.3"] }
+RECORDS
+"$build/ncfg" plan > "$work/plan-records.log" 2>&1
+records_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server.*5 records ' "$work/plan-records.log")
+say "after the records: $(grep -E 'backend\.' "$work/plan-records.log" | head -1 | tr -s ' ')"
+"$build/ncfg" apply > "$work/apply7.log" 2>&1
+say "ncfg apply rc=$?"
+sleep 1
+lookup() { ip netns exec client timeout 10 getent ahosts "$1" | awk 'NR==1 {print $1}'; }
+nas=$(lookup nas.home.lan)
+nas6=$(ip netns exec client timeout 10 getent ahostsv6 nas.home.lan | awk 'NR==1 {print $1}')
+alias=$(lookup files.home.lan)
+corp_name=$(lookup www.corp.example)
+say "  nas.home.lan is '$nas' and '$nas6', files.home.lan '$alias', www.corp.example '$corp_name'"
+if command -v dig > /dev/null 2>&1; then
+	asked() { ip netns exec client timeout 10 dig +short @192.168.7.1 "$2" "$1" | tr '\n' ' '; }
+	mx=$(asked home.lan MX)
+	txt=$(asked home.lan TXT)
+	srv=$(asked _sip._udp.home.lan SRV)
+	say "  home.lan MX '$mx' TXT '$txt', _sip._udp SRV '$srv'"
+else
+	mx=skipped
+	say "  no dig in the image: MX, TXT and SRV are checked by dhcp_server_test's lines only"
+fi
+kill "$corp" "$upstream" 2>/dev/null
+
 # Custom options (0303), each typed, read by a client that knows each code's
 # width: a u16 of 5 sent as one byte, which dnsmasq does with a bare 5, is
 # refused by it and arrives empty.
@@ -189,6 +231,16 @@ say "the client is given custom options: $custom"
 say "  the client resolves desk.home.lan to '$domain_name'"
 
 failed=0
+[ "$records_plan" -ge 1 ] || { say "  the records were not planned as a restart counting them"; failed=1; }
+[ "$nas" = "192.168.7.10" ] || { say "  an address record did not resolve"; failed=1; }
+[ "$nas6" = "fd00::10" ] || { say "  its IPv6 address did not resolve"; failed=1; }
+[ "$alias" = "192.168.7.10" ] || { say "  an alias did not resolve to its target's address"; failed=1; }
+[ "$corp_name" = "10.7.7.7" ] || { say "  a forwarded domain was not asked of the server named"; failed=1; }
+if [ "$mx" != skipped ]; then
+	case "$mx" in *"5 mail.home.lan."*) ;; *) say "  the MX record was not answered"; failed=1 ;; esac
+	case "$txt" in *'"v=spf1 -all"'*) ;; *) say "  the TXT record was not answered"; failed=1 ;; esac
+	case "$srv" in *"1 2 5060 pbx.home.lan."*) ;; *) say "  the SRV record was not answered"; failed=1 ;; esac
+fi
 case "$custom" in
 	*"voip=192.168.7.9 192.168.7.10 motd=hello world mtu2=5 big=70000 flag=1 raw=01a203 one=ff small=7"*) ;;
 	*) say "  the custom options did not arrive at the widths their types say"; failed=1 ;;
@@ -245,6 +297,7 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  upstream: /' "$work/upstream.log" | tail -4 >> "$out"
 	sed 's/^/  apply5: /' "$work/apply5.log" | tail -6 >> "$out"
 	sed 's/^/  apply6: /' "$work/apply6.log" | tail -6 >> "$out"
+	sed 's/^/  apply7: /' "$work/apply7.log" | tail -6 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

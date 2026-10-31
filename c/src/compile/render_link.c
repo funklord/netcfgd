@@ -1322,6 +1322,80 @@ void ncfg_render_host_list(const ncfg_host_list_t *list, const ncfg_overrides_t 
 	ncfg_buf_add_text(text, "]\n}\n");
 }
 
+/* A list of strings as `key = ["a", "b"]`, for a record's addresses. */
+static void render_word_list(ncfg_buf_t *text, const char *key, char *const *words,
+    size_t count)
+{
+	size_t at;
+
+	if (!count) {
+		return;
+	}
+	ncfg_buf_addf(text, "\t%s = [", key);
+	for (at = 0; at < count; at++) {
+		if (at) {
+			ncfg_buf_add_text(text, ", ");
+		}
+		ncfg_render_quote(text, words[at]);
+	}
+	ncfg_buf_add_text(text, "]\n");
+}
+
+/*
+ * A DNS record (0303), refused where `ncfg_dns_record_check` would refuse it
+ * -- the lowerer asks the same question, so a profile never carries a record
+ * it would not load.
+ */
+void ncfg_render_dns_record(const ncfg_dns_record_t *record, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
+{
+	const char *why = NULL;
+	const struct {
+		const char *key;
+		const char *value;
+	} texts[] = {
+		{ "cname", record->cname },
+		{ "mx", record->mx },
+		{ "txt", record->txt },
+		{ "srv", record->srv },
+	};
+	const struct {
+		const char          *key;
+		const ncfg_optint_t *value;
+	} numbers[] = {
+		{ "preference", &record->preference },
+		{ "port", &record->port },
+		{ "priority", &record->priority },
+		{ "weight", &record->weight },
+	};
+	size_t at;
+
+	if (!ncfg_dns_record_check(record, &why)) {
+		ncfg_render_refuse(missing, "dns_record", record->name, "%s",
+		    why ? why : "it cannot be served");
+		return;
+	}
+	ncfg_render_opening(text, "dns_record", record->name, overrides);
+	ncfg_render_quote(text, record->name);
+	ncfg_buf_add_text(text, " {\n");
+	render_word_list(text, "address", record->address, record->address_count);
+	for (at = 0; at < sizeof(texts) / sizeof(texts[0]); at++) {
+		if (texts[at].value) {
+			ncfg_buf_addf(text, "\t%s = ", texts[at].key);
+			ncfg_render_quote(text, texts[at].value);
+			ncfg_buf_add_char(text, '\n');
+		}
+	}
+	for (at = 0; at < sizeof(numbers) / sizeof(numbers[0]); at++) {
+		if (numbers[at].value->has) {
+			ncfg_buf_addf(text, "\t%s = %lld\n", numbers[at].key,
+			    (long long)numbers[at].value->value);
+		}
+	}
+	render_word_list(text, "forward", record->forward, record->forward_count);
+	ncfg_buf_add_text(text, "}\n");
+}
+
 void ncfg_render_mesh(const ncfg_mesh_t *mesh, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {

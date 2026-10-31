@@ -422,7 +422,7 @@ static int start_dhcp_server(const ncfg_service_t *service, const char *run_dir,
 		    "built from has no `dhcp_server` block on it", iface);
 		return 0;
 	}
-	return ncfg_dhcp_server_start(run_dir, interface, NULL, err, err_size);
+	return ncfg_dhcp_server_start(run_dir, service->document, interface, NULL, err, err_size);
 }
 
 static int start_advertising(const ncfg_service_t *service, const char *run_dir,

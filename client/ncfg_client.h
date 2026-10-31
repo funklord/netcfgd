@@ -1205,6 +1205,33 @@ typedef struct {
 
 void ncfg_host_lists_free(ncfg_host_lists_t *lists);
 
+/* One local DNS record (0303), as an editor carries it: lists space-joined,
+ * text "" and numbers -1 where unset. */
+typedef struct {
+	char *name;
+	char *address;
+	char *cname;
+	char *mx;
+	int   preference;
+	char *txt;
+	char *srv;
+	int   port;
+	int   priority;
+	int   weight;
+	char *forward;
+} ncfg_dns_record_entry_t;
+
+typedef struct {
+	ncfg_dns_record_entry_t *items;
+	size_t                   count;
+} ncfg_dns_records_t;
+
+void ncfg_dns_records_free(ncfg_dns_records_t *records);
+
+/* The DNS records the configuration declares. Needs `observe`. */
+int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char *err,
+                            size_t err_size);
+
 /* One 802.11s mesh (10.588), as an editor carries it. `channel` -1 where
  * unset; `security` is `psk` (SAE) or `open`; `credential` the reference as
  * written, provider and all; `unmodelled` names what the editor cannot carry

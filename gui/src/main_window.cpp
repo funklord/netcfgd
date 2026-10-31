@@ -17,6 +17,7 @@
 #include "rules_view.h"
 #include "firewall_view.h"
 #include "host_lists_view.h"
+#include "dns_records_view.h"
 #include "meshes_view.h"
 #include "bluetooth_view.h"
 #include "hooks_view.h"
@@ -110,6 +111,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	rules = new ncfg_rules_view(connection, configuration);
 	firewall = new ncfg_firewall_view(connection, configuration);
 	host_lists = new ncfg_host_lists_view(connection, configuration);
+	dns_records = new ncfg_dns_records_view(connection, configuration);
 	meshes = new ncfg_meshes_view(connection, configuration);
 	hooks = new ncfg_hooks_view(connection, configuration);
 	secrets = new ncfg_secrets_view(connection, configuration);
@@ -132,6 +134,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * an operator looking for one looks where the other is. */
 	configuration->addTab(firewall, QStringLiteral("firewall"));
 	configuration->addTab(host_lists, QStringLiteral("host lists"));
+	configuration->addTab(dns_records, QStringLiteral("dns records"));
 	configuration->addTab(meshes, QStringLiteral("mesh"));
 	configuration->addTab(hooks, QStringLiteral("hooks"));
 	configuration->addTab(secrets, QStringLiteral("secrets"));
@@ -176,6 +179,8 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(firewall, &ncfg_firewall_view::changed, this, &ncfg_main_window::reload);
 	connect(host_lists, &ncfg_host_lists_view::reported, this, &ncfg_main_window::note);
 	connect(host_lists, &ncfg_host_lists_view::changed, this, &ncfg_main_window::reload);
+	connect(dns_records, &ncfg_dns_records_view::reported, this, &ncfg_main_window::note);
+	connect(dns_records, &ncfg_dns_records_view::changed, this, &ncfg_main_window::reload);
 	connect(meshes, &ncfg_meshes_view::reported, this, &ncfg_main_window::note);
 	connect(meshes, &ncfg_meshes_view::changed, this, &ncfg_main_window::reload);
 	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
@@ -341,6 +346,8 @@ void ncfg_main_window::refresh()
 		firewall->refresh();
 	} else if (current == host_lists) {
 		host_lists->refresh();
+	} else if (current == dns_records) {
+		dns_records->refresh();
 	} else if (current == meshes) {
 		meshes->refresh();
 	} else if (current == bluetooth) {

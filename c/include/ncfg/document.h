@@ -1767,6 +1767,34 @@ typedef struct {
 } ncfg_host_list_t;
 
 /*
+ * A local DNS record (decision 0303): a name the router's forwarders answer
+ * themselves. The router's, not one LAN's, so a top-level block, answered by
+ * every `dhcp_server` with `dns_forward`.
+ *
+ * One block per name, and a name may carry several kinds -- `address`
+ * (A and AAAA, either family), `mx` with its `preference`, `txt`, and `srv`
+ * with `port`, `priority` and `weight`. `cname` stands alone, as DNS says an
+ * alias must; so does `forward`, which sends the name's queries, and its
+ * subdomains', to other servers instead. `ncfg_dns_record_check` holds all
+ * of it, for the compiler, the renderer and the backend alike.
+ */
+typedef struct {
+	char         *name; /* the label, and the sorting key */
+	char        **address;
+	size_t        address_count;
+	char         *cname;
+	char         *mx;
+	ncfg_optint_t preference;
+	char         *txt;
+	char         *srv;
+	ncfg_optint_t port;
+	ncfg_optint_t priority;
+	ncfg_optint_t weight;
+	char        **forward;
+	size_t        forward_count;
+} ncfg_dns_record_t;
+
+/*
  * An access point netcfgd runs, rather than joins.
  *
  * Bound to a device, unlike a wifi network which deliberately is not: a
@@ -1982,6 +2010,9 @@ int ncfg_dhcp_option_code_taken(int64_t code);
 
 /* Colon-separated lowercase octets, "01:a2", one to 255 of them. */
 int ncfg_dhcp_option_hex(const char *text);
+
+/* Whether a DNS record is one the forwarder can serve (0303), and why not. */
+int ncfg_dns_record_check(const ncfg_dns_record_t *record, const char **why);
 
 int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
     char *router, const char **why);
@@ -2539,6 +2570,9 @@ typedef struct {
 	/* After the meshes, and omitted when empty, for the same reason. */
 	ncfg_host_list_t        *host_lists; /* sorted by name */
 	size_t                   host_list_count;
+	/* After the host lists, and omitted when empty, for the same reason. */
+	ncfg_dns_record_t       *dns_records; /* sorted by name */
+	size_t                   dns_record_count;
 } ncfg_document_t;
 
 /*
@@ -2577,6 +2611,8 @@ void ncfg_firewall_free(ncfg_firewall_t *firewall);
 void ncfg_dhcp_server_free(ncfg_dhcp_server_t *server);
 /* One custom option's members, not the struct, which a list holds. */
 void ncfg_dhcp_option_free(ncfg_dhcp_option_t *option);
+/* One DNS record's members, not the struct, which a list holds (0303). */
+void ncfg_dns_record_free(ncfg_dns_record_t *record);
 
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size);
 

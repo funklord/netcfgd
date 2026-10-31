@@ -551,6 +551,10 @@ void ncfg_plan_access_point_restart_policy(ncfg_builder_t *builder, const char *
 void ncfg_plan_advertise(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing);
 /* What an interface hands out by DHCPv4 (0297). */
+/* DNS records nothing answers (0303): said once, naming them, where no DHCP
+ * server forwards DNS. */
+void ncfg_plan_dns_record_warnings(ncfg_builder_t *builder);
+
 void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing);
 

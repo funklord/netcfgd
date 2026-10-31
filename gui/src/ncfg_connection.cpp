@@ -1548,6 +1548,47 @@ bool ncfg_connection::host_lists(QList<ncfg_host_list_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::dns_records(QList<ncfg_dns_record_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_dns_records_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_dns_records(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		const ncfg_dns_record_entry_t &one = found.items[i];
+		ncfg_dns_record_row            row;
+		row.name = from_c(one.name);
+		row.address = from_c(one.address);
+		row.cname = from_c(one.cname);
+		row.mx = from_c(one.mx);
+		row.preference = one.preference;
+		row.txt = from_c(one.txt);
+		row.srv = from_c(one.srv);
+		row.port = one.port;
+		row.priority = one.priority;
+		row.weight = one.weight;
+		row.forward = from_c(one.forward);
+		out->append(row);
+	}
+	ncfg_dns_records_free(&found);
+	return true;
+}
+
 bool ncfg_connection::meshes(QList<ncfg_mesh_row> *out, QString *error)
 {
 	if (!out) {

@@ -1770,6 +1770,42 @@
 #	}
 #}
 
+# LOCAL DNS NAMES (decision 0303). A `dns_record` is a name this router
+# answers itself, through every `dhcp_server` with `dns_forward = true` -- the
+# plan says so where none has it. Names a reservation or a lease carries
+# already resolve; a record is for what holds no lease, and for the kinds a
+# lease cannot say:
+#
+#   - `address` is the name's A and AAAA addresses, either family;
+#   - `cname` makes the name an alias for another, and stands alone, as DNS
+#     requires. dnsmasq answers an alias only for a target it knows itself:
+#     a record, a reservation or a lease;
+#   - `mx` with an optional `preference` (10 if unset), and `txt`;
+#   - `srv` with `port`, and optional `priority` and `weight`, on a name
+#     spelled for the service, `_sip._udp.home.lan`;
+#   - `forward` sends the name and everything under it to the servers named
+#     instead of the router's own upstream -- a VPN's internal domain, say --
+#     and stands alone too.
+
+#dns_record "nas.home.lan" {
+#	address = ["192.168.1.10", "fd00::10"]
+#}
+#dns_record "files.home.lan" {
+#	cname = "nas.home.lan"
+#}
+#dns_record "home.lan" {
+#	mx         = "mail.home.lan"
+#	preference = 5
+#	txt        = "v=spf1 -all"
+#}
+#dns_record "_sip._udp.home.lan" {
+#	srv  = "pbx.home.lan"
+#	port = 5060
+#}
+#dns_record "corp.example" {
+#	forward = ["10.0.0.53"]
+#}
+
 # POLICY ROUTING. A rule sends some traffic to a different table -- which is
 # how a second uplink, or a VPN for one subnet only, is expressed.
 

@@ -45,7 +45,7 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 	char                           wanted[NCFG_DHCP_SERVER_SUMMARY_MAX];
 
 	if (!interface->dhcp_server ||
-	    !ncfg_dhcp_server_summary(interface, wanted, sizeof(wanted))) {
+	    !ncfg_dhcp_server_summary(builder->desired, interface, wanted, sizeof(wanted))) {
 		return;
 	}
 	/* `dns` is never guessed (0297): say what an empty one means, since the
@@ -107,4 +107,28 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 	    &started);
 	ncfg_plan_ids_free(&deps);
 	ncfg_plan_ids_free(&started);
+}
+
+void ncfg_plan_dns_record_warnings(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 at;
+
+	if (!desired || !desired->dns_record_count) {
+		return;
+	}
+	for (at = 0; at < desired->interface_count; at++) {
+		const ncfg_dhcp_server_t *server = desired->interfaces[at].dhcp_server;
+
+		if (server && server->dns_forward) {
+			return;
+		}
+	}
+	/* Records are the forwarder's to answer, and nothing forwards: an
+	 * operator who wrote `nas.home.lan` would find it resolving nowhere. */
+	ncfg_plan_warnf(builder->plan, NULL,
+	    "%zu DNS record%s, starting with `%s`, will not be answered: records are served by a "
+	    "`dhcp_server` with `dns_forward = true`, and none has it",
+	    desired->dns_record_count, desired->dns_record_count == 1u ? "" : "s",
+	    desired->dns_records[0].name);
 }

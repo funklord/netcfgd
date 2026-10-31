@@ -113,7 +113,48 @@ static int options_digest(const ncfg_dhcp_server_t *server, uint32_t *out)
 	return any;
 }
 
-int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_t out_size)
+/*
+ * The router's DNS records (0303), as one digest and a count: what a
+ * forwarding server answers itself, so a changed record is a changed summary
+ * and a restart -- dnsmasq reads them only then. 0 records where the server
+ * does not forward, since it answers none of them.
+ */
+static size_t records_digest(const ncfg_document_t *document, const ncfg_dhcp_server_t *server,
+    uint32_t *out)
+{
+	uint32_t digest = 2166136261u;
+	size_t   at;
+	size_t   one;
+
+	if (!document || !server->dns_forward) {
+		return 0;
+	}
+	for (at = 0; at < document->dns_record_count; at++) {
+		const ncfg_dns_record_t *record = &document->dns_records[at];
+		char                     numbers[96];
+
+		(void)snprintf(numbers, sizeof(numbers), "%d %lld %d %lld %d %lld %d %lld",
+		    record->preference.has, (long long)record->preference.value, record->port.has,
+		    (long long)record->port.value, record->priority.has,
+		    (long long)record->priority.value, record->weight.has,
+		    (long long)record->weight.value);
+		digest = digest_text(digest_text(digest, record->name), numbers);
+		digest = digest_text(digest_text(digest, record->cname), record->mx);
+		digest = digest_text(digest_text(digest, record->txt), record->srv);
+		for (one = 0; one < record->address_count; one++) {
+			digest = digest_text(digest, record->address[one]);
+		}
+		digest = digest_text(digest, "|");
+		for (one = 0; one < record->forward_count; one++) {
+			digest = digest_text(digest, record->forward[one]);
+		}
+	}
+	*out = digest;
+	return document->dns_record_count;
+}
+
+int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interface_t *interface,
+    char *out, size_t out_size)
 {
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
 	char                      start[NCFG_ADDRESS_MAX];
@@ -174,9 +215,16 @@ int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_
 	{
 		uint32_t digest;
 
+		size_t   records;
+
 		if (options_digest(server, &digest) && used < out_size) {
 			used += (size_t)snprintf(out + used, out_size - used, ", options %08x",
 			    (unsigned)digest);
+		}
+		records = records_digest(document, server, &digest);
+		if (records && used < out_size) {
+			used += (size_t)snprintf(out + used, out_size - used, ", %zu record%s %08x",
+			    records, records == 1u ? "" : "s", (unsigned)digest);
 		}
 	}
 	return used < out_size;
@@ -260,8 +308,56 @@ static void render_custom_option(ncfg_buf_t *buf, const ncfg_dhcp_option_t *opti
 	ncfg_buf_add_char(buf, '\n');
 }
 
-char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *leases_path,
-    char *err, size_t err_size)
+/*
+ * The router's DNS records (0303), for a server that forwards. Each was
+ * checked by `ncfg_dns_record_check`, so no field holds a comma, a quote or
+ * a newline that would end its line. `host-record` answers A and AAAA,
+ * `cname` an alias -- dnsmasq answers one only for a target it knows itself,
+ * a lease, a reservation or another record -- and `server=/name/` sends the
+ * name and everything under it to the servers named.
+ */
+static void render_records(ncfg_buf_t *buf, const ncfg_document_t *document)
+{
+	size_t at;
+	size_t one;
+
+	for (at = 0; document && at < document->dns_record_count; at++) {
+		const ncfg_dns_record_t *record = &document->dns_records[at];
+
+		if (!ncfg_dns_record_check(record, NULL)) {
+			continue;
+		}
+		if (record->address_count) {
+			ncfg_buf_addf(buf, "host-record=%s", record->name);
+			for (one = 0; one < record->address_count; one++) {
+				ncfg_buf_addf(buf, ",%s", record->address[one]);
+			}
+			ncfg_buf_add_char(buf, '\n');
+		}
+		if (record->cname) {
+			ncfg_buf_addf(buf, "cname=%s,%s\n", record->name, record->cname);
+		}
+		if (record->mx) {
+			ncfg_buf_addf(buf, "mx-host=%s,%s,%lld\n", record->name, record->mx,
+			    record->preference.has ? (long long)record->preference.value : 10LL);
+		}
+		if (record->txt) {
+			ncfg_buf_addf(buf, "txt-record=%s,\"%s\"\n", record->name, record->txt);
+		}
+		if (record->srv) {
+			ncfg_buf_addf(buf, "srv-host=%s,%s,%lld,%lld,%lld\n", record->name, record->srv,
+			    (long long)record->port.value,
+			    record->priority.has ? (long long)record->priority.value : 0LL,
+			    record->weight.has ? (long long)record->weight.value : 0LL);
+		}
+		for (one = 0; one < record->forward_count; one++) {
+			ncfg_buf_addf(buf, "server=/%s/%s\n", record->name, record->forward[one]);
+		}
+	}
+}
+
+char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
+    const char *leases_path, char *err, size_t err_size)
 {
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
 	char                      start[NCFG_ADDRESS_MAX];
@@ -277,7 +373,7 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 		return NULL;
 	}
 	if (!ncfg_dhcp_server_range(interface, start, end, NULL, &why) ||
-	    !ncfg_dhcp_server_summary(interface, summary, sizeof(summary))) {
+	    !ncfg_dhcp_server_summary(document, interface, summary, sizeof(summary))) {
 		ncfg_error_set(err, err_size, "%s cannot serve DHCP: %s", interface->name,
 		    why ? why : "its range cannot be worked out");
 		return NULL;
@@ -366,6 +462,9 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 	for (at = 0; at < server->option_count; at++) {
 		render_custom_option(&buf, &server->options[at]);
 	}
+	if (server->dns_forward) {
+		render_records(&buf, document);
+	}
 	if (ncfg_buf_failed(&buf)) {
 		ncfg_buf_free(&buf);
 		ncfg_error_set(err, err_size, "out of memory rendering the DHCP server on %s",
@@ -377,8 +476,8 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 	return out;
 }
 
-int ncfg_dhcp_server_start(const char *run, const ncfg_interface_t *interface,
-    const char *program, char *err, size_t err_size)
+int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
+    const ncfg_interface_t *interface, const char *program, char *err, size_t err_size)
 {
 	char        dir[NCFG_DHCP_SERVER_PATH_MAX];
 	char        config[NCFG_DHCP_SERVER_PATH_MAX];
@@ -407,7 +506,7 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_interface_t *interface,
 	        err_size)) {
 		return 0;
 	}
-	text = ncfg_dhcp_server_render(interface, leases, err, err_size);
+	text = ncfg_dhcp_server_render(document, interface, leases, err, err_size);
 	if (!text) {
 		return 0;
 	}

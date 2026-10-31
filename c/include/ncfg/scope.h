@@ -89,6 +89,8 @@ typedef enum {
 	/* A named list of hosts other blocks refer to (10.591). Last, for the
 	 * reason above. */
 	NCFG_BLOCK_HOST_LIST,
+	/* The router's local DNS names (0303). Last, for the reason above. */
+	NCFG_BLOCK_DNS_RECORD,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

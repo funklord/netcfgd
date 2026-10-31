@@ -12597,6 +12597,38 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.635 Local DNS records
+
+0303's third slice, UniFi's "DNS records": `dns_record "nas.home.lan" { ... }`,
+a top-level block because a router's names are not one LAN's -- a NAS written
+once is answered on every LAN whose server forwards DNS. One block per name;
+it may carry `address` (A and AAAA), `mx` with `preference`, `txt`, and `srv`
+with `port`, `priority` and `weight` together, while `cname` and `forward`
+stand alone -- the first because DNS says an alias has no other record, the
+second because a forwarded name is asked of other servers and nothing here
+would be consulted. `ncfg_dns_record_check` holds all of it for the
+compiler, the profile renderer and the backend. A new block head means
+`NCFG_BLOCK_DNS_RECORD`, scoped to the group (a site's names), last in the
+enum for the reason `scope.h` gives.
+
+The DHCP server's summary, render and start now take the document, which is
+where records are; a forwarding server counts them in its summary with a
+digest, so a changed record restarts it. Records with no forwarding server
+anywhere are one plan warning naming the first of them.
+
+**Measured.** `make hull-dhcp-server` has a real client resolve an address
+record in both families, an alias to its target's address, and a name under a
+`forward` domain through a second upstream that alone knows it. The image has
+no `dig`, so MX, TXT and SRV were measured on this host instead: dnsmasq 2.91
+given exactly the lines `dhcp_server_test` asserts netcfgd writes answers
+`5 mail.home.lan.`, `"v=spf1 -all"` and `1 2 5060 pbx.home.lan.`. The GUI has a
+`dns records` tab, held by the coverage gate and by `dns_record_load`, which
+saves one record of each kind unchanged and compares what netcfgd compiles; a
+writer that drops the numbers fails it. `override_coverage_gate.py` caught the
+one layer the slice first missed: `collect_overrides` had not been told the new
+kind, so `ncfg profile save` would have written a record bare over the base's
+and been refused for a redefinition. +12,720 bytes.
+
 ## 10.634 Custom DHCP options, typed
 
 0303's second slice: `option "voip" { code = 150; ip = [...] }` inside

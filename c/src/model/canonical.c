@@ -179,6 +179,12 @@ static int compare_neighbour(const void *left, const void *right)
 	    ((const ncfg_neighbour_t *)right)->bssid);
 }
 
+static int compare_dns_record(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_dns_record_t *)left)->name,
+	    ((const ncfg_dns_record_t *)right)->name);
+}
+
 static int compare_dhcp_option(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_dhcp_option_t *)left)->name,
@@ -508,6 +514,10 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 
 	stable_sort(document->host_lists, document->host_list_count,
 	    sizeof(*document->host_lists), compare_host_list);
+	/* DNS records are a set by name (0303); a record's addresses keep the
+	 * order written, which is the order they are answered in. */
+	stable_sort(document->dns_records, document->dns_record_count,
+	    sizeof(*document->dns_records), compare_dns_record);
 	/* A DHCP server's reservations are a set, by name (10.605). Its `dns`
 	 * is not: the order is the order a client tries them. */
 	for (i = 0; i < document->interface_count; i++) {

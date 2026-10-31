@@ -69,6 +69,7 @@ FORMS = {
 	"firewall_fields": FIREWALL_READER,
 	"host_list_fields": ("ncfg_client_host_lists", []),
 	"mesh_fields": ("ncfg_client_meshes", []),
+	"dns_record_fields": ("ncfg_client_dns_records", []),
 }
 
 # Sub-blocks a dialog reads field by field, held to the same rule. Each names

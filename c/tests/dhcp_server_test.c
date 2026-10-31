@@ -71,7 +71,7 @@ int main(void)
 	lan.addressing_count = 1u;
 	lan.dhcp_server = &server;
 
-	text = ncfg_dhcp_server_render(&lan, "/run/netcfgd/dhcp-server/br0.leases", message,
+	text = ncfg_dhcp_server_render(NULL, &lan, "/run/netcfgd/dhcp-server/br0.leases", message,
 	    sizeof(message));
 	check(text && has_line(text, "port=0") && has_line(text, "interface=br0") &&
 	    has_line(text, "bind-interfaces") && has_line(text, "dhcp-authoritative"),
@@ -90,13 +90,13 @@ int main(void)
 	 * what keeps it off a resolver already there. No `dhcp-option=6`, so the
 	 * router is offered; and the summary changes, so turning it on restarts. */
 	server.dns_forward = 1;
-	text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 	check(text && has_line(text, "port=53") && !has_line(text, "port=0") &&
 	        has_line(text, "except-interface=lo") && has_line(text, "interface=br0") &&
 	        has_line(text, "domain-needed") && has_line(text, "bogus-priv") &&
 	        !strstr(text, "dhcp-option=6"),
 	    "a forwarding server answers DNS on its interface alone, offering itself");
-	check(ncfg_dhcp_server_summary(&lan, summary, sizeof(summary)) &&
+	check(ncfg_dhcp_server_summary(NULL, &lan, summary, sizeof(summary)) &&
 	        strcmp(summary, "192.168.1.100-192.168.1.249, 43200 s, dns this router, "
 	                        "forwarding dns") == 0,
 	    "  and says so in its summary, so turning it on is a restart");
@@ -107,11 +107,11 @@ int main(void)
 	server.dns_count = 2u;
 	server.lease.has = 1;
 	server.lease.value = 3600;
-	text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 	check(text && has_line(text, "dhcp-option=6,192.168.1.1,9.9.9.9") &&
 	    has_line(text, "dhcp-range=br0,192.168.1.100,192.168.1.249,3600"),
 	    "the DNS servers named are offered, in order, and the lease is the one stated");
-	check(ncfg_dhcp_server_summary(&lan, summary, sizeof(summary)) &&
+	check(ncfg_dhcp_server_summary(NULL, &lan, summary, sizeof(summary)) &&
 	    strcmp(summary, "192.168.1.100-192.168.1.249, 3600 s, dns 192.168.1.1 9.9.9.9") == 0,
 	    "the summary says what is served, in words a plan can show");
 	check(text && strstr(text, "# serves: 192.168.1.100-192.168.1.249, 3600 s, dns ") != NULL,
@@ -140,19 +140,19 @@ int main(void)
 
 		server.hosts = &host;
 		server.host_count = 1u;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(text && has_line(text, "dhcp-host=AA:BB:CC:DD:EE:01,192.168.1.10,printer"),
 		    "a reservation is a dhcp-host line: the MAC, its address and its name");
 		free(text);
-		check(ncfg_dhcp_server_summary(&lan, before, sizeof(before)) &&
+		check(ncfg_dhcp_server_summary(NULL, &lan, before, sizeof(before)) &&
 		    strncmp(before, summary, strlen(summary)) == 0 && strstr(before, ", 1 host "),
 		    "  the summary keeps what it said and counts the reservation");
 		host.address = moved;
-		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		check(ncfg_dhcp_server_summary(NULL, &lan, recorded, sizeof(recorded)) &&
 		    strcmp(recorded, before) != 0,
 		    "  and a reservation moved to another address is a different summary");
 		host.address = dns0;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "the interface's own"),
 		    "  one given the router's own address renders nothing, and says why");
 		free(text);
@@ -177,7 +177,7 @@ int main(void)
 		char comma[] = "a,b";
 		char before[NCFG_DHCP_SERVER_SUMMARY_MAX];
 
-		check(ncfg_dhcp_server_summary(&lan, before, sizeof(before)) &&
+		check(ncfg_dhcp_server_summary(NULL, &lan, before, sizeof(before)) &&
 		    !strstr(before, "options"),
 		    "a server offering no options says nothing of them in its summary");
 		server.gateway = gateway;
@@ -189,7 +189,7 @@ int main(void)
 		server.tftp_server = tftp;
 		server.wpad = wpad;
 		server.dns_forward = 1;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(text && has_line(text, "dhcp-option=3,192.168.1.254") &&
 		        has_line(text, "domain=home.lan") && has_line(text, "local=/home.lan/") &&
 		        has_line(text, "dhcp-option=42,192.168.1.1,192.168.1.2") &&
@@ -198,34 +198,34 @@ int main(void)
 		        has_line(text, "dhcp-option=252,\"http://wpad.home.lan/wpad.dat\""),
 		    "the standard options are a line each, the domain answered here alone");
 		free(text);
-		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		check(ncfg_dhcp_server_summary(NULL, &lan, recorded, sizeof(recorded)) &&
 		        strstr(recorded, ", options ") != NULL,
 		    "  and the summary carries their digest");
 		strcpy(before, recorded);
 		server.ntp_count = 1u;
-		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		check(ncfg_dhcp_server_summary(NULL, &lan, recorded, sizeof(recorded)) &&
 		        strcmp(recorded, before) != 0,
 		    "  so dropping an NTP server is a different summary, and a restart");
 		server.ntp_count = 2u;
 		server.boot_server = NULL;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(text && has_line(text, "dhcp-boot=pxelinux.0"),
 		    "a boot file with no server is the file alone");
 		free(text);
 		server.gateway = outside;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "gateway"),
 		    "a gateway off the network renders nothing, and says why");
 		free(text);
 		server.gateway = gateway;
 		server.boot_file = comma;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "boot_file"),
 		    "  and so does a boot file that would end dnsmasq's field");
 		free(text);
 		server.boot_file = NULL;
 		server.boot_server = boot_server;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "boot_server"),
 		    "  and a boot server with no file to fetch from it");
 		free(text);
@@ -263,10 +263,10 @@ int main(void)
 			{ 0, 0 } };
 		options[6] = (ncfg_dhcp_option_t){ n_one, 229, NCFG_DHCP_OPTION_HEX, NULL, 0u, one,
 			{ 0, 0 } };
-		check(ncfg_dhcp_server_summary(&lan, before, sizeof(before)), "a summary to compare");
+		check(ncfg_dhcp_server_summary(NULL, &lan, before, sizeof(before)), "a summary to compare");
 		server.options = options;
 		server.option_count = 7u;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(text && has_line(text, "dhcp-option=150,192.168.1.9") &&
 		        has_line(text, "dhcp-option=224,\"hello\"") &&
 		        has_line(text, "dhcp-option=225,00:05") &&
@@ -275,22 +275,22 @@ int main(void)
 		        has_line(text, "dhcp-option=229,255"),
 		    "custom options are encoded at their type's width, never left to a guess");
 		free(text);
-		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		check(ncfg_dhcp_server_summary(NULL, &lan, recorded, sizeof(recorded)) &&
 		        strcmp(recorded, before) != 0,
 		    "  and change the summary, so adding one restarts the server");
 		options[2].number.value = 70000;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "does not fit its type"),
 		    "a u16 too large renders nothing, and says why");
 		free(text);
 		options[2].number.value = 5;
 		options[2].code = 6;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "`code`"),
 		    "  and so does a code a key already sets, so it has one spelling");
 		free(text);
 		options[2].code = 224;
-		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 		check(!text && strstr(message, "share a name or a code"),
 		    "  and two options of one code");
 		free(text);
@@ -298,8 +298,68 @@ int main(void)
 		server.option_count = 0u;
 	}
 
+	/* DNS records (0303): served by a forwarding server, one line per kind,
+	 * and in the summary so a changed record restarts it. */
+	{
+		char              nas[] = "nas.home.lan", files[] = "files.home.lan",
+		                  home[] = "home.lan", sip[] = "_sip._udp.home.lan",
+		                  corp[] = "corp.example";
+		char              v4[] = "192.168.1.10", v6[] = "fd00::10", up[] = "10.0.0.53";
+		char             *addresses[] = { v4, v6 };
+		char             *upstream[] = { up };
+		char              mail[] = "mail.home.lan", spf[] = "v=spf1 -all", pbx[] = "pbx.home.lan";
+		ncfg_dns_record_t records[5];
+		ncfg_document_t   document;
+		char              before[NCFG_DHCP_SERVER_SUMMARY_MAX];
+
+		memset(records, 0, sizeof(records));
+		memset(&document, 0, sizeof(document));
+		records[0].name = nas;
+		records[0].address = addresses;
+		records[0].address_count = 2u;
+		records[1].name = files;
+		records[1].cname = nas;
+		records[2].name = home;
+		records[2].mx = mail;
+		records[2].preference = (ncfg_optint_t){ 1, 5 };
+		records[2].txt = spf;
+		records[3].name = sip;
+		records[3].srv = pbx;
+		records[3].port = (ncfg_optint_t){ 1, 5060 };
+		records[3].priority = (ncfg_optint_t){ 1, 1 };
+		records[4].name = corp;
+		records[4].forward = upstream;
+		records[4].forward_count = 1u;
+		document.dns_records = records;
+		document.dns_record_count = 5u;
+
+		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", message, sizeof(message));
+		check(text && !strstr(text, "host-record=") && !strstr(text, "server=/"),
+		    "a server that does not forward DNS answers no records");
+		free(text);
+		check(ncfg_dhcp_server_summary(&document, &lan, before, sizeof(before)) &&
+		    !strstr(before, "record"), "  and its summary does not count them");
+		server.dns_forward = 1;
+		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "host-record=nas.home.lan,192.168.1.10,fd00::10") &&
+		        has_line(text, "cname=files.home.lan,nas.home.lan") &&
+		        has_line(text, "mx-host=home.lan,mail.home.lan,5") &&
+		        has_line(text, "txt-record=home.lan,\"v=spf1 -all\"") &&
+		        has_line(text, "srv-host=_sip._udp.home.lan,pbx.home.lan,5060,1,0") &&
+		        has_line(text, "server=/corp.example/10.0.0.53"),
+		    "a forwarding server answers every record, a line per kind");
+		free(text);
+		check(ncfg_dhcp_server_summary(&document, &lan, before, sizeof(before)) &&
+		    strstr(before, ", 5 records "), "  and counts them in its summary");
+		records[0].address_count = 1u;
+		check(ncfg_dhcp_server_summary(&document, &lan, recorded, sizeof(recorded)) &&
+		    strcmp(recorded, before) != 0,
+		    "  so a record that loses an address is a restart");
+		server.dns_forward = 0;
+	}
+
 	source.static_address.address = NULL;
-	text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 	check(!text && strstr(message, "cannot serve DHCP"),
 	    "an interface with no address to serve from renders nothing, and says why");
 	free(text);

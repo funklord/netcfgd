@@ -394,6 +394,12 @@ static int collect_overrides(const ncfg_document_t *base, ncfg_overrides_t *over
 			return 0;
 		}
 	}
+	for (i = 0; i < base->dns_record_count; i++) {
+		if (!ncfg_overrides_add(overrides, "dns_record", base->dns_records[i].name, err,
+		        err_size)) {
+			return 0;
+		}
+	}
 	for (i = 0; i < base->linkset_count; i++) {
 		if (!ncfg_overrides_add(overrides, "linkset", base->linksets[i].name, err,
 		    err_size)) {

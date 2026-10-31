@@ -2291,6 +2291,30 @@ static const ncfg_field_t mesh_fields[] = {
 };
 static const ncfg_type_t mesh_type = TYPE("mesh", mesh_fields);
 
+static const ncfg_field_t dns_record_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_dns_record_t, name) },
+	{ .name = "address", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dns_record_t, address),
+	    .count_offset = offsetof(ncfg_dns_record_t, address_count) },
+	{ .name = "cname", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dns_record_t, cname) },
+	{ .name = "mx", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dns_record_t, mx) },
+	{ .name = "preference", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_dns_record_t, preference) },
+	{ .name = "txt", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dns_record_t, txt) },
+	{ .name = "srv", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dns_record_t, srv) },
+	{ .name = "port", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_dns_record_t, port) },
+	{ .name = "priority", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_dns_record_t, priority) },
+	{ .name = "weight", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_dns_record_t, weight) },
+	{ .name = "forward", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dns_record_t, forward),
+	    .count_offset = offsetof(ncfg_dns_record_t, forward_count) }
+};
+static const ncfg_type_t dns_record_type = TYPE("DNS record", dns_record_fields);
+
 static const ncfg_field_t host_list_fields[] = {
 	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_host_list_t, name) },
@@ -2770,7 +2794,11 @@ static const ncfg_field_t document_fields[] = {
 	{ .name = "host_lists", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &host_list_type, .element_size = sizeof(ncfg_host_list_t),
 	    .offset = offsetof(ncfg_document_t, host_lists),
-	    .count_offset = offsetof(ncfg_document_t, host_list_count) }
+	    .count_offset = offsetof(ncfg_document_t, host_list_count) },
+	{ .name = "dns_records", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &dns_record_type, .element_size = sizeof(ncfg_dns_record_t),
+	    .offset = offsetof(ncfg_document_t, dns_records),
+	    .count_offset = offsetof(ncfg_document_t, dns_record_count) }
 };
 static const ncfg_type_t document_type = TYPE("document", document_fields);
 
@@ -2826,6 +2854,13 @@ const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const
 		}
 	}
 	return NULL;
+}
+
+void ncfg_dns_record_free(ncfg_dns_record_t *record)
+{
+	if (record) {
+		ncfg_type_free(&dns_record_type, record);
+	}
 }
 
 void ncfg_dhcp_option_free(ncfg_dhcp_option_t *option)

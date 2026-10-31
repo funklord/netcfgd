@@ -1535,6 +1535,9 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	for (i = 0; i < document->host_list_count; i++) {
 		ncfg_render_host_list(&document->host_lists[i], overrides, text, missing);
 	}
+	for (i = 0; i < document->dns_record_count; i++) {
+		ncfg_render_dns_record(&document->dns_records[i], overrides, text, missing);
+	}
 	for (i = 0; i < document->access_point_count; i++) {
 		ncfg_render_access_point(&document->access_points[i], overrides, text, missing);
 	}

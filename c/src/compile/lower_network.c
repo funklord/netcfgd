@@ -913,6 +913,125 @@ int ncfg_is_host_list_name(const char *name)
  * somebody is about to fill, and the access point naming it says what that
  * means for it.
  */
+/*
+ * `dns_record "nas.home.lan" { address = ["192.168.1.10"] }` (0303): a name
+ * the router's forwarders answer. Lowered beside the host list as the other
+ * router-wide list of names; what the record may say is
+ * `ncfg_dns_record_check`'s, which the renderer and the backend call too.
+ */
+int ncfg_lower_dns_record(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
+    ncfg_dns_record_t *out)
+{
+	const ncfg_ast_block_t *block = merged->block;
+	const char             *why = NULL;
+	size_t                  i;
+
+	memset(out, 0, sizeof(*out));
+	out->name = ncfg_require_label(ctx, block);
+	if (!out->name) {
+		return 0;
+	}
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t       *item = merged->items[i].item;
+		const ncfg_ast_assignment_t *assignment;
+		const char                  *key;
+		char                       **text = NULL;
+		ncfg_optint_t               *number = NULL;
+		char                      ***list = NULL;
+		size_t                      *count = NULL;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `dns_record`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		key = assignment->key;
+		if (strcmp(key, "address") == 0) {
+			list = &out->address;
+			count = &out->address_count;
+		} else if (strcmp(key, "forward") == 0) {
+			list = &out->forward;
+			count = &out->forward_count;
+		} else if (strcmp(key, "cname") == 0) {
+			text = &out->cname;
+		} else if (strcmp(key, "mx") == 0) {
+			text = &out->mx;
+		} else if (strcmp(key, "txt") == 0) {
+			text = &out->txt;
+		} else if (strcmp(key, "srv") == 0) {
+			text = &out->srv;
+		} else if (strcmp(key, "preference") == 0) {
+			number = &out->preference;
+		} else if (strcmp(key, "port") == 0) {
+			number = &out->port;
+		} else if (strcmp(key, "priority") == 0) {
+			number = &out->priority;
+		} else if (strcmp(key, "weight") == 0) {
+			number = &out->weight;
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown dns_record key `%s`: address, cname, mx and preference, txt, srv "
+			    "with port, priority and weight, and forward", key);
+			continue;
+		}
+		if (text) {
+			char *value = ncfg_as_string(ctx, assignment->value);
+
+			if (value) {
+				free(*text);
+				*text = value;
+			}
+		} else if (number) {
+			int64_t value;
+
+			if (ncfg_as_i64(ctx, assignment->value, &value)) {
+				if (value < 0 || value > 65535) {
+					ncfg_diag(ctx, assignment->span, "`%s = %lld` is not 0 to 65535", key,
+					    (long long)value);
+					continue;
+				}
+				number->has = 1;
+				number->value = value;
+			}
+		} else {
+			ncfg_words_t words;
+			size_t       at;
+
+			if (!ncfg_as_words(ctx, assignment->value, &words)) {
+				ncfg_words_free(&words);
+				continue;
+			}
+			for (at = 0; at < words.count; at++) {
+				char **grown = realloc(*list, (*count + 1u) * sizeof(*grown));
+
+				if (!grown) {
+					ncfg_lower_oom(ctx);
+					break;
+				}
+				*list = grown;
+				(*list)[*count] = strdup(words.at[at].text);
+				if (!(*list)[(*count)++]) {
+					ncfg_lower_oom(ctx);
+				}
+			}
+			ncfg_words_free(&words);
+		}
+	}
+	ctx->source = merged->source;
+	if (!ncfg_dns_record_check(out, &why)) {
+		ncfg_diag(ctx, block->span, "dns_record `%s`: %s", out->name,
+		    why ? why : "it cannot be served");
+		ncfg_dns_record_free(out);
+		return 0;
+	}
+	return 1;
+}
+
 int ncfg_lower_host_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
     ncfg_host_list_t *out)
 {

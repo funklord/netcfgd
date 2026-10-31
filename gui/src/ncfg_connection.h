@@ -351,6 +351,22 @@ struct ncfg_mesh_row {
 	QString unmodelled;
 };
 
+/* One local DNS record (0303): lists space-joined, text empty and numbers
+ * -1 where unset. */
+struct ncfg_dns_record_row {
+	QString name;
+	QString address;
+	QString cname;
+	QString mx;
+	int     preference = -1;
+	QString txt;
+	QString srv;
+	int     port = -1;
+	int     priority = -1;
+	int     weight = -1;
+	QString forward;
+};
+
 struct ncfg_bluetooth_row {
 	QString id;
 	QString address;
@@ -1269,6 +1285,8 @@ public:
 	bool host_lists(QList<ncfg_host_list_row> *out, QString *error);
 	/* The meshes the configuration declares, for the tab that edits them. */
 	bool meshes(QList<ncfg_mesh_row> *out, QString *error);
+	/* The local DNS records the configuration declares (0303). */
+	bool dns_records(QList<ncfg_dns_record_row> *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);

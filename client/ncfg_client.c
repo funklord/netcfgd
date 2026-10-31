@@ -3031,6 +3031,86 @@ int ncfg_client_meshes(ncfg_client_t *client, ncfg_meshes_t *out, char *err, siz
 	return 1;
 }
 
+void ncfg_dns_records_free(ncfg_dns_records_t *records)
+{
+	if (!records) {
+		return;
+	}
+	for (size_t i = 0; i < records->count; i++) {
+		ncfg_dns_record_entry_t *one = &records->items[i];
+
+		free(one->name);
+		free(one->address);
+		free(one->cname);
+		free(one->mx);
+		free(one->txt);
+		free(one->srv);
+		free(one->forward);
+	}
+	free(records->items);
+	records->items = NULL;
+	records->count = 0;
+}
+
+int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char *err,
+                            size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t records = ncfg_json_member(doc, ncfg_json_root(doc), "dns_records");
+	uint32_t count = ncfg_json_count(doc, records);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t                 entry = ncfg_json_at(doc, records, i);
+		ncfg_dns_record_entry_t *one = &out->items[i];
+
+		one->name = member_text(doc, entry, "name");
+		one->address = joined_words(doc, ncfg_json_member(doc, entry, "address"));
+		one->cname = member_text(doc, entry, "cname");
+		one->mx = member_text(doc, entry, "mx");
+		one->preference = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "preference"), -1);
+		one->txt = member_text(doc, entry, "txt");
+		one->srv = member_text(doc, entry, "srv");
+		one->port = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "port"), -1);
+		one->priority = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), -1);
+		one->weight = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "weight"), -1);
+		one->forward = joined_words(doc, ncfg_json_member(doc, entry, "forward"));
+		if (!one->name || !one->address || !one->cname || !one->mx || !one->txt || !one->srv ||
+		    !one->forward) {
+			ncfg_dns_records_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_host_lists_free(ncfg_host_lists_t *lists)
 {
 	if (!lists) {

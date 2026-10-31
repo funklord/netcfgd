@@ -852,6 +852,14 @@ static void an_access_point_round_trips(void)
 	    "\t\toption \"raw\" { code = 228; hex = \"01:a2:03\" }\n"
 	    "\t\toption \"small\" { code = 230; u8 = 0 }\n\t}\n}\n",
 	    "  and so does one with a custom option of every type (0303)");
+	round_trips("dns_record \"nas.home.lan\" {\n\taddress = [\"192.168.1.10\", \"fd00::10\"]\n}\n"
+	    "dns_record \"files.home.lan\" {\n\tcname = \"nas.home.lan\"\n}\n"
+	    "dns_record \"home.lan\" {\n\tmx = \"mail.home.lan\"\n\ttxt = \"v=spf1 -all\"\n"
+	    "\tpreference = 5\n}\n"
+	    "dns_record \"_sip._udp.home.lan\" {\n\tsrv = \"pbx.home.lan\"\n\tport = 5060\n"
+	    "\tpriority = 1\n\tweight = 2\n}\n"
+	    "dns_record \"corp.example\" {\n\tforward = [\"10.0.0.53\", \"fd00::53\"]\n}\n",
+	    "DNS records of every kind round-trip (0303)");
 	round_trips("interface wan0 {\n\tnat = true\n"
 	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\"; "
 	    "to_port = 8443 }\n"

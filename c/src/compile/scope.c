@@ -16,7 +16,7 @@
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
 	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh",
-	"host_list" };
+	"host_list", "dns_record" };
 
 const char *ncfg_block_name(int block)
 {
@@ -92,7 +92,10 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	 * point's `access_control` travels, and it may name a list: a list that
 	 * stayed behind would arrive on the next host as a reference to nothing,
 	 * which that host refuses. */
-	[NCFG_BLOCK_HOST_LIST] = NCFG_SCOPE_ESTATE
+	[NCFG_BLOCK_HOST_LIST] = NCFG_SCOPE_ESTATE,
+	/* A site's names: what one router's LANs answer, shared by the machines
+	 * of that site rather than by the estate (0303). */
+	[NCFG_BLOCK_DNS_RECORD] = NCFG_SCOPE_GROUP
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)

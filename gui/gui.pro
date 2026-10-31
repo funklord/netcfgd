@@ -112,6 +112,8 @@ SOURCES += \
 	src/firewall_view.cpp \
 	src/host_list_dialog.cpp \
 	src/host_lists_view.cpp \
+	src/dns_record_dialog.cpp \
+	src/dns_records_view.cpp \
 	src/mesh_dialog.cpp \
 	src/meshes_view.cpp \
 	src/config_view.cpp \
@@ -155,6 +157,8 @@ HEADERS += \
 	src/firewall_view.h \
 	src/host_list_dialog.h \
 	src/host_lists_view.h \
+	src/dns_record_dialog.h \
+	src/dns_records_view.h \
 	src/mesh_dialog.h \
 	src/meshes_view.h \
 	src/config_view.h \

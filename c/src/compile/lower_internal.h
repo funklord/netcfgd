@@ -428,6 +428,11 @@ int ncfg_is_host_list_name(const char *name);
 	"netcfgd expands a prefix into the stations it has seen match it, and a " \
 	"station an allow list refuses is never seen; list the addresses to allow"
 
+/* `dns_record "nas.home.lan" { ... }` (0303). 0, with a diagnostic, for one
+ * `ncfg_dns_record_check` refuses. */
+int ncfg_lower_dns_record(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
+    ncfg_dns_record_t *out);
+
 int ncfg_lower_host_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
     ncfg_host_list_t *out);
 /*
