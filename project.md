@@ -12597,6 +12597,32 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.646 SLAAC turned on for an interface already up
+
+hull 5be9f34 lets a segment advertise unasked, `(advertise_every D)`, which
+hull's session offered for the case `make hull-slaac` found on 2026-10-30: an
+accept_ra written after the kernel solicited gets no advertisement from an
+advertiser that only answers. That rig's ordering assertion depends on hull
+answering only when asked, so its first segment stays that way and a second,
+`every`, advertises every 2 s as a real router does on its own interval.
+
+The new case is the one a router meets in service: an interface already up
+and forwarding, where netcfgd turns slaac on without bringing the interface
+up, so nothing solicits. At accept_ra 1 the interface ignores four intervals
+of advertisements. After the apply the plan has no `link.up` for it, and an
+address arrives from the next advertisement.
+
+The payload finds each interface by the address hull drew in its segment,
+not by name: with two segments the unasked one came up as eth0, which the
+first run took for the solicited one.
+
+**Measured** against hull 5be9f34 built in scratch: 19 checks pass. **The
+control**: with `advertise_every` removed, the new case fails, with no
+address on the interface, so the address comes from the unasked
+advertisements and not from anything netcfgd's apply makes the kernel send.
+The hull at `~/src/hull/build/hull` predated 5be9f34 when this was written;
+`make hull-slaac` needs one that has it.
+
 ## 10.645 A rig's verdict directory is replaced when another account made it
 
 Both accounts run these rigs, and each `tests/hull/*/verdict` is made by

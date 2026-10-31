@@ -20,11 +20,15 @@
 #     forwarding as the reason, and does so before the link comes up;
 #   - the apply writes 2 and the kernel configures an address from the prefix;
 #   - a second plan has nothing to do; dropping slaac hands back 1; and a value
-#     netcfgd never wrote is left alone.
+#     netcfgd never wrote is left alone;
+#   - on a segment advertised unasked as well, an interface already up and
+#     forwarding ignores the advertisements at 1, and once netcfgd turns
+#     slaac on -- with no link.up in the plan, so nothing solicits -- an
+#     address arrives from the next one.
 #
 # Always exits 0 and reports through /verdict/slaac.
 #
-# HOW IT STOPS: every wait is a bounded loop (60 s at most each), the steps
+# HOW IT STOPS: every wait is bounded (60 s at most each), the steps
 # are a fixed list, and the machine takes everything in it when it ends.
 set -u
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
@@ -50,8 +54,17 @@ if [ ! -x "$ncfg" ]; then
 	say "VERDICT bad: $ncfg is not built on the host"
 	exit 0
 fi
-dev=eth0
+# **Each interface found by its segment's prefix, not by its name.** hull
+# drew an address in each subnet6, and the order it gives the NICs is not this
+# file's to assume: with a second segment the unasked one arrived as eth0.
+by_prefix() { ip -o -6 addr show | awk -v p="inet6 $1" 'index($0, p) { print $2; exit }'; }
 prefix=fd42:84:
+dev=$(by_prefix "$prefix")
+every=$(by_prefix fd42:85:)
+if [ -z "$dev" ] || [ -z "$every" ]; then
+	say "VERDICT bad: no interface carries hull's address on both segments: $(ip -6 -br addr)"
+	exit 0
+fi
 slaac_address() { ip -6 addr show dev "$dev" | grep -q "inet6 $prefix.*proto kernel_ra"; }
 wait_for() { # $1 a command, $2 quarter-seconds
 	waited=0
@@ -144,6 +157,53 @@ echo 0 > "/proc/sys/net/ipv6/conf/$dev/accept_ra"
 "$ncfg" apply > "$work/apply4.log" 2>&1
 check "a value netcfgd never wrote is left alone" \
 	"$(cat /proc/sys/net/ipv6/conf/$dev/accept_ra)" "0"
+
+# **An interface already up, on a segment advertised unasked** (hull
+# 5be9f34, `every` in hull.conf). Everything above holds because hull answers
+# only a solicitation, and a kernel solicits only as its link comes up -- so
+# there an accept_ra written late gets nothing. A real router also advertises
+# on its own interval, and that is what reaches an interface netcfgd turns
+# slaac on for without bringing it up. Forwarding first, so the kernel
+# ignores what the boot's solicitation brought, and that address gone.
+every_address() { ip -6 addr show dev "$every" | grep -q "inet6 fd42:85:.*proto kernel_ra"; }
+echo 1 > "/proc/sys/net/ipv6/conf/$every/forwarding"
+check "the unasked segment's interface is up" \
+	"$(ip -o link show dev "$every" | grep -c 'state UP\|,UP')" "1"
+ip -6 addr flush dev "$every" scope global
+# Four intervals, so four advertisements passed it by.
+sleep 8
+if every_address; then
+	say "FAIL forwarding at accept_ra 1 took an address from an unasked advertisement: $(ip -6 -br addr show dev "$every")"
+	failed=1
+else
+	say "ok   forwarding at accept_ra 1, unasked advertisements are ignored too"
+fi
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface $dev {
+	forwarding = true
+}
+
+interface $every {
+	config     = "slaac"
+	forwarding = true
+}
+CONF
+plan=$("$ncfg" plan 2>&1 || true)
+check "the plan sets accept_ra on the interface already up" \
+	"$(printf '%s\n' "$plan" | grep 'sysctl.set_accept_ra' | grep -c "$every")" "1"
+check "and does not bring it up, so the kernel solicits nothing" \
+	"$(printf '%s\n' "$plan" | grep -c "link.up $every")" "0"
+"$ncfg" apply > "$work/apply5.log" 2>&1
+say "ncfg apply rc=$?"
+check "netcfgd wrote 2 on it" "$(cat /proc/sys/net/ipv6/conf/$every/accept_ra)" "2"
+# Within five intervals: one is enough, the rest is a loaded host's margin.
+if wait_for every_address 40; then
+	say "ok   and an address came from the next unasked advertisement, after $((waited / 4))s"
+else
+	say "FAIL no address from the unasked advertisements: $(ip -6 -br addr show dev "$every")"
+	sed 's/^/  apply: /' "$work/apply5.log" | tail -8 >> "$out"
+	failed=1
+fi
 
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -8 >> "$out"
