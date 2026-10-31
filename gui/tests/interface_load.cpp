@@ -28,6 +28,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
@@ -69,6 +72,41 @@ static QString text_of(const QWidget *view, const char *name)
  * given, is `conf.d/interface-eth0.conf`: the file the interface dialog owns
  * and replaces, which is where an interface it edits lives -- one declared in
  * `netcfgd.conf` instead is a duplicate its save cannot write (10.608). */
+/* One entry of the document as netcfgd compiles the configuration -- `ncfg
+ * show` over the same directory the daemon reads -- by its `name` or `id`.
+ * Compared before and after a save (10.631): the reader cannot report a key
+ * it drops, and the compiler sees every one. */
+static QString compiled(const QString &work, const char *section, const QString &name)
+{
+	QProcess show;
+	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+	environment.insert(QStringLiteral("NCFG_CONFIG_DIR"), work + QStringLiteral("/etc"));
+	environment.insert(QStringLiteral("NCFG_RUN_DIR"), work + QStringLiteral("/run"));
+	show.setProcessEnvironment(environment);
+	/* `ncfg`, the link beside the daemon: one binary, told which it is by
+	 * the name it is run as. */
+	show.start(QStringLiteral(NETCFGD_BINARY).section(QLatin1Char('/'), 0, -2) +
+	        QStringLiteral("/ncfg"),
+	    { QStringLiteral("show") });
+	if (!show.waitForFinished(20000)) {
+		show.kill();
+		show.waitForFinished(2000);
+		return QStringLiteral("<ncfg show did not finish>");
+	}
+	const QJsonArray entries = QJsonDocument::fromJson(show.readAllStandardOutput())
+	                               .object()
+	                               .value(QString::fromLatin1(section))
+	                               .toArray();
+	for (const QJsonValue &entry : entries) {
+		const QJsonObject object = entry.toObject();
+		if (object.value(QStringLiteral("name")).toString() == name ||
+		    object.value(QStringLiteral("id")).toString() == name) {
+			return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+		}
+	}
+	return QStringLiteral("<no %1 %2>").arg(QString::fromLatin1(section), name);
+}
+
 static QString start(QProcess *daemon, const QString &work, const QString &body,
     const QString &drop_in = QString())
 {
@@ -247,7 +285,13 @@ int main(int argc, char **argv)
 		 * `hooks: []` and a `dns` scope whether anybody wrote them or not --
 		 * so `ncfg wifi activate`'s own block could not be edited at all. An
 		 * empty list is not content. */
+		const QString before = compiled(work.path(), "interfaces", QStringLiteral("eth0"));
+		/* Found, or the comparison below compares two absences. */
+		check(before.startsWith(QLatin1Char('{')) ? QStringLiteral("found") : before,
+		    QStringLiteral("found"), "ncfg show compiles the interface");
 		QMetaObject::invokeMethod(&dialog, "submit");
+		check(compiled(work.path(), "interfaces", QStringLiteral("eth0")), before,
+		    "and netcfgd compiles the interface it had, every key");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
 		const QString said = note ? note->text() : QString();
 		check(said.contains(QStringLiteral("would delete")) ? said
@@ -359,7 +403,13 @@ int main(int argc, char **argv)
 		        : error,
 		    QString(), "netcfgd says the dialog can carry all of it");
 		ncfg_interface_dialog dialog(&connection, QStringLiteral("eth0"));
+		const QString before = compiled(work.path(), "interfaces", QStringLiteral("eth0"));
+		/* Found, or the comparison below compares two absences. */
+		check(before.startsWith(QLatin1Char('{')) ? QStringLiteral("found") : before,
+		    QStringLiteral("found"), "ncfg show compiles the interface");
 		QMetaObject::invokeMethod(&dialog, "submit");
+		check(compiled(work.path(), "interfaces", QStringLiteral("eth0")), before,
+		    "and netcfgd compiles the interface it had, every key");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
 		/* The outcome, not the note's wording: a note that said anything but
 		 * "would delete" -- a refusal for permission, say -- read as a save. */

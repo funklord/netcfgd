@@ -12597,6 +12597,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.632 Every whole-block dialog is checked against what netcfgd compiles
+
+10.631's check, carried to the other dialogs that save a block whole.
+`interface_load` and `device_load` now compare `ncfg show`'s entry before and
+after each save, refusing a lookup that finds nothing so two absences cannot
+pass as equal; `device_load` gains a WireGuard device whose private key is in
+the keyring and whose peer's preshared key is in `pass`. A new
+`network_load` saves a passphrase network using every network key
+(`proto = "wpa3"`, BSSIDs, roam, addressing, routes, dns), a TLS network
+whose three certificates sit in three stores, and a PEAP network. All came
+back the same: the fault 10.631 found was the access point's alone. Making
+the network dialog skip `proto` fails the new probe.
+
+One thing it showed that is not a fault: a network whose `ca_cert` is a
+*path* cannot be saved by a client that is not root -- the daemon refuses,
+since a path is a file root opens -- and nothing is changed. The probe uses a
+stored certificate for that reason.
+
 ## 10.631 Saving a WPA3-only access point let WPA2 back in
 
 Derived from 10.628's shape -- a reader that reduces a value the dialog then

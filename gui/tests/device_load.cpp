@@ -27,6 +27,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMetaObject>
@@ -54,6 +57,41 @@ static void check(const QString &got, const QString &want, const char *what)
 /* Start a daemon over `body` and the drop-ins in `owned` -- name to text, each
  * under `conf.d/` -- and hand back its socket. A device the dialog edits lives
  * in its own `device-<name>` drop-in, which is the file its save replaces. */
+/* One entry of the document as netcfgd compiles the configuration -- `ncfg
+ * show` over the same directory the daemon reads -- by its `name` or `id`.
+ * Compared before and after a save (10.631): the reader cannot report a key
+ * it drops, and the compiler sees every one. */
+static QString compiled(const QString &work, const char *section, const QString &name)
+{
+	QProcess show;
+	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+	environment.insert(QStringLiteral("NCFG_CONFIG_DIR"), work + QStringLiteral("/etc"));
+	environment.insert(QStringLiteral("NCFG_RUN_DIR"), work + QStringLiteral("/run"));
+	show.setProcessEnvironment(environment);
+	/* `ncfg`, the link beside the daemon: one binary, told which it is by
+	 * the name it is run as. */
+	show.start(QStringLiteral(NETCFGD_BINARY).section(QLatin1Char('/'), 0, -2) +
+	        QStringLiteral("/ncfg"),
+	    { QStringLiteral("show") });
+	if (!show.waitForFinished(20000)) {
+		show.kill();
+		show.waitForFinished(2000);
+		return QStringLiteral("<ncfg show did not finish>");
+	}
+	const QJsonArray entries = QJsonDocument::fromJson(show.readAllStandardOutput())
+	                               .object()
+	                               .value(QString::fromLatin1(section))
+	                               .toArray();
+	for (const QJsonValue &entry : entries) {
+		const QJsonObject object = entry.toObject();
+		if (object.value(QStringLiteral("name")).toString() == name ||
+		    object.value(QStringLiteral("id")).toString() == name) {
+			return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+		}
+	}
+	return QStringLiteral("<no %1 %2>").arg(QString::fromLatin1(section), name);
+}
+
 static QString start(QProcess *daemon, const QString &work, const QString &body,
     const QList<QPair<QString, QString>> &owned)
 {
@@ -104,11 +142,21 @@ static QString read_file(const QString &path)
 
 /* Open the dialog on `name`, press Save, and say what the note said: empty
  * where the save went through, which is what `outcome` then reports. */
-static QString save(ncfg_connection *connection, const QString &name)
+static QString save(ncfg_connection *connection, const QString &name, const QString &work)
 {
 	ncfg_device_dialog dialog(connection, name);
+	const QString before = compiled(work, "devices", name);
+	if (!before.startsWith(QLatin1Char('{'))) {
+		/* Not found: comparing two absences would pass for anything. */
+		return before;
+	}
 	QMetaObject::invokeMethod(&dialog, "submit");
 	if (!dialog.outcome().isEmpty()) {
+		/* Saved, and compiled to the device it was (10.631). */
+		const QString after = compiled(work, "devices", name);
+		if (after != before) {
+			return QStringLiteral("saved, and changed:\n%1\n%2").arg(before, after);
+		}
 		return QStringLiteral("saved");
 	}
 	auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
@@ -138,6 +186,18 @@ int main(int argc, char **argv)
 	owned << qMakePair(QStringLiteral("device-dum0"),
 	    QStringLiteral("device dum0 {\n\tkind = \"dummy\"\n"
 	                   "\tqdisc { kind = \"cake\"; bandwidth = \"1234567bit\" }\n}\n"));
+	/* Keys held outside the file store: a reader that kept only the name
+	 * would write them back as files (10.628's shape, 10.632). */
+	owned << qMakePair(QStringLiteral("device-wg0"),
+	    QStringLiteral("device wg0 {\n\twireguard {\n"
+	                   "\t\tprivate_key = \"@secret:keyring:wg0\"\n\t\tlisten_port = 51820\n"
+	                   "\t\tfwmark = 51820\n"
+	                   "\t\tpeer \"office\" {\n"
+	                   "\t\t\tpublic_key = \"xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\"\n"
+	                   "\t\t\tpreshared_key = \"@secret:pass:wg0-office\"\n"
+	                   "\t\t\tendpoint = \"vpn.example.com:51820\"\n"
+	                   "\t\t\tallowed_ips = [\"10.9.0.0/24\", \"192.168.50.0/24\"]\n"
+	                   "\t\t\tkeepalive = 25\n\t\t}\n\t}\n}\n"));
 	/* `eth0` joins by the bridge's list, `eth1` by its own `master`; the radio
 	 * is in four-address mode; the dummy is shaped at a rate that is not a
 	 * whole kbit. */
@@ -172,7 +232,7 @@ int main(int argc, char **argv)
 		check(table ? QString::number(table->rowCount()) : QStringLiteral("<missing>"),
 		    QStringLiteral("2"), "and its vlans as two rows, the range kept whole");
 	}
-	check(save(&connection, QStringLiteral("eth1")), QStringLiteral("saved"),
+	check(save(&connection, QStringLiteral("eth1"), work.path()), QStringLiteral("saved"),
 	    "a port with vlans can be saved");
 	const QString port = read_file(conf_d + QStringLiteral("device-eth1.conf"));
 	check(port.startsWith(QStringLiteral("# Written by netcfgd's gui")) &&
@@ -200,7 +260,7 @@ int main(int argc, char **argv)
 		        : QStringLiteral("<%1>").arg(joins ? joins->text() : QString()),
 		    QStringLiteral("shown"), "a member by the bridge's list shows it, read-only");
 	}
-	check(save(&connection, QStringLiteral("eth0")), QStringLiteral("saved"),
+	check(save(&connection, QStringLiteral("eth0"), work.path()), QStringLiteral("saved"),
 	    "and can be saved");
 	const QString member = read_file(conf_d + QStringLiteral("device-eth0.conf"));
 	check(member.contains(QStringLiteral("mtu = 1500")) &&
@@ -210,7 +270,7 @@ int main(int argc, char **argv)
 	    QStringLiteral("written"), "  without restating the membership");
 
 	/* Four-address mode, which a save used to drop. */
-	check(save(&connection, QStringLiteral("wlan0")), QStringLiteral("saved"),
+	check(save(&connection, QStringLiteral("wlan0"), work.path()), QStringLiteral("saved"),
 	    "a radio in four-address mode can be saved");
 	ncfg_device_config wlan0;
 	check(connection.device_config(QStringLiteral("wlan0"), &wlan0, &error) && wlan0.wds
@@ -225,13 +285,17 @@ int main(int argc, char **argv)
 		check(out ? QString::number(out->value()) : QStringLiteral("<missing>"),
 		    QStringLiteral("1235"), "a rate in bits shows as the nearest kbit");
 	}
-	check(save(&connection, QStringLiteral("dum0")), QStringLiteral("saved"),
+	check(save(&connection, QStringLiteral("dum0"), work.path()), QStringLiteral("saved"),
 	    "a rate finer than a kbit can be saved");
 	ncfg_device_config dum0;
 	check(connection.device_config(QStringLiteral("dum0"), &dum0, &error)
 	        ? QString::number(dum0.bandwidth_bits)
 	        : error,
 	    QStringLiteral("1234567"), "  and comes back exact rather than rounded");
+
+	/* A WireGuard device whose keys the keyring and `pass` hold. */
+	check(save(&connection, QStringLiteral("wg0"), work.path()), QStringLiteral("saved"),
+	    "a WireGuard device with keys outside the file store saves unchanged");
 
 	daemon.kill();
 	daemon.waitForFinished(2000);
