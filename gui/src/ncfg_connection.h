@@ -339,6 +339,18 @@ struct ncfg_host_list_row {
 	QStringList mac;
 };
 
+/* One 802.11s mesh (10.588). `channel` -1 where unset; `credential` the
+ * reference as written; `unmodelled` what the editor cannot carry. */
+struct ncfg_mesh_row {
+	QString id;
+	QString device;
+	int     channel = -1;
+	QString band;
+	QString security;
+	QString credential;
+	QString unmodelled;
+};
+
 struct ncfg_bluetooth_row {
 	QString id;
 	QString address;
@@ -1232,6 +1244,8 @@ public:
 	/* The host lists the configuration declares, for the tab that edits
 	 * them. */
 	bool host_lists(QList<ncfg_host_list_row> *out, QString *error);
+	/* The meshes the configuration declares, for the tab that edits them. */
+	bool meshes(QList<ncfg_mesh_row> *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);

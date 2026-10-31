@@ -2938,6 +2938,96 @@ int ncfg_client_firewall(ncfg_client_t *client, ncfg_firewall_config_t *out, cha
 	return 1;
 }
 
+void ncfg_meshes_free(ncfg_meshes_t *meshes)
+{
+	if (!meshes) {
+		return;
+	}
+	for (size_t i = 0; i < meshes->count; i++) {
+		free(meshes->items[i].id);
+		free(meshes->items[i].device);
+		free(meshes->items[i].band);
+		free(meshes->items[i].security);
+		free(meshes->items[i].credential);
+		free(meshes->items[i].unmodelled);
+	}
+	free(meshes->items);
+	meshes->items = NULL;
+	meshes->count = 0;
+}
+
+int ncfg_client_meshes(ncfg_client_t *client, ncfg_meshes_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t meshes = ncfg_json_member(doc, ncfg_json_root(doc), "meshes");
+	uint32_t count = ncfg_json_count(doc, meshes);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t           entry = ncfg_json_at(doc, meshes, i);
+		uint32_t           security = ncfg_json_member(doc, entry, "security");
+		ncfg_mesh_entry_t *item = &out->items[i];
+
+		item->id = member_text(doc, entry, "id");
+		item->device = member_text(doc, entry, "device");
+		item->channel = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "channel"), -1);
+		item->band = member_text(doc, entry, "band");
+		item->security = member_text(doc, security, "type");
+		item->credential = security_credential(doc, security);
+		item->unmodelled = dup_string("");
+		/* The mesh ID is the label in every block the language can write
+		 * (the renderer refuses any other), so it is checked rather than
+		 * edited: a document whose ID differs came from somewhere else. */
+		{
+			char *hex = member_text(doc, entry, "mesh_id");
+			char  label[2 * 32 + 1];
+			size_t at;
+
+			label[0] = '\0';
+			for (at = 0; item->id && item->id[at] && at < 32u; at++) {
+				(void)snprintf(label + 2u * at, 3u, "%02x", (unsigned char)item->id[at]);
+			}
+			if (hex && strcmp(hex, label) != 0) {
+				note_unmodelled(&item->unmodelled, "mesh_id (not its label)");
+			}
+			free(hex);
+		}
+		if (!item->id || !item->device || !item->band || !item->security ||
+		    !item->credential || !item->unmodelled) {
+			ncfg_meshes_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_host_lists_free(ncfg_host_lists_t *lists)
 {
 	if (!lists) {

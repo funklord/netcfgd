@@ -12597,6 +12597,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.629 Meshes have a tab
+
+10.588's `mesh` was the last top-level block the window could not show. A
+`mesh` tab now sits beside `host lists`, each mesh its own `mesh-ID` drop-in:
+the radio, the channel (required, refused in the form before the daemon sees
+it), the band, and SAE or open with the password as a reference kept as
+written -- the provider 10.628 found the access point dialog losing. The ID is
+the label and fixed once written, as a host list's name is; the reader checks
+the document's `mesh_id` against it and names a mismatch as unmodelled rather
+than saving over it, since the language cannot write one.
+`gui/tests/mesh_load.cpp` saves a keyring-backed mesh unchanged through a real
+daemon and reads it back, writes an open one, and has the daemon refuse a
+second mesh on a radio already given to one; a writer that drops `band` fails
+it. The reader is in `form_coverage_gate.py`, 182 members.
+
+Every top-level block the document holds now has a view: of `document_fields`,
+only `schema_version` and `generated_by` have none, and neither is written by
+an operator.
+
 ## 10.628 Saving an access point moved its passphrase to a file
 
 Found while reading the access point reader for the mesh tab. It took the

@@ -1528,6 +1528,42 @@ bool ncfg_connection::host_lists(QList<ncfg_host_list_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::meshes(QList<ncfg_mesh_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_meshes_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_meshes(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_mesh_row row;
+		row.id = from_c(found.items[i].id);
+		row.device = from_c(found.items[i].device);
+		row.channel = found.items[i].channel;
+		row.band = from_c(found.items[i].band);
+		row.security = from_c(found.items[i].security);
+		row.credential = from_c(found.items[i].credential);
+		row.unmodelled = from_c(found.items[i].unmodelled);
+		out->append(row);
+	}
+	ncfg_meshes_free(&found);
+	return true;
+}
+
 bool ncfg_connection::bluetooth(QList<ncfg_bluetooth_row> *out, QString *error)
 {
 	if (!out) {

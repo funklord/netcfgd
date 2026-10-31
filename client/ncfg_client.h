@@ -1205,6 +1205,30 @@ typedef struct {
 
 void ncfg_host_lists_free(ncfg_host_lists_t *lists);
 
+/* One 802.11s mesh (10.588), as an editor carries it. `channel` -1 where
+ * unset; `security` is `psk` (SAE) or `open`; `credential` the reference as
+ * written, provider and all; `unmodelled` names what the editor cannot carry
+ * and so must not save over, empty where it carries everything. */
+typedef struct {
+	char *id;
+	char *device;
+	int   channel;
+	char *band;
+	char *security;
+	char *credential;
+	char *unmodelled;
+} ncfg_mesh_entry_t;
+
+typedef struct {
+	ncfg_mesh_entry_t *items;
+	size_t             count;
+} ncfg_meshes_t;
+
+void ncfg_meshes_free(ncfg_meshes_t *meshes);
+
+/* The meshes the configuration declares. Needs `observe`. */
+int ncfg_client_meshes(ncfg_client_t *client, ncfg_meshes_t *out, char *err, size_t err_size);
+
 /*
  * The host lists the configuration declares. Needs `observe`. From the
  * document, for the editor that saves each list whole.
