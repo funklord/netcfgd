@@ -391,6 +391,8 @@ int main(int argc, char **argv)
 		                   "\troutes = [\"10.9.0.0/24 via 192.0.2.254 src 192.0.2.10 table 100 "
 		                   "onlink\"]\n"
 		                   "\tdns { mode = \"resolved\"; domains = [\"~corp.example\"] }\n"
+		                   /* DHCPv6 in the delegated prefix (0303). */
+		                   "\tdhcp_server { range6 = \"::100-::1ff\" }\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");

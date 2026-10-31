@@ -79,6 +79,30 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 		    "\"udp\"; port = [53]; interface = \"%s\" }` to `input`", interface->name,
 		    interface->name, interface->name);
 	}
+	/* DHCPv6 (0303): a host asks only when a router advertisement tells it
+	 * to, and that is the interface's `advertise`, not this server's. */
+	if (interface->dhcp_server->range6_start &&
+	    (!interface->advertise || !interface->advertise->managed)) {
+		/* `advertise` takes a delegated prefix only, so on a static one there
+		 * is no block to add the flag to; said, rather than advice that
+		 * cannot be followed. */
+		ncfg_plan_warnf(builder->plan, interface->name,
+		    "the DHCP server on %s hands out IPv6 addresses, and no router advertisement on "
+		    "it tells the hosts to ask: %s", interface->name,
+		    interface->advertise
+		        ? "add `managed = true` to its `advertise` block"
+		        : "an `advertise` block with `managed = true` does, and it advertises a "
+		          "delegated prefix only -- on a static prefix, hosts must be set to ask");
+	}
+	if (interface->dhcp_server->range6_start && builder->desired &&
+	    !ncfg_plan_input_accepts(builder->desired, interface->name, NCFG_FIREWALL_PROTO_UDP,
+	        547)) {
+		ncfg_plan_warnf(builder->plan, interface->name,
+		    "the firewall's input chain drops by default with no rule accepting DHCPv6 on %s, "
+		    "so the server there is never asked. Add `accept \"dhcpv6-%s\" { protocol = "
+		    "\"udp\"; port = [547]; interface = \"%s\" }` to `input`", interface->name,
+		    interface->name, interface->name);
+	}
 	running = running_server(builder->observed, interface->name);
 	if (running && running->served && strcmp(running->served, wanted) != 0) {
 		ncfg_op_t     stop;

@@ -136,6 +136,45 @@ static void a_firewall_that_drops_the_requests_is_said(void)
 	planfix_release(plan, document, observed);
 }
 
+/* DHCPv6 (0303): hosts ask only when an advertisement tells them to, and
+ * the firewall's input chain has to let UDP 547 in. */
+#define SERVING6(v6, advertise) \
+	"{\"name\":\"br0\",\"addressing\":[{\"source\":\"static\"," \
+	"\"address\":\"192.168.1.1/24\"}," v6 "]" advertise \
+	",\"dhcp_server\":{\"dns_forward\":true,\"range6_start\":\"::100\"," \
+	"\"range6_end\":\"::1ff\"}}"
+#define STATIC6 "{\"source\":\"static\",\"address\":\"fd00::1/64\"}"
+/* `advertise` takes a delegated prefix only, so the managed case is one. */
+#define DELEGATED6 \
+	"{\"source\":\"delegated\",\"prefix\":{\"source\":\"wan0\",\"index\":0," \
+	"\"subnet\":1},\"suffix\":\"::1/64\"}"
+#define MANAGED \
+	",\"advertise\":{\"backend\":\"auto\",\"prefixes\":[{\"source\":\"wan0\"," \
+	"\"index\":0,\"subnet\":1}],\"managed\":true,\"other_config\":false,\"dns\":true}"
+
+static void a_dhcpv6_range_nobody_is_told_of_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE, SERVING6(STATIC6, ""), "", DROPPING(""),
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+
+	check(plan && planfix_warned(plan, "no router advertisement on it tells the hosts") &&
+	        planfix_warned(plan, "`managed = true`"),
+	    "a DHCPv6 range with no managed advertisement is said");
+	check(plan && planfix_warned(plan, "no rule accepting DHCPv6 on br0") &&
+	        planfix_warned(plan, "port = [547]; interface = \"br0\""),
+	    "  and so is a firewall dropping DHCPv6, naming the rule");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(LAN_DEVICE, SERVING6(DELEGATED6, MANAGED), "", "",
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "tells the hosts to ask") &&
+	        !planfix_warned(plan, "DHCPv6 on br0"),
+	    "  and neither with the flag set and no firewall");
+	planfix_release(plan, document, observed);
+}
+
 static void a_server_serving_what_is_asked_is_left_alone(void)
 {
 	ncfg_document_t *document;
@@ -208,6 +247,7 @@ int main(void)
 	a_server_with_no_dns_is_said();
 	a_forwarder_answers_for_the_router();
 	a_firewall_that_drops_the_requests_is_said();
+	a_dhcpv6_range_nobody_is_told_of_is_said();
 	a_server_serving_what_is_asked_is_left_alone();
 	a_server_serving_something_else_restarts();
 	a_reservation_added_restarts_the_server();

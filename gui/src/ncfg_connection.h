@@ -503,6 +503,8 @@ struct ncfg_interface_config {
 	QString dhcp_boot_server;
 	QString dhcp_tftp_server;
 	QString dhcp_wpad;
+	/* DHCPv6 as "::A-::B", empty for none (0303). */
+	QString dhcp_range6;
 	/* The server's reservations, and the ports forwarded from this interface
 	 * (10.612). */
 	struct reservation {

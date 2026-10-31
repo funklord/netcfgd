@@ -3312,6 +3312,7 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->dhcp_boot_server);
 	free(config->dhcp_tftp_server);
 	free(config->dhcp_wpad);
+	free(config->dhcp_range6);
 	for (size_t i = 0; i < config->dhcp_option_count; i++) {
 		free(config->dhcp_options[i].name);
 		free(config->dhcp_options[i].kind);
@@ -4617,6 +4618,21 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->dhcp_boot_server = member_text(doc, server, "boot_server");
 		out->dhcp_tftp_server = member_text(doc, server, "tftp_server");
 		out->dhcp_wpad = member_text(doc, server, "wpad");
+		{
+			char *start6 = member_text(doc, server, "range6_start");
+			char *end6 = member_text(doc, server, "range6_end");
+
+			if (start6 && end6 && *start6 && *end6) {
+				size_t length = strlen(start6) + strlen(end6) + 2;
+
+				out->dhcp_range6 = malloc(length);
+				if (out->dhcp_range6) {
+					snprintf(out->dhcp_range6, length, "%s-%s", start6, end6);
+				}
+			}
+			free(start6);
+			free(end6);
+		}
 		if (start && end && *start && *end) {
 			size_t length = strlen(start) + strlen(end) + 2;
 

@@ -94,6 +94,8 @@ say "after the lease changed: $(grep -E 'backend\.' "$work/plan-lease.log" | hea
 "$build/ncfg" apply > "$work/apply2.log" 2>&1
 say "ncfg apply rc=$?"
 pid2=$(cat "$work/run/dhcp-server/lan0.pid" 2>/dev/null)
+# Read now: the stages after this one rewrite the file.
+lease_line=$(grep -c '^dhcp-range=lan0,192.168.7.100,192.168.7.249,3600$' "$work/run/dhcp-server/lan0.conf")
 kept=$(cat "$work/run/dhcp-server/lan0.leases" 2>/dev/null)
 say "  dnsmasq pid $pid1 -> $pid2; lease file kept: $(printf '%s' "$kept" | grep -c "$mac")"
 
@@ -230,7 +232,38 @@ custom=$(cat "$work/custom")
 say "the client is given custom options: $custom"
 say "  the client resolves desk.home.lan to '$domain_name'"
 
+# DHCPv6 (0303): a range of suffixes in lan0's own prefix, the forwarder on
+# so the router is offered as the DNS server over v6 too.
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface lan0 {
+	config = ["192.168.7.1/24", "fd00:7::1/64"]
+	dhcp_server {
+		dns_forward = true
+		range6 = "::100-::1ff"
+	}
+}
+CONF
+"$build/ncfg" plan > "$work/plan-v6.log" 2>&1
+v6_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server.*dhcpv6 ::100-::1ff' "$work/plan-v6.log")
+v6_warned=$(grep -c 'tells the hosts to ask' "$work/plan-v6.log")
+say "after DHCPv6: $(grep -E 'backend\.' "$work/plan-v6.log" | head -1 | tr -s ' ')"
+"$build/ncfg" apply > "$work/apply8.log" 2>&1
+say "ncfg apply rc=$?"
+say "  lan0.conf: $(grep '^dhcp-range=' "$work/run/dhcp-server/lan0.conf" 2>/dev/null | tr '\n' ' ')"
+sleep 2
+: > "$work/given6"
+ip netns exec client timeout 25 dhcpcd -1 -6 -t 20 -f /payload/dhcpcd-v6.conf \
+	--script /payload/hook.sh eth0 > "$work/client6.log" 2>&1
+given6=$(cat "$work/given6")
+say "the client is given over DHCPv6: $given6"
+
 failed=0
+[ "$v6_plan" -ge 1 ] || { say "  DHCPv6 was not planned as a restart naming its range"; failed=1; }
+[ "$v6_warned" -ge 1 ] || { say "  a range6 with no managed advertisement was not warned about"; failed=1; }
+case "$given6" in
+	*"address6=fd00:7::1"[0-9a-f][0-9a-f]" "*) ;;
+	*) say "  the client was not given an address from fd00:7::100 to ::1ff"; failed=1 ;;
+esac
 [ "$records_plan" -ge 1 ] || { say "  the records were not planned as a restart counting them"; failed=1; }
 [ "$nas" = "192.168.7.10" ] || { say "  an address record did not resolve"; failed=1; }
 [ "$nas6" = "fd00::10" ] || { say "  its IPv6 address did not resolve"; failed=1; }
@@ -286,8 +319,7 @@ printf '%s\n' "$leases" | awk -v m="$mac" '$2 == m && $4 == "laptop" {found=1} E
 [ "$again" -ge 1 ] || { say "  the second plan was not empty"; failed=1; }
 [ "$restart" -eq 2 ] || { say "  a changed lease was not planned as a stop and a start"; failed=1; }
 [ -n "$pid2" ] && [ "$pid2" != "$pid1" ] || { say "  the apply did not run a new dnsmasq"; failed=1; }
-grep -q '^dhcp-range=lan0,192.168.7.100,192.168.7.249,3600$' "$work/run/dhcp-server/lan0.conf" ||
-	{ say "  the new lease is not in the file"; failed=1; }
+[ "$lease_line" -ge 1 ] || { say "  the new lease is not in the file"; failed=1; }
 printf '%s' "$kept" | grep -q "$mac" || { say "  the lease file was not kept across the restart"; failed=1; }
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -6 >> "$out"
@@ -298,6 +330,7 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply5: /' "$work/apply5.log" | tail -6 >> "$out"
 	sed 's/^/  apply6: /' "$work/apply6.log" | tail -6 >> "$out"
 	sed 's/^/  apply7: /' "$work/apply7.log" | tail -6 >> "$out"
+	sed 's/^/  client6: /' "$work/client6.log" | tail -8 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

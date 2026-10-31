@@ -1961,7 +1961,11 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	{ .name = "options", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &dhcp_option_type, .element_size = sizeof(ncfg_dhcp_option_t),
 	    .offset = offsetof(ncfg_dhcp_server_t, options),
-	    .count_offset = offsetof(ncfg_dhcp_server_t, option_count) }
+	    .count_offset = offsetof(ncfg_dhcp_server_t, option_count) },
+	{ .name = "range6_start", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, range6_start) },
+	{ .name = "range6_end", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, range6_end) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 

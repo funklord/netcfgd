@@ -1445,6 +1445,11 @@ typedef struct {
 	/* The custom options (0303), a set sorted by name. */
 	ncfg_dhcp_option_t *options;
 	size_t              option_count;
+	/* DHCPv6 (0303): the range as suffixes of whatever prefix the interface
+	 * holds, "::100" to "::1ff", so it follows a delegated prefix as the
+	 * prefix moves. NULL where the server answers DHCPv4 alone. */
+	char               *range6_start;
+	char               *range6_end;
 } ncfg_dhcp_server_t;
 
 /*

@@ -1055,4 +1055,6 @@ netcfgd
 # (decision 0303), +4,592.
 # And local DNS records, a top-level block with its own lowering, check,
 # renderer, plan warning and dnsmasq lines (decision 0303), +12,720.
-total 1369432
+# And DHCPv6 ranges in the interface's prefix, with their two plan warnings
+# (decision 0303), +40 as measured -- the section's padding took the rest.
+total 1369472

@@ -358,6 +358,69 @@ static int options_fit(const ncfg_dhcp_server_t *server, uint32_t network, uint3
 	return 1;
 }
 
+/* An IPv6 suffix, "::100": an address with nothing in its upper 64 bits, into
+ * `out`. */
+static int ipv6_suffix(const char *text, unsigned char out[16])
+{
+	ncfg_address_t address;
+	size_t         at;
+
+	if (!text || !ncfg_address_parse(text, &address, NULL, 0) || !address.is_ipv6 ||
+	    address.has_prefix) {
+		return 0;
+	}
+	for (at = 0; at < 8u; at++) {
+		if (address.bytes[at]) {
+			return 0;
+		}
+	}
+	memcpy(out, address.bytes, 16u);
+	return 1;
+}
+
+/*
+ * DHCPv6 (0303): two suffixes, in order, on an interface that holds an IPv6
+ * prefix to put them in -- a static IPv6 address or a delegated one. Which
+ * prefix it is, is dnsmasq's to read off the interface when it starts.
+ */
+static int range6_fits(const ncfg_interface_t *interface, const char **why)
+{
+	const ncfg_dhcp_server_t *server = interface->dhcp_server;
+	unsigned char             first[16];
+	unsigned char             last[16];
+	ncfg_address_t            address;
+	size_t                    at;
+	int                       prefix = 0;
+
+	if (!server->range6_start && !server->range6_end) {
+		return 1;
+	}
+	if (!ipv6_suffix(server->range6_start, first) || !ipv6_suffix(server->range6_end, last) ||
+	    memcmp(first, last, 16u) > 0) {
+		if (why) {
+			*why = "a `range6` is two IPv6 suffixes in order, \"::100-::1ff\", which are put "
+			       "in the interface's own prefix";
+		}
+		return 0;
+	}
+	for (at = 0; !prefix && at < interface->addressing_count; at++) {
+		const ncfg_address_source_t *source = &interface->addressing[at];
+
+		prefix = source->kind == NCFG_ADDRESS_SOURCE_DELEGATED ||
+		    (source->kind == NCFG_ADDRESS_SOURCE_STATIC && source->static_address.address &&
+		        ncfg_address_parse(source->static_address.address, &address, NULL, 0) &&
+		        address.is_ipv6 && address.has_prefix && address.bytes[0] != 0xfe);
+	}
+	if (!prefix) {
+		if (why) {
+			*why = "a `range6` is put in the interface's IPv6 prefix, and this interface has "
+			       "none: give it a static IPv6 address or a delegated prefix in `config`";
+		}
+		return 0;
+	}
+	return 1;
+}
+
 int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char *end,
     char *router, const char **why)
 {
@@ -454,7 +517,8 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 		}
 	}
 	if (!hosts_fit(server, own, network, broadcast, mask, why) ||
-	    !options_fit(server, network, broadcast, mask, why) || !custom_options_fit(server, why)) {
+	    !options_fit(server, network, broadcast, mask, why) || !custom_options_fit(server, why) ||
+	    !range6_fits(interface, why)) {
 		return 0;
 	}
 	if (start) {

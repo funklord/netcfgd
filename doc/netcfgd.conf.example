@@ -1749,6 +1749,22 @@
 #	}
 #}
 
+# DHCPv6 (decision 0303). `range6` hands out IPv6 addresses as two suffixes
+# put in whatever prefix the interface holds -- a static one or a delegated
+# one, and the range follows a delegated prefix as the ISP moves it. A host
+# asks only when a router advertisement says so, which is `managed = true` in
+# the interface's `advertise` block; the plan says so where it is missing.
+# With `dns_forward`, the router is offered as the DNS server over v6 too.
+
+#interface br0 {
+#	config    = ["192.168.1.1/24", "@pd:wan0/1=::1/64"]
+#	advertise { prefixes = ["@pd:wan0/1"]; managed = true }
+#	dhcp_server {
+#		dns_forward = true
+#		range6      = "::100-::1ff"
+#	}
+#}
+
 # CUSTOM DHCP OPTIONS, for what the keys above do not name -- a VoIP phone's
 # provisioning server, a vendor's controller address (option 43). Each is an
 # `option` block with a `code` and one value, keyed by its type, which is how

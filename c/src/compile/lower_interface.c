@@ -480,7 +480,30 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			continue;
 		}
 		assignment = &item->as.assignment;
-		if (strcmp(assignment->key, "range") == 0) {
+		if (strcmp(assignment->key, "range6") == 0) {
+			char *text = ncfg_as_string(ctx, assignment->value);
+			char *dash = text ? strchr(text, '-') : NULL;
+
+			if (!text) {
+				continue;
+			}
+			if (!dash) {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a range: write it as two IPv6 suffixes, \"::100-::1ff\"",
+				    text);
+				free(text);
+				continue;
+			}
+			*dash = '\0';
+			free(server->range6_start);
+			free(server->range6_end);
+			server->range6_start = strdup(text);
+			server->range6_end = strdup(dash + 1);
+			free(text);
+			if (!server->range6_start || !server->range6_end) {
+				ncfg_lower_oom(ctx);
+			}
+		} else if (strcmp(assignment->key, "range") == 0) {
 			char       *text = ncfg_as_string(ctx, assignment->value);
 			char       *dash = text ? strchr(text, '-') : NULL;
 			const char *first = text;
@@ -604,7 +627,7 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown dhcp_server key `%s`: range, lease, dns, dns_forward, gateway, "
+			    "unknown dhcp_server key `%s`: range, range6, lease, dns, dns_forward, gateway, "
 			    "domain, ntp, boot_file, boot_server, tftp_server and wpad, and `host` "
 			    "and `option` blocks", assignment->key);
 		}

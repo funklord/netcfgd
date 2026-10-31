@@ -12597,6 +12597,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.636 DHCPv6, and a static prefix nothing can advertise
+
+0303's fourth slice: `dhcp_server { range6 = "::100-::1ff" }`, suffixes that
+dnsmasq puts in whatever prefix the interface holds when it starts
+(`constructor:`), so the range follows a delegated prefix as it moves. No
+`enable-ra`: router advertisements stay radvd's (0009). Refused on an interface
+with no IPv6 prefix of its own -- a static global or ULA address, or a
+delegated one. The summary names the range, so turning it on is a restart. Two
+plan warnings: a range no managed advertisement tells hosts about, and an input
+chain dropping UDP 547.
+
+**Measured in `make hull-dhcp-server`.** The image has no radvd, so the client
+is told not to wait for an advertisement (`noipv6rs`, `ia_na`,
+`tests/hull/dhcp-server/dhcpcd-v6.conf`); it is leased `fd00:7::188` from the
+range and offered the router, `fd00:7::1`, as its DNS server, since the
+forwarder is on. The rig's lease check, which read `lan0.conf` at the end of
+the run, now records its answer at its own stage: later stages rewrite the
+file, and this one dropped the lease it looked for.
+
+**Found on the way, and left open: `advertise` takes delegated prefixes only.**
+`prefixes = ["fd00:7::/64"]` is refused -- "never a prefix itself, which no
+config file can know" -- which is right for an ISP's delegation and wrong for a
+ULA or a static global prefix, which the file does know. So a LAN with a static
+IPv6 prefix can carry `range6` and nothing can tell its hosts to ask; the
+warning says that instead of advice that cannot be followed. UniFi advertises
+a static prefix. Widening `advertise` to take one is a change to its decision,
+recorded here as the next router item rather than made in passing. +40 bytes,
+as measured.
+
 ## 10.635 Local DNS records
 
 0303's third slice, UniFi's "DNS records": `dns_record "nas.home.lan" { ... }`,

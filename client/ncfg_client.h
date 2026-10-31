@@ -1529,6 +1529,8 @@ typedef struct {
 	char *dhcp_boot_server;
 	char *dhcp_tftp_server;
 	char *dhcp_wpad;
+	/* DHCPv6 as "::A-::B", "" for none (0303). */
+	char *dhcp_range6;
 	/* The server's reservations (10.605), carried since 10.612. */
 	ncfg_reservation_t *reservations;
 	size_t              reservation_count;

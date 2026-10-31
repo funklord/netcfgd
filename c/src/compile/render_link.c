@@ -756,6 +756,10 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 	if (server->lease.has) {
 		ncfg_buf_addf(body, "\t\tlease = %lld\n", (long long)server->lease.value);
 	}
+	if (server->range6_start && server->range6_end) {
+		ncfg_buf_addf(body, "\t\trange6 = \"%s-%s\"\n", server->range6_start,
+		    server->range6_end);
+	}
 	if (server->dns_count) {
 		ncfg_buf_add_text(body, "\t\tdns = [");
 		for (at = 0; at < server->dns_count; at++) {

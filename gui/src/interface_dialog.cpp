@@ -390,6 +390,8 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 		    "a name or address" },
 		{ &dhcp_wpad, "iface_dhcp_wpad", "proxy autoconfig (WPAD)",
 		    "http://wpad.home.lan/wpad.dat" },
+		{ &dhcp_range6, "iface_dhcp_range6", "DHCPv6 range",
+		    "::100-::1ff -- suffixes in this interface's prefix; blank for none" },
 	};
 	for (const auto &one : options) {
 		*one.field = new QLineEdit(this);
@@ -404,7 +406,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 		dhcp_dns->setEnabled(on);
 		dhcp_dns_forward->setEnabled(on);
 		for (QLineEdit *field : { dhcp_gateway, dhcp_domain, dhcp_ntp, dhcp_boot_file,
-		         dhcp_boot_server, dhcp_tftp_server, dhcp_wpad }) {
+		         dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6 }) {
 			field->setEnabled(on);
 		}
 	};
@@ -637,6 +639,7 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_boot_server->setText(existing.dhcp_boot_server);
 	dhcp_tftp_server->setText(existing.dhcp_tftp_server);
 	dhcp_wpad->setText(existing.dhcp_wpad);
+	dhcp_range6->setText(existing.dhcp_range6);
 	for (const auto &one : existing.dhcp_options) {
 		put_row(dhcp_options, { one.name, QString::number(one.code), one.kind, one.value });
 	}
@@ -966,6 +969,7 @@ QString ncfg_interface_dialog::block_text() const
 			{ "boot_server", dhcp_boot_server },
 			{ "tftp_server", dhcp_tftp_server },
 			{ "wpad", dhcp_wpad },
+			{ "range6", dhcp_range6 },
 		};
 		for (const auto &one : texts) {
 			if (!one.field->text().trimmed().isEmpty()) {
@@ -1154,7 +1158,8 @@ void ncfg_interface_dialog::submit()
 {
 	const QLineEdit *values[] = { dns_servers, dns_search, dns_domains,
 		probe_command, probe_args, dhcp_range, dhcp_dns, dhcp_gateway, dhcp_domain, dhcp_ntp,
-		dhcp_boot_file, dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, advertise_prefixes,
+		dhcp_boot_file, dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6,
+		advertise_prefixes,
 		ipv6_token,
 		guard, dot1x_identity, dot1x_anonymous_identity, dot1x_phase2, dot1x_ca_cert,
 		dot1x_domain_suffix_match, dot1x_client_cert, dot1x_private_key, dot1x_reference };

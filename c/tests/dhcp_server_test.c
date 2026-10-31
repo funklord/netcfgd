@@ -358,6 +358,37 @@ int main(void)
 		server.dns_forward = 0;
 	}
 
+	/* DHCPv6 (0303): suffixes put in the interface's own prefix by dnsmasq,
+	 * refused on an interface that holds none, and in the summary. */
+	{
+		char                  start6[] = "::100", end6[] = "::1ff", v6[] = "fd00::1/64";
+		ncfg_address_source_t sources[2];
+
+		server.range6_start = start6;
+		server.range6_end = end6;
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "has none"),
+		    "a DHCPv6 range on an interface with no IPv6 prefix renders nothing");
+		free(text);
+		sources[0] = source;
+		memset(&sources[1], 0, sizeof(sources[1]));
+		sources[1].kind = NCFG_ADDRESS_SOURCE_STATIC;
+		sources[1].static_address.address = v6;
+		lan.addressing = sources;
+		lan.addressing_count = 2u;
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "dhcp-range=::100,::1ff,constructor:br0,64,3600"),
+		    "  and on one with a prefix, the suffixes are put in it by dnsmasq");
+		free(text);
+		check(ncfg_dhcp_server_summary(NULL, &lan, recorded, sizeof(recorded)) &&
+		        strstr(recorded, ", dhcpv6 ::100-::1ff"),
+		    "  and the summary says so, so turning it on is a restart");
+		server.range6_start = NULL;
+		server.range6_end = NULL;
+		lan.addressing = &source;
+		lan.addressing_count = 1u;
+	}
+
 	source.static_address.address = NULL;
 	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 	check(!text && strstr(message, "cannot serve DHCP"),

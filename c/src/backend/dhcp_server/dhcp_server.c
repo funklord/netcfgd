@@ -179,6 +179,11 @@ int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interfa
 	if (server->dns_forward && used < out_size) {
 		used += (size_t)snprintf(out + used, out_size - used, ", forwarding dns");
 	}
+	/* Absent with no DHCPv6, so a server that has none keeps its line. */
+	if (server->range6_start && server->range6_end && used < out_size) {
+		used += (size_t)snprintf(out + used, out_size - used, ", dhcpv6 %s-%s",
+		    server->range6_start, server->range6_end);
+	}
 	/*
 	 * **A count and a digest, not the list** (10.605). The line is bounded
 	 * and a router may reserve dozens of hosts, so listing them would make a
@@ -413,6 +418,16 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 	    server->lease.has ? (long long)server->lease.value
 	                      : (long long)NCFG_DHCP_SERVER_LEASE_DEFAULT,
 	    leases_path ? leases_path : "");
+	/* DHCPv6 (0303): the suffixes put in whatever prefix the interface holds
+	 * when dnsmasq starts, which is what follows a delegated prefix. No
+	 * `enable-ra`: router advertisements are radvd's (0009), and they are
+	 * what tells a host to ask. */
+	if (server->range6_start && server->range6_end) {
+		ncfg_buf_addf(&buf, "dhcp-range=%s,%s,constructor:%s,64,%lld\n",
+		    server->range6_start, server->range6_end, interface->name,
+		    server->lease.has ? (long long)server->lease.value
+		                      : (long long)NCFG_DHCP_SERVER_LEASE_DEFAULT);
+	}
 	/* One line per reservation: dnsmasq gives this MAC this address and
 	 * this name, and never gives the address to anybody else. */
 	for (at = 0; at < server->host_count; at++) {

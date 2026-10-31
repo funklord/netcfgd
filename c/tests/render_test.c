@@ -852,6 +852,9 @@ static void an_access_point_round_trips(void)
 	    "\t\toption \"raw\" { code = 228; hex = \"01:a2:03\" }\n"
 	    "\t\toption \"small\" { code = 230; u8 = 0 }\n\t}\n}\n",
 	    "  and so does one with a custom option of every type (0303)");
+	round_trips("interface br0 {\n\tconfig = [\"192.168.1.1/24\", \"fd00::1/64\"]\n"
+	    "\tdhcp_server {\n\t\trange6 = \"::100-::1ff\"\n\t}\n}\n",
+	    "  and so does one serving DHCPv6 (0303)");
 	round_trips("dns_record \"nas.home.lan\" {\n\taddress = [\"192.168.1.10\", \"fd00::10\"]\n}\n"
 	    "dns_record \"files.home.lan\" {\n\tcname = \"nas.home.lan\"\n}\n"
 	    "dns_record \"home.lan\" {\n\tmx = \"mail.home.lan\"\n\ttxt = \"v=spf1 -all\"\n"

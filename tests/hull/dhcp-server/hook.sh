@@ -1,6 +1,12 @@
 #!/bin/sh
 # dhcpcd's hook: what the server gave, for the payload to read. dhcpcd runs
 # it with the lease in its environment; nothing here changes the machine.
+case "$reason" in BOUND6|RENEW6|REBIND6|REBOOT6)
+	# DHCPv6 (0303): the address leased, and the DNS server offered.
+	printf 'address6=%s dns6=%s\n' "$new_dhcp6_ia_na1_ia_addr1" "$new_dhcp6_name_servers" \
+		>> /tmp/dhcp-server/given6
+	;;
+esac
 case "$reason" in BOUND|RENEW|REBIND|REBOOT)
 	# The standard options (0303) after the first four, so a pattern on
 	# those four still matches.
