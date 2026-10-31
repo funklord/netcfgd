@@ -45,6 +45,7 @@ private:
 
 	QLineEdit *name;
 	QLineEdit *file;
+	QLineEdit *url;
 	QLineEdit *domain;
 	QLineEdit *allow;
 	QLabel    *note;

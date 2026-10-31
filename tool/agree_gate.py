@@ -482,6 +482,19 @@ REQUIRED_DIFFERENCES = {
 	],
 }
 
+# **Verbs the Rust will never have**, by the whole line each adds to the C's
+# `--help`. 0305's `ncfg block fetch` arrived after 0266 made the C what
+# ships, and the Rust is being retired rather than extended. Each line must be
+# in the C's text, and is taken out of it before the two are compared, so the
+# rest of the help is still held to agreeing -- and a line that goes is a gate
+# going red asking for its entry to be deleted.
+BLOCK_FETCH_USAGE = "  ncfg block fetch [LIST...] download block lists from their `url`\n"
+C_ONLY_LINES = {
+	# Both spellings of asking for the usage.
+	"--help": [BLOCK_FETCH_USAGE],
+	"-h": [BLOCK_FETCH_USAGE],
+}
+
 
 def missing_difference(name, rust_said, c_said):
 	"""Which recorded divergence has stopped being one, or None."""
@@ -725,6 +738,11 @@ def compare_reads(rust, c):
 				text = text.replace(copy, "<config>").replace(run_dir, "<run>")
 				said.append((result.returncode, text))
 		spelled = " ".join(verb) or "(no verb)"
+		for line in C_ONLY_LINES.get(spelled, []):
+			if line not in said[1][1]:
+				return (f"`ncfg {spelled}`: the C no longer prints {line.strip()!r}; "
+					"if that verb has gone, its entry in C_ONLY_LINES can go")
+			said[1] = (said[1][0], said[1][1].replace(line, "", 1))
 		if must_differ:
 			gone = missing_difference(spelled, said[0][1], said[1][1])
 			if gone:

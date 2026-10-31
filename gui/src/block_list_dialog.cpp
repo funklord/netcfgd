@@ -39,6 +39,7 @@ QString ncfg_block_list_block(const ncfg_block_list_row &list)
 		QString     value;
 	} lists[] = {
 		{ "file", list.file },
+		{ "url", list.url },
 		{ "domain", list.domain },
 		{ "allow", list.allow },
 	};
@@ -72,6 +73,8 @@ ncfg_block_list_dialog::ncfg_block_list_dialog(ncfg_connection *connection,
 	name->setReadOnly(!before.isEmpty());
 	text(&file, "block_list_file", "files", existing.file,
 	    "/var/lib/netcfgd/block/ads.txt -- hosts, plain or adblock lists, by spaces");
+	text(&url, "block_list_url", "fetched from", existing.url,
+	    "https://... -- one for each file, in order; `ncfg block fetch` downloads them");
 	text(&domain, "block_list_domain", "names", existing.domain,
 	    "doubleclick.net -- each blocked with everything under it");
 	text(&allow, "block_list_allow", "allow", existing.allow,
@@ -101,7 +104,7 @@ ncfg_block_list_dialog::ncfg_block_list_dialog(ncfg_connection *connection,
 
 void ncfg_block_list_dialog::submit()
 {
-	for (const QLineEdit *value : { name, file, domain, allow }) {
+	for (const QLineEdit *value : { name, file, url, domain, allow }) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash or a "
 			              "newline"));
@@ -111,6 +114,7 @@ void ncfg_block_list_dialog::submit()
 	ncfg_block_list_row list;
 	list.name = name->text().trimmed();
 	list.file = file->text().trimmed();
+	list.url = url->text().trimmed();
 	list.domain = domain->text().trimmed();
 	list.allow = allow->text().trimmed();
 	if (list.name.isEmpty() || list.name.contains(QLatin1Char(' '))) {

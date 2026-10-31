@@ -3192,6 +3192,7 @@ void ncfg_block_lists_free(ncfg_block_lists_t *lists)
 		free(lists->items[i].name);
 		free(lists->items[i].domain);
 		free(lists->items[i].file);
+		free(lists->items[i].url);
 		free(lists->items[i].allow);
 	}
 	free(lists->items);
@@ -3238,8 +3239,9 @@ int ncfg_client_block_lists(ncfg_client_t *client, ncfg_block_lists_t *out, char
 		one->name = member_text(doc, entry, "name");
 		one->domain = joined_words(doc, ncfg_json_member(doc, entry, "domain"));
 		one->file = joined_words(doc, ncfg_json_member(doc, entry, "file"));
+		one->url = joined_words(doc, ncfg_json_member(doc, entry, "url"));
 		one->allow = joined_words(doc, ncfg_json_member(doc, entry, "allow"));
-		if (!one->name || !one->domain || !one->file || !one->allow) {
+		if (!one->name || !one->domain || !one->file || !one->url || !one->allow) {
 			ncfg_block_lists_free(out);
 			set_error(err, err_size, "out of memory");
 			ncfg_json_free(doc);

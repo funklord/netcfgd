@@ -1435,6 +1435,7 @@ void ncfg_render_block_list(const ncfg_block_list_t *list, const ncfg_overrides_
 	ncfg_render_quote(text, list->name);
 	ncfg_buf_add_text(text, " {\n");
 	render_word_list(text, "file", list->file, list->file_count);
+	render_word_list(text, "url", list->url, list->url_count);
 	render_word_list(text, "domain", list->domain, list->domain_count);
 	render_word_list(text, "allow", list->allow, list->allow_count);
 	ncfg_buf_add_text(text, "}\n");

@@ -45,6 +45,7 @@ static const char usage_text[] =
     "  ncfg apply [options]     make the observed state match the config\n"
     "  ncfg status [options]    show what is currently observed\n"
     "  ncfg show [options]      print the compiled desired-state document\n"
+    "  ncfg block fetch [LIST...] download block lists from their `url`\n"
     "  ncfg explain SUBJECT      why is it like this? SUBJECT is one of:\n"
     "                             interface NAME\n"
     "                             address   IFACE CIDR\n"

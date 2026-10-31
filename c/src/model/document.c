@@ -2339,6 +2339,9 @@ static const ncfg_field_t block_list_fields[] = {
 	{ .name = "file", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_block_list_t, file),
 	    .count_offset = offsetof(ncfg_block_list_t, file_count) },
+	{ .name = "url", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_block_list_t, url),
+	    .count_offset = offsetof(ncfg_block_list_t, url_count) },
 	{ .name = "allow", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_block_list_t, allow),
 	    .count_offset = offsetof(ncfg_block_list_t, allow_count) }

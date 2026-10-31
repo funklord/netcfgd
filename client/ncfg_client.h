@@ -1259,6 +1259,7 @@ typedef struct {
 	char *name;
 	char *domain;
 	char *file;
+	char *url;
 	char *allow;
 } ncfg_block_list_entry_t;
 

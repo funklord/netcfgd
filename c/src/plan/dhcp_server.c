@@ -122,10 +122,11 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 				if (!ncfg_block_list_file_usable(named->file[file])) {
 					ncfg_plan_warnf(builder->plan, interface->name,
 					    "block list `%s` names %s, which is not there or is past %llu MiB, "
-					    "so %s blocks without it",
+					    "so %s blocks without it%s",
 					    named->name, named->file[file],
 					    (unsigned long long)(NCFG_BLOCK_FILE_MAX / (1024u * 1024u)),
-					    interface->name);
+					    interface->name,
+					    file < named->url_count ? ": `ncfg block fetch` downloads it" : "");
 				}
 			}
 		}

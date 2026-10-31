@@ -1079,9 +1079,12 @@ int ncfg_lower_block_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merg
 		} else if (strcmp(assignment->key, "allow") == 0) {
 			list = &out->allow;
 			count = &out->allow_count;
+		} else if (strcmp(assignment->key, "url") == 0) {
+			list = &out->url;
+			count = &out->url_count;
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown block_list key `%s`: domain, file and allow", assignment->key);
+			    "unknown block_list key `%s`: domain, file, url and allow", assignment->key);
 			continue;
 		}
 		if (!ncfg_as_words(ctx, assignment->value, &words)) {

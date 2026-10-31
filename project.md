@@ -12597,6 +12597,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.641 Block lists are fetched by a command, never by the daemon
+
+0305's refresh half. A `block_list` gains `url`, one per `file` in the same
+order, and `ncfg block fetch [LIST...]` downloads each with curl into a
+`.part` beside the file and renames it into place only once it holds at least
+one name -- so a 404, a captive portal's HTML or an empty answer keeps the
+list that was there. curl is bounded on every side it offers: `--proto` and
+`--proto-redir` to http and https, so neither a `url` nor a redirect reaches
+`file://`; five minutes; and `--max-filesize` at the 64 MiB `read_list`
+reads, refused before writing rather than truncated into a list missing its
+tail. A `url` is checked to begin with its scheme, so curl cannot read it as
+an option. The daemon still holds no HTTP client, and what it applies never
+depends on a remote at apply time; a timer runs `ncfg block fetch && ncfg
+apply`, and the plan restarts exactly the servers whose files changed.
+
+**Measured on the host** with curl 8.14.1 against a local web server, through
+the built `ncfg`: a hosts list fetched as 2 names, its `dhcp-script=` line
+left for the reader to skip; a 404 and an HTML page each kept the file there
+and left no `.part` or log behind (the log was left on the first run, and is
+now read into the sentence and removed); a 70 MiB list refused with curl's
+"Maximum file size exceeded" and nothing written. The missing-file warning
+now names `ncfg block fetch` where the file has a `url`.
+
+**The agree gate met its first verb the Rust will never have.** `--help`
+differed by one line and `make check` went red. The Rust is retired rather
+than extended (0266), so `agree_gate.py` gains `C_ONLY_LINES`: each whole line
+must be in the C's `--help` and `-h`, and is taken out before the two are
+compared, so the rest of the usage is still held to agreeing and a line that
+goes is a red gate asking for its entry to be deleted.
+
 ## 10.640 Block lists: the router refuses ad names
 
 Decision 0305, which 0303 had deferred and the holder asked for: a

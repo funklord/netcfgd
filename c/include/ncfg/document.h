@@ -1823,7 +1823,8 @@ typedef struct {
  *
  * `domain` is names written in the configuration; `file` is files holding
  * more, one name to a line in any of the formats lists are published in,
- * read at apply time and never handed to dnsmasq as they are; `allow` takes
+ * read at apply time and never handed to dnsmasq as they are, and fetched
+ * from `url` by `ncfg block fetch` and never by the daemon; `allow` takes
  * names back out, and subdomains of a blocked name back to the upstream.
  * `ncfg_block_list_check` holds it.
  */
@@ -1833,6 +1834,10 @@ typedef struct {
 	size_t domain_count;
 	char **file;
 	size_t file_count;
+	/* Where each `file` is fetched from, by position, for `ncfg block
+	 * fetch`; empty for files the operator fills some other way. */
+	char **url;
+	size_t url_count;
 	char **allow;
 	size_t allow_count;
 } ncfg_block_list_t;

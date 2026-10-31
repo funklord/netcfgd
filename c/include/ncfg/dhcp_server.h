@@ -53,6 +53,15 @@ int ncfg_block_list_file_usable(const char *path);
 size_t ncfg_dhcp_server_block_digest(const ncfg_document_t *document,
     const ncfg_dhcp_server_t *server, uint32_t *out);
 
+/*
+ * Fetch one block list file from `url` into `path` with curl (0305), for
+ * `ncfg block fetch`; `program` is the curl to run, or NULL to find one. The
+ * file is replaced only by a download holding at least one name, whose count
+ * goes to `names_out`. 0 with a sentence, the old file kept.
+ */
+int ncfg_block_list_fetch(const char *url, const char *path, const char *program,
+    size_t *names_out, char *err, size_t err_size);
+
 /* Write the names a server blocks to `path` (0305). 0 with a sentence. */
 int ncfg_dhcp_server_block_write(const ncfg_document_t *document,
     const ncfg_dhcp_server_t *server, const char *path, char *err, size_t err_size);

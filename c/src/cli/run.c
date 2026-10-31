@@ -36,6 +36,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/config.h"
 #include "ncfg/daemon.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/explain.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
@@ -884,6 +885,76 @@ static int command_show(const ncfg_cli_options_t *options)
 	    : fail(err);
 	ncfg_document_free(document);
 	return code;
+}
+
+/*
+ * `ncfg block fetch [LIST...]` (0305): download each block list's files from
+ * the `url` beside them. The daemon never fetches, so this is what a timer
+ * runs; the files it replaces are a changed summary, which the next plan
+ * restarts the servers for. Every list with a `url` where none is named.
+ */
+static int command_block(const ncfg_cli_options_t *options, const char **positional,
+    size_t count)
+{
+	char             run_dir[NCFG_CLI_TEXT_MAX];
+	char             err[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+	size_t           at;
+	size_t           fetched = 0;
+	size_t           failed = 0;
+
+	if (count == 0 || strcmp(positional[0], "fetch") != 0) {
+		return failf("`ncfg block` needs a subcommand: fetch [LIST...]");
+	}
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
+	if (!document) {
+		return fail(err);
+	}
+	for (at = 1; at < count; at++) {
+		size_t find;
+		int    known = 0;
+
+		for (find = 0; find < document->block_list_count; find++) {
+			known = known || strcmp(document->block_lists[find].name, positional[at]) == 0;
+		}
+		if (!known) {
+			ncfg_document_free(document);
+			return failf("no `block_list` is named `%s`", positional[at]);
+		}
+	}
+	for (at = 0; at < document->block_list_count; at++) {
+		const ncfg_block_list_t *list = &document->block_lists[at];
+		size_t                   one;
+		int                      named = count == 1u;
+
+		for (one = 1; !named && one < count; one++) {
+			named = strcmp(positional[one], list->name) == 0;
+		}
+		if (!named) {
+			continue;
+		}
+		if (!list->url_count && count > 1u) {
+			printf("%s: no `url`, so nothing to fetch\n", list->name);
+		}
+		for (one = 0; one < list->url_count; one++) {
+			size_t names = 0;
+
+			if (ncfg_block_list_fetch(list->url[one], list->file[one], NULL, &names, err,
+			        sizeof(err))) {
+				printf("%s: %s: %zu names\n", list->name, list->file[one], names);
+				fetched++;
+			} else {
+				fprintf(stderr, "%s: %s\n", list->name, err);
+				failed++;
+			}
+		}
+	}
+	ncfg_document_free(document);
+	if (fetched) {
+		printf("the next `ncfg apply` restarts the servers whose lists changed\n");
+	}
+	return failed ? failf("%zu of %zu file(s) could not be fetched", failed, failed + fetched)
+	              : NCFG_CLI_EXIT_OK;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -2226,6 +2297,9 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	}
 	if (strcmp(command, "explain") == 0) {
 		return command_explain(options, positional, count);
+	}
+	if (strcmp(command, "block") == 0) {
+		return command_block(options, positional, count);
 	}
 	if (strcmp(command, "control") == 0) {
 		return subcommand(ncfg_cli_control, options, positional, count);

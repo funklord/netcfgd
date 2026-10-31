@@ -143,7 +143,8 @@ int main(int argc, char **argv)
 	QList<QPair<QString, QString>> owned;
 	owned << qMakePair(QStringLiteral("block_list-ads"),
 	    QStringLiteral("block_list \"ads\" { file = [\"/var/lib/netcfgd/block/ads.txt\", "
-	                   "\"/var/lib/netcfgd/block/more.txt\"]; domain = [\"doubleclick.net\"]; "
+	                   "\"/var/lib/netcfgd/block/more.txt\"]; url = [\"https://example.org/a.txt\", "
+	                   "\"https://example.org/b.txt\"]; domain = [\"doubleclick.net\"]; "
 	                   "allow = [\"ok.doubleclick.net\"] }\n"));
 	owned << qMakePair(QStringLiteral("block_list-malware"),
 	    QStringLiteral("block_list \"malware\" { domain = [\"bad.example\", \"worse.example\"] }\n"));

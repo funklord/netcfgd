@@ -1611,6 +1611,7 @@ bool ncfg_connection::block_lists(QList<ncfg_block_list_row> *out, QString *erro
 		row.name = from_c(found.items[i].name);
 		row.domain = from_c(found.items[i].domain);
 		row.file = from_c(found.items[i].file);
+		row.url = from_c(found.items[i].url);
 		row.allow = from_c(found.items[i].allow);
 		out->append(row);
 	}

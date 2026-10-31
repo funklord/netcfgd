@@ -746,6 +746,21 @@ int ncfg_block_list_check(const ncfg_block_list_t *list, const char **why)
 			reason = "an `allow` is a DNS name in lowercase, as \"cdn.ads.example\"";
 		}
 	}
+	if (!reason && list->url_count && list->url_count != list->file_count) {
+		reason = "a `url` is where the `file` beside it is fetched from, one for each file "
+		         "in the same order";
+	}
+	for (at = 0; !reason && at < list->url_count; at++) {
+		const char *url = list->url[at];
+
+		/* What curl is handed as one argument: a web address and nothing a
+		 * shell or curl's own option parser would read as more. */
+		if (!url || (strncmp(url, "https://", 8) != 0 && strncmp(url, "http://", 7) != 0) ||
+		    !option_text(url, 2047u, " \"\\")) {
+			reason = "a `url` is an http or https address, as "
+			         "\"https://example.org/hosts.txt\"";
+		}
+	}
 	for (at = 0; !reason && at < list->file_count; at++) {
 		const char *path = list->file[at];
 

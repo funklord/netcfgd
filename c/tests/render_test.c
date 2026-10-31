@@ -869,7 +869,7 @@ static void an_access_point_round_trips(void)
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
 	    "\tdhcp_server {\n\t\tdns_forward = true\n\t\tblock = [\"ads\", \"malware\"]\n\t}\n}\n"
 	    "block_list \"ads\" {\n\tfile = [\"/var/lib/netcfgd/block/ads.txt\"]\n"
-	    "\tdomain = [\"doubleclick.net\"]\n\tallow = [\"ok.doubleclick.net\"]\n}\n"
+	    "\turl = [\"https://example.org/hosts.txt\"]\n\tdomain = [\"doubleclick.net\"]\n\tallow = [\"ok.doubleclick.net\"]\n}\n"
 	    "block_list \"malware\" {\n\tdomain = [\"bad.example\"]\n}\n",
 	    "block lists, and a server applying two, round-trip (0305)");
 	round_trips("interface wan0 {\n\tnat = true\n"

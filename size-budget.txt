@@ -1064,4 +1064,6 @@ netcfgd
 # And DHCP relay (decision 0303), +40.
 # And block lists, read and sanitised for the forwarder (decision 0305),
 # +13,288.
-total 1387128
+# And `ncfg block fetch`, curl run outside the daemon (decision 0305),
+# +4,272.
+total 1391400

@@ -15,6 +15,13 @@
  *   refuses every character that could make a name into more, and the file
  *   dnsmasq reads is netcfgd's own.
  *
+ * WHY FETCHING IS NOT THE DAEMON'S
+ *   `ncfg_block_list_fetch` runs curl for `ncfg block fetch`, which an
+ *   operator or a timer runs: the daemon holds no HTTP client, and what it
+ *   applies never depends on a remote at apply time. A download lands beside
+ *   the file and replaces it only once it holds at least one name, so a
+ *   failed or empty fetch keeps the list that was there.
+ *
  * WHY A LIST THAT CANNOT BE READ IS LEFT OUT
  *   A file not fetched yet, or past the bound, leaves its names out and the
  *   server starts without them -- with a plan warning, from
@@ -31,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /*
  * Firefox's switch (0305): a resolver that answers this name NXDOMAIN tells
@@ -297,4 +305,129 @@ int ncfg_dhcp_server_block_write(const ncfg_document_t *document,
 	ok = ncfg_backend_write_file(path, text, length, 0644, err, err_size);
 	free(text);
 	return ok;
+}
+
+/* What curl says when it fails, for the sentence a failed fetch carries. */
+static const char *const FETCH_MARKERS[] = { "curl:", "error", "failed", "could not" };
+
+/* The names a downloaded file holds, counted as `read_list` would read them. */
+static size_t count_names(const char *path)
+{
+	names_t names = { NULL, 0, 0 };
+	size_t  count;
+	int     full = 0;
+
+	if (!read_list(path, &names, &full)) {
+		names_free(&names);
+		return 0;
+	}
+	count = names.count;
+	names_free(&names);
+	return count;
+}
+
+int ncfg_block_list_fetch(const char *url, const char *path, const char *program,
+    size_t *names_out, char *err, size_t err_size)
+{
+	char        dir[NCFG_DHCP_SERVER_PATH_MAX];
+	char        part[NCFG_DHCP_SERVER_PATH_MAX + 8];
+	char        log[NCFG_DHCP_SERVER_PATH_MAX + 8];
+	char        said[NCFG_ERROR_MAX];
+	char        most[32];
+	char       *found = NULL;
+	char       *slash;
+	const char *argv[17];
+	size_t      names;
+	int         exited_ok = 0;
+	int         status = 0;
+
+	if (!url || !path || strlen(path) >= sizeof(dir)) {
+		ncfg_error_set(err, err_size, "a fetch needs a url and a file to put it in");
+		return 0;
+	}
+	strcpy(dir, path);
+	slash = strrchr(dir, '/');
+	if (slash && slash != dir) {
+		*slash = '\0';
+		if (!ncfg_backend_make_dir(dir, 0755, err, err_size)) {
+			return 0;
+		}
+	}
+	(void)snprintf(part, sizeof(part), "%s.part", path);
+	(void)snprintf(log, sizeof(log), "%s.log", path);
+	(void)snprintf(most, sizeof(most), "%llu", (unsigned long long)NCFG_BLOCK_FILE_MAX);
+	if (!program) {
+		found = ncfg_backend_find_program("curl");
+		if (!found) {
+			ncfg_error_set(err, err_size, "no curl found; fetching a block list needs it");
+			return 0;
+		}
+		program = found;
+	}
+	/*
+	 * **Bounded on every side curl offers**: the web schemes only, redirects
+	 * included, so a list cannot send it to `file://`; five minutes; and the
+	 * size `read_list` would read, refused before it is written rather than
+	 * truncated into a list missing its tail. `--fail` makes an error page
+	 * an exit status rather than a file of HTML.
+	 */
+	argv[0] = program;
+	argv[1] = "--fail";
+	argv[2] = "--silent";
+	argv[3] = "--show-error";
+	argv[4] = "--location";
+	argv[5] = "--proto";
+	argv[6] = "=https,http";
+	argv[7] = "--proto-redir";
+	argv[8] = "=https,http";
+	argv[9] = "--max-time";
+	argv[10] = "300";
+	argv[11] = "--max-filesize";
+	argv[12] = most;
+	argv[13] = "--output";
+	argv[14] = part;
+	/* Its own argument, and checked by `ncfg_block_list_check` to start
+	 * with a scheme, so curl never reads it as an option. */
+	argv[15] = url;
+	argv[16] = NULL;
+	if (!ncfg_backend_run(program, argv, log, &exited_ok, &status, err, err_size)) {
+		free(found);
+		(void)unlink(log);
+		(void)unlink(part);
+		return 0;
+	}
+	free(found);
+	if (!exited_ok) {
+		if (ncfg_backend_complaints(log, FETCH_MARKERS,
+		        sizeof(FETCH_MARKERS) / sizeof(FETCH_MARKERS[0]), NULL, 0u, 2u, said,
+		        sizeof(said))) {
+			ncfg_error_set(err, err_size, "could not fetch %s: %s; %s is kept as it was", url,
+			    said, path);
+		} else {
+			ncfg_error_set(err, err_size, "could not fetch %s: curl exited with status %d; %s "
+			    "is kept as it was", url, status, path);
+		}
+		/* Read into the sentence above, so nothing is left beside the list. */
+		(void)unlink(log);
+		(void)unlink(part);
+		return 0;
+	}
+	(void)unlink(log);
+	names = count_names(part);
+	if (names == 0u) {
+		ncfg_error_set(err, err_size, "%s holds no names a block list can use, so %s is kept "
+		    "as it was", url, path);
+		(void)unlink(part);
+		return 0;
+	}
+	if (chmod(part, 0644) != 0 || rename(part, path) != 0) {
+		ncfg_error_set(err, err_size, "could not put the list fetched from %s in %s", url,
+		    path);
+		(void)unlink(part);
+		return 0;
+	}
+	if (names_out) {
+		*names_out = names;
+	}
+	return 1;
 }

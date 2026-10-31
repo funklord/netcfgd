@@ -1862,6 +1862,13 @@ static void firewall_mac_cases(void)
 	    "needs `dns_forward = true`", "  and so is blocking where nothing forwards DNS");
 	refuses("block_list \"ads\" { allow = [\"ads.example\"] }\n", "a block list holds names",
 	    "  and a list holding no names");
+	refuses("block_list \"ads\" { file = [\"/a.txt\", \"/b.txt\"]; "
+	    "url = [\"https://example.org/a.txt\"] }\n", "one for each file",
+	    "  and a `url` for some of its files and not others");
+	refuses("block_list \"ads\" { file = [\"/a.txt\"]; url = [\"file:///etc/shadow\"] }\n",
+	    "http or https", "  and a `url` curl would read from this machine");
+	refuses("block_list \"ads\" { file = [\"/a.txt\"]; url = [\"-o/etc/passwd\"] }\n",
+	    "http or https", "  and one curl would read as an option");
 	refuses("block_list \"ads\" { domain = [\"Ads.Example\"] }\n", "in lowercase",
 	    "  and a name in capitals, which dnsmasq would match and a reader might not");
 	document = compiles("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"

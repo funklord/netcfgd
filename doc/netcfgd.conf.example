@@ -1859,8 +1859,11 @@
 #     netcfgd reads each line as one name and writes what dnsmasq sees, so a
 #     list cannot carry anything else. Up to 64 MiB a file and a million names
 #     a server; a file not there yet is left out, with a plan warning.
-#     netcfgd does not download them: fetch them on whatever schedule suits,
-#     and a changed file restarts the server on the next apply;
+#   - `url` says where each file is fetched from, one per file in the same
+#     order. The daemon never downloads anything: `ncfg block fetch` does,
+#     with curl, replacing a file only with a download that holds names --
+#     so run it from a timer, `ncfg block fetch && ncfg apply`, and a changed
+#     file restarts the servers that read it;
 #   - `domain` is names written here;
 #   - `allow` takes a name out, and resolves a subdomain of a blocked name.
 #
@@ -1869,6 +1872,7 @@
 
 #block_list "ads" {
 #	file   = ["/var/lib/netcfgd/block/ads.txt"]
+#	url    = ["https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"]
 #	domain = ["doubleclick.net"]
 #	allow  = ["ok.doubleclick.net"]
 #}

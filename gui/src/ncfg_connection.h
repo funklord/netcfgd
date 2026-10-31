@@ -356,6 +356,7 @@ struct ncfg_block_list_row {
 	QString name;
 	QString domain;
 	QString file;
+	QString url;
 	QString allow;
 };
 
