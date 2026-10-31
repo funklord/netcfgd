@@ -783,6 +783,13 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 	if (server->dns_forward) {
 		ncfg_buf_add_text(body, "\t\tdns_forward = true\n");
 	}
+	if (server->block_count) {
+		ncfg_buf_add_text(body, "\t\tblock = [");
+		for (at = 0; at < server->block_count; at++) {
+			ncfg_buf_addf(body, "%s\"%s\"", at ? ", " : "", server->block[at]);
+		}
+		ncfg_buf_add_text(body, "]\n");
+	}
 	/* The standard options (0303). The range check above checked each shape,
 	 * a quote and a backslash among what it refuses, so each is written as
 	 * it is. */
@@ -1410,6 +1417,26 @@ void ncfg_render_dns_record(const ncfg_dns_record_t *record, const ncfg_override
 		}
 	}
 	render_word_list(text, "forward", record->forward, record->forward_count);
+	ncfg_buf_add_text(text, "}\n");
+}
+
+/* A block list (0305), refused where `ncfg_block_list_check` would refuse it. */
+void ncfg_render_block_list(const ncfg_block_list_t *list, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
+{
+	const char *why = NULL;
+
+	if (!ncfg_block_list_check(list, &why)) {
+		ncfg_render_refuse(missing, "block_list", list->name, "%s",
+		    why ? why : "it cannot be applied");
+		return;
+	}
+	ncfg_render_opening(text, "block_list", list->name, overrides);
+	ncfg_render_quote(text, list->name);
+	ncfg_buf_add_text(text, " {\n");
+	render_word_list(text, "file", list->file, list->file_count);
+	render_word_list(text, "domain", list->domain, list->domain_count);
+	render_word_list(text, "allow", list->allow, list->allow_count);
 	ncfg_buf_add_text(text, "}\n");
 }
 

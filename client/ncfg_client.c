@@ -3183,6 +3183,73 @@ int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char
 	return 1;
 }
 
+void ncfg_block_lists_free(ncfg_block_lists_t *lists)
+{
+	if (!lists) {
+		return;
+	}
+	for (size_t i = 0; i < lists->count; i++) {
+		free(lists->items[i].name);
+		free(lists->items[i].domain);
+		free(lists->items[i].file);
+		free(lists->items[i].allow);
+	}
+	free(lists->items);
+	lists->items = NULL;
+	lists->count = 0;
+}
+
+int ncfg_client_block_lists(ncfg_client_t *client, ncfg_block_lists_t *out, char *err,
+                            size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t lists = ncfg_json_member(doc, ncfg_json_root(doc), "block_lists");
+	uint32_t count = ncfg_json_count(doc, lists);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t                 entry = ncfg_json_at(doc, lists, i);
+		ncfg_block_list_entry_t *one = &out->items[i];
+
+		one->name = member_text(doc, entry, "name");
+		one->domain = joined_words(doc, ncfg_json_member(doc, entry, "domain"));
+		one->file = joined_words(doc, ncfg_json_member(doc, entry, "file"));
+		one->allow = joined_words(doc, ncfg_json_member(doc, entry, "allow"));
+		if (!one->name || !one->domain || !one->file || !one->allow) {
+			ncfg_block_lists_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_host_lists_free(ncfg_host_lists_t *lists)
 {
 	if (!lists) {
@@ -3386,6 +3453,7 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->dhcp_wpad);
 	free(config->dhcp_range6);
 	free(config->dhcp_relay);
+	free(config->dhcp_block);
 	for (size_t i = 0; i < config->dhcp_option_count; i++) {
 		free(config->dhcp_options[i].name);
 		free(config->dhcp_options[i].kind);
@@ -4692,6 +4760,7 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->dhcp_tftp_server = member_text(doc, server, "tftp_server");
 		out->dhcp_wpad = member_text(doc, server, "wpad");
 		out->dhcp_relay = joined_words(doc, ncfg_json_member(doc, server, "relay"));
+		out->dhcp_block = joined_words(doc, ncfg_json_member(doc, server, "block"));
 		{
 			char *start6 = member_text(doc, server, "range6_start");
 			char *end6 = member_text(doc, server, "range6_end");

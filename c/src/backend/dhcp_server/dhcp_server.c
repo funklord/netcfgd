@@ -56,6 +56,27 @@ int ncfg_dhcp_server_leases_path(const char *run, const char *iface, char *out, 
 	    err_size);
 }
 
+int ncfg_dhcp_server_block_path(const char *run, const char *iface, char *out,
+    size_t out_size, char *err, size_t err_size)
+{
+	return ncfg_backend_path(out, out_size, run, "dhcp-server", iface, ".block", err, err_size);
+}
+
+/* What a server blocks (0305), as a count of lists and a digest, after
+ * whatever else its line says. Absent where it blocks nothing. */
+static size_t add_blocks(const ncfg_document_t *document, const ncfg_dhcp_server_t *server,
+    char *out, size_t used, size_t out_size)
+{
+	uint32_t digest;
+	size_t   lists = ncfg_dhcp_server_block_digest(document, server, &digest);
+
+	if (lists && used < out_size) {
+		used += (size_t)snprintf(out + used, out_size - used, ", blocking %zu list%s %08x",
+		    lists, lists == 1u ? "" : "s", (unsigned)digest);
+	}
+	return used;
+}
+
 static int log_path(const char *run, const char *iface, char *out, size_t out_size, char *err,
     size_t err_size)
 {
@@ -175,6 +196,7 @@ int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interfa
 		if (server->dns_forward && used < out_size) {
 			used += (size_t)snprintf(out + used, out_size - used, ", forwarding dns");
 		}
+		used = add_blocks(document, server, out, used, out_size);
 		return used < out_size;
 	}
 	/* "none" only where nothing answers (0301): a forwarding server with no
@@ -244,6 +266,7 @@ int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interfa
 			    records, records == 1u ? "" : "s", (unsigned)digest);
 		}
 	}
+	used = add_blocks(document, server, out, used, out_size);
 	return used < out_size;
 }
 
@@ -333,6 +356,16 @@ static void render_custom_option(ncfg_buf_t *buf, const ncfg_dhcp_option_t *opti
  * a lease, a reservation or another record -- and `server=/name/` sends the
  * name and everything under it to the servers named.
  */
+/* The block lists (0305), in a file of their own: a list is far longer than
+ * this file's bound, and is rewritten from the lists on every start. */
+static void render_blocks(ncfg_buf_t *buf, const ncfg_dhcp_server_t *server,
+    const char *block_path)
+{
+	if (server->block_count && block_path) {
+		ncfg_buf_addf(buf, "conf-file=%s\n", block_path);
+	}
+}
+
 static void render_records(ncfg_buf_t *buf, const ncfg_document_t *document)
 {
 	size_t at;
@@ -374,7 +407,7 @@ static void render_records(ncfg_buf_t *buf, const ncfg_document_t *document)
 }
 
 char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
-    const char *leases_path, char *err, size_t err_size)
+    const char *leases_path, const char *block_path, char *err, size_t err_size)
 {
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
 	char                      start[NCFG_ADDRESS_MAX];
@@ -433,6 +466,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 		}
 		if (server->dns_forward) {
 			render_records(&buf, document);
+			render_blocks(&buf, server, block_path);
 		}
 		goto rendered;
 	}
@@ -511,6 +545,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 	}
 	if (server->dns_forward) {
 		render_records(&buf, document);
+		render_blocks(&buf, server, block_path);
 	}
 rendered:
 	if (ncfg_buf_failed(&buf)) {
@@ -532,6 +567,7 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 	char        pid[NCFG_DHCP_SERVER_PATH_MAX];
 	char        log[NCFG_DHCP_SERVER_PATH_MAX];
 	char        leases[NCFG_DHCP_SERVER_PATH_MAX];
+	char        block[NCFG_DHCP_SERVER_PATH_MAX];
 	char        said[NCFG_ERROR_MAX];
 	char       *found = NULL;
 	char       *text;
@@ -551,10 +587,19 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 	    !ncfg_dhcp_server_pid_path(run, interface->name, pid, sizeof(pid), err, err_size) ||
 	    !log_path(run, interface->name, log, sizeof(log), err, err_size) ||
 	    !ncfg_dhcp_server_leases_path(run, interface->name, leases, sizeof(leases), err,
+	        err_size) ||
+	    !ncfg_dhcp_server_block_path(run, interface->name, block, sizeof(block), err,
 	        err_size)) {
 		return 0;
 	}
-	text = ncfg_dhcp_server_render(document, interface, leases, err, err_size);
+	/* Written before the configuration naming it, so dnsmasq never reads a
+	 * `conf-file=` that is not there. */
+	if (interface->dhcp_server && interface->dhcp_server->dns_forward &&
+	    interface->dhcp_server->block_count &&
+	    !ncfg_dhcp_server_block_write(document, interface->dhcp_server, block, err, err_size)) {
+		return 0;
+	}
+	text = ncfg_dhcp_server_render(document, interface, leases, block, err, err_size);
 	if (!text) {
 		return 0;
 	}

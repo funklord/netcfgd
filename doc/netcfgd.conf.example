@@ -1848,6 +1848,38 @@
 #	forward = ["10.0.0.53"]
 #}
 
+# BLOCKING ADS (decision 0305). A `block_list` is names the router refuses to
+# resolve: each answers NXDOMAIN, with everything under it. A network applies
+# it with `block` in a `dhcp_server` that has `dns_forward = true` -- a list
+# no server names is a plan warning.
+#
+#   - `file` names files a list is published in: hosts files
+#     ("0.0.0.0 ads.example"), one name a line, adblock rules
+#     ("||ads.example^"), or dnsmasq `address=`/`local=`/`server=` lines.
+#     netcfgd reads each line as one name and writes what dnsmasq sees, so a
+#     list cannot carry anything else. Up to 64 MiB a file and a million names
+#     a server; a file not there yet is left out, with a plan warning.
+#     netcfgd does not download them: fetch them on whatever schedule suits,
+#     and a changed file restarts the server on the next apply;
+#   - `domain` is names written here;
+#   - `allow` takes a name out, and resolves a subdomain of a blocked name.
+#
+# A blocking server also answers `use-application-dns.net` NXDOMAIN, which
+# tells Firefox not to send DNS past the router by itself.
+
+#block_list "ads" {
+#	file   = ["/var/lib/netcfgd/block/ads.txt"]
+#	domain = ["doubleclick.net"]
+#	allow  = ["ok.doubleclick.net"]
+#}
+#interface "br0" {
+#	config = "192.168.1.1/24"
+#	dhcp_server {
+#		dns_forward = true
+#		block       = ["ads"]
+#	}
+#}
+
 # POLICY ROUTING. A rule sends some traffic to a different table -- which is
 # how a second uplink, or a VPN for one subnet only, is expressed.
 

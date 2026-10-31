@@ -1973,7 +1973,10 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	    .offset = offsetof(ncfg_dhcp_server_t, range6_end) },
 	{ .name = "relay", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_dhcp_server_t, relay),
-	    .count_offset = offsetof(ncfg_dhcp_server_t, relay_count) }
+	    .count_offset = offsetof(ncfg_dhcp_server_t, relay_count) },
+	{ .name = "block", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dhcp_server_t, block),
+	    .count_offset = offsetof(ncfg_dhcp_server_t, block_count) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 
@@ -2326,6 +2329,21 @@ static const ncfg_field_t dns_record_fields[] = {
 	    .count_offset = offsetof(ncfg_dns_record_t, forward_count) }
 };
 static const ncfg_type_t dns_record_type = TYPE("DNS record", dns_record_fields);
+
+static const ncfg_field_t block_list_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_block_list_t, name) },
+	{ .name = "domain", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_block_list_t, domain),
+	    .count_offset = offsetof(ncfg_block_list_t, domain_count) },
+	{ .name = "file", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_block_list_t, file),
+	    .count_offset = offsetof(ncfg_block_list_t, file_count) },
+	{ .name = "allow", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_block_list_t, allow),
+	    .count_offset = offsetof(ncfg_block_list_t, allow_count) }
+};
+static const ncfg_type_t block_list_type = TYPE("block list", block_list_fields);
 
 static const ncfg_field_t host_list_fields[] = {
 	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
@@ -2810,7 +2828,11 @@ static const ncfg_field_t document_fields[] = {
 	{ .name = "dns_records", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &dns_record_type, .element_size = sizeof(ncfg_dns_record_t),
 	    .offset = offsetof(ncfg_document_t, dns_records),
-	    .count_offset = offsetof(ncfg_document_t, dns_record_count) }
+	    .count_offset = offsetof(ncfg_document_t, dns_record_count) },
+	{ .name = "block_lists", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &block_list_type, .element_size = sizeof(ncfg_block_list_t),
+	    .offset = offsetof(ncfg_document_t, block_lists),
+	    .count_offset = offsetof(ncfg_document_t, block_list_count) }
 };
 static const ncfg_type_t document_type = TYPE("document", document_fields);
 
@@ -2866,6 +2888,13 @@ const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const
 		}
 	}
 	return NULL;
+}
+
+void ncfg_block_list_free(ncfg_block_list_t *list)
+{
+	if (list) {
+		ncfg_type_free(&block_list_type, list);
+	}
 }
 
 void ncfg_dns_record_free(ncfg_dns_record_t *record)

@@ -18,6 +18,7 @@
 #include "rules_view.h"
 #include "firewall_view.h"
 #include "host_lists_view.h"
+#include "block_lists_view.h"
 #include "dns_records_view.h"
 #include "meshes_view.h"
 #include "bluetooth_view.h"
@@ -187,6 +188,10 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(host_lists, &ncfg_host_lists_view::changed, this, &ncfg_main_window::reload);
 	connect(dns_records, &ncfg_dns_records_view::reported, this, &ncfg_main_window::note);
 	connect(dns_records, &ncfg_dns_records_view::changed, this, &ncfg_main_window::reload);
+	block_lists = new ncfg_block_lists_view(connection, configuration);
+	configuration->addTab(block_lists, QStringLiteral("block lists"));
+	connect(block_lists, &ncfg_block_lists_view::reported, this, &ncfg_main_window::note);
+	connect(block_lists, &ncfg_block_lists_view::changed, this, &ncfg_main_window::reload);
 	connect(meshes, &ncfg_meshes_view::reported, this, &ncfg_main_window::note);
 	connect(meshes, &ncfg_meshes_view::changed, this, &ncfg_main_window::reload);
 	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
@@ -356,6 +361,8 @@ void ncfg_main_window::refresh()
 		host_lists->refresh();
 	} else if (current == dns_records) {
 		dns_records->refresh();
+	} else if (current == block_lists) {
+		block_lists->refresh();
 	} else if (current == meshes) {
 		meshes->refresh();
 	} else if (current == bluetooth) {

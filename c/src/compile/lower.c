@@ -606,6 +606,43 @@ static void resolve_firewall_host_lists(ncfg_lower_ctx_t *ctx, ncfg_span_t span,
  * nowhere is the configuration failing silently; two -- the same name reserved
  * on two networks -- is refused because either answer would be a guess.
  */
+/*
+ * Each block list a DHCP server names must be declared (0305). Refused rather
+ * than read as empty, for the access point's reason: a LAN whose operator
+ * believes it is filtered and is not is the failure, and it is silent.
+ */
+static void resolve_block_lists(ncfg_lower_ctx_t *ctx, const deferred_t *blockers,
+    size_t count)
+{
+	ncfg_document_t *document = ctx->document;
+	size_t           i;
+
+	for (i = 0; i < count; i++) {
+		const ncfg_dhcp_server_t *server = NULL;
+		size_t                    at;
+
+		ctx->source = blockers[i].source;
+		for (at = 0; at < document->interface_count; at++) {
+			if (strcmp(document->interfaces[at].name, blockers[i].name) == 0) {
+				server = document->interfaces[at].dhcp_server;
+			}
+		}
+		for (at = 0; server && at < server->block_count; at++) {
+			size_t find;
+			int    found = 0;
+
+			for (find = 0; find < document->block_list_count; find++) {
+				found = found || strcmp(document->block_lists[find].name, server->block[at]) == 0;
+			}
+			if (!found) {
+				ncfg_diag(ctx, blockers[i].span,
+				    "the DHCP server on `%s` blocks list `%s`, which no `block_list` block "
+				    "declares", blockers[i].name, server->block[at]);
+			}
+		}
+	}
+}
+
 static void resolve_forward_hosts(ncfg_lower_ctx_t *ctx, const deferred_t *forwarders,
     size_t count)
 {
@@ -759,6 +796,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	/* Each interface with a forward naming a reservation, resolved once every
 	 * interface has been read (10.618). */
 	deferred_t      *forwarders = NULL;
+	deferred_t      *blockers = NULL;
+	size_t           blocker_count = 0;
 	size_t           forwarder_count = 0;
 	/* Where the firewall block was, for a host list one of its rules names
 	 * and nothing declares. */
@@ -868,6 +907,10 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 					break;
 				}
 			}
+			if (interface.dhcp_server && interface.dhcp_server->block_count) {
+				(void)remember(&ctx, &blockers, &blocker_count, interface.name, NULL,
+				    block->block->span, block->source);
+			}
 			{
 				ncfg_interface_t *slot = ncfg_push(&ctx, &ctx.document->interfaces,
 				    &ctx.document->interface_count, sizeof(*slot));
@@ -972,6 +1015,32 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 			} else {
 				ncfg_dns_record_free(&record);
 			}
+		} else if (strcmp(head, "block_list") == 0) {
+			ncfg_block_list_t  list;
+			ncfg_block_list_t *slot;
+			size_t             at;
+			int                repeated = 0;
+
+			if (!ncfg_lower_block_list(&ctx, block, &list)) {
+				continue;
+			}
+			for (at = 0; at < ctx.document->block_list_count; at++) {
+				repeated = repeated || strcmp(ctx.document->block_lists[at].name, list.name) == 0;
+			}
+			if (repeated) {
+				ncfg_diag(&ctx, block->block->span, "block_list `%s` is declared twice",
+				    list.name);
+				ncfg_block_list_free(&list);
+				continue;
+			}
+			ncfg_record(&ctx, block->source, block->block->span, "block_list.%s", list.name);
+			slot = ncfg_push(&ctx, &ctx.document->block_lists, &ctx.document->block_list_count,
+			    sizeof(*slot));
+			if (slot) {
+				*slot = list;
+			} else {
+				ncfg_block_list_free(&list);
+			}
 		} else if (strcmp(head, "host_list") == 0) {
 			ncfg_host_list_t list;
 			size_t           at;
@@ -1033,8 +1102,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		} else {
 			ncfg_diag(&ctx, block->block->span,
 			    "unknown top-level block `%s`: the top-level blocks are interface, network, "
-			    "device, rule, linkset, access_point, mesh, host_list, dns_record, firewall "
-			    "and global",
+			    "device, rule, linkset, access_point, mesh, host_list, dns_record, "
+			    "block_list, firewall and global",
 			    head);
 		}
 	}
@@ -1045,12 +1114,14 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	resolve_host_lists(&ctx, referrers, referrer_count);
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
 	resolve_forward_hosts(&ctx, forwarders, forwarder_count);
+	resolve_block_lists(&ctx, blockers, blocker_count);
 
 	deferred_free(memberships, membership_count);
 	deferred_free(shapers, shaper_count);
 	deferred_free(linksets, linkset_count);
 	deferred_free(referrers, referrer_count);
 	deferred_free(forwarders, forwarder_count);
+	deferred_free(blockers, blocker_count);
 
 	/*
 	 * A table for a document nobody gets is a table of paths into nothing, so

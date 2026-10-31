@@ -1849,6 +1849,31 @@ static void firewall_mac_cases(void)
 	    "\t\tdrop \"x\" { mac = [\"@host_list:nobody\"] }\n\t}\n"
 	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
 	    "which no `host_list` block declares", "a firewall list nothing declares is refused");
+
+	/* Block lists (0305): a server naming one nothing declares is refused,
+	 * since a LAN that reads as filtered and is not fails silently; so is
+	 * blocking where nothing forwards, and a list that holds no names. */
+	refuses("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns_forward = true; block = [\"ads\"] }\n}\n",
+	    "which no `block_list` block declares", "a block list nothing declares is refused");
+	refuses("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { block = [\"ads\"] }\n}\n"
+	    "block_list \"ads\" { domain = [\"ads.example\"] }\n",
+	    "needs `dns_forward = true`", "  and so is blocking where nothing forwards DNS");
+	refuses("block_list \"ads\" { allow = [\"ads.example\"] }\n", "a block list holds names",
+	    "  and a list holding no names");
+	refuses("block_list \"ads\" { domain = [\"Ads.Example\"] }\n", "in lowercase",
+	    "  and a name in capitals, which dnsmasq would match and a reader might not");
+	document = compiles("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns_forward = true; block = [\"ads\"] }\n}\n"
+	    "block_list \"ads\" { file = [\"/var/lib/netcfgd/block/ads.txt\"] }\n",
+	    "a forwarding server blocking a declared list compiles");
+	if (document) {
+		check(document->block_list_count == 1u && document->block_lists[0].file_count == 1u &&
+		        document->interfaces[0].dhcp_server->block_count == 1u,
+		    "  carrying the list and the server's reference to it");
+		ncfg_document_free(document);
+	}
 	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
 	    "\t\tdrop \"x\" { mac = [\"nonsense\"] }\n\t}\n"
 	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
@@ -2755,8 +2780,10 @@ static void interface_cases(void)
  *     resolves to nothing is refused on purpose.
  *   - the `access_point "Family"` names a `host_list`, and a list nothing
  *     declares is refused on purpose (10.591).
+ *   - the `interface "br0"` applying a block list names it, for the same
+ *     reason (0305).
  *
- * All four are correct as documentation and meaningless in isolation. A gate
+ * All five are correct as documentation and meaningless in isolation. A gate
  * that silently tolerated "anything that does not compile" would tolerate the
  * next real error too. `tool/example_gate.py` keeps the same list.
  */
@@ -2764,7 +2791,10 @@ static const char *const expected_incomplete[] = {
 	"override interface eth0 {",
 	"interface eth0 {\n\tconfig = \"dhcp\"\n\tdns {",
 	"linkset \"uplink\" {",
-	"access_point \"Family\" {"
+	"access_point \"Family\" {",
+	/* Parenthesised, which is how clang is told a joined literal is meant. */
+	("interface \"br0\" {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	 "\t\tdns_forward = true\n\t\tblock"),
 };
 
 /* Every top-level block head this build accepts. The example calls itself

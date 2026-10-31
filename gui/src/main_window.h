@@ -41,6 +41,7 @@ class ncfg_profiles_view;
 class ncfg_rules_view;
 class ncfg_firewall_view;
 class ncfg_host_lists_view;
+class ncfg_block_lists_view;
 class ncfg_dns_records_view;
 class ncfg_meshes_view;
 class ncfg_bluetooth_view;
@@ -124,6 +125,7 @@ private:
 	ncfg_firewall_view *firewall;
 	ncfg_host_lists_view *host_lists;
 	ncfg_dns_records_view *dns_records;
+	ncfg_block_lists_view *block_lists;
 	ncfg_meshes_view *meshes;
 	ncfg_bluetooth_view *bluetooth;
 	ncfg_hooks_view *hooks;

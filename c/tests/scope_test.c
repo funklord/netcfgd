@@ -74,7 +74,8 @@ static const struct {
 	/* A host list is the estate's because an access point's reference to it
 	 * travels, and must find it on the other end (10.591). */
 	{ "host_list", NCFG_SCOPE_ESTATE },
-	{ "dns_record", NCFG_SCOPE_GROUP }
+	{ "dns_record", NCFG_SCOPE_GROUP },
+	{ "block_list", NCFG_SCOPE_GROUP }
 };
 
 #define EXPECTED_COUNT (sizeof(EXPECTED) / sizeof(EXPECTED[0]))

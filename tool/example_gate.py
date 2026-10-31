@@ -23,7 +23,7 @@ Saying so here rather than letting the gate's name imply otherwise: a check
 that is trusted for more than it does is worse than no check, because the next
 person stops reading the file by hand.
 
-FOUR BLOCKS ARE EXPECTED NOT TO COMPILE ALONE, and they are named rather than
+FIVE BLOCKS ARE EXPECTED NOT TO COMPILE ALONE, and they are named rather than
 skipped by pattern, so that a fourth joining them is a failure:
 
   - `override interface` needs the block it overrides.
@@ -37,6 +37,9 @@ skipped by pattern, so that a fourth joining them is a failure:
   - the `access_point "Family"` names a `host_list`, and a list nothing
 	declares is refused on purpose: read as empty it would shut every station
 	out of an allow list, or keep nobody out of a deny list.
+  - the `interface "br0"` applying a block list names it, for the same reason
+	(0305): a list read as empty leaves a LAN unfiltered while it reads as
+	filtered.
 
 Each is correct as documentation and meaningless in isolation. A gate that
 silently tolerated "anything that does not compile" would tolerate the next
@@ -71,6 +74,8 @@ EXPECTED_INCOMPLETE = {
 	'interface eth0 {\n\tconfig = "dhcp"\n\tdns {',
 	'linkset "uplink" {',
 	'access_point "Family" {',
+	'interface "br0" {\n\tconfig = "192.168.1.1/24"\n\tdhcp_server {\n\t\tdns_forward = true\n'
+	'\t\tblock',
 }
 
 

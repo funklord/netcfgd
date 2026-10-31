@@ -1254,6 +1254,25 @@ int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, siz
 int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char *err,
                             size_t err_size);
 
+/* One block list (0305), as an editor carries it: lists space-joined. */
+typedef struct {
+	char *name;
+	char *domain;
+	char *file;
+	char *allow;
+} ncfg_block_list_entry_t;
+
+typedef struct {
+	ncfg_block_list_entry_t *items;
+	size_t                   count;
+} ncfg_block_lists_t;
+
+void ncfg_block_lists_free(ncfg_block_lists_t *lists);
+
+/* The block lists the configuration declares. Needs `observe`. */
+int ncfg_client_block_lists(ncfg_client_t *client, ncfg_block_lists_t *out, char *err,
+                            size_t err_size);
+
 /* One 802.11s mesh (10.588), as an editor carries it. `channel` -1 where
  * unset; `security` is `psk` (SAE) or `open`; `credential` the reference as
  * written, provider and all; `unmodelled` names what the editor cannot carry
@@ -1556,6 +1575,8 @@ typedef struct {
 	/* The servers a relay passes requests to, space-joined, "" for a server
 	 * that answers itself (0303). */
 	char *dhcp_relay;
+	/* The block lists the server applies, space-joined, "" for none (0305). */
+	char *dhcp_block;
 	/* The server's reservations (10.605), carried since 10.612. */
 	ncfg_reservation_t *reservations;
 	size_t              reservation_count;

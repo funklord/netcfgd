@@ -104,6 +104,32 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 		    "\"udp\"; port = [547]; interface = \"%s\" }` to `input`", interface->name,
 		    interface->name, interface->name);
 	}
+	/* A list file not there yet, or past the bound, is left out and the
+	 * server runs without it (0305): said, since the LAN looks filtered and
+	 * is not. */
+	for (size_t at = 0; interface->dhcp_server->dns_forward && builder->desired &&
+	     at < interface->dhcp_server->block_count; at++) {
+		size_t list;
+
+		for (list = 0; list < builder->desired->block_list_count; list++) {
+			const ncfg_block_list_t *named = &builder->desired->block_lists[list];
+			size_t                   file;
+
+			if (strcmp(named->name, interface->dhcp_server->block[at]) != 0) {
+				continue;
+			}
+			for (file = 0; file < named->file_count; file++) {
+				if (!ncfg_block_list_file_usable(named->file[file])) {
+					ncfg_plan_warnf(builder->plan, interface->name,
+					    "block list `%s` names %s, which is not there or is past %llu MiB, "
+					    "so %s blocks without it",
+					    named->name, named->file[file],
+					    (unsigned long long)(NCFG_BLOCK_FILE_MAX / (1024u * 1024u)),
+					    interface->name);
+				}
+			}
+		}
+	}
 	running = running_server(builder->observed, interface->name);
 	if (running && running->served && strcmp(running->served, wanted) != 0) {
 		ncfg_op_t     stop;
@@ -156,4 +182,36 @@ void ncfg_plan_dns_record_warnings(ncfg_builder_t *builder)
 	    "`dhcp_server` with `dns_forward = true`, and none has it",
 	    desired->dns_record_count, desired->dns_record_count == 1u ? "" : "s",
 	    desired->dns_records[0].name);
+}
+
+void ncfg_plan_block_list_warnings(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 at;
+
+	if (!desired) {
+		return;
+	}
+	for (at = 0; at < desired->block_list_count; at++) {
+		const char *name = desired->block_lists[at].name;
+		size_t      one;
+		int         used = 0;
+
+		for (one = 0; !used && one < desired->interface_count; one++) {
+			const ncfg_dhcp_server_t *server = desired->interfaces[one].dhcp_server;
+			size_t                    named;
+
+			for (named = 0; server && named < server->block_count; named++) {
+				used = used || strcmp(server->block[named], name) == 0;
+			}
+		}
+		/* A list is applied where a server names it (0305), so one nothing
+		 * names blocks nothing -- the shape of a list somebody meant to turn
+		 * on. */
+		if (!used) {
+			ncfg_plan_warnf(builder->plan, NULL,
+			    "block list `%s` is applied by no DHCP server: add `block = [\"%s\"]` to "
+			    "the `dhcp_server` of each network it should filter", name, name);
+		}
+	}
 }

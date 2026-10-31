@@ -185,6 +185,12 @@ static int compare_dns_record(const void *left, const void *right)
 	    ((const ncfg_dns_record_t *)right)->name);
 }
 
+static int compare_block_list(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_block_list_t *)left)->name,
+	    ((const ncfg_block_list_t *)right)->name);
+}
+
 static int compare_dhcp_option(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_dhcp_option_t *)left)->name,
@@ -518,6 +524,10 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 	 * order written, which is the order they are answered in. */
 	stable_sort(document->dns_records, document->dns_record_count,
 	    sizeof(*document->dns_records), compare_dns_record);
+	/* Block lists are a set by name (0305); what each holds is applied as a
+	 * set, so the order written is kept for the reader. */
+	stable_sort(document->block_lists, document->block_list_count,
+	    sizeof(*document->block_lists), compare_block_list);
 	/* A DHCP server's reservations are a set, by name (10.605). Its `dns`
 	 * is not: the order is the order a client tries them. */
 	for (i = 0; i < document->interface_count; i++) {

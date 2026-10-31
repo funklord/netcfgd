@@ -593,7 +593,8 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 				server->dns_forward = flag;
 			}
-		} else if (strcmp(assignment->key, "ntp") == 0 || strcmp(assignment->key, "relay") == 0) {
+		} else if (strcmp(assignment->key, "ntp") == 0 || strcmp(assignment->key, "relay") == 0 ||
+		    strcmp(assignment->key, "block") == 0) {
 			/* The shapes are `ncfg_dhcp_server_range`'s to check, with the
 			 * rest of the block, so one sentence refuses a bad one wherever
 			 * it is met (0303). */
@@ -604,11 +605,14 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 				ncfg_words_free(&words);
 				continue;
 			}
-			/* `ntp` and `relay` are both lists of addresses, checked with the
-			 * rest of the block. */
-			char  ***list = strcmp(assignment->key, "ntp") == 0 ? &server->ntp : &server->relay;
-			size_t *count = strcmp(assignment->key, "ntp") == 0 ? &server->ntp_count
-			                                                     : &server->relay_count;
+			/* `ntp` and `relay` are lists of addresses and `block` of block
+			 * list names (0305), all checked with the rest of the block. */
+			char  ***list = strcmp(assignment->key, "ntp") == 0     ? &server->ntp
+			    : strcmp(assignment->key, "relay") == 0             ? &server->relay
+			                                                        : &server->block;
+			size_t *count = strcmp(assignment->key, "ntp") == 0     ? &server->ntp_count
+			    : strcmp(assignment->key, "relay") == 0             ? &server->relay_count
+			                                                        : &server->block_count;
 
 			for (at = 0; at < words.count; at++) {
 				char **grown = realloc(*list, (*count + 1u) * sizeof(*grown));
@@ -635,8 +639,8 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "unknown dhcp_server key `%s`: range, range6, lease, dns, dns_forward, gateway, "
-			    "domain, ntp, boot_file, boot_server, tftp_server, wpad and relay, and `host` "
-			    "and `option` blocks", assignment->key);
+			    "domain, ntp, boot_file, boot_server, tftp_server, wpad, relay and block, and "
+			    "`host` and `option` blocks", assignment->key);
 		}
 	}
 	return server;

@@ -554,6 +554,8 @@ void ncfg_plan_advertise(ncfg_builder_t *builder, const ncfg_interface_t *interf
 /* DNS records nothing answers (0303): said once, naming them, where no DHCP
  * server forwards DNS. */
 void ncfg_plan_dns_record_warnings(ncfg_builder_t *builder);
+/* A block list no DHCP server applies (0305). */
+void ncfg_plan_block_list_warnings(ncfg_builder_t *builder);
 
 void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing);

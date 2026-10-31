@@ -71,8 +71,8 @@ int main(void)
 	lan.addressing_count = 1u;
 	lan.dhcp_server = &server;
 
-	text = ncfg_dhcp_server_render(NULL, &lan, "/run/netcfgd/dhcp-server/br0.leases", message,
-	    sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/run/netcfgd/dhcp-server/br0.leases", NULL,
+	    message, sizeof(message));
 	check(text && has_line(text, "port=0") && has_line(text, "interface=br0") &&
 	    has_line(text, "bind-interfaces") && has_line(text, "dhcp-authoritative"),
 	    "a DHCP server is dnsmasq with its DNS side off, bound to its interface");
@@ -90,7 +90,7 @@ int main(void)
 	 * what keeps it off a resolver already there. No `dhcp-option=6`, so the
 	 * router is offered; and the summary changes, so turning it on restarts. */
 	server.dns_forward = 1;
-	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 	check(text && has_line(text, "port=53") && !has_line(text, "port=0") &&
 	        has_line(text, "except-interface=lo") && has_line(text, "interface=br0") &&
 	        has_line(text, "domain-needed") && has_line(text, "bogus-priv") &&
@@ -107,7 +107,7 @@ int main(void)
 	server.dns_count = 2u;
 	server.lease.has = 1;
 	server.lease.value = 3600;
-	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 	check(text && has_line(text, "dhcp-option=6,192.168.1.1,9.9.9.9") &&
 	    has_line(text, "dhcp-range=br0,192.168.1.100,192.168.1.249,3600"),
 	    "the DNS servers named are offered, in order, and the lease is the one stated");
@@ -140,7 +140,7 @@ int main(void)
 
 		server.hosts = &host;
 		server.host_count = 1u;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(text && has_line(text, "dhcp-host=AA:BB:CC:DD:EE:01,192.168.1.10,printer"),
 		    "a reservation is a dhcp-host line: the MAC, its address and its name");
 		free(text);
@@ -152,7 +152,7 @@ int main(void)
 		    strcmp(recorded, before) != 0,
 		    "  and a reservation moved to another address is a different summary");
 		host.address = dns0;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "the interface's own"),
 		    "  one given the router's own address renders nothing, and says why");
 		free(text);
@@ -189,7 +189,7 @@ int main(void)
 		server.tftp_server = tftp;
 		server.wpad = wpad;
 		server.dns_forward = 1;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(text && has_line(text, "dhcp-option=3,192.168.1.254") &&
 		        has_line(text, "domain=home.lan") && has_line(text, "local=/home.lan/") &&
 		        has_line(text, "dhcp-option=42,192.168.1.1,192.168.1.2") &&
@@ -208,24 +208,24 @@ int main(void)
 		    "  so dropping an NTP server is a different summary, and a restart");
 		server.ntp_count = 2u;
 		server.boot_server = NULL;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(text && has_line(text, "dhcp-boot=pxelinux.0"),
 		    "a boot file with no server is the file alone");
 		free(text);
 		server.gateway = outside;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "gateway"),
 		    "a gateway off the network renders nothing, and says why");
 		free(text);
 		server.gateway = gateway;
 		server.boot_file = comma;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "boot_file"),
 		    "  and so does a boot file that would end dnsmasq's field");
 		free(text);
 		server.boot_file = NULL;
 		server.boot_server = boot_server;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "boot_server"),
 		    "  and a boot server with no file to fetch from it");
 		free(text);
@@ -266,7 +266,7 @@ int main(void)
 		check(ncfg_dhcp_server_summary(NULL, &lan, before, sizeof(before)), "a summary to compare");
 		server.options = options;
 		server.option_count = 7u;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(text && has_line(text, "dhcp-option=150,192.168.1.9") &&
 		        has_line(text, "dhcp-option=224,\"hello\"") &&
 		        has_line(text, "dhcp-option=225,00:05") &&
@@ -279,18 +279,18 @@ int main(void)
 		        strcmp(recorded, before) != 0,
 		    "  and change the summary, so adding one restarts the server");
 		options[2].number.value = 70000;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "does not fit its type"),
 		    "a u16 too large renders nothing, and says why");
 		free(text);
 		options[2].number.value = 5;
 		options[2].code = 6;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "`code`"),
 		    "  and so does a code a key already sets, so it has one spelling");
 		free(text);
 		options[2].code = 224;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "share a name or a code"),
 		    "  and two options of one code");
 		free(text);
@@ -333,14 +333,16 @@ int main(void)
 		document.dns_records = records;
 		document.dns_record_count = 5u;
 
-		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", NULL, message,
+		    sizeof(message));
 		check(text && !strstr(text, "host-record=") && !strstr(text, "server=/"),
 		    "a server that does not forward DNS answers no records");
 		free(text);
 		check(ncfg_dhcp_server_summary(&document, &lan, before, sizeof(before)) &&
 		    !strstr(before, "record"), "  and its summary does not count them");
 		server.dns_forward = 1;
-		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", NULL, message,
+		    sizeof(message));
 		check(text && has_line(text, "host-record=nas.home.lan,192.168.1.10,fd00::10") &&
 		        has_line(text, "cname=files.home.lan,nas.home.lan") &&
 		        has_line(text, "mx-host=home.lan,mail.home.lan,5") &&
@@ -366,7 +368,7 @@ int main(void)
 
 		server.range6_start = start6;
 		server.range6_end = end6;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "has none"),
 		    "a DHCPv6 range on an interface with no IPv6 prefix renders nothing");
 		free(text);
@@ -376,7 +378,7 @@ int main(void)
 		sources[1].static_address.address = v6;
 		lan.addressing = sources;
 		lan.addressing_count = 2u;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(text && has_line(text, "dhcp-range=::100,::1ff,constructor:br0,64,3600"),
 		    "  and on one with a prefix, the suffixes are put in it by dnsmasq");
 		free(text);
@@ -404,7 +406,7 @@ int main(void)
 		server.dns_count = 0u;
 		server.relay = relays;
 		server.relay_count = 1u;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(text && has_line(text, "dhcp-relay=192.168.1.1,10.9.0.2") &&
 		        has_line(text, "interface=br0") && !strstr(text, "dhcp-range") &&
 		        !strstr(text, "dhcp-leasefile"),
@@ -414,13 +416,13 @@ int main(void)
 		        strcmp(recorded, "relay to 10.9.0.2") == 0,
 		    "  and its summary is where it relays to");
 		server.lease.has = 1;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "hands out nothing"),
 		    "  a lease beside a relay is refused, since leasing is the other server's");
 		free(text);
 		server.lease.has = 0;
 		relays[0] = ours;
-		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 		check(!text && strstr(message, "other than the interface's own"),
 		    "  and so is a relay to the interface itself");
 		free(text);
@@ -428,7 +430,7 @@ int main(void)
 	}
 
 	source.static_address.address = NULL;
-	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", NULL, message, sizeof(message));
 	check(!text && strstr(message, "cannot serve DHCP"),
 	    "an interface with no address to serve from renders nothing, and says why");
 	free(text);
@@ -507,6 +509,140 @@ int main(void)
 			    "  and a v6 lease, which has no MAC, the duid line skipped");
 		}
 		ncfg_dhcp_server_leases_free(leases, count);
+	}
+
+	/* Block lists (0305): every published format reduced to one name, and
+	 * nothing a list's author writes reaching dnsmasq as more than a name. */
+	{
+		static const struct {
+			const char *line;
+			const char *name; /* NULL for none */
+		} lines[] = {
+			{ "0.0.0.0 ads.example", "ads.example" },
+			{ "127.0.0.1\tTracker.Example  # comment", "tracker.example" },
+			{ ":: v6.ads.example", "v6.ads.example" },
+			{ "ad_server.example", "ad_server.example" },
+			{ "||adblock.example^", "adblock.example" },
+			{ "address=/dnsmasq.example/", "dnsmasq.example" },
+			{ "local=/local.example/", "local.example" },
+			{ "server=/server.example/#", "server.example" },
+			{ "  bare.example\r", "bare.example" },
+			{ "# a comment", NULL },
+			{ "! adblock comment", NULL },
+			{ "", NULL },
+			{ "0.0.0.0 localhost", NULL },
+			{ "127.0.0.1 localhost.localdomain", NULL },
+			{ "10.0.0.1 real.example", NULL },
+			{ "||ads.example^$third-party", NULL },
+			{ "dhcp-script=/tmp/x", NULL },
+			{ "conf-file=/etc/shadow", NULL },
+			{ "address=/evil.example/1.2.3.4", "evil.example" },
+			{ "bad/name.example", NULL },
+			{ "com", NULL },
+		};
+		char   found[256];
+		size_t at;
+		int    all = 1;
+
+		for (at = 0; at < sizeof(lines) / sizeof(lines[0]); at++) {
+			int got = ncfg_block_list_name_of_line(lines[at].line, strlen(lines[at].line), found,
+			    sizeof(found));
+
+			if (got != (lines[at].name != NULL) || (got && strcmp(found, lines[at].name) != 0)) {
+				printf("    line \"%s\" read as %s\n", lines[at].line, got ? found : "none");
+				all = 0;
+			}
+		}
+		check(all, "a list line in any published format is one lowercase name, or none");
+	}
+	{
+		char              ads[] = "ads", doubleclick[] = "doubleclick.net";
+		char              okay[] = "ok.doubleclick.net", file[512], bad_file[] = "relative.txt";
+		char             *domains[] = { doubleclick };
+		char             *allows[] = { okay };
+		char             *files[] = { file };
+		char             *names[] = { ads };
+		char              block_path[512];
+		char              before[NCFG_DHCP_SERVER_SUMMARY_MAX];
+		char              after[NCFG_DHCP_SERVER_SUMMARY_MAX];
+		ncfg_block_list_t list;
+		ncfg_document_t   document;
+		const char       *why = NULL;
+		static const char contents[] = "# StevenBlack-style\n"
+		                               "0.0.0.0 tracker.example\n"
+		                               "0.0.0.0 doubleclick.net\n"
+		                               "0.0.0.0 ok.doubleclick.net\n"
+		                               "dhcp-script=/tmp/owned\n"
+		                               "||adblock.example^\n";
+
+		/* The case above took the interface's address away. */
+		source.static_address.address = address;
+		(void)testdir_in(run, "ads.txt", file, sizeof(file));
+		(void)testdir_in(run, "br0.block", block_path, sizeof(block_path));
+		memset(&list, 0, sizeof(list));
+		memset(&document, 0, sizeof(document));
+		list.name = ads;
+		list.domain = domains;
+		list.domain_count = 1u;
+		list.allow = allows;
+		list.allow_count = 1u;
+		list.file = files;
+		list.file_count = 1u;
+		document.block_lists = &list;
+		document.block_list_count = 1u;
+		check(ncfg_block_list_check(&list, &why), "a block list of names, a file and an allow");
+		list.file[0] = bad_file;
+		check(!ncfg_block_list_check(&list, &why) && why && strstr(why, "absolute"),
+		    "  a file is an absolute path");
+		list.file[0] = file;
+
+		server.block = names;
+		server.block_count = 1u;
+		check(!ncfg_dhcp_server_range(&lan, NULL, NULL, NULL, &why) && why &&
+		        strstr(why, "dns_forward"),
+		    "a server that does not forward DNS cannot block: the hosts ask elsewhere");
+		server.dns_forward = 1;
+		check(ncfg_dhcp_server_summary(&document, &lan, before, sizeof(before)) &&
+		        strstr(before, ", blocking 1 list "),
+		    "  a forwarding one can, and its summary says so");
+		check(!ncfg_block_list_file_usable(file), "  a list not fetched yet is not usable");
+		check(testdir_write(file, contents, sizeof(contents) - 1u) &&
+		        ncfg_block_list_file_usable(file),
+		    "  and is once it is there");
+		check(ncfg_dhcp_server_summary(&document, &lan, after, sizeof(after)) &&
+		        strcmp(before, after) != 0,
+		    "  so its arrival is a changed summary, and a restart");
+		check(ncfg_dhcp_server_summary(&document, &lan, before, sizeof(before)) &&
+		        strcmp(before, after) == 0,
+		    "  and the same file read again is not");
+		check(ncfg_dhcp_server_block_write(&document, &server, block_path, message,
+		          sizeof(message)),
+		    "the names it blocks are written");
+		text = testdir_read(block_path, NULL);
+		check(text && has_line(text, "address=/tracker.example/") &&
+		        has_line(text, "address=/doubleclick.net/") &&
+		        has_line(text, "address=/adblock.example/"),
+		    "  every name from the file and the configuration, as NXDOMAIN for it and below");
+		check(text && has_line(text, "address=/use-application-dns.net/"),
+		    "  with Firefox's switch, so it does not ask past the router");
+		check(text && !strstr(text, "address=/ok.doubleclick.net/") &&
+		        has_line(text, "server=/ok.doubleclick.net/#"),
+		    "  an allowed name taken out, and sent back upstream under its blocked parent");
+		check(text && !strstr(text, "dhcp-script") && !strstr(text, "owned"),
+		    "  and nothing from the file that is not a name");
+		check(text && strstr(text, "address=/doubleclick.net/") ==
+		                 strstr(text, "address=/doubleclick.net/\naddress=/tracker.example/") &&
+		        has_line(text, "# 4 names blocked"),
+		    "  each name once, sorted, the configuration's and the file's together");
+		free(text);
+		text = ncfg_dhcp_server_render(&document, &lan, "/x.leases", block_path, message,
+		    sizeof(message));
+		check(text && strstr(text, "conf-file=") && strstr(text, "br0.block"),
+		    "  and the server's configuration reads them");
+		free(text);
+		server.block = NULL;
+		server.block_count = 0;
+		server.dns_forward = 0;
 	}
 
 	testdir_remove(run);

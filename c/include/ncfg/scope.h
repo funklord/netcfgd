@@ -91,6 +91,9 @@ typedef enum {
 	NCFG_BLOCK_HOST_LIST,
 	/* The router's local DNS names (0303). Last, for the reason above. */
 	NCFG_BLOCK_DNS_RECORD,
+	/* The names the router's forwarders refuse (0305). Last, for the reason
+	 * above. */
+	NCFG_BLOCK_BLOCK_LIST,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

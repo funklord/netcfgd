@@ -1032,6 +1032,79 @@ int ncfg_lower_dns_record(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merg
 	return 1;
 }
 
+/*
+ * `block_list "ads" { file = [...]  domain = [...]  allow = [...] }` (0305):
+ * names the router's forwarders refuse. Lowered beside the DNS records as the
+ * other router-wide list of names; what it may hold is
+ * `ncfg_block_list_check`'s. A file is named here and read at apply time,
+ * never now: the document holds the configuration, and the file is its
+ * contents by reference.
+ */
+int ncfg_lower_block_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
+    ncfg_block_list_t *out)
+{
+	const ncfg_ast_block_t *block = merged->block;
+	const char             *why = NULL;
+	size_t                  i;
+
+	memset(out, 0, sizeof(*out));
+	out->name = ncfg_require_label(ctx, block);
+	if (!out->name) {
+		return 0;
+	}
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t       *item = merged->items[i].item;
+		const ncfg_ast_assignment_t *assignment;
+		char                      ***list;
+		size_t                      *count;
+		ncfg_words_t                 words;
+		size_t                       at;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `block_list`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "domain") == 0) {
+			list = &out->domain;
+			count = &out->domain_count;
+		} else if (strcmp(assignment->key, "file") == 0) {
+			list = &out->file;
+			count = &out->file_count;
+		} else if (strcmp(assignment->key, "allow") == 0) {
+			list = &out->allow;
+			count = &out->allow_count;
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown block_list key `%s`: domain, file and allow", assignment->key);
+			continue;
+		}
+		if (!ncfg_as_words(ctx, assignment->value, &words)) {
+			ncfg_words_free(&words);
+			continue;
+		}
+		for (at = 0; at < words.count; at++) {
+			if (!ncfg_push_string(ctx, list, count, words.at[at].text)) {
+				break;
+			}
+		}
+		ncfg_words_free(&words);
+	}
+	ctx->source = merged->source;
+	if (!ncfg_block_list_check(out, &why)) {
+		ncfg_diag(ctx, block->span, "block_list `%s`: %s", out->name,
+		    why ? why : "it cannot be applied");
+		ncfg_block_list_free(out);
+		return 0;
+	}
+	return 1;
+}
+
 int ncfg_lower_host_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
     ncfg_host_list_t *out)
 {

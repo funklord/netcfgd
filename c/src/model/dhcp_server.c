@@ -441,6 +441,24 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 	if (!server) {
 		return 0;
 	}
+	/* **Blocking is answering** (0305): with no forwarder here the hosts ask
+	 * somebody else, and a list would block nothing while reading as if it
+	 * did. */
+	if (server->block_count && !server->dns_forward) {
+		if (why) {
+			*why = "a `block` list is applied by the DNS forwarder, so it needs "
+			       "`dns_forward = true`: without it the hosts ask another server";
+		}
+		return 0;
+	}
+	for (at = 0; at < server->block_count; at++) {
+		if (!ncfg_block_list_label(server->block[at])) {
+			if (why) {
+				*why = "a `block` names `block_list` blocks: letters, digits, `-`, `_` and `.`";
+			}
+			return 0;
+		}
+	}
 	for (at = 0; !found && at < interface->addressing_count; at++) {
 		const ncfg_address_source_t *source = &interface->addressing[at];
 
@@ -654,4 +672,186 @@ int ncfg_dns_record_check(const ncfg_dns_record_t *record, const char **why)
 		*why = reason;
 	}
 	return reason == NULL;
+}
+
+int ncfg_block_list_label(const char *name)
+{
+	size_t at;
+
+	if (!name || !name[0] || strlen(name) > 64u) {
+		return 0;
+	}
+	for (at = 0; name[at]; at++) {
+		const unsigned char c = (unsigned char)name[at];
+
+		if (!(isalnum(c) || c == '-' || c == '_' || c == '.')) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * `ncfg_dhcp_server_dns_name`'s shape, lowercase, with `_` allowed anywhere in
+ * a label: published lists carry names like `ad_server.example`, which dnsmasq
+ * matches like any other. What matters is what is refused -- every character
+ * that could end the name inside `address=/name/` or start something else.
+ */
+int ncfg_block_list_name(const char *name)
+{
+	size_t at;
+	size_t label = 0;
+
+	if (!name || !name[0] || strlen(name) > 253u) {
+		return 0;
+	}
+	for (at = 0; name[at]; at++) {
+		const unsigned char c = (unsigned char)name[at];
+
+		if (c == '.') {
+			if (label == 0u) {
+				return 0;
+			}
+			label = 0;
+			continue;
+		}
+		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') ||
+		    ++label > 63u) {
+			return 0;
+		}
+	}
+	return label != 0u;
+}
+
+int ncfg_block_list_check(const ncfg_block_list_t *list, const char **why)
+{
+	const char *reason = NULL;
+	size_t      at;
+
+	if (!list) {
+		return 0;
+	}
+	if (!ncfg_block_list_label(list->name)) {
+		reason = "a block list's name is letters, digits, `-`, `_` and `.`";
+	} else if (!list->domain_count && !list->file_count) {
+		reason = "a block list holds names: a `domain` list, a `file` of them, or both";
+	}
+	for (at = 0; !reason && at < list->domain_count; at++) {
+		if (!ncfg_block_list_name(list->domain[at])) {
+			reason = "a `domain` is a DNS name in lowercase, as \"ads.example\"";
+		}
+	}
+	for (at = 0; !reason && at < list->allow_count; at++) {
+		if (!ncfg_block_list_name(list->allow[at])) {
+			reason = "an `allow` is a DNS name in lowercase, as \"cdn.ads.example\"";
+		}
+	}
+	for (at = 0; !reason && at < list->file_count; at++) {
+		const char *path = list->file[at];
+
+		/* Absolute, so it means one file whatever directory the daemon runs
+		 * in; printable, so a plan can quote it. */
+		if (!path || path[0] != '/' || !option_text(path, 4095u, "")) {
+			reason = "a `file` is an absolute path, as \"/var/lib/netcfgd/block/ads.txt\"";
+		}
+	}
+	if (why) {
+		*why = reason;
+	}
+	return reason == NULL;
+}
+
+/* A hosts file's address column: what a list points a name at. */
+static int null_address(const char *word, size_t length)
+{
+	static const char *const nulls[] = { "0.0.0.0", "127.0.0.1", "::", "::1", "0" };
+	size_t                   at;
+
+	for (at = 0; at < sizeof(nulls) / sizeof(nulls[0]); at++) {
+		if (length == strlen(nulls[at]) && strncmp(word, nulls[at], length) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ncfg_block_list_name_of_line(const char *line, size_t length, char *out, size_t out_size)
+{
+	const char *at = line;
+	const char *stop = line + length;
+	const char *word;
+	size_t      size;
+	size_t      one;
+
+	if (!line || !out || out_size < 2u) {
+		return 0;
+	}
+	while (at < stop && (*at == ' ' || *at == '\t')) {
+		at++;
+	}
+	while (stop > at && (stop[-1] == ' ' || stop[-1] == '\t' || stop[-1] == '\r')) {
+		stop--;
+	}
+	if (at == stop || *at == '#' || *at == '!') {
+		return 0;
+	}
+	/* dnsmasq's own lines name the domain between the first two slashes. */
+	if ((size_t)(stop - at) > 9u && (strncmp(at, "address=/", 9) == 0 ||
+	        strncmp(at, "local=/", 7) == 0 || strncmp(at, "server=/", 8) == 0)) {
+		at = (const char *)memchr(at, '/', (size_t)(stop - at)) + 1;
+		word = at;
+		while (at < stop && *at != '/') {
+			at++;
+		}
+		if (at == stop) {
+			return 0;
+		}
+		stop = at;
+		at = word;
+	} else if (stop - at > 3 && at[0] == '|' && at[1] == '|' && stop[-1] == '^') {
+		/* An adblock rule, the plain kind only: one with options or a path
+		 * after the name is not a name. */
+		at += 2;
+		stop--;
+	} else {
+		word = at;
+		while (at < stop && *at != ' ' && *at != '\t') {
+			at++;
+		}
+		if (at < stop) {
+			/* Two columns: a hosts line, whose address must be one a list
+			 * points names at, and whose name ends at the next blank or
+			 * comment. */
+			if (!null_address(word, (size_t)(at - word))) {
+				return 0;
+			}
+			while (at < stop && (*at == ' ' || *at == '\t')) {
+				at++;
+			}
+			word = at;
+			while (at < stop && *at != ' ' && *at != '\t' && *at != '#') {
+				at++;
+			}
+			stop = at;
+			at = word;
+		} else {
+			at = word;
+		}
+	}
+	size = (size_t)(stop - at);
+	if (size == 0u || size >= out_size) {
+		return 0;
+	}
+	for (one = 0; one < size; one++) {
+		out[one] = (char)tolower((unsigned char)at[one]);
+	}
+	out[size] = '\0';
+	/* A hosts file names itself too; those are not ads. */
+	if (strcmp(out, "localhost") == 0 || strcmp(out, "localhost.localdomain") == 0 ||
+	    strcmp(out, "local") == 0 || strcmp(out, "broadcasthost") == 0 ||
+	    strcmp(out, "ip6-localhost") == 0 || strcmp(out, "ip6-loopback") == 0 ||
+	    strchr(out, '.') == NULL) {
+		return 0;
+	}
+	return ncfg_block_list_name(out);
 }

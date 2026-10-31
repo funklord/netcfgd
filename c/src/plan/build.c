@@ -983,6 +983,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	ncfg_plan_nat(&builder);
 	ncfg_plan_input_warnings(&builder);
 	ncfg_plan_dns_record_warnings(&builder);
+	ncfg_plan_block_list_warnings(&builder);
 	/* `ncfg_plan_wifi` was here and is now above the interface loop -- see the
 	 * comment there. `access_control` stays: a station list is hostapd's and
 	 * nothing is addressed over it. */

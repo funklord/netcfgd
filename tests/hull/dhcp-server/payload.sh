@@ -213,6 +213,43 @@ else
 	mx=skipped
 	say "  no dig in the image: MX, TXT and SRV are checked by dhcp_server_test's lines only"
 fi
+
+# Block lists (0305), on the forwarder above, whose upstream answers every
+# name under example.test with 10.9.9.9. A name in the configuration first,
+# with the list's file not fetched yet, which the plan has to say; then the
+# file, carrying a line that is not a name, whose arrival is a restart.
+mkdir -p "$work/block"
+cat >> "$work/etc/netcfgd.conf" <<BLOCK
+block_list "ads" {
+	domain = ["ads.example.test"]
+	file   = ["$work/block/ads.txt"]
+	allow  = ["ok.ads.example.test"]
+}
+BLOCK
+sed -i 's/^\t\tdns_forward = true$/&\n\t\tblock = ["ads"]/' "$work/etc/netcfgd.conf"
+"$build/ncfg" plan > "$work/plan-block.log" 2>&1
+block_warned=$(grep -c 'block list `ads` names .*ads.txt, which is not there' "$work/plan-block.log")
+block_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server.*blocking 1 list ' "$work/plan-block.log")
+say "after a block list: $(grep -E 'backend\.' "$work/plan-block.log" | head -1 | tr -s ' ')"
+"$build/ncfg" apply > "$work/apply-block.log" 2>&1
+say "ncfg apply rc=$?"
+sleep 1
+blocked=$(lookup ads.example.test)$(lookup deep.ads.example.test)
+allowed=$(lookup ok.ads.example.test)
+unblocked=$(lookup www.example.test)
+say "  blocked '$blocked', allowed '$allowed', not listed '$unblocked'"
+printf '%s\n' "0.0.0.0 tracker.example.test" "dhcp-script=/bin/false" "||adblock.example.test^" \
+	> "$work/block/ads.txt"
+"$build/ncfg" plan > "$work/plan-fetched.log" 2>&1
+fetched_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server.*blocking 1 list ' "$work/plan-fetched.log")
+say "after the file arrives: $(grep -E 'backend\.' "$work/plan-fetched.log" | head -1 | tr -s ' ')"
+"$build/ncfg" apply > "$work/apply-fetched.log" 2>&1
+say "ncfg apply rc=$?"
+sleep 1
+from_file=$(lookup tracker.example.test)$(lookup adblock.example.test)
+hostile=$(grep -c 'dhcp-script' "$work/run/dhcp-server/lan0.block" 2>/dev/null)
+canary=$(grep -c '^address=/use-application-dns.net/$' "$work/run/dhcp-server/lan0.block" 2>/dev/null)
+say "  from the file '$from_file'; $(tail -1 "$work/run/dhcp-server/lan0.block" 2>/dev/null)"
 kill "$corp" "$upstream" 2>/dev/null
 
 # Custom options (0303), each typed, read by a client that knows each code's
@@ -385,6 +422,15 @@ case "$given6" in
 	*"address6=fd00:7::1"[0-9a-f][0-9a-f]" "*) ;;
 	*) say "  the client was not given an address from fd00:7::100 to ::1ff"; failed=1 ;;
 esac
+[ "$block_warned" -ge 1 ] || { say "  a list file not fetched yet was not warned about"; failed=1; }
+[ "$block_plan" -ge 1 ] || { say "  blocking was not planned as a restart naming it"; failed=1; }
+[ -z "$blocked" ] || { say "  a blocked name, or one under it, resolved: '$blocked'"; failed=1; }
+[ "$allowed" = "10.9.9.9" ] || { say "  an allowed name under a blocked one did not resolve"; failed=1; }
+[ "$unblocked" = "10.9.9.9" ] || { say "  a name on no list did not resolve"; failed=1; }
+[ "$fetched_plan" -ge 1 ] || { say "  a list file arriving was not planned as a restart"; failed=1; }
+[ -z "$from_file" ] || { say "  a name from the list's file resolved: '$from_file'"; failed=1; }
+[ "$hostile" -eq 0 ] || { say "  a line that is not a name reached dnsmasq"; failed=1; }
+[ "$canary" -eq 1 ] || { say "  Firefox's DNS-over-HTTPS switch was not answered"; failed=1; }
 [ "$records_plan" -ge 1 ] || { say "  the records were not planned as a restart counting them"; failed=1; }
 [ "$nas" = "192.168.7.10" ] || { say "  an address record did not resolve"; failed=1; }
 [ "$nas6" = "fd00::10" ] || { say "  its IPv6 address did not resolve"; failed=1; }
@@ -451,6 +497,8 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply5: /' "$work/apply5.log" | tail -6 >> "$out"
 	sed 's/^/  apply6: /' "$work/apply6.log" | tail -6 >> "$out"
 	sed 's/^/  apply7: /' "$work/apply7.log" | tail -6 >> "$out"
+	sed 's/^/  apply-block: /' "$work/apply-block.log" | tail -6 >> "$out"
+	sed 's/^/  apply-fetched: /' "$work/apply-fetched.log" | tail -6 >> "$out"
 	sed 's/^/  client6: /' "$work/client6.log" | tail -8 >> "$out"
 	sed 's/^/  apply9: /' "$work/apply9.log" | tail -6 >> "$out"
 	sed 's/^/  apply10: /' "$work/apply10.log" | tail -6 >> "$out"

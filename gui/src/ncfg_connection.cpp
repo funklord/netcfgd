@@ -1330,6 +1330,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dhcp_wpad = from_c(found.dhcp_wpad);
 	out->dhcp_range6 = from_c(found.dhcp_range6);
 	out->dhcp_relay = from_c(found.dhcp_relay);
+	out->dhcp_block = from_c(found.dhcp_block);
 	for (size_t i = 0; i < found.dhcp_option_count; i++) {
 		ncfg_interface_config::dhcp_option one;
 		one.name = from_c(found.dhcp_options[i].name);
@@ -1581,6 +1582,39 @@ bool ncfg_connection::leases(QList<ncfg_lease_row> *out, QString *error)
 		out->append(row);
 	}
 	ncfg_leases_free(&found);
+	return true;
+}
+
+bool ncfg_connection::block_lists(QList<ncfg_block_list_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_block_lists_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_block_lists(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_block_list_row row;
+		row.name = from_c(found.items[i].name);
+		row.domain = from_c(found.items[i].domain);
+		row.file = from_c(found.items[i].file);
+		row.allow = from_c(found.items[i].allow);
+		out->append(row);
+	}
+	ncfg_block_lists_free(&found);
 	return true;
 }
 

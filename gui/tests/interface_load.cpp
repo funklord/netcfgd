@@ -174,7 +174,9 @@ int main(int argc, char **argv)
 		 * refused for an unmodelled key" (10.608). */
 		const QString socket = start(&daemon, work.path(),
 		    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
-		                   "device eth0 { kind = \"physical\" }\n"),
+		                   "device eth0 { kind = \"physical\" }\n"
+		                   "block_list \"ads\" { domain = [\"ads.example\"] }\n"
+		                   "block_list \"malware\" { domain = [\"bad.example\"] }\n"),
 		    QStringLiteral("interface eth0 {\n"
 		                   "\tconfig = [\"dhcp\", \"192.0.2.10/24\"]\n"
 		                   "\troutes = [\"default via 192.0.2.1\", "
@@ -187,6 +189,9 @@ int main(int argc, char **argv)
 		                   "\tnat = true\n"
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
 		                   "dns = [\"192.0.2.53\"]; dns_forward = true; "
+		                   /* 0305: the lists it applies, two so the order
+		                    * written is the order saved. */
+		                   "block = [\"malware\", \"ads\"]; "
 		                   /* The standard options (0303), each of which Save
 		                    * must write back. */
 		                   "gateway = \"192.0.2.254\"; domain = \"home.lan\"; "
@@ -332,7 +337,8 @@ int main(int argc, char **argv)
 		        wrote.contains(QStringLiteral("lease = 3600")) &&
 		        wrote.contains(QStringLiteral("dns = [\"192.0.2.53\"]")) &&
 		        /* 0301: the LAN's forwarder, written back with the rest. */
-		        wrote.contains(QStringLiteral("dns_forward = true"))
+		        wrote.contains(QStringLiteral("dns_forward = true")) &&
+		        wrote.contains(QStringLiteral("block = [\"malware\", \"ads\"]"))
 		        ? QStringLiteral("written")
 		        : wrote,
 		    QStringLiteral("written"), "  written by the dialog, all three of its fields");

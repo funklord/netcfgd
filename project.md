@@ -12597,6 +12597,47 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.640 Block lists: the router refuses ad names
+
+Decision 0305, which 0303 had deferred and the holder asked for: a
+`block_list` block holds names, from `domain`, from `file`s a list is
+published in, with `allow` taking names out; a forwarding `dhcp_server` applies
+the lists it names in `block`, which is UniFi's per-network switch with the
+list written once. Each blocked name answers NXDOMAIN with everything under
+it (`address=/name/`), an allowed one goes back upstream (`server=/name/#`),
+and a blocking server answers `use-application-dns.net` NXDOMAIN, which turns
+off Firefox's own DNS over HTTPS. All measured against dnsmasq 2.91 on the
+host before it was written.
+
+**netcfgd reads the lists; dnsmasq never does.** A list is somebody else's
+file, and given to dnsmasq as configuration one `dhcp-script=` line in it runs
+as root. `ncfg_block_list_name_of_line` reduces each line -- hosts, bare name,
+plain adblock rule, dnsmasq `address=`/`local=`/`server=` -- to one lowercase
+name of `[a-z0-9_-]` labels or nothing, and the server's
+`<run>/dhcp-server/<iface>.block` is written from those, sorted and once each.
+**The schedule is the file's**: the summary digests each file's bytes, so a
+refreshed list restarts the server on the next plan and a refresh that
+fetched the same bytes does not. A file not there, or past 64 MiB, is left out
+with a plan warning, because a LAN with no DNS is worse than one not filtered
+yet; a server blocks at most 1,048,576 names (300,000 measured at 0.56 s to
+start and about 26 MB in dnsmasq).
+
+**A transparent proxy was asked about and rejected** (0305): HTTPS is
+filtered by URL only by decrypting it, a CA on every client; undecrypted, it
+sees the server name DNS already blocks. Pi-hole's old block page existed
+because its IP-answer mode sent browsers to the router; NXDOMAIN needs none.
+
+**Measured in `make hull-dhcp-server`**: with the file not fetched the plan
+warns and restarts the server naming `blocking 1 list`; the client cannot
+resolve `ads.example.test` or a name under it, resolves the allowed
+`ok.ads.example.test` and an unlisted name through the upstream; the file's
+arrival is a planned restart, its hosts and adblock names stop resolving, and
+its `dhcp-script=` line is nowhere in what dnsmasq reads. The GUI gains a
+block lists tab and a `block` field in the interface dialog, held by
+`block_list_load` and `interface_load`. The example gate names the example's
+blocking interface as known-incomplete, for `access_point "Family"`'s reason,
+and `file` left the renderer's waivers now that a block list writes it.
+
 ## 10.639 DHCP relay, and a client that gave up too early
 
 0303's sixth slice: `dhcp_server { relay = ["10.0.0.5"] }` passes the

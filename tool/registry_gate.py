@@ -72,10 +72,11 @@ OWNERS = {
 	"lower_kind.c": {"NCFG_BLOCK_DEVICE", "NCFG_BLOCK_INTERFACE"},
 	# `ncfg_lower_mesh` is here too, beside the access point it is modelled on,
 	# and `ncfg_lower_host_list` beside the access control that names one, and
-	# `ncfg_lower_dns_record` beside it as the other router-wide list of names.
+	# `ncfg_lower_dns_record` beside it as the other router-wide list of names,
+	# and `ncfg_lower_block_list` beside that (0305).
 	"lower_network.c": {"NCFG_BLOCK_NETWORK", "NCFG_BLOCK_ACCESS_POINT",
 	    "NCFG_BLOCK_INTERFACE", "NCFG_BLOCK_MESH", "NCFG_BLOCK_HOST_LIST",
-	    "NCFG_BLOCK_DNS_RECORD"},
+	    "NCFG_BLOCK_DNS_RECORD", "NCFG_BLOCK_BLOCK_LIST"},
 	"lower_rule.c": {"NCFG_BLOCK_RULE", "NCFG_BLOCK_LINKSET", "NCFG_BLOCK_BLUETOOTH"},
 	# Layer one's firewall (0294). Its keys are read inside the chains rather
 	# than at the top of the block, so every one of them is attributed here

@@ -24,6 +24,7 @@
 #define NCFG_DHCP_SERVER_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #include "ncfg/document.h"
@@ -31,6 +32,30 @@
 
 #define NCFG_DHCP_SERVER_PATH_MAX 512
 #define NCFG_DHCP_SERVER_SUMMARY_MAX 512
+
+/* What one server blocks at most, and the largest list file read (0305).
+ * Measured: 300,000 names start dnsmasq in 0.56 s and cost it about 26 MB. */
+#define NCFG_BLOCK_NAMES_MAX 1048576
+#define NCFG_BLOCK_FILE_MAX (64ull * 1024ull * 1024ull)
+
+/* `<run>/dhcp-server/<iface>.block`, the names the server refuses (0305). */
+int ncfg_dhcp_server_block_path(const char *run, const char *iface, char *out,
+    size_t out_size, char *err, size_t err_size);
+
+/* Whether a block list's file is there to read and within the bound. */
+int ncfg_block_list_file_usable(const char *path);
+
+/*
+ * A digest of what a server blocks -- the lists it names, their names, and
+ * their files' contents -- into `out`, and the number of lists; 0 where it
+ * blocks nothing. A refreshed file is a changed digest.
+ */
+size_t ncfg_dhcp_server_block_digest(const ncfg_document_t *document,
+    const ncfg_dhcp_server_t *server, uint32_t *out);
+
+/* Write the names a server blocks to `path` (0305). 0 with a sentence. */
+int ncfg_dhcp_server_block_write(const ncfg_document_t *document,
+    const ncfg_dhcp_server_t *server, const char *path, char *err, size_t err_size);
 
 int ncfg_dhcp_server_config_path(const char *run, const char *iface, char *out, size_t out_size,
     char *err, size_t err_size);
@@ -59,8 +84,10 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
  * checked without serving it. Allocated; free with `free`. NULL with a
  * sentence where the interface's policy cannot be worked out.
  */
+/* `block_path` is the file the server's block lists were written to, read
+ * with `conf-file=`; NULL for none (0305). */
 char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
-    const char *leases_path, char *err, size_t err_size);
+    const char *leases_path, const char *block_path, char *err, size_t err_size);
 
 /*
  * Start serving on one interface. `program` is the dnsmasq to run, or NULL

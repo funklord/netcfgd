@@ -1461,6 +1461,11 @@ typedef struct {
 	 * server or relay, as one block. */
 	char              **relay;
 	size_t              relay_count;
+	/* The block lists this server's forwarder applies (0305), by name: a
+	 * name on one answers NXDOMAIN, with everything under it. Only with
+	 * `dns_forward`, since the router answers only what it is asked. */
+	char              **block;
+	size_t              block_count;
 } ncfg_dhcp_server_t;
 
 /*
@@ -1811,6 +1816,28 @@ typedef struct {
 } ncfg_dns_record_t;
 
 /*
+ * A list of names the router's forwarders refuse to resolve (decision 0305):
+ * ad and tracker domains, answered NXDOMAIN with everything under them. The
+ * router's, not one LAN's, so a top-level block, applied by each
+ * `dhcp_server` that names it in `block`.
+ *
+ * `domain` is names written in the configuration; `file` is files holding
+ * more, one name to a line in any of the formats lists are published in,
+ * read at apply time and never handed to dnsmasq as they are; `allow` takes
+ * names back out, and subdomains of a blocked name back to the upstream.
+ * `ncfg_block_list_check` holds it.
+ */
+typedef struct {
+	char  *name; /* the label, and the sorting key */
+	char **domain;
+	size_t domain_count;
+	char **file;
+	size_t file_count;
+	char **allow;
+	size_t allow_count;
+} ncfg_block_list_t;
+
+/*
  * An access point netcfgd runs, rather than joins.
  *
  * Bound to a device, unlike a wifi network which deliberately is not: a
@@ -2029,6 +2056,27 @@ int ncfg_dhcp_option_hex(const char *text);
 
 /* Whether a DNS record is one the forwarder can serve (0303), and why not. */
 int ncfg_dns_record_check(const ncfg_dns_record_t *record, const char **why);
+
+/* A block list's label: letters, digits, `-`, `_` and `.` (0305). */
+int ncfg_block_list_label(const char *name);
+
+/* A name a block list may hold (0305): a DNS name, lowercase, whose labels
+ * may carry an underscore as published lists' do. Nothing dnsmasq would read
+ * as more than a name -- no `/`, `#`, space or comma. */
+int ncfg_block_list_name(const char *name);
+
+/* Whether a block list is one the forwarder can apply (0305), and why not. */
+int ncfg_block_list_check(const ncfg_block_list_t *list, const char **why);
+
+/*
+ * The one name a line of a published list carries, lowercased into `out`
+ * (0305): a hosts line ("0.0.0.0 ads.example"), a bare name, an adblock
+ * rule ("||ads.example^"), or a dnsmasq `address=`, `local=` or `server=`
+ * line. 0 for a comment, a blank line, anything else, and a name
+ * `ncfg_block_list_name` refuses -- a list's author is not trusted to write
+ * anything but names.
+ */
+int ncfg_block_list_name_of_line(const char *line, size_t length, char *out, size_t out_size);
 
 
 int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
@@ -2590,6 +2638,9 @@ typedef struct {
 	/* After the host lists, and omitted when empty, for the same reason. */
 	ncfg_dns_record_t       *dns_records; /* sorted by name */
 	size_t                   dns_record_count;
+	/* After the DNS records, and omitted when empty, for the same reason. */
+	ncfg_block_list_t       *block_lists; /* sorted by name */
+	size_t                   block_list_count;
 } ncfg_document_t;
 
 /*
@@ -2630,6 +2681,8 @@ void ncfg_dhcp_server_free(ncfg_dhcp_server_t *server);
 void ncfg_dhcp_option_free(ncfg_dhcp_option_t *option);
 /* One DNS record's members, not the struct, which a list holds (0303). */
 void ncfg_dns_record_free(ncfg_dns_record_t *record);
+/* One block list's members, not the struct (0305). */
+void ncfg_block_list_free(ncfg_block_list_t *list);
 
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size);
 

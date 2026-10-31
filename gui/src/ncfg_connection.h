@@ -351,6 +351,14 @@ struct ncfg_mesh_row {
 	QString unmodelled;
 };
 
+/* One block list (0305): lists space-joined. */
+struct ncfg_block_list_row {
+	QString name;
+	QString domain;
+	QString file;
+	QString allow;
+};
+
 /* One local DNS record (0303): lists space-joined, text empty and numbers
  * -1 where unset. */
 struct ncfg_dns_record_row {
@@ -517,6 +525,8 @@ struct ncfg_interface_config {
 	QString dhcp_range6;
 	/* A relay's servers, space-joined, empty for none (0303). */
 	QString dhcp_relay;
+	/* The block lists the server applies, space-joined (0305). */
+	QString dhcp_block;
 	/* The server's reservations, and the ports forwarded from this interface
 	 * (10.612). */
 	struct reservation {
@@ -1301,6 +1311,8 @@ public:
 	bool meshes(QList<ncfg_mesh_row> *out, QString *error);
 	/* The local DNS records the configuration declares (0303). */
 	bool dns_records(QList<ncfg_dns_record_row> *out, QString *error);
+	/* The block lists the configuration declares (0305). */
+	bool block_lists(QList<ncfg_block_list_row> *out, QString *error);
 	/* The leases netcfgd's DHCP servers hold, from the observation (0303). */
 	bool leases(QList<ncfg_lease_row> *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
