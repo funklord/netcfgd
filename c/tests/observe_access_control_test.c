@@ -141,6 +141,56 @@ static void both_lists_are_read_and_the_daemon_is_answering(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * A station walk hostapd stops answering partway through is recorded as short
+ * (10.647). Before, the walk ended at the first request with no reply exactly
+ * as it ends on hostapd's own "no more", so a hostapd too busy to answer read
+ * as one with nobody associated. **The control** is the same two stations
+ * walked whole, which is not flagged; the fake answers the list's end with an
+ * empty reply, as hostapd's null station does.
+ */
+static void a_station_walk_cut_short_is_recorded_as_short(void)
+{
+	size_t silent;
+
+	for (silent = 0u; silent < 2u; silent++) {
+		ncfg_observed_t                      *observed = observed_with("access_point", "wlan0", 1);
+		const ncfg_observed_access_control_t *lists;
+		char                                  message[NCFG_ERROR_MAX];
+
+		if (!observed) {
+			check(0, "the fixture for a live access point reads");
+			return;
+		}
+		memset(&fake_config, 0, sizeof(fake_config));
+		(void)snprintf(fake_config.stations[0], sizeof(fake_config.stations[0]),
+		    "aa:00:00:00:00:01");
+		(void)snprintf(fake_config.stations[1], sizeof(fake_config.stations[1]),
+		    "aa:00:00:00:00:02");
+		fake_config.station_count = 2u;
+		fake_config.stations_silent_after = silent;
+		check(fake_start(ctrl_dir, "wlan0"), "a fake hostapd with two stations is listening");
+		message[0] = '\0';
+		check(ncfg_observe_access_control(observed, run_dir, PATIENCE_MS, message,
+		    sizeof(message)), "the round runs");
+		lists = only(observed) ? only(observed)->access_control : NULL;
+		if (silent) {
+			check(lists && holds(lists->associated, lists->associated_count,
+			    "aa:00:00:00:00:01"),
+			    "a walk cut short keeps the station it was given");
+			check(lists && lists->associated_unread,
+			    "  and is recorded as short, not as everybody");
+		} else {
+			check(lists && holds(lists->associated, lists->associated_count,
+			    "aa:00:00:00:00:01 aa:00:00:00:00:02"),
+			    "control: a whole walk lists both stations");
+			check(lists && !lists->associated_unread, "  and is not recorded as short");
+		}
+		fake_stop();
+		ncfg_observed_free(observed);
+	}
+}
+
 static void a_daemon_that_answers_nothing_is_not_answering(void)
 {
 	ncfg_observed_t *observed = observed_with("access_point", "wlan-wedged", 1);
@@ -358,6 +408,7 @@ int main(void)
 	printf("== observe_access_control_test in %s\n", base);
 
 	both_lists_are_read_and_the_daemon_is_answering();
+	a_station_walk_cut_short_is_recorded_as_short();
 	a_daemon_that_answers_nothing_is_not_answering();
 	a_daemon_that_connects_and_then_will_not_answer();
 	nothing_listening_is_the_same_answer();

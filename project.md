@@ -12615,12 +12615,23 @@ plan (`observe/current.c`), so it is not a stale one either.
 STA-FIRST/STA-NEXT walk at the first request that fails and returns what it
 has, so a request that timed out on a loaded host reads as nobody
 associated, with no warning -- which fits a plan that was simply empty. The
-failed run left no trace that would confirm it. Distinguishing the two would
-not have planned the steer either, since an unreadable list plans none, so
-what a fix buys is a plan that says why; whether that is worth a warning on
-every slow hostapd is open. Until then a red `hull-steer` with an empty plan
-is a reading to repeat, and the hostapd line beside it says which bound, if
-either, held the steer.
+failed run left no trace that would confirm it.
+
+**So the walk now says when it was cut short**, at the holder's word. It asks
+with `ncfg_supplicant_request` rather than `ask`, which folded hostapd's
+`FAIL` -- the end of the list -- into the same 0 as no reply at all; a
+request with no reply sets `associated_unread` on the observation, and the
+planner warns, on any access point that steers, that hostapd *stopped
+answering partway through its stations* and how many it did list. The steers
+for those are still planned: a short list is not a reason to move nobody.
+`ncfg ap stations` refuses a short list rather than printing it, as it
+already did for one that would not fit in memory. The fake hostapd in
+`c/tests/hostapdfake.h` learned a station walk that can go silent after N,
+which is the only way to produce the state; sabotaging either the flag or the
+warning turns its check red.
+
+A red `hull-steer` with an empty plan now carries the warning if this was the
+cause, and the hostapd line beside it says which bound held the steer if not.
 
 ## 10.646 SLAAC turned on for an interface already up
 

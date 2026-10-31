@@ -1217,6 +1217,15 @@ void ncfg_plan_steering(ncfg_builder_t *builder)
 		if (!own) {
 			continue;
 		}
+		/* Said, because otherwise nothing would be: a short list plans no steer
+		 * for whoever is missing from it, which reads exactly like a network
+		 * with nobody to move (10.647). */
+		if (live->associated_unread) {
+			ncfg_plan_warnf(builder->plan, point->device,
+			    "hostapd on %s stopped answering partway through its stations, so "
+			    "steering this round considers only the %zu it listed",
+			    point->device, live->steerable_count);
+		}
 		for (i = 0; i < live->neighbour_count; i++) {
 			others += &live->neighbours[i] != own;
 		}

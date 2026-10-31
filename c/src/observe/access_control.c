@@ -168,7 +168,7 @@ static int by_address(const void *left, const void *right)
 }
 
 int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
-    ncfg_hostapd_station_t **out, size_t *count)
+    ncfg_hostapd_station_t **out, size_t *count, int *unread)
 {
 	ncfg_buf_t collected;
 	char       command[64];
@@ -180,6 +180,7 @@ int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
 
 	*out = NULL;
 	*count = 0u;
+	*unread = 0;
 	/*
 	 * **Walked into a buffer**, and an `ncfg_buf_t` rather than an array of
 	 * the bound: that is a quarter of a megabyte on the stack for a walk that
@@ -191,8 +192,16 @@ int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
 	(void)snprintf(command, sizeof(command), "%s", "STA-FIRST");
 	for (at = 0; at < NCFG_HOSTAPD_STATION_WALK_MAX; at++) {
 		ncfg_hostapd_station_t station;
+		int                    kind = NCFG_SUPPLICANT_REPLY_FAIL;
 
-		if (!ncfg_supplicant_ask(client, command, body, sizeof(body), why, sizeof(why))) {
+		/* `request` rather than `ask`, which folds a `FAIL` reply -- the end of
+		 * the walk -- into the same 0 as no reply at all. */
+		if (!ncfg_supplicant_request(client, command, body, sizeof(body), &kind, why,
+		        sizeof(why))) {
+			*unread = 1;
+			break;
+		}
+		if (kind == NCFG_SUPPLICANT_REPLY_FAIL) {
 			break;
 		}
 		if (!ncfg_hostapd_parse_station(body, &station)) {
@@ -322,7 +331,7 @@ static int steerable_of(const ncfg_hostapd_station_t *found, size_t found_count,
 
 /* The addresses alone, for the observation, and the steerable ones beside. */
 static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *count,
-    ncfg_observed_steerable_t **steerable, size_t *steerable_count)
+    ncfg_observed_steerable_t **steerable, size_t *steerable_count, int *unread)
 {
 	ncfg_hostapd_station_t *found = NULL;
 	size_t                  found_count = 0u;
@@ -332,7 +341,7 @@ static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *
 	*count = 0u;
 	*steerable = NULL;
 	*steerable_count = 0u;
-	if (!ncfg_observe_hostapd_stations(client, &found, &found_count)) {
+	if (!ncfg_observe_hostapd_stations(client, &found, &found_count, unread)) {
 		return 0;
 	}
 	if (!steerable_of(found, found_count, steerable, steerable_count)) {
@@ -392,6 +401,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		size_t                          neighbour_count = 0;
 		ncfg_observed_steerable_t      *steerable = NULL;
 		size_t                          steerable_count = 0;
+		int                             unread = 0;
 
 		if (backend->kind != NCFG_BACKEND_ACCESS_POINT || !backend->running ||
 		    !backend->interface) {
@@ -434,7 +444,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		 * held entry is kept by the planner whether or not it is associated.
 		 */
 		if (!associated_of(client, &associated, &associated_count, &steerable,
-		        &steerable_count)) {
+		        &steerable_count, &unread)) {
 			associated = NULL;
 			associated_count = 0;
 		}
@@ -476,6 +486,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		lists->neighbour_count = neighbour_count;
 		lists->steerable = steerable;
 		lists->steerable_count = steerable_count;
+		lists->associated_unread = unread;
 		if (!ncfg_hostapd_steered_read(run_dir, backend->interface, (int64_t)time(NULL),
 		        &lists->steered, &lists->steered_count)) {
 			ncfg_observed_access_control_free(lists);

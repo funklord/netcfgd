@@ -1448,11 +1448,17 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
  * the last station. 1 with `*out` the caller's to free (NULL for none); 0 when
  * the list would not fit in memory, which is refused rather than reported
  * short.
+ *
+ * **`*unread` says the list is short, not ended**: 1 when a request got no
+ * reply at all -- hostapd slow past the deadline, or its socket gone mid-walk
+ * -- and the stations before it are all there is. Without it a hostapd too
+ * busy to answer read as one with nobody associated, and a steer was not
+ * planned with nothing to say why (10.647).
  */
 #define NCFG_HOSTAPD_STATION_WALK_MAX 2007
 struct ncfg_supplicant_client;
 int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
-    ncfg_hostapd_station_t **out, size_t *count);
+    ncfg_hostapd_station_t **out, size_t *count, int *unread);
 
 /*
  * What each running supplicant is holding, and whether it answers.

@@ -1115,6 +1115,8 @@ static const ncfg_field_t access_control_fields[] = {
 	{ .name = "associated", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_access_control_t, associated),
 	    .count_offset = offsetof(ncfg_observed_access_control_t, associated_count) },
+	{ .name = "associated_unread", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_control_t, associated_unread) },
 	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &observed_neighbour_type, .element_size = sizeof(ncfg_observed_neighbour_t),
 	    .offset = offsetof(ncfg_observed_access_control_t, neighbours),

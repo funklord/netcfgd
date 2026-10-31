@@ -1272,6 +1272,7 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 	size_t                     at;
 	size_t                     count;
 	ncfg_hostapd_station_t    *found = NULL;
+	int                        unread = 0;
 	char                       ctrl_dir[512];
 	char                       why[NCFG_ERROR_MAX];
 
@@ -1318,11 +1319,19 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 	 * is the observer's since 10.591, which needs the same addresses to expand
 	 * a deny list's prefix against.
 	 */
-	if (!ncfg_observe_hostapd_stations(client, &found, &count)) {
+	if (!ncfg_observe_hostapd_stations(client, &found, &count, &unread)) {
 		ncfg_supplicant_client_free(client);
 		ncfg_error_set(err, err_size,
 		    "the stations on %s would not fit in memory, so the list is refused rather "
 		    "than reported short", interface);
+		return 0;
+	}
+	if (unread) {
+		ncfg_supplicant_client_free(client);
+		free(found);
+		ncfg_error_set(err, err_size,
+		    "hostapd on %s stopped answering partway through its stations, so the list "
+		    "is refused rather than reported short", interface);
 		return 0;
 	}
 	ncfg_supplicant_client_free(client);

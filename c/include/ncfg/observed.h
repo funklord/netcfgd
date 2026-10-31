@@ -998,6 +998,13 @@ typedef struct {
 	char                 **associated;
 	size_t                 associated_count;
 	/*
+	 * hostapd stopped answering partway through the station walk, so the two
+	 * lists of stations are short rather than complete: what steering is
+	 * planned against, and what a deny list's prefix expands against, may be
+	 * missing somebody. Left out when false.
+	 */
+	int                    associated_unread;
+	/*
 	 * The neighbour list hostapd holds (`SHOW_NEIGHBOR`, 10.595), its own
 	 * entry among them, in hostapd's words: the BSSID, the SSID as hex and
 	 * the report element as hex. Omitted when empty, which is every access

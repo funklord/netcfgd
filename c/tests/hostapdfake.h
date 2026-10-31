@@ -86,6 +86,15 @@ struct fake {
 	 * an access point with neighbour reports (10.595). */
 	char   neighbours[512];
 	char   own_bssid[18];
+	/* Who `STA-FIRST` and `STA-NEXT` walk through, in this order, each answered
+	 * with its address alone; past the last, an empty reply, as hostapd's null
+	 * station gives. None leaves both answering `FAIL`, as they always did. */
+	char   stations[4][18];
+	size_t station_count;
+	/* Answers no walk request once this many stations have been given, so a
+	 * walk is cut short the way a hostapd too busy to reply cuts one (10.647).
+	 * 0 for never. */
+	size_t stations_silent_after;
 };
 
 static struct fake fake_config;
@@ -209,6 +218,28 @@ static inline void fake_handle(struct fake *state, const char *command, const st
 	}
 	if (strcmp(command, "SHOW_NEIGHBOR") == 0) {
 		fake_reply(state, from, from_length, state->neighbours);
+		return;
+	}
+	if (state->station_count &&
+	    (strcmp(command, "STA-FIRST") == 0 || starts_with(command, "STA-NEXT "))) {
+		size_t next = 0u;
+		char   line[32];
+
+		if (starts_with(command, "STA-NEXT ")) {
+			while (next < state->station_count &&
+			    strcmp(state->stations[next], command + 9) != 0) {
+				next++;
+			}
+			next++;
+		}
+		if (state->stations_silent_after && next >= state->stations_silent_after) {
+			return;
+		}
+		line[0] = '\0';
+		if (next < state->station_count) {
+			(void)snprintf(line, sizeof(line), "%s\n", state->stations[next]);
+		}
+		fake_reply(state, from, from_length, line);
 		return;
 	}
 	if (starts_with(command, "BSS_TM_REQ ")) {

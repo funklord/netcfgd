@@ -1225,6 +1225,55 @@ static void stations_are_steered_by_band_and_by_signal(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * A station list hostapd stopped answering partway through is said to be
+ * short. The steer for the station it did list is still planned, and the plan
+ * warns that others may be missing -- where before a busy hostapd read as an
+ * access point with nobody to move, and `make hull-steer` once failed on an
+ * empty plan with nothing to say why (10.647). **The control** is the same
+ * observation read whole, which warns nothing.
+ */
+static void a_station_list_cut_short_is_said_to_be(void)
+{
+	static const char *const unread[] = { "", ",\"associated_unread\":true" };
+	size_t                   at;
+
+	for (at = 0; at < 2u; at++) {
+		ncfg_document_t *document;
+		ncfg_observed_t *observed;
+		char             backends[2048];
+		ncfg_plan_t     *plan;
+
+		(void)snprintf(backends, sizeof(backends),
+		    RADIO_LINKS ",\"backends\":["
+		    "{\"kind\":\"access_point\",\"interface\":\"wlan0\",\"running\":true"
+		    STARTED_WITH(AS_WRITTEN ",\"neighbour_reports\":true")
+		    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[]%s,"
+		    "\"neighbours\":[" OWN_A "," OWN_B5 "],\"steerable\":["
+		    STATION("aa:00:00:00:00:01", "-40", "300") "]}},"
+		    "{\"kind\":\"access_point\",\"interface\":\"wlan1\",\"running\":true"
+		    STARTED_WITH(",\"channel\":36,\"band\":\"5\",\"neighbour_reports\":true")
+		    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[],"
+		    "\"neighbours\":[" OWN_B5 "," OWN_A "]}}]",
+		    unread[at]);
+		plan = planfix_plan(TWO_RADIOS, TWO_RADIO_INTERFACES, "", STEERING_POINTS, backends,
+		    &document, &observed);
+		check(plan && steer_for(plan, "aa:00:00:00:00:01"),
+		    at ? "a short list still steers the station it did list"
+		       : "control: the whole list steers its station");
+		if (at) {
+			check(plan && planfix_warned(plan, "stopped answering partway through its stations"),
+			    "  and the plan says the list was cut short");
+			check(plan && planfix_warned(plan, "considers only the 1 it listed"),
+			    "  naming how many it did list");
+		} else {
+			check(plan && !planfix_warned(plan, "stopped answering"),
+			    "  and warns nothing about it");
+		}
+		planfix_release(plan, document, observed);
+	}
+}
+
 /* An access point without steering moves nobody, however weak. */
 static void an_access_point_without_steering_moves_nobody(void)
 {
@@ -1547,6 +1596,7 @@ int main(void)
 	a_neighbour_list_held_as_wanted_is_converged();
 	neighbour_reports_are_part_of_what_an_access_point_was_started_as();
 	stations_are_steered_by_band_and_by_signal();
+	a_station_list_cut_short_is_said_to_be();
 	a_sibling_at_80_mhz_is_still_a_5_ghz_target();
 	an_access_point_without_steering_moves_nobody();
 	an_access_point_on_a_radio_with_802_11n_takes_it_once();
