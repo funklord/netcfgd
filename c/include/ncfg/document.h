@@ -1399,6 +1399,22 @@ typedef struct {
 	 * router's own resolution (0301); with no `dns`, the hosts are offered
 	 * the router. */
 	int               dns_forward;
+	/*
+	 * The standard options (0303), each NULL or empty where unset. `gateway`
+	 * is option 3, absent offering the interface's own address; `domain` is
+	 * option 15 and, with `dns_forward`, the LAN's local domain; `ntp` is
+	 * option 42; `boot_file` and `boot_server` are the BOOTP file and
+	 * next-server fields, a server only with a file; `tftp_server` option
+	 * 66; `wpad` option 252. `ncfg_dhcp_server_range` checks them all.
+	 */
+	char             *gateway;
+	char             *domain;
+	char            **ntp;
+	size_t            ntp_count;
+	char             *boot_file;
+	char             *boot_server;
+	char             *tftp_server;
+	char             *wpad;
 } ncfg_dhcp_server_t;
 
 /*
@@ -1924,6 +1940,11 @@ int ncfg_channel_in_band(const char *band, int64_t channel);
  * hyphens and dots, starting with a letter or digit, shorter than 64. The
  * rule 10.602 applies to a client's own name, and a reservation's. */
 int ncfg_dhcp_server_plain_name(const char *name);
+
+/* A DNS name: labels of letters, digits and hyphens, at most 63 each, not
+ * starting or ending with a hyphen, joined by single dots; 253 at most. A
+ * dotted IPv4 address is one. `domain`, `tftp_server` and records (0303). */
+int ncfg_dhcp_server_dns_name(const char *name);
 
 int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
     char *router, const char **why);
@@ -2514,6 +2535,9 @@ ncfg_document_t *ncfg_document_new(char *err, size_t err_size);
  * NULL in, NULL out; NULL out otherwise means out of memory. */
 ncfg_firewall_t *ncfg_firewall_copy(const ncfg_firewall_t *firewall);
 void ncfg_firewall_free(ncfg_firewall_t *firewall);
+/* A DHCP server and every member its field table declares, then the struct:
+ * one free that cannot fall behind a field added later (0303). */
+void ncfg_dhcp_server_free(ncfg_dhcp_server_t *server);
 
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size);
 

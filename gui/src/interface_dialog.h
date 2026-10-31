@@ -159,6 +159,14 @@ private:
 	QSpinBox    *dhcp_lease;
 	QLineEdit   *dhcp_dns;
 	QCheckBox   *dhcp_dns_forward;
+	/* The standard options (0303). */
+	QLineEdit   *dhcp_gateway;
+	QLineEdit   *dhcp_domain;
+	QLineEdit   *dhcp_ntp;
+	QLineEdit   *dhcp_boot_file;
+	QLineEdit   *dhcp_boot_server;
+	QLineEdit   *dhcp_tftp_server;
+	QLineEdit   *dhcp_wpad;
 	ncfg_hooks_editor *hooks;
 	QComboBox   *detection;
 	/* What the daemon said, kept so the editor can be handed the text rather

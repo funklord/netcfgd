@@ -187,6 +187,12 @@ int main(int argc, char **argv)
 		                   "\tnat = true\n"
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
 		                   "dns = [\"192.0.2.53\"]; dns_forward = true; "
+		                   /* The standard options (0303), each of which Save
+		                    * must write back. */
+		                   "gateway = \"192.0.2.254\"; domain = \"home.lan\"; "
+		                   "ntp = [\"192.0.2.1\", \"192.0.2.2\"]; boot_file = \"pxelinux.0\"; "
+		                   "boot_server = \"192.0.2.5\"; tftp_server = \"tftp.home.lan\"; "
+		                   "wpad = \"http://wpad.home.lan/wpad.dat\"; "
 		                   "host \"tv\" { mac = \"AA:BB:CC:DD:EE:01\"; "
 		                   "address = \"192.0.2.20\" } }\n"
 		                   /* To the reservation by name (10.618), which Save must

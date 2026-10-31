@@ -61,6 +61,44 @@ static int log_path(const char *run, const char *iface, char *out, size_t out_si
 	return ncfg_backend_path(out, out_size, run, "dhcp-server", iface, ".log", err, err_size);
 }
 
+/* One more text into an FNV-1a digest, with a separator so "ab","c" and
+ * "a","bc" differ. */
+static uint32_t digest_text(uint32_t digest, const char *text)
+{
+	const char *c = text ? text : "";
+
+	for (; *c; c++) {
+		digest = (digest ^ (unsigned char)tolower((unsigned char)*c)) * 16777619u;
+	}
+	return (digest ^ 0u) * 16777619u;
+}
+
+/*
+ * The options a server offers beyond its range, lease and DNS (0303), as one
+ * digest, and whether there are any. Every member that reaches dnsmasq is in
+ * it, so changing any of them changes the summary and the planner restarts
+ * the server -- which re-reads options only on a restart.
+ */
+static int options_digest(const ncfg_dhcp_server_t *server, uint32_t *out)
+{
+	const char *const texts[] = { server->gateway, server->domain, server->boot_file,
+		server->boot_server, server->tftp_server, server->wpad };
+	uint32_t          digest = 2166136261u;
+	int               any = 0;
+	size_t            at;
+
+	for (at = 0; at < sizeof(texts) / sizeof(texts[0]); at++) {
+		any = any || texts[at] != NULL;
+		digest = digest_text(digest, texts[at]);
+	}
+	for (at = 0; at < server->ntp_count; at++) {
+		any = 1;
+		digest = digest_text(digest, server->ntp[at]);
+	}
+	*out = digest;
+	return any;
+}
+
 int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_t out_size)
 {
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
@@ -117,6 +155,15 @@ int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_
 		}
 		used += (size_t)snprintf(out + used, out_size - used, ", %zu host%s %08x",
 		    server->host_count, server->host_count == 1u ? "" : "s", (unsigned)digest);
+	}
+	/* Absent with none, so a server that offers none keeps its line. */
+	{
+		uint32_t digest;
+
+		if (options_digest(server, &digest) && used < out_size) {
+			used += (size_t)snprintf(out + used, out_size - used, ", options %08x",
+			    (unsigned)digest);
+		}
 	}
 	return used < out_size;
 }
@@ -221,6 +268,39 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 			ncfg_buf_addf(&buf, ",%s", server->dns[at]);
 		}
 		ncfg_buf_add_char(&buf, '\n');
+	}
+	/* The standard options (0303), each checked by `ncfg_dhcp_server_range`
+	 * above: no quote, comma or newline reaches a line it could end. */
+	if (server->gateway) {
+		ncfg_buf_addf(&buf, "dhcp-option=3,%s\n", server->gateway);
+	}
+	if (server->domain) {
+		/* Option 15, and the name a lease answers under. With the
+		 * forwarder on, the domain is the LAN's own: answered here, never
+		 * asked upstream. */
+		ncfg_buf_addf(&buf, "domain=%s\n", server->domain);
+		if (server->dns_forward) {
+			ncfg_buf_addf(&buf, "local=/%s/\n", server->domain);
+		}
+	}
+	if (server->ntp_count) {
+		ncfg_buf_add_text(&buf, "dhcp-option=42");
+		for (at = 0; at < server->ntp_count; at++) {
+			ncfg_buf_addf(&buf, ",%s", server->ntp[at]);
+		}
+		ncfg_buf_add_char(&buf, '\n');
+	}
+	if (server->boot_file) {
+		/* The file, no server name, and the next-server address where one
+		 * is given: dnsmasq's three fields. */
+		ncfg_buf_addf(&buf, "dhcp-boot=%s%s%s\n", server->boot_file,
+		    server->boot_server ? ",," : "", server->boot_server ? server->boot_server : "");
+	}
+	if (server->tftp_server) {
+		ncfg_buf_addf(&buf, "dhcp-option=66,\"%s\"\n", server->tftp_server);
+	}
+	if (server->wpad) {
+		ncfg_buf_addf(&buf, "dhcp-option=252,\"%s\"\n", server->wpad);
 	}
 	if (ncfg_buf_failed(&buf)) {
 		ncfg_buf_free(&buf);

@@ -1048,4 +1048,7 @@ netcfgd
 # And the masquerade whose forward chain drops replies, +40.
 # And the lease file's parser split from its read so a fuzzer can drive it
 # (10.622), +56.
-total 1347856
+# And the DHCP server's standard options -- gateway, domain, NTP, network
+# boot, TFTP server, WPAD -- checked, rendered and offered (decision 0303),
+# +4,264.
+total 1352120

@@ -1483,6 +1483,15 @@ typedef struct {
 	char *dhcp_dns;
 	/* Whether the server also answers DNS, forwarding it (0301). */
 	int   dhcp_dns_forward;
+	/* The standard options (0303), each "" where unset; `dhcp_ntp`
+	 * space-joined. */
+	char *dhcp_gateway;
+	char *dhcp_domain;
+	char *dhcp_ntp;
+	char *dhcp_boot_file;
+	char *dhcp_boot_server;
+	char *dhcp_tftp_server;
+	char *dhcp_wpad;
 	/* The server's reservations (10.605), carried since 10.612. */
 	ncfg_reservation_t *reservations;
 	size_t              reservation_count;

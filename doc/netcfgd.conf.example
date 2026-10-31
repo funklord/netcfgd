@@ -1713,6 +1713,42 @@
 #	}
 #}
 
+# A `host` block reserves an address for one machine by its MAC, and the name
+# is the one it is given. `dns_forward = true` makes the same dnsmasq answer
+# DNS for the network (decision 0301), forwarding what it cannot answer to
+# whatever the router itself resolves with, and offering itself as the hosts'
+# DNS server where `dns` names none; a reserved or leased name then resolves.
+#
+# THE OTHER OPTIONS a router's DHCP offers (decision 0303), each optional:
+#
+#   - `gateway` is the router offered, on the network served; absent, this
+#     interface's own address;
+#   - `domain` is the domain name offered, and with `dns_forward` the LAN's
+#     own: `desk` answers as `desk.home.lan`, and the domain is never asked
+#     upstream;
+#   - `ntp` is time servers, as IPv4 addresses;
+#   - `boot_file` and `boot_server` are network boot: the file a PXE client
+#     fetches, and the TFTP server's address it fetches it from;
+#   - `tftp_server` is option 66, a name or address, for phones and the like
+#     that ask for it by option rather than by the boot fields;
+#   - `wpad` is the proxy autoconfiguration URL, option 252.
+#
+# dnsmasq sends an option to a client that asks for it, which is how DHCP
+# works; the boot file is in the BOOTP header for a PXE ROM and in option 67
+# for a client that asks there.
+
+#interface br0 {
+#	config = "192.168.1.1/24"
+#	dhcp_server {
+#		dns_forward = true
+#		domain      = "home.lan"
+#		ntp         = ["192.168.1.1"]
+#		boot_file   = "pxelinux.0"
+#		boot_server = "192.168.1.5"
+#		host "nas" { mac = "AA:BB:CC:DD:EE:01"; address = "192.168.1.10" }
+#	}
+#}
+
 # POLICY ROUTING. A rule sends some traffic to a different table -- which is
 # how a second uplink, or a VPN for one subnet only, is expressed.
 

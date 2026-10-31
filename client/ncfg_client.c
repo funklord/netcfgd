@@ -3225,6 +3225,13 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	free(config->probe_args);
 	free(config->dhcp_range);
 	free(config->dhcp_dns);
+	free(config->dhcp_gateway);
+	free(config->dhcp_domain);
+	free(config->dhcp_ntp);
+	free(config->dhcp_boot_file);
+	free(config->dhcp_boot_server);
+	free(config->dhcp_tftp_server);
+	free(config->dhcp_wpad);
 	for (size_t i = 0; i < config->reservation_count; i++) {
 		free(config->reservations[i].name);
 		free(config->reservations[i].mac);
@@ -4516,6 +4523,14 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->dhcp_dns = joined_words(doc, ncfg_json_member(doc, server, "dns"));
 		out->dhcp_dns_forward =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, server, "dns_forward"), 0);
+		/* The standard options (0303). */
+		out->dhcp_gateway = member_text(doc, server, "gateway");
+		out->dhcp_domain = member_text(doc, server, "domain");
+		out->dhcp_ntp = joined_words(doc, ncfg_json_member(doc, server, "ntp"));
+		out->dhcp_boot_file = member_text(doc, server, "boot_file");
+		out->dhcp_boot_server = member_text(doc, server, "boot_server");
+		out->dhcp_tftp_server = member_text(doc, server, "tftp_server");
+		out->dhcp_wpad = member_text(doc, server, "wpad");
 		if (start && end && *start && *end) {
 			size_t length = strlen(start) + strlen(end) + 2;
 

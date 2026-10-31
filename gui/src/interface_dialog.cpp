@@ -371,11 +371,42 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	    "out resolve too."));
 	form->addRow(QString(), dhcp_dns_forward);
 
+	/* The standard options (0303), each blank for none -- the gateway blank
+	 * for this router. The compiler checks each shape and names the one it
+	 * refuses. */
+	const struct {
+		QLineEdit **field;
+		const char *object;
+		const char *label;
+		const char *placeholder;
+	} options[] = {
+		{ &dhcp_gateway, "iface_dhcp_gateway", "gateway", "blank for this router" },
+		{ &dhcp_domain, "iface_dhcp_domain", "domain", "home.lan -- names answer under it" },
+		{ &dhcp_ntp, "iface_dhcp_ntp", "NTP servers", "IPv4 addresses, separated by spaces" },
+		{ &dhcp_boot_file, "iface_dhcp_boot_file", "network boot file", "pxelinux.0" },
+		{ &dhcp_boot_server, "iface_dhcp_boot_server", "boot server",
+		    "the TFTP server's address, with a boot file" },
+		{ &dhcp_tftp_server, "iface_dhcp_tftp_server", "TFTP server (66)",
+		    "a name or address" },
+		{ &dhcp_wpad, "iface_dhcp_wpad", "proxy autoconfig (WPAD)",
+		    "http://wpad.home.lan/wpad.dat" },
+	};
+	for (const auto &one : options) {
+		*one.field = new QLineEdit(this);
+		(*one.field)->setObjectName(QString::fromLatin1(one.object));
+		(*one.field)->setPlaceholderText(QString::fromLatin1(one.placeholder));
+		form->addRow(QString::fromLatin1(one.label), *one.field);
+	}
+
 	const auto serving = [this](bool on) {
 		dhcp_range->setEnabled(on);
 		dhcp_lease->setEnabled(on);
 		dhcp_dns->setEnabled(on);
 		dhcp_dns_forward->setEnabled(on);
+		for (QLineEdit *field : { dhcp_gateway, dhcp_domain, dhcp_ntp, dhcp_boot_file,
+		         dhcp_boot_server, dhcp_tftp_server, dhcp_wpad }) {
+			field->setEnabled(on);
+		}
 	};
 	connect(dhcp_server, &QCheckBox::toggled, this, serving);
 	serving(false);
@@ -589,6 +620,13 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_lease->setValue(existing.dhcp_lease > 0 ? existing.dhcp_lease : 0);
 	dhcp_dns->setText(existing.dhcp_dns);
 	dhcp_dns_forward->setChecked(existing.dhcp_dns_forward);
+	dhcp_gateway->setText(existing.dhcp_gateway);
+	dhcp_domain->setText(existing.dhcp_domain);
+	dhcp_ntp->setText(existing.dhcp_ntp);
+	dhcp_boot_file->setText(existing.dhcp_boot_file);
+	dhcp_boot_server->setText(existing.dhcp_boot_server);
+	dhcp_tftp_server->setText(existing.dhcp_tftp_server);
+	dhcp_wpad->setText(existing.dhcp_wpad);
 	for (const auto &one : existing.reservations) {
 		put_row(reservations, { one.name, one.mac, one.address });
 	}
@@ -905,6 +943,30 @@ QString ncfg_interface_dialog::block_text() const
 		if (dhcp_dns_forward->isChecked()) {
 			served << QStringLiteral("\t\tdns_forward = true");
 		}
+		const struct {
+			const char *key;
+			QLineEdit  *field;
+		} texts[] = {
+			{ "gateway", dhcp_gateway },
+			{ "domain", dhcp_domain },
+			{ "boot_file", dhcp_boot_file },
+			{ "boot_server", dhcp_boot_server },
+			{ "tftp_server", dhcp_tftp_server },
+			{ "wpad", dhcp_wpad },
+		};
+		for (const auto &one : texts) {
+			if (!one.field->text().trimmed().isEmpty()) {
+				served << QStringLiteral("\t\t%1 = \"%2\"")
+				              .arg(QString::fromLatin1(one.key), one.field->text().trimmed());
+			}
+		}
+		QStringList clocks;
+		for (const QString &one : dhcp_ntp->text().split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+			clocks << QStringLiteral("\"%1\"").arg(one);
+		}
+		if (!clocks.isEmpty()) {
+			served << QStringLiteral("\t\tntp = [%1]").arg(clocks.join(QStringLiteral(", ")));
+		}
 		body << QStringLiteral("\tdhcp_server {");
 		for (int row = 0; row < reservations->rowCount(); row++) {
 			served << QStringLiteral("\t\thost \"%1\" { mac = \"%2\"; address = \"%3\" }")
@@ -1061,7 +1123,9 @@ QString ncfg_interface_dialog::dot1x_reference_text() const
 void ncfg_interface_dialog::submit()
 {
 	const QLineEdit *values[] = { dns_servers, dns_search, dns_domains,
-		probe_command, probe_args, dhcp_range, dhcp_dns, advertise_prefixes, ipv6_token,
+		probe_command, probe_args, dhcp_range, dhcp_dns, dhcp_gateway, dhcp_domain, dhcp_ntp,
+		dhcp_boot_file, dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, advertise_prefixes,
+		ipv6_token,
 		guard, dot1x_identity, dot1x_anonymous_identity, dot1x_phase2, dot1x_ca_cert,
 		dot1x_domain_suffix_match, dot1x_client_cert, dot1x_private_key, dot1x_reference };
 	for (const QLineEdit *value : values) {

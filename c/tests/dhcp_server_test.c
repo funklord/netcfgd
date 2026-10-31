@@ -14,6 +14,7 @@
 #include "ncfg/base.h"
 #include "testdir.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -157,6 +158,80 @@ int main(void)
 		free(text);
 		server.hosts = NULL;
 		server.host_count = 0u;
+	}
+
+	/* The standard options (0303): one line each, the domain kept local to a
+	 * forwarder, and any of them changing the summary -- since dnsmasq reads
+	 * its options only on a restart. */
+	{
+		char gateway[] = "192.168.1.254";
+		char domain[] = "home.lan";
+		char ntp0[] = "192.168.1.1";
+		char ntp1[] = "192.168.1.2";
+		char *ntp[] = { ntp0, ntp1 };
+		char boot_file[] = "pxelinux.0";
+		char boot_server[] = "192.168.1.5";
+		char tftp[] = "tftp.home.lan";
+		char wpad[] = "http://wpad.home.lan/wpad.dat";
+		char outside[] = "10.0.0.1";
+		char comma[] = "a,b";
+		char before[NCFG_DHCP_SERVER_SUMMARY_MAX];
+
+		check(ncfg_dhcp_server_summary(&lan, before, sizeof(before)) &&
+		    !strstr(before, "options"),
+		    "a server offering no options says nothing of them in its summary");
+		server.gateway = gateway;
+		server.domain = domain;
+		server.ntp = ntp;
+		server.ntp_count = 2u;
+		server.boot_file = boot_file;
+		server.boot_server = boot_server;
+		server.tftp_server = tftp;
+		server.wpad = wpad;
+		server.dns_forward = 1;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "dhcp-option=3,192.168.1.254") &&
+		        has_line(text, "domain=home.lan") && has_line(text, "local=/home.lan/") &&
+		        has_line(text, "dhcp-option=42,192.168.1.1,192.168.1.2") &&
+		        has_line(text, "dhcp-boot=pxelinux.0,,192.168.1.5") &&
+		        has_line(text, "dhcp-option=66,\"tftp.home.lan\"") &&
+		        has_line(text, "dhcp-option=252,\"http://wpad.home.lan/wpad.dat\""),
+		    "the standard options are a line each, the domain answered here alone");
+		free(text);
+		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		        strstr(recorded, ", options ") != NULL,
+		    "  and the summary carries their digest");
+		strcpy(before, recorded);
+		server.ntp_count = 1u;
+		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		        strcmp(recorded, before) != 0,
+		    "  so dropping an NTP server is a different summary, and a restart");
+		server.ntp_count = 2u;
+		server.boot_server = NULL;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "dhcp-boot=pxelinux.0"),
+		    "a boot file with no server is the file alone");
+		free(text);
+		server.gateway = outside;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "gateway"),
+		    "a gateway off the network renders nothing, and says why");
+		free(text);
+		server.gateway = gateway;
+		server.boot_file = comma;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "boot_file"),
+		    "  and so does a boot file that would end dnsmasq's field");
+		free(text);
+		server.boot_file = NULL;
+		server.boot_server = boot_server;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "boot_server"),
+		    "  and a boot server with no file to fetch from it");
+		free(text);
+		memset(&server.gateway, 0,
+		    sizeof(server) - offsetof(ncfg_dhcp_server_t, gateway));
+		server.dns_forward = 0;
 	}
 
 	source.static_address.address = NULL;

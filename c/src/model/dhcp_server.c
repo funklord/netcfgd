@@ -122,6 +122,124 @@ static int hosts_fit(const ncfg_dhcp_server_t *server, uint32_t own, uint32_t ne
 	return 1;
 }
 
+int ncfg_dhcp_server_dns_name(const char *name)
+{
+	size_t at;
+	size_t label = 0;
+
+	if (!name || !name[0] || strlen(name) > 253u) {
+		return 0;
+	}
+	for (at = 0; name[at]; at++) {
+		const unsigned char c = (unsigned char)name[at];
+
+		if (c == '.') {
+			/* An empty label, or one ending in a hyphen. */
+			if (label == 0u || name[at - 1u] == '-') {
+				return 0;
+			}
+			label = 0;
+			continue;
+		}
+		if (!(isalnum(c) || c == '-') || (label == 0u && c == '-') || ++label > 63u) {
+			return 0;
+		}
+	}
+	return label != 0u && name[at - 1u] != '-';
+}
+
+/* Text dnsmasq is given inside a quoted option or a comma-separated field:
+ * printable, and none of the characters that would end either. */
+static int option_text(const char *text, size_t most, const char *refused)
+{
+	size_t at;
+
+	if (!text || !text[0] || strlen(text) > most) {
+		return 0;
+	}
+	for (at = 0; text[at]; at++) {
+		if (!isprint((unsigned char)text[at]) || strchr(refused, text[at])) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * The standard options (0303), with the same four callers as the range and
+ * the reservations. The gateway has to be on the network served, since a
+ * host reaches its gateway without one.
+ */
+static int options_fit(const ncfg_dhcp_server_t *server, uint32_t network, uint32_t broadcast,
+    uint32_t mask, const char **why)
+{
+	uint32_t address;
+	size_t   at;
+
+	if (server->gateway) {
+		if (!bare_ipv4(server->gateway, &address) || (address & mask) != network ||
+		    address == network || address == broadcast) {
+			if (why) {
+				*why = "a `gateway` is one IPv4 address inside the interface's network, "
+				       "since a host reaches its gateway directly";
+			}
+			return 0;
+		}
+	}
+	if (server->domain && !ncfg_dhcp_server_dns_name(server->domain)) {
+		if (why) {
+			*why = "a `domain` is a DNS name: labels of letters, digits and hyphens, "
+			       "joined by dots";
+		}
+		return 0;
+	}
+	for (at = 0; at < server->ntp_count; at++) {
+		if (!bare_ipv4(server->ntp[at], &address)) {
+			if (why) {
+				*why = "an `ntp` server is an IPv4 address, which is what option 42 carries";
+			}
+			return 0;
+		}
+	}
+	if (server->boot_file && !option_text(server->boot_file, 127u, ",\\\" ")) {
+		if (why) {
+			*why = "a `boot_file` is a file name of at most 127 printable characters, with "
+			       "no comma, quote, backslash or space";
+		}
+		return 0;
+	}
+	if (server->boot_server) {
+		if (!server->boot_file) {
+			if (why) {
+				*why = "a `boot_server` is where a `boot_file` is fetched from, and there is "
+				       "no `boot_file`";
+			}
+			return 0;
+		}
+		if (!bare_ipv4(server->boot_server, &address)) {
+			if (why) {
+				*why = "a `boot_server` is one IPv4 address";
+			}
+			return 0;
+		}
+	}
+	if (server->tftp_server && !ncfg_dhcp_server_dns_name(server->tftp_server)) {
+		if (why) {
+			*why = "a `tftp_server` is a DNS name or an IPv4 address";
+		}
+		return 0;
+	}
+	if (server->wpad && (!option_text(server->wpad, 255u, "\"\\ ") ||
+	        (strncmp(server->wpad, "http://", 7u) != 0 &&
+	            strncmp(server->wpad, "https://", 8u) != 0))) {
+		if (why) {
+			*why = "a `wpad` is an http:// or https:// URL, with no quote, backslash or space";
+		}
+		return 0;
+	}
+	return 1;
+}
+
 int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char *end,
     char *router, const char **why)
 {
@@ -217,7 +335,8 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 			return 0;
 		}
 	}
-	if (!hosts_fit(server, own, network, broadcast, mask, why)) {
+	if (!hosts_fit(server, own, network, broadcast, mask, why) ||
+	    !options_fit(server, network, broadcast, mask, why)) {
 		return 0;
 	}
 	if (start) {

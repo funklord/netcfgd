@@ -1321,6 +1321,13 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dhcp_lease = found.dhcp_lease;
 	out->dhcp_dns = from_c(found.dhcp_dns);
 	out->dhcp_dns_forward = found.dhcp_dns_forward != 0;
+	out->dhcp_gateway = from_c(found.dhcp_gateway);
+	out->dhcp_domain = from_c(found.dhcp_domain);
+	out->dhcp_ntp = from_c(found.dhcp_ntp);
+	out->dhcp_boot_file = from_c(found.dhcp_boot_file);
+	out->dhcp_boot_server = from_c(found.dhcp_boot_server);
+	out->dhcp_tftp_server = from_c(found.dhcp_tftp_server);
+	out->dhcp_wpad = from_c(found.dhcp_wpad);
 	for (size_t i = 0; i < found.reservation_count; i++) {
 		ncfg_interface_config::reservation one;
 		one.name = from_c(found.reservations[i].name);

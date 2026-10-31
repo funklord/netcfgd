@@ -12597,6 +12597,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.633 The DHCP server's standard options
+
+The holder, 2026-10-31: "we need fully functional dhcp and dns server config
+too, if unifi has it, we probably want it too". Decision 0303 reads UniFi's
+per-network DHCP and DNS settings as the list and settles each item's shape;
+this is its first slice. `dhcp_server` gains `gateway`, `domain`, `ntp`,
+`boot_file`, `boot_server`, `tftp_server` and `wpad`, checked in one place --
+`ncfg_dhcp_server_range`, which the compiler, the profile renderer and the
+backend already all call, so a value one of them refuses none of the others
+writes. A gateway must be on the network served; a boot server needs a boot
+file; text that reaches a dnsmasq field cannot carry what would end it.
+`domain` with `dns_forward` is the LAN's own: `local=/domain/`, so a lease
+answers as `name.domain` and the domain is never asked upstream.
+
+The plan's summary carries a digest of the options, absent where there are
+none so existing servers keep their line, because dnsmasq reads options only
+on a restart. `release_dhcp_server`, a hand-written free that would have
+leaked every new field, is now `ncfg_dhcp_server_free` over the field table.
+
+**Measured in `make hull-dhcp-server`** with a real dhcpcd client: gateway,
+domain, both NTP servers, TFTP server and WPAD URL arrive, and `desk.home.lan`
+resolves through the forwarder. **The boot file goes to one of two places**,
+measured against dnsmasq 2.91: a client that asks for option 67 gets it there
+and an empty BOOTP header, one that does not -- a PXE ROM reading the header --
+gets it in the header. The rig checks both. The interface dialog carries every
+key, held by the coverage gate and by `interface_load`'s compiled comparison;
+a dialog that skipped `wpad` fails it. +4,264 bytes.
+
 ## 10.632 Every whole-block dialog is checked against what netcfgd compiles
 
 10.631's check, carried to the other dialogs that save a block whole.

@@ -219,28 +219,6 @@ static void release_advertise(ncfg_ra_policy_t *policy)
 	free(policy->backend.command);
 }
 
-static void release_dhcp_server(ncfg_dhcp_server_t *server)
-{
-	size_t at;
-
-	if (!server) {
-		return;
-	}
-	free(server->range_start);
-	free(server->range_end);
-	for (at = 0; at < server->dns_count; at++) {
-		free(server->dns[at]);
-	}
-	free(server->dns);
-	for (at = 0; at < server->host_count; at++) {
-		free(server->hosts[at].name);
-		free(server->hosts[at].mac);
-		free(server->hosts[at].address);
-	}
-	free(server->hosts);
-	free(server);
-}
-
 /*
  * `host "printer" { mac = "AA:BB:CC:DD:EE:FF"  address = "192.168.1.10" }`
  * inside `dhcp_server` (10.605). The label is the name dnsmasq gives the host,
@@ -323,6 +301,31 @@ static void lower_dhcp_host(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block
 	}
 	server->hosts = grown;
 	server->hosts[server->host_count++] = host;
+}
+
+/* The single-text options (0303): the slot a key fills, NULL for any other
+ * key. */
+static char **dhcp_server_text_slot(ncfg_dhcp_server_t *server, const char *key)
+{
+	if (strcmp(key, "gateway") == 0) {
+		return &server->gateway;
+	}
+	if (strcmp(key, "domain") == 0) {
+		return &server->domain;
+	}
+	if (strcmp(key, "boot_file") == 0) {
+		return &server->boot_file;
+	}
+	if (strcmp(key, "boot_server") == 0) {
+		return &server->boot_server;
+	}
+	if (strcmp(key, "tftp_server") == 0) {
+		return &server->tftp_server;
+	}
+	if (strcmp(key, "wpad") == 0) {
+		return &server->wpad;
+	}
+	return NULL;
 }
 
 /*
@@ -447,9 +450,43 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 				server->dns_forward = flag;
 			}
+		} else if (strcmp(assignment->key, "ntp") == 0) {
+			/* The shapes are `ncfg_dhcp_server_range`'s to check, with the
+			 * rest of the block, so one sentence refuses a bad one wherever
+			 * it is met (0303). */
+			ncfg_words_t words;
+			size_t       at;
+
+			if (!ncfg_as_words(ctx, assignment->value, &words)) {
+				ncfg_words_free(&words);
+				continue;
+			}
+			for (at = 0; at < words.count; at++) {
+				char **grown = realloc(server->ntp, (server->ntp_count + 1u) * sizeof(*grown));
+
+				if (!grown) {
+					ncfg_lower_oom(ctx);
+					break;
+				}
+				server->ntp = grown;
+				server->ntp[server->ntp_count] = strdup(words.at[at].text);
+				if (!server->ntp[server->ntp_count++]) {
+					ncfg_lower_oom(ctx);
+				}
+			}
+			ncfg_words_free(&words);
+		} else if (dhcp_server_text_slot(server, assignment->key) != NULL) {
+			char **slot = dhcp_server_text_slot(server, assignment->key);
+			char  *text = ncfg_as_string(ctx, assignment->value);
+
+			if (text) {
+				free(*slot);
+				*slot = text;
+			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown dhcp_server key `%s`: range, lease, dns and dns_forward, and `host` "
+			    "unknown dhcp_server key `%s`: range, lease, dns, dns_forward, gateway, "
+			    "domain, ntp, boot_file, boot_server, tftp_server and wpad, and `host` "
 			    "blocks", assignment->key);
 		}
 	}
@@ -1142,7 +1179,7 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 			ctx->source = dhcp_server_source;
 			ncfg_diag(ctx, dhcp_server_span, "interface `%s` cannot serve DHCP: %s",
 			    interface.name, why ? why : "its range cannot be worked out");
-			release_dhcp_server(interface.dhcp_server);
+			ncfg_dhcp_server_free(interface.dhcp_server);
 			interface.dhcp_server = NULL;
 		}
 	}

@@ -478,6 +478,15 @@ struct ncfg_interface_config {
 	int     dhcp_lease = -1;
 	QString dhcp_dns;
 	bool    dhcp_dns_forward = false;
+	/* The standard options (0303), empty where unset; `dhcp_ntp`
+	 * space-joined. */
+	QString dhcp_gateway;
+	QString dhcp_domain;
+	QString dhcp_ntp;
+	QString dhcp_boot_file;
+	QString dhcp_boot_server;
+	QString dhcp_tftp_server;
+	QString dhcp_wpad;
 	/* The server's reservations, and the ports forwarded from this interface
 	 * (10.612). */
 	struct reservation {

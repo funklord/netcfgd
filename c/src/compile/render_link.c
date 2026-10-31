@@ -766,6 +766,35 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 	if (server->dns_forward) {
 		ncfg_buf_add_text(body, "\t\tdns_forward = true\n");
 	}
+	/* The standard options (0303). The range check above checked each shape,
+	 * a quote and a backslash among what it refuses, so each is written as
+	 * it is. */
+	{
+		const struct {
+			const char *key;
+			const char *value;
+		} texts[] = {
+			{ "gateway", server->gateway },
+			{ "domain", server->domain },
+			{ "boot_file", server->boot_file },
+			{ "boot_server", server->boot_server },
+			{ "tftp_server", server->tftp_server },
+			{ "wpad", server->wpad },
+		};
+
+		for (at = 0; at < sizeof(texts) / sizeof(texts[0]); at++) {
+			if (texts[at].value) {
+				ncfg_buf_addf(body, "\t\t%s = \"%s\"\n", texts[at].key, texts[at].value);
+			}
+		}
+	}
+	if (server->ntp_count) {
+		ncfg_buf_add_text(body, "\t\tntp = [");
+		for (at = 0; at < server->ntp_count; at++) {
+			ncfg_buf_addf(body, "%s\"%s\"", at ? ", " : "", server->ntp[at]);
+		}
+		ncfg_buf_add_text(body, "]\n");
+	}
 	/* Their shapes were checked with the range above, so a quote cannot be
 	 * in any of the three. */
 	for (at = 0; at < server->host_count; at++) {

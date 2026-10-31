@@ -73,9 +73,9 @@ say "ncfg apply rc=$?"
 say "  lan0.conf: $(grep -vE '^#' "$work/run/dhcp-server/lan0.conf" 2>/dev/null | tr '\n' ' ')"
 pid1=$(cat "$work/run/dhcp-server/lan0.pid" 2>/dev/null)
 
-client() {
+client() { # $@ more dhcpcd options, such as the options to ask for
 	: > "$work/given"
-	ip netns exec client timeout 20 dhcpcd -1 -4 -t 15 -h laptop --script /payload/hook.sh eth0 \
+	ip netns exec client timeout 20 dhcpcd -1 -4 -t 15 -h laptop "$@" --script /payload/hook.sh eth0 \
 		> "$work/client.log" 2>&1
 	cat "$work/given"
 }
@@ -138,7 +138,50 @@ lease_name=$(ip netns exec client timeout 10 getent hosts desk | awk '{print $1}
 say "  the client resolves example.test to '$upstream_name' and desk to '$lease_name'"
 kill "$upstream" 2>/dev/null
 
+# The standard options (0303): asked for by the client, since dnsmasq sends
+# an option only to a client that asks, and the domain answering a lease's
+# name under it through the forwarder.
+conf "lease = 3600
+		host \"desk\" { mac = \"$mac\"; address = \"192.168.7.50\" }
+		dns_forward = true
+		gateway = \"192.168.7.254\"
+		domain = \"home.lan\"
+		ntp = [\"192.168.7.1\", \"192.168.7.2\"]
+		boot_file = \"pxelinux.0\"
+		boot_server = \"192.168.7.5\"
+		tftp_server = \"tftp.home.lan\"
+		wpad = \"http://wpad.home.lan/wpad.dat\"" ""
+"$build/ncfg" plan > "$work/plan-options.log" 2>&1
+options_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server.*options ' "$work/plan-options.log")
+say "after the options: $(grep -E 'backend\.' "$work/plan-options.log" | head -1 | tr -s ' ')"
+"$build/ncfg" apply > "$work/apply5.log" 2>&1
+say "ncfg apply rc=$?"
+sleep 1
+optioned=$(client -o ntp_servers -o tftp_server_name -o wpad_url -o bootfile_name)
+say "the client is given: $optioned"
+# A client that asks for option 67 is given the file there and an empty
+# header field, measured against 2.91; one that does not -- a PXE ROM reading
+# the BOOTP header -- has to find it in the header.
+headered=$(client)
+say "a client not asking for option 67 is given: $headered"
+domain_name=$(ip netns exec client timeout 10 getent hosts desk.home.lan | awk '{print $1}')
+say "  the client resolves desk.home.lan to '$domain_name'"
+
 failed=0
+[ "$options_plan" -ge 1 ] || { say "  the options were not planned as a restart naming them"; failed=1; }
+case "$optioned" in
+	*" routers=192.168.7.254 "*) ;;
+	*) say "  the client was not offered the gateway named"; failed=1 ;;
+esac
+case "$optioned" in
+	*" domain=home.lan ntp=192.168.7.1 192.168.7.2 file= tftp=tftp.home.lan wpad=http://wpad.home.lan/wpad.dat bootfile=pxelinux.0"*) ;;
+	*) say "  the client was not given the domain, NTP, boot file, TFTP server and WPAD URL"; failed=1 ;;
+esac
+case "$headered" in
+	*" file=pxelinux.0 "*) ;;
+	*) say "  a client not asking for option 67 did not find the boot file in the header"; failed=1 ;;
+esac
+[ "$domain_name" = "192.168.7.50" ] || { say "  a lease's name did not resolve under the domain"; failed=1; }
 [ "$forward_plan" -ge 1 ] || { say "  turning the forwarder on was not planned as a restart"; failed=1; }
 case " $listening" in *" 192.168.7.1:53 "*) ;; *) say "  the forwarder is not on lan0's address"; failed=1 ;; esac
 case " $listening" in *" 127.0.0.1:53 "*) say "  the forwarder bound loopback too"; failed=1 ;; esac
@@ -175,6 +218,7 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  dnsmasq: /' "$work/run/dhcp-server/lan0.log" 2>/dev/null | tail -6 >> "$out"
 	sed 's/^/  apply4: /' "$work/apply4.log" | tail -6 >> "$out"
 	sed 's/^/  upstream: /' "$work/upstream.log" | tail -4 >> "$out"
+	sed 's/^/  apply5: /' "$work/apply5.log" | tail -6 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

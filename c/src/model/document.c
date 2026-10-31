@@ -1921,7 +1921,21 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	/* Absent where off (0301), so a server written before it existed reads
 	 * and writes back unchanged. */
 	{ .name = "dns_forward", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
-	    .offset = offsetof(ncfg_dhcp_server_t, dns_forward) }
+	    .offset = offsetof(ncfg_dhcp_server_t, dns_forward) },
+	/* The standard options (0303), each absent where unset for the same
+	 * reason: a server written before them reads and writes back unchanged. */
+	{ .name = "gateway", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_server_t, gateway) },
+	{ .name = "domain", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_server_t, domain) },
+	{ .name = "ntp", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dhcp_server_t, ntp),
+	    .count_offset = offsetof(ncfg_dhcp_server_t, ntp_count) },
+	{ .name = "boot_file", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, boot_file) },
+	{ .name = "boot_server", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, boot_server) },
+	{ .name = "tftp_server", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, tftp_server) },
+	{ .name = "wpad", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_server_t, wpad) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 
@@ -2786,6 +2800,15 @@ const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const
 		}
 	}
 	return NULL;
+}
+
+void ncfg_dhcp_server_free(ncfg_dhcp_server_t *server)
+{
+	if (!server) {
+		return;
+	}
+	ncfg_type_free(&dhcp_server_type, server);
+	free(server);
 }
 
 void ncfg_firewall_free(ncfg_firewall_t *firewall)

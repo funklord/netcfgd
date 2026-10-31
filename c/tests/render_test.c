@@ -837,6 +837,12 @@ static void an_access_point_round_trips(void)
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
 	    "\tdhcp_server { dns_forward = true }\n}\n",
 	    "  and so does one answering DNS for the LAN (0301)");
+	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	    "\t\tdns_forward = true\n\t\tgateway = \"192.168.1.254\"\n\t\tdomain = \"home.lan\"\n"
+	    "\t\tntp = [\"192.168.1.1\", \"192.168.1.2\"]\n\t\tboot_file = \"pxelinux.0\"\n"
+	    "\t\tboot_server = \"192.168.1.5\"\n\t\ttftp_server = \"tftp.home.lan\"\n"
+	    "\t\twpad = \"http://wpad.home.lan/wpad.dat\"\n\t}\n}\n",
+	    "  and so does one offering every standard option (0303)");
 	round_trips("interface wan0 {\n\tnat = true\n"
 	    "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; to = \"192.168.1.10\"; "
 	    "to_port = 8443 }\n"

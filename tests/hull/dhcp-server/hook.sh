@@ -2,8 +2,12 @@
 # dhcpcd's hook: what the server gave, for the payload to read. dhcpcd runs
 # it with the lease in its environment; nothing here changes the machine.
 case "$reason" in BOUND|RENEW|REBIND|REBOOT)
-	printf 'address=%s routers=%s dns=%s lease=%s\n' "$new_ip_address" "$new_routers" \
-		"$new_domain_name_servers" "$new_dhcp_lease_time" >> /tmp/dhcp-server/given
+	# The standard options (0303) after the first four, so a pattern on
+	# those four still matches.
+	printf 'address=%s routers=%s dns=%s lease=%s domain=%s ntp=%s file=%s tftp=%s wpad=%s bootfile=%s\n' \
+		"$new_ip_address" "$new_routers" "$new_domain_name_servers" "$new_dhcp_lease_time" \
+		"$new_domain_name" "$new_ntp_servers" "$new_filename" "$new_tftp_server_name" \
+		"$new_wpad_url" "$new_bootfile_name" >> /tmp/dhcp-server/given
 	;;
 esac
 exit 0
