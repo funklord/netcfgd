@@ -436,6 +436,41 @@ int main(void)
 		    "  and a station no server leased to has nothing");
 	}
 
+	/* Every lease at once (0303), for `ncfg status` and the GUI: v4 keyed
+	 * by MAC, v6 by IAID with no MAC, the server's `duid` line skipped, an
+	 * expired lease left out, and a hostile name dropped with its lease kept. */
+	{
+		static const char lease_text[] =
+		    "2000 aa:bb:cc:00:00:01 192.168.1.101 phone 01:aa:bb:cc:00:00:01\n"
+		    "1000 aa:bb:cc:00:00:02 192.168.1.102 gone *\n"
+		    "0 AA:BB:CC:00:00:03 192.168.1.103 * *\n"
+		    "2000 aa:bb:cc:00:00:04 192.168.1.104 bad;name *\n"
+		    "duid 00:01:00:01:2c:5b:3f:aa:aa:bb:cc:dd:ee:ff\n"
+		    "2000 12345 fd00:7::188 laptop 00:01:00:01\n"
+		    "garbage\n"
+		    "2000 aa:bb:cc:00:00:05 not-an-address x *\n";
+		ncfg_observed_lease_t *leases = NULL;
+		size_t                 count = 0;
+
+		check(ncfg_dhcp_server_leases_in_text(lease_text, 1500, &leases, &count) && count == 4u,
+		    "every unexpired lease is read, and nothing that is not one");
+		if (count == 4u) {
+			check(strcmp(leases[0].address, "192.168.1.101") == 0 &&
+			        strcmp(leases[0].mac, "AA:BB:CC:00:00:01") == 0 &&
+			        strcmp(leases[0].hostname, "phone") == 0 && leases[0].expires == 2000,
+			    "  a v4 lease: its address, its MAC as the document writes one, its name");
+			check(strcmp(leases[1].address, "192.168.1.103") == 0 && leases[1].expires == 0 &&
+			        !leases[1].hostname[0],
+			    "  one that never expires, with no name");
+			check(strcmp(leases[2].address, "192.168.1.104") == 0 && !leases[2].hostname[0],
+			    "  a name that is not a host name is left out, the lease kept");
+			check(strcmp(leases[3].address, "fd00:7::188") == 0 && !leases[3].mac[0] &&
+			        strcmp(leases[3].hostname, "laptop") == 0,
+			    "  and a v6 lease, which has no MAC, the duid line skipped");
+		}
+		ncfg_dhcp_server_leases_free(leases, count);
+	}
+
 	testdir_remove(run);
 	if (failures) {
 		printf("%d check(s) failed\n", failures);

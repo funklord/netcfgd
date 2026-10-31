@@ -1196,6 +1196,16 @@ void ncfg_observed_access_point_free(ncfg_observed_access_point_t *access_point)
 	free(access_point);
 }
 
+static const ncfg_field_t observed_lease_fields[] = {
+	{ .name = "address", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_lease_t, address) },
+	{ .name = "mac", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_lease_t, mac) },
+	{ .name = "hostname", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_lease_t, hostname) },
+	{ .name = "expires", .kind = NCFG_F_INT, .offset = offsetof(ncfg_observed_lease_t, expires) }
+};
+static const ncfg_type_t observed_lease_type = TYPE("lease", observed_lease_fields);
+
 static const ncfg_field_t observed_backend_fields[] = {
 	{ .name = "kind", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
 	    .choices = &backend_kind_set, .offset = offsetof(ncfg_observed_backend_t, kind) },
@@ -1225,7 +1235,13 @@ static const ncfg_field_t observed_backend_fields[] = {
 	    .offset = offsetof(ncfg_observed_backend_t, advertised),
 	    .count_offset = offsetof(ncfg_observed_backend_t, advertised_count) },
 	{ .name = "served", .kind = NCFG_F_STR,
-	    .offset = offsetof(ncfg_observed_backend_t, served) }
+	    .offset = offsetof(ncfg_observed_backend_t, served) },
+	/* Absent where none (0303), so an observation without a DHCP server
+	 * is the one it was. */
+	{ .name = "leases", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_lease_type, .element_size = sizeof(ncfg_observed_lease_t),
+	    .offset = offsetof(ncfg_observed_backend_t, leases),
+	    .count_offset = offsetof(ncfg_observed_backend_t, lease_count) }
 };
 static const ncfg_type_t observed_backend_type = TYPE("backend", observed_backend_fields);
 

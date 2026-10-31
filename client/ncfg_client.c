@@ -3031,6 +3031,78 @@ int ncfg_client_meshes(ncfg_client_t *client, ncfg_meshes_t *out, char *err, siz
 	return 1;
 }
 
+void ncfg_leases_free(ncfg_leases_t *leases)
+{
+	if (!leases) {
+		return;
+	}
+	for (size_t i = 0; i < leases->count; i++) {
+		free(leases->items[i].interface);
+		free(leases->items[i].address);
+		free(leases->items[i].mac);
+		free(leases->items[i].hostname);
+	}
+	free(leases->items);
+	leases->items = NULL;
+	leases->count = 0;
+}
+
+int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_status(client, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+	uint32_t backends = ncfg_json_member(doc, ncfg_json_root(doc), "backends");
+	for (uint32_t i = 0; i < ncfg_json_count(doc, backends); i++) {
+		uint32_t backend = ncfg_json_at(doc, backends, i);
+		uint32_t leases = ncfg_json_member(doc, backend, "leases");
+		uint32_t count = ncfg_json_count(doc, leases);
+
+		if (!count ||
+		    !ncfg_json_string_equals(doc, ncfg_json_member(doc, backend, "kind"), "dhcp_server")) {
+			continue;
+		}
+		ncfg_lease_entry_t *grown = realloc(out->items, (out->count + count) * sizeof(*grown));
+		if (!grown) {
+			ncfg_leases_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+		out->items = grown;
+		for (uint32_t at = 0; at < count; at++) {
+			uint32_t            lease = ncfg_json_at(doc, leases, at);
+			ncfg_lease_entry_t *one = &out->items[out->count++];
+
+			one->interface = member_text(doc, backend, "interface");
+			one->address = member_text(doc, lease, "address");
+			one->mac = member_text(doc, lease, "mac");
+			one->hostname = member_text(doc, lease, "hostname");
+			one->expires = ncfg_json_int(doc, ncfg_json_member(doc, lease, "expires"), 0);
+			if (!one->interface || !one->address || !one->mac || !one->hostname) {
+				ncfg_leases_free(out);
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_dns_records_free(ncfg_dns_records_t *records)
 {
 	if (!records) {

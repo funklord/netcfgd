@@ -1549,6 +1549,40 @@ bool ncfg_connection::host_lists(QList<ncfg_host_list_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::leases(QList<ncfg_lease_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_leases_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_leases(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_lease_row row;
+		row.interface = from_c(found.items[i].interface);
+		row.address = from_c(found.items[i].address);
+		row.mac = from_c(found.items[i].mac);
+		row.hostname = from_c(found.items[i].hostname);
+		row.expires = found.items[i].expires;
+		out->append(row);
+	}
+	ncfg_leases_free(&found);
+	return true;
+}
+
 bool ncfg_connection::dns_records(QList<ncfg_dns_record_row> *out, QString *error)
 {
 	if (!out) {

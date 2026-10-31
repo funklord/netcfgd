@@ -862,6 +862,59 @@ static const char status_response[] =
     "{\"interface\":\"br0\",\"address\":\"10.0.0.1/24\"},"
     "{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}]}\n";
 
+/*
+ * The leases netcfgd's DHCP servers hold (0303), from a status answer: two
+ * servers' leases flattened, each with its interface, a v6 lease with no MAC,
+ * and a backend of another kind carrying a `leases` member left alone.
+ */
+static const char leases_response[] =
+    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"backends\":["
+    "{\"kind\":\"dhcp_server\",\"interface\":\"lan0\",\"running\":true,\"leases\":["
+    "{\"address\":\"192.168.7.103\",\"mac\":\"42:32:BA:BD:BB:DF\",\"hostname\":\"laptop\","
+    "\"expires\":1893456000},"
+    "{\"address\":\"fd00:7::188\",\"mac\":\"\",\"hostname\":\"\",\"expires\":0}]},"
+    "{\"kind\":\"dhcp4\",\"interface\":\"wan0\",\"running\":true,\"leases\":["
+    "{\"address\":\"203.0.113.9\"}]},"
+    "{\"kind\":\"dhcp_server\",\"interface\":\"guest0\",\"running\":true,\"leases\":["
+    "{\"address\":\"10.0.0.50\",\"mac\":\"AA:BB:CC:00:00:05\",\"hostname\":\"tv\","
+    "\"expires\":1893456001}]}]}\n";
+
+static void a_status_becomes_leases(void)
+{
+	struct staged staged;
+	char          err[NCFG_ERROR_MAX];
+	ncfg_leases_t leases;
+
+	if (!staged_open(&staged, "a status answer with leases can be staged", leases_response)) {
+		return;
+	}
+	if (!ncfg_client_leases(staged.client, &leases, err, sizeof(err))) {
+		ok("a status converts to leases", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("the DHCP servers' leases are read, and only theirs", leases.count == 3u, NULL);
+	if (leases.count == 3u) {
+		ok("  each with its interface, address, MAC, name and expiry",
+		    !strcmp(leases.items[0].interface, "lan0") &&
+		        !strcmp(leases.items[0].address, "192.168.7.103") &&
+		        !strcmp(leases.items[0].mac, "42:32:BA:BD:BB:DF") &&
+		        !strcmp(leases.items[0].hostname, "laptop") &&
+		        leases.items[0].expires == 1893456000LL,
+		    NULL);
+		ok("  a v6 lease with no MAC, never expiring",
+		    !strcmp(leases.items[1].address, "fd00:7::188") && !leases.items[1].mac[0] &&
+		        leases.items[1].expires == 0,
+		    NULL);
+		ok("  and a second server's, under its own interface",
+		    !strcmp(leases.items[2].interface, "guest0") &&
+		        !strcmp(leases.items[2].hostname, "tv"),
+		    NULL);
+	}
+	ncfg_leases_free(&leases);
+	staged_close(&staged);
+}
+
 static void a_status_becomes_links(void)
 {
 	struct staged staged;
@@ -2577,6 +2630,7 @@ int main(int argc, char **argv)
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();
 	a_status_becomes_links();
+	a_status_becomes_leases();
 	a_scan_becomes_access_points();
 	a_scan_that_could_not_be_taken_says_so();
 	joining_names_a_network_and_never_a_secret();

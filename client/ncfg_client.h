@@ -1228,6 +1228,28 @@ typedef struct {
 
 void ncfg_dns_records_free(ncfg_dns_records_t *records);
 
+/* One lease a netcfgd DHCP server holds (0303): `mac` empty for a DHCPv6
+ * lease, `hostname` empty where the client sent none worth keeping,
+ * `expires` a Unix time, 0 for never. */
+typedef struct {
+	char     *interface;
+	char     *address;
+	char     *mac;
+	char     *hostname;
+	long long expires;
+} ncfg_lease_entry_t;
+
+typedef struct {
+	ncfg_lease_entry_t *items;
+	size_t              count;
+} ncfg_leases_t;
+
+void ncfg_leases_free(ncfg_leases_t *leases);
+
+/* The leases netcfgd's DHCP servers hold, from the observation. Needs
+ * `observe`. */
+int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, size_t err_size);
+
 /* The DNS records the configuration declares. Needs `observe`. */
 int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char *err,
                             size_t err_size);

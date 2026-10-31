@@ -121,6 +121,7 @@ SOURCES += \
 	src/global_view.cpp \
 	src/modems_view.cpp \
 	src/stations_view.cpp \
+	src/leases_view.cpp \
 	src/table_view.cpp \
 	src/secrets_view.cpp \
 	src/profiles_view.cpp \
@@ -166,6 +167,7 @@ HEADERS += \
 	src/global_view.h \
 	src/modems_view.h \
 	src/stations_view.h \
+	src/leases_view.h \
 	src/table_view.h \
 	src/secrets_view.h \
 	src/profiles_view.h \

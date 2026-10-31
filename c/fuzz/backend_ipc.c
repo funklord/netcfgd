@@ -143,6 +143,15 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		    sizeof(hostname), address, sizeof(address));
 		(void)ncfg_dhcp_server_lease_in_text(text, first, 1893456000LL, hostname,
 		    sizeof(hostname), address, sizeof(address));
+		/* Every lease at once (0303), the same hostile text. */
+		{
+			ncfg_observed_lease_t *leases = NULL;
+			size_t                 count = 0;
+
+			if (ncfg_dhcp_server_leases_in_text(text, 0, &leases, &count)) {
+				ncfg_dhcp_server_leases_free(leases, count);
+			}
+		}
 	}
 
 	/* Line by line. The text is NUL-terminated by `ncfg_fuzz_text`, and an

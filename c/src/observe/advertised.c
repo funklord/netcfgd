@@ -44,6 +44,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /*
  * How much of a generated `radvd.conf` is read.
@@ -57,7 +58,7 @@
 
 /* The whole file, or NULL. Absent, unreadable and past the ceiling are one
  * answer, for the reason this file's header gives. */
-static char *read_config(const char *path)
+static char *read_config(const char *path, size_t most)
 {
 	FILE  *file = fopen(path, "rb");
 	char  *body;
@@ -66,12 +67,12 @@ static char *read_config(const char *path)
 	if (!file) {
 		return NULL;
 	}
-	body = malloc((size_t)RA_CONFIG_MAX + 1u);
+	body = malloc(most + 1u);
 	if (!body) {
 		(void)fclose(file);
 		return NULL;
 	}
-	got = fread(body, 1u, (size_t)RA_CONFIG_MAX, file);
+	got = fread(body, 1u, most, file);
 	if (!feof(file) || ferror(file)) {
 		(void)fclose(file);
 		free(body);
@@ -174,6 +175,29 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
 					return 0;
 				}
 			}
+			/* And who holds what from it (0303): the lease file, read
+			 * whole and bounded, unexpired leases only. A file that is not
+			 * there yet is a server that has leased nothing. */
+			if (ncfg_dhcp_server_leases_path(run_dir, backend->interface, path, sizeof(path),
+			        NULL, 0)) {
+				/* A megabyte holds thousands of leases, past the cap the
+				 * parser keeps; a file larger is read as none. */
+				char *leases = read_config(path, 1024u * 1024u);
+
+				if (leases) {
+					ncfg_dhcp_server_leases_free(backend->leases, backend->lease_count);
+					backend->leases = NULL;
+					backend->lease_count = 0;
+					if (!ncfg_dhcp_server_leases_in_text(leases, (long long)time(NULL),
+					        &backend->leases, &backend->lease_count)) {
+						free(leases);
+						ncfg_error_set(err, err_size,
+						    "out of memory reading the leases %s has given", backend->interface);
+						return 0;
+					}
+					free(leases);
+				}
+			}
 			continue;
 		}
 		if (backend->kind != NCFG_BACKEND_ROUTER_ADVERT || !backend->running ||
@@ -183,7 +207,7 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
 		if (!ncfg_ra_config_path(run_dir, backend->interface, path, sizeof(path), NULL, 0)) {
 			continue;
 		}
-		text = read_config(path);
+		text = read_config(path, (size_t)RA_CONFIG_MAX);
 		if (!text) {
 			continue;
 		}

@@ -1113,6 +1113,20 @@ typedef struct {
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */
 void ncfg_observed_access_point_free(ncfg_observed_access_point_t *access_point);
 
+/*
+ * One lease a DHCP server holds (0303), as dnsmasq's lease file says: the
+ * address, the MAC for a DHCPv4 lease (empty for a DHCPv6 one, which dnsmasq
+ * keys by an IAID instead), the name the client sent where it is a plain host
+ * name -- a client chooses it, so anything else is left out -- and when it
+ * expires, 0 for never.
+ */
+typedef struct {
+	char   *address;
+	char   *mac;
+	char   *hostname;
+	int64_t expires;
+} ncfg_observed_lease_t;
+
 /* A backend process as netcfgd currently believes it to be. */
 typedef struct {
 	int   kind; /* ncfg_backend_kind_t */
@@ -1180,6 +1194,11 @@ typedef struct {
 	/* What a running DHCP server's file says it serves (0297): the line
 	 * `ncfg_dhcp_server_summary` writes, compared against the document's. */
 	char  *served;
+	/* Who holds which address from a running DHCP server (0303), read from
+	 * its lease file: UniFi's client list, and the greppable record 0297
+	 * put under /run, read back. Unexpired leases only. */
+	ncfg_observed_lease_t *leases;
+	size_t                 lease_count;
 } ncfg_observed_backend_t;
 
 /* How many times netcfgd has started one backend without it staying up. Reset

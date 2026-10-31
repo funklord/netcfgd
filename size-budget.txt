@@ -1059,4 +1059,6 @@ netcfgd
 # (decision 0303), +40 as measured -- the section's padding took the rest.
 # And advertising a static prefix beside a delegated one (decision 0304),
 # +4,120.
-total 1373592
+# And the DHCP servers' leases, observed and shown by `ncfg status`
+# (decision 0303), +208.
+total 1373800

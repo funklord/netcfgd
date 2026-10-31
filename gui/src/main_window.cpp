@@ -11,6 +11,7 @@
 #include "global_view.h"
 #include "modems_view.h"
 #include "stations_view.h"
+#include "leases_view.h"
 #include "config_view.h"
 #include "secrets_view.h"
 #include "profiles_view.h"
@@ -79,6 +80,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	wifi = new ncfg_wifi_view(connection, machine);
 	modems = new ncfg_modems_view(connection, machine);
 	stations = new ncfg_stations_view(connection, machine);
+	leases = new ncfg_leases_view(connection, machine);
 	bluetooth = new ncfg_bluetooth_view(connection, machine);
 	/* **`links`, not `devices`, and the rename is the model's own vocabulary.**
 	 * This tab has always shown `ncfg_client_links()` -- interface, kind,
@@ -99,6 +101,9 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	/* Straight after wifi, where the access points are configured: who is on
 	 * one is the question an operator has the moment it is up. */
 	machine->addTab(stations, QStringLiteral("stations"));
+	/* Beside the stations: who is on the LAN, by the address they were
+	 * given rather than the radio they joined (0303). */
+	machine->addTab(leases, QStringLiteral("leases"));
 	/* Beside wifi: a modem is the other way this machine reaches a network,
 	 * and an operator looking for one looks where the radios are. */
 	machine->addTab(modems, QStringLiteral("modems"));
@@ -161,6 +166,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
 	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
 	connect(stations, &ncfg_stations_view::reported, this, &ncfg_main_window::note);
+	connect(leases, &ncfg_leases_view::reported, this, &ncfg_main_window::note);
 	connect(global, &ncfg_global_view::reported, this, &ncfg_main_window::note);
 	connect(secrets, &ncfg_secrets_view::reported, this, &ncfg_main_window::note);
 	connect(config, &ncfg_config_view::reported, this, &ncfg_main_window::note);
@@ -330,6 +336,8 @@ void ncfg_main_window::refresh()
 		wifi->refresh();
 	} else if (current == stations) {
 		stations->refresh();
+	} else if (current == leases) {
+		leases->refresh();
 	} else if (current == modems) {
 		modems->refresh();
 	} else if (current == global) {

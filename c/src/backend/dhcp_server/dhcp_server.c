@@ -7,6 +7,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/process.h"
+#include "ncfg/value.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -634,6 +635,77 @@ int ncfg_dhcp_server_stop(const char *run, const char *iface, char *err, size_t 
 	 * the other who holds which address, and a start reads both. */
 	if (ncfg_dhcp_server_pid_path(run, iface, pid_file, sizeof(pid_file), NULL, 0)) {
 		(void)unlink(pid_file);
+	}
+	return 1;
+}
+
+void ncfg_dhcp_server_leases_free(ncfg_observed_lease_t *leases, size_t count)
+{
+	size_t at;
+
+	for (at = 0; leases && at < count; at++) {
+		free(leases[at].address);
+		free(leases[at].mac);
+		free(leases[at].hostname);
+	}
+	free(leases);
+}
+
+/*
+ * Every lease in the text (0303). dnsmasq writes one per line, `expiry key
+ * address name client-id`, where the key is a MAC for DHCPv4 and an IAID for
+ * DHCPv6, and a `duid` line names the server's own DUID before the v6 ones.
+ * The same hostile input `ncfg_dhcp_server_lease_in_text` reads: each field
+ * is bounded by its scan width, the name kept only if it is a plain host
+ * name, and the count capped.
+ */
+int ncfg_dhcp_server_leases_in_text(const char *text, long long now,
+    ncfg_observed_lease_t **out, size_t *count)
+{
+	const char *line;
+
+	*out = NULL;
+	*count = 0;
+	for (line = text; line && *line && *count < NCFG_DHCP_SERVER_LEASES_MAX;
+	    line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		long long              expiry;
+		char                   key[64];
+		char                   address[NCFG_ADDRESS_MAX];
+		char                   name[256];
+		ncfg_address_t         parsed;
+		ncfg_observed_lease_t *grown;
+		ncfg_observed_lease_t *one;
+		char                   canonical[NCFG_HARDWARE_ADDRESS_MAX];
+		int                    v4_key;
+
+		if (sscanf(line, "%lld %63s %49s %255s", &expiry, key, address, name) != 4 ||
+		    (expiry != 0 && expiry <= now) || expiry < 0 ||
+		    !ncfg_address_parse(address, &parsed, NULL, 0) || parsed.has_prefix) {
+			continue;
+		}
+		v4_key = !parsed.is_ipv6 &&
+		    ncfg_hardware_address_strict(key, canonical, sizeof(canonical), NULL, 0);
+		grown = realloc(*out, (*count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_dhcp_server_leases_free(*out, *count);
+			*out = NULL;
+			*count = 0;
+			return 0;
+		}
+		*out = grown;
+		one = &grown[*count];
+		one->address = strdup(address);
+		one->mac = strdup(v4_key ? canonical : "");
+		one->hostname = strdup(strcmp(name, "*") != 0 && ncfg_dhcp_server_plain_name(name)
+		        ? name : "");
+		one->expires = expiry;
+		(*count)++;
+		if (!one->address || !one->mac || !one->hostname) {
+			ncfg_dhcp_server_leases_free(*out, *count);
+			*out = NULL;
+			*count = 0;
+			return 0;
+		}
 	}
 	return 1;
 }

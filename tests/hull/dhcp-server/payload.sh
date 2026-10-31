@@ -83,6 +83,11 @@ given=$(client)
 say "the client is given: $given"
 leases=$(cat "$work/run/dhcp-server/lan0.leases" 2>/dev/null)
 say "  lan0.leases: $leases"
+# The same lease as `ncfg status` shows it (0303): the client's address, its
+# MAC and the name it sent.
+"$build/ncfg" status > "$work/status.log" 2>&1
+shown=$(sed -n '/^DHCP leases/,$p' "$work/status.log" | grep -i "$mac" | tr -s ' ')
+say "  ncfg status shows: $shown"
 "$build/ncfg" plan > "$work/plan-again.log" 2>&1
 again=$(grep -c '^nothing to do' "$work/plan-again.log")
 say "a second plan: $(head -1 "$work/plan-again.log")"
@@ -286,6 +291,10 @@ ra_addresses=$(ip -n client -6 addr show dev eth0 scope global | awk '/inet6/ {p
 say "the client, told by the advertisement, holds: $ra_addresses"
 
 failed=0
+case "$shown" in
+	*"192.168.7."*" laptop"*) ;;
+	*) say "  ncfg status did not show the lease with the client's name"; failed=1 ;;
+esac
 [ "$ra_started" -ge 1 ] || { say "  a static prefix did not start the advertiser"; failed=1; }
 case " $ra_addresses" in
 	*" fd00:7::1"[0-9a-f][0-9a-f]"/128 "*) ;;

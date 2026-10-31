@@ -2,3 +2,5 @@
 0 AA:BB:CC:DD:EE:02 192.168.1.11 * *
 1700000000 aa:bb:cc:dd:ee:03 192.168.1.12 laptop-of-bob.lan 01:aa:bb:cc:dd:ee:03
 1893456000 aa:bb:cc:dd:ee:04 192.168.1.13 $(reboot);evil 01:aa:bb:cc:dd:ee:04
+duid 00:01:00:01:2c:5b:3f:aa:aa:bb:cc:dd:ee:ff
+2000 12345 fd00:7::188 laptop 00:01:00:01

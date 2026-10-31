@@ -12597,6 +12597,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.638 Leases are shown
+
+0303's fifth slice, UniFi's client list: who holds which address from
+netcfgd's DHCP servers. The observation pass that reads what a running server
+`served` now reads its lease file too, bounded at a megabyte and parsed by
+`ncfg_dhcp_server_leases_in_text` into the backend's `leases` -- address, MAC
+for a DHCPv4 lease (a DHCPv6 one is keyed by an IAID and has none), the name
+the client sent where it is a plain host name, and expiry -- unexpired only
+and capped at 4096, since the file is written from what any machine on the LAN
+asked. dnsmasq's `duid` line is skipped. Absent where none, so an observation
+without a server is the one it was.
+
+`ncfg status` prints a `DHCP leases` section; **`make hull-dhcp-server` shows
+it naming the rig's client**, `192.168.7.103 42:32:BA:BD:BB:DF laptop`. The GUI
+has a read-only `leases` tab beside `stations`, read through
+`ncfg_client_leases`, which `client_test` holds to a staged status reply: two
+servers flattened, a v6 lease, and another backend's `leases` member left
+alone. The parser is unit-tested in `dhcp_server_test` and driven by the
+`backend_ipc` fuzzer, whose lease seed gained the v6 lines -- 1.46 million runs
+clean in two minutes. +208 bytes.
+
 ## 10.637 A static prefix is advertised as itself
 
 Decision 0304, amending 0009: `advertise { prefixes = ["fd00:7::/64"] }` takes

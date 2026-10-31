@@ -27,6 +27,7 @@
 #include <sys/types.h>
 
 #include "ncfg/document.h"
+#include "ncfg/observed.h"
 
 #define NCFG_DHCP_SERVER_PATH_MAX 512
 #define NCFG_DHCP_SERVER_SUMMARY_MAX 512
@@ -97,6 +98,18 @@ pid_t ncfg_dhcp_server_running_pid(const char *run, const char *iface);
 int ncfg_dhcp_server_lease_of(const char *run, const char *mac, long long now, char *hostname,
     size_t hostname_size, char *address, size_t address_size);
 /* The same for one lease file's text, which is what the fuzzer drives. */
+/*
+ * Every unexpired lease in a lease file's text (0303), into `out`, which the
+ * caller frees with `ncfg_dhcp_server_leases_free`. At most
+ * NCFG_DHCP_SERVER_LEASES_MAX are kept: the file is written by dnsmasq from
+ * what any machine on the LAN asked for, so its size is not netcfgd's to
+ * trust. 0 only for a failed allocation.
+ */
+#define NCFG_DHCP_SERVER_LEASES_MAX 4096
+int ncfg_dhcp_server_leases_in_text(const char *text, long long now,
+    ncfg_observed_lease_t **out, size_t *count);
+void ncfg_dhcp_server_leases_free(ncfg_observed_lease_t *leases, size_t count);
+
 int ncfg_dhcp_server_lease_in_text(const char *text, const char *mac, long long now,
     char *hostname, size_t hostname_size, char *address, size_t address_size);
 

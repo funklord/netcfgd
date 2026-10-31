@@ -367,6 +367,16 @@ struct ncfg_dns_record_row {
 	QString forward;
 };
 
+/* One lease a netcfgd DHCP server holds (0303). `expires` a Unix time, 0
+ * for never; `mac` empty for a DHCPv6 lease. */
+struct ncfg_lease_row {
+	QString   interface;
+	QString   address;
+	QString   mac;
+	QString   hostname;
+	long long expires = 0;
+};
+
 struct ncfg_bluetooth_row {
 	QString id;
 	QString address;
@@ -1289,6 +1299,8 @@ public:
 	bool meshes(QList<ncfg_mesh_row> *out, QString *error);
 	/* The local DNS records the configuration declares (0303). */
 	bool dns_records(QList<ncfg_dns_record_row> *out, QString *error);
+	/* The leases netcfgd's DHCP servers hold, from the observation (0303). */
+	bool leases(QList<ncfg_lease_row> *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);

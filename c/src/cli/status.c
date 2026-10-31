@@ -257,6 +257,48 @@ static void print_firewall(const ncfg_observed_t *observed)
 	}
 }
 
+/*
+ * Who holds which address from netcfgd's DHCP servers (0303), per interface:
+ * UniFi's client list, from the lease file 0297 put under /run. The name is
+ * the one the client sent, where it is a plain host name.
+ */
+static void print_leases(const ncfg_observed_t *observed)
+{
+	size_t at;
+	size_t one;
+	int    headed = 0;
+
+	for (at = 0; at < observed->backend_count; at++) {
+		const ncfg_observed_backend_t *backend = &observed->backends[at];
+
+		if (backend->kind != NCFG_BACKEND_DHCP_SERVER || !backend->lease_count) {
+			continue;
+		}
+		if (!headed) {
+			ncfg_out_line("");
+			ncfg_out_line("DHCP leases");
+			headed = 1;
+		}
+		ncfg_out_writef("  %s: %zu\n", backend->interface ? backend->interface : "?",
+		    backend->lease_count);
+		for (one = 0; one < backend->lease_count; one++) {
+			const ncfg_observed_lease_t *lease = &backend->leases[one];
+
+			ncfg_out_writef("    %s", lease->address);
+			if (lease->mac && lease->mac[0]) {
+				ncfg_out_writef(" %s", lease->mac);
+			}
+			if (lease->hostname && lease->hostname[0]) {
+				ncfg_out_writef(" %s", lease->hostname);
+			}
+			if (lease->expires == 0) {
+				ncfg_out_write(" (never expires)");
+			}
+			ncfg_out_line("");
+		}
+	}
+}
+
 static void print_linksets(const ncfg_observed_t *observed)
 {
 	size_t set;
@@ -517,6 +559,7 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 	print_regdom(observed);
 	print_linksets(observed);
 	print_firewall(observed);
+	print_leases(observed);
 	/*
 	 * Printed once rather than per interface: the conflict is with a table,
 	 * not with a device, and repeating it under every link would make one
