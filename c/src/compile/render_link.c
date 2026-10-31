@@ -754,6 +754,15 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 		}
 	}
 	ncfg_buf_add_text(body, "\tdhcp_server {\n");
+	/* A relay (0303); the range check above refused it beside anything it
+	 * cannot carry. */
+	if (server->relay_count) {
+		ncfg_buf_add_text(body, "\t\trelay = [");
+		for (at = 0; at < server->relay_count; at++) {
+			ncfg_buf_addf(body, "%s\"%s\"", at ? ", " : "", server->relay[at]);
+		}
+		ncfg_buf_add_text(body, "]\n");
+	}
 	if (server->range_start && server->range_end) {
 		ncfg_buf_addf(body, "\t\trange = \"%s-%s\"\n", server->range_start, server->range_end);
 	}

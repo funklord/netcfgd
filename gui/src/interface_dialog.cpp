@@ -392,6 +392,8 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 		    "http://wpad.home.lan/wpad.dat" },
 		{ &dhcp_range6, "iface_dhcp_range6", "DHCPv6 range",
 		    "::100-::1ff -- suffixes in this interface's prefix; blank for none" },
+		{ &dhcp_relay, "iface_dhcp_relay", "relay to",
+		    "DHCP servers to pass requests to, by address -- instead of serving" },
 	};
 	for (const auto &one : options) {
 		*one.field = new QLineEdit(this);
@@ -406,7 +408,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 		dhcp_dns->setEnabled(on);
 		dhcp_dns_forward->setEnabled(on);
 		for (QLineEdit *field : { dhcp_gateway, dhcp_domain, dhcp_ntp, dhcp_boot_file,
-		         dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6 }) {
+		         dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6, dhcp_relay }) {
 			field->setEnabled(on);
 		}
 	};
@@ -640,6 +642,7 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_tftp_server->setText(existing.dhcp_tftp_server);
 	dhcp_wpad->setText(existing.dhcp_wpad);
 	dhcp_range6->setText(existing.dhcp_range6);
+	dhcp_relay->setText(existing.dhcp_relay);
 	for (const auto &one : existing.dhcp_options) {
 		put_row(dhcp_options, { one.name, QString::number(one.code), one.kind, one.value });
 	}
@@ -984,6 +987,13 @@ QString ncfg_interface_dialog::block_text() const
 		if (!clocks.isEmpty()) {
 			served << QStringLiteral("\t\tntp = [%1]").arg(clocks.join(QStringLiteral(", ")));
 		}
+		QStringList relays;
+		for (const QString &one : dhcp_relay->text().split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+			relays << QStringLiteral("\"%1\"").arg(one);
+		}
+		if (!relays.isEmpty()) {
+			served << QStringLiteral("\t\trelay = [%1]").arg(relays.join(QStringLiteral(", ")));
+		}
 		body << QStringLiteral("\tdhcp_server {");
 		for (int row = 0; row < dhcp_options->rowCount(); row++) {
 			const QString kind = text_at(dhcp_options, row, 2);
@@ -1158,7 +1168,7 @@ void ncfg_interface_dialog::submit()
 {
 	const QLineEdit *values[] = { dns_servers, dns_search, dns_domains,
 		probe_command, probe_args, dhcp_range, dhcp_dns, dhcp_gateway, dhcp_domain, dhcp_ntp,
-		dhcp_boot_file, dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6,
+		dhcp_boot_file, dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6, dhcp_relay,
 		advertise_prefixes,
 		ipv6_token,
 		guard, dot1x_identity, dot1x_anonymous_identity, dot1x_phase2, dot1x_ca_cert,

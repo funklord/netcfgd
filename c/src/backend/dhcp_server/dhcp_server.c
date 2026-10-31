@@ -166,6 +166,17 @@ int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interfa
 	if (!server || !ncfg_dhcp_server_range(interface, start, end, NULL, NULL)) {
 		return 0;
 	}
+	/* A relay serves nothing, so its line is where it relays to (0303). */
+	if (server->relay_count) {
+		used = (size_t)snprintf(out, out_size, "relay to");
+		for (at = 0; at < server->relay_count && used < out_size; at++) {
+			used += (size_t)snprintf(out + used, out_size - used, " %s", server->relay[at]);
+		}
+		if (server->dns_forward && used < out_size) {
+			used += (size_t)snprintf(out + used, out_size - used, ", forwarding dns");
+		}
+		return used < out_size;
+	}
 	/* "none" only where nothing answers (0301): a forwarding server with no
 	 * `dns` offers itself, so the line says so, and a changed `dns_forward`
 	 * is a changed summary and therefore a restart. */
@@ -368,6 +379,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
 	char                      start[NCFG_ADDRESS_MAX];
 	char                      end[NCFG_ADDRESS_MAX];
+	char                      own[NCFG_ADDRESS_MAX];
 	char                      summary[NCFG_DHCP_SERVER_SUMMARY_MAX];
 	const char               *why = NULL;
 	ncfg_buf_t                buf;
@@ -378,7 +390,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 		ncfg_error_set(err, err_size, "a DHCP server was rendered with no interface");
 		return NULL;
 	}
-	if (!ncfg_dhcp_server_range(interface, start, end, NULL, &why) ||
+	if (!ncfg_dhcp_server_range(interface, start, end, own, &why) ||
 	    !ncfg_dhcp_server_summary(document, interface, summary, sizeof(summary))) {
 		ncfg_error_set(err, err_size, "%s cannot serve DHCP: %s", interface->name,
 		    why ? why : "its range cannot be worked out");
@@ -404,6 +416,25 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 		/* DHCP only: never also a resolver, so it cannot meet a `dns_mode =
 		 * "dnsmasq"` delivery on port 53. */
 		ncfg_buf_add_text(&buf, "port=0\n");
+	}
+	/* **A relay** (0303): requests arriving here are passed to the servers
+	 * named, from this interface's own address, and nothing is leased here --
+	 * no range, so dnsmasq serves none. */
+	if (server->relay_count) {
+		char *slash = strchr(own, '/');
+
+		if (slash) {
+			*slash = '\0';
+		}
+		ncfg_buf_addf(&buf, "interface=%s\nbind-interfaces\nuser=" DHCP_SERVER_USER "\n",
+		    interface->name);
+		for (at = 0; at < server->relay_count; at++) {
+			ncfg_buf_addf(&buf, "dhcp-relay=%s,%s\n", own, server->relay[at]);
+		}
+		if (server->dns_forward) {
+			render_records(&buf, document);
+		}
+		goto rendered;
 	}
 	ncfg_buf_addf(&buf,
 	    "interface=%s\n"
@@ -481,6 +512,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 	if (server->dns_forward) {
 		render_records(&buf, document);
 	}
+rendered:
 	if (ncfg_buf_failed(&buf)) {
 		ncfg_buf_free(&buf);
 		ncfg_error_set(err, err_size, "out of memory rendering the DHCP server on %s",

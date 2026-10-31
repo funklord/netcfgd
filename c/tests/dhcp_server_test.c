@@ -389,6 +389,44 @@ int main(void)
 		lan.addressing_count = 1u;
 	}
 
+	/* Relay (0303): requests passed on from this interface's own address, and
+	 * nothing leased here -- so no range, and anything a server offers is
+	 * refused beside it. */
+	{
+		char  upstream[] = "10.9.0.2";
+		char  ours[] = "192.168.1.1";
+		char *relays[] = { upstream };
+		const ncfg_dhcp_server_t serving = server;
+
+		/* A relay carries nothing a server offers, so what the cases above
+		 * left set is put aside and restored after. */
+		server.lease.has = 0;
+		server.dns_count = 0u;
+		server.relay = relays;
+		server.relay_count = 1u;
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "dhcp-relay=192.168.1.1,10.9.0.2") &&
+		        has_line(text, "interface=br0") && !strstr(text, "dhcp-range") &&
+		        !strstr(text, "dhcp-leasefile"),
+		    "a relay passes requests on from the interface's address and leases nothing");
+		free(text);
+		check(ncfg_dhcp_server_summary(NULL, &lan, recorded, sizeof(recorded)) &&
+		        strcmp(recorded, "relay to 10.9.0.2") == 0,
+		    "  and its summary is where it relays to");
+		server.lease.has = 1;
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "hands out nothing"),
+		    "  a lease beside a relay is refused, since leasing is the other server's");
+		free(text);
+		server.lease.has = 0;
+		relays[0] = ours;
+		text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "other than the interface's own"),
+		    "  and so is a relay to the interface itself");
+		free(text);
+		server = serving;
+	}
+
 	source.static_address.address = NULL;
 	text = ncfg_dhcp_server_render(NULL, &lan, "/x.leases", message, sizeof(message));
 	check(!text && strstr(message, "cannot serve DHCP"),

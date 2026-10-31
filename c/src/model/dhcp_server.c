@@ -463,6 +463,45 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 		return 0;
 	}
 	own = to_host(address.bytes);
+	/* **A relay hands out nothing** (0303), so it has no range to work out
+	 * and nothing a server offers: only where requests go, and from which
+	 * address they are sent -- the interface's own, which `router` gives. */
+	if (server->relay_count) {
+		uint32_t relayed;
+
+		if (server->range_start || server->range_end || server->lease.has ||
+		    server->dns_count || server->host_count || server->option_count ||
+		    server->range6_start || server->gateway || server->domain || server->ntp_count ||
+		    server->boot_file || server->tftp_server || server->wpad) {
+			if (why) {
+				*why = "a `relay` passes requests to another server and hands out nothing "
+				       "itself, so it takes no range, lease, reservation or option: those are "
+				       "the other server's";
+			}
+			return 0;
+		}
+		for (at = 0; at < server->relay_count; at++) {
+			if (!bare_ipv4(server->relay[at], &relayed) || relayed == own) {
+				if (why) {
+					*why = "a `relay` names the DHCP servers to pass requests to, as IPv4 "
+					       "addresses other than the interface's own";
+				}
+				return 0;
+			}
+		}
+		if (start) {
+			start[0] = '\0';
+		}
+		if (end) {
+			end[0] = '\0';
+		}
+		if (router) {
+			dotted(own, router);
+			(void)snprintf(router + strlen(router), NCFG_ADDRESS_MAX - strlen(router), "/%u",
+			    address.prefix);
+		}
+		return 1;
+	}
 	mask = address.prefix ? 0xffffffffu << (32u - address.prefix) : 0u;
 	network = own & mask;
 	broadcast = network | ~mask;

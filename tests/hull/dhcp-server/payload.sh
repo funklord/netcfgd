@@ -262,6 +262,72 @@ ip netns exec client timeout 25 dhcpcd -1 -6 -t 20 -f /payload/dhcpcd-v6.conf \
 given6=$(cat "$work/given6")
 say "the client is given over DHCPv6: $given6"
 
+# Relay (0303): lan0 passes requests to a server netcfgd does not run, in a
+# namespace of its own behind wan0, which leases from a range of its own for
+# lan0's network -- so an address from that range is the relay's proof.
+ip netns add upstream
+ip link add wan0 type veth peer name eth0 netns upstream
+ip -n upstream link set lo up
+ip -n upstream link set eth0 up
+ip -n upstream addr add 10.9.0.2/24 dev eth0
+ip -n upstream route add 192.168.7.0/24 via 10.9.0.1
+ip netns exec upstream timeout -k 2 120 dnsmasq -k --conf-file=/dev/null --port=0 \
+	--interface=eth0 --bind-interfaces --dhcp-range=192.168.7.150,192.168.7.160,255.255.255.0,600 \
+	--dhcp-leasefile="$work/upstream.leases" --pid-file= --user=root --log-dhcp \
+	--log-facility="$work/upstream-dhcp.log" > /dev/null 2>&1 &
+upstream_dhcp=$!
+# And a second LAN served by netcfgd at the same time: the relay listens on
+# two interfaces, so its DHCP socket is not bound to one device, and it has
+# to leave lan1's server room to start and answer.
+ip link add lan1 type veth peer name eth1 netns client
+ip -n client link set eth1 up
+cat > "$work/etc/netcfgd.conf" <<CONF
+interface wan0 {
+	config = "10.9.0.1/24"
+}
+interface lan0 {
+	config = "192.168.7.1/24"
+	dhcp_server {
+		relay = ["10.9.0.2"]
+	}
+}
+interface lan1 {
+	config = "192.168.8.1/24"
+	dhcp_server {
+		dns = ["192.168.8.1"]
+	}
+}
+CONF
+"$build/ncfg" plan > "$work/plan-relay.log" 2>&1
+relay_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server: relay to 10.9.0.2' "$work/plan-relay.log")
+"$build/ncfg" apply > "$work/apply10.log" 2>&1
+say "ncfg apply rc=$?"
+say "  lan0.conf: $(grep -vE '^#' "$work/run/dhcp-server/lan0.conf" 2>/dev/null | tr '\n' ' ')"
+sleep 1
+# Longer than `client`'s 15 s, and with no link-local fallback: a relayed
+# lease is slower by the server's ping of the address before offering it and
+# the client's ARP probe after, and dhcpcd configures a link-local address
+# after ten seconds without a lease -- which `-1` takes as done, exiting with
+# the real lease still in hand.
+: > "$work/given"
+ip netns exec client timeout 50 dhcpcd -1 -4 -L -t 45 -h laptop --script /payload/hook.sh eth0 \
+	> "$work/client.log" 2>&1
+relayed=$(cat "$work/given")
+say "the client is given through the relay: $relayed"
+say "  upstream heard: $(grep -cE 'DHCPDISCOVER|DHCPREQUEST' "$work/upstream-dhcp.log") requests, offered $(grep -c DHCPOFFER "$work/upstream-dhcp.log")"
+: > "$work/given"
+ip netns exec client timeout 20 dhcpcd -1 -4 -t 15 --script /payload/hook.sh eth1 \
+	> "$work/client1.log" 2>&1
+beside=$(cat "$work/given")
+say "and a client on lan1, beside it: $beside"
+for i in lan0 lan1; do
+	pid=$(cat "$work/run/dhcp-server/$i.pid" 2>/dev/null)
+	alive=no
+	[ -n "$pid" ] && [ -d "/proc/$pid" ] && alive=yes
+	say "  $i dnsmasq alive=$alive log: $(tail -3 "$work/run/dhcp-server/$i.log" 2>/dev/null | tr '\n' ' ')"
+done
+kill "$upstream_dhcp" 2>/dev/null
+
 # A static prefix advertised with the managed flag (0304): an ordinary client,
 # waiting for the advertisement as a host does, takes an address from the
 # prefix by itself and asks the server for one more.
@@ -291,6 +357,15 @@ ra_addresses=$(ip -n client -6 addr show dev eth0 scope global | awk '/inet6/ {p
 say "the client, told by the advertisement, holds: $ra_addresses"
 
 failed=0
+[ "$relay_plan" -ge 1 ] || { say "  the relay was not planned as a restart naming where it relays"; failed=1; }
+case "$beside" in
+	*"address=192.168.8."*) ;;
+	*) say "  lan1's server did not answer beside the relay"; failed=1 ;;
+esac
+case "$relayed" in
+	*"address=192.168.7.15"[0-9]" "*|*"address=192.168.7.160 "*) ;;
+	*) say "  the client was not given an address from the server behind the relay"; failed=1 ;;
+esac
 case "$shown" in
 	*"192.168.7."*" laptop"*) ;;
 	*) say "  ncfg status did not show the lease with the client's name"; failed=1 ;;
@@ -378,6 +453,8 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply7: /' "$work/apply7.log" | tail -6 >> "$out"
 	sed 's/^/  client6: /' "$work/client6.log" | tail -8 >> "$out"
 	sed 's/^/  apply9: /' "$work/apply9.log" | tail -6 >> "$out"
+	sed 's/^/  apply10: /' "$work/apply10.log" | tail -6 >> "$out"
+	sed 's/^/  upstream-dhcp: /' "$work/upstream-dhcp.log" | tail -6 >> "$out"
 	sed 's/^/  client-ra: /' "$work/client-ra.log" | tail -10 >> "$out"
 	say "VERDICT bad"
 else

@@ -1329,6 +1329,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dhcp_tftp_server = from_c(found.dhcp_tftp_server);
 	out->dhcp_wpad = from_c(found.dhcp_wpad);
 	out->dhcp_range6 = from_c(found.dhcp_range6);
+	out->dhcp_relay = from_c(found.dhcp_relay);
 	for (size_t i = 0; i < found.dhcp_option_count; i++) {
 		ncfg_interface_config::dhcp_option one;
 		one.name = from_c(found.dhcp_options[i].name);

@@ -1553,6 +1553,9 @@ typedef struct {
 	char *dhcp_wpad;
 	/* DHCPv6 as "::A-::B", "" for none (0303). */
 	char *dhcp_range6;
+	/* The servers a relay passes requests to, space-joined, "" for a server
+	 * that answers itself (0303). */
+	char *dhcp_relay;
 	/* The server's reservations (10.605), carried since 10.612. */
 	ncfg_reservation_t *reservations;
 	size_t              reservation_count;

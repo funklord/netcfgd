@@ -51,7 +51,8 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 	/* `dns` is never guessed (0297): say what an empty one means, since the
 	 * hosts will join, get an address, and resolve nothing -- unless this
 	 * server also answers DNS, and then it offers itself (0301). */
-	if (!interface->dhcp_server->dns_count && !interface->dhcp_server->dns_forward) {
+	if (!interface->dhcp_server->dns_count && !interface->dhcp_server->dns_forward &&
+	    !interface->dhcp_server->relay_count) {
 		ncfg_plan_warnf(builder->plan, interface->name,
 		    "the DHCP server on %s offers no DNS server, so the hosts it serves get an "
 		    "address and resolve no names: set `dns_forward = true` to answer them from "

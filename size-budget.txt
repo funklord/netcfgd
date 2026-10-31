@@ -1061,4 +1061,5 @@ netcfgd
 # +4,120.
 # And the DHCP servers' leases, observed and shown by `ncfg status`
 # (decision 0303), +208.
-total 1373800
+# And DHCP relay (decision 0303), +40.
+total 1373840

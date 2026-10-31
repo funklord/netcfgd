@@ -1777,6 +1777,20 @@
 #	}
 #}
 
+# RELAY (decision 0303). `relay` passes this network's DHCP requests to other
+# servers instead of answering them -- UniFi's "DHCP relay" mode. A relaying
+# interface hands out nothing itself, so nothing a server offers is allowed
+# beside it; `dns_forward` is, since answering DNS is a separate job. The
+# servers see the requests come from the interface's own address, which is how
+# they know which network to lease from, and need a route back to it.
+
+#interface br-office {
+#	config = "192.168.20.1/24"
+#	dhcp_server {
+#		relay = ["10.0.0.5"]
+#	}
+#}
+
 # CUSTOM DHCP OPTIONS, for what the keys above do not name -- a VoIP phone's
 # provisioning server, a vendor's controller address (option 43). Each is an
 # `option` block with a `code` and one value, keyed by its type, which is how

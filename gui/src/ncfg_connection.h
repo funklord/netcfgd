@@ -515,6 +515,8 @@ struct ncfg_interface_config {
 	QString dhcp_wpad;
 	/* DHCPv6 as "::A-::B", empty for none (0303). */
 	QString dhcp_range6;
+	/* A relay's servers, space-joined, empty for none (0303). */
+	QString dhcp_relay;
 	/* The server's reservations, and the ports forwarded from this interface
 	 * (10.612). */
 	struct reservation {

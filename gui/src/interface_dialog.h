@@ -170,6 +170,7 @@ private:
 	QLineEdit   *dhcp_tftp_server;
 	QLineEdit   *dhcp_wpad;
 	QLineEdit   *dhcp_range6;
+	QLineEdit   *dhcp_relay;
 	ncfg_hooks_editor *hooks;
 	QComboBox   *detection;
 	/* What the daemon said, kept so the editor can be handed the text rather

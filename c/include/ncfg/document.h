@@ -1455,6 +1455,12 @@ typedef struct {
 	 * prefix moves. NULL where the server answers DHCPv4 alone. */
 	char               *range6_start;
 	char               *range6_end;
+	/* Relay (0303): the DHCP servers this interface's requests are passed to,
+	 * as IPv4 addresses. A relaying server hands out nothing itself, so every
+	 * key above but `dns_forward` is refused beside it -- UniFi's "DHCP mode",
+	 * server or relay, as one block. */
+	char              **relay;
+	size_t              relay_count;
 } ncfg_dhcp_server_t;
 
 /*
@@ -2023,6 +2029,7 @@ int ncfg_dhcp_option_hex(const char *text);
 
 /* Whether a DNS record is one the forwarder can serve (0303), and why not. */
 int ncfg_dns_record_check(const ncfg_dns_record_t *record, const char **why);
+
 
 int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
     char *router, const char **why);

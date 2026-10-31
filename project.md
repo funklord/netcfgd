@@ -12597,6 +12597,40 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.639 DHCP relay, and a client that gave up too early
+
+0303's sixth slice: `dhcp_server { relay = ["10.0.0.5"] }` passes the
+network's requests to other servers instead of answering them -- UniFi's DHCP
+mode, server or relay, as one block, so the dnsmasq instance, its summary
+(`relay to 10.0.0.5`) and its restart are the server's own plumbing. 0303
+sketched a separate `dhcp_relay` block; one block was chosen because the mode
+is one setting and two blocks would need a rule that they never meet, which
+the validator now is: a relay hands out nothing, so every serving key but
+`dns_forward` is refused beside it, as is a relay to the interface itself.
+dnsmasq gets `dhcp-relay=<own address>,<server>` and no range.
+
+**Measured in `make hull-dhcp-server`**: an upstream dnsmasq in a namespace
+behind wan0, leasing from a range of its own for lan0's network, gives the
+rig's client `192.168.7.156` through netcfgd's relay -- while a second netcfgd
+server on lan1 answers its own client beside it.
+
+**The measurement misled five runs first, and the lesson is the rig's.** The
+client was `dhcpcd -1 -t 15`, and a relayed lease is slower -- the server pings
+an address before offering it, the client ARP-probes it after -- so dhcpcd's
+link-local fallback, which starts ten seconds without a lease, configured an
+address first, and `-1` took that as done and exited with the real lease
+mid-probe. Every relay "failure" was that, and each looked like a different
+cause: the relay "not listening upstream" (an experiment that happened to run
+later passed), `bind-dynamic` "failing beside another server", a start-up race
+(the same config started seconds later "worked"). Three mechanisms were built
+on those readings -- listening on the upstream interface with a `relay_via`
+key to name it, planning relays after every other interface, waiting for the
+upstream carrier -- and all three were removed once the upstream server's own
+log (`--log-dhcp`, kept in the rig) showed it had offered and been asked, and a
+relay on lan0 alone, with a client given `-L` and 45 s, worked. **A `dhcpcd -1`
+client in a rig needs `-L` wherever a lease may take ten seconds**; the relay
+stage says so where it calls one. +40 bytes.
+
 ## 10.638 Leases are shown
 
 0303's fifth slice, UniFi's client list: who holds which address from

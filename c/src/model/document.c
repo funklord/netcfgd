@@ -1970,7 +1970,10 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	{ .name = "range6_start", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_dhcp_server_t, range6_start) },
 	{ .name = "range6_end", .kind = NCFG_F_STR,
-	    .offset = offsetof(ncfg_dhcp_server_t, range6_end) }
+	    .offset = offsetof(ncfg_dhcp_server_t, range6_end) },
+	{ .name = "relay", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dhcp_server_t, relay),
+	    .count_offset = offsetof(ncfg_dhcp_server_t, relay_count) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 
