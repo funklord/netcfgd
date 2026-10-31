@@ -1191,6 +1191,26 @@ void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall);
 int ncfg_client_firewall(ncfg_client_t *client, ncfg_firewall_config_t *out, char *err,
                          size_t err_size);
 
+/* One host list (10.591): a named set of stations other blocks refer to as
+ * `@host_list:NAME`. `mac` is its members joined with ", ", as written. */
+typedef struct {
+	char *name;
+	char *mac;
+} ncfg_host_list_entry_t;
+
+typedef struct {
+	ncfg_host_list_entry_t *items;
+	size_t                  count;
+} ncfg_host_lists_t;
+
+void ncfg_host_lists_free(ncfg_host_lists_t *lists);
+
+/*
+ * The host lists the configuration declares. Needs `observe`. From the
+ * document, for the editor that saves each list whole.
+ */
+int ncfg_client_host_lists(ncfg_client_t *client, ncfg_host_lists_t *out, char *err,
+                           size_t err_size);
 
 /* One bluetooth device the configuration declares. */
 typedef struct {

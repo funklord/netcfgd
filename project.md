@@ -12597,6 +12597,22 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.627 Host lists have a tab
+
+10.591's host lists -- what an access point's allow or deny list and a
+firewall rule's `mac` name as `@host_list:NAME` -- were the other block the
+window could not show. A `host lists` tab now sits beside `firewall`, each list
+a drop-in of its own, `host_list-NAME`, as a routing rule is.
+
+**The name is fixed once written**: other blocks name the list by it, so a
+rename would leave each of them pointing at a list that is gone, and a new
+name is a new list. **A delete is left to the daemon to refuse** while
+anything still names the list, which it does by naming it; the dialog says so
+before asking. `gui/tests/host_list_load.cpp` drives both through a real
+daemon, plus a save with no change compared station by station -- proved by a
+writer that drops the last station, which fails four checks. The reader is
+in `form_coverage_gate.py`, 176 members.
+
 ## 10.626 The firewall has a tab
 
 0294's firewall, and 0302's `out_interface` on it, could be written only as

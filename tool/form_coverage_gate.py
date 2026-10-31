@@ -67,6 +67,7 @@ FORMS = {
 	# The firewall tab saves the whole block on every edit (0294), so a member
 	# its reader skips is a match deleted from a rule nobody touched.
 	"firewall_fields": FIREWALL_READER,
+	"host_list_fields": ("ncfg_client_host_lists", []),
 }
 
 # Sub-blocks a dialog reads field by field, held to the same rule. Each names

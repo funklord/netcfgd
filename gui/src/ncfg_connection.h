@@ -333,6 +333,12 @@ struct ncfg_firewall_settings {
 	ncfg_firewall_chain_row output;
 };
 
+/* One host list (10.591): its name and its members, as written. */
+struct ncfg_host_list_row {
+	QString     name;
+	QStringList mac;
+};
+
 struct ncfg_bluetooth_row {
 	QString id;
 	QString address;
@@ -1223,6 +1229,9 @@ public:
 	/* The firewall the configuration declares, whole, for the view that
 	 * writes the block back whole. */
 	bool firewall(ncfg_firewall_settings *out, QString *error);
+	/* The host lists the configuration declares, for the tab that edits
+	 * them. */
+	bool host_lists(QList<ncfg_host_list_row> *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);

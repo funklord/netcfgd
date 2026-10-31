@@ -1497,6 +1497,37 @@ bool ncfg_connection::firewall(ncfg_firewall_settings *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::host_lists(QList<ncfg_host_list_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_host_lists_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_host_lists(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_host_list_row row;
+		row.name = from_c(found.items[i].name);
+		row.mac = firewall_list(found.items[i].mac);
+		out->append(row);
+	}
+	ncfg_host_lists_free(&found);
+	return true;
+}
+
 bool ncfg_connection::bluetooth(QList<ncfg_bluetooth_row> *out, QString *error)
 {
 	if (!out) {

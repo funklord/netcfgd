@@ -110,6 +110,8 @@ SOURCES += \
 	src/rule_dialog.cpp \
 	src/firewall_dialog.cpp \
 	src/firewall_view.cpp \
+	src/host_list_dialog.cpp \
+	src/host_lists_view.cpp \
 	src/config_view.cpp \
 	src/explain_dialog.cpp \
 	src/global_view.cpp \
@@ -149,6 +151,8 @@ HEADERS += \
 	src/rule_dialog.h \
 	src/firewall_dialog.h \
 	src/firewall_view.h \
+	src/host_list_dialog.h \
+	src/host_lists_view.h \
 	src/config_view.h \
 	src/explain_dialog.h \
 	src/global_view.h \
