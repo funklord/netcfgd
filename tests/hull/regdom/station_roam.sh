@@ -19,7 +19,7 @@
 # Always exits 0 and reports through /verdict/station_roam, as station.sh
 # does.
 #
-# HOW IT STOPS: waits are bounded -- the access points at 300 s, each join at
+# HOW IT STOPS: waits are bounded -- the access points by hull's `ready` at 5m, each join at
 # fifteen seconds, each roam at fifteen, the sampler at 200 readings -- over
 # three cases; every relay, supplicant and sampler is stopped by the next.
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
@@ -86,17 +86,10 @@ fresh() {
 	sleep 1
 }
 
-waited=0
-until grep -q '^UP' /verdict/ap_roam 2>/dev/null; do
-	if grep -q '^VERDICT bad' /verdict/ap_roam 2>/dev/null; then
-		say "VERDICT bad: the access points' machine failed, so nothing here is a reading"
-		sed 's/^/  ap_roam said: /' /verdict/ap_roam >> "$out"
-		exit 0
-	fi
-	waited=$((waited + 1))
-	[ "$waited" -gt 300 ] && { say "VERDICT bad: the access points never came up"; exit 0; }
-	sleep 1
-done
+# **Started only once the access point is up**: `(after ap-roam)` in wire_roam.conf,
+# whose `(ready ...)` is the `UP` line in /verdict/ap_roam -- hull's start order,
+# in place of a loop here polling for it. An access point that fails or never
+# comes up stops the run there, its verdict saying why.
 
 wpa() { wpa_cli -p "$work/wpa" -i wlan0 "$@" 2>/dev/null; }
 state_of() { wpa status | awk -F= -v k="$1" '$1 == k { print $2 }'; }

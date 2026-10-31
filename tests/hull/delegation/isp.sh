@@ -74,11 +74,16 @@ fi
 say "kea is serving on eth1, pd-pool 2001:db8:1234::/48 delegated at /56"
 say "VERDICT ok: the ISP is up"
 
-# **It has to outlive its own payload.** The sibling needs an ISP to ask, and a
-# machine whose command returns is a machine hull stops -- so this waits, and
-# the run ends when the other machine finishes and the host times out or stops
-# it. The ceiling is its own, so a wedged sibling cannot leave this running for
-# ever.
-sleep 90
-say "the ISP stood for 90s and is standing down"
+# **It has to outlive its own payload.** The CPE needs an ISP to ask, and a
+# machine whose command returns is a machine hull stops -- so this stands
+# until the CPE has its verdict. It is started only after this one is ready
+# (hull.conf), so a fixed lifetime would be counting the CPE's boot as well;
+# the ceiling is its own, so a wedged sibling cannot leave this running.
+waited=0
+until grep -q '^VERDICT' /verdict/cpe 2>/dev/null; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 300 ] && break
+	sleep 1
+done
+say "the ISP stood ${waited}s, until the CPE's verdict, and is standing down"
 sed 's/^/  kea: /' /run/kea/kea.log >> "$out"

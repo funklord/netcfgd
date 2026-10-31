@@ -15,7 +15,7 @@
 #
 # Always exits 0 and reports through /verdict/station_rnr, as station.sh does.
 #
-# HOW IT STOPS: waits are bounded -- the access points at 300 s, each scan at
+# HOW IT STOPS: waits are bounded -- the access points by hull's `ready` at 5m, each scan at
 # eight tries, each association at fifteen seconds, the wait for a move at
 # twenty -- over five cases; every relay and supplicant is stopped by the next
 # case, and the relays have lifetimes of their own.
@@ -87,17 +87,10 @@ set_domain() {
 	observe 5 00 >/dev/null
 }
 
-waited=0
-until grep -q '^UP' /verdict/ap_rnr 2>/dev/null; do
-	if grep -q '^VERDICT bad' /verdict/ap_rnr 2>/dev/null; then
-		say "VERDICT bad: the access points' machine failed, so nothing here is a reading"
-		sed 's/^/  ap_rnr said: /' /verdict/ap_rnr >> "$out"
-		exit 0
-	fi
-	waited=$((waited + 1))
-	[ "$waited" -gt 300 ] && { say "VERDICT bad: the access points never came up"; exit 0; }
-	sleep 1
-done
+# **Started only once the access point is up**: `(after ap-rnr)` in wire_rnr.conf,
+# whose `(ready ...)` is the `UP` line in /verdict/ap_rnr -- hull's start order,
+# in place of a loop here polling for it. An access point that fails or never
+# comes up stops the run there, its verdict saying why.
 
 # A plain scan, until the 5 GHz BSS is in it: whether its beacon carries
 # element 201, and whether the 6 GHz BSS is listed beside it.

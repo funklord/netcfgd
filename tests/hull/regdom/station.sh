@@ -12,7 +12,7 @@
 #
 # Always exits 0 and reports through /verdict/station; see ap.sh.
 #
-# HOW IT STOPS: every wait is bounded (the access point's start at 120 s,
+# HOW IT STOPS: every wait is bounded (the access point's start by hull's `ready` at 2m,
 # each scan and association at about ten), the cases are a fixed list, and
 # the relay has a lifetime of its own.
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
@@ -32,16 +32,10 @@ fi
 ip link set eth1 up
 ip addr add 10.98.0.2/24 dev eth1
 
-waited=0
-until grep -q '^UP' /verdict/ap 2>/dev/null; do
-	if grep -q '^VERDICT bad' /verdict/ap 2>/dev/null; then
-		say "VERDICT bad: the access point's machine failed, so nothing here is a reading"
-		exit 0
-	fi
-	waited=$((waited + 1))
-	[ "$waited" -gt 120 ] && { say "VERDICT bad: the access point never came up"; exit 0; }
-	sleep 1
-done
+# **Started only once the access point is up**: `(after ap)` in wire.conf,
+# whose `(ready ...)` is the `UP` line in /verdict/ap -- hull's start order,
+# in place of a loop here polling for it. An access point that fails or never
+# comes up stops the run there, its verdict saying why.
 
 country() {
 	iw reg get 2>/dev/null | awk '/^global/ { g = 1; next }

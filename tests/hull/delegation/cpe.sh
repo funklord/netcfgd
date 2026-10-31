@@ -20,16 +20,16 @@ for program in netcfgd ncfg; do
 done
 command -v odhcp6c >/dev/null || { say "VERDICT bad: no odhcp6c in the image"; exit 0; }
 
-# **Wait for the ISP before soliciting, which is not politeness.** hull starts
-# both machines together, so a client that solicits before kea is listening
-# gets no answer -- and odhcp6c gives up rather than retrying for ever, which
-# presents as "no prefix was delegated" with a healthy server beside it. This
-# rig failed twice that way and passed once with nothing relevant changed,
-# which is what an unsynchronised start looks like from outside.
+# **Wait for the ISP before soliciting, which is not politeness.** A client
+# that solicits before kea is listening gets no answer -- and odhcp6c gives up
+# rather than retrying for ever, which presents as "no prefix was delegated"
+# with a healthy server beside it. This rig failed twice that way and passed
+# once with nothing relevant changed, which is what an unsynchronised start
+# looks like from outside.
 #
-# The ISP's verdict file is the handshake, so the channel the collector already
-# uses carries the ordering too, and a machine that never comes up makes this
-# wait expire rather than hang.
+# hull.conf orders it with hull's start order -- `(after isp)`, the ISP ready
+# at its `VERDICT ok` -- so there this finds the ISP up at once. lossy.conf
+# starts both together, for the reason it gives, so the loop stays for it.
 waited=0
 while [ "$waited" -lt 300 ]; do
 	if grep -q '^VERDICT ok' /verdict/isp 2>/dev/null; then

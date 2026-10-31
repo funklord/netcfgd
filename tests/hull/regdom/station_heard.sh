@@ -20,7 +20,7 @@
 #
 # Always exits 0 and reports through /verdict/station_heard; see ap.sh.
 #
-# HOW IT STOPS: every wait is bounded (the access point at 120 s, each change
+# HOW IT STOPS: every wait is bounded (the access point by hull's `ready` at 2m, each change
 # at 15 s), the steps are a fixed list, the relay has a lifetime of its own,
 # and the daemon is killed before the verdict is written.
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
@@ -47,16 +47,10 @@ fi
 ip link set eth1 up
 ip addr add 10.98.0.2/24 dev eth1
 
-waited=0
-until grep -q '^UP' /verdict/ap_heard 2>/dev/null; do
-	if grep -q '^VERDICT bad' /verdict/ap_heard 2>/dev/null; then
-		say "VERDICT bad: the access point's machine failed, so nothing here is a reading"
-		exit 0
-	fi
-	waited=$((waited + 1))
-	[ "$waited" -gt 120 ] && { say "VERDICT bad: the access point never came up"; exit 0; }
-	sleep 1
-done
+# **Started only once the access point is up**: `(after ap-heard)` in wire_heard.conf,
+# whose `(ready ...)` is the `UP` line in /verdict/ap_heard -- hull's start order,
+# in place of a loop here polling for it. An access point that fails or never
+# comes up stops the run there, its verdict saying why.
 
 modprobe cfg80211 && modprobe mac80211_hwsim radios=1
 tenths=0

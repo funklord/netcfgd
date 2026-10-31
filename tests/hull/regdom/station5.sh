@@ -11,7 +11,7 @@
 #
 # Always exits 0 and reports through /verdict/station5, as station.sh does.
 #
-# HOW IT STOPS: waits are bounded -- the access points at 300 s, each scan at
+# HOW IT STOPS: waits are bounded -- the access points by hull's `ready` at 5m, each scan at
 # eight tries, each association at ten seconds -- over a fixed list of
 # sixteen cases, and every relay it starts has a lifetime of its own.
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
@@ -116,16 +116,10 @@ off|absent) table=ok ;;
 *) table=bad ;;
 esac
 
-waited=0
-until grep -q '^UP' /verdict/ap5 2>/dev/null; do
-	if grep -q '^VERDICT bad' /verdict/ap5 2>/dev/null; then
-		say "VERDICT bad: the access points' machine failed, so nothing here is a reading"
-		exit 0
-	fi
-	waited=$((waited + 1))
-	[ "$waited" -gt 300 ] && { say "VERDICT bad: the access points never came up"; exit 0; }
-	sleep 1
-done
+# **Started only once the access point is up**: `(after ap5)` in wire5.conf,
+# whose `(ready ...)` is the `UP` line in /verdict/ap5 -- hull's start order,
+# in place of a loop here polling for it. An access point that fails or never
+# comes up stops the run there, its verdict saying why.
 
 heard() {
 	tries=0

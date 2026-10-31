@@ -12597,6 +12597,54 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.644 Rigs start in order, where hull can order them
+
+The holder asked for hull's start order (hull 1330cae, its §4.8) in place of
+the sleeps the multi-machine rigs used to wait on each other. `(after NAME)`
+starts a machine once its sibling is up, and `(ready (command ...))` on the
+sibling says when that is: its command, run in it, exiting 0.
+
+- **The six regdom pairs** (`wire*.conf`): each station `(after <ap>)`, each
+  access point ready at the `UP` line its payload writes, bounded as the
+  stations' loops were (2m, 5m at 5 and 6 GHz). The six polling loops are
+  gone. The access points' own wait at the end, for the station's verdict,
+  stays: start order says when to start, not when to stop.
+- **Delegation** (`hull.conf`): the CPE `(after isp)`, the ISP ready at its
+  `VERDICT ok`. The ISP's fixed `sleep 90`, there only to outlive the CPE,
+  became a wait for the CPE's verdict, bounded at 300 s -- a fixed lifetime
+  would now be counting the CPE's boot too. Measured 15 s rather than 90.
+- **`hull/wire`** has no cross-machine wait, so nothing changed.
+
+**Measured**: `make hull-delegation` passes, the CPE saying the ISP was up
+before it started; the six regdom pairs pass, each access point's `UP`
+written before any line of its station's. **Their measurement ran from a copy
+in scratch, not from `make hull-regdom`**, which cannot run from this account
+at all: `tests/hull/regdom/verdict` belongs to the other account, and a vm's
+shared folder writes as this account without its supplementary groups, so
+every access point failed at its first line -- `cannot create /verdict/ap:
+Permission denied` -- before start order was reached. The directory is group
+writable; the share does not honour that. Not this account's to change.
+
+**`lossy.conf` keeps the simultaneous start, measured rather than assumed.**
+With `after` and `ready` it failed 3 of 3 -- kea logging every SOLICIT and an
+ADVERTISE for each, no REQUEST arriving -- and that was signalled to hull as a
+late-joining port losing everything. **It was not, and the retraction is the
+finding.** hull's loss is seeded, so a run reruns its pattern, and its two
+experiments settled it: `hull segment pd` mid-run showed the CPE's in way
+losing 3 of 9, 3 of 8 and 2 of 7 frames, the 30% asked; and with start order,
+`(seed N)` on that way passed for 2, 3 and 5 and failed for 1 and 4. The
+default seed's pattern under that start defeats the exchange; a seed that
+passes would be a result chosen, so the file keeps both starting together and
+`cpe.sh` its wait.
+
+**And `hull-delegation-lossy` is flaky on its own, which 10.582 did not
+say.** On the files as they were it passed 4 of 5. The arithmetic fits: a
+delegation is four messages, at 30% each way about 0.7^4 of attempts get all
+four through, and odhcp6c retries about six times inside the CPE's 60 s wait,
+which is roughly 80%. That window is the rig's, so a red run of it is a reading
+to repeat before it is a regression; widening the wait is the fix, and not
+made here.
+
 ## 10.643 DNS interception over IPv6
 
 The holder asked for it after 10.642 left IPv6 out. `dns_intercept` now also
