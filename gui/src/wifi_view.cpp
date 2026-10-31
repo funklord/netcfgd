@@ -373,9 +373,13 @@ void ncfg_wifi_view::update_saved()
 			 * operator needs when a credential is wrong and noise the rest of
 			 * the time. */
 			if (column == 2 && !network.credential.isEmpty()) {
-				item->setToolTip(QStringLiteral("configured as @secret:%1 -- whether "
-				         "that file exists is not shown here")
-				             .arg(network.credential));
+				/* The reference as written: `@secret:NAME` built from the
+				 * name called a keyring passphrase a file (10.628). */
+				item->setToolTip(QStringLiteral("configured as %1 -- whether "
+				         "that secret is stored is not shown here")
+				             .arg(network.credential_reference.isEmpty()
+				                     ? QStringLiteral("@secret:%1").arg(network.credential)
+				                     : network.credential_reference));
 			}
 			saved_table->setItem(row, column, item);
 		}
