@@ -37,6 +37,14 @@ const choice securities[] = {
 	{ "OWE -- opportunistic encryption", "owe" },
 };
 
+/* Absent offers both, as for a network: pinning a generation is the
+ * exception. */
+const choice protos[] = {
+	{ "WPA2 and WPA3", "" },
+	{ "WPA2 only", "wpa2" },
+	{ "WPA3 only", "wpa3" },
+};
+
 const choice bands[] = {
 	{ "let hostapd choose", "" },
 	{ "2.4 GHz", "2.4" },
@@ -115,6 +123,9 @@ QString ncfg_access_point_block(const ncfg_access_point_config &settings)
 	body << QStringLiteral("\twifi {");
 	if (settings.security == QLatin1String("psk")) {
 		body << QStringLiteral("\t\tpsk = \"%1\"").arg(settings.credential);
+		if (!settings.proto.isEmpty()) {
+			body << QStringLiteral("\t\tproto = \"%1\"").arg(settings.proto);
+		}
 	} else if (settings.security == QLatin1String("owe")) {
 		body << QStringLiteral("\t\towe = true");
 	} else {
@@ -217,6 +228,11 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	credential->setPlaceholderText(QStringLiteral("@secret:ap -- `ncfg secret set ap` "
 	            "puts one there"));
 	form->addRow(QStringLiteral("passphrase"), credential);
+
+	proto = new QComboBox(this);
+	proto->setObjectName(QStringLiteral("ap_proto"));
+	fill(proto, protos, sizeof(protos) / sizeof(protos[0]));
+	form->addRow(QStringLiteral("generation"), proto);
 
 	band = new QComboBox(this);
 	band->setObjectName(QStringLiteral("ap_band"));
@@ -366,6 +382,10 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	if (editing) {
 		device->setCurrentText(existing.device);
 		select(security, existing.security);
+		/* Restored, as the network dialog's is: unrestored, the combo
+		 * opened at "both" and a save widened a WPA3-only access point to
+		 * take WPA2 again (10.631). */
+		select(proto, existing.proto);
 		/* As written, provider and all (10.628). */
 		credential->setText(existing.credential);
 		select(band, existing.band);
@@ -442,6 +462,7 @@ void ncfg_access_point_dialog::security_changed()
 	QFormLayout *form = form_layout;
 	if (form) {
 		form->setRowVisible(credential, needs);
+		form->setRowVisible(proto, needs);
 	}
 }
 
@@ -452,6 +473,8 @@ QString ncfg_access_point_dialog::block_text() const
 	settings.device = device->currentText().trimmed();
 	settings.security = security->currentData().toString();
 	settings.credential = credential->text().trimmed();
+	settings.proto = settings.security == QLatin1String("psk")
+	    ? proto->currentData().toString() : QString();
 	settings.band = band->currentData().toString();
 	settings.channel = channel->value();
 	settings.regdom = regdom->text().trimmed();

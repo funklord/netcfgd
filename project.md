@@ -12597,6 +12597,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.631 Saving a WPA3-only access point let WPA2 back in
+
+Derived from 10.628's shape -- a reader that reduces a value the dialog then
+rebuilds with a default -- and found by comparing what netcfgd *compiles*
+rather than what the reader reports, since a reader cannot report a key it
+drops. `access_point_load` now writes an access point using every key the
+language has and compares `ncfg show`'s `access_points` before and after a
+save through the dialog. One key changed: `proto = "wpa3"` came back
+`wpa2_wpa3`. The reader never read `security.proto` and the dialog had no
+field for it, so pressing Save on a WPA3-only access point made it accept
+WPA2 clients again -- the fault the network dialog had and fixed (its
+comment says so), on the access point side never wired.
+
+`form_coverage_gate.py` could not see it and cannot: `security` is a custom
+member, so the gate checks the word `security` and nothing inside it. The
+compiled comparison is the check that reaches it. The reader takes `proto`
+now, the dialog offers it as "generation" and restores it, and the probe
+passes; every other key already came back the same.
+
 ## 10.630 The global tab pins the country
 
 0296's machine-wide `global { regdom }` was neither shown nor settable in the

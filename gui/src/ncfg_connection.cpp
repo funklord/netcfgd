@@ -1100,6 +1100,10 @@ bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QStrin
 		row.device = from_c(found.items[i].device);
 		row.security = from_c(found.items[i].security);
 		row.credential = from_c(found.items[i].credential);
+		row.proto = from_c(found.items[i].proto);
+		if (row.proto == QLatin1String("wpa2_wpa3")) {
+			row.proto.clear();
+		}
 		row.band = from_c(found.items[i].band);
 		row.regdom = from_c(found.items[i].regdom);
 		row.channel = found.items[i].channel;

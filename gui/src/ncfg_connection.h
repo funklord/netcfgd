@@ -528,6 +528,9 @@ struct ncfg_interface_config {
  * are what hostapd actually took, which is not always what the block asks for:
  * a channel can be refused and hostapd then chooses. */
 struct ncfg_access_point_config {
+	/* "wpa2", "wpa3", or empty for both -- the default, which the
+	 * document spells "wpa2_wpa3". */
+	QString proto;
 	QString id;
 	QString name;
 	QString ssid;

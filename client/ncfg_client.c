@@ -2105,6 +2105,7 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
 		free(points->items[i].device);
 		free(points->items[i].security);
 		free(points->items[i].credential);
+		free(points->items[i].proto);
 		free(points->items[i].band);
 		free(points->items[i].regdom);
 		free(points->items[i].acl_policy);
@@ -2326,6 +2327,7 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 		uint32_t security = ncfg_json_member(doc, entry, "security");
 		item->security = member_text(doc, security, "type");
 		item->credential = security_credential(doc, security);
+		item->proto = member_text(doc, security, "proto");
 		item->band = member_text(doc, entry, "band");
 		item->regdom = member_text(doc, entry, "regdom");
 		/* -1 rather than 0: 0 is not a channel, and a client that drew one
@@ -2384,7 +2386,8 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 		}
 
 		if (!item->id || !item->name || !item->ssid || !item->device || !item->security
-		    || !item->credential || !item->band || !item->regdom || !item->acl_policy
+		    || !item->credential || !item->proto || !item->band || !item->regdom
+		    || !item->acl_policy
 		    || !item->stations || !item->started_band || !item->unmodelled ||
 		    !item->mobility_domain || !item->roaming_key ||
 		    (ncfg_json_count(doc, ncfg_json_member(doc, entry, "neighbours")) &&

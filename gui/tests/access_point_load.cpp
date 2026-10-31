@@ -9,6 +9,12 @@
  * (10.628). So this writes one with `@secret:keyring:ap`, saves it through
  * the dialog with no change, and reads it back through a real daemon.
  *
+ * **And every other key, compared as netcfgd compiles it** (10.631). The
+ * reader's own view cannot show a key the reader drops -- that is how the
+ * provider went unseen, and how `proto = "wpa3"` was then found lost the same
+ * way -- so the access point here uses every key the language has, and the
+ * check is `ncfg show`'s `access_points` before and after the save.
+ *
  * HOW IT STOPS: one daemon, killed at the end; the wait for its socket is
  * bounded at ten seconds.
  */
@@ -20,6 +26,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMetaObject>
 #include <QProcess>
@@ -90,6 +99,31 @@ static void stop(QProcess *daemon)
 	daemon->waitForFinished(2000);
 }
 
+/* The access points as netcfgd compiles the configuration -- `ncfg show`,
+ * over the same directory the daemon reads. */
+static QString compiled(const QString &work)
+{
+	QProcess show;
+	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+	environment.insert(QStringLiteral("NCFG_CONFIG_DIR"), work + QStringLiteral("/etc"));
+	environment.insert(QStringLiteral("NCFG_RUN_DIR"), work + QStringLiteral("/run"));
+	show.setProcessEnvironment(environment);
+	/* `ncfg`, the link beside the daemon: one binary, told which it is by
+	 * the name it is run as. */
+	const QString ncfg = QStringLiteral(NETCFGD_BINARY).section(QLatin1Char('/'), 0, -2) +
+	                     QStringLiteral("/ncfg");
+	show.start(ncfg, { QStringLiteral("show") });
+	if (!show.waitForFinished(20000)) {
+		show.kill();
+		show.waitForFinished(2000);
+		return QStringLiteral("<ncfg show did not finish>");
+	}
+	const QJsonDocument document = QJsonDocument::fromJson(show.readAllStandardOutput());
+	return QString::fromUtf8(
+	    QJsonDocument(document.object().value(QStringLiteral("access_points")).toArray())
+	        .toJson(QJsonDocument::Compact));
+}
+
 static QString credential_of(ncfg_connection *connection)
 {
 	QList<ncfg_access_point_config> points;
@@ -114,9 +148,18 @@ int main(int argc, char **argv)
 	QProcess      daemon;
 	const QString socket = start(&daemon, work.path(),
 	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
-	                   "interface wlan0 { config = \"192.168.50.1/24\" }\n"),
-	    QStringLiteral("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tchannel = 36\n"
-	                   "\twifi {\n\t\tpsk = \"@secret:keyring:ap\"\n\t}\n}\n"));
+	                   "interface wlan0 { config = \"192.168.50.1/24\" }\n"
+	                   "host_list \"kids\" { mac = [\"00:11:22:33:44:01\"] }\n"),
+	    QStringLiteral("access_point \"Home\" {\n"
+	                   "\tdevice = \"wlan0\"\n\tchannel = 36\n\tband = \"5\"\n\twidth = 80\n"
+	                   "\tregdom = \"SE\"\n\thidden = true\n\tfast_roaming = true\n"
+	                   "\tmobility_domain = \"4f2a\"\n\troaming_key = \"@secret:keyring:roam\"\n"
+	                   "\tneighbour_reports = true\n"
+	                   "\tneighbour \"aa:bb:cc:dd:ee:01\" { channel = 36 }\n"
+	                   "\tsteering { signal = -75; band = true }\n"
+	                   "\twifi {\n\t\tpsk = \"@secret:keyring:ap\"\n\t\tproto = \"wpa3\"\n\t}\n"
+	                   "\taccess_control {\n\t\tdeny = [\"@host_list:kids\", \"de:ad:be:*\"]\n\t}\n"
+	                   "}\n"));
 	ncfg_connection connection;
 	QString         error;
 	if (socket.isEmpty() || !connection.open(socket, &error)) {
@@ -127,6 +170,11 @@ int main(int argc, char **argv)
 
 	check(credential_of(&connection), QStringLiteral("@secret:keyring:ap"),
 	    "the passphrase reads as the reference written, provider and all");
+
+	const QString before = compiled(work.path());
+	check(before.contains(QStringLiteral("\"proto\":\"wpa3\"")) ? QStringLiteral("compiled")
+	                                                             : before,
+	    QStringLiteral("compiled"), "ncfg show compiles the access point, every key");
 
 	QList<ncfg_access_point_config> points;
 	connection.access_points(&points, &error);
@@ -140,6 +188,7 @@ int main(int argc, char **argv)
 	}
 	check(credential_of(&connection), QStringLiteral("@secret:keyring:ap"),
 	    "  and still takes its passphrase from the keyring");
+	check(compiled(work.path()), before, "  and compiles to the access point it was, whole");
 	stop(&daemon);
 
 	fprintf(stderr, "access_point_load: %s\n", failures ? "FAILED" : "all checks passed");

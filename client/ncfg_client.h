@@ -2267,6 +2267,10 @@ typedef struct {
 	char *device;
 	char *security;   /* "psk", "eap", "open", "owe" */
 	char *credential; /* the `@secret:` reference, or "" where it needs none */
+	/* A passphrase's generation, "wpa2", "wpa3" or "wpa2_wpa3"; "" where
+	 * there is no passphrase. Read since 10.631: without it a save turned a
+	 * WPA3-only access point into one that takes WPA2 again. */
+	char *proto;
 	char *band;       /* "2.4", "5", "6", or "" where the document says nothing */
 	char *regdom;
 	/* -1 where the document names none: 0 is not a channel, but a client that

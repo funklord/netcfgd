@@ -75,6 +75,7 @@ private:
 	QComboBox *device;
 	QComboBox *security;
 	QLineEdit *credential;
+	QComboBox *proto;
 	QComboBox *band;
 	QSpinBox  *channel;
 	QLineEdit *regdom;
