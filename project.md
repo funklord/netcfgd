@@ -12597,6 +12597,32 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.645 A rig's verdict directory is replaced when another account made it
+
+Both accounts run these rigs, and each `tests/hull/*/verdict` is made by
+whichever ran first: on 2026-10-31 `regdom` and `mesh` were the other
+account's, 2775 group `users`. The host honours the group bit and a vm's
+shared folder does not -- it writes as the running account without its
+supplementary groups -- so from the second account every payload failed at its
+first write (10.644).
+
+`hull_verdict` in the Makefile now makes each of the fourteen directories:
+one this user does not own is removed with `rmdir` and made again. `rmdir`
+because it removes only an empty directory, and each target has already
+removed its own verdicts by name just before -- so anything still there is
+another rig's or another account's, and the target refuses with the owner's
+name rather than sweeping it. The parent being group writable is what lets
+either account remove the other's empty directory; a sticky bit there would
+stop it, and the refusal would say so.
+
+Re-owning the two directories once was the alternative, and it fixes today
+and not the next time the other account runs a rig first.
+
+**Measured**: `make hull-regdom` from this account replaced the other's
+directory and every machine wrote its verdict, where before none could. Nine
+of ten passed; the roam station could not make its first join in 15 s, which
+the directory has no part in.
+
 ## 10.644 Rigs start in order, where hull can order them
 
 The holder asked for hull's start order (hull 1330cae, its §4.8) in place of
@@ -12623,7 +12649,8 @@ at all: `tests/hull/regdom/verdict` belongs to the other account, and a vm's
 shared folder writes as this account without its supplementary groups, so
 every access point failed at its first line -- `cannot create /verdict/ap:
 Permission denied` -- before start order was reached. The directory is group
-writable; the share does not honour that. Not this account's to change.
+writable; the share does not honour that. 10.645 makes the targets replace
+such a directory.
 
 **`lossy.conf` keeps the simultaneous start, measured rather than assumed.**
 With `after` and `ready` it failed 3 of 3 -- kea logging every SOLICIT and an

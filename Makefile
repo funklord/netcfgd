@@ -2530,6 +2530,22 @@ hull_says = command -v $(HULL) >/dev/null 2>&1 || \
 		"$$(printf '%s\n' "$$said" | head -1)" \
 		"$${commit:-commit unknown}" "$(1)"
 
+# Make a rig's verdict directory, replacing one another account made.
+#
+# **The guest writes it as its owner only.** Both accounts build here, and a
+# directory left by the other is 2775 group `users`, which the host honours and
+# the vm's share does not: every payload of `make hull-regdom` from the second
+# account failed at its first line with `cannot create /verdict/ap: Permission
+# denied` (10.645). So one this user does not own is replaced, by `rmdir`,
+# which removes only an empty one -- its target has already removed its own
+# verdicts by name, and anything left is somebody's and is refused, not swept.
+hull_verdict = if [ -d $(1) ] && [ ! -O $(1) ]; then \
+		rmdir $(1) 2>/dev/null || \
+		{ echo "hull: $(1) belongs to $$(stat -c %U $(1)) and still holds" \
+		       "files, so a vm here could not write into it" >&2; exit 1; }; \
+	fi; \
+	mkdir -p $(1)
+
 # Build a rig's image when the store has no ref for it. `hull build` is itself
 # cached per step, so asking again is cheap -- but asking only when the ref is
 # absent keeps a rig run from reaching the network at all on the common path.
@@ -2565,7 +2581,7 @@ hull-delegation:
 		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build \
 			-f tests/hull/delegation/hull.conf netcfgd/delegation; }
 	@rm -f tests/hull/delegation/verdict/isp tests/hull/delegation/verdict/cpe
-	@mkdir -p tests/hull/delegation/verdict
+	@$(call hull_verdict,tests/hull/delegation/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/delegation/hull.conf || true
 	@missing=0; \
 	for name in isp cpe; do \
@@ -2598,7 +2614,7 @@ hull-delegation-lossy:
 		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build \
 			-f tests/hull/delegation/hull.conf netcfgd/delegation; }
 	@rm -f tests/hull/delegation/verdict/isp tests/hull/delegation/verdict/cpe
-	@mkdir -p tests/hull/delegation/verdict
+	@$(call hull_verdict,tests/hull/delegation/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/delegation/lossy.conf || true
 	@missing=0; \
 	for name in isp cpe; do \
@@ -2637,7 +2653,7 @@ hull-wire:
 	@$(call hull_says,netcfgd/natcap)
 	@$(call hull_image,natcap)
 	@rm -f tests/hull/wire/verdict/isp tests/hull/wire/verdict/cpe
-	@mkdir -p tests/hull/wire/verdict
+	@$(call hull_verdict,tests/hull/wire/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/wire/hull.conf || true
 	@missing=0; \
 	for name in isp cpe; do \
@@ -2710,7 +2726,7 @@ hull-regdom:
 		tests/hull/regdom/verdict/ap6 tests/hull/regdom/verdict/station6 \
 		tests/hull/regdom/verdict/ap_rnr tests/hull/regdom/verdict/station_rnr \
 		tests/hull/regdom/verdict/ap_roam tests/hull/regdom/verdict/station_roam
-	@mkdir -p tests/hull/regdom/verdict
+	@$(call hull_verdict,tests/hull/regdom/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire.conf || true
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire5.conf || true
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire6.conf || true
@@ -2741,7 +2757,7 @@ hull-regdom-heard:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/regdom/verdict/ap_heard tests/hull/regdom/verdict/station_heard
-	@mkdir -p tests/hull/regdom/verdict
+	@$(call hull_verdict,tests/hull/regdom/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire_heard.conf || true
 	@missing=0; \
 	for name in ap_heard station_heard; do \
@@ -2768,7 +2784,7 @@ hull-roam:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/roam/verdict/roam
-	@mkdir -p tests/hull/roam/verdict
+	@$(call hull_verdict,tests/hull/roam/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/roam/hull.conf || true
 	@if [ ! -f tests/hull/roam/verdict/roam ]; then \
 		echo "roam: the payload left no verdict, so it never ran"; \
@@ -2788,7 +2804,7 @@ hull-steer:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/steer/verdict/steer tests/hull/steer/verdict/weak
-	@mkdir -p tests/hull/steer/verdict
+	@$(call hull_verdict,tests/hull/steer/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/steer/hull.conf || true
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/steer/weak.conf || true
 	@missing=0; \
@@ -2815,7 +2831,7 @@ hull-width:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/width/verdict/width
-	@mkdir -p tests/hull/width/verdict
+	@$(call hull_verdict,tests/hull/width/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/width/hull.conf || true
 	@if [ ! -f tests/hull/width/verdict/width ]; then \
 		echo "width: the payload left no verdict, so it never ran"; \
@@ -2834,7 +2850,7 @@ hull-dhcp-server:
 	@$(call hull_says,netcfgd/hwsim)
 	@$(call hull_image,hwsim)
 	@rm -f tests/hull/dhcp-server/verdict/dhcp-server
-	@mkdir -p tests/hull/dhcp-server/verdict
+	@$(call hull_verdict,tests/hull/dhcp-server/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/dhcp-server/hull.conf || true
 	@if [ ! -f tests/hull/dhcp-server/verdict/dhcp-server ]; then \
 		echo "dhcp-server: the payload left no verdict, so it never ran"; \
@@ -2854,7 +2870,7 @@ hull-slaac:
 	@$(call hull_says,netcfgd/hwsim)
 	@$(call hull_image,hwsim)
 	@rm -f tests/hull/slaac/verdict/slaac
-	@mkdir -p tests/hull/slaac/verdict
+	@$(call hull_verdict,tests/hull/slaac/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/slaac/hull.conf || true
 	@if [ ! -f tests/hull/slaac/verdict/slaac ]; then \
 		echo "slaac: the payload left no verdict, so it never ran"; \
@@ -2873,7 +2889,7 @@ hull-ap-lease:
 	@$(call hull_says,netcfgd/hwsim)
 	@$(call hull_image,hwsim)
 	@rm -f tests/hull/ap-lease/verdict/ap-lease
-	@mkdir -p tests/hull/ap-lease/verdict
+	@$(call hull_verdict,tests/hull/ap-lease/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/ap-lease/hull.conf || true
 	@if [ ! -f tests/hull/ap-lease/verdict/ap-lease ]; then \
 		echo "ap-lease: the payload left no verdict, so it never ran"; \
@@ -2890,7 +2906,7 @@ hull-mesh:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/mesh/verdict/mesh
-	@mkdir -p tests/hull/mesh/verdict
+	@$(call hull_verdict,tests/hull/mesh/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/mesh/hull.conf || true
 	@if [ ! -f tests/hull/mesh/verdict/mesh ]; then \
 		echo "mesh: the payload left no verdict, so it never ran"; \
@@ -2908,7 +2924,7 @@ hull-wds:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/wds/verdict/wds
-	@mkdir -p tests/hull/wds/verdict
+	@$(call hull_verdict,tests/hull/wds/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/wds/hull.conf || true
 	@if [ ! -f tests/hull/wds/verdict/wds ]; then \
 		echo "wds: the payload left no verdict, so it never ran"; \
@@ -2925,7 +2941,7 @@ hull-roam-sae:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@rm -f tests/hull/roam-sae/verdict/roam-sae
-	@mkdir -p tests/hull/roam-sae/verdict
+	@$(call hull_verdict,tests/hull/roam-sae/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/roam-sae/hull.conf || true
 	@if [ ! -f tests/hull/roam-sae/verdict/roam-sae ]; then \
 		echo "roam-sae: the payload left no verdict, so it never ran"; \
