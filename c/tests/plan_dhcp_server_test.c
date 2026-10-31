@@ -288,6 +288,28 @@ static void an_intercepting_server_forwards_dns_to_itself(void)
 	check(plan && !planfix_action(plan, "nftables.replace"),
 	    "  and one that does not intercept writes no rule");
 	planfix_release(plan, document, observed);
+
+	/* And IPv6 to the first global static address, not the link-local one
+	 * listed before it, in the form the kernel's read-back prints. */
+	plan = planfix_plan(LAN_DEVICE,
+	    "{\"name\":\"br0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"192.168.1.1/24\"},{\"source\":\"static\","
+	    "\"address\":\"fe80::1/64\"},{\"source\":\"static\","
+	    "\"address\":\"fd00:0007:0000::0001/64\"}],"
+	    "\"dhcp_server\":{\"dns_forward\":true,\"dns_intercept\":true}}",
+	    "", "", "\"links\":[" LAN_UP "]", &document, &observed);
+	replace = plan ? planfix_action(plan, "nftables.replace") : NULL;
+	udp = 0;
+	tcp = 0;
+	for (at = 0; replace && at < replace->op.u.nftables.forward_count; at++) {
+		const ncfg_forward_rule_t *rule = &replace->op.u.nftables.forwards[at];
+
+		udp += strcmp(rule->name, "dns6+udp") == 0 && strcmp(rule->to, "fd00:7::1") == 0;
+		tcp += strcmp(rule->name, "dns6+tcp") == 0 && strcmp(rule->to, "fd00:7::1") == 0;
+	}
+	check(replace && replace->op.u.nftables.forward_count == 4u && udp == 1 && tcp == 1,
+	    "  and IPv6 too, to the global static address in canonical form");
+	planfix_release(plan, document, observed);
 }
 
 int main(void)

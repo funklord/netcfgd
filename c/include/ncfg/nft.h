@@ -319,7 +319,7 @@ typedef struct {
 	char     digest[NCFG_NFT_DIGEST_HEX + 1u];
 	int      protocol;
 	uint16_t port;
-	char     to[16];
+	char     to[48];       /* an IPv6 host only for a forward (0305) */
 	uint16_t to_port;
 	char     address[16];  /* reflect */
 	char     network[20];  /* hairpin, a CIDR */

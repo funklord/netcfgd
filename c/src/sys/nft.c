@@ -1250,7 +1250,8 @@ int ncfg_nft_forward_text(const ncfg_forward_rule_t *forward, ncfg_buf_t *out)
 /* What one forward rule needs to be written: its host's bytes, and for the
  * kinds that have them the uplink address and the host's network. */
 typedef struct {
-	uint8_t       to[4];
+	uint8_t       to[16];
+	size_t        to_length; /* 4, or 16 for an IPv6 forward (0305) */
 	uint8_t       address[4];
 	nft_address_t network;
 	char          comment[NCFG_NFT_COMMENT_MAX + 1u];
@@ -1274,7 +1275,16 @@ static int forward_checked(const ncfg_forward_rule_t *forward, forward_parts_t *
 	if (!valid_uplink(forward->interface, err, err_size)) {
 		return 0;
 	}
-	if (inet_pton(AF_INET, forward->to, parts->to) != 1) {
+	/* **IPv6 for a plain forward only** (0305): DNS interception sends to
+	 * the router's own IPv6 address. A reflection and a return path are the
+	 * IPv4 port forward's, written for an uplink's one address and a
+	 * masqueraded network. */
+	if (inet_pton(AF_INET, forward->to, parts->to) == 1) {
+		parts->to_length = 4u;
+	} else if (forward->kind == NCFG_FORWARD_RULE_FORWARD &&
+	    inet_pton(AF_INET6, forward->to, parts->to) == 1) {
+		parts->to_length = 16u;
+	} else {
 		ncfg_error_set(err, err_size, "port forward `%s/%s` sends to `%s`, which is not an "
 		    "IPv4 address", forward->interface, forward->name, forward->to);
 		return 0;
@@ -1364,6 +1374,7 @@ static void forward_rule(ncfg_buf_t *attrs, const ncfg_forward_rule_t *forward,
 	const uint8_t  number = forward->protocol == NCFG_PORT_FORWARD_UDP ? IPPROTO_UDP
 	                                                                   : IPPROTO_TCP;
 	const uint8_t  ipv4 = NFPROTO_IPV4;
+	const uint8_t  ipv6 = NFPROTO_IPV6;
 	const uint16_t port = htons(forward->kind == NCFG_FORWARD_RULE_HAIRPIN ? forward->to_port
 	                                                                       : forward->port);
 	const uint16_t to_port = htons(forward->to_port);
@@ -1397,6 +1408,13 @@ static void forward_rule(ncfg_buf_t *attrs, const ncfg_forward_rule_t *forward,
 			put_cmp(&expressions, NFT_CMP_EQ, &ipv4, 1u);
 			put_address_match(&expressions, &host, 0);
 		}
+		/* An IPv6 forward says its family, as `dnat ip6 to` makes nft do:
+		 * the translation alone would pass IPv4 by, but the rule should not
+		 * read as though it might apply to it. */
+		if (parts->to_length == 16u) {
+			put_meta(&expressions, NFT_META_NFPROTO);
+			put_cmp(&expressions, NFT_CMP_EQ, &ipv6, 1u);
+		}
 	}
 	put_meta(&expressions, NFT_META_L4PROTO);
 	put_cmp(&expressions, NFT_CMP_EQ, &number, 1u);
@@ -1407,11 +1425,11 @@ static void forward_rule(ncfg_buf_t *attrs, const ncfg_forward_rule_t *forward,
 		put_expression(&expressions, "masq", &data);
 		ncfg_buf_free(&data);
 	} else {
-		put_immediate(&expressions, NFT_REG_1, parts->to, 4u);
+		put_immediate(&expressions, NFT_REG_1, parts->to, parts->to_length);
 		put_immediate(&expressions, NFT_REG_2, &to_port, sizeof(to_port));
 		ncfg_buf_init(&data, 0);
 		put_be32(&data, NFTA_NAT_TYPE, NFT_NAT_DNAT);
-		put_be32(&data, NFTA_NAT_FAMILY, NFPROTO_IPV4);
+		put_be32(&data, NFTA_NAT_FAMILY, parts->to_length == 16u ? NFPROTO_IPV6 : NFPROTO_IPV4);
 		put_be32(&data, NFTA_NAT_REG_ADDR_MIN, NFT_REG_1);
 		put_be32(&data, NFTA_NAT_REG_PROTO_MIN, NFT_REG_2);
 		put_be32(&data, NFTA_NAT_FLAGS, NF_NAT_RANGE_PROTO_SPECIFIED);
@@ -2365,6 +2383,7 @@ typedef struct {
 	int      iif_op; /* 0 none, 1 equal, 2 not equal */
 	char     oif[NCFG_NFT_IFNAME_MAX];
 	int      ipv4;
+	int      ipv6;
 	int      has_saddr;
 	uint8_t  saddr[4];
 	int      saddr_prefix;
@@ -2375,10 +2394,12 @@ typedef struct {
 	int      has_dport;
 	uint16_t dport;
 	int      has_to;
-	uint8_t  to[4];
+	uint8_t  to[16];
+	size_t   to_length;
 	int      has_to_port;
 	uint16_t to_port;
 	int      nat;
+	uint32_t nat_family;
 	int      masq;
 } forward_seen_t;
 
@@ -2406,7 +2427,8 @@ static int forward_cmp(const reading_t *reading, uint32_t op, const uint8_t *byt
 	}
 	if (reading->what == LOADED_META && reading->key == NFT_META_NFPROTO) {
 		seen->ipv4 = length == 1u && bytes[0] == NFPROTO_IPV4;
-		return seen->ipv4;
+		seen->ipv6 = length == 1u && bytes[0] == NFPROTO_IPV6;
+		return seen->ipv4 || seen->ipv6;
 	}
 	if (reading->what == LOADED_META && reading->key == NFT_META_L4PROTO) {
 		if (length != 1u || (bytes[0] != IPPROTO_TCP && bytes[0] != IPPROTO_UDP)) {
@@ -2589,14 +2611,16 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 			const uint32_t reg = register_of(&data, NFTA_IMMEDIATE_DREG);
 
 			if (!data_value(&data, NFTA_IMMEDIATE_DATA, &bytes, &bytes_length) ||
-			    !((reg == NFT_REG_1 && bytes_length == 4u && !seen.has_to) ||
+			    !((reg == NFT_REG_1 && (bytes_length == 4u || bytes_length == 16u) &&
+			          !seen.has_to) ||
 			    (reg == NFT_REG_2 && bytes_length == 2u && seen.has_to && !seen.has_to_port))) {
 				ncfg_error_set(err, err_size, "forward `%s` loads something netcfgd does not "
 				    "write", identity.name);
 				return 0;
 			}
 			if (reg == NFT_REG_1) {
-				memcpy(seen.to, bytes, 4u);
+				memcpy(seen.to, bytes, bytes_length);
+				seen.to_length = bytes_length;
 				seen.has_to = 1;
 			} else {
 				uint16_t port;
@@ -2609,7 +2633,8 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 			/* The kernel echoes a range's maximum as its minimum where none
 			 * was given, so both are allowed and must agree. */
 			if (register_of(&data, NFTA_NAT_TYPE) != NFT_NAT_DNAT ||
-			    register_of(&data, NFTA_NAT_FAMILY) != NFPROTO_IPV4 ||
+			    (register_of(&data, NFTA_NAT_FAMILY) != NFPROTO_IPV4 &&
+			    register_of(&data, NFTA_NAT_FAMILY) != NFPROTO_IPV6) ||
 			    register_of(&data, NFTA_NAT_REG_ADDR_MIN) != NFT_REG_1 ||
 			    register_of(&data, NFTA_NAT_REG_PROTO_MIN) != NFT_REG_2 ||
 			    (register_of(&data, NFTA_NAT_REG_ADDR_MAX) != 0u &&
@@ -2621,6 +2646,7 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 				return 0;
 			}
 			seen.nat = 1;
+			seen.nat_family = register_of(&data, NFTA_NAT_FAMILY);
 		} else if (strcmp(name, "masq") == 0) {
 			seen.masq = 1;
 		} else {
@@ -2633,15 +2659,20 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 	/* Exactly the matches the role is written with, and no others. */
 	switch (out->kind) {
 	case NCFG_FORWARD_RULE_FORWARD:
+		/* IPv4 with no family match, as 0298 wrote it, or IPv6 with one
+		 * (0305) -- the family, the address and the translation agreeing. */
 		shape = seen.iif_op == 1 && !seen.oif[0] && !seen.ipv4 && !seen.has_saddr &&
-		    !seen.has_daddr && seen.has_to && seen.has_to_port && seen.nat;
+		    !seen.has_daddr && seen.has_to && seen.has_to_port && seen.nat &&
+		    (seen.ipv6 ? seen.to_length == 16u && seen.nat_family == NFPROTO_IPV6
+		               : seen.to_length == 4u && seen.nat_family == NFPROTO_IPV4);
 		break;
 	case NCFG_FORWARD_RULE_REFLECT:
 		shape = seen.iif_op == 2 && !seen.oif[0] && seen.ipv4 && !seen.has_saddr &&
-		    seen.has_daddr && seen.has_to && seen.has_to_port && seen.nat;
+		    seen.has_daddr && seen.has_to && seen.to_length == 4u && seen.has_to_port &&
+		    seen.nat && seen.nat_family == NFPROTO_IPV4;
 		break;
 	default:
-		shape = seen.iif_op == 0 && seen.oif[0] && seen.ipv4 && seen.has_saddr &&
+		shape = seen.iif_op == 0 && seen.oif[0] && seen.ipv4 && !seen.ipv6 && seen.has_saddr &&
 		    seen.has_daddr && !seen.has_to && seen.masq;
 		break;
 	}
@@ -2656,6 +2687,7 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 		char net[16];
 
 		memcpy(seen.to, seen.daddr, 4u);
+		seen.to_length = 4u;
 		seen.to_port = seen.dport;
 		(void)snprintf(out->via, sizeof(out->via), "%s", seen.oif);
 		if (!inet_ntop(AF_INET, seen.saddr, net, sizeof(net))) {
@@ -2678,7 +2710,8 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 		}
 	}
 	out->to_port = seen.to_port;
-	if (!inet_ntop(AF_INET, seen.to, out->to, sizeof(out->to))) {
+	if (!inet_ntop(seen.to_length == 16u ? AF_INET6 : AF_INET, seen.to, out->to,
+	        sizeof(out->to))) {
 		ncfg_error_set(err, err_size, "forward `%s` sends to an address it cannot print",
 		    identity.name);
 		return 0;

@@ -29,6 +29,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/nft.h"
 
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -322,6 +323,24 @@ static const char *bare_ipv4(ncfg_plan_t *plan, const char *cidr)
 }
 
 /*
+ * A global IPv6 address out of a CIDR, as the kernel's read-back prints it --
+ * `inet_ntop`'s canonical form, so the two compare equal -- interned in the
+ * plan; NULL for IPv4, link-local, or anything not an address (0305).
+ */
+static const char *bare_ipv6(ncfg_plan_t *plan, const char *cidr)
+{
+	ncfg_address_t address;
+	char           text[INET6_ADDRSTRLEN];
+
+	if (!cidr || !ncfg_address_parse(cidr, &address, NULL, 0) || !address.is_ipv6 ||
+	    (address.bytes[0] == 0xfeu && (address.bytes[1] & 0xc0u) == 0x80u) ||
+	    !inet_ntop(AF_INET6, address.bytes, text, sizeof(text))) {
+		return NULL;
+	}
+	return ncfg_plan_intern(plan, text);
+}
+
+/*
  * The interface whose static IPv4 network holds `host`, and that network as a
  * CIDR, interned: where a return path for a hairpinned connection leaves
  * (0299). 0 where no interface in the document holds it.
@@ -449,30 +468,46 @@ static ncfg_forward_rule_t *wanted_forwards(ncfg_builder_t *builder, size_t *cou
 		 */
 		if (interface->dhcp_server && interface->dhcp_server->dns_forward &&
 		    interface->dhcp_server->dns_intercept) {
-			const char *own = NULL;
+			/* Each family to the interface's first static address of it:
+			 * IPv6 to a global one, since the forwarder binds the addresses
+			 * the interface holds and a link-local one names no interface on
+			 * its own. */
+			static const char *const names[2][2] = { { "dns+udp", "dns+tcp" },
+				{ "dns6+udp", "dns6+tcp" } };
+			const char *own[2] = { NULL, NULL };
+			size_t      family;
 
-			for (at = 0; !own && at < interface->addressing_count; at++) {
+			for (at = 0; at < interface->addressing_count; at++) {
 				const ncfg_address_source_t *source = &interface->addressing[at];
 
-				if (source->kind == NCFG_ADDRESS_SOURCE_STATIC) {
-					own = bare_ipv4(builder->plan, source->static_address.address);
+				if (source->kind != NCFG_ADDRESS_SOURCE_STATIC) {
+					continue;
+				}
+				if (!own[0]) {
+					own[0] = bare_ipv4(builder->plan, source->static_address.address);
+				}
+				if (!own[1]) {
+					own[1] = bare_ipv6(builder->plan, source->static_address.address);
 				}
 			}
-			if (own) {
+			for (family = 0; family < 2u; family++) {
 				ncfg_forward_rule_t rule;
 
+				if (!own[family]) {
+					continue;
+				}
 				memset(&rule, 0, sizeof(rule));
 				rule.kind = NCFG_FORWARD_RULE_FORWARD;
 				rule.interface = interface->name;
-				rule.to = own;
+				rule.to = own[family];
 				rule.port = 53u;
 				rule.to_port = 53u;
-				rule.name = "dns+udp";
+				rule.name = names[family][0];
 				rule.protocol = NCFG_PORT_FORWARD_UDP;
 				if (!add_rule(&rules, count, &room, &rule)) {
 					goto oom;
 				}
-				rule.name = "dns+tcp";
+				rule.name = names[family][1];
 				rule.protocol = NCFG_PORT_FORWARD_TCP;
 				if (!add_rule(&rules, count, &room, &rule)) {
 					goto oom;

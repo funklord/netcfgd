@@ -376,7 +376,8 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	dhcp_dns_intercept->setObjectName(QStringLiteral("iface_dhcp_dns_intercept"));
 	dhcp_dns_intercept->setToolTip(QStringLiteral(
 	    "A device that ignores the DNS server offered -- a TV, a streaming stick -- is "
-	    "answered by this router anyway, so block lists reach it. IPv4."));
+	    "answered by this router anyway, so block lists reach it. IPv6 too, where the "
+	    "interface has a static IPv6 address."));
 	form->addRow(QString(), dhcp_dns_intercept);
 
 	/* The standard options (0303), each blank for none -- the gateway blank

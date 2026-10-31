@@ -413,6 +413,30 @@ sleep 1
 ra_addresses=$(ip -n client -6 addr show dev eth0 scope global | awk '/inet6/ {print $2}' | tr '\n' ' ')
 say "the client, told by the advertisement, holds: $ra_addresses"
 
+# DNS interception over IPv6 (0305): the client asks 2001:db8::53, where
+# nothing listens, through the router -- unanswered until `dns_intercept`
+# sends port 53 to lan0's fd00:7::1, where the forwarder listens.
+timeout -k 2 60 dnsmasq -k --conf-file=/dev/null --port=53 --listen-address=127.0.0.2 \
+	--bind-interfaces --no-resolv --address=/example.test/10.9.9.9 --pid-file= --user=root \
+	> "$work/upstream6.log" 2>&1 &
+upstream6=$!
+router_ll=$(ip -6 addr show dev lan0 scope link | awk '/inet6/ {sub("/.*", "", $2); print $2; exit}')
+ip -n client -6 route replace default via "$router_ll" dev eth0 2>/dev/null
+echo "nameserver 2001:db8::53" > /etc/netns/client/resolv.conf
+uncaught6=$(lookup www.example.test)
+sed -i 's/^\t\tdns_forward = true$/&\n\t\tdns_intercept = true/' "$work/etc/netcfgd.conf"
+"$build/ncfg" plan > "$work/plan-intercept6.log" 2>&1
+intercept6_plan=$(grep -c 'dns6+udp' "$work/plan-intercept6.log")
+"$build/ncfg" apply > "$work/apply-intercept6.log" 2>&1
+say "ncfg apply rc=$?"
+sleep 1
+caught6=$(lookup www.example.test)
+say "  asking 2001:db8::53 through $router_ll: before '$uncaught6', after '$caught6'"
+"$build/ncfg" plan > "$work/plan-intercept6b.log" 2>&1
+intercept6_again=$(grep -c 'nothing to do' "$work/plan-intercept6b.log")
+kill "$upstream6" 2>/dev/null
+echo "nameserver 192.168.7.1" > /etc/netns/client/resolv.conf
+
 failed=0
 [ "$relay_plan" -ge 1 ] || { say "  the relay was not planned as a restart naming where it relays"; failed=1; }
 case "$beside" in
@@ -427,6 +451,10 @@ case "$shown" in
 	*"192.168.7."*" laptop"*) ;;
 	*) say "  ncfg status did not show the lease with the client's name"; failed=1 ;;
 esac
+[ -z "$uncaught6" ] || { say "  a server that is not there answered over IPv6 before interception"; failed=1; }
+[ "$intercept6_plan" -ge 1 ] || { say "  IPv6 interception was not planned as the dns6+udp forward"; failed=1; }
+[ "$caught6" = "10.9.9.9" ] || { say "  DNS sent to an IPv6 server was not answered by the router"; failed=1; }
+[ "$intercept6_again" -ge 1 ] || { say "  the plan after IPv6 interception was not empty"; failed=1; }
 [ "$ra_started" -ge 1 ] || { say "  a static prefix did not start the advertiser"; failed=1; }
 case " $ra_addresses" in
 	*" fd00:7::1"[0-9a-f][0-9a-f]"/128 "*) ;;
@@ -526,6 +554,8 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply-fetched: /' "$work/apply-fetched.log" | tail -6 >> "$out"
 	sed 's/^/  apply-intercept: /' "$work/apply-intercept.log" | tail -6 >> "$out"
 	sed 's/^/  plan-intercept2: /' "$work/plan-intercept2.log" | tail -6 >> "$out"
+	sed 's/^/  apply-intercept6: /' "$work/apply-intercept6.log" | tail -6 >> "$out"
+	sed 's/^/  plan-intercept6b: /' "$work/plan-intercept6b.log" | tail -6 >> "$out"
 	sed 's/^/  client6: /' "$work/client6.log" | tail -8 >> "$out"
 	sed 's/^/  apply9: /' "$work/apply9.log" | tail -6 >> "$out"
 	sed 's/^/  apply10: /' "$work/apply10.log" | tail -6 >> "$out"

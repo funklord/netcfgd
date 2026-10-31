@@ -487,12 +487,41 @@ static void forwards_are_written_and_read_back(void)
 	    "a forward alone is a table, its chain and its rule, with no masquerade chain");
 	ncfg_buf_free(&out);
 
+	/* 0305: DNS interception's IPv6 half is a plain forward to the router's
+	 * own IPv6 address, read back with its family and in inet_ntop's form. */
+	{
+		const ncfg_forward_rule_t six = { NCFG_FORWARD_RULE_FORWARD, "lan0", "dns6+udp",
+			NCFG_PORT_FORWARD_UDP, 53u, "fd00:7::1", 53u, NULL, NULL, NULL };
+		int                       found = 0;
+
+		ncfg_buf_init(&out, 0);
+		check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &six, 1u, &batch, err,
+		          sizeof(err)),
+		    "a forward to an IPv6 address builds");
+		ncfg_wire_messages_start(&walk, out.data, out.length);
+		while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+			ncfg_nft_kernel_forward_t one;
+
+			if ((message.header.kind & 0xffu) == NFT_MSG_NEWRULE &&
+			    ncfg_nft_forward_read(message.payload, message.payload_length, &one, err,
+			        sizeof(err)) &&
+			    one.kind == NCFG_FORWARD_RULE_FORWARD && strcmp(one.to, "fd00:7::1") == 0 &&
+			    one.port == 53u && one.to_port == 53u && one.protocol == NCFG_PORT_FORWARD_UDP &&
+			    strcmp(one.interface, "lan0") == 0 && strcmp(one.name, "dns6+udp") == 0) {
+				found++;
+			}
+		}
+		check(found == 1, "  and reads back as written, its address in inet_ntop's form");
+		ncfg_buf_free(&out);
+	}
 	bad = forwards[0];
+	bad.kind = NCFG_FORWARD_RULE_REFLECT;
+	bad.address = "203.0.113.1";
 	bad.to = "2001:db8::10";
 	ncfg_buf_init(&out, 0);
 	check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, &batch, err,
 	          sizeof(err)) && out.length == 0u && strstr(err, "not an IPv4 address") != NULL,
-	    "a forward to an IPv6 address is refused, and nothing built");
+	    "a reflection to an IPv6 address is refused, and nothing built");
 	ncfg_buf_free(&out);
 	bad = forwards[0];
 	bad.interface = "a-name-far-too-long";

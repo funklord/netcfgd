@@ -1872,8 +1872,10 @@
 #
 # `dns_intercept = true` answers DNS the network sends to any server, for
 # devices that ignore the one offered -- a TV, a streaming stick -- so the
-# lists reach them too. IPv4, as a port forward is: the router's forwarder
-# answers port 53 whatever address it was sent to.
+# lists reach them too: port 53, whatever address it was sent to, goes to
+# the interface's own static address of the same family. IPv6 needs a static
+# global address on the interface, such as "fd00:7::1/64"; with none, IPv6
+# DNS is not intercepted.
 
 #block_list "ads" {
 #	file   = ["/var/lib/netcfgd/block/ads.txt"]

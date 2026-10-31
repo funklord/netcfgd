@@ -1468,7 +1468,8 @@ typedef struct {
 	size_t              block_count;
 	/* DNS sent anywhere from this interface is answered here (0305): a
 	 * device with a server built in asks this forwarder whatever it names.
-	 * Only with `dns_forward`, and IPv4, as a port forward is. */
+	 * Only with `dns_forward`; each family to the interface's own static
+	 * address of it, so IPv6 needs a global one. */
 	int                 dns_intercept;
 } ncfg_dhcp_server_t;
 

@@ -12597,6 +12597,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.643 DNS interception over IPv6
+
+The holder asked for it after 10.642 left IPv6 out. `dns_intercept` now also
+writes `dns6+udp` and `dns6+tcp`: port 53 arriving on the interface over IPv6,
+translated to its first static global IPv6 address -- not a link-local one,
+which names no interface on its own -- where the forwarder is bound. With no
+static global address the IPv6 half is simply not written, and the example
+says so. The planner prints the address with `inet_ntop`, the form the
+kernel's read-back gives, so the two compare equal and the next plan is empty.
+
+The forward rule builder and its decoder learn **an IPv6 plain forward only**:
+16 address bytes, `NFPROTO_IPV6` as the translation's family, and an explicit
+`meta nfproto ipv6` match, as `dnat ip6 to` makes nft write. A reflection and
+a return path stay IPv4, being written for an uplink's one address and a
+masqueraded network, and are refused with an IPv6 host; a `port_forward` in
+the configuration stays IPv4 as 0298 has it. The decoder holds the family,
+the address length and the translation's family to agreeing, so a rule
+carrying one family's address and the other's translation is not read as
+netcfgd's. `nft_test` round-trips the IPv6 forward and refuses the IPv6
+reflection that used to stand for "IPv6 is refused".
+
+**Measured in `make hull-dhcp-server`**, in the advertised-prefix stage where
+lan0 holds `fd00:7::1/64`: the client, routed by the router's link-local
+address and asking 2001:db8::53 where nothing listens, resolved nothing
+before and `10.9.9.9` through the router's forwarder after the apply; the
+plan after it was empty.
+
 ## 10.642 DNS sent anywhere is answered by the router
 
 0305's second way round the router: `dhcp_server { dns_intercept = true }`

@@ -1066,4 +1066,6 @@ netcfgd
 # +13,288.
 # And `ncfg block fetch`, curl run outside the daemon (decision 0305),
 # +4,272.
-total 1391400
+# And DNS interception over IPv6, an IPv6 forward in the rule builder and
+# its decoder (decision 0305), +24.
+total 1391424
