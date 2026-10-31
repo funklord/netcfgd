@@ -78,11 +78,14 @@ say "VERDICT ok: the ISP is up"
 # machine whose command returns is a machine hull stops -- so this stands
 # until the CPE has its verdict. It is started only after this one is ready
 # (hull.conf), so a fixed lifetime would be counting the CPE's boot as well;
-# the ceiling is its own, so a wedged sibling cannot leave this running.
+# the ceiling is its own, so a wedged sibling cannot leave this running. It
+# is 600 because the CPE may spend 60 s waiting for this one and 300 s for a
+# prefix under loss: an ISP that stood down first would fail the CPE it was
+# there to serve, and hull's 900 s still bounds both.
 waited=0
 until grep -q '^VERDICT' /verdict/cpe 2>/dev/null; do
 	waited=$((waited + 1))
-	[ "$waited" -gt 300 ] && break
+	[ "$waited" -gt 600 ] && break
 	sleep 1
 done
 say "the ISP stood ${waited}s, until the CPE's verdict, and is standing down"

@@ -12641,9 +12641,23 @@ passes would be a result chosen, so the file keeps both starting together and
 say.** On the files as they were it passed 4 of 5. The arithmetic fits: a
 delegation is four messages, at 30% each way about 0.7^4 of attempts get all
 four through, and odhcp6c retries about six times inside the CPE's 60 s wait,
-which is roughly 80%. That window is the rig's, so a red run of it is a reading
-to repeat before it is a regression; widening the wait is the fix, and not
-made here.
+which is roughly 80%.
+
+**The wait is 300 s now, and it rescues some runs and not others.** Five
+runs after widening, 4 passed again, and the two that matter read opposite
+ways. One delegated after about 100 s and five REQUEST/REPLY rounds, so the
+old 60 s would have failed it. The failure had six solicits reach kea and
+none of the six ADVERTISEs reach the CPE in 300 s -- about 2% at 0.49 a
+frame. odhcp6c's solicit interval doubles (kea saw gaps of 1, 2, 13, 19 and
+36 s), so the extra four minutes bought about two tries, which is why the
+width helps less than its size suggests. The ISP's own bound went from 300 s
+to 600 s with it, or it would stand down under a CPE still waiting.
+
+Across the five runs the ISP-to-CPE direction delivered about 8 of 23 frames
+that can be traced, 35% against the 49% two 30% draws give. That is not
+significant at n=23, and 10.644 above has already retracted one loss fault
+sent to hull on thinner evidence, so it is recorded and not signalled. A red
+run of this rig is still a reading to repeat before it is a regression.
 
 ## 10.643 DNS interception over IPv6
 

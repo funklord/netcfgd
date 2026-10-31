@@ -101,10 +101,13 @@ sed 's/^/  apply: /' "$work/apply.log" >> "$out"
 # asked to compute, which is what this one did on its first run.
 prefixes="$work/run/prefixes/eth1"
 waited=0
-# **600, not 200.** The same payload serves the lossy rig, where a solicit
-# may be dropped several times and odhcp6c backs off between tries. A wait that
-# suited a clean wire would make loss look like a failure to delegate.
-while [ ! -s "$prefixes" ] && [ "$waited" -lt 600 ]; do
+# **3000, not 600, and the lossy rig is why.** A delegation is four messages,
+# each crossing two 30% draws there, and odhcp6c doubles its solicit interval
+# from a second: 60 s held about six tries and the rig passed 4 of 5 on that
+# alone. 300 s holds two or three more, since each one waits twice as long.
+# A clean wire answers in the first second, so the width costs hull.conf
+# nothing; it is only ever spent where loss is.
+while [ ! -s "$prefixes" ] && [ "$waited" -lt 3000 ]; do
 	waited=$((waited + 1))
 	sleep 0.1
 done
