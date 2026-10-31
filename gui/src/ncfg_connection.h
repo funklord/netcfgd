@@ -513,6 +513,8 @@ struct ncfg_interface_config {
 	int     dhcp_lease = -1;
 	QString dhcp_dns;
 	bool    dhcp_dns_forward = false;
+	/* The network's DNS answered here wherever it is sent (0305). */
+	bool    dhcp_dns_intercept = false;
 	/* The standard options (0303), empty where unset; `dhcp_ntp`
 	 * space-joined. */
 	QString dhcp_gateway;

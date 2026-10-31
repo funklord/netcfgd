@@ -444,6 +444,13 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 	/* **Blocking is answering** (0305): with no forwarder here the hosts ask
 	 * somebody else, and a list would block nothing while reading as if it
 	 * did. */
+	if (server->dns_intercept && !server->dns_forward) {
+		if (why) {
+			*why = "`dns_intercept` sends the network's DNS to this router's forwarder, so it "
+			       "needs `dns_forward = true`";
+		}
+		return 0;
+	}
 	if (server->block_count && !server->dns_forward) {
 		if (why) {
 			*why = "a `block` list is applied by the DNS forwarder, so it needs "

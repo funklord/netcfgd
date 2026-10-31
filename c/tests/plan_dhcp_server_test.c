@@ -253,8 +253,46 @@ static void a_server_the_document_dropped_is_stopped(void)
 	planfix_release(plan, document, observed);
 }
 
+/* 0305: DNS sent anywhere from the LAN answered by its forwarder, as two
+ * port forwards to the router's own address -- the port forwards' kernel
+ * path, which writes, reads back and compares them. */
+static void an_intercepting_server_forwards_dns_to_itself(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(LAN_DEVICE,
+	    SERVING("\"dns_forward\":true,\"dns_intercept\":true"), "", "",
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+	const ncfg_action_t *replace = plan ? planfix_action(plan, "nftables.replace") : NULL;
+	int                  udp = 0;
+	int                  tcp = 0;
+	size_t               at;
+
+	for (at = 0; replace && at < replace->op.u.nftables.forward_count; at++) {
+		const ncfg_forward_rule_t *rule = &replace->op.u.nftables.forwards[at];
+		int matches = rule->kind == NCFG_FORWARD_RULE_FORWARD &&
+		    strcmp(rule->interface, "br0") == 0 && strcmp(rule->to, "192.168.1.1") == 0 &&
+		    rule->port == 53u && rule->to_port == 53u;
+
+		udp += matches && rule->protocol == NCFG_PORT_FORWARD_UDP &&
+		    strcmp(rule->name, "dns+udp") == 0;
+		tcp += matches && rule->protocol == NCFG_PORT_FORWARD_TCP &&
+		    strcmp(rule->name, "dns+tcp") == 0;
+	}
+	check(replace && replace->op.u.nftables.forward_count == 2u && udp == 1 && tcp == 1,
+	    "an intercepting server sends DNS on 53, both protocols, to its own address");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "", "",
+	    "\"links\":[" LAN_UP "]", &document, &observed);
+	check(plan && !planfix_action(plan, "nftables.replace"),
+	    "  and one that does not intercept writes no rule");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
+	an_intercepting_server_forwards_dns_to_itself();
 	a_server_starts_after_the_address_it_serves();
 	a_server_with_no_dns_is_said();
 	a_forwarder_answers_for_the_router();

@@ -1949,6 +1949,8 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	 * and writes back unchanged. */
 	{ .name = "dns_forward", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_dhcp_server_t, dns_forward) },
+	{ .name = "dns_intercept", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_dhcp_server_t, dns_intercept) },
 	/* The standard options (0303), each absent where unset for the same
 	 * reason: a server written before them reads and writes back unchanged. */
 	{ .name = "gateway", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp_server_t, gateway) },

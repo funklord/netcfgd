@@ -867,7 +867,8 @@ static void an_access_point_round_trips(void)
 	    "dns_record \"corp.example\" {\n\tforward = [\"10.0.0.53\", \"fd00::53\"]\n}\n",
 	    "DNS records of every kind round-trip (0303)");
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
-	    "\tdhcp_server {\n\t\tdns_forward = true\n\t\tblock = [\"ads\", \"malware\"]\n\t}\n}\n"
+	    "\tdhcp_server {\n\t\tdns_forward = true\n\t\tdns_intercept = true\n"
+	    "\t\tblock = [\"ads\", \"malware\"]\n\t}\n}\n"
 	    "block_list \"ads\" {\n\tfile = [\"/var/lib/netcfgd/block/ads.txt\"]\n"
 	    "\turl = [\"https://example.org/hosts.txt\"]\n\tdomain = [\"doubleclick.net\"]\n\tallow = [\"ok.doubleclick.net\"]\n}\n"
 	    "block_list \"malware\" {\n\tdomain = [\"bad.example\"]\n}\n",

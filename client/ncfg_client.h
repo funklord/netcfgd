@@ -1562,6 +1562,8 @@ typedef struct {
 	char *dhcp_dns;
 	/* Whether the server also answers DNS, forwarding it (0301). */
 	int   dhcp_dns_forward;
+	/* The network's DNS answered here wherever it is sent (0305). */
+	int   dhcp_dns_intercept;
 	/* The standard options (0303), each "" where unset; `dhcp_ntp`
 	 * space-joined. */
 	char *dhcp_gateway;

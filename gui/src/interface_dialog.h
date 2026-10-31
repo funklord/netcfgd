@@ -161,6 +161,7 @@ private:
 	QSpinBox    *dhcp_lease;
 	QLineEdit   *dhcp_dns;
 	QCheckBox   *dhcp_dns_forward;
+	QCheckBox   *dhcp_dns_intercept;
 	/* The standard options (0303). */
 	QLineEdit   *dhcp_gateway;
 	QLineEdit   *dhcp_domain;

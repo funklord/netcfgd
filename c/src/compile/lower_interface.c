@@ -587,11 +587,13 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 				}
 			}
 			ncfg_words_free(&words);
-		} else if (strcmp(assignment->key, "dns_forward") == 0) {
+		} else if (strcmp(assignment->key, "dns_forward") == 0 ||
+		    strcmp(assignment->key, "dns_intercept") == 0) {
 			int flag;
 
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
-				server->dns_forward = flag;
+				*(strcmp(assignment->key, "dns_forward") == 0 ? &server->dns_forward
+				                                              : &server->dns_intercept) = flag;
 			}
 		} else if (strcmp(assignment->key, "ntp") == 0 || strcmp(assignment->key, "relay") == 0 ||
 		    strcmp(assignment->key, "block") == 0) {
@@ -638,7 +640,8 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown dhcp_server key `%s`: range, range6, lease, dns, dns_forward, gateway, "
+			    "unknown dhcp_server key `%s`: range, range6, lease, dns, dns_forward, "
+			    "dns_intercept, gateway, "
 			    "domain, ntp, boot_file, boot_server, tftp_server, wpad, relay and block, and "
 			    "`host` and `option` blocks", assignment->key);
 		}

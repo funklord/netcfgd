@@ -1869,6 +1869,11 @@
 #
 # A blocking server also answers `use-application-dns.net` NXDOMAIN, which
 # tells Firefox not to send DNS past the router by itself.
+#
+# `dns_intercept = true` answers DNS the network sends to any server, for
+# devices that ignore the one offered -- a TV, a streaming stick -- so the
+# lists reach them too. IPv4, as a port forward is: the router's forwarder
+# answers port 53 whatever address it was sent to.
 
 #block_list "ads" {
 #	file   = ["/var/lib/netcfgd/block/ads.txt"]
@@ -1880,7 +1885,8 @@
 #	config = "192.168.1.1/24"
 #	dhcp_server {
 #		dns_forward = true
-#		block       = ["ads"]
+#		dns_intercept = true
+#		block = ["ads"]
 #	}
 #}
 

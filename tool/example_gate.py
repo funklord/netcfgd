@@ -74,8 +74,7 @@ EXPECTED_INCOMPLETE = {
 	'interface eth0 {\n\tconfig = "dhcp"\n\tdns {',
 	'linkset "uplink" {',
 	'access_point "Family" {',
-	'interface "br0" {\n\tconfig = "192.168.1.1/24"\n\tdhcp_server {\n\t\tdns_forward = true\n'
-	'\t\tblock',
+	'interface "br0" {\n\tconfig = "192.168.1.1/24"\n\tdhcp_server {\n\t\tdns_forward = true\n',
 }
 
 

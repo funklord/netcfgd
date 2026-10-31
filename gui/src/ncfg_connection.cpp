@@ -1321,6 +1321,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dhcp_lease = found.dhcp_lease;
 	out->dhcp_dns = from_c(found.dhcp_dns);
 	out->dhcp_dns_forward = found.dhcp_dns_forward != 0;
+	out->dhcp_dns_intercept = found.dhcp_dns_intercept != 0;
 	out->dhcp_gateway = from_c(found.dhcp_gateway);
 	out->dhcp_domain = from_c(found.dhcp_domain);
 	out->dhcp_ntp = from_c(found.dhcp_ntp);

@@ -438,6 +438,47 @@ static ncfg_forward_rule_t *wanted_forwards(ncfg_builder_t *builder, size_t *cou
 	for (i = 0; i < desired->interface_count; i++) {
 		const ncfg_interface_t *interface = &desired->interfaces[i];
 
+		/*
+		 * **DNS interception is two port forwards to the router itself**
+		 * (0305): DNS arriving on the interface, for any address, translated
+		 * to the interface's own on 53, where its forwarder listens. The
+		 * kernel writing, reading back and comparing them is the port
+		 * forwards', unchanged. Named with a `+`, which a `port_forward` label
+		 * cannot hold, so neither can meet one. No reflection and no return
+		 * path: the host it sends to is this one.
+		 */
+		if (interface->dhcp_server && interface->dhcp_server->dns_forward &&
+		    interface->dhcp_server->dns_intercept) {
+			const char *own = NULL;
+
+			for (at = 0; !own && at < interface->addressing_count; at++) {
+				const ncfg_address_source_t *source = &interface->addressing[at];
+
+				if (source->kind == NCFG_ADDRESS_SOURCE_STATIC) {
+					own = bare_ipv4(builder->plan, source->static_address.address);
+				}
+			}
+			if (own) {
+				ncfg_forward_rule_t rule;
+
+				memset(&rule, 0, sizeof(rule));
+				rule.kind = NCFG_FORWARD_RULE_FORWARD;
+				rule.interface = interface->name;
+				rule.to = own;
+				rule.port = 53u;
+				rule.to_port = 53u;
+				rule.name = "dns+udp";
+				rule.protocol = NCFG_PORT_FORWARD_UDP;
+				if (!add_rule(&rules, count, &room, &rule)) {
+					goto oom;
+				}
+				rule.name = "dns+tcp";
+				rule.protocol = NCFG_PORT_FORWARD_TCP;
+				if (!add_rule(&rules, count, &room, &rule)) {
+					goto oom;
+				}
+			}
+		}
 		for (at = 0; at < interface->port_forward_count; at++) {
 			const ncfg_port_forward_t *forward = &interface->port_forwards[at];
 			ncfg_forward_rule_t        rule;

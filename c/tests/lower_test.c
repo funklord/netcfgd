@@ -1860,6 +1860,9 @@ static void firewall_mac_cases(void)
 	    "\tdhcp_server { block = [\"ads\"] }\n}\n"
 	    "block_list \"ads\" { domain = [\"ads.example\"] }\n",
 	    "needs `dns_forward = true`", "  and so is blocking where nothing forwards DNS");
+	refuses("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns_intercept = true }\n}\n",
+	    "needs `dns_forward = true`", "  and so is intercepting DNS where nothing forwards it");
 	refuses("block_list \"ads\" { allow = [\"ads.example\"] }\n", "a block list holds names",
 	    "  and a list holding no names");
 	refuses("block_list \"ads\" { file = [\"/a.txt\", \"/b.txt\"]; "
@@ -2801,7 +2804,7 @@ static const char *const expected_incomplete[] = {
 	"access_point \"Family\" {",
 	/* Parenthesised, which is how clang is told a joined literal is meant. */
 	("interface \"br0\" {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
-	 "\t\tdns_forward = true\n\t\tblock"),
+	 "\t\tdns_forward = true\n"),
 };
 
 /* Every top-level block head this build accepts. The example calls itself

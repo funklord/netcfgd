@@ -783,6 +783,9 @@ static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *bo
 	if (server->dns_forward) {
 		ncfg_buf_add_text(body, "\t\tdns_forward = true\n");
 	}
+	if (server->dns_intercept) {
+		ncfg_buf_add_text(body, "\t\tdns_intercept = true\n");
+	}
 	if (server->block_count) {
 		ncfg_buf_add_text(body, "\t\tblock = [");
 		for (at = 0; at < server->block_count; at++) {

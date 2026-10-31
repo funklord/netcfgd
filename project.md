@@ -12597,6 +12597,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.642 DNS sent anywhere is answered by the router
+
+0305's second way round the router: `dhcp_server { dns_intercept = true }`
+answers DNS the network sends to any server, for the TV or streaming stick
+with a server built in that ignores the one offered, so the block lists reach
+it too. It is **two port forwards to the router itself** -- UDP and TCP 53
+arriving on the interface, translated to its own static IPv4 address, where
+the forwarder listens -- so the kernel writing, reading back and comparing
+them is 0298's unchanged, and `wanted_forwards` gains them beside the
+document's. Named `dns+udp` and `dns+tcp`: a `port_forward` label cannot hold
+a `+`, so neither can meet one. No reflection and no return path, since the
+host it sends to is this one; refused without `dns_forward`, as a block list
+is. IPv4 only, as a port forward is -- a device with an IPv6 server built in
+still asks past the router, which is said in the example.
+
+**Measured in `make hull-dhcp-server`**: the client's resolver set to
+192.0.2.53, where nothing listens, through the router's default route --
+`www.example.test` resolved to nothing before, to the upstream's 10.9.9.9
+after the apply, and a blocked name stayed unresolved; the plan after it was
+empty, which is the `+` name surviving the kernel's read-back.
+
 ## 10.641 Block lists are fetched by a command, never by the daemon
 
 0305's refresh half. A `block_list` gains `url`, one per `file` in the same

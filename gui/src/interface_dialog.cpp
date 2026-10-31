@@ -370,6 +370,14 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	    "it cannot answer to the servers the router uses. Names the DHCP server handed "
 	    "out resolve too."));
 	form->addRow(QString(), dhcp_dns_forward);
+	/* 0305: what a device with its own DNS server asks is answered here too,
+	 * so a block list reaches it. */
+	dhcp_dns_intercept = new QCheckBox(QStringLiteral("answer DNS sent to any server"), this);
+	dhcp_dns_intercept->setObjectName(QStringLiteral("iface_dhcp_dns_intercept"));
+	dhcp_dns_intercept->setToolTip(QStringLiteral(
+	    "A device that ignores the DNS server offered -- a TV, a streaming stick -- is "
+	    "answered by this router anyway, so block lists reach it. IPv4."));
+	form->addRow(QString(), dhcp_dns_intercept);
 
 	/* The standard options (0303), each blank for none -- the gateway blank
 	 * for this router. The compiler checks each shape and names the one it
@@ -409,6 +417,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 		dhcp_lease->setEnabled(on);
 		dhcp_dns->setEnabled(on);
 		dhcp_dns_forward->setEnabled(on);
+		dhcp_dns_intercept->setEnabled(on);
 		for (QLineEdit *field : { dhcp_gateway, dhcp_domain, dhcp_ntp, dhcp_boot_file,
 		         dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6, dhcp_relay,
 		         dhcp_block }) {
@@ -637,6 +646,7 @@ void ncfg_interface_dialog::load_existing()
 	dhcp_lease->setValue(existing.dhcp_lease > 0 ? existing.dhcp_lease : 0);
 	dhcp_dns->setText(existing.dhcp_dns);
 	dhcp_dns_forward->setChecked(existing.dhcp_dns_forward);
+	dhcp_dns_intercept->setChecked(existing.dhcp_dns_intercept);
 	dhcp_gateway->setText(existing.dhcp_gateway);
 	dhcp_domain->setText(existing.dhcp_domain);
 	dhcp_ntp->setText(existing.dhcp_ntp);
@@ -965,6 +975,9 @@ QString ncfg_interface_dialog::block_text() const
 		}
 		if (dhcp_dns_forward->isChecked()) {
 			served << QStringLiteral("\t\tdns_forward = true");
+		}
+		if (dhcp_dns_intercept->isChecked()) {
+			served << QStringLiteral("\t\tdns_intercept = true");
 		}
 		const struct {
 			const char *key;

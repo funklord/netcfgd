@@ -4753,6 +4753,8 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->dhcp_dns = joined_words(doc, ncfg_json_member(doc, server, "dns"));
 		out->dhcp_dns_forward =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, server, "dns_forward"), 0);
+		out->dhcp_dns_intercept =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, server, "dns_intercept"), 0);
 		/* The standard options (0303). */
 		out->dhcp_gateway = member_text(doc, server, "gateway");
 		out->dhcp_domain = member_text(doc, server, "domain");

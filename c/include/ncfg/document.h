@@ -1466,6 +1466,10 @@ typedef struct {
 	 * `dns_forward`, since the router answers only what it is asked. */
 	char              **block;
 	size_t              block_count;
+	/* DNS sent anywhere from this interface is answered here (0305): a
+	 * device with a server built in asks this forwarder whatever it names.
+	 * Only with `dns_forward`, and IPv4, as a port forward is. */
+	int                 dns_intercept;
 } ncfg_dhcp_server_t;
 
 /*

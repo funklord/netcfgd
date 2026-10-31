@@ -188,7 +188,7 @@ int main(int argc, char **argv)
 		                   "\tforwarding = true\n"
 		                   "\tnat = true\n"
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
-		                   "dns = [\"192.0.2.53\"]; dns_forward = true; "
+		                   "dns = [\"192.0.2.53\"]; dns_forward = true; dns_intercept = true; "
 		                   /* 0305: the lists it applies, two so the order
 		                    * written is the order saved. */
 		                   "block = [\"malware\", \"ads\"]; "
@@ -338,6 +338,7 @@ int main(int argc, char **argv)
 		        wrote.contains(QStringLiteral("dns = [\"192.0.2.53\"]")) &&
 		        /* 0301: the LAN's forwarder, written back with the rest. */
 		        wrote.contains(QStringLiteral("dns_forward = true")) &&
+		        wrote.contains(QStringLiteral("dns_intercept = true")) &&
 		        wrote.contains(QStringLiteral("block = [\"malware\", \"ads\"]"))
 		        ? QStringLiteral("written")
 		        : wrote,

@@ -250,6 +250,26 @@ from_file=$(lookup tracker.example.test)$(lookup adblock.example.test)
 hostile=$(grep -c 'dhcp-script' "$work/run/dhcp-server/lan0.block" 2>/dev/null)
 canary=$(grep -c '^address=/use-application-dns.net/$' "$work/run/dhcp-server/lan0.block" 2>/dev/null)
 say "  from the file '$from_file'; $(tail -1 "$work/run/dhcp-server/lan0.block" 2>/dev/null)"
+
+# DNS interception (0305). The client is set to ask a server that is not
+# there, as a device with one built in does; asked through the router's
+# default route it gets no answer until `dns_intercept` sends port 53 to
+# the forwarder, which then answers it -- block list included.
+ip -n client route replace default via 192.168.7.1 2>/dev/null
+echo "nameserver 192.0.2.53" > /etc/netns/client/resolv.conf
+uncaught=$(lookup www.example.test)
+sed -i 's/^\t\tdns_forward = true$/&\n\t\tdns_intercept = true/' "$work/etc/netcfgd.conf"
+"$build/ncfg" plan > "$work/plan-intercept.log" 2>&1
+intercept_plan=$(grep -c 'dns+udp' "$work/plan-intercept.log")
+"$build/ncfg" apply > "$work/apply-intercept.log" 2>&1
+say "ncfg apply rc=$?"
+sleep 1
+caught=$(lookup www.example.test)
+caught_blocked=$(lookup ads.example.test)
+say "  asking 192.0.2.53: before '$uncaught', after '$caught', a blocked name '$caught_blocked'"
+"$build/ncfg" plan > "$work/plan-intercept2.log" 2>&1
+intercept_again=$(grep -c 'nothing to do' "$work/plan-intercept2.log")
+echo "nameserver 192.168.7.1" > /etc/netns/client/resolv.conf
 kill "$corp" "$upstream" 2>/dev/null
 
 # Custom options (0303), each typed, read by a client that knows each code's
@@ -431,6 +451,11 @@ esac
 [ -z "$from_file" ] || { say "  a name from the list's file resolved: '$from_file'"; failed=1; }
 [ "$hostile" -eq 0 ] || { say "  a line that is not a name reached dnsmasq"; failed=1; }
 [ "$canary" -eq 1 ] || { say "  Firefox's DNS-over-HTTPS switch was not answered"; failed=1; }
+[ -z "$uncaught" ] || { say "  a server that is not there answered before interception: '$uncaught'"; failed=1; }
+[ "$intercept_plan" -ge 1 ] || { say "  interception was not planned as the dns+udp forward"; failed=1; }
+[ "$caught" = "10.9.9.9" ] || { say "  DNS sent elsewhere was not answered by the router"; failed=1; }
+[ -z "$caught_blocked" ] || { say "  a blocked name resolved through interception"; failed=1; }
+[ "$intercept_again" -ge 1 ] || { say "  the plan after interception was not empty"; failed=1; }
 [ "$records_plan" -ge 1 ] || { say "  the records were not planned as a restart counting them"; failed=1; }
 [ "$nas" = "192.168.7.10" ] || { say "  an address record did not resolve"; failed=1; }
 [ "$nas6" = "fd00::10" ] || { say "  its IPv6 address did not resolve"; failed=1; }
@@ -499,6 +524,8 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply7: /' "$work/apply7.log" | tail -6 >> "$out"
 	sed 's/^/  apply-block: /' "$work/apply-block.log" | tail -6 >> "$out"
 	sed 's/^/  apply-fetched: /' "$work/apply-fetched.log" | tail -6 >> "$out"
+	sed 's/^/  apply-intercept: /' "$work/apply-intercept.log" | tail -6 >> "$out"
+	sed 's/^/  plan-intercept2: /' "$work/plan-intercept2.log" | tail -6 >> "$out"
 	sed 's/^/  client6: /' "$work/client6.log" | tail -8 >> "$out"
 	sed 's/^/  apply9: /' "$work/apply9.log" | tail -6 >> "$out"
 	sed 's/^/  apply10: /' "$work/apply10.log" | tail -6 >> "$out"
