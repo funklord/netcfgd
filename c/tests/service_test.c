@@ -1473,6 +1473,112 @@ static void stopping_an_access_point_takes_the_passphrase_with_it(void)
 	fake_stop();
 }
 
+/*
+ * A stand-in for a hostapd that is still on its way out: its command line
+ * carries `-P <pid file>`, which is what `ncfg_hostapd_running_pid` owns it
+ * by, and it lives `seconds` more whatever it is told. Its pid is written
+ * where hostapd writes its own.
+ */
+static pid_t a_hostapd_leaving(const char *pid_file, const char *seconds)
+{
+	char  text[32];
+	pid_t pid = fork();
+
+	if (pid < 0) {
+		return -1;
+	}
+	if (pid == 0) {
+		(void)signal(SIGTERM, SIG_IGN);
+		(void)execl("/bin/sh", "sh", "-c", "sleep \"$1\"", "hostapd", seconds, "-P",
+		    pid_file, (char *)NULL);
+		_exit(127);
+	}
+	(void)snprintf(text, sizeof(text), "%ld\n", (long)pid);
+	(void)testdir_write(pid_file, text, strlen(text));
+	/* Until the child has exec'd, its command line is this test's and owns
+	 * nothing; at most two seconds. */
+	{
+		long long deadline = hostapdfake_now_ms() + 2000;
+
+		while (ncfg_hostapd_running_pid(run_dir, "wlan0") != pid &&
+		    hostapdfake_now_ms() < deadline) {
+			struct timespec pause = { 0, 5000000L };
+
+			(void)nanosleep(&pause, NULL);
+		}
+	}
+	return pid;
+}
+
+/*
+ * The stop waits for hostapd to go (10.649). `TERMINATE` is answered before
+ * hostapd has deinitialised, and a restart's start that began then had its
+ * files removed and its interface taken down by the old one finishing its
+ * exit -- measured in `make hull-ap-lease`, where no access point was left.
+ * So a stop returns only once the process has gone, and one that will not go
+ * is a failure that keeps its pid file, so a start that follows sees it.
+ */
+static void stopping_an_access_point_waits_for_it_to_go(void)
+{
+	ncfg_service_t service;
+	char           message[NCFG_ERROR_MAX];
+	char           directory[1024];
+	char           pid_file[1024];
+	pid_t          leaving;
+	int            status = 0;
+
+	a_document(1, 0);
+	service = a_context();
+	if (!ncfg_hostapd_ctrl_dir(run_dir, directory, sizeof(directory), message,
+	    sizeof(message)) ||
+	    !ncfg_hostapd_pid_path(run_dir, "wlan0", pid_file, sizeof(pid_file), message,
+	    sizeof(message))) {
+		check(0, "the access point's paths could be named");
+		return;
+	}
+	make_tree(directory);
+
+	memset(&fake_config, 0, sizeof(fake_config));
+	if (!fake_start(directory, "wlan0")) {
+		check(0, "a fake access point could be started");
+		return;
+	}
+	leaving = a_hostapd_leaving(pid_file, "0.5");
+	check(leaving > 0 && ncfg_hostapd_running_pid(run_dir, "wlan0") == leaving,
+	    "control: a hostapd still exiting is recognised as the access point's");
+	message[0] = '\0';
+	check(ncfg_service_backend_stop(&service, NCFG_BACKEND_ACCESS_POINT, "wlan0", message,
+	    sizeof(message)), "an access point taking its time to exit is stopped");
+	/* The process asked, not the pid file: the stop removes the file, so a
+	 * check of `running_pid` would pass whether or not it had waited. */
+	check(leaving > 0 && waitpid(leaving, &status, WNOHANG) == leaving,
+	    "  and the stop returns only once it has gone, so a start cannot meet it");
+	if (leaving > 0) {
+		(void)kill(leaving, SIGKILL);
+		(void)waitpid(leaving, &status, 0);
+	}
+	fake_stop();
+
+	memset(&fake_config, 0, sizeof(fake_config));
+	if (!fake_start(directory, "wlan0")) {
+		check(0, "a fake access point could be started again");
+		return;
+	}
+	leaving = a_hostapd_leaving(pid_file, "30");
+	message[0] = '\0';
+	refused(ncfg_service_backend_stop(&service, NCFG_BACKEND_ACCESS_POINT, "wlan0", message,
+	    sizeof(message)), message, "still running",
+	    "one that will not go is a failure that says so");
+	check(testdir_exists(pid_file),
+	    "  and keeps its pid file, so a start that follows sees it");
+	if (leaving > 0) {
+		(void)kill(leaving, SIGKILL);
+		(void)waitpid(leaving, &status, 0);
+	}
+	(void)unlink(pid_file);
+	fake_stop();
+}
+
 /* ------------------------------------------------------------------------ *
  * DNS
  * ------------------------------------------------------------------------ */
@@ -1628,6 +1734,7 @@ int main(void)
 	a_backend_op_says_what_it_was_not_given();
 	a_dhcp6_start_finds_the_request_in_the_document();
 	stopping_an_access_point_takes_the_passphrase_with_it();
+	stopping_an_access_point_waits_for_it_to_go();
 	a_resolver_configuration_is_delivered_and_recorded();
 	the_dispatch_reaches_the_right_verb();
 

@@ -12597,6 +12597,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.649 An access point restarted for any changed field could be left dead
+
+Found by 10.648's rig, and not specific to its key. Restarting an access
+point -- a changed `ssid`, `channel`, `security`, `width` or any other field
+hostapd reads once -- is a `backend.stop` and a `backend.start`, and the stop
+returned as soon as hostapd answered `TERMINATE` with `OK`. hostapd answers
+before it has deinitialised, so the start began beside the old process, and
+the old one, finishing its exit, removed the pid file and control socket the
+new one had just made and took the interface down. **Measured in
+`make hull-ap-lease`, three runs of three**: after the restart no hostapd was
+running, `run/hostapd/` held only the log, `wlan0` was down, the station was
+scanning -- and the apply had printed `ok` for both halves.
+
+It is 10.566's class, the fifth instance and the one its table left out,
+because this stop speaks a control socket rather than sending a signal. The
+fix is that class's: the stop waits, at most 3 s, until
+`ncfg_hostapd_running_pid` answers 0, and one that will not go is a failure
+that keeps its pid file so the start that follows sees it rather than
+beginning a second access point on the radio. The config file still goes
+either way, since it holds the passphrase.
+
+`service_test` drives it with a stand-in recognised as the access point's
+hostapd -- `-P <pid file>` in its command line, which is the ownership marker
+-- that takes half a second to go. The check asks the process itself whether
+it has exited, not `running_pid`: the stop removes the pid file, so a check
+of the file passed with the wait removed, which is how the first draft of the
+test was found vacuous. With the wait removed the three checks fail; with it,
+the rig passes.
+
 ## 10.647 `make hull` on 2026-10-31: 17 of 18, and a steer plan that missed once
 
 All eighteen rigs with `make -k hull` against hull b01be07: seventeen pass,

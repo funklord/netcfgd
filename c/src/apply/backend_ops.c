@@ -96,6 +96,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -878,7 +879,39 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
  * behind in exactly the situation where nobody comes back to tidy up. The
  * `.acl` beside it stays -- it holds no secret and carries the policy record
  * 0039 gave it.
+ *
+ * **And the stop waits for hostapd to go** (10.649), the fifth of 10.566's
+ * class and the one its table left out, because this stop speaks a socket
+ * rather than sending a signal. `TERMINATE` is answered `OK` before hostapd
+ * has deinitialised, so a restart's start began beside the old process --
+ * and the old one, finishing its exit, removed the pid file and control socket
+ * the new one had just made and took the interface down. Measured in
+ * `make hull-ap-lease`: after a restart for a changed field no hostapd was
+ * running, `wlan0` was down, and the apply had said `ok` for both halves.
  */
+#define ACCESS_POINT_STOP_PATIENCE_MILLISECONDS 3000
+#define ACCESS_POINT_STOP_STEP_MILLISECONDS 25
+
+static int access_point_gone(const char *run_dir, const char *device)
+{
+	int waited = 0;
+
+	for (;;) {
+		struct timespec step;
+
+		if (ncfg_hostapd_running_pid(run_dir, device) <= 0) {
+			return 1;
+		}
+		if (waited >= ACCESS_POINT_STOP_PATIENCE_MILLISECONDS) {
+			return 0;
+		}
+		step.tv_sec = 0;
+		step.tv_nsec = (long)ACCESS_POINT_STOP_STEP_MILLISECONDS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		waited += ACCESS_POINT_STOP_STEP_MILLISECONDS;
+	}
+}
+
 static int stop_access_point(const char *run_dir, const char *device, int patience_ms,
     char *err, size_t err_size)
 {
@@ -888,6 +921,7 @@ static int stop_access_point(const char *run_dir, const char *device, int patien
 	struct stat               about;
 	ncfg_supplicant_client_t *client;
 	int                       ok = 1;
+	int                       lingering = 0;
 
 	if (!ncfg_hostapd_ctrl_dir(run_dir, directory, sizeof(directory), err, err_size)) {
 		return 0;
@@ -902,6 +936,15 @@ static int stop_access_point(const char *run_dir, const char *device, int patien
 			    device, detail);
 		}
 		ncfg_supplicant_client_free(client);
+		if (ok && !access_point_gone(run_dir, device)) {
+			ok = 0;
+			lingering = 1;
+			ncfg_error_set(err, err_size,
+			    "hostapd on %s accepted TERMINATE and is still running %d ms later. Its "
+			    "pid file is left in place, so a start that follows will see it rather "
+			    "than beginning a second access point on the same radio",
+			    device, ACCESS_POINT_STOP_PATIENCE_MILLISECONDS);
+		}
 	} else if (snprintf(path, sizeof(path), "%s/%s", directory, device) > 0 &&
 	    lstat(path, &about) == 0) {
 		/*
@@ -926,8 +969,10 @@ static int stop_access_point(const char *run_dir, const char *device, int patien
 	}
 	/* And the pid file, for 0080's reason: hostapd removes its own on a clean
 	 * exit, one that was killed leaves it, and a stale file would have the next
-	 * observation asking about a pid that belongs to somebody else by then. */
-	if (ncfg_hostapd_pid_path(run_dir, device, path, sizeof(path), detail, sizeof(detail))) {
+	 * observation asking about a pid that belongs to somebody else by then. Not
+	 * for one still running, whose file is what keeps a start from beside it. */
+	if (!lingering &&
+	    ncfg_hostapd_pid_path(run_dir, device, path, sizeof(path), detail, sizeof(detail))) {
 		(void)unlink(path);
 	}
 	return ok;
