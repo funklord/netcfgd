@@ -14,10 +14,15 @@
 #include "ncfg/base.h"
 #include "testdir.h"
 
+#include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 static int failures;
 
@@ -42,6 +47,87 @@ static int has_line(const char *text, const char *line)
 		at += length;
 	}
 	return 0;
+}
+
+/*
+ * A stand-in for a dnsmasq on its way out: the generated configuration in its
+ * command line, which is what `ncfg_dhcp_server_running_pid` owns it by, its
+ * pid where dnsmasq writes its own, and `on_term` as what it does on SIGTERM.
+ */
+static pid_t a_server_leaving(const char *run, const char *iface, const char *on_term)
+{
+	char  config[512];
+	char  pid_file[512];
+	char  script[256];
+	char  text[32];
+	pid_t pid;
+	int   tries;
+
+	if (!ncfg_dhcp_server_config_path(run, iface, config, sizeof(config), NULL, 0) ||
+	    !ncfg_dhcp_server_pid_path(run, iface, pid_file, sizeof(pid_file), NULL, 0)) {
+		return -1;
+	}
+	(void)snprintf(script, sizeof(script),
+	    "trap '%s' TERM; while :; do sleep 0.05; done", on_term);
+	pid = fork();
+	if (pid < 0) {
+		return -1;
+	}
+	if (pid == 0) {
+		(void)execl("/bin/sh", "sh", "-c", script, "dnsmasq", "-C", config, (char *)NULL);
+		_exit(127);
+	}
+	(void)snprintf(text, sizeof(text), "%ld\n", (long)pid);
+	(void)testdir_write(pid_file, text, strlen(text));
+	/* Until it has exec'd it carries this test's command line and owns
+	 * nothing; at most two seconds. */
+	for (tries = 0; tries < 400 && ncfg_dhcp_server_running_pid(run, iface) != pid; tries++) {
+		struct timespec pause = { 0, 5000000L };
+
+		(void)nanosleep(&pause, NULL);
+	}
+	return pid;
+}
+
+/*
+ * The stop waits for dnsmasq to go -- radvd's wait, written with it -- and had
+ * no test: 10.650 found the supplicant's stop missing it, and its own test
+ * granted the process a grace period that hid the gap. So this asks the
+ * process itself the moment the stop returns, not `running_pid`, which reads
+ * the pid file the stop removes.
+ */
+static void a_stop_waits_for_dnsmasq_to_go(const char *run)
+{
+	char  message[NCFG_ERROR_MAX];
+	char  pid_file[512];
+	pid_t leaving;
+	int   status = 0;
+
+	(void)ncfg_dhcp_server_pid_path(run, "lan0", pid_file, sizeof(pid_file), NULL, 0);
+	leaving = a_server_leaving(run, "lan0", "sleep 0.4; exit 0");
+	check(leaving > 0 && ncfg_dhcp_server_running_pid(run, "lan0") == leaving,
+	    "control: a dnsmasq taking its time to exit is recognised as netcfgd's");
+	message[0] = '\0';
+	check(ncfg_dhcp_server_stop(run, "lan0", message, sizeof(message)),
+	    "it is stopped");
+	check(leaving > 0 && waitpid(leaving, &status, WNOHANG) == leaving,
+	    "  and the stop returns only once it has gone, so a start cannot meet it");
+	if (leaving > 0) {
+		(void)kill(leaving, SIGKILL);
+		(void)waitpid(leaving, &status, 0);
+	}
+
+	leaving = a_server_leaving(run, "lan0", "");
+	message[0] = '\0';
+	check(!ncfg_dhcp_server_stop(run, "lan0", message, sizeof(message)) &&
+	    strstr(message, "still running") != NULL,
+	    "one that will not go is a failure that says so");
+	check(testdir_exists(pid_file), "  and keeps its pid file, so a start that follows sees it");
+	if (leaving > 0) {
+		(void)kill(leaving, SIGKILL);
+		(void)waitpid(leaving, &status, 0);
+	}
+	(void)unlink(pid_file);
 }
 
 int main(void)
@@ -644,6 +730,8 @@ int main(void)
 		server.block_count = 0;
 		server.dns_forward = 0;
 	}
+
+	a_stop_waits_for_dnsmasq_to_go(run);
 
 	testdir_remove(run);
 	if (failures) {

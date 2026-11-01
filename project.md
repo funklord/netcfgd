@@ -12620,7 +12620,11 @@ It now asks `/proc/<pid>/cmdline` the moment the stop returns -- not
 taken out fails three runs of three.
 
 So the 10.566 table is complete: every backend netcfgd stops waits for the
-process to go before its record does.
+process to go before its record does. **And dnsmasq's wait had no test at
+all**, so it is pinned the same way now: a stand-in naming the generated
+configuration, which is the ownership marker, takes 0.4 s over SIGTERM and
+must have gone when the stop returns, and one that ignores it must leave the
+stop failed with its pid file kept. With the wait removed all three fail.
 
 ## 10.649 An access point restarted for any changed field could be left dead
 
