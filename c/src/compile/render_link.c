@@ -1161,6 +1161,9 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	if (point->hidden) {
 		ncfg_buf_add_text(&body, "\thidden = true\n");
 	}
+	if (point->isolate_stations) {
+		ncfg_buf_add_text(&body, "\tisolate_stations = true\n");
+	}
 	if (point->fast_roaming) {
 		ncfg_buf_add_text(&body, "\tfast_roaming = true\n");
 	}

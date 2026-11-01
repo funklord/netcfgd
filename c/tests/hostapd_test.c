@@ -711,6 +711,25 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 	}
 }
 
+/* A guest network (10.648): `ap_isolate` only where the document asks. */
+static void isolated_stations_are_ap_isolate(void)
+{
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_hostapd_lines_t lines;
+
+	if (rendered(&point, "correcthorse", &lines)) {
+		check(ncfg_hostapd_value_of(&lines, "ap_isolate") == NULL,
+		    "an access point whose stations are free writes no ap_isolate");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.isolate_stations = 1;
+	if (rendered(&point, "correcthorse", &lines)) {
+		check_text(ncfg_hostapd_value_of(&lines, "ap_isolate"), "1",
+		    "one keeping them apart tells hostapd to relay nothing between them");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
 /* Four-address stations, and the bridge their interfaces join -- without it
  * hostapd makes them and they carry nothing (10.587 item 4). */
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
@@ -1579,6 +1598,7 @@ int main(void)
 	forty_megahertz_is_given_only_where_it_can_start();
 	a_radio_with_802_11n_is_given_it();
 	neighbour_reports_are_two_lines_and_no_neighbours();
+	isolated_stations_are_ap_isolate();
 	const char *run = testdir_make("hostapd");
 	char        stderr_path[512];
 	int         saved;

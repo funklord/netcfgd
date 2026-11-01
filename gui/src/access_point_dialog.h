@@ -80,6 +80,7 @@ private:
 	QSpinBox  *channel;
 	QLineEdit *regdom;
 	QCheckBox *hidden;
+	QCheckBox *isolate_stations;
 	QComboBox *acl_policy;
 	QLineEdit *stations;
 	QComboBox *width;

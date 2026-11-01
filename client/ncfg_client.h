@@ -2395,6 +2395,8 @@ typedef struct {
 	int   width;
 	int   neighbour_reports;
 	int   wds;
+	/* Whether its stations are kept from one another (10.648). */
+	int   isolate_stations;
 	int   steering;
 	int   steering_signal;
 	int   steering_band;

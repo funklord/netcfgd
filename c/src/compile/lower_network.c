@@ -1564,6 +1564,10 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.neighbour_reports = flag;
 				}
+			} else if (strcmp(key, "isolate_stations") == 0) {
+				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+					access_point.isolate_stations = flag;
+				}
 			} else if (strcmp(key, "roaming_key") == 0) {
 				ncfg_secret_ref_t secret;
 

@@ -826,6 +826,8 @@ static void an_access_point_round_trips(void)
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
 	    "\tsteering { band = true }\n\twifi { psk = \"@secret:ap\" }\n}\n",
 	    "  and so does band steering alone");
+	round_trips("access_point \"guest\" {\n\tdevice = \"wlan0\"\n\tisolate_stations = true\n"
+	    "\twifi { open = true }\n}\n", "a guest network's isolated stations round-trip");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\twidth = 20\n"
 	    "\twifi { psk = \"@secret:ap\" }\n}\n", "a stated width round-trips");
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"

@@ -1103,6 +1103,8 @@ typedef struct {
 	/* Whether it answers neighbour report requests (`rrm_neighbor_report`,
 	 * 10.595). */
 	int           neighbour_reports;
+	/* Whether its stations are kept apart (`ap_isolate`, 10.648). */
+	int           isolate_stations;
 	/* Whether it was given 802.11n (`ieee80211n`, 10.596). */
 	int           high_throughput;
 	/* And 40 MHz (`ht_capab` naming HT40, 10.597). */

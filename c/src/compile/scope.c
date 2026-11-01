@@ -443,6 +443,9 @@ static const struct {
 	/* The channel width (10.597): how much spectrum the network takes,
 	 * which a site agrees on, as it does the channel plan. */
 	{ NCFG_BLOCK_ACCESS_POINT, "width", 0x00040014u },
+	/* Whether its stations may reach one another (10.648): what a guest
+	 * network is, so the estate's, as `hidden` is. */
+	{ NCFG_BLOCK_ACCESS_POINT, "isolate_stations", 0x00040015u },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

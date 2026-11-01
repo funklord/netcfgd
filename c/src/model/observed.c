@@ -1152,6 +1152,8 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	    .offset = offsetof(ncfg_observed_access_point_t, wds) },
 	{ .name = "neighbour_reports", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_access_point_t, neighbour_reports) },
+	{ .name = "isolate_stations", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, isolate_stations) },
 	{ .name = "high_throughput", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_access_point_t, high_throughput) },
 	{ .name = "forty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,

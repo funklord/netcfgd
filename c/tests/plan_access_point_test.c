@@ -1109,6 +1109,34 @@ static void a_neighbour_list_held_as_wanted_is_converged(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * Keeping the stations apart is part of what hostapd was started as (10.648):
+ * `ap_isolate` is read once, so turning it on restarts the access point, and
+ * one started with it plans nothing more -- the control.
+ */
+static void isolating_stations_is_part_of_what_an_access_point_was_started_as(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"isolate_stations\":true"),
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && stop->reason.field &&
+	    strcmp(stop->reason.field, "access_point.isolate_stations") == 0,
+	    "keeping the stations apart restarts the access point, and says why");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"isolate_stations\":true"),
+	    "\"links\":[" UP_LINK "],"
+	    RUNNING(STARTED_WITH(AS_WRITTEN ",\"isolate_stations\":true")), &document, &observed);
+	check(plan && !planfix_action(plan, "backend.stop"),
+	    "control: one started with its stations apart is not restarted");
+	planfix_release(plan, document, observed);
+}
+
 /* Turning reports on is part of what hostapd was started as. */
 static void neighbour_reports_are_part_of_what_an_access_point_was_started_as(void)
 {
@@ -1595,6 +1623,7 @@ int main(void)
 	access_points_of_one_network_report_each_other();
 	a_neighbour_list_held_as_wanted_is_converged();
 	neighbour_reports_are_part_of_what_an_access_point_was_started_as();
+	isolating_stations_is_part_of_what_an_access_point_was_started_as();
 	stations_are_steered_by_band_and_by_signal();
 	a_station_list_cut_short_is_said_to_be();
 	a_sibling_at_80_mhz_is_still_a_5_ghz_target();

@@ -115,6 +115,9 @@ QString ncfg_access_point_block(const ncfg_access_point_config &settings)
 	if (settings.hidden) {
 		body << QStringLiteral("\thidden = true");
 	}
+	if (settings.isolate_stations) {
+		body << QStringLiteral("\tisolate_stations = true");
+	}
 
 	/* The `wifi` block, which is the same shape a station profile's is: the
 	 * compiler parses both with one reader. A passphrase is a reference and
@@ -258,6 +261,14 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	    "wherever they are."));
 	form->addRow(QString(), hidden);
 
+	isolate_stations = new QCheckBox(QStringLiteral("keep its stations from reaching each other"),
+	    this);
+	isolate_stations->setObjectName(QStringLiteral("ap_isolate_stations"));
+	isolate_stations->setToolTip(QStringLiteral(
+	    "For a guest network: a station on this access point cannot reach another on "
+	    "it. Keeping guests off the rest of the network is the firewall's part."));
+	form->addRow(QString(), isolate_stations);
+
 	acl_policy = new QComboBox(this);
 	acl_policy->setObjectName(QStringLiteral("ap_acl_policy"));
 	fill(acl_policy, acls, sizeof(acls) / sizeof(acls[0]));
@@ -392,6 +403,7 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 		channel->setValue(existing.channel > 0 ? existing.channel : 0);
 		regdom->setText(existing.regdom);
 		hidden->setChecked(existing.hidden);
+		isolate_stations->setChecked(existing.isolate_stations);
 		select(acl_policy, existing.acl_policy);
 		stations->setText(existing.stations);
 		select(width, existing.width > 0 ? QString::number(existing.width) : QString());
@@ -479,6 +491,7 @@ QString ncfg_access_point_dialog::block_text() const
 	settings.channel = channel->value();
 	settings.regdom = regdom->text().trimmed();
 	settings.hidden = hidden->isChecked();
+	settings.isolate_stations = isolate_stations->isChecked();
 	settings.acl_policy = acl_policy->currentData().toString();
 	settings.stations = stations->text().trimmed();
 	settings.width = width->currentData().toString().isEmpty()

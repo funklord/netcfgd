@@ -1302,6 +1302,25 @@ static void access_point_cases(void)
 	    "\tmobility_domain = \"4f2\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
 	    "four hex digits", "and a domain that is not four hex digits");
 
+	/* A guest network (10.648): the stations kept from one another, and a
+	 * block that does not say so leaves them free -- the control. */
+	document = compiles("access_point \"Guest\" {\n\tdevice = \"wlan0\"\n"
+	    "\tisolate_stations = true\n\twifi { open = true }\n}\n",
+	    "an access point keeping its stations apart compiles");
+	if (document) {
+		check(document->access_points[0].isolate_stations,
+		    "  carrying the isolation");
+		ncfg_document_free(document);
+	}
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "control: one that does not say so compiles");
+	if (document) {
+		check(!document->access_points[0].isolate_stations, "  and leaves its stations free");
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"Guest\" {\n\tdevice = \"wlan0\"\n\tisolate_stations = 1\n"
+	    "\twifi { open = true }\n}\n", "", "and isolation that is not true or false is refused");
+
 	/* Neighbour reports (10.595): this machine's own access points of the
 	 * network are found, and a neighbour elsewhere is declared by BSSID and
 	 * channel -- the two things a report has to carry. */

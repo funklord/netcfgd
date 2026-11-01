@@ -648,8 +648,8 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		ncfg_plan_warnf(builder->plan, device,
 		    "netcfgd has no record of what the access point running on %s was started "
 		    "with, so an edited `ssid`, `band`, `channel`, `security`, `hidden`, "
-		    "`regdom` or fast roaming is not noticed and hostapd goes on offering what it "
-		    "has: its station lists are the only part of the block that converges without "
+		    "`isolate_stations`, `regdom` or fast roaming is not noticed and hostapd goes "
+		    "on offering what it has: its station lists are the only part of the block that converges without "
 		    "being restarted",
 		    device);
 		return 0;
@@ -736,6 +736,13 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		    point->neighbour_reports ? "true" : "false");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->neighbour_reports ? "true" : "false");
+	} else if ((started->isolate_stations != 0) != (point->isolate_stations != 0)) {
+		/* `ap_isolate` is read once as well (10.648). */
+		field = "access_point.isolate_stations";
+		(void)snprintf(desired, sizeof(desired), "%s",
+		    point->isolate_stations ? "true" : "false");
+		(void)snprintf(observed, sizeof(observed), "%s",
+		    started->isolate_stations ? "true" : "false");
 	} else if (radio_has_ht(builder, device) >= 0 &&
 	    (started->high_throughput != 0) != (radio_has_ht(builder, device) != 0)) {
 		/* `ieee80211n` is read once, and is the radio's answer rather than the

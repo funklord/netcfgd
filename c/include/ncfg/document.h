@@ -1911,6 +1911,14 @@ typedef struct {
 	 */
 	int                    neighbour_reports;
 	/*
+	 * Whether its stations are kept from reaching one another (project.md
+	 * 10.648): hostapd's `ap_isolate`, so frames from one station to another
+	 * on this access point are not relayed. What a guest network needs and a
+	 * firewall cannot give, since such a frame never leaves the radio. Off
+	 * unless asked for, and omitted when off.
+	 */
+	int                    isolate_stations;
+	/*
 	 * Access points on other machines, declared until fuzznet can carry each
 	 * host's own entry (10.594): a BSSID and its channel. The access points
 	 * of the same network on this machine are neighbours without being

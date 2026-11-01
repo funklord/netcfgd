@@ -2345,6 +2345,8 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 		item->neighbour_reports =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "neighbour_reports"), 0);
 		item->wds = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "wds"), 0);
+		item->isolate_stations =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "isolate_stations"), 0);
 		uint32_t steering = ncfg_json_member(doc, entry, "steering");
 		item->steering = ncfg_json_type(doc, steering) == NCFG_JSON_OBJECT;
 		item->steering_signal =

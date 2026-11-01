@@ -1117,6 +1117,7 @@ bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QStrin
 		row.width = found.items[i].width;
 		row.neighbour_reports = found.items[i].neighbour_reports != 0;
 		row.wds = found.items[i].wds != 0;
+		row.isolate_stations = found.items[i].isolate_stations != 0;
 		row.steering = found.items[i].steering != 0;
 		row.steering_signal = found.items[i].steering_signal;
 		row.steering_band = found.items[i].steering_band != 0;

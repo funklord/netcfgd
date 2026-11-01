@@ -2282,6 +2282,9 @@ static const ncfg_field_t access_point_fields[] = {
 	 * was (10.595). */
 	{ .name = "neighbour_reports", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_access_point_t, neighbour_reports) },
+	/* Omitted when off, so every earlier document is what it was (10.648). */
+	{ .name = "isolate_stations", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_access_point_t, isolate_stations) },
 	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &neighbour_type, .element_size = sizeof(ncfg_neighbour_t),
 	    .offset = offsetof(ncfg_access_point_t, neighbours),

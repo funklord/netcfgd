@@ -650,6 +650,14 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 	 * report lets a station say what it hears, which steering reads. The
 	 * neighbours themselves are not in the file -- hostapd has no key for
 	 * them -- and are given over the control socket. */
+	/* A guest network (10.648): hostapd relays nothing from one station to
+	 * another. A bridged access point stays isolated too, since a bridge does
+	 * not send a frame back out of the port it came in on. */
+	if (access_point->isolate_stations && !add_line(out, "ap_isolate", "1", 0)) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering station isolation");
+		return 0;
+	}
 	if (access_point->neighbour_reports && (!add_line(out, "rrm_neighbor_report", "1", 0) ||
 	    !add_line(out, "rrm_beacon_report", "1", 0))) {
 		ncfg_hostapd_lines_free(out);

@@ -152,7 +152,8 @@ int main(int argc, char **argv)
 	                   "host_list \"kids\" { mac = [\"00:11:22:33:44:01\"] }\n"),
 	    QStringLiteral("access_point \"Home\" {\n"
 	                   "\tdevice = \"wlan0\"\n\tchannel = 36\n\tband = \"5\"\n\twidth = 80\n"
-	                   "\tregdom = \"SE\"\n\thidden = true\n\tfast_roaming = true\n"
+	                   "\tregdom = \"SE\"\n\thidden = true\n\tisolate_stations = true\n"
+	                   "\tfast_roaming = true\n"
 	                   "\tmobility_domain = \"4f2a\"\n\troaming_key = \"@secret:keyring:roam\"\n"
 	                   "\tneighbour_reports = true\n"
 	                   "\tneighbour \"aa:bb:cc:dd:ee:01\" { channel = 36 }\n"

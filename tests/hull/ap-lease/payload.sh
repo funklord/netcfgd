@@ -18,12 +18,17 @@
 #   - `ncfg wifi clients wlan0`, through the daemon's socket, lists the
 #     station by its MAC with the name `phone` and that address, in the text
 #     table and in `--json`;
-#   - and a second plan has nothing to do.
+#   - and a second plan has nothing to do;
+#   - then a guest network (10.648): a second station, `tablet`, reaches the
+#     first through the access point; with `isolate_stations = true` the plan
+#     restarts the access point for that field, and once both have rejoined
+#     the first reaches the router and not the other station.
 #
 # Always exits 0 and reports through /verdict/ap-lease.
 #
 # HOW IT STOPS: every wait is bounded (the radios at 5 s, the daemon's socket
-# at 5 s, the association at 30 s, dhcpcd at 20 s, the listing at 10 s), the
+# at 5 s, each association at 30 s, dhcpcd at 20 s, the listing at 10 s, each
+# ping at 3 s), the
 # steps are a fixed list, and the vm takes the daemon, hostapd, dnsmasq,
 # wpa_supplicant and dhcpcd with it.
 set -u
@@ -48,13 +53,13 @@ for program in hostapd dnsmasq wpa_supplicant dhcpcd; do
 		{ say "VERDICT bad: the image has no $program; rebuild netcfgd/hwsim"; exit 0; }
 done
 
-modprobe mac80211_hwsim radios=2
+modprobe mac80211_hwsim radios=3
 n=0
-while [ ! -e /sys/class/net/wlan1 ] && [ "$n" -lt 50 ]; do
+while [ ! -e /sys/class/net/wlan2 ] && [ "$n" -lt 50 ]; do
 	sleep 0.1
 	n=$((n + 1))
 done
-[ -e /sys/class/net/wlan1 ] || { say "VERDICT bad: hwsim gave no second radio"; exit 0; }
+[ -e /sys/class/net/wlan2 ] || { say "VERDICT bad: hwsim gave no third radio"; exit 0; }
 # The station in a namespace of its own, so the address dhcpcd takes is not an
 # address of the access point's kernel stack too -- which would deliver the
 # server's replies locally and prove nothing about the air between them.
@@ -92,6 +97,7 @@ say "ncfg apply rc=$?"
 # The daemon, for the socket `wifi clients` reads. The apply above already did
 # the work, so it is told not to repeat it on start.
 "$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+daemon=$!
 n=0
 while [ ! -e "$work/run/netcfgd.sock" ] && [ "$n" -lt 50 ]; do
 	sleep 0.1
@@ -155,8 +161,89 @@ grep -q '"hostname":"phone"' "$work/clients.json" ||
 grep -q "\"ipv4\":\"$address\"" "$work/clients.json" ||
 	{ say "  --json carries no ipv4 $address"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the second plan was not empty"; failed=1; }
+
+# **A guest network (10.648).** A second station, in a namespace of its own and
+# addressed by hand outside the pool, so the only path between the two is the
+# access point relaying one station's frame to the other -- which is what
+# `isolate_stations` stops. The ping to the router after isolation is the
+# control that the stations are still on the air: a station that had simply
+# fallen off would fail the other ping too.
+# The daemon stops first: it watches the file, and an edit it applied on its
+# own would leave the plan below with nothing to say about the restart.
+kill "$daemon" 2>/dev/null
+n=0
+while [ -d "/proc/$daemon" ] && [ "$n" -lt 50 ]; do
+	sleep 0.1
+	n=$((n + 1))
+done
+other=$(cat /sys/class/net/wlan2/phy80211/name)
+ip netns add other
+iw phy "$other" set netns name other
+ip -n other link set lo up
+mkdir -p "$work/sta2"
+sed "s|$work/sta|$work/sta2|" "$work/sta.conf" > "$work/sta2.conf"
+ip netns exec other wpa_supplicant -B -i wlan2 -c "$work/sta2.conf" -f "$work/sta2.log" \
+	>/dev/null 2>&1
+T() { ip netns exec other wpa_cli -p "$work/sta2" -i wlan2 "$@" 2>/dev/null; }
+both_joined() { # $1 tenths of a second
+	n=0
+	until { S status | grep -q '^wpa_state=COMPLETED' &&
+	    T status | grep -q '^wpa_state=COMPLETED'; } || [ "$n" -gt "$1" ]; do
+		sleep 0.1
+		n=$((n + 1))
+	done
+	S status | grep -q '^wpa_state=COMPLETED' && T status | grep -q '^wpa_state=COMPLETED'
+}
+reaches() { # $1 an address, from the first station
+	ip netns exec client ping -c 3 -W 1 -i 0.3 "$1" >/dev/null 2>&1
+}
+both_joined 300 || { say "  the second station did not join"; failed=1; }
+ip -n other addr add 192.168.4.51/24 dev wlan2
+if reaches 192.168.4.51; then
+	say "ok   control: one station reaches the other through the access point"
+else
+	say "  one station does not reach the other even with nothing isolated"; failed=1
+fi
+sed 's/^access_point "home" {$/access_point "home" {\n\tisolate_stations = true/' \
+	"$work/etc/netcfgd.conf" > "$work/etc/guest.conf"
+mv "$work/etc/guest.conf" "$work/etc/netcfgd.conf"
+grep -q 'isolate_stations = true' "$work/etc/netcfgd.conf" ||
+	{ say "  the document was not given isolate_stations"; failed=1; }
+"$build/ncfg" plan > "$work/plan-guest.log" 2>&1
+grep -q 'access_point.isolate_stations' "$work/plan-guest.log" &&
+    grep -qE 'backend\.stop wlan0' "$work/plan-guest.log" ||
+	{ say "  the plan does not restart the access point for isolate_stations"; failed=1; }
+say "the plan for isolation: $(grep -E 'backend\.(stop|start) wlan0 +access_point' \
+	"$work/plan-guest.log" | tr -s ' ' | tr '\n' ';')"
+"$build/ncfg" apply > "$work/apply-guest.log" 2>&1
+say "ncfg apply rc=$?"
+grep -q '^ap_isolate=1$' "$work/run/hostapd/wlan0.conf" 2>/dev/null ||
+	{ say "  hostapd's file carries no ap_isolate=1"; failed=1; }
+both_joined 300 || { say "  the stations did not rejoin the restarted access point"; failed=1; }
+if reaches 192.168.4.1; then
+	say "ok   isolated, the first station still reaches the router"
+else
+	say "  isolated, the first station does not reach the router either"; failed=1
+fi
+if reaches 192.168.4.51; then
+	say "  isolated, one station still reaches the other"; failed=1
+else
+	say "ok   and no longer reaches the other station"
+fi
+
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -6 >> "$out"
+	sed 's/^/  apply-guest: /' "$work/apply-guest.log" 2>/dev/null | tail -8 >> "$out"
+	ls "$work/run/hostapd" 2>&1 | sed 's/^/  run\/hostapd: /' >> "$out"
+	grep -H '^ap_isolate' "$work/run/hostapd/"*.conf 2>&1 | sed 's/^/  /' >> "$out"
+	sed 's/^/  hostapd: /' "$work/run/hostapd/wlan0.log" 2>/dev/null | tail -40 >> "$out"
+	for p in /proc/[0-9]*; do
+		case "$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)" in
+		*hostapd*) say "  process ${p#/proc/}: $(tr '\0' ' ' < "$p/cmdline")" ;;
+		esac
+	done
+	ip -br addr show dev wlan0 | sed 's/^/  ap: /' >> "$out"
+	S status | grep -E '^(wpa_state|bssid)=' | sed 's/^/  phone: /' >> "$out"
 	sed 's/^/  json: /' "$work/clients.json" | head -20 >> "$out"
 	sed 's/^/  client: /' "$work/client.log" | tail -6 >> "$out"
 	sed 's/^/  dnsmasq: /' "$work/run/dhcp-server/wlan0.log" 2>/dev/null | tail -6 >> "$out"

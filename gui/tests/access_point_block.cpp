@@ -52,6 +52,8 @@ int main(int argc, char **argv)
 		 * otherwise, and stating it would bury the one that is hidden. */
 		check(!block.contains(QStringLiteral("hidden")),
 		    "and says nothing about hiding, which is the default");
+		check(!block.contains(QStringLiteral("isolate_stations")),
+		    "nor about keeping its stations apart, which is not either");
 		check(!block.contains(QStringLiteral("access_control")),
 		    "and writes no station list when it talks to everyone");
 	}
@@ -64,11 +66,14 @@ int main(int argc, char **argv)
 		guest.device = QStringLiteral("wlan0");
 		guest.security = QStringLiteral("open");
 		guest.hidden = true;
+		guest.isolate_stations = true;
 		const QString block = ncfg_access_point_block(guest);
 		check(block.contains(QStringLiteral("open = true")), "an open network says so");
 		check(!block.contains(QStringLiteral("psk")), "and carries no passphrase key");
 		check(block.contains(QStringLiteral("hidden = true")),
 		    "and a hidden one says that too, because it is not the default");
+		check(block.contains(QStringLiteral("isolate_stations = true")),
+		    "and a guest network keeping its stations apart says so (10.648)");
 	}
 
 	/* The station list, which is the half a save can silently empty. */

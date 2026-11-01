@@ -12626,6 +12626,36 @@ of the file passed with the wait removed, which is how the first draft of the
 test was found vacuous. With the wait removed the three checks fail; with it,
 the rig passes.
 
+## 10.648 Guest wifi: an access point that keeps its stations apart
+
+`isolate_stations = true` on an `access_point` is hostapd's `ap_isolate`: a
+frame from one station to another on that access point is not relayed. It is
+the half of a guest network a firewall cannot give, because such a frame
+never leaves the radio; keeping guests off the rest of the network is the
+firewall's half, and the example says so. Estate-scoped, as `hidden` is,
+since whether a network's stations may reach each other is the network's
+property. Off unless asked for and omitted when off, so earlier documents are
+unchanged; read once by hostapd, so changing it restarts the access point,
+and the running value is read back out of the generated file as the other
+read-once keys are. Named for what it does rather than OpenWrt's `isolate`,
+which does not say what is kept from what.
+
+Carried through the lowering, the document and observation models, the
+hostapd render, the restart comparison, the profile renderer, the client
+library and the GUI's access point dialog -- the form gate named the client
+as the one reader missing, and the dialog would have deleted the key on Save.
+
+**Measured live** in `make hull-ap-lease`, which gained a second station on
+a third hwsim radio: with nothing isolated one station pings the other
+through the access point (the control); the edit plans a restart naming
+`access_point.isolate_stations`; once both rejoin, the first still reaches
+the router and no longer reaches the other station. **Sabotage**: with the
+`ap_isolate` line not rendered the stations reach each other again, with
+the access point up and both associated, so it is that line that keeps them
+apart. Unit tests: lowering (and a non-boolean refused), the hostapd line
+only when asked, the round trip, and the restart with a started-with control;
+the render and plan sabotages each turn their test red.
+
 ## 10.647 `make hull` on 2026-10-31: 17 of 18, and a steer plan that missed once
 
 All eighteen rigs with `make -k hull` against hull b01be07: seventeen pass,

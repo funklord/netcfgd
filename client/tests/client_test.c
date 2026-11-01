@@ -2370,7 +2370,7 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	    "\"neighbour_reports\":true,\"steering\":{\"signal\":-75,\"band\":true},"
 	    "\"fast_roaming\":true},"
 	    "{\"id\":\"small\",\"ssid\":\"73\",\"device\":\"wlan1\","
-	    "\"security\":{\"type\":\"open\"},\"hidden\":false}"
+	    "\"security\":{\"type\":\"open\"},\"hidden\":false,\"isolate_stations\":true}"
 	    "],\"globals\":{}}\n"
 	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[]}\n")) {
 		return;
@@ -2416,6 +2416,10 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 		    points.items[1].unmodelled, "");
 		ok("  and has no width and no steering", points.items[1].width == -1 &&
 		    !points.items[1].steering, NULL);
+		/* A guest network since 10.648, and the control is the first, which
+		 * does not say it. */
+		ok("  and its stations kept apart is read", points.items[1].isolate_stations == 1 &&
+		    points.items[0].isolate_stations == 0, NULL);
 	}
 	ncfg_access_points_free(&points);
 	staged_close(&staged);

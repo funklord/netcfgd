@@ -615,6 +615,8 @@ struct ncfg_access_point_config {
 	int     width = -1;
 	bool    neighbour_reports = false;
 	bool    wds = false;
+	/* Its stations kept from one another, for a guest network (10.648). */
+	bool    isolate_stations = false;
 	bool    steering = false;
 	int     steering_signal = 0;
 	bool    steering_band = false;
