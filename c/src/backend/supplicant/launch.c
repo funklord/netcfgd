@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -419,6 +420,37 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
  * Stopping
  * ------------------------------------------------------------------------ */
 
+/*
+ * **The stop waits for the supplicant to go** (project.md 10.650), which is
+ * 10.649's fault found in hostapd and the same shape here: `TERMINATE` is
+ * answered `OK` before the process has exited, and the pid file was removed
+ * at once -- so the next observation read a supplicant still exiting as
+ * absent, and a start that followed began a second one whose control socket
+ * the first then removed on its way out.
+ */
+#define SUPPLICANT_STOP_PATIENCE_MS 3000
+#define SUPPLICANT_STOP_STEP_MS 25
+
+static int supplicant_gone(const char *run, const char *iface)
+{
+	int waited = 0;
+
+	for (;;) {
+		struct timespec step;
+
+		if (ncfg_supplicant_running_pid(run, iface) <= 0) {
+			return 1;
+		}
+		if (waited >= SUPPLICANT_STOP_PATIENCE_MS) {
+			return 0;
+		}
+		step.tv_sec = 0;
+		step.tv_nsec = (long)SUPPLICANT_STOP_STEP_MS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		waited += SUPPLICANT_STOP_STEP_MS;
+	}
+}
+
 int ncfg_supplicant_stop(const char *run, const char *dir, const char *iface, int patience_ms,
     char *err, size_t err_size)
 {
@@ -428,6 +460,7 @@ int ncfg_supplicant_stop(const char *run, const char *dir, const char *iface, in
 	struct stat               about;
 	ncfg_supplicant_client_t *client;
 	int                       ok = 1;
+	int                       lingering = 0;
 
 	if (!run || run[0] == '\0' || !dir || dir[0] == '\0' || !iface || iface[0] == '\0') {
 		ncfg_error_set(err, err_size,
@@ -451,6 +484,15 @@ int ncfg_supplicant_stop(const char *run, const char *dir, const char *iface, in
 			    iface, detail);
 		}
 		ncfg_supplicant_client_free(client);
+		if (ok && !supplicant_gone(run, iface)) {
+			ok = 0;
+			lingering = 1;
+			ncfg_error_set(err, err_size,
+			    "the supplicant on %s accepted TERMINATE and is still running %d ms later. "
+			    "Its pid file is left in place, so a start that follows will see it rather "
+			    "than beginning a second one on the same interface",
+			    iface, SUPPLICANT_STOP_PATIENCE_MS);
+		}
 	} else if (lstat(socket_path, &about) == 0) {
 		/*
 		 * **Absence is the socket file not being there**, which is the
@@ -471,8 +513,9 @@ int ncfg_supplicant_stop(const char *run, const char *dir, const char *iface, in
 	/* And the pid file, whether or not it answered. `wpa_supplicant` removes
 	 * its own on a clean exit, one that was killed leaves it, and a stale file
 	 * would have the next observation asking about a pid that belongs to
-	 * somebody else by then (0080). */
-	if (ncfg_supplicant_pid_path(run, iface, pid_path, sizeof(pid_path), detail,
+	 * somebody else by then (0080). Not for one still running, whose file is
+	 * what keeps a start from beginning beside it. */
+	if (!lingering && ncfg_supplicant_pid_path(run, iface, pid_path, sizeof(pid_path), detail,
 	    sizeof(detail))) {
 		(void)unlink(pid_path);
 	}

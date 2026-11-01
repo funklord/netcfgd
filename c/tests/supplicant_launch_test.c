@@ -1091,6 +1091,26 @@ static void a_wired_port_is_started_with_the_other_driver(void)
 	check(recorded_pid("eth-test0") > 0, "  and it recorded its pid where `-P` said");
 }
 
+/* Whether a process is there and not a zombie: an exited child nobody has
+ * reaped keeps its pid, and `kill(pid, 0)` calls it alive, while its
+ * `cmdline` reads empty (`running-code.md`). */
+static int process_alive(pid_t pid)
+{
+	char path[64];
+	char byte;
+	int  fd;
+	int  alive;
+
+	(void)snprintf(path, sizeof(path), "/proc/%ld/cmdline", (long)pid);
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		return 0;
+	}
+	alive = read(fd, &byte, 1u) == 1;
+	(void)close(fd);
+	return alive;
+}
+
 /* The stop, which is the inverse `backend.start` declares. */
 static void a_stop_goes_through_the_socket(void)
 {
@@ -1098,7 +1118,6 @@ static void a_stop_goes_through_the_socket(void)
 	char           message[NCFG_ERROR_MAX];
 	char           path[512];
 	char           socket_path[512];
-	long long      deadline;
 	pid_t          running = recorded_pid("wlan-test0");
 
 	printf("\n-- stopping one\n");
@@ -1113,12 +1132,15 @@ static void a_stop_goes_through_the_socket(void)
 	check(ncfg_supplicant_pid_path(run_dir, "wlan-test0", path, sizeof(path), NULL, 0) &&
 	    !testdir_exists(path),
 	    "  and the pid file goes with it, so 0080 cannot recur");
-	deadline = now_ms() + 3000;
-	while (running > 0 && now_ms() < deadline && kill(running, 0) == 0) {
-		pause_briefly();
-	}
-	check(running > 0 && kill(running, 0) != 0 && errno == ESRCH,
-	    "  and the supplicant it was told to stop has gone");
+	/*
+	 * **At once, with no grace period** (10.650). This waited up to three
+	 * seconds for the fake to go, which is the window the stop itself left
+	 * open: the fake answers `OK` and exits on its next turn, as a real one
+	 * does. The process is asked through `/proc`, not through
+	 * `running_pid`, because the stop removes the pid file that reads.
+	 */
+	check(running > 0 && !process_alive(running),
+	    "  and the supplicant it was told to stop has gone by the time the stop returns");
 
 	/* Nothing running is the state the op was asked to produce. */
 	message[0] = '\0';

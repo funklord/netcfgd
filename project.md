@@ -12597,6 +12597,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.650 The supplicant's stop had 10.649's shape too, and the class is closed
+
+Derived from 10.649 rather than found: that fault's shape -- a stop that
+returns while the process it stopped is still exiting -- was looked for in
+every backend stop. dnsmasq, openvpn, the DHCP clients, radvd, autoip and
+pppoe all wait; **wpa_supplicant's did not**, being the other stop that speaks
+a control socket. It sent `TERMINATE`, took `OK`, and removed the pid file at
+once, so the next observation read a supplicant still exiting as absent, and
+a start that followed -- the next apply, or a revert -- began a second one
+whose control socket the first removed on its way out. A plan's own restart
+of a supplicant is the wedged case only, where the stop fails first, so the
+exposure is across applies rather than within one; it is radvd's ending in
+10.566.
+
+The fix is 10.649's: wait at most 3 s for `ncfg_supplicant_running_pid` to
+answer 0, and keep the pid file of one that will not go. **The test had
+been hiding it**: `supplicant_launch_test` waited up to three seconds for the
+fake to go after the stop returned, which is the window the stop left open.
+It now asks `/proc/<pid>/cmdline` the moment the stop returns -- not
+`running_pid`, which reads the file the stop removes -- and with the wait
+taken out fails three runs of three.
+
+So the 10.566 table is complete: every backend netcfgd stops waits for the
+process to go before its record does.
+
 ## 10.649 An access point restarted for any changed field could be left dead
 
 Found by 10.648's rig, and not specific to its key. Restarting an access
