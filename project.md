@@ -12597,6 +12597,40 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.651 A fuzz target for block list lines, and two hunts that found nothing
+
+A `/go` run's bug hunt, 2026-11-01, after the known backlog was done.
+
+**`block_list`, the ninth fuzz target.** `ncfg_block_list_name_of_line` is
+the only thing between a file downloaded from a list's server and dnsmasq's
+configuration -- each name it returns becomes an `address=/name/` line, where
+a `/` would start a target and a newline a directive -- and no target reached
+it, because it reads a list's lines rather than the document. The harness
+asserts the header's promise: a returned name is terminated inside the
+buffer, lowercase, accepted by `ncfg_block_list_name`, and a fixed point when
+given back as a bare line. Eight hand-written seeds, as the other corpora
+keep. Five minutes of libFuzzer under ASan and UBSan ran 45 million inputs
+and grew the corpus to 171 with no crash. **Sabotage**: with the parser's
+final `ncfg_block_list_name` check removed, replaying that grown corpus
+aborts; restored, it passes -- so a parser handing back a name dnsmasq could
+misread is something the target catches.
+
+**ASan and UBSan over the whole C suite: clean.** `make -C c SANITIZE=1 test`
+in a `git archive` copy, the first full pass since 10.199's 56 binaries; 107
+now, every check passing, no sanitizer report and no leak. A first attempt
+from a copy of only `c/`, `client/` and `tests/live` failed its checks on
+missing witness and packaging files -- fixture absence, not findings -- and
+was rerun whole.
+
+**gcc `-fanalyzer` over the library: 45 warnings, none real among those
+read.** 14 malloc leaks, 13 fd leaks, 9 NULL dereferences, 6 out-of-bounds, 3
+uninitialised. 18 were read against the code and all were the analyzer's
+known shapes: descriptors `dup2`ed in a forked child before `exec`; an array
+NULL only while its count is zero; a partial entry the caller frees because
+the count includes it; an index guarded by `length > 0` it could not relate
+to the allocation. Abandoned on that yield; the remaining 27 are the same
+families by location.
+
 ## 10.650 The supplicant's stop had 10.649's shape too, and the class is closed
 
 Derived from 10.649 rather than found: that fault's shape -- a stop that
