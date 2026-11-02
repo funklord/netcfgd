@@ -489,10 +489,14 @@ REQUIRED_DIFFERENCES = {
 # rest of the help is still held to agreeing -- and a line that goes is a gate
 # going red asking for its entry to be deleted.
 BLOCK_FETCH_USAGE = "  ncfg block fetch [LIST...] download block lists from their `url`\n"
+# 0306's `wifi add --owe`, for the same reason: the Rust proto does not carry
+# the member, so its CLI has no flag to describe.
+OWE_USAGE = ("  --owe                    encrypted with no passphrase (OWE, \"Enhanced Open\"):\n"
+	     "                           not --open, which would not associate with one\n")
 C_ONLY_LINES = {
 	# Both spellings of asking for the usage.
-	"--help": [BLOCK_FETCH_USAGE],
-	"-h": [BLOCK_FETCH_USAGE],
+	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE],
+	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE],
 }
 
 
