@@ -986,6 +986,16 @@ them because no test had ever carried those keys.
 
 **What to pick up next, in order.**
 
+0. **Link fuzznet into netcfgd and make it the one protocol** (holder,
+   2026-11-02; decisions 0308 and 0309; the steps and what this session built
+   on the old premise are in 10.668). The order: link fuzznet into the
+   daemon; give it a node identity and store -- shared with a fuzznetd
+   running beside it under locks, which waits on fuzznet's answer to inbox
+   `20261102T2330Z`; carry the local `ncfg`/GUI socket over fuzznet with
+   netcfgd's requests as extensions; move 10.666's seen-hosts recorder onto
+   the records API in-process; retype `scope.h` onto `fzn_scope_t`. Then
+   10.667's UPnP/NAT-PMP (with its warning) and reading seen hosts back.
+
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
    on this machine. **The modem half has moved and is now narrower than the
