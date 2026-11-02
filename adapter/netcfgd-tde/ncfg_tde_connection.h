@@ -12,6 +12,7 @@
 
 #include <tqstring.h>
 #include <tqstringlist.h>
+#include <tqvaluelist.h>
 
 struct ncfg_client;
 
@@ -67,6 +68,40 @@ public:
 
 	TQString state_line( reach &out );
 
+	/*
+	 * The radio and the network block it is on, as the last state_line()
+	 * found them. Empty where there is no radio, or it has joined nothing a
+	 * block names.
+	 */
+	TQString radio() const { return m_radio; }
+	TQString network() const { return m_network; }
+
+	/*
+	 * What the tray says unasked since the previous state_line(): the client
+	 * library's `ncfg_connectivity_notice`, which the Qt tray says too.
+	 * Empty when nothing moved, and for the first answer after the daemon is
+	 * reached -- that is where things stand, not news.
+	 */
+	TQString notice() const { return m_notice; }
+
+	//! one entry in "Connect to": a saved network the last scan heard
+	struct join_choice {
+		TQString network; //!< the id wifi_connect() takes
+		TQString label;
+		int      signal;
+		bool     current;
+	};
+	/*
+	 * Scan the radio and say which saved networks it heard, by
+	 * `ncfg_join_choices` -- the rule the Qt tray uses. `stale` is the
+	 * daemon's reason where the results are the previous scan's.
+	 */
+	bool scan( TQValueList<join_choice> &out, TQString &stale );
+	//! join a saved network by its id; the `wifi` tier
+	bool wifi_connect( const TQString &network );
+	//! leave whatever the radio is on; the `wifi` tier
+	bool wifi_disconnect();
+
 	//! profiles on this machine, and which is in effect
 	bool profiles( TQStringList &names, TQString &chosen );
 	//! switch; an empty name stops using a profile altogether
@@ -78,6 +113,13 @@ private:
 	bool         m_observe;
 	bool         m_wifi;
 	bool         m_admin;
+	TQString     m_radio;
+	TQString     m_network;
+	TQString     m_notice;
+	//! the previous connectivity answer, so a change can be said
+	bool         m_known;
+	int          m_rung;
+	TQString     m_label;
 
 	void forget_tiers();
 	bool refresh_tiers();

@@ -1785,6 +1785,42 @@ fail:
 	return 0;
 }
 
+/* `online` and `routed` are one state for a notice: both can send traffic. */
+static int rung_routes(ncfg_rung_t rung)
+{
+	return rung >= ncfg_rung_routed;
+}
+
+static char *notice_printf(const char *format, const char *label)
+{
+	size_t span = strlen(format) + strlen(label) + 1u;
+	char  *text = malloc(span);
+
+	if (text) {
+		snprintf(text, span, format, label);
+	}
+	return text;
+}
+
+char *ncfg_connectivity_notice(ncfg_rung_t before, const char *before_label, ncfg_rung_t after,
+                               const char *after_label)
+{
+	const char *was = before_label ? before_label : "";
+	const char *now = after_label ? after_label : "";
+
+	if (rung_routes(after) && (!rung_routes(before) || strcmp(was, now) != 0)) {
+		return notice_printf("Connected to %s.", now);
+	}
+	if (after == ncfg_rung_local && rung_routes(before)) {
+		return notice_printf("%s has no default route: connected, and nowhere to send "
+		                     "traffic.", now);
+	}
+	if (after == ncfg_rung_offline && before != ncfg_rung_offline) {
+		return *was ? notice_printf("Disconnected from %s.", was) : dup_string("Disconnected.");
+	}
+	return NULL;
+}
+
 void ncfg_new_choices_free(ncfg_new_choices_t *choices)
 {
 	if (!choices) {

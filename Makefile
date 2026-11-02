@@ -8,6 +8,7 @@
 #   make               -- build the workspace and link the `ncfg` name
 #   make gui           -- the Qt client, which nothing else builds
 #   make tde           -- the TDE control module and tray, likewise
+#   make tde-container -- compile those where TDE's headers are: a container
 #   make nm            -- the NetworkManager shim, likewise. `make adapters`
 #                         built it until 0276 retired the Rust one, and the
 #                         suite that skips without it says `make nm` now
@@ -112,7 +113,7 @@ CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 # subcommand, so the question is whether it is on PATH.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
+.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde tde-container install-tde deb-tde help
 
 all: build
 
@@ -835,6 +836,39 @@ tde:
 	cmake -S adapter/netcfgd-tde -B $(TDE_BUILD_DIR) \
 		-DCMAKE_INSTALL_PREFIX=$(TDE_PREFIX) $(TDE_CMAKE_ARGS)
 	$(MAKE) -C $(TDE_BUILD_DIR)
+
+# **The TDE front end, compiled where TDE's headers are.** They are not in
+# Debian and are not on most machines -- this one runs TDE and has five of
+# them -- so a change to the tray was code nobody had compiled (10.590). This
+# builds an image from packaging/tde/Dockerfile once, then compiles the
+# working tree's client/ and adapter/netcfgd-tde in it, from a read-only
+# mount copied inside, so nothing is written here. A compile check: nothing
+# is installed or run. Named, so `docker kill` reaches it if it is stopped.
+TDE_IMAGE ?= netcfgd-tde-build:r14.1-trixie
+
+tde-container:
+	@command -v docker >/dev/null 2>&1 || { \
+		echo "tde-container: docker is not installed, and this target is docker"; \
+		exit 1; \
+	}
+	@docker image inspect $(TDE_IMAGE) >/dev/null 2>&1 || \
+		docker build -q -t $(TDE_IMAGE) packaging/tde >/dev/null
+	@docker run --rm --name netcfgd-tde-container-$$$$ -u "$$(id -u):$$(id -g)" \
+		-v "$$PWD:/src:ro" $(TDE_IMAGE) sh -c '\
+		set -e; mkdir -p /tmp/w/adapter; \
+		cp -r /src/client /tmp/w/client; \
+		cp -r /src/adapter/netcfgd-tde /tmp/w/adapter/netcfgd-tde; \
+		rm -rf /tmp/w/adapter/netcfgd-tde/build; \
+		rm -f /tmp/w/client/ncfg_client.o /tmp/w/client/ncfg_json.o \
+			/tmp/w/client/libncfg_client.a; \
+		cd /tmp/w; export HOME=/tmp; \
+		make -s -C client >/dev/null; \
+		cmake -S adapter/netcfgd-tde -B build -DCMAKE_INSTALL_PREFIX=/opt/trinity \
+			>/tmp/cmake.log 2>&1 || { cat /tmp/cmake.log; exit 1; }; \
+		make -s -C build 2>&1 | tee /tmp/build.log | grep -E "error|warning" || true; \
+		test -x build/netcfgd-tde-tray; test -e build/kcm_netcfgd.so || \
+			test -e build/kcm_netcfgd.la'
+	@echo "tde-container: the tray and the control module compile against TDE R14.1"
 
 # cmake's own install step rather than a list of `install -D` lines, because
 # where a kpart and a control-centre desktop file go is TDE's answer and not

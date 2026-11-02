@@ -12626,6 +12626,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.657 The TDE tray joins networks too, and is compiled for the first time here
+
+10.590 left the TDE tray's `Connect to` as "the open half": the rule was in
+the client library already, and the tray could not be built here, since this
+machine runs TDE and has five of its headers. **`make tde-container`** settles
+the second part: an image from `packaging/tde/Dockerfile` -- Debian 13 plus
+trinitydesktop.org's R14.1 repository, its keyring fetched over https -- that
+compiles the working tree's `client/` and `adapter/netcfgd-tde` from a
+read-only mount. Nothing is installed on the host and nothing is run; it is a
+compile check, named so `docker kill` reaches it. The image is about 1.2 GB.
+
+With it, the TDE tray gains what the Qt one has:
+
+- **`Connect to`**: the saved networks the last scan heard, by
+  `ncfg_join_choices`, the radio's network ticked, `Scan for networks`, and
+  `Another network...`, which opens the Qt window -- a new network is a
+  dialog with a passphrase in it, and that dialog is the window's. No scan of
+  its own, as the Qt tray. `Disconnect wifi` beside it.
+- **Notices on a change**, by **`ncfg_connectivity_notice`**, which moved
+  from the Qt tray (10.654) into the client library so the two trays say the
+  same words about the same change; `client_test` holds the rule now and
+  `tray_choices` the Qt conversion. Shown with `KPassivePopup`.
+
+What it still lacks against the Qt tray: the new networks heard (10.652), the
+hidden network (10.653) and `--login` (10.656, which TDE's own autostart
+condition already covers). The first two each open a dialog that exists only
+in Qt, so they wait on whether the TDE tray should launch the Qt dialog by
+SSID or carry a TQt one.
+
+Checked: `make tde-container` compiles the tray and the control module with
+no warning. **Not run**: the TDE tray needs a TDE session and a daemon, and the
+one session on this machine is the holder's desktop.
+
 ## 10.656 The Qt tray starts at login
 
 The TDE tray has had an autostart entry since it was packaged; the Qt one had

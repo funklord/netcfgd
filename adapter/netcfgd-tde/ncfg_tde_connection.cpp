@@ -4,10 +4,13 @@ extern "C" {
 	#include "ncfg_client.h"
 }
 
+#include <stdlib.h>
+
 #include <tdelocale.h>
 
 ncfg_tde_connection::ncfg_tde_connection()
-    : m_client(0), m_observe(false), m_wifi(false), m_admin(false)
+    : m_client(0), m_observe(false), m_wifi(false), m_admin(false), m_known(false),
+      m_rung(0)
 {
 }
 
@@ -90,8 +93,10 @@ TQString ncfg_tde_connection::status_line()
 	char err[256];
 	err[0] = '\0';
 
-	if (!ncfg_client_links(m_client, &links, err, sizeof(err)))
+	if (!ncfg_client_links(m_client, &links, err, sizeof(err))) {
+		m_known = false;
 		return i18n("netcfgd: %1").arg(TQString::fromLocal8Bit(err));
+	}
 
 	/*
 	 * Deliberately a count rather than a verdict. netcfgd's own claim is
@@ -201,10 +206,24 @@ ncfg_tde_connection::reach ncfg_tde_connection::daemon_reach( reach derived )
 	char err[256];
 	err[0] = '\0';
 
-	if (!m_client || !ncfg_client_connectivity(m_client, &answer, err, sizeof(err)))
+	if (!m_client || !ncfg_client_connectivity(m_client, &answer, err, sizeof(err))) {
+		m_known = false;
 		return derived;
+	}
 
 	const ncfg_rung_t rung = answer.rung;
+	const TQString label = TQString::fromUtf8(answer.label ? answer.label : "");
+	/* The notice is decided by the client library, so this tray and the Qt
+	 * one say the same thing about the same change. */
+	if (m_known) {
+		char *said = ncfg_connectivity_notice((ncfg_rung_t)m_rung, m_label.utf8().data(),
+		                                      rung, answer.label ? answer.label : "");
+		m_notice = said ? TQString::fromUtf8(said) : TQString::null;
+		free(said);
+	}
+	m_known = true;
+	m_rung = (int)rung;
+	m_label = label;
 	ncfg_connectivity_free(&answer);
 
 	switch (rung) {
@@ -226,7 +245,13 @@ ncfg_tde_connection::reach ncfg_tde_connection::daemon_reach( reach derived )
 TQString ncfg_tde_connection::state_line( reach &out )
 {
 	out = reach_no_daemon;
-	if (!m_client) return i18n("netcfgd is not reachable");
+	m_notice = TQString::null;
+	m_radio = TQString::null;
+	m_network = TQString::null;
+	if (!m_client) {
+		m_known = false;
+		return i18n("netcfgd is not reachable");
+	}
 
 	ncfg_links_t links;
 	char err[256];
@@ -242,6 +267,7 @@ TQString ncfg_tde_connection::state_line( reach &out )
 			break;
 		}
 	}
+	m_radio = radio;
 
 	if (radio.isEmpty()) {
 		/*
@@ -305,6 +331,7 @@ TQString ncfg_tde_connection::state_line( reach &out )
 
 	const TQString state   = TQString::fromLocal8Bit(status.state ? status.state : "");
 	const TQString network = TQString::fromLocal8Bit(status.network ? status.network : "");
+	m_network = network;
 	TQString display = TQString::fromLocal8Bit(status.name ? status.name : "");
 	if (display.isEmpty())
 		display = TQString::fromLocal8Bit(status.ssid ? status.ssid : "");
@@ -333,4 +360,71 @@ TQString ncfg_tde_connection::state_line( reach &out )
 		                  : i18n(" -- joined, no address");
 
 	return line;
+}
+
+bool ncfg_tde_connection::scan( TQValueList<join_choice> &out, TQString &stale )
+{
+	out.clear();
+	stale = TQString::null;
+	if (!m_client || m_radio.isEmpty()) {
+		m_error = m_client ? i18n("there is no wireless interface")
+		                   : i18n("netcfgd is not reachable");
+		return false;
+	}
+
+	ncfg_scan_t scan;
+	char err[256];
+	err[0] = '\0';
+	/* Synchronous, as the Qt tray's is: the menu has closed by now, and the
+	 * tooltip says what is happening for the seconds the radio takes. */
+	if (!ncfg_client_wifi_scan(m_client, m_radio.local8Bit().data(), &scan, err,
+	                           sizeof(err))) {
+		m_error = TQString::fromLocal8Bit(err);
+		return false;
+	}
+	stale = TQString::fromUtf8(scan.stale ? scan.stale : "");
+
+	ncfg_join_choices_t found;
+	const TQCString current = m_network.utf8();
+	const int built = ncfg_join_choices(scan.items, scan.count, current.data(), &found);
+	ncfg_scan_free(&scan);
+	if (!built) {
+		m_error = i18n("out of memory");
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		join_choice choice;
+		choice.network = TQString::fromUtf8(found.items[i].network);
+		choice.label = TQString::fromUtf8(found.items[i].label);
+		choice.signal = found.items[i].signal;
+		choice.current = found.items[i].current != 0;
+		out.append(choice);
+	}
+	ncfg_join_choices_free(&found);
+	return true;
+}
+
+bool ncfg_tde_connection::wifi_connect( const TQString &network )
+{
+	char err[256];
+	err[0] = '\0';
+	if (!m_client || m_radio.isEmpty() ||
+	    !ncfg_client_wifi_connect(m_client, m_radio.local8Bit().data(),
+	                              network.utf8().data(), err, sizeof(err))) {
+		m_error = err[0] ? TQString::fromLocal8Bit(err) : i18n("there is no wireless interface");
+		return false;
+	}
+	return true;
+}
+
+bool ncfg_tde_connection::wifi_disconnect()
+{
+	char err[256];
+	err[0] = '\0';
+	if (!m_client || m_radio.isEmpty() ||
+	    !ncfg_client_wifi_disconnect(m_client, m_radio.local8Bit().data(), err, sizeof(err))) {
+		m_error = err[0] ? TQString::fromLocal8Bit(err) : i18n("there is no wireless interface");
+		return false;
+	}
+	return true;
 }

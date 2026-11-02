@@ -10,6 +10,7 @@
 #include <tdeglobal.h>
 #include <kprocess.h>
 #include <kshell.h>
+#include <kpassivepopup.h>
 
 #include <tqtimer.h>
 #include <tqtooltip.h>
@@ -22,6 +23,10 @@ enum {
 	ID_TERMINAL_ROOT,
 	ID_CONFIGURE,
 	ID_QUIT,
+	ID_DISCONNECT,
+	ID_JOIN_SCAN = 200,
+	ID_JOIN_OTHER,
+	ID_JOIN_FIRST = 210,
 	ID_PROFILE_NONE = 100,
 	ID_PROFILE_FIRST = 101
 };
@@ -34,6 +39,8 @@ ncfg_tde_tray::ncfg_tde_tray( TQWidget *parent, const char *name )
       DCOPObject("netcfgd"),
       m_connection(new ncfg_tde_connection),
       m_profiles(0),
+      m_join(0),
+      m_disconnect_id(0),
       m_status_id(0)
 {
 	setPixmap(loadIcon("network"));
@@ -64,6 +71,18 @@ void ncfg_tde_tray::build_menu()
 	 */
 	m_status_id = m_menu->insertItem(i18n("netcfgd"), ID_STATUS);
 	m_menu->setItemEnabled(m_status_id, false);
+	m_menu->insertSeparator();
+
+	/*
+	 * Joining first, because it is what most people open this menu for --
+	 * the Qt tray's order. Saved networks the last scan heard, by
+	 * `ncfg_join_choices`, so both trays offer the same list.
+	 */
+	m_join = new TDEPopupMenu(m_menu);
+	m_menu->insertItem(SmallIconSet("network"), i18n("Co&nnect to"), m_join);
+	connect(m_join, TQ_SIGNAL(activated(int)), this, TQ_SLOT(join_chosen(int)));
+	m_disconnect_id = m_menu->insertItem(i18n("&Disconnect wifi"), this,
+	                                     TQ_SLOT(disconnect_radio()), 0, ID_DISCONNECT);
 	m_menu->insertSeparator();
 
 	/*
@@ -170,7 +189,136 @@ void ncfg_tde_tray::refresh()
 	}
 	setPixmap(state_glyph(glyph, "connect_no"));
 
+	/*
+	 * **Said, because a glyph in a corner is easy to miss**, and the first
+	 * sign of a dropped network was otherwise a page that would not load.
+	 * The words are the client library's, so this tray and the Qt one agree.
+	 */
+	if (!m_connection->notice().isEmpty())
+		KPassivePopup::message(i18n("netcfgd"), m_connection->notice(), this);
+
+	m_menu->setItemEnabled(m_disconnect_id, !m_connection->radio().isEmpty());
+	rebuild_join();
 	rebuild_profiles();
+}
+
+void ncfg_tde_tray::rebuild_join()
+{
+	m_join->clear();
+
+	const TQString radio = m_connection->radio();
+	if (radio.isEmpty()) {
+		const int id = m_join->insertItem(i18n("no wireless interface"));
+		m_join->setItemEnabled(id, false);
+		return;
+	}
+	/* Results belong to the radio that heard them. */
+	if (m_heard_radio != radio) {
+		m_heard.clear();
+		m_stale = TQString::null;
+		m_heard_at = TQDateTime();
+		m_heard_radio = radio;
+	}
+
+	if (m_heard_at.isNull()) {
+		/* Said rather than left empty: an empty submenu reads as "nothing
+		 * in range", and nobody has looked. */
+		const int id = m_join->insertItem(i18n("not scanned yet"));
+		m_join->setItemEnabled(id, false);
+	} else {
+		TQString when = i18n("seen at %1").arg(m_heard_at.time().toString("hh:mm"));
+		if (!m_stale.isEmpty())
+			when += i18n(" -- the previous scan's: %1").arg(m_stale);
+		const int header = m_join->insertItem(when);
+		m_join->setItemEnabled(header, false);
+
+		if (m_heard.isEmpty()) {
+			const int id = m_join->insertItem(i18n("no saved network in range"));
+			m_join->setItemEnabled(id, false);
+		}
+		const TQString current = m_connection->network();
+		int at = 0;
+		for (TQValueList<ncfg_tde_connection::join_choice>::ConstIterator it =
+		         m_heard.begin();
+		     it != m_heard.end(); ++it, ++at) {
+			const int id = m_join->insertItem(
+			    TQString::fromLatin1("%1  (%2 dBm)").arg((*it).label).arg((*it).signal),
+			    ID_JOIN_FIRST + at);
+			/* The tick follows the radio rather than the scan: it may have
+			 * moved since. */
+			m_join->setItemChecked(id, (*it).network == current);
+		}
+	}
+
+	m_join->insertSeparator();
+	m_join->insertItem(i18n("&Scan for networks"), ID_JOIN_SCAN);
+	/* A new network is a dialog with a passphrase in it, and that dialog is
+	 * the Qt window's; this tray opens it rather than growing a second. */
+	m_join->insertItem(i18n("&Another network..."), ID_JOIN_OTHER);
+	/* Joining is the `wifi` tier. Greyed rather than hidden, as profiles are. */
+	m_join->setEnabled(m_connection->may_wifi());
+}
+
+void ncfg_tde_tray::scan()
+{
+	TQToolTip::remove(this);
+	TQToolTip::add(this, i18n("scanning %1...").arg(m_connection->radio()));
+
+	TQValueList<ncfg_tde_connection::join_choice> heard;
+	TQString stale;
+	if (!m_connection->scan(heard, stale)) {
+		/* The previous results are kept: still what was last heard, and
+		 * their time says how old. */
+		KPassivePopup::message(i18n("netcfgd"), m_connection->error(), this);
+		refresh();
+		return;
+	}
+	m_heard = heard;
+	m_stale = stale;
+	m_heard_at = TQDateTime::currentDateTime();
+	m_heard_radio = m_connection->radio();
+	refresh();
+
+	/* The menu closed when the scan was chosen, so what it found is said
+	 * where it can be seen without reopening it. */
+	KPassivePopup::message(i18n("netcfgd"),
+	    m_heard.isEmpty() ? i18n("No saved network in range.")
+	                      : i18n("%1 saved network(s) in range -- choose one under "
+	                             "Connect to.").arg(m_heard.count()),
+	    this);
+}
+
+void ncfg_tde_tray::join_chosen( int id )
+{
+	if (id == ID_JOIN_SCAN) {
+		scan();
+		return;
+	}
+	if (id == ID_JOIN_OTHER) {
+		open_window();
+		return;
+	}
+	const int index = id - ID_JOIN_FIRST;
+	if (index < 0 || index >= (int)m_heard.count())
+		return;
+	const ncfg_tde_connection::join_choice choice = m_heard[index];
+	/* The one already joined does nothing: selecting the network a station
+	 * is on can reassociate, a dropped connection for a click that meant
+	 * "yes, this one". */
+	if (choice.network == m_connection->network()) {
+		refresh();
+		return;
+	}
+	if (!m_connection->wifi_connect(choice.network))
+		KMessageBox::sorry(0, m_connection->error(), i18n("netcfgd"));
+	refresh();
+}
+
+void ncfg_tde_tray::disconnect_radio()
+{
+	if (!m_connection->wifi_disconnect())
+		KMessageBox::sorry(0, m_connection->error(), i18n("netcfgd"));
+	refresh();
 }
 
 void ncfg_tde_tray::rebuild_profiles()

@@ -798,6 +798,26 @@ typedef struct {
 int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_choices_t *out);
 void ncfg_new_choices_free(ncfg_new_choices_t *choices);
 
+/*
+ * What a tray says, unasked, when connectivity moved from one answer to the
+ * next; NULL when nothing worth a notice changed. Here for the reason the two
+ * rules above are: both trays say it.
+ *
+ * - **Reaching a default route**, or moving to another network while there:
+ *   "Connected to <label>."
+ * - **Losing the route but keeping the network**, the state that looks fine
+ *   from every angle but a page that will not load.
+ * - **Losing the network**: "Disconnected from <label>.", naming the one
+ *   before.
+ *
+ * Not the climb through `local` on the way up, which every join passes
+ * through for the second a lease takes; and not `routed` against `online`,
+ * which differ only in whether a probe has looked. Labels may be NULL.
+ * Returns a string the caller frees.
+ */
+char *ncfg_connectivity_notice(ncfg_rung_t before, const char *before_label, ncfg_rung_t after,
+                               const char *after_label);
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_inventory_free(ncfg_inventory_t *inventory);
 void ncfg_linksets_free(ncfg_linksets_t *linksets);

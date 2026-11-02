@@ -16,6 +16,7 @@
 #include <QSystemTrayIcon>
 #include <QTimer>
 
+#include <cstdlib>
 #include <vector>
 
 /*
@@ -270,40 +271,19 @@ QString ncfg_tray::line_for(const ncfg_connectivity_row &state)
 }
 
 /*
- * Which changes are worth interrupting somebody for.
- *
- * - **Reaching somewhere to route through**, or moving to another network
- *   while there: the join worked, or the radio roamed onto something else.
- * - **Losing the route but keeping the network**: the one that looks fine
- *   from every angle but a page that will not load.
- * - **Losing the network.**
- *
- * Not the climb through `local` on the way up: a join passes through it for
- * the second a lease takes, and announcing it would be a notice for every
- * join that then says nothing wrong. And not `routed` against `online`: the
- * icon draws them as one, because the difference is whether a probe looked.
+ * Which changes are worth interrupting somebody for: `ncfg_connectivity_notice`
+ * decides, because the TDE tray says the same things. This is the conversion.
  */
 QString ncfg_tray::notice_for(const ncfg_connectivity_row &before,
                               const ncfg_connectivity_row &after)
 {
-	const ncfg_reach was = reach_of(before.rung);
-	const ncfg_reach now = reach_of(after.rung);
-
-	if (now == ncfg_reach::routed &&
-	    (was != ncfg_reach::routed || before.label != after.label)) {
-		return QStringLiteral("Connected to %1.").arg(after.label);
-	}
-	if (now == ncfg_reach::local && was == ncfg_reach::routed) {
-		return QStringLiteral("%1 has no default route: connected, and nowhere to send "
-		                      "traffic.")
-		    .arg(after.label);
-	}
-	if (now == ncfg_reach::offline && was != ncfg_reach::offline) {
-		return before.label.isEmpty()
-		           ? QStringLiteral("Disconnected.")
-		           : QStringLiteral("Disconnected from %1.").arg(before.label);
-	}
-	return QString();
+	const QByteArray was = before.label.toUtf8();
+	const QByteArray now = after.label.toUtf8();
+	char *said = ncfg_connectivity_notice(before.rung, was.constData(), after.rung,
+	                                      now.constData());
+	const QString out = said ? QString::fromUtf8(said) : QString();
+	free(said);
+	return out;
 }
 
 QList<ncfg_tray_choice> ncfg_tray::choices(const QList<ncfg_access_point_row> &scanned,

@@ -38,6 +38,9 @@ for a daemon whose core has none:
 
 `NCFG_CLIENT_DIR` points at `client/` by default and can be overridden.
 
+Where TDE's headers are not installed, `make tde-container` at the top of the
+tree compiles both in a container that has them (`packaging/tde/Dockerfile`).
+
 ## What the tray does
 
 - **Status**, as the first, disabled menu item, the way tdepowersave's is,
@@ -48,6 +51,13 @@ for a daemon whose core has none:
   answers. It read `is_open()` once, so a machine with no network at all
   drew the connected glyph as long as netcfgd was running, which is the
   single case somebody looks at a tray to find out about.
+- **Connect to**, the saved networks the last scan heard -- the Qt tray's
+  list, from the same rule in `client/` -- with the radio's network ticked,
+  `Scan for networks`, and `Another network...`, which opens the Qt window
+  for the dialog a new network needs. Nothing scans until asked. `Disconnect
+  wifi` sits beside it. Both are the `wifi` tier.
+- **A notice when the network comes and goes**, in the Qt tray's words,
+  which are the client library's.
 - **Profile**, an exclusive submenu -- the same mode switcher the Qt tray
   offers, with "this machine's own configuration" at the top because a null
   selection is the default rather than a profile named none. Greyed when the

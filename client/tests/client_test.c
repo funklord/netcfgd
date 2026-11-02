@@ -2250,6 +2250,50 @@ static void new_choices_are_the_unsaved_networks_heard(void)
 	ncfg_new_choices_free(&choices);
 }
 
+/* What a tray says unasked when connectivity moves. Both trays say it. */
+static void notice_is(const char *what, char *got, const char *wanted)
+{
+	if (wanted) {
+		equals(what, got ? got : "(nothing)", wanted);
+	} else {
+		ok(what, got == NULL, got);
+	}
+	free(got);
+}
+
+static void a_tray_says_when_the_network_moves(void)
+{
+	notice_is("joining says where",
+	    ncfg_connectivity_notice(ncfg_rung_offline, "", ncfg_rung_routed, "home"),
+	    "Connected to home.");
+	notice_is("the second a lease takes is not news",
+	    ncfg_connectivity_notice(ncfg_rung_offline, "", ncfg_rung_local, "home"), NULL);
+	notice_is("and the route after it is",
+	    ncfg_connectivity_notice(ncfg_rung_local, "home", ncfg_rung_routed, "home"),
+	    "Connected to home.");
+	notice_is("moving to another network is said",
+	    ncfg_connectivity_notice(ncfg_rung_routed, "home", ncfg_rung_routed, "cafe"),
+	    "Connected to cafe.");
+	notice_is("a probe confirming the route is not a change",
+	    ncfg_connectivity_notice(ncfg_rung_routed, "home", ncfg_rung_online, "home"), NULL);
+	notice_is("nor a probe going quiet",
+	    ncfg_connectivity_notice(ncfg_rung_online, "home", ncfg_rung_routed, "home"), NULL);
+	notice_is("losing the route on a network is said",
+	    ncfg_connectivity_notice(ncfg_rung_online, "home", ncfg_rung_local, "home"),
+	    "home has no default route: connected, and nowhere to send traffic.");
+	notice_is("losing the network names it",
+	    ncfg_connectivity_notice(ncfg_rung_routed, "home", ncfg_rung_offline, ""),
+	    "Disconnected from home.");
+	notice_is("from a network with no route too",
+	    ncfg_connectivity_notice(ncfg_rung_local, "home", ncfg_rung_offline, NULL),
+	    "Disconnected from home.");
+	notice_is("and with no name, says so plainly",
+	    ncfg_connectivity_notice(ncfg_rung_local, NULL, ncfg_rung_offline, NULL),
+	    "Disconnected.");
+	notice_is("and nothing when nothing moved",
+	    ncfg_connectivity_notice(ncfg_rung_offline, "", ncfg_rung_offline, ""), NULL);
+}
+
 /*
  * The document's networks, which is a different list from a scan's.
  *
@@ -2717,6 +2761,7 @@ int main(int argc, char **argv)
 	saved_networks_come_from_the_document_not_a_scan();
 	join_choices_are_the_saved_networks_heard();
 	new_choices_are_the_unsaved_networks_heard();
+	a_tray_says_when_the_network_moves();
 	credentials_and_eap_are_read_as_written();
 	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();
