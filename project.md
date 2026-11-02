@@ -1144,8 +1144,11 @@ deciding does not start from zero.
 
 **A trial on ESP8266 and ESP32 is wanted, later** (holder, 2026-11-02): after
 the OpenWrt routers in section 10, and probably only once the holder's
-HAL9001, a hardware abstraction layer for microcontrollers, is finished. That
-project is not on this machine, so what it will offer is unknown here. Read
+HAL9001 is finished. HAL9001 is a microcontroller HAL at a higher level than
+usual, meant to make switching between 8-, 16-, 32-bit and larger parts, and
+between quite different architectures, seamless. It has had ATmega8, PIC16,
+8051, MSP430 and STM32F103 support; in principle it is a better Arduino. Its
+tree is not on this machine, so what it would give netcfgd is unknown here. Read
 what follows with the C port in mind: the measurements below were taken on
 the Rust tree.
 
