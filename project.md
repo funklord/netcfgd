@@ -995,6 +995,8 @@ them because no test had ever carried those keys.
    netcfgd's requests as extensions; move 10.666's seen-hosts recorder onto
    the records API in-process; retype `scope.h` onto `fzn_scope_t`. Then
    10.667's UPnP/NAT-PMP (with its warning) and reading seen hosts back.
+   **Linking and the identity are done (10.669)**, and the shared store is
+   answered there: one store is one node, the claim's face writes.
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
@@ -12630,6 +12632,112 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.669 The daemon is a fuzznet node: one store, the claim, its identity
+
+**Built** (2026-11-02): fuzznet's objects are linked into `c/`, and the
+daemon opens a fuzznet store at start, takes its claim, and loads or makes
+the node's identity -- 10.668's first step, and the identity half of its
+second. `c/src/node/` is the seam; nothing else in the tree includes a
+fuzznet header, and `ncfg/node.h` names no fuzznet type.
+
+**The shared store is answered, and it settles 0308's "own identity".**
+fuzznet's sec 827, replying to inbox `20261102T2330Z`: a store has one
+identity and one writer. The first process to take the store's `claim` (an
+exclusive flock) is its **face** and alone writes; any other is a
+**follower**, which reads the store and forwards writes over the socket the
+face names in the store's `face` file, and takes the claim when the face
+goes. So the holder's "fuzznetd and netcfgd ... lock-writing the same files"
+makes them one node in two processes, and 0308's "its own identity" is the
+case of netcfgd running alone -- the default, needing no fuzznetd. A follower
+here loads the identity, writes nothing, and makes none if the store has none.
+
+**netcfgd holds the claim only while it boots, and that was a fault found
+before committing.** The first version kept it, as fuzznetd does. But a face
+serves the store -- its socket, the rounds that carry records to the estate
+-- and that loop is fuzznetd's; netcfgd does not run it yet. So a netcfgd
+that started first and kept the claim made any fuzznetd started after it a
+follower, forwarding every client to a face socket nobody served: fuzznetd
+broken by an ordering. Now the claim is taken to load or make the identity
+(only a face may make one) and given back at once; fuzznetd's follower
+retries it every second and becomes the face. When netcfgd runs the node
+loop itself it keeps the claim it takes -- the point at which "no fuzznetd
+should be necessary" is fully true rather than true of the identity.
+
+**Where the store is, decided from the aims:**
+
+- **fuzznet's own default for the user** (`fzn_cli_default_dir`:
+  `$XDG_DATA_HOME/fuzznet`, else `~/.local/share/fuzznet`), so fuzznetd and
+  netcfgd started as root on a router meet in one store without being told
+  -- the holder's requirement, met by default rather than by configuration.
+- **The account's home from the password database where neither variable is
+  set**, which is how a service is usually started; it is where a fuzznetd
+  run from that account's shell would look.
+- **`--fuzznet-dir` / `NCFG_FUZZNET_DIR`** name another, spelled as fuzznetd
+  spells it. A named store is never made, fuzznet's rule: a mistyped path is
+  refused rather than becoming a second node. An empty one asks for none.
+- **No default store for a daemon on a non-default `--run-dir`.** That daemon
+  is a test or a second instance, and the default would hand it the
+  operator's own identity, or take the claim on a running fuzznetd's store.
+  Every test in the tree runs on its own run directory, so none of them
+  touches a home directory unless it names a store.
+
+**A node that will not open is logged and changes nothing else**: the
+network is configured as before. The daemon writes `<run>/node` -- `key=`
+and `store=`, and no role, since which process serves the store can change
+after netcfgd opens it -- and removes it when it stops; `ncfg status` prints it
+as a section of its own, read from that file rather than the observation,
+because a node is not network state and the observed model is frozen (0020).
+
+**Measured, and what it cost:** the installed program grew 78,016 bytes over
+the tree just before (1,409,376 to 1,487,392), nearly all of it Monocypher
+and the identity it signs with; `size-budget.txt` carries it. Linked from an
+archive of fuzznet's objects, so a link takes only what is called -- a test
+that never opens a node takes nothing of fuzznet. **The first link grew it
+366 KB**: fuzznet builds `-Os -g` by default and its debug sections came
+along, so `c/` builds it with `-Os` through the environment, where fuzznet's
+`CFLAGS ?=` takes it and its own `-std=c11` and warnings still append.
+fuzznet is built into `c/fuzznet-build/`, not the bridge's `fuzznet/build/`:
+two builds into one directory from a parallel `make` are two writers.
+
+**Checked:** `tests/node_test.c`, 21 checks against a real file store and a
+real flock -- where the store is in each case, the identity made once and
+loaded after, **the claim free while the node is open**, the identity loaded
+and nothing made with another process holding the claim, a named store that
+is not there refused, and a store missing its anchor refused by name and
+left unwritten. Sabotaged: keeping the claim turns three checks red. And
+the real programs on scratch directories, both orders: netcfgd first, then
+the fuzznetd built beside it on the same store -- fuzznetd booted as the
+face with netcfgd's key and wrote `face`; fuzznetd first, then netcfgd --
+which loaded the same key "beside the process serving it". `ncfg status`
+showed the node, `<run>/node` went at SIGTERM, and nothing was left running.
+
+**Next, from 10.668's list:** the recorder (10.666) forwarded to the face
+named in the store's `face` file -- the conversation `c/src/host/seen.c`
+already has, found from the store rather than from fuzznetd's default
+socket; then the scope table retyped onto `fzn_scope_t`.
+
+**And how netcfgd becomes a face that serves, answered by fuzznet** (inbox
+`20261102T2329Z`, its sec 831, built in its `f12ee4b`). Writing records
+in-process and 0309's local socket both need it. The node loop is already
+one call, `fzn_daemon_main(argc, argv, &ext)` in `node/daemon.h` --
+options, store, claim, face or follower, both hops, the rounds; fuzznetd's
+own `main` is that call with no extension. An extension (`fzn_daemon_ext_t`)
+adds options, local verbs, remote request types, journal kinds and settings
+(`node/test/ext_daemon.c` is the worked example), and since `f12ee4b` it
+takes the caller's own descriptors (`fds`, up to 16, asked each pass),
+`ready` for each that is readable, and a `tick` about once a second. So
+**netcfgd's poll loop would move inside the node's**: one loop owns the
+process's descriptors, because two threads would be two writers of one
+store (sec 827).
+
+**One cost to weigh before building on it, and it is netcfgd's to weigh:**
+fuzznet's caution that while a round waits in turn on a peer the loop polls
+neither its own descriptors nor the caller's, for up to a few seconds. For
+this daemon that is a few seconds in which an `ncfg` request, a netlink
+event and a confirm window's deadline all wait. Measuring how long a round
+holds the loop on a real estate, and whether fuzznet can bound it, comes
+before moving the reconcile loop into it.
+
 ## 10.668 fuzznet is linked into netcfgd: 0269 is superseded
 
 The holder, 2026-11-02, on being asked what 0269 was: fuzznet "should be
@@ -12677,7 +12785,8 @@ Whether fuzznet's store is safe for two processes today is fuzznet's to say.
 Measured here only as far as `claim/claim_file.c`, an exclusive `flock`;
 nothing found says a node re-reads its in-memory state when the other writes.
 Signalled to fuzznet's inbox, `20261102T2330Z`, with the recorder as the
-caller. **Step 2 above waits on that answer**; step 1, linking, does not.
+caller -- **and answered** by fuzznet's sec 827: one store is one identity,
+and the claim's face is its only writer. 10.669 has what that settles.
 
 **The first steps, in order**: link fuzznet into `c/` (its objects, as
 `bridge/Makefile` already does, minus the program's `main`); give the daemon a

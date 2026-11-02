@@ -186,16 +186,99 @@ EXAMPLES = examples/live_association examples/live_firewall
 
 examples: $(EXAMPLES)
 
-examples/%: examples/%.c $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+examples/%: examples/%.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $(LIB_OBJS)
 
+# FUZZNET, LINKED IN (0308)
+#
+# netcfgd is a fuzznet node, so fuzznet's objects are part of what this links:
+# the submodule at its pinned commit, built into a directory of this build's
+# own and archived. **An archive, so the linker takes what is referenced** and
+# the program grows by the node it actually uses rather than by all of
+# fuzznet; a test that never opens a node pulls in nothing of it.
+#
+# Fetched here when absent, and the build FAILS when it cannot be: the reasons
+# are `bridge/Makefile`'s, which fetches the same submodule for the same
+# argument -- an empty directory a guard reads as "not available" is a build
+# that succeeds having built less than it was asked for. `--recursive`
+# because fuzznet's crypto is Monocypher, its own submodule, and fuzznet's
+# build skips the bindings with a notice rather than failing without it.
+#
+# **Its own build directory**, not `../fuzznet/build`, which the bridge builds
+# into: two builds of one tree into one directory, from a top-level `make -j`,
+# is two writers of the same objects.
+FUZZNET       = ../fuzznet
+FUZZNET_BUILD = fuzznet-build
+FUZZNET_LIB   = fuzznet.a
+# fuzznet's feature flags, as `bridge/Makefile` names them: a header compiled
+# under different flags from the object it calls is the quietest kind of
+# wrong.
+FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
+		-DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
+# **Without `-g`, unless this build is a debug one.** fuzznet's own default is
+# `-Os -g`, and its debug sections rode into the daemon: the first link of the
+# node grew the installed program by 366 KB, of which about 21 KB was code
+# (project.md 10.669). Given through the environment because fuzznet sets
+# `CFLAGS ?=` and then appends its warnings and `-std=c11`, which a
+# command-line `CFLAGS` would discard.
+FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os)
+# The system libraries the objects decided they need, asked of the archive
+# with `nm` for the reason `bridge/Makefile` gives (fuzznet probes for zstd,
+# so naming it here would be a claim about another tree's configuration) --
+# and **as-needed**, because the archive holds objects the link may not take,
+# and a NEEDED entry for a library nothing calls is what `make linkage` reads.
+FUZZNET_SYSLIBS = $(shell nm $(FUZZNET_LIB) 2>/dev/null | grep -q ' U ZSTD_' && \
+		  echo -Wl,--as-needed -lzstd -Wl,--no-as-needed)
+
+# Only the node module includes fuzznet, so only it is given fuzznet's paths:
+# nothing else in this tree may reach a fuzznet header (`ncfg/node.h` names no
+# fuzznet type), and the flags stay out of every other object.
+NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS)
+NODE_SRCS   = $(filter src/node/%,$(SRCS))
+src/node/%.o: CFLAGS += $(NODE_CFLAGS)
+src/node/node.o: | $(FUZZNET_LIB)
+
+# Re-archived only when an object is newer than the archive, so a build with
+# nothing to do relinks nothing: make compares the archive's time after this
+# runs, and an untouched one leaves the program alone. The objects that define
+# `main` are left out, asked of the objects with `nm` rather than guessed from
+# their names -- `bridge/Makefile` says what the guess cost.
+$(FUZZNET_LIB): FORCE
+	@if [ ! -e $(FUZZNET)/Makefile ] || [ ! -e $(FUZZNET)/monocypher/src/monocypher.c ]; then \
+		if ! command -v git >/dev/null 2>&1; then \
+			echo "c: fuzznet is absent and git is not installed to fetch it." >&2; \
+			exit 1; \
+		fi; \
+		if ! git -C .. rev-parse --git-common-dir >/dev/null 2>&1; then \
+			echo "c: fuzznet is absent and this is not a git checkout," >&2; \
+			echo "c:   so there is no gitlink saying which commit to fetch." >&2; \
+			exit 1; \
+		fi; \
+		echo "c: fetching the fuzznet submodule at the commit this tree pins"; \
+		git -C .. submodule update --init --recursive -- fuzznet || { \
+			echo "c: could not fetch the fuzznet submodule." >&2; \
+			exit 1; \
+		}; \
+	fi
+	@CFLAGS='$(FUZZNET_CFLAGS)' $(MAKE) --no-print-directory -s -C $(FUZZNET) \
+		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) all
+	@if [ ! -e $@ ] || [ -n "$$(find $(FUZZNET_BUILD) -name '*.o' -newer $@ | head -1)" ]; then \
+		objects=$$(find $(FUZZNET_BUILD) -name '*.o' | sort | while read -r o; do \
+			nm "$$o" 2>/dev/null | grep -qE ' [TtWw] main$$' || echo "$$o"; \
+		done); \
+		[ -n "$$objects" ] || { echo "c: fuzznet built no objects" >&2; exit 1; }; \
+		rm -f $@; \
+		echo "  AR $@"; \
+		$(AR) rcs $@ $$objects; \
+	fi
+
 # The library last on the line, because it is an archive: the objects that need
 # it are listed before it or the linker has already walked past what it wanted.
-$(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB)
-	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+$(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
+	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The second name, made rather than installed -- see the header.
 $(PROGRAM_LINK): $(PROGRAM)
@@ -241,8 +324,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
-tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The two tests that link more than the library, because what they check is not
 # in the library: the entry points and the descriptor loop are under
@@ -254,21 +337,21 @@ tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) .build-flags
 # for the reason 0263 gives -- a library never exits and never owns a `poll`
 # that decides when a process stops. `world_test` and `answer_test` are the
 # other two halves of the same sentence.
-tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
-tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The same two, for the same reason: the four seams a reconcile pass reaches
 # the machine through and the request dispatcher are `src/main/`'s work --
 # owning the apply lock, the netlink socket and the connections an event is
 # written to is what that directory is for.
-tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
-tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # A parse and a check of every source, writing nothing.
 #
@@ -296,8 +379,17 @@ tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .b
 # reason it was noticed.
 SYNTAX_CFLAGS = $(filter-out -MMD -MP,$(CFLAGS))
 
-syntax:
-	@$(CC) $(SYNTAX_CFLAGS) -Werror -fsyntax-only $(SRCS) $(PROGRAM_SRCS) $(SHARED_SRCS)
+#
+# **Two invocations, because the node module is compiled with fuzznet's paths
+# and flags and nothing else is** (`NODE_CFLAGS` above). One command over every
+# source could not find fuzznet's headers, which is how the first run of this
+# gate after fuzznet was linked failed; giving every source the paths would
+# let anything include fuzznet unnoticed. The fuzznet archive is a
+# prerequisite only so that a fresh clone has the submodule to read.
+syntax: | $(FUZZNET_LIB)
+	@$(CC) $(SYNTAX_CFLAGS) -Werror -fsyntax-only $(filter-out $(NODE_SRCS),$(SRCS)) \
+		$(PROGRAM_SRCS) $(SHARED_SRCS)
+	@$(CC) $(SYNTAX_CFLAGS) $(NODE_CFLAGS) -Werror -fsyntax-only $(NODE_SRCS)
 	@printf 'syntax: %s read %s source(s) with no warning\n' "$(CC)" \
 		"$(words $(SRCS) $(PROGRAM_SRCS) $(SHARED_SRCS))"
 
@@ -381,8 +473,8 @@ fuzz-replay: $(FUZZ_REPLAYS)
 # One call, so `$(filter %.c,$^)` rather than `$^`: the archive and the stamp
 # are prerequisites that must not reach the compiler, which is the hazard
 # `build-and-commit.md` names about a compile-and-link rule.
-fuzz/%_replay: fuzz/%.c fuzz/fuzz_replay.c fuzz/fuzz_text.c $(SHARED_OBJS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) -Ifuzz $(filter %.c,$^) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+fuzz/%_replay: fuzz/%.c fuzz/fuzz_replay.c fuzz/fuzz_text.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) -Ifuzz $(filter %.c,$^) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The exploring half. Not reached by `all` or `test`: it needs clang, and a
 # fuzzer in a gate is a gate whose verdict depends on where its seed took it.
@@ -421,8 +513,8 @@ fuzz/%_fuzz: fuzz/%.c fuzz/fuzz_libfuzzer.c fuzz/fuzz_text.c $(FUZZ_LIB)
 clean:
 	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) $(EXAMPLES) \
 	    $(DEPS) $(FUZZ_REPLAYS) $(addsuffix .d,$(FUZZ_REPLAYS)) $(FUZZ_PROGRAMS) \
-	    .build-flags
-	@# The one directory cleared wholesale, and only because this build made
+	    .build-flags $(FUZZNET_LIB)
+	@# Two directories cleared wholesale, and only because this build made
 	@# it: every object under it is one of ours, and the guard is the one
 	@# `build-and-commit.md` asks for -- non-empty, relative, and not a path
 	@# that could resolve to a source tree.
@@ -434,6 +526,15 @@ clean:
 	if [ -d "$(FUZZ_BUILD_DIR)" ]; then \
 		echo "clean: removing $(FUZZ_BUILD_DIR)"; \
 		rm -rf "$(FUZZ_BUILD_DIR)"; \
+	fi
+	@case "$(FUZZNET_BUILD)" in \
+	"") echo "clean: FUZZNET_BUILD is empty, refusing to remove anything"; exit 1 ;; \
+	/*) echo "clean: FUZZNET_BUILD is absolute ($(FUZZNET_BUILD)), refusing"; exit 1 ;; \
+	*..*) echo "clean: FUZZNET_BUILD escapes the tree, refusing"; exit 1 ;; \
+	esac; \
+	if [ -d "$(FUZZNET_BUILD)" ]; then \
+		echo "clean: removing $(FUZZNET_BUILD)"; \
+		rm -rf "$(FUZZNET_BUILD)"; \
 	fi
 
 # Read back what the compiler wrote. A `.d` that is generated and never

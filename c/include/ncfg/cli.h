@@ -353,6 +353,14 @@ void ncfg_cli_print_version(void);
 void ncfg_cli_print_status(const ncfg_observed_t *observed);
 
 /*
+ * The daemon's fuzznet node, from what it published at `<run_dir>/node`
+ * (`ncfg/node.h`), or nothing where there is no such file -- a daemon with no
+ * node, or none running. Read from the file rather than the observation: the
+ * node is not network state, and the observed model is frozen (0020).
+ */
+void ncfg_cli_print_node(const char *run_dir);
+
+/*
  * Put the daemon's answer to who set the regulatory domain on an observation
  * this program took itself.
  *

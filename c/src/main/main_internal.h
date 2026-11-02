@@ -181,6 +181,8 @@ typedef struct ncfg_main_options {
 	const char *factory_dir;
 	const char *run_dir;
 	const char *socket;
+	/* `--fuzznet-dir`; NULL leaves it to the environment and `ncfg/node.h`. */
+	const char *fuzznet_dir;
 	int         apply_on_start;
 	int         poll_config;
 	/*

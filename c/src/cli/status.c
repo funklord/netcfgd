@@ -532,6 +532,59 @@ static void print_regdom(const ncfg_observed_t *observed)
 	ncfg_out_writef("wireless regulatory domain: %s\n", observed->regdom);
 }
 
+/* The value after `name=` on its own line of `text`, into `out`, or 0. */
+static int node_value(const char *text, const char *name, char *out, size_t out_size)
+{
+	size_t      length = strlen(name);
+	const char *line = text;
+
+	while (line && *line) {
+		const char *end = strchr(line, '\n');
+		size_t      span = end ? (size_t)(end - line) : strlen(line);
+
+		if (span > length && strncmp(line, name, length) == 0 && line[length] == '=') {
+			span -= length + 1u;
+			if (span >= out_size) {
+				return 0;
+			}
+			memcpy(out, line + length + 1u, span);
+			out[span] = '\0';
+			return 1;
+		}
+		line = end ? end + 1 : NULL;
+	}
+	return 0;
+}
+
+void ncfg_cli_print_node(const char *run_dir)
+{
+	char  path[1100];
+	char  text[2400];
+	char  key[80];
+	char  store[1100];
+	FILE *file;
+	size_t got;
+
+	if (!run_dir) {
+		return;
+	}
+	(void)snprintf(path, sizeof(path), "%s/node", run_dir);
+	file = fopen(path, "r");
+	if (!file) {
+		return;
+	}
+	got = fread(text, 1u, sizeof(text) - 1u, file);
+	(void)fclose(file);
+	text[got] = '\0';
+	if (!node_value(text, "key", key, sizeof(key)) ||
+	    !node_value(text, "store", store, sizeof(store))) {
+		return;
+	}
+	ncfg_out_line("");
+	ncfg_out_writef("fuzznet node: %s\n", key);
+	ncfg_out_writef("  its store: %s\n", store);
+}
+
 void ncfg_cli_take_regdom_setter(ncfg_observed_t *mine, const ncfg_observed_t *theirs)
 {
 	if (!mine || !theirs || !mine->regdom || mine->regdom_set_by || !theirs->regdom ||

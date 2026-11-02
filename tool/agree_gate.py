@@ -382,6 +382,12 @@ DAEMON_DIFFERENCES = {
 		# asking of it. project.md 10.247.
 		("c", "  --supported            what this build carries out, as JSON lines, asked"),
 		("c", "                         of the code that decides rather than listed"),
+		# `--fuzznet-dir` is the C's alone because fuzznet is linked into the C
+		# (0308, project.md 10.669): the retired Rust has no node to keep a
+		# store for.
+		("c", "  --fuzznet-dir PATH     this node's fuzznet store, or $NCFG_FUZZNET_DIR;"),
+		("c", "                         default fuzznet's own, for a daemon on the default"),
+		("c", "                         --run-dir only. Empty for none"),
 	],
 }
 

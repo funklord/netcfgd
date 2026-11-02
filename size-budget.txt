@@ -1068,4 +1068,12 @@ netcfgd
 # +4,272.
 # And DNS interception over IPv6, an IPv6 forward in the rule builder and
 # its decoder (decision 0305), +24.
-total 1391424
+# And fuzznet linked in, the daemon a node with an identity of its own
+# (decision 0308, project.md 10.669): Monocypher, the identity, the claim
+# and the file store, +78,016 over the 1,409,376 the tree measured just
+# before it -- which was itself 17,952 over the total above, inside the
+# tolerance, from the commits since that line was written. Linked from an
+# archive, so only what the node calls came in; built without fuzznet's
+# default `-g`, which had added 288 KB of debug sections on the first try.
+# Measured again with `ncfg status`'s node section in: 1,491,568.
+total 1491568

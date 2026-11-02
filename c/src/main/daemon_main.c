@@ -38,6 +38,7 @@
 
 #include "loop_internal.h"
 
+#include "ncfg/node.h"
 #include "ncfg/seen.h"
 #include "ncfg/cli.h"
 #include "ncfg/config.h"
@@ -82,6 +83,9 @@ static const char usage_text[] =
     "                         Read before --config-dir, which overrides it\n"
     "  --run-dir PATH         default " NCFG_RUN_DIR_DEFAULT ", or $NCFG_RUN_DIR\n"
     "  --socket PATH          default " NCFG_RUN_DIR_DEFAULT "/netcfgd.sock\n"
+    "  --fuzznet-dir PATH     this node's fuzznet store, or $" NCFG_FUZZNET_DIR_ENV ";\n"
+    "                         default fuzznet's own, for a daemon on the default\n"
+    "                         --run-dir only. Empty for none\n"
     "  --no-apply-on-start    observe and watch, but change nothing until asked\n"
     "  --poll-config          use mtime polling rather than inotify\n"
     "  --supported            what this build carries out, as JSON lines, asked\n"
@@ -368,6 +372,11 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
 		} else if (strcmp(argument, "--socket") == 0) {
 			if (!value_of(argc, argv, &at, &options->socket)) {
 				*code = fail("--socket needs a value");
+				return 0;
+			}
+		} else if (strcmp(argument, "--fuzznet-dir") == 0) {
+			if (!value_of(argc, argv, &at, &options->fuzznet_dir)) {
+				*code = fail("--fuzznet-dir needs a value");
 				return 0;
 			}
 		} else if (strcmp(argument, "--no-apply-on-start") == 0) {
@@ -805,6 +814,52 @@ static void report_writability(const char *config)
 	    "`systemctl cat netcfgd` shows what yours says");
 }
 
+/*
+ * This daemon's fuzznet node (0308), or NULL -- and NULL is not a failure of
+ * the daemon. `ncfg/node.h` says where the store is and why a daemon on
+ * another run directory gets none unless one is named; what is said here is
+ * the outcome, once, because a node that made itself a new identity is the
+ * thing an operator most needs to find afterwards.
+ */
+static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t *where)
+{
+	const char  *named = options->fuzznet_dir ? options->fuzznet_dir
+	                                          : getenv(NCFG_FUZZNET_DIR_ENV);
+	char         dir[NCFG_NODE_DIR_MAX];
+	char         key[NCFG_NODE_KEY_HEX];
+	char         err[NCFG_ERROR_MAX];
+	int          made = 0;
+	ncfg_node_t *node;
+
+	err[0] = '\0';
+	if (!ncfg_node_where(named, strcmp(where->run, NCFG_RUN_DIR_DEFAULT) == 0, dir, &made,
+	    err, sizeof(err))) {
+		if (err[0]) {
+			ncfg_log_emitf("node", NCFG_LOG_WARNING, "no fuzznet node: %s", err);
+		}
+		return NULL;
+	}
+	node = ncfg_node_open(dir, made, err, sizeof(err));
+	if (!node) {
+		ncfg_log_emitf("node", NCFG_LOG_WARNING,
+		    "no fuzznet node, and the network is configured as usual: %s", err);
+		return NULL;
+	}
+	ncfg_node_key_hex(ncfg_node_key(node), key);
+	if (ncfg_node_found(node) == NCFG_NODE_BESIDE_FACE) {
+		ncfg_log_emitf("node", NCFG_LOG_INFO,
+		    "fuzznet node %s, loaded from %s beside the process serving it", key, dir);
+	} else {
+		ncfg_log_emitf("node", NCFG_LOG_INFO, "fuzznet node %s, %s %s", key,
+		    ncfg_node_created(node) ? "a new identity made in" : "loaded from", dir);
+	}
+	err[0] = '\0';
+	if (!ncfg_node_publish(node, where->run, err, sizeof(err))) {
+		ncfg_log_emitf("node", NCFG_LOG_WARNING, "%s", err);
+	}
+	return node;
+}
+
 static int start(const options_t *options)
 {
 	ncfg_main_where_t        where;
@@ -824,6 +879,7 @@ static int start(const options_t *options)
 	ncfg_resolv_machine_t    resolv;
 	ncfg_daemon_server_t    *local = NULL;
 	ncfg_daemon_server_t    *remote = NULL;
+	ncfg_node_t             *node = NULL;
 	const ncfg_principal_t  *reach[3];
 	char                     rendered[NCFG_MAIN_PATH_MAX];
 	const ncfg_principal_t  *agent[1];
@@ -1192,6 +1248,8 @@ static int start(const options_t *options)
 		    "a confirm window cannot be armed until the first apply", err);
 	}
 	err[0] = '\0';
+	node = open_node(options, &where);
+
 	if (!ncfg_reconcile_start(&loop, options->apply_on_start, reverted, err, sizeof(err))) {
 		/* The startup apply failing is a machine that needs looking at, not a
 		 * daemon that should stop watching it. */
@@ -1236,6 +1294,7 @@ done:
 	ncfg_probes_free(loop.probes);
 	ncfg_sims_free(loop.sims);
 	ncfg_seen_free(loop.seen);
+	ncfg_node_close(node);
 	ncfg_confirm_armed_free(&armed);
 	ncfg_main_policy_free(&policy);
 	ncfg_daemon_state_free(&state);
