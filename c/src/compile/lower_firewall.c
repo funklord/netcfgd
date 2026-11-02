@@ -36,6 +36,7 @@
  */
 #include "lower_internal.h"
 
+#include "ncfg/schedule.h"
 #include "ncfg/base.h"
 
 #include <stdlib.h>
@@ -58,6 +59,9 @@ static void rule_free(ncfg_firewall_rule_t *rule)
 	ncfg_strings_free(rule->mac, rule->mac_count);
 	ncfg_strings_free(rule->mac_lists, rule->mac_list_count);
 	ncfg_strings_free(rule->mac_written, rule->mac_written_count);
+	free(rule->hours);
+	ncfg_strings_free(rule->days, rule->day_count);
+	ncfg_strings_free(rule->utc_pieces, rule->utc_piece_count);
 	memset(rule, 0, sizeof(*rule));
 }
 
@@ -325,6 +329,72 @@ static void rule_macs(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assign
 	ncfg_words_free(&words);
 }
 
+/* `hours`, refused by `schedule.h`'s own sentence and kept normalised. */
+static void rule_hours(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    ncfg_firewall_rule_t *rule)
+{
+	char *text = ncfg_as_string(ctx, assignment->value);
+	char  normal[16];
+	char  why[256];
+
+	if (!text) {
+		return;
+	}
+	if (!ncfg_schedule_hours_parse(text, NULL, NULL, normal, sizeof(normal), why,
+	        sizeof(why))) {
+		ncfg_diag(ctx, assignment->span, "`%s` %s", text, why);
+		free(text);
+		return;
+	}
+	free(text);
+	free(rule->hours);
+	rule->hours = strdup(normal);
+	if (!rule->hours) {
+		ncfg_diag(ctx, assignment->span, "out of memory");
+	}
+}
+
+/*
+ * `days`, every word checked before any is kept, as `state`'s are; kept in
+ * week order from Monday and once each, since a day is in a set or not.
+ */
+static void rule_days(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    ncfg_firewall_rule_t *rule)
+{
+	static const int week[7] = { 1, 2, 3, 4, 5, 6, 0 };
+	ncfg_words_t     words;
+	unsigned         mask = 0;
+	size_t           i;
+
+	memset(&words, 0, sizeof(words));
+	if (!ncfg_as_words(ctx, assignment->value, &words)) {
+		ncfg_words_free(&words);
+		return;
+	}
+	for (i = 0; i < words.count; i++) {
+		const int day = ncfg_schedule_day(words.at[i].text, NULL);
+
+		if (day < 0) {
+			ncfg_diag(ctx, words.at[i].span,
+			    "`%s` is not a day: one of mon, tue, wed, thu, fri, sat, sun, or the "
+			    "whole name", words.at[i].text);
+			ncfg_words_free(&words);
+			return;
+		}
+		mask |= 1u << day;
+	}
+	ncfg_words_free(&words);
+	ncfg_strings_free(rule->days, rule->day_count);
+	rule->days = NULL;
+	rule->day_count = 0;
+	for (i = 0; i < 7u; i++) {
+		if (mask & (1u << week[i])) {
+			(void)ncfg_push_string(ctx, &rule->days, &rule->day_count,
+			    ncfg_schedule_day_word(week[i]));
+		}
+	}
+}
+
 /*
  * One rule: the action from the head, the name from the label, the matches
  * from the keys.
@@ -390,10 +460,14 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			rule_states(ctx, assignment, &rule);
 		} else if (strcmp(key, "mac") == 0) {
 			rule_macs(ctx, assignment, &rule);
+		} else if (strcmp(key, "hours") == 0) {
+			rule_hours(ctx, assignment, &rule);
+		} else if (strcmp(key, "days") == 0) {
+			rule_days(ctx, assignment, &rule);
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, out_interface, state, mac", key);
+			    "interface, out_interface, state, mac, hours, days", key);
 		}
 	}
 	/* What was written is the resolved set again where no list is named. */

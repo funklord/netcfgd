@@ -1512,6 +1512,10 @@ typedef struct {
 	char        **states;
 	size_t        state_count;
 	char         *mac;
+	/* One UTC piece of a schedule, as `schedule.h` writes it -- `"1 28800
+	 * 32399"`, day then inclusive seconds, `any` for every day -- NULL for a
+	 * rule with none (10.663). */
+	char         *time;
 } ncfg_observed_firewall_rule_t;
 
 typedef struct ncfg_observed_firewall {

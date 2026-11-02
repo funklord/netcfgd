@@ -49,6 +49,8 @@ static void print_rule(const ncfg_nft_kernel_rule_t *one)
 	size_t                   at;
 	ncfg_buf_t               text;
 	char                     digest[NCFG_SHA256_HEX_SIZE];
+	char                     time[NCFG_NFT_TIME_TEXT];
+	char                    *piece = time;
 
 	for (at = 0; at < 4u; at++) {
 		if (one->states & (1u << at)) {
@@ -71,6 +73,11 @@ static void print_rule(const ncfg_nft_kernel_rule_t *one)
 	rule.state_count = state_count;
 	rule.mac = one->mac[0] ? &mac : NULL;
 	rule.mac_count = one->mac[0] ? 1u : 0u;
+	/* A schedule's piece as an undo copy carries it (10.663), so a rule of
+	 * one piece recomputes as its written rule did. */
+	ncfg_nft_kernel_rule_time(one, time, sizeof(time));
+	rule.utc_pieces = time[0] ? &piece : NULL;
+	rule.utc_piece_count = time[0] ? 1u : 0u;
 	ncfg_buf_init(&text, 0);
 	(void)ncfg_nft_firewall_rule_text(one->chain, &rule, &text);
 	ncfg_sha256_hex(text.data, text.length, digest);
@@ -98,6 +105,9 @@ static void print_rule(const ncfg_nft_kernel_rule_t *one)
 	}
 	if (one->mac[0]) {
 		printf(" mac=%s", one->mac);
+	}
+	if (time[0]) {
+		printf(" time=%s", time);
 	}
 	printf(" digest=%s\n",
 	    strncmp(digest, one->digest, NCFG_NFT_DIGEST_HEX) == 0 ? "recomputed" : "other");

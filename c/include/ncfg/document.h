@@ -2577,6 +2577,23 @@ typedef struct {
 	size_t   mac_list_count;
 	char   **mac_written;
 	size_t   mac_written_count;
+	/*
+	 * When the rule applies, in the machine's local time (project.md 10.663,
+	 * `schedule.h`): `hours` normalised as "HH:MM-HH:MM", NULL for the whole
+	 * day; `days` as `mon` to `sun` in week order, empty for every day. Both
+	 * omitted when unset, so an unscheduled ruleset is the document it was.
+	 */
+	char    *hours;
+	char   **days;
+	size_t   day_count;
+	/*
+	 * The schedule as the kernel holds it, as `schedule.h`'s piece text. Set
+	 * only on a rule rebuilt from what is installed -- an undo copy -- where
+	 * the local schedule cannot be recovered; the builder then takes these
+	 * as they are. A rule the compiler wrote never has them.
+	 */
+	char   **utc_pieces;
+	size_t   utc_piece_count;
 } ncfg_firewall_rule_t;
 
 typedef struct {

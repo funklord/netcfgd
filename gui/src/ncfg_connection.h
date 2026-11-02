@@ -327,6 +327,9 @@ struct ncfg_firewall_rule_row {
 	QString     out_interface;
 	QStringList states;
 	QStringList stations;
+	/* The schedule as written (10.663), empty where the rule has none. */
+	QString     hours;
+	QStringList days;
 };
 
 struct ncfg_firewall_chain_row {

@@ -48,6 +48,7 @@
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/portal.h"
+#include "ncfg/nft.h"
 #include "ncfg/state.h"
 
 #include <limits.h>
@@ -942,6 +943,51 @@ static void guard_resolv(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
 }
 
 /*
+ * The firewall replacement, carried across where the clock alone moved it.
+ *
+ * A firewall replace names no interface, so the restriction never keeps one:
+ * the firewall changes when somebody applies. **The one change no operator
+ * makes is the clock's** (10.663). A schedule is held by the kernel in UTC
+ * pieces worked out at the offset in force, so a summer-time change leaves
+ * every scheduled rule an hour out until the next apply -- the children's
+ * bedtime an hour early or late, on a router nobody is watching. So where the
+ * installed firewall differs from the document's only in those pieces, the
+ * plan's replacement goes through: the same rules, at the hours they say.
+ */
+static void schedule_follows_clock(const ncfg_reconcile_t *loop, const ncfg_plan_t *plan,
+    ncfg_plan_t *restricted)
+{
+	const ncfg_document_t *desired = loop->state->desired;
+	const ncfg_observed_t *observed = loop->state->observed;
+	size_t                 at;
+
+	if (!desired || !desired->firewall || !observed || !observed->firewall) {
+		return;
+	}
+	for (at = 0; at < restricted->action_count; at++) {
+		if (restricted->actions[at].op.kind == (int)NCFG_OP_NFTABLES_REPLACE) {
+			return;
+		}
+	}
+	for (at = 0; at < plan->action_count; at++) {
+		const ncfg_action_t *action = &plan->actions[at];
+
+		if (action->op.kind != (int)NCFG_OP_NFTABLES_REPLACE || action->depends_count != 0u) {
+			continue;
+		}
+		if (!ncfg_nft_firewall_only_schedule_moved(desired->firewall, observed->firewall)) {
+			return;
+		}
+		ncfg_log_emitf("firewall", NCFG_LOG_NOTE,
+		    "the clock's offset has moved, so the firewall's schedules are put back at the "
+		    "hours they say");
+		(void)ncfg_plan_add(restricted, &action->op, &action->reason, NULL, 0u,
+		    action->has_inverse ? &action->inverse : NULL);
+		return;
+	}
+}
+
+/*
  * Put back what drifted, on the interfaces whose policy says to.
  *
  * **Not `nothing reconciles` alone.** A host whose only reconcilable state is
@@ -974,6 +1020,7 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 		ncfg_buf_free(&dropped);
 		return;
 	}
+	schedule_follows_clock(loop, plan, restricted);
 	if (restricted->action_count == 0u) {
 		ncfg_plan_free(restricted);
 		ncfg_buf_free(&dropped);

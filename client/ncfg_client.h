@@ -1255,6 +1255,10 @@ typedef struct {
 	char *out_interface;
 	char *states;
 	char *stations;
+	/* The schedule as written (10.663): `hours` as "HH:MM-HH:MM" and `days`
+	 * as `mon` to `sun` joined, both empty where the rule has none. */
+	char *hours;
+	char *days;
 } ncfg_firewall_entry_t;
 
 /* One base chain: its policy and its rules, in the document's order -- which

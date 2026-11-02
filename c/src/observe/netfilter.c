@@ -349,6 +349,14 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 	    (one->mac[0] && !(out->mac = observe_dup(one->mac)))) {
 		return 0;
 	}
+	if (one->has_hours) {
+		char text[NCFG_NFT_TIME_TEXT];
+
+		ncfg_nft_kernel_rule_time(one, text, sizeof(text));
+		if (!(out->time = observe_dup(text))) {
+			return 0;
+		}
+	}
 	for (bit = 0; bit < 4u; bit++) {
 		if ((one->states & (1u << bit)) &&
 		    !observe_list_add(&out->states, &out->state_count, ncfg_nft_state_word(bit))) {

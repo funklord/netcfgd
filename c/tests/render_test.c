@@ -1890,6 +1890,13 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\" }\n"
 	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so does a forward rule matching both interfaces (0302)");
+	round_trips("firewall {\n\tinput { policy = \"accept\" }\n\tforward {\n"
+	    "\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"bedtime\" { interface = \"kids0\"; hours = \"22:00-07:00\"; "
+	    "days = [\"mon\", \"tue\"] }\n"
+	    "\t\tdrop \"weekend\" { days = [\"sat\", \"sun\"] }\n"
+	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so do a schedule's hours and days (10.663)");
 }
 
 static void a_firewall_round_trips(void)

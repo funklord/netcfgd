@@ -17,6 +17,7 @@
  *   difference between "the bearer is up" and "netcfgd configured the
  *   interface" has no way to tell which half is broken.
  */
+#include "ncfg/schedule.h"
 #include "ncfg/cli.h"
 
 #include "ncfg/log.h"
@@ -242,6 +243,19 @@ static void print_firewall(const ncfg_observed_t *observed)
 			}
 			if (rule->out_interface) {
 				ncfg_out_writef(" out_interface %s", rule->out_interface);
+			}
+			if (rule->time) {
+				ncfg_schedule_piece_t piece;
+				char                  shown[64];
+
+				/* The kernel's clock, said as such: a person reading `07:00`
+				 * would otherwise take it for their own. */
+				if (ncfg_schedule_piece_read(rule->time, &piece)) {
+					ncfg_schedule_piece_describe(&piece, shown, sizeof(shown));
+					ncfg_out_writef(" time %s", shown);
+				} else {
+					ncfg_out_writef(" time %s", rule->time);
+				}
 			}
 			for (state = 0; state < rule->state_count; state++) {
 				ncfg_out_writef("%s%s", state ? "," : " state ", rule->states[state]);

@@ -123,7 +123,8 @@ static QString dump(const ncfg_firewall_settings &settings)
 			lines << QStringList { rule.name, rule.action, rule.protocol,
 				ports.join(QLatin1Char(',')), rule.from.join(QLatin1Char(',')),
 				rule.to.join(QLatin1Char(',')), rule.interface, rule.out_interface,
-				rule.states.join(QLatin1Char(',')), rule.stations.join(QLatin1Char(',')) }
+				rule.states.join(QLatin1Char(',')), rule.stations.join(QLatin1Char(',')),
+				rule.hours, rule.days.join(QLatin1Char(',')) }
 			             .join(QLatin1Char('|'));
 		}
 	}
@@ -145,7 +146,8 @@ static const char every_key[] =
     "\t}\n"
     "\tforward {\n"
     "\t\tpolicy = \"drop\"\n"
-    "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\" }\n"
+    "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\"; "
+    "hours = \"22:00-07:00\"; days = [\"mon\", \"tue\"] }\n"
     "\t\taccept \"out\" { out_interface = \"wan0\"; to = [\"192.0.2.0/24\"] }\n"
     "\t}\n"
     "\toutput { policy = \"accept\" }\n"
@@ -204,6 +206,9 @@ int main(int argc, char **argv)
 		    QStringLiteral("@host_list:kids,aa:bb:cc:*"), "  its stations, the list named");
 		check(loaded.forward.rules.at(0).out_interface, QStringLiteral("lan0"),
 		    "  and where a forwarded packet leaves");
+		check(loaded.forward.rules.at(0).hours + QLatin1Char(' ') +
+		          loaded.forward.rules.at(0).days.join(QLatin1Char(',')),
+		    QStringLiteral("22:00-07:00 mon,tue"), "  and its schedule (10.663)");
 	}
 
 	/* **Save with no change, and nothing moves.** The block the tab would

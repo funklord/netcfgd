@@ -1321,6 +1321,23 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		ncfg_render_list_emit(body, "\t\t\t", "mac", &list, 0);
 		ncfg_render_list_free(&list);
 	}
+	/* The schedule as written (10.663). A rule carrying UTC pieces is an undo
+	 * copy and never reaches a profile, which is written from the document. */
+	if (rule->hours) {
+		ncfg_buf_add_text(body, "\t\t\thours = ");
+		ncfg_render_quote(body, rule->hours);
+		ncfg_buf_add_text(body, "\n");
+	}
+	if (rule->day_count != 0u) {
+		ncfg_render_list_t list;
+
+		ncfg_render_list_init(&list);
+		for (at = 0; at < rule->day_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&list), rule->days[at]);
+		}
+		ncfg_render_list_emit(body, "\t\t\t", "days", &list, 0);
+		ncfg_render_list_free(&list);
+	}
 	ncfg_buf_add_text(body, "\t\t}\n");
 }
 

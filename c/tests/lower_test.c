@@ -1825,6 +1825,46 @@ static void firewall_out_interface_cases(void)
 	    "  and in output, where `interface` already is the leaving one");
 }
 
+/* A rule's schedule (10.663): normalised as written, days in week order, and
+ * the refusals saying why. */
+static void firewall_schedule_cases(void)
+{
+	ncfg_document_t *document = compiles("firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"bedtime\" { interface = \"kids0\"; hours = \"22:00-7:00\"; "
+	    "days = [\"sunday\", \"mon\", \"mon\", \"fri\"] }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n",
+	    "a rule with hours and days compiles");
+
+	if (document && document->firewall && document->firewall->forward.rule_count == 1) {
+		const ncfg_firewall_rule_t *rule = &document->firewall->forward.rules[0];
+
+		check(rule->hours && strcmp(rule->hours, "22:00-07:00") == 0,
+		    "  the hours spelled with two digits");
+		check(rule->day_count == 3 && strcmp(rule->days[0], "mon") == 0 &&
+		        strcmp(rule->days[1], "fri") == 0 && strcmp(rule->days[2], "sun") == 0,
+		    "  the days in week order from Monday, short and once each");
+		check(rule->utc_piece_count == 0, "  and no UTC pieces, which only an undo copy has");
+	} else {
+		check(0, "  the rule is there");
+	}
+	if (document) {
+		ncfg_document_free(document);
+	}
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { hours = \"07:00-07:00\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "leave `hours` out", "a window of nothing or all day is refused, saying what to write");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { hours = \"10pm-7am\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "22:00-07:00", "  as are hours in another shape, naming the one to use");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { days = [\"mon\", \"funday\"] }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "`funday` is not a day", "  and a word that is not a day");
+}
+
 /* Host lists in the firewall (10.592): a rule's `mac`. */
 static void firewall_mac_cases(void)
 {
@@ -3913,6 +3953,7 @@ int main(void)
 	host_list_cases();
 	firewall_mac_cases();
 	firewall_out_interface_cases();
+	firewall_schedule_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();

@@ -422,6 +422,12 @@
 #     related, invalid), and `mac` --
 #     the sending station, by address, by manufacturer prefix (`aa:bb:cc:*`)
 #     or by `"@host_list:NAME"`, in `input` and `forward` only.
+#   - `hours` and `days` say when a rule applies, in this machine's local time:
+#     `hours = "22:00-07:00"` (one that ends before it starts runs past
+#     midnight into the next day) and `days = ["mon", "tue"]`. Either alone is
+#     fine. The kernel's clock is UTC, so netcfgd turns the schedule into the
+#     UTC times it means, and puts it back by itself after a summer-time
+#     change. `ncfg status` shows what the kernel holds, in UTC, and says so.
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
 #
@@ -461,6 +467,12 @@
 #		drop "guest-lan" {
 #			interface     = "guest0"
 #			out_interface = "lan0"
+#		}
+#		# The children's devices, off the internet on school nights.
+#		drop "bedtime" {
+#			mac   = ["00:11:22:33:44:01", "00:11:22:33:44:02"]
+#			hours = "21:00-07:00"
+#			days  = ["sun", "mon", "tue", "wed", "thu"]
 #		}
 #		accept "out" {
 #			out_interface = "wan0"

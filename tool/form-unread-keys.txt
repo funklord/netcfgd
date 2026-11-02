@@ -4,3 +4,4 @@ device_fields.declared	provenance: true for a block somebody wrote, false for on
 interface_fields.hooks	the interface dialog carries hooks itself, through the hook requests and its own list (0258), and refuses when a body is withheld
 qdisc_fields.ingress_bandwidth_bits	never held by a written device: the compiler moves the arriving rate onto the ifb it synthesises (lower.c) and clears it here; the reader joins it back from that ifb's bandwidth_bits
 qdisc_fields.ingress	set only on the synthesised ifb's own qdisc, a device the reader names unmodelled because nobody writes one
+firewall_rule_fields.utc_pieces	never in a compiled document: only an undo copy rebuilt from the kernel carries it (10.663), and no dialog reads an undo copy

@@ -398,6 +398,13 @@ typedef struct {
 	 * language's order -- bit 0 is `new`. */
 	unsigned states;
 	char     mac[NCFG_STATION_ADDRESS_SIZE];
+	/* One UTC piece of a schedule (10.663, `schedule.h`): `meta hour` in an
+	 * inclusive range of seconds, and `meta day` where one day is matched. */
+	int      has_hours;
+	uint32_t hour_from;
+	uint32_t hour_to;
+	int      has_day;
+	uint8_t  day; /* 0 Sunday to 6 Saturday */
 } ncfg_nft_kernel_rule_t;
 
 /*
@@ -411,6 +418,11 @@ typedef struct {
  */
 int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
     ncfg_nft_kernel_rule_t *out, char *err, size_t err_size);
+
+/* A kernel rule's schedule piece as `schedule.h`'s text, `"any 0 21599"` or
+ * `"1 28800 32399"`; "" where it has none. */
+#define NCFG_NFT_TIME_TEXT 32u
+void ncfg_nft_kernel_rule_time(const ncfg_nft_kernel_rule_t *rule, char *out, size_t out_size);
 
 /* The words the observation and `ncfg status` use: `accept`, `drop`,
  * `reject`; `any`, `tcp`, `udp`, `icmp`, `icmpv6`; and the state for one of
@@ -440,6 +452,17 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
  */
 int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
     const ncfg_observed_firewall_t *observed, char *refusal, size_t refusal_size);
+
+/*
+ * Whether the installed firewall differs from the document's only in the UTC
+ * pieces of its schedules (10.663) -- which is the clock's offset having
+ * moved, a summer-time change, since the document did not. Asked by taking
+ * the document's firewall, giving each scheduled rule the pieces the kernel
+ * holds for it, and matching that exactly. 0 where the two already match,
+ * and where anything else differs.
+ */
+int ncfg_nft_firewall_only_schedule_moved(const ncfg_firewall_t *desired,
+    const ncfg_observed_firewall_t *observed);
 
 /* One entry of a table dump. */
 int ncfg_nft_table_read(const void *payload, size_t length, ncfg_nft_table_t *out,

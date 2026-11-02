@@ -14,6 +14,7 @@
  * the way back.
  */
 #include "ncfg/nft.h"
+#include "ncfg/schedule.h"
 
 #include "ncfg/sha256.h"
 #include "ncfg/wire.h"
@@ -720,6 +721,44 @@ typedef struct {
 	uint32_t prefix;
 } nft_address_t;
 
+/*
+ * One schedule piece, as nft writes `meta hour "08:00"-"09:30" meta day 1`:
+ * the hour loaded, swapped to network order -- `meta hour` is a host-order
+ * register and `range` compares bytes -- and ranged; then the day compared.
+ * Measured against nft 1.1.3's own encoding (project.md 10.663).
+ */
+static void put_schedule(ncfg_buf_t *list, const ncfg_schedule_piece_t *piece)
+{
+	ncfg_buf_t     data;
+	const uint32_t from = htonl((uint32_t)piece->from);
+	const uint32_t to = htonl((uint32_t)piece->to);
+
+	put_meta(list, NFT_META_TIME_HOUR);
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_BYTEORDER_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_BYTEORDER_DREG, NFT_REG_1);
+	put_be32(&data, NFTA_BYTEORDER_OP, NFT_BYTEORDER_HTON);
+	put_be32(&data, NFTA_BYTEORDER_LEN, 4u);
+	put_be32(&data, NFTA_BYTEORDER_SIZE, 4u);
+	put_expression(list, "byteorder", &data);
+	ncfg_buf_free(&data);
+
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_RANGE_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_RANGE_OP, NFT_RANGE_EQ);
+	put_data(&data, NFTA_RANGE_FROM_DATA, &from, sizeof(from));
+	put_data(&data, NFTA_RANGE_TO_DATA, &to, sizeof(to));
+	put_expression(list, "range", &data);
+	ncfg_buf_free(&data);
+
+	if (piece->day >= 0) {
+		const uint8_t day = (uint8_t)piece->day;
+
+		put_meta(list, NFT_META_TIME_DAY);
+		put_cmp(list, NFT_CMP_EQ, &day, sizeof(day));
+	}
+}
+
 static int parse_address(const char *text, nft_address_t *out, char *err, size_t err_size)
 {
 	char        host[64];
@@ -856,9 +895,42 @@ static uint8_t protocol_number(int protocol)
 	}
 }
 
+/*
+ * A rule's schedule as UTC pieces (10.663): those it carries, where it is an
+ * undo copy rebuilt from the kernel, and otherwise its written schedule
+ * expanded at this machine's offset now. 0 for a rule with no schedule, and
+ * -1 for one whose schedule cannot be read -- which the compiler refuses, so
+ * only a hand-edited undo copy reaches it.
+ */
+static long rule_pieces(const ncfg_firewall_rule_t *rule, ncfg_schedule_piece_t *pieces)
+{
+	size_t count;
+	size_t at;
+
+	if (rule->utc_piece_count) {
+		if (rule->utc_piece_count > NCFG_SCHEDULE_PIECES_MAX) {
+			return -1;
+		}
+		for (at = 0; at < rule->utc_piece_count; at++) {
+			if (!ncfg_schedule_piece_read(rule->utc_pieces[at], &pieces[at])) {
+				return -1;
+			}
+		}
+		return (long)rule->utc_piece_count;
+	}
+	if (!rule->hours && rule->day_count == 0u) {
+		return 0;
+	}
+	count = ncfg_schedule_expand(rule->hours, rule->days, rule->day_count,
+	    ncfg_schedule_offset(), pieces, NCFG_SCHEDULE_PIECES_MAX);
+	return count ? (long)count : -1;
+}
+
 int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *rule,
     ncfg_buf_t *out)
 {
+	ncfg_schedule_piece_t pieces[NCFG_SCHEDULE_PIECES_MAX];
+	long                  piece_count;
 	static const char *const states[] = { "new", "established", "related", "invalid" };
 	size_t                   at;
 
@@ -908,6 +980,20 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	for (at = 0; at < rule->mac_count; at++) {
 		ncfg_buf_addf(out, "mac %s\n", rule->mac[at]);
 	}
+	/* The schedule as the kernel will hold it, so the digest moves when the
+	 * offset does -- a summer-time change is a firewall the planner sees as
+	 * not the document's. Only where one is set, so no digest written before
+	 * 10.663 changes. */
+	piece_count = rule_pieces(rule, pieces);
+	if (piece_count < 0) {
+		return 0;
+	}
+	for (at = 0; at < (size_t)piece_count; at++) {
+		char text[NCFG_SCHEDULE_PIECE_TEXT];
+
+		ncfg_schedule_piece_text(&pieces[at], text, sizeof(text));
+		ncfg_buf_addf(out, "time %s\n", text);
+	}
 	return !ncfg_buf_failed(out);
 }
 
@@ -949,7 +1035,7 @@ static int rule_comment(const char *chain, const ncfg_firewall_rule_t *rule, cha
  * same on every kernel rule it became.
  */
 static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_rule_t *rule,
-    const char *comment, char *err, size_t err_size)
+    const ncfg_schedule_piece_t *piece, const char *comment, char *err, size_t err_size)
 {
 	ncfg_buf_t    expressions;
 	ncfg_buf_t    data;
@@ -1057,6 +1143,9 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 		}
 		put_cmp(&expressions, NFT_CMP_EQ, mac, sizeof(mac));
 	}
+	if (piece) {
+		put_schedule(&expressions, piece);
+	}
 
 	ncfg_buf_init(&data, 0);
 	if (rule->action == NCFG_FIREWALL_REJECT) {
@@ -1121,14 +1210,24 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 	const size_t tos = rule->to_count ? rule->to_count : 1u;
 	const size_t macs = rule->mac_count ? rule->mac_count : 1u;
 	char         comment[NCFG_NFT_COMMENT_MAX + 1u];
+	ncfg_schedule_piece_t pieces[NCFG_SCHEDULE_PIECES_MAX];
+	const long   piece_count = rule_pieces(rule, pieces);
+	const size_t times = piece_count > 0 ? (size_t)piece_count : 1u;
 	size_t       p, f, t, m;
 	size_t       wrote = 0;
 
-	if (ports * froms * tos * macs > FIREWALL_EXPANSION_MAX) {
+	if (piece_count < 0) {
+		ncfg_error_set(err, err_size, "rule `%s/%s` has a schedule that cannot be read",
+		    chain, rule->name);
+		return 0;
+	}
+	if (ports * froms * tos * macs * times > FIREWALL_EXPANSION_MAX) {
 		ncfg_error_set(err, err_size,
 		    "rule `%s/%s` would be %zu kernel rules, one per combination of its ports, "
-		    "addresses and stations, and %u is the most one rule may become; split it",
-		    chain, rule->name, ports * froms * tos * macs, (unsigned)FIREWALL_EXPANSION_MAX);
+		    "addresses, stations and the pieces its schedule is in UTC, and %u is the most "
+		    "one rule may become; split it",
+		    chain, rule->name, ports * froms * tos * macs * times,
+		    (unsigned)FIREWALL_EXPANSION_MAX);
 		return 0;
 	}
 	if (!rule_comment(chain, rule, comment, sizeof(comment), err, err_size)) {
@@ -1137,8 +1236,11 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 	for (p = 0; p < ports; p++) {
 		for (f = 0; f < froms; f++) {
 			for (t = 0; t < tos; t++) {
-				for (m = 0; m < macs; m++) {
+				for (m = 0; m < macs * times; m++) {
 					ncfg_firewall_rule_t one = *rule;
+					const size_t         mac_at = m / times;
+					const ncfg_schedule_piece_t *piece =
+					    piece_count > 0 ? &pieces[m % times] : NULL;
 					nft_address_t        a;
 					nft_address_t        b;
 					ncfg_buf_t           attrs;
@@ -1151,7 +1253,7 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 					one.to_count = rule->to_count ? 1u : 0u;
 					one.to = rule->to_count ? &rule->to[t] : NULL;
 					one.mac_count = rule->mac_count ? 1u : 0u;
-					one.mac = rule->mac_count ? &rule->mac[m] : NULL;
+					one.mac = rule->mac_count ? &rule->mac[mac_at] : NULL;
 					/* A source of one family and a destination of the other
 					 * is a combination no packet carries: skipped, not
 					 * written as a rule that can never match. */
@@ -1165,7 +1267,7 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 						}
 					}
 					ncfg_buf_init(&attrs, 0);
-					ok = firewall_rule(&attrs, chain, &one, comment, err, err_size);
+					ok = firewall_rule(&attrs, chain, &one, piece, comment, err, err_size);
 					if (ok) {
 						*last_acked = *seq;
 						ok = build(transaction, NFT_MSG_NEWRULE,
@@ -1971,6 +2073,7 @@ typedef struct {
 	uint8_t  mask[16];
 	size_t   mask_length; /* 0 where nothing was masked */
 	uint8_t  family; /* from `meta nfproto`, for the addresses after it */
+	int      swapped; /* `meta hour` turned to network order, ready to range */
 } reading_t;
 
 static int be32_member(const ncfg_wire_attrs_t *area, uint16_t kind, uint32_t *out)
@@ -2113,6 +2216,15 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 			memcpy(into, value, length);
 			return 1;
 		}
+		case NFT_META_TIME_DAY:
+			/* A schedule piece's day (10.663). A second is not a rule
+			 * netcfgd writes. */
+			if (length != 1u || value[0] > 6u || out->has_day) {
+				break;
+			}
+			out->has_day = 1;
+			out->day = value[0];
+			return 1;
 		case NFT_META_IIFTYPE: {
 			uint16_t type = 0;
 
@@ -2291,7 +2403,57 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		if (strcmp(name, "meta") == 0) {
 			reading.what = LOADED_META;
 			reading.mask_length = 0;
+			reading.swapped = 0;
 			(void)be32_member(&data, NFTA_META_KEY, &reading.key);
+		} else if (strcmp(name, "byteorder") == 0) {
+			uint32_t op = 0;
+			uint32_t len = 0;
+			uint32_t size = 0;
+
+			/* Only as `put_schedule` writes it: the hour, to network order,
+			 * four bytes of four. */
+			if (reading.what != LOADED_META || reading.key != NFT_META_TIME_HOUR ||
+			    !be32_member(&data, NFTA_BYTEORDER_OP, &op) || op != NFT_BYTEORDER_HTON ||
+			    !be32_member(&data, NFTA_BYTEORDER_LEN, &len) || len != 4u ||
+			    !be32_member(&data, NFTA_BYTEORDER_SIZE, &size) || size != 4u) {
+				ncfg_error_set(err, err_size,
+				    "rule `%s` has a byte-order swap netcfgd does not write", out->name);
+				return 0;
+			}
+			reading.swapped = 1;
+		} else if (strcmp(name, "range") == 0) {
+			const uint8_t *from = NULL;
+			const uint8_t *to = NULL;
+			size_t         from_length = 0;
+			size_t         to_length = 0;
+			uint32_t       op = 0;
+			uint32_t       first;
+			uint32_t       last;
+
+			if (reading.what != LOADED_META || reading.key != NFT_META_TIME_HOUR ||
+			    !reading.swapped || out->has_hours ||
+			    !be32_member(&data, NFTA_RANGE_OP, &op) || op != NFT_RANGE_EQ ||
+			    !data_value(&data, NFTA_RANGE_FROM_DATA, &from, &from_length) ||
+			    !data_value(&data, NFTA_RANGE_TO_DATA, &to, &to_length) ||
+			    from_length != 4u || to_length != 4u) {
+				ncfg_error_set(err, err_size, "rule `%s` has a range netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			memcpy(&first, from, sizeof(first));
+			memcpy(&last, to, sizeof(last));
+			first = ntohl(first);
+			last = ntohl(last);
+			if (first > last || last >= (uint32_t)NCFG_SCHEDULE_DAY_SECONDS) {
+				ncfg_error_set(err, err_size, "rule `%s` has an hour range netcfgd does not "
+				    "write", out->name);
+				return 0;
+			}
+			out->has_hours = 1;
+			out->hour_from = first;
+			out->hour_to = last;
+			reading.what = LOADED_NONE;
+			reading.swapped = 0;
 		} else if (strcmp(name, "ct") == 0) {
 			reading.what = LOADED_CT;
 			reading.mask_length = 0;
@@ -2760,6 +2922,22 @@ const char *ncfg_nft_state_word(unsigned bit)
 
 /* Two optional strings: absent and empty are one answer, which is how the
  * decoder leaves a match it did not see. */
+void ncfg_nft_kernel_rule_time(const ncfg_nft_kernel_rule_t *rule, char *out, size_t out_size)
+{
+	ncfg_schedule_piece_t piece;
+
+	if (!rule->has_hours) {
+		if (out_size) {
+			out[0] = '\0';
+		}
+		return;
+	}
+	piece.day = rule->has_day ? (int)rule->day : -1;
+	piece.from = (long)rule->hour_from;
+	piece.to = (long)rule->hour_to;
+	ncfg_schedule_piece_text(&piece, out, out_size);
+}
+
 static int same_text(const char *one, const char *other)
 {
 	return strcmp(one ? one : "", other ? other : "") == 0;
@@ -2786,6 +2964,14 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->out_interface, observed->out_interface) ||
 	    !same_text(expected->mac, observed->mac)) {
 		return 0;
+	}
+	{
+		char time[NCFG_NFT_TIME_TEXT];
+
+		ncfg_nft_kernel_rule_time(expected, time, sizeof(time));
+		if (!same_text(time, observed->time)) {
+			return 0;
+		}
 	}
 	for (at = 0; at < observed->state_count; at++) {
 		unsigned bit;
@@ -2865,3 +3051,86 @@ int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
 	return same && at == observed->rule_count;
 }
 
+
+/* The kernel's pieces for one written rule, in the order they appear. */
+static int observed_pieces(const ncfg_observed_firewall_t *observed, const char *chain,
+    const char *name, char ***out, size_t *count)
+{
+	size_t at;
+
+	*out = NULL;
+	*count = 0;
+	for (at = 0; at < observed->rule_count; at++) {
+		const ncfg_observed_firewall_rule_t *one = &observed->rules[at];
+		char                               **grown;
+		size_t                               seen;
+		int                                  repeat = 0;
+
+		if (!one->time || !same_text(one->chain, chain) || !same_text(one->name, name)) {
+			continue;
+		}
+		for (seen = 0; seen < *count; seen++) {
+			repeat = repeat || strcmp((*out)[seen], one->time) == 0;
+		}
+		if (repeat) {
+			continue;
+		}
+		grown = realloc(*out, (*count + 1u) * sizeof(**out));
+		if (!grown) {
+			return 0;
+		}
+		*out = grown;
+		(*out)[*count] = strdup(one->time);
+		if (!(*out)[*count]) {
+			return 0;
+		}
+		(*count)++;
+	}
+	return *count != 0u;
+}
+
+int ncfg_nft_firewall_only_schedule_moved(const ncfg_firewall_t *desired,
+    const ncfg_observed_firewall_t *observed)
+{
+	static const char *const names[3] = { NCFG_NFT_CHAIN_INPUT, NCFG_NFT_CHAIN_FORWARD,
+		                              NCFG_NFT_CHAIN_OUTPUT };
+	ncfg_firewall_t         *pinned;
+	ncfg_firewall_chain_t   *chains[3];
+	char                     refusal[NCFG_ERROR_MAX];
+	size_t                   c;
+	size_t                   r;
+	int                      scheduled = 0;
+	int                      moved;
+
+	if (!desired || !observed || ncfg_nft_firewall_matches(desired, observed, refusal,
+	        sizeof(refusal))) {
+		return 0;
+	}
+	pinned = ncfg_firewall_copy(desired);
+	if (!pinned) {
+		return 0;
+	}
+	chains[0] = &pinned->input;
+	chains[1] = &pinned->forward;
+	chains[2] = &pinned->output;
+	for (c = 0; c < 3u; c++) {
+		for (r = 0; r < chains[c]->rule_count; r++) {
+			ncfg_firewall_rule_t *rule = &chains[c]->rules[r];
+
+			if (!rule->hours && rule->day_count == 0u) {
+				continue;
+			}
+			scheduled = 1;
+			/* A scheduled rule the kernel holds no pieces for is a rule
+			 * missing, which is not the clock. */
+			if (!observed_pieces(observed, names[c], rule->name, &rule->utc_pieces,
+			        &rule->utc_piece_count)) {
+				ncfg_firewall_free(pinned);
+				return 0;
+			}
+		}
+	}
+	moved = scheduled && ncfg_nft_firewall_matches(pinned, observed, refusal, sizeof(refusal));
+	ncfg_firewall_free(pinned);
+	return moved;
+}

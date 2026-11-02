@@ -96,6 +96,8 @@ private:
 	QCheckBox *state_related;
 	QCheckBox *state_invalid;
 	QLineEdit *stations;
+	QLineEdit *hours;
+	QLineEdit *days;
 	QLabel      *note;
 	QPushButton *save_button;
 };

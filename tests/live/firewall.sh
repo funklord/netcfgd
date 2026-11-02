@@ -176,6 +176,34 @@ check "all four with one digest, the written rule's" \
 check "and the stations as two" \
 	"$(grep -c 'comment "name=pair sha256=' "$work/listed" || true)" "2"
 
+# A schedule (10.663), in local time and held by the kernel in UTC. The zone is
+# fixed an hour east so the pieces are known: Monday 08:00-09:30 local is one
+# piece, 07:00 to 08:29:59 UTC on Monday; 22:00-07:00 every day is two. nft
+# reads the hours back in its own zone, UTC here, and the day as it is held.
+cat > "$work/netcfgd.conf" <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		drop "monday" { hours = "08:00-09:30"; days = ["mon"] }
+		drop "nightly" { hours = "22:00-07:00" }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+TZ=CET-1 "$probe" "$work" --replace > "$work/sent" 2>&1 || true
+check "a scheduled rule is taken" "$(cat "$work/sent")" ""
+TZ=UTC nft list ruleset > "$work/listed" 2>&1 || true
+has "the kernel holds it in UTC, the day matched" \
+	'meta hour "07:00"-"08:29:59" meta day "Monday" drop comment "name=monday'
+check "a window past midnight is two kernel rules, one digest" \
+	"$(grep -o 'name=nightly sha256=[0-9a-f]*' "$work/listed" | wc -l | tr -d ' ')" "2"
+TZ=CET-1 "$probe" --read > "$work/read" 2>&1 || true
+check "and reads back to its piece, recomputing its digest" \
+	"$(grep -cF 'input monday drop protocol=0 time=1 25200 30599 digest=recomputed' \
+		"$work/read" || true)" "1"
+check "none of them refused" "$(grep -c '^refused' "$work/read" || true)" "0"
+
 # The refusals, which must refuse before anything is sent.
 cat > "$work/netcfgd.conf" <<'CONF'
 firewall {
@@ -203,6 +231,8 @@ ncfg="$build/ncfg"
 [ -x "$ncfg" ] || skip "ncfg is not built"
 mkdir -p "$work/etc" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
+# A fixed zone, so the schedule's pieces do not depend on where this runs.
+export TZ=UTC0
 write_etc() {
 	cat > "$work/etc/netcfgd.conf"
 }
@@ -215,7 +245,10 @@ firewall {
 		accept "ssh" { protocol = "tcp"; port = 22 }
 		drop "strangers" { mac = ["@host_list:banned"] }
 	}
-	forward { policy = "drop" }
+	forward {
+		policy = "drop"
+		drop "bedtime" { hours = "22:00-07:00"; days = ["sun", "mon"] }
+	}
 	output { policy = "accept" }
 }
 CONF
@@ -230,7 +263,13 @@ has "the host list's prefix is enforced in the kernel, as a mask" \
 has "and its exact station as an address" \
 	'ether saddr 02:00:00:00:00:09 drop comment "name=strangers'
 "$ncfg" plan > "$work/plan" 2>&1 || true
-check "a second plan has nothing to do" "$(cat "$work/plan")" "nothing to do"
+check "a second plan has nothing to do, a schedule's pieces among the rules" \
+	"$(cat "$work/plan")" "nothing to do"
+# The same document five hours west is other pieces: what a summer-time change
+# is, and it has to be noticed rather than left an hour out (10.663).
+TZ=EST5 "$ncfg" plan > "$work/plan" 2>&1 || true
+check "the clock's offset moving is a firewall to replace" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
 "$ncfg" status > "$work/status" 2>&1 || true
 check "ncfg status shows the installed firewall as rules" \
 	"$(grep -cE '^    (accept established state established,related|accept ssh protocol tcp port 22|drop strangers mac (de:ad:be:\*|02:00:00:00:00:09))$' "$work/status" || true)" "4"

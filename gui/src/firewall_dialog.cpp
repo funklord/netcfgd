@@ -84,6 +84,12 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (!rule.stations.isEmpty()) {
 		body << QStringLiteral("\t\t\tmac = %1").arg(quoted_list(rule.stations));
 	}
+	if (!rule.hours.isEmpty()) {
+		body << QStringLiteral("\t\t\thours = %1").arg(quoted(rule.hours));
+	}
+	if (!rule.days.isEmpty()) {
+		body << QStringLiteral("\t\t\tdays = %1").arg(quoted_list(rule.days));
+	}
 	body << QStringLiteral("\t\t}");
 }
 
@@ -232,6 +238,22 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	    QStringLiteral("aa:bb:cc:dd:ee:ff, aa:bb:cc:*, @host_list:kids -- blank for any"));
 	stations->setToolTip(QStringLiteral("The sending station's hardware address."));
 	form->addRow(QStringLiteral("from stations"), stations);
+
+	/* 10.663: in the machine's local time; netcfgd turns it into the UTC the
+	 * kernel's clock reads, and follows a summer-time change. */
+	hours = new QLineEdit(this);
+	hours->setObjectName(QStringLiteral("firewall_hours"));
+	hours->setPlaceholderText(QStringLiteral("22:00-07:00 -- blank for all day"));
+	hours->setToolTip(QStringLiteral(
+	    "When the rule applies, in this machine's local time. One that ends before it "
+	    "starts runs past midnight."));
+	form->addRow(QStringLiteral("hours"), hours);
+	days = new QLineEdit(this);
+	days->setObjectName(QStringLiteral("firewall_days"));
+	days->setPlaceholderText(QStringLiteral("mon, tue, wed, thu, fri -- blank for every day"));
+	days->setToolTip(QStringLiteral(
+	    "The days the hours apply on. A window past midnight runs into the next day."));
+	form->addRow(QStringLiteral("days"), days);
 	layout->addLayout(form);
 
 	note = new QLabel(this);
@@ -276,6 +298,8 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		state_related->setChecked(rule.states.contains(QStringLiteral("related")));
 		state_invalid->setChecked(rule.states.contains(QStringLiteral("invalid")));
 		stations->setText(rule.stations.join(QStringLiteral(", ")));
+		hours->setText(rule.hours);
+		days->setText(rule.days.join(QStringLiteral(", ")));
 	}
 	connect(chain, &QComboBox::currentIndexChanged, this,
 	    &ncfg_firewall_rule_dialog::shape_changed);
@@ -299,7 +323,8 @@ void ncfg_firewall_rule_dialog::shape_changed()
 
 bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 {
-	const QLineEdit *values[] = { name, ports, from, to, interface, out_interface, stations };
+	const QLineEdit *values[] = { name,          ports,    from,  to,   interface,
+	                              out_interface, stations, hours, days };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash or a "
@@ -356,6 +381,10 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 		}
 	}
 	rule->stations = split_list(stations->text());
+	/* Checked by the compiler when the rule is saved, whose sentence names the
+	 * shape to use; a second copy of the rule here would be one to drift. */
+	rule->hours = hours->text().trimmed();
+	rule->days = split_list(days->text());
 	return true;
 }
 

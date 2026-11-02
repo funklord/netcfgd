@@ -266,9 +266,13 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 				rule->ports[rule->port_count++] = one->port.value;
 			}
 		}
+		/* A schedule's UTC pieces, kept as the kernel holds them: the local
+		 * schedule cannot be recovered from them, and the builder takes them
+		 * as they are, so the restored rules digest as these do (10.663). */
 		if (!add_text(&rule->from, &rule->from_count, one->from) ||
 		    !add_text(&rule->to, &rule->to_count, one->to) ||
-		    !add_text(&rule->mac, &rule->mac_count, one->mac)) {
+		    !add_text(&rule->mac, &rule->mac_count, one->mac) ||
+		    !add_text(&rule->utc_pieces, &rule->utc_piece_count, one->time)) {
 			ncfg_firewall_free(firewall);
 			return NULL;
 		}

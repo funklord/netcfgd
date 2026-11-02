@@ -1513,6 +1513,8 @@ static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t 
 		rule.out_interface = from_c(entry.out_interface);
 		rule.states = firewall_list(entry.states);
 		rule.stations = firewall_list(entry.stations);
+		rule.hours = from_c(entry.hours);
+		rule.days = firewall_list(entry.days);
 		row.rules << rule;
 	}
 	return row;

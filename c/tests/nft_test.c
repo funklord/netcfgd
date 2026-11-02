@@ -26,6 +26,8 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/nft.h"
+#include "ncfg/observed.h"
+#include "ncfg/schedule.h"
 #include "ncfg/sha256.h"
 #include "ncfg/wire.h"
 
@@ -407,6 +409,211 @@ static void what_is_written_is_read_back(void)
 	check(read == 2 && right == 2,
 	    "each rule reads back as written, the address normalised to its network");
 	ncfg_buf_free(&out);
+}
+
+/* The comment's digest of a one-rule input chain, at the fixed offset. */
+static void digest_of(ncfg_firewall_rule_t *rule, char *out, size_t out_size)
+{
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           built;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+
+	out[0] = '\0';
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.rules = rule;
+	firewall.input.rule_count = 1u;
+	ncfg_buf_init(&built, 0);
+	if (ncfg_nft_build_replace(&built, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err))) {
+		ncfg_wire_messages_start(&walk, built.data, built.length);
+		while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+			ncfg_nft_kernel_rule_t one;
+
+			if ((message.header.kind & 0xffu) == NFT_MSG_NEWRULE &&
+			    ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one,
+			        NULL, 0)) {
+				(void)snprintf(out, out_size, "%s", one.digest);
+				break;
+			}
+		}
+	}
+	ncfg_buf_free(&built);
+}
+
+/*
+ * A schedule (10.663): written in local time, built as one kernel rule per UTC
+ * piece, each read back to the piece it was -- and the digest moves with the
+ * offset, which is what makes a summer-time change a firewall the planner
+ * replaces. An undo copy carrying the pieces digests as the rules it came from.
+ */
+static void a_schedule_is_written_in_utc_and_read_back(void)
+{
+	static char         *days[] = { (char *)"mon" };
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	char                 times[4][NCFG_NFT_TIME_TEXT];
+	char                 winter[NCFG_NFT_DIGEST_HEX + 1u];
+	char                 summer[NCFG_NFT_DIGEST_HEX + 1u];
+	char                 restored[NCFG_NFT_DIGEST_HEX + 1u];
+	char                *pieces[4];
+	int                  read = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"bedtime";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_ANY;
+	rule.hours = (char *)"22:00-07:00";
+	rule.days = days;
+	rule.day_count = 1u;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.forward.rules = &rule;
+	firewall.forward.rule_count = 1u;
+
+	/* An hour east: Monday 22:00 to Tuesday 07:00 local is Monday 21:00 to
+	 * Tuesday 06:00 UTC, which is two pieces on two days. */
+	ncfg_schedule_offset_fix(1, 3600);
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a scheduled rule builds");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (read < 4 && ncfg_nft_firewall_rule_read(message.payload, message.payload_length,
+		        &one, err, sizeof(err))) {
+			ncfg_nft_kernel_rule_time(&one, times[read], sizeof(times[read]));
+		} else if (read < 4) {
+			(void)snprintf(times[read], sizeof(times[read]), "unread");
+			printf("  said: %s\n", err);
+		}
+		read++;
+	}
+	ncfg_buf_free(&out);
+	check(read == 2, "  as one kernel rule per UTC piece, two here");
+	check(read == 2 && strcmp(times[0], "1 75600 86399") == 0 &&
+	          strcmp(times[1], "2 0 21599") == 0,
+	    "  each read back to its piece: Monday evening, then Tuesday morning, in UTC");
+
+	digest_of(&rule, winter, sizeof(winter));
+	ncfg_schedule_offset_fix(1, 7200);
+	digest_of(&rule, summer, sizeof(summer));
+	check(winter[0] && summer[0] && strcmp(winter, summer) != 0,
+	    "the digest moves when the offset does, so the planner replaces the rules");
+
+	/* The undo copy: the pieces as installed at an hour east, the local
+	 * schedule gone. Built at two hours east, it is still those pieces. */
+	pieces[0] = times[0];
+	pieces[1] = times[1];
+	rule.hours = NULL;
+	rule.days = NULL;
+	rule.day_count = 0u;
+	rule.utc_pieces = pieces;
+	rule.utc_piece_count = 2u;
+	digest_of(&rule, restored, sizeof(restored));
+	check(restored[0] && strcmp(restored, winter) == 0,
+	    "an undo copy carrying the pieces digests as the rules it was read from");
+	ncfg_schedule_offset_fix(0, 0);
+}
+
+/* What the kernel would hold for `firewall` built now, as the observation
+ * reads it: every rule decoded and written into `out`, which holds up to
+ * eight. Each string is the decoder's own buffer, so `rules` lives as long as
+ * `held`. */
+static size_t observe_built(const ncfg_firewall_t *firewall, ncfg_nft_kernel_rule_t *held,
+    char (*times)[NCFG_NFT_TIME_TEXT], ncfg_observed_firewall_rule_t *rules)
+{
+	ncfg_buf_t           built;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	size_t               count = 0;
+
+	ncfg_buf_init(&built, 0);
+	if (!ncfg_nft_build_replace(&built, 1u, 0, NULL, 0, firewall, &batch, err, sizeof(err))) {
+		ncfg_buf_free(&built);
+		return 0;
+	}
+	ncfg_wire_messages_start(&walk, built.data, built.length);
+	while (count < 8u && ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t *one = &held[count];
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE ||
+		    !ncfg_nft_firewall_rule_read(message.payload, message.payload_length, one, NULL,
+		        0)) {
+			continue;
+		}
+		memset(&rules[count], 0, sizeof(rules[count]));
+		ncfg_nft_kernel_rule_time(one, times[count], NCFG_NFT_TIME_TEXT);
+		rules[count].chain = one->chain;
+		rules[count].name = one->name;
+		rules[count].digest = one->digest;
+		rules[count].action = (char *)ncfg_nft_action_word(one->action);
+		rules[count].protocol = (char *)ncfg_nft_protocol_word(one->protocol);
+		rules[count].interface = one->interface[0] ? one->interface : NULL;
+		rules[count].time = times[count][0] ? times[count] : NULL;
+		count++;
+	}
+	ncfg_buf_free(&built);
+	return count;
+}
+
+/*
+ * The loop's one firewall change no operator makes (10.663): the clock's
+ * offset moving under a schedule. Recognised only where nothing else differs.
+ */
+static void only_the_clock_moving_is_recognised(void)
+{
+	static char                   *days[] = { (char *)"mon" };
+	ncfg_firewall_rule_t           rule;
+	ncfg_firewall_t                firewall;
+	ncfg_nft_kernel_rule_t         held[8];
+	char                           times[8][NCFG_NFT_TIME_TEXT];
+	ncfg_observed_firewall_rule_t  rules[8];
+	ncfg_observed_firewall_t       observed;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"bedtime";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_ANY;
+	rule.interface = (char *)"kids0";
+	rule.hours = (char *)"22:00-07:00";
+	rule.days = days;
+	rule.day_count = 1u;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.forward.rules = &rule;
+	firewall.forward.rule_count = 1u;
+	memset(&observed, 0, sizeof(observed));
+	observed.input = (char *)"accept";
+	observed.forward = (char *)"accept";
+	observed.output = (char *)"accept";
+	observed.rules = rules;
+
+	ncfg_schedule_offset_fix(1, 3600);
+	observed.rule_count = observe_built(&firewall, held, times, rules);
+	check(observed.rule_count == 2u, "an installed schedule, an hour east, is two rules");
+	check(!ncfg_nft_firewall_only_schedule_moved(&firewall, &observed),
+	    "at the same offset nothing has moved");
+
+	ncfg_schedule_offset_fix(1, 7200);
+	check(ncfg_nft_firewall_only_schedule_moved(&firewall, &observed),
+	    "at summer time the schedule alone has moved, and the loop may put it back");
+
+	rule.interface = (char *)"kids1";
+	check(!ncfg_nft_firewall_only_schedule_moved(&firewall, &observed),
+	    "  but not where anything else differs too: that is an apply's to make");
+	rule.interface = (char *)"kids0";
+	ncfg_schedule_offset_fix(0, 0);
 }
 
 /*
@@ -1345,6 +1552,8 @@ int main(void)
 
 	a_rule_is_bounded_in_what_it_becomes();
 	what_is_written_is_read_back();
+	a_schedule_is_written_in_utc_and_read_back();
+	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();
 	reflections_and_return_paths_are_read_back();
 

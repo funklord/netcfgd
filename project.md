@@ -12626,6 +12626,56 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.663 A firewall rule may keep hours: parental controls, held by the kernel
+
+Found walking the router aim: every consumer router can keep a child's
+devices offline after ten on school nights, and netcfgd's firewall could not
+say it, so the answer was a hand-written nftables table beside netcfgd's.
+[0307](doc/decision/0307-a-firewall-rule-may-keep-hours.md) has the decision
+and what was rejected.
+
+    drop "bedtime" {
+    	mac   = ["@host_list:kids"]
+    	hours = "21:00-07:00"
+    	days  = ["sun", "mon", "tue", "wed", "thu"]
+    }
+
+- **In local time, held in UTC.** `meta hour` and `meta day` read the kernel's
+  clock, which is UTC; nft converts the hour and not the day, so its own rules
+  match the wrong day near midnight. `c/src/model/schedule.c` expands a
+  schedule into UTC pieces -- moved and split wherever local or UTC midnight
+  falls -- at the offset in force when the rules are built, and each piece is
+  one kernel rule: `meta hour`, `byteorder hton`, `range eq`, then `meta day`
+  and `cmp`, as nft 1.1.3 encodes `meta hour "08:00"-"09:30" meta day 1`
+  (measured with `nft --debug=netlink`). Pieces are one more axis of 10.592's
+  expansion and count against its 256.
+- **The pieces are in the digest**, so a summer-time change is a firewall that
+  is not the document's, and **the loop puts it back by itself**: a firewall
+  replace is otherwise an apply's to make, and this one is the clock's,
+  recognised exactly by `ncfg_nft_firewall_only_schedule_moved` -- the
+  document's firewall given the kernel's pieces matches what is installed.
+- **The undo copy carries `utc_pieces`**, since the local schedule cannot be
+  recovered from them; the builder takes them as they are and they digest as
+  the rules they were read from. A compiled document never has them, and
+  `tool/form-unread-keys.txt` waives the field for the GUI with that reason.
+- The observation's rule gains `time` (the piece, `"1 25200 30599"`), the
+  comparison compares it, `ncfg status` says it for a person
+  (`time mon 07:00-08:29:59 UTC`), the renderer writes `hours` and `days`
+  back, and the GUI's firewall dialog edits them.
+
+Checked: `schedule_test` (the parse, the days, fourteen expansions written out
+by hand across offsets east and west, the piece text); `nft_test` (a Monday
+night an hour east is two rules on two UTC days, read back to its pieces; the
+digest moves with the offset; an undo copy digests as its source; the clock
+alone moving is recognised, and not when anything else differs too);
+`lower_test`, `render_test`; `firewall_load` with a schedule in the fixture.
+**In a real kernel**, `tests/live/firewall.sh` under `unshare -rn`: Monday
+08:00-09:30 an hour east is listed by nft as `meta hour "07:00"-"08:29:59"
+meta day "Monday" drop`, a window past midnight is two rules with one digest,
+the probe reads a piece back with its digest recomputing, `ncfg apply` then
+`ncfg plan` says nothing to do, and the same document planned five hours west
+is a table to replace.
+
 ## 10.662 fuzznet built three things this tree asked for, and the seam they meet
 
 Five inbox messages, 2026-11-02 and 03, recorded here before they are

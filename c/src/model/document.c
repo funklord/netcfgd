@@ -2751,7 +2751,16 @@ static const ncfg_field_t firewall_rule_fields[] = {
 	    .count_offset = offsetof(ncfg_firewall_rule_t, mac_list_count) },
 	{ .name = "mac_written", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_firewall_rule_t, mac_written),
-	    .count_offset = offsetof(ncfg_firewall_rule_t, mac_written_count) }
+	    .count_offset = offsetof(ncfg_firewall_rule_t, mac_written_count) },
+	/* The schedule, each omitted when unset (10.663), so every ruleset written
+	 * before it reads and writes back unchanged. */
+	{ .name = "hours", .kind = NCFG_F_STR, .offset = offsetof(ncfg_firewall_rule_t, hours) },
+	{ .name = "days", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, days),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, day_count) },
+	{ .name = "utc_pieces", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, utc_pieces),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, utc_piece_count) }
 };
 static const ncfg_type_t firewall_rule_type = TYPE("firewall rule", firewall_rule_fields);
 
