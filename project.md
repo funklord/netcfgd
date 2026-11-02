@@ -1148,8 +1148,11 @@ HAL9001 is finished. HAL9001 is a microcontroller HAL at a higher level than
 usual, meant to make switching between 8-, 16-, 32-bit and larger parts, and
 between quite different architectures, seamless. It has had ATmega8, PIC16,
 8051, MSP430 and STM32F103 support; in principle it is a better Arduino. The
-ESP parts are the easy end for it, being far more capable than those; the
-small and odd architectures were the hard part. Its
+ESP parts are the easy end for it, being far more capable than those. **What
+the trial waits on is HAL9001's design, not a port**: it is meant to be the
+right abstraction from the start rather than a moving target, and settling
+one interface that also fits the small and odd architectures is the hard
+part. A netcfgd port would then target an interface that does not move. Its
 tree is not on this machine, so what it would give netcfgd is unknown here. Read
 what follows with the C port in mind: the measurements below were taken on
 the Rust tree.
