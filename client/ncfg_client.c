@@ -551,6 +551,7 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].master);
 		free(links->items[i].parent);
 		free(links->items[i].public_key);
+		free(links->items[i].delegated);
 		for (size_t at = 0; at < links->items[i].route_count; at++) {
 			free(links->items[i].routes[at].destination);
 			free(links->items[i].routes[at].via);
@@ -636,6 +637,49 @@ void ncfg_event_free(ncfg_event_t *event)
  * against a socket round trip, and a hash table here would be more code than
  * the rest of the conversion put together.
  */
+/* The prefixes `delegations` lists for one interface, comma-joined. */
+static char *join_delegated(const ncfg_json_doc_t *doc, uint32_t delegations, const char *name)
+{
+	char  *joined = dup_text("", 0);
+	size_t length = 0;
+
+	if (!joined) {
+		return NULL;
+	}
+	uint32_t count = ncfg_json_count(doc, delegations);
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, delegations, i);
+
+		if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "interface"), name)) {
+			continue;
+		}
+		uint32_t prefixes = ncfg_json_member(doc, entry, "prefixes");
+		uint32_t many = ncfg_json_count(doc, prefixes);
+		for (uint32_t at = 0; at < many; at++) {
+			size_t      prefix_length = 0;
+			const char *prefix = ncfg_json_string(doc, ncfg_json_at(doc, prefixes, at),
+			                                      &prefix_length);
+			if (!prefix || !prefix_length) {
+				continue;
+			}
+			char *grown = realloc(joined, length + (length ? 2u : 0u) + prefix_length + 1u);
+			if (!grown) {
+				free(joined);
+				return NULL;
+			}
+			joined = grown;
+			if (length) {
+				memcpy(joined + length, ", ", 2u);
+				length += 2u;
+			}
+			memcpy(joined + length, prefix, prefix_length);
+			length += prefix_length;
+			joined[length] = '\0';
+		}
+	}
+	return joined;
+}
+
 static char *join_addresses(const ncfg_json_doc_t *doc, uint32_t addresses, const char *name)
 {
 	char *joined = dup_text("", 0);
@@ -840,6 +884,7 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 	uint32_t links = ncfg_json_member(doc, root, "links");
 	uint32_t addresses = ncfg_json_member(doc, root, "addresses");
 	uint32_t routes = ncfg_json_member(doc, root, "routes");
+	uint32_t delegations = ncfg_json_member(doc, root, "delegations");
 	uint32_t count = ncfg_json_count(doc, links);
 
 	if (!count) {
@@ -873,6 +918,7 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), 0);
 		item->carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), 0);
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
+		item->delegated = item->name ? join_delegated(doc, delegations, item->name) : NULL;
 		item->default_route =
 		    item->name ? link_has_default_route(doc, routes, item->name) : 0;
 		item->default_via = item->name ? link_default_via(doc, routes, item->name) : NULL;
@@ -916,7 +962,7 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->category = member_text(doc, link, "category");
 		if (!item->name || !item->kind || !item->mac || !item->addresses ||
 		    !item->network || !item->category || !item->master || !item->parent ||
-		    !item->public_key) {
+		    !item->public_key || !item->delegated) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);
 			return 0;

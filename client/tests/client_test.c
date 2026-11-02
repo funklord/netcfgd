@@ -860,7 +860,11 @@ static const char status_response[] =
     "\"wireless\":true,\"network\":\"office\",\"mtu\":1500}],"
     "\"addresses\":[{\"interface\":\"eth0\",\"address\":\"192.0.2.1/24\"},"
     "{\"interface\":\"br0\",\"address\":\"10.0.0.1/24\"},"
-    "{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}]}\n";
+    "{\"interface\":\"eth0\",\"address\":\"fe80::1/64\"}],"
+    /* Two prefixes delegated over eth0, and a delegation for an interface
+     * that is not in the list, which must land nowhere. */
+    "\"delegations\":[{\"interface\":\"eth0\",\"prefixes\":[\"2001:db8:1234::/56\","
+    "\"2001:db8:5678::/60\"]},{\"interface\":\"ppp0\",\"prefixes\":[\"2001:db8:9::/48\"]}]}\n";
 
 /*
  * The leases netcfgd's DHCP servers hold (0303), from a status answer: two
@@ -939,6 +943,10 @@ static void a_status_becomes_links(void)
 		equals("every address of an interface is gathered, in the daemon's order",
 		       links.items[0].addresses, "192.0.2.1/24, fe80::1/64");
 		equals("and only that interface's", links.items[1].addresses, "10.0.0.1/24");
+		equals("a link carries the prefixes delegated over it, in the lease's order",
+		       links.items[0].delegated, "2001:db8:1234::/56, 2001:db8:5678::/60");
+		equals("and a link nothing was delegated over carries none",
+		       links.items[1].delegated, "");
 		/* An empty kind is what the kernel says about a real NIC, and it
 		 * stays empty: `eth0` is a convention, not a fact. */
 		equals("a real NIC keeps its empty kind", links.items[0].kind, "");

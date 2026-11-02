@@ -258,7 +258,7 @@ void ncfg_links_view::redraw()
 			 * interface, which carries itself and would only repeat column
 			 * one. */
 			cells << known.carrier;
-			cells << (seen ? seen->addresses : QString());
+			cells << (seen ? ncfg_link_addresses_shown(*seen) : QString());
 			cells << (seen && seen->mtu ? QString::number(seen->mtu) : QString());
 			cells << (seen ? seen->mac : QString());
 			rows << cells;
@@ -289,7 +289,7 @@ void ncfg_links_view::redraw()
 			 * replaced -- leaving it blank says less than it could, and says
 			 * nothing wrong. */
 			cells << QString();
-			cells << link.addresses;
+			cells << ncfg_link_addresses_shown(link);
 			cells << (link.mtu ? QString::number(link.mtu) : QString());
 			cells << link.mac;
 			rows << cells;

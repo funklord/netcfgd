@@ -74,6 +74,16 @@ void notes_into(const ncfg_note_t *items, size_t count, QList<ncfg_note_row> *ou
 
 } /* namespace */
 
+QString ncfg_link_addresses_shown(const ncfg_link_row &link)
+{
+	if (link.delegated.isEmpty()) {
+		return link.addresses;
+	}
+	const QString delegated = QStringLiteral("delegated %1").arg(link.delegated);
+	return link.addresses.isEmpty() ? delegated
+	                                : QStringLiteral("%1; %2").arg(link.addresses, delegated);
+}
+
 QString ncfg_wifi_status_row::summary() const
 {
 	QString line = QStringLiteral("%1: %2").arg(interface, state);
@@ -465,6 +475,7 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 		row.state = state_of(link);
 		row.mac = from_c(link.mac);
 		row.addresses = from_c(link.addresses);
+		row.delegated = from_c(link.delegated);
 		row.default_route = link.default_route != 0;
 		row.mtu = link.mtu;
 		row.wireless = link.wireless != 0;

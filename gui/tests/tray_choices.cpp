@@ -172,6 +172,16 @@ int main(int argc, char **argv)
 	    "and one switched off says what clears it");
 	check(!status.summary().contains(QStringLiteral("gave up")),
 	    "a radio the supplicant has not given up on says nothing of it");
+	/* A router's links cell: what an upstream delegated, said as such. */
+	ncfg_link_row wan;
+	wan.addresses = QStringLiteral("192.0.2.1/24");
+	check(ncfg_link_addresses_shown(wan) == QStringLiteral("192.0.2.1/24"),
+	    "a link with nothing delegated shows its addresses");
+	wan.delegated = QStringLiteral("2001:db8:1234::/56");
+	check(ncfg_link_addresses_shown(wan) ==
+	          QStringLiteral("192.0.2.1/24; delegated 2001:db8:1234::/56"),
+	    "and one with a delegation says what was delegated");
+
 	status.given_up = QStringList() << QStringLiteral("Office");
 	check(status.summary().contains(QStringLiteral("gave up on Office")),
 	    "and one that has names the network");

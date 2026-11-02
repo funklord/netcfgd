@@ -727,6 +727,10 @@ static void the_status_listing_is_what_an_operator_reads(const char *text, size_
 	 * port that reached for it here would have changed the output while every
 	 * test that reads JSON stayed green.
 	 */
+	/* What the upstream delegated, which the observation carried and no
+	 * client printed (10.660). The witness has wan0's /56. */
+	line(printed, "  wan0: 2001:db8:1234::/56", "a delegated prefix is listed by its interface");
+
 	line(printed, "    192.168.0.1/24 [Ours]", "an address carries its ownership");
 	line(printed, "    172.16.1.1/24 [Foreign]", "and somebody else's says so");
 

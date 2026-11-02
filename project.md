@@ -12626,6 +12626,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.660 What the ISP delegated is shown, by `ncfg status` and the window
+
+Found walking the router aim from the window's side: the daemon has observed
+each DHCPv6 client's delegated prefixes since `advertise` and an interface's
+`prefix` reference were built on them, and **no client printed them** --
+neither `ncfg status` nor the window -- so "which prefix did the ISP give this
+router" had no answer short of reading `/run`. It was in 10.659's list of
+status members the client does not read.
+
+`ncfg status` gains a `Delegated prefixes` section, by interface, after the
+DHCP leases; the client library's link gains `delegated`, comma-joined in the
+lease's order; and the window's links view says it in the addresses cell as
+`; delegated <prefix>`, kept apart from the link's own addresses because a
+delegated prefix is not an address on that link but what the router hands on.
+
+Checked: `cli_test` holds the listing to the observed witness's `wan0` /56,
+and fails without the print; `client_test` stages two prefixes on one link
+and one on a link not in the list, which lands nowhere; `tray_choices` holds
+the cell.
+
 ## 10.659 A network the supplicant gave up on is named, and the lens that found it
 
 The same shape as 10.658, found by looking for it: **a member the daemon

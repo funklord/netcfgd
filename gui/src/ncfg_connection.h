@@ -144,6 +144,9 @@ struct ncfg_link_row {
 	QString state;
 	QString mac;
 	QString addresses;
+	/* The prefixes an upstream delegated over this link, comma-joined;
+	 * empty where none. */
+	QString delegated;
 	int     mtu = 0;
 	/* Whether the wifi tab should offer this one. Answered below the seam so
 	 * that the rule lives with the other models rather than in a table. */
@@ -168,6 +171,13 @@ struct ncfg_link_row {
 	 * decides this link's route metric (0153). */
 	QString network;
 };
+
+/*
+ * The addresses cell for a link: its addresses, and what an upstream
+ * delegated over it, said as delegated rather than mixed in -- a delegated
+ * prefix is not an address on this link, it is what the router hands on.
+ */
+QString ncfg_link_addresses_shown(const ncfg_link_row &link);
 
 /*
  * One saved wireless network, as the document describes it.

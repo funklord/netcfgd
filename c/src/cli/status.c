@@ -299,6 +299,38 @@ static void print_leases(const ncfg_observed_t *observed)
 	}
 }
 
+/*
+ * What an upstream delegated, by the interface its DHCPv6 client ran on.
+ *
+ * **Observed since the delegation work and printed by nothing**, so "which
+ * prefix did the ISP give this router" had no answer from any client of
+ * netcfgd, though `advertise` and an interface's `prefix` reference are built
+ * on it. Told rather than read (observed.h): the client's hook writes it.
+ */
+static void print_delegations(const ncfg_observed_t *observed)
+{
+	size_t at;
+	size_t one;
+
+	if (!observed->delegation_count) {
+		return;
+	}
+	ncfg_out_line("");
+	ncfg_out_line("Delegated prefixes");
+	for (at = 0; at < observed->delegation_count; at++) {
+		const ncfg_delegation_t *delegation = &observed->delegations[at];
+
+		ncfg_out_writef("  %s:", delegation->interface ? delegation->interface : "?");
+		if (!delegation->prefix_count) {
+			ncfg_out_write(" none in the lease");
+		}
+		for (one = 0; one < delegation->prefix_count; one++) {
+			ncfg_out_writef(" %s", delegation->prefixes[one]);
+		}
+		ncfg_out_line("");
+	}
+}
+
 static void print_linksets(const ncfg_observed_t *observed)
 {
 	size_t set;
@@ -560,6 +592,7 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 	print_linksets(observed);
 	print_firewall(observed);
 	print_leases(observed);
+	print_delegations(observed);
 	/*
 	 * Printed once rather than per interface: the conflict is with a table,
 	 * not with a device, and repeating it under every link would make one

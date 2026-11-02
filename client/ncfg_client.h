@@ -315,6 +315,13 @@ typedef struct {
 	 */
 	char *public_key;
 	int   listen_port;
+	/*
+	 * The prefixes an upstream delegated over this link, comma-joined in the
+	 * order the lease listed them; "" where none. What a router's operator
+	 * asks first -- "which prefix did the ISP give me" -- and the daemon
+	 * observed it long before any client read it (project.md 10.660).
+	 */
+	char *delegated;
 } ncfg_link_t;
 
 typedef struct {
