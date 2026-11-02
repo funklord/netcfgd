@@ -4343,13 +4343,9 @@ verified.**
   already records against the `raidcfgd` fact.
 - **What a laptop should expect, asked directly.** Wired is the proven half
   and `doc/first-run.md` is the sequence for it. Wifi has never met a real
-  radio. Suspend and resume have never been run, and the specific consequence
-  is already known and undecided: the confirm window is an absolute
-  `deadline_epoch`, so a window armed before a long suspend is expired on
-  resume and **the first observation after the lid opens reverts a change the
-  operator has been living with all night**. Until that is decided, the
-  practical advice is to `confirm` promptly and not to suspend with a window
-  open.
+  radio. Suspend and resume have never been run. ~~The confirm window expired
+  during a suspend and reverted on resume~~ -- **decided and built, 10.665**:
+  a window pauses while the machine sleeps.
 
 **Still true from the pass before, and it keeps paying.** Three things recorded
 as blocked on hardware were blocked on *privilege* or on *a toolchain*, and a
@@ -5500,13 +5496,11 @@ the sentence that disposes of an alternative in half a line.
      `CLOCK_MONOTONIC` deadline would have walked into, since that clock does not
      advance across a suspend and `CLOCK_BOOTTIME` is the one that does.
 
-     What that same design does next has not been decided. A window armed before
-     an eight-hour suspend is long expired on resume, so the first observation
-     after the lid opens **reverts a change the operator has been living with all
-     night** — defensible, since unconfirmed means revert, and surprising enough
-     that it should be a decision rather than a consequence. Wall-clock also means
-     the resume-time NTP correction a laptop usually takes can move the deadline
-     under a window that is still open.
+     ~~What that same design does next has not been decided~~ -- **decided by
+     the holder and built, 10.665**: a window pauses while the machine sleeps,
+     so the operator who opens the lid has the time that was left rather than a
+     revert. Wall-clock still means a resume-time NTP correction can move an
+     open window's deadline.
 
      Worth measuring specifically, in the order it will bite: whether a lease that
      expired during the suspend is renewed or silently stale; whether the
@@ -12626,6 +12620,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.665 A confirm window pauses while the machine sleeps
+
+The holder's "do what makes sense for each confirm window" (10.664, item 4).
+There is one kind, commit-confirm, and what made no sense was its suspend: the
+deadline was wall-clock, so a window armed before the lid closed was long
+past when it opened, and the first pass reverted a change the operator had
+lived with all night -- at the one moment they were back to confirm it.
+Nobody can confirm a sleeping machine, so the time it slept is given back.
+
+**`CLOCK_BOOTTIME` less `CLOCK_MONOTONIC` is exactly the time spent
+suspended**, and nothing else: no polling, and immune to a wall-clock step. A
+window records it when armed (`asleep_seconds` in `confirm.json`), and its
+deadline moves later by however much more has been slept since. A step of
+the wall clock still moves an open window, as `confirm_test` already pinned;
+a window written before this keeps the old reading, and the reader takes the
+new member where it is.
+
+Checked: `confirm_test` -- a window armed before a night's sleep is open when
+the lid opens with the forty seconds it had left, closes once those run
+awake, closes on time for a machine that stayed awake, and keeps its sleep
+count through the file; the old reading still holds for a window with none.
+Sabotaged (the sleep ignored), two checks fail. `reconcile_test` and
+`daemon_test` pass. Never run across a real suspend: `tests/live/` cannot
+suspend a machine, and this one is the holder's desktop.
+
 ## 10.664 Five answers from the holder, 2026-11-02
 
 Asked at the end of the /go runs of 2026-11-02, answered the same evening.
@@ -12656,7 +12675,7 @@ held them now point here.
 4. **Confirm windows: "do what makes sense for each".** For commit-confirm
    across a suspend, what makes sense is that a window does not run out while
    nobody can be at the machine to confirm: it pauses while the machine
-   sleeps. Built as its own change.
+   sleeps. Built, 10.665.
 5. **UPnP / NAT-PMP: yes, with a warning that it is a security risk.** Any
    device on the LAN may then open a port on the router; the plan says so
    whenever it is on.

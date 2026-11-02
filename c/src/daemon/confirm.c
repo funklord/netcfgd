@@ -170,20 +170,63 @@ uint64_t ncfg_confirm_now(void)
 	return now > 0 ? (uint64_t)now : 0u;
 }
 
+static int      asleep_fixed;
+static uint64_t asleep_seconds;
+
+void ncfg_confirm_asleep_fix(int set, uint64_t seconds)
+{
+	asleep_fixed = set;
+	asleep_seconds = seconds;
+}
+
+uint64_t ncfg_confirm_asleep(void)
+{
+	struct timespec boot;
+	struct timespec awake;
+
+	if (asleep_fixed) {
+		return asleep_seconds;
+	}
+	/* The two clocks differ by exactly the time suspended: BOOTTIME counts
+	 * it and MONOTONIC does not. Either missing is "never slept". */
+	if (clock_gettime(CLOCK_BOOTTIME, &boot) != 0 ||
+	    clock_gettime(CLOCK_MONOTONIC, &awake) != 0 || boot.tv_sec < awake.tv_sec) {
+		return 0u;
+	}
+	return (uint64_t)(boot.tv_sec - awake.tv_sec);
+}
+
+/* The deadline with the sleep since arming given back. */
+static uint64_t deadline_of(const ncfg_confirm_window_t *window)
+{
+	uint64_t asleep;
+
+	if (!window->has_asleep) {
+		return window->deadline_epoch;
+	}
+	asleep = ncfg_confirm_asleep();
+	return asleep > window->asleep_at_arming
+	    ? window->deadline_epoch + (asleep - window->asleep_at_arming)
+	    : window->deadline_epoch;
+}
+
 int ncfg_confirm_expired_at(const ncfg_confirm_window_t *window, uint64_t now)
 {
 	if (!window) {
 		return 1;
 	}
-	return now >= window->deadline_epoch;
+	return now >= deadline_of(window);
 }
 
 uint64_t ncfg_confirm_remaining_at(const ncfg_confirm_window_t *window, uint64_t now)
 {
-	if (!window || now >= window->deadline_epoch) {
+	uint64_t deadline;
+
+	if (!window) {
 		return 0u;
 	}
-	return window->deadline_epoch - now;
+	deadline = deadline_of(window);
+	return now >= deadline ? 0u : deadline - now;
 }
 
 /* Whether a member name is one of the three. Unknown members refuse the file,
@@ -210,6 +253,8 @@ int ncfg_confirm_read_window(const char *run_dir, ncfg_confirm_window_t *out)
 	size_t           hash_length = 0u;
 	int64_t          deadline = 0;
 	int64_t          seconds = 0;
+	int64_t          asleep = 0;
+	int              have_asleep = 0;
 
 	if (!out) {
 		return 0;
@@ -242,6 +287,9 @@ int ncfg_confirm_read_window(const char *run_dir, ncfg_confirm_window_t *out)
 			have_seconds = ncfg_json_type(doc, member) == NCFG_JSON_NUMBER;
 		} else if (window_member(doc, member, "last_good_hash")) {
 			hash = ncfg_json_string(doc, member, &hash_length);
+		} else if (window_member(doc, member, "asleep_seconds")) {
+			asleep = ncfg_json_int(doc, member, -1);
+			have_asleep = ncfg_json_type(doc, member) == NCFG_JSON_NUMBER && asleep >= 0;
 		} else {
 			/* A member netcfgd did not write. The file is netcfgd's own, so
 			 * this is not a version skew to accommodate -- it is a file
@@ -258,6 +306,8 @@ int ncfg_confirm_read_window(const char *run_dir, ncfg_confirm_window_t *out)
 	}
 	out->deadline_epoch = (uint64_t)deadline;
 	out->window_seconds = (uint32_t)seconds;
+	out->has_asleep = have_asleep;
+	out->asleep_at_arming = have_asleep ? (uint64_t)asleep : 0u;
 	memcpy(out->last_good_hash, hash, hash_length);
 	out->last_good_hash[hash_length] = '\0';
 	ncfg_json_free(doc);
@@ -290,6 +340,10 @@ int ncfg_confirm_write_window(const char *run_dir, const ncfg_confirm_window_t *
 	ncfg_json_write_key(&writer, "window_seconds");
 	ncfg_json_write_uint(&writer, (uint64_t)window->window_seconds);
 	ncfg_json_write_member_string(&writer, "last_good_hash", window->last_good_hash);
+	if (window->has_asleep) {
+		ncfg_json_write_key(&writer, "asleep_seconds");
+		ncfg_json_write_uint(&writer, window->asleep_at_arming);
+	}
 	ncfg_json_write_object_end(&writer);
 	if (!ncfg_json_write_done(&writer)) {
 		ncfg_error_set(err, err_size, "could not build the confirm window: %s",
@@ -513,6 +567,8 @@ int ncfg_confirm_arm(const ncfg_daemon_state_t *state, uint32_t window_seconds,
 	memset(&window, 0, sizeof(window));
 	window.deadline_epoch = ncfg_confirm_now() + window_seconds;
 	window.window_seconds = window_seconds;
+	window.has_asleep = 1;
+	window.asleep_at_arming = ncfg_confirm_asleep();
 	if (!ncfg_daemon_document_hash(last_good, window.last_good_hash, err, err_size)) {
 		return 0;
 	}

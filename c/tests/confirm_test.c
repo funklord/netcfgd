@@ -503,12 +503,8 @@ static void a_window_that_has_passed_reports_expired(void)
 }
 
 /*
- * A window is wall-clock, so a machine that sleeps through it wakes with it
- * already closed. That is the property suspend needs and the reason the
- * deadline is an epoch rather than a monotonic instant, which does not advance
- * across a suspend -- a window stored that way would come back with its whole
- * duration still to run, and the first observation after the lid opens would
- * revert a change the operator had been living with all night.
+ * A window that carries no sleep count -- one written before 10.665 -- keeps
+ * the old reading: wall-clock, so eight hours of suspend close it.
  */
 static void a_window_does_not_survive_the_machine_sleeping_through_it(void)
 {
@@ -526,6 +522,53 @@ static void a_window_does_not_survive_the_machine_sleeping_through_it(void)
 	    "eight hours of suspend later it is closed rather than untouched");
 	check(ncfg_confirm_remaining_at(&window, armed_at + 8u * 60u * 60u) == 0u,
 	    "and has nothing left");
+}
+
+/*
+ * **A window pauses while the machine sleeps** (10.665): nobody can confirm a
+ * sleeping machine, so the time it slept is given back, and the operator who
+ * opens the lid has what was left rather than a revert. Time awake still runs
+ * it out, and a window armed after a sleep is not lengthened by it.
+ */
+static void a_window_pauses_while_the_machine_sleeps(void)
+{
+	const uint64_t        armed_at = 1700000000u;
+	const uint64_t        night = 8u * 60u * 60u;
+	ncfg_confirm_window_t window;
+
+	memset(&window, 0, sizeof(window));
+	window.deadline_epoch = armed_at + 60u;
+	window.window_seconds = 60u;
+	window.has_asleep = 1;
+	window.asleep_at_arming = 500u;
+
+	/* Twenty seconds awake, then a night asleep, then the lid opens. */
+	ncfg_confirm_asleep_fix(1, 500u + night);
+	check(!ncfg_confirm_expired_at(&window, armed_at + 20u + night),
+	    "a window armed before a night's sleep is open when the lid opens");
+	check(ncfg_confirm_remaining_at(&window, armed_at + 20u + night) == 40u,
+	    "  with the forty seconds it had left, the night given back");
+	check(ncfg_confirm_expired_at(&window, armed_at + 60u + night),
+	    "  and closed once those have run awake");
+
+	ncfg_confirm_asleep_fix(1, 500u);
+	check(ncfg_confirm_expired_at(&window, armed_at + 60u),
+	    "a window the machine stayed awake through closes on time");
+
+	/* Written and read back, it keeps what it slept at arming. */
+	{
+		ncfg_confirm_window_t back;
+		char                  err[NCFG_ERROR_MAX];
+		const char           *run = testdir_make("confirm-asleep");
+
+		memset(&back, 0, sizeof(back));
+		(void)snprintf(window.last_good_hash, sizeof(window.last_good_hash), "%s", "abc");
+		check(ncfg_confirm_write_window(run, &window, err, sizeof(err)) &&
+		        ncfg_confirm_read_window(run, &back) && back.has_asleep &&
+		        back.asleep_at_arming == 500u,
+		    "the sleep at arming survives the window file");
+	}
+	ncfg_confirm_asleep_fix(0, 0u);
 }
 
 /*
@@ -1496,6 +1539,7 @@ int main(void)
 
 	a_window_that_has_passed_reports_expired();
 	a_window_does_not_survive_the_machine_sleeping_through_it();
+	a_window_pauses_while_the_machine_sleeps();
 	moving_the_clock_moves_an_open_window();
 
 	only_done_actions_with_an_inverse_are_undone();

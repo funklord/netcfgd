@@ -1395,19 +1395,29 @@ const char *ncfg_confirm_dir(const char *run_dir, char *out, size_t out_size);
 /*
  * An open commit-confirm window.
  *
- * The deadline is **absolute and wall-clock**, and both halves of that are
- * load-bearing. Absolute, so a daemon that restarts inside the window knows
- * how much is left without having to trust its own uptime. Wall-clock, so a
- * machine that sleeps through a window wakes with it already closed -- a
- * monotonic instant does not advance across a suspend, so a window stored that
- * way would come back with its whole duration still to run and would revert a
- * change the operator had been living with all night. The cost is that a clock
- * step moves an open window, which `confirm_test.c` pins in both directions so
- * that changing it is a decision with a number attached rather than an
- * accident.
+ * The deadline is **absolute and wall-clock**, so a daemon that restarts
+ * inside the window knows how much is left without trusting its own uptime;
+ * a clock step moves an open window, which `confirm_test.c` pins in both
+ * directions.
+ *
+ * **And it pauses while the machine sleeps** (project.md 10.665, the holder's
+ * "do what makes sense for each confirm window"). It used to close during a
+ * suspend, so the first pass after the lid opened reverted a change the
+ * operator had been living with all night, at the one moment they were back
+ * to confirm it. Nobody can confirm a sleeping machine, so the time it slept
+ * is given back: the window records how long the machine had slept since
+ * boot when it was armed -- `CLOCK_BOOTTIME` less `CLOCK_MONOTONIC`, which is
+ * exactly the time suspended and nothing else -- and its deadline moves later
+ * by however much more has been slept since. A wall-clock step still moves
+ * it; a suspend no longer does.
  */
 typedef struct {
 	uint64_t deadline_epoch;
+	/* Seconds slept since boot when the window was armed, and whether the
+	 * window carries it -- one written before 10.665 does not, and keeps the
+	 * old reading. */
+	uint64_t asleep_at_arming;
+	int      has_asleep;
 	/* How long the window was, for reporting. */
 	uint32_t window_seconds;
 	/* The document to go back to, by `ncfg_daemon_document_hash`. */
@@ -1416,6 +1426,11 @@ typedef struct {
 
 /* Seconds since the epoch, or 0 where this machine's clock is before it. */
 uint64_t ncfg_confirm_now(void);
+
+/* Seconds this machine has spent suspended since it booted. A test may fix
+ * it (`set` non-zero) to stand in for a suspend. */
+uint64_t ncfg_confirm_asleep(void);
+void ncfg_confirm_asleep_fix(int set, uint64_t seconds);
 
 /*
  * Whether the window has closed, and how long is left, against a clock the
