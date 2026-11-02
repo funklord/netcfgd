@@ -12626,7 +12626,7 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.661 The stops waited on a file the daemon removes before it exits
+## 10.661 Five stops waited on a file the daemon removes before it exits
 
 **Found by `make check` at f353458d**, under a machine at load 65:
 `supplicant_launch_test` failed "the supplicant it was told to stop has gone
@@ -12644,6 +12644,17 @@ carrying netcfgd's marker. Both stops take the pid before `TERMINATE` and
 wait on it; a zombie, or a pid reused by something without the marker, reads
 as gone. dnsmasq's stop is untouched: it does not remove its pid file on
 exit, so re-reading the file was sound there.
+
+**The same shape, searched for: three more stops.** openvpn, radvd and pppd
+each remove their own pid file as they exit, and each stop waited by
+re-reading it -- openvpn's comment even said so, as the reason the wait
+usually returned at once. Each now follows the pid it signalled, by the
+marker its `running_pid` already used: the management socket path, the
+generated radvd configuration, the pppd options file. `ra_test`'s slow
+stand-in now removes its pid file before its half-second exit, as radvd does;
+the old wait fails "a start that follows cannot meet the daemon it replaced"
+and the new one passes. openvpn and pppoe have no stand-in that exits slowly,
+so for them the change is the same code as the two proved, not a third proof.
 
 Proved both ways, deterministically. The fake supplicant gained
 `FAKE_SUPPLICANT_EXIT_DELAY_MS`, which the launch test sets to 300 and

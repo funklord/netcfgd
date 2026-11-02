@@ -618,17 +618,23 @@ static void forget_tunnel(const char *run, const char *iface, const char *socket
  * the pid file against this tunnel's socket path, so a pid recycled between
  * two looks cannot be read as the daemon still running.
  *
- * The common case returns on the first look, openvpn removing its own pid file
- * as it exits.
+ * **By the pid taken before the signal, where there is one**: openvpn
+ * removes its own pid file as it exits, before it has, so the file says
+ * "gone" early (10.661). The marker is the same socket path.
  */
-static int wait_for_exit(const char *run, const char *iface)
+static int wait_for_exit(pid_t pid, const char *run, const char *iface)
 {
-	int waited = 0;
+	char marker[NCFG_OPENVPN_PATH_MAX];
+	int  waited = 0;
 
+	if (pid > 0 && !ncfg_openvpn_socket_path(run, iface, marker, sizeof(marker), NULL, 0)) {
+		pid = 0;
+	}
 	for (;;) {
 		struct timespec step;
 
-		if (ncfg_openvpn_running_pid(run, iface) <= 0) {
+		if (pid > 0 ? !ncfg_process_still(pid, marker)
+		            : ncfg_openvpn_running_pid(run, iface) <= 0) {
 			return 1;
 		}
 		if (waited >= OPENVPN_STOP_PATIENCE_MILLISECONDS) {
@@ -677,7 +683,7 @@ static int stop_by_pid(const char *run, const char *iface, char *err, size_t err
 	 * takes. A restart is a stop and then a start, so the start would meet the
 	 * daemon it was replacing: the same defect `autoip` and the RA daemon
 	 * carried (10.565, 10.566). */
-	if (!wait_for_exit(run, iface)) {
+	if (!wait_for_exit(pid, run, iface)) {
 		ncfg_error_set(err, err_size,
 		    "the openvpn tunnel on %s was signalled (pid %ld) and is still running after "
 		    "%d ms, so its pid file is kept: a start that follows cannot meet the daemon it "
@@ -700,6 +706,7 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 	char                       socket_path[NCFG_OPENVPN_PATH_MAX];
 	char                       hash[NCFG_OPENVPN_PATH_MAX];
 	ncfg_openvpn_management_t *management;
+	pid_t                      running;
 
 	/* **Before the signal, and outside the "is anything listening" question.** A
 	 * report is a claim that routes exist, and the tunnel they belong to is
@@ -734,6 +741,9 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 		 * wrongly for a daemon that had forked and not yet bound (0074). */
 		return stop_by_pid(run, iface, err, err_size);
 	}
+	/* Taken before the signal, so the wait follows this process and not a
+	 * pid file openvpn removes before it has gone (10.661). */
+	running = ncfg_openvpn_running_pid(run, iface);
 	if (!ncfg_openvpn_command(management, "signal SIGTERM", NULL, 0u, err, err_size)) {
 		char why[NCFG_ERROR_MAX];
 
@@ -764,7 +774,7 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 		 * the sentence the management reply supplied -- which is the case the
 		 * named refusal was written for (10.571) and is unchanged.
 		 */
-		if (wait_for_exit(run, iface)) {
+		if (wait_for_exit(running, run, iface)) {
 			forget_tunnel(run, iface, socket_path);
 			return 1;
 		}
@@ -789,7 +799,7 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 	 * socket on its way out -- after which netcfgd cannot reach a tunnel that is
 	 * running perfectly well, and every later stop falls back to the pid path.
 	 */
-	if (!wait_for_exit(run, iface)) {
+	if (!wait_for_exit(running, run, iface)) {
 		ncfg_error_set(err, err_size,
 		    "the openvpn tunnel on %s took the stop and is still running after %d ms, so its "
 		    "pid file and management socket are kept: removing them now would hand the next "

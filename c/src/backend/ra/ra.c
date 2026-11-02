@@ -325,14 +325,22 @@ int ncfg_ra_reload(const char *run, const char *iface, const ncfg_ra_policy_t *p
 #define RA_STOP_PATIENCE_MILLISECONDS 1000
 #define RA_STOP_STEP_MILLISECONDS 25
 
-static int wait_for_exit(const char *run, const char *iface)
+static int wait_for_exit(pid_t pid, const char *run, const char *iface)
 {
-	int waited = 0;
+	char marker[NCFG_RA_PATH_MAX];
+	int  waited = 0;
 
+	/* By the pid taken before the signal, where there is one: radvd removes
+	 * its own pid file as it exits, before it has (10.661). The marker is the
+	 * same generated configuration. */
+	if (pid > 0 && !ncfg_ra_config_path(run, iface, marker, sizeof(marker), NULL, 0)) {
+		pid = 0;
+	}
 	for (;;) {
 		struct timespec step;
 
-		if (ncfg_ra_running_pid(run, iface) <= 0) {
+		if (pid > 0 ? !ncfg_process_still(pid, marker)
+		            : ncfg_ra_running_pid(run, iface) <= 0) {
 			return 1;
 		}
 		if (waited >= RA_STOP_PATIENCE_MILLISECONDS) {
@@ -362,7 +370,7 @@ int ncfg_ra_stop(const char *run, const char *iface, char *err, size_t err_size)
 	 * returns on the first look and the unlink below is a tidy-up for a
 	 * daemon that was killed rather than asked.
 	 */
-	if (!wait_for_exit(run, iface)) {
+	if (!wait_for_exit(pid, run, iface)) {
 		ncfg_error_set(err, err_size,
 		    "radvd on %s is still running %d ms after SIGTERM, still reciting the "
 		    "configuration netcfgd gave it. Its pid file is left in place, so a start "

@@ -587,13 +587,22 @@ int ncfg_pppoe_stop(const char *run, const char *iface, const char *report,
 		 * mistaken for the session, since a stranger does not carry the
 		 * marker either.
 		 */
+		/* By the pid signalled rather than by the pid file: pppd removes its
+		 * own as it exits, before it has (10.661). The marker is the same
+		 * options file. */
+		char options[NCFG_PPPOE_PATH_MAX];
+		int  marked = ncfg_pppoe_options_path(run, iface, options, sizeof(options),
+		                                      scratch, sizeof(scratch));
+
 		for (waited = 0u; waited < 50u; waited++) {
-			if (ncfg_pppoe_running_pid(run, iface, machine) <= 0) {
+			if (marked ? !ncfg_process_still(pid, options)
+			           : ncfg_pppoe_running_pid(run, iface, machine) <= 0) {
 				break;
 			}
 			(void)nanosleep(&step, NULL);
 		}
-		if (ncfg_pppoe_running_pid(run, iface, machine) > 0) {
+		if (marked ? ncfg_process_still(pid, options)
+		           : ncfg_pppoe_running_pid(run, iface, machine) > 0) {
 			ncfg_error_set(err, err_size,
 			    "the pppoe session on %s was asked to stop and pid %ld is still "
 			    "running after five seconds; its options file is kept so the next "
