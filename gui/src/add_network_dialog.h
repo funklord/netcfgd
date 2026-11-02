@@ -87,6 +87,10 @@ public:
 	            const QString &shown, bool secured, bool enterprise,
 	            QWidget *parent = nullptr);
 
+	/* The id the operator gave, which is empty where they left the daemon
+	 * to choose one. Read after the dialog is accepted. */
+	QString chosen_id() const;
+
 private slots:
 	void submit();
 	void revalidate();

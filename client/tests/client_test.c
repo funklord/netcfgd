@@ -2181,6 +2181,59 @@ static void join_choices_are_the_saved_networks_heard(void)
 }
 
 /*
+ * What a tray offers to add, from the same kind of scan.
+ *
+ * The cases are the ones the rule excludes, each beside a case it keeps: an
+ * SSID saved under one access point and heard unsaved from another, a hidden
+ * name, an OWE network, and two access points for one new SSID whose flags
+ * differ -- the stronger one's are the ones carried.
+ */
+static ncfg_access_point_t new_point(const char *ssid, const char *name, const char *configured,
+                                     int signal, int secured)
+{
+	ncfg_access_point_t point = heard_point(name, configured, signal);
+
+	point.ssid = (char *)ssid;
+	point.secured = secured;
+	return point;
+}
+
+static void new_choices_are_the_unsaved_networks_heard(void)
+{
+	ncfg_access_point_t points[] = {
+		new_point("43616665", "Cafe", "", -60, 0),
+		new_point("43616665", "Cafe", "", -45, 1),
+		new_point("486f6d65", "Home", "home", -70, 1),
+		new_point("486f6d65", "Home", "", -40, 1),
+		new_point("", "", "", -30, 0),
+		new_point("4c6962", "Lib", "", -75, 1),
+		new_point("4f7765", "Owe", "", -35, 0),
+	};
+	points[5].enterprise = 1;
+	points[6].owe = 1;
+	ncfg_new_choices_t choices = {};
+
+	int got = ncfg_new_choices(points, sizeof(points) / sizeof(points[0]), &choices);
+	ok("the new choices are built", got == 1, NULL);
+	ok("one per unsaved SSID, and none hidden, saved or OWE", choices.count == 2, NULL);
+	if (choices.count == 2) {
+		equals("the strongest first", choices.items[0].label, "Cafe");
+		equals("carrying the SSID as hex", choices.items[0].ssid, "43616665");
+		ok("at the strongest signal heard", choices.items[0].signal == -45, NULL);
+		ok("with the strongest access point's security", choices.items[0].secured == 1,
+		    NULL);
+		equals("then the next", choices.items[1].label, "Lib");
+		ok("an 802.1X network says so", choices.items[1].enterprise == 1, NULL);
+	}
+	ncfg_new_choices_free(&choices);
+
+	got = ncfg_new_choices(points + 2, 1, &choices);
+	ok("a scan of only saved networks offers nothing new", got == 1 && choices.count == 0,
+	    NULL);
+	ncfg_new_choices_free(&choices);
+}
+
+/*
  * The document's networks, which is a different list from a scan's.
  *
  * A configured network that is not broadcasting appears here and in no scan,
@@ -2646,6 +2699,7 @@ int main(int argc, char **argv)
 	a_station_list_carries_who_and_the_lease_they_hold();
 	saved_networks_come_from_the_document_not_a_scan();
 	join_choices_are_the_saved_networks_heard();
+	new_choices_are_the_unsaved_networks_heard();
 	credentials_and_eap_are_read_as_written();
 	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();

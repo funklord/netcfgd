@@ -373,6 +373,11 @@ void ncfg_add_network_dialog::revalidate()
 	add_button->setEnabled(ready);
 }
 
+QString ncfg_add_network_dialog::chosen_id() const
+{
+	return id->text();
+}
+
 void ncfg_add_network_dialog::submit()
 {
 	QString error;

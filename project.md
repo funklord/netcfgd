@@ -12626,6 +12626,46 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.652 The tray offers the networks it heard that nothing names yet
+
+**Found by walking the desktop aim** (10.590's brief: for a laptop's owner,
+joining a network is the whole interaction). The tray's `Connect to` listed
+the saved networks the last scan heard, and every other one -- the cafe, a
+friend's flat -- meant `Another network...`, the window, the wifi tab, finding
+the row and `Add`. 10.590 kept it that way because "a new network is a block
+written", and that reason had gone: `wifi_add` has been the `wifi` tier since
+0124 and carries typed fields, never config text (0117), so the tray may ask
+for it exactly as it asks for `wifi_connect`.
+
+**Below the saved networks, `New networks`**: the first eight SSIDs the last
+scan heard that no access point in it is configured for, strongest first,
+each saying whether it wants a passphrase, an 802.1X login or nothing.
+Choosing one opens the window's own add dialog on that access point -- the
+same fields and refusals as the wifi tab, and the review a plan would
+otherwise be -- and joins the network once the daemon has loaded it.
+
+- **The rule is the client library's, `ncfg_new_choices`**, beside
+  `ncfg_join_choices` and for its reason: the TDE tray will offer the same
+  list. It leaves out an SSID some network already names (that one is offered
+  above, by id, and a second block for it would be wrong), a hidden or
+  non-text name (nothing to recognise in a menu), and OWE (0227: `wifi_add`
+  cannot say it yet). Those stay reachable through `Another network...`.
+- **Joining waits for the load, by SSID.** `wifi_add` is answered when the
+  block is written, before the watcher has re-read the configuration, and
+  `wifi_connect` joins only what the loaded document names. The id may be the
+  daemon's choice, too, since the dialog leaves it optional. So the tray asks
+  `saved_networks` for the SSID every half second, up to ten seconds, and
+  joins by the id it finds; past that it says the network was added and where
+  to choose it.
+- **Still no scan of its own.** The list is the last scan the operator asked
+  for, as before.
+
+Checked: `client_test` holds the rule to each exclusion beside a case it
+keeps; `gui/tests/tray_choices` holds the tray's conversion, every field the
+rule reads included. The menu and the dialog it opens still want a
+notification host (10.590), so the click path is compiled and not driven.
+The TDE tray does not have this either, for 10.590's reason.
+
 ## 10.651 A fuzz target for block list lines, and two hunts that found nothing
 
 A `/go` run's bug hunt, 2026-11-01, after the known backlog was done.
@@ -15167,7 +15207,9 @@ network...`. Two things the tray's header had ruled out stay ruled out:
   exactly the wifi tab's, so it is the `wifi` tier and writes nothing; an
   access point no block names has no id and is not offered. `Another
   network...` opens the window on the wifi tab, since a new network is a
-  block written.
+  block written. **Superseded in part by 10.652**: writing that block is the
+  `wifi` tier too, so the tray now offers the unsaved networks it heard and
+  adds one through the add dialog.
 
 Two choices in it worth knowing. **Access points carrying one network are one
 entry** at the strongest signal heard, since the supplicant picks the BSS; two

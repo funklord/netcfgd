@@ -23,5 +23,5 @@ LIBS += $$CLIENT_DIR/libncfg_client.a
 # here too.
 PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
-SOURCES += tray_icon.cpp ../src/tray.cpp ../src/ncfg_connection.cpp
-HEADERS += ../src/tray.h ../src/ncfg_connection.h
+SOURCES += tray_icon.cpp ../src/tray.cpp ../src/add_network_dialog.cpp ../src/ncfg_connection.cpp
+HEADERS += ../src/tray.h ../src/add_network_dialog.h ../src/ncfg_connection.h

@@ -25,7 +25,13 @@
  *   they are the `wifi` tier and need no plan to understand: the join is by
  *   the network's id, exactly as the wifi tab's, and writes nothing.
  *   Joining a network the configuration does *not* name needs a block
- *   written, so that entry opens the window's wifi tab instead.
+ *   written, which is `wifi_add` -- the `wifi` tier too since 0124, and
+ *   typed fields rather than config text. So the networks the last scan heard
+ *   that nothing names are offered below the saved ones: choosing one opens
+ *   the window's own add dialog on that access point, which is the review a
+ *   plan would otherwise be, and joins the network once the daemon has loaded
+ *   it. `Another network...` still opens the wifi tab, for what a menu cannot
+ *   offer -- a hidden network, or one beyond the first few.
  *
  * THE ONE ADMIN-TIER THING IT DOES, AND WHY
  *   **Switching profiles**, which is a configuration write and therefore the
@@ -106,6 +112,18 @@ struct ncfg_tray_choice {
 	bool    current = false;
 };
 
+/*
+ * One entry below the saved ones: an SSID the last scan heard that no network
+ * names. The rule is `ncfg_new_choices`; this is its Qt shape.
+ */
+struct ncfg_tray_new_choice {
+	QString ssid; /* hex, what `wifi_add` takes */
+	QString label;
+	int     signal = 0;
+	bool    secured = false;
+	bool    enterprise = false;
+};
+
 class ncfg_tray : public QObject {
 	Q_OBJECT
 
@@ -130,6 +148,7 @@ public:
 	 * decides what the menu says. */
 	static QList<ncfg_tray_choice> choices(const QList<ncfg_access_point_row> &scanned,
 	                                       const QString &current);
+	static QList<ncfg_tray_new_choice> new_choices(const QList<ncfg_access_point_row> &scanned);
 
 	void refresh();
 
@@ -151,6 +170,11 @@ private slots:
 	void choose_profile(const QString &name);
 	void scan();
 	void join(const QString &network);
+	/* Add a network through the dialog, then join it once it is loaded. */
+	void add_network(const ncfg_tray_new_choice &choice);
+	/* One look for the network just added among the daemon's saved ones,
+	 * joining it when it is there and asking again shortly when it is not. */
+	void join_added();
 
 private:
 	ncfg_tray(ncfg_connection *connection, QObject *parent);
@@ -172,6 +196,13 @@ private:
 	QString                      scanned_radio;
 	QString                      scan_stale;
 	QDateTime                    scanned_at;
+	/* The network just added, by SSID, while the tray waits for the daemon
+	 * to load it. The id is the one the dialog was given, or empty where
+	 * the daemon chose it -- which is why the wait looks by SSID. */
+	QString                      added_ssid;
+	QString                      added_id;
+	QString                      added_label;
+	int                          added_looks = 0;
 	void rebuild_join(const QString &current);
 	/* Rebuilt on every refresh, because a profile can appear or be chosen
 	 * from anywhere -- `ncfg`, an editor, another client. A menu built once

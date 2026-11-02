@@ -760,6 +760,43 @@ int ncfg_join_choices(const ncfg_access_point_t *points, size_t count, const cha
                       ncfg_join_choices_t *out);
 void ncfg_join_choices_free(ncfg_join_choices_t *choices);
 
+/*
+ * What a tray offers under "connect to" below the saved ones: the networks a
+ * scan heard that the configuration does not name yet.
+ *
+ * Choosing one adds it -- `wifi_add`, the `wifi` tier since 0124, through the
+ * add dialog -- and then joins it. Same reason as ncfg_join_choices() for
+ * being here rather than in a tray.
+ *
+ * - Only SSIDs no access point in the scan is configured for. An SSID some
+ *   network already names is offered above, by that network's id; offering
+ *   it here too would add a second block for one network.
+ * - Only what a click can finish: an SSID that arrived as text, since an
+ *   operator cannot recognise a hidden or non-text one from a menu, and not
+ *   an OWE network, which `wifi_add` cannot say yet (0227).
+ * - One entry per SSID, at the strongest signal heard, carrying that access
+ *   point's `secured` and `enterprise`: they decide what the dialog asks.
+ * - Strongest first, ties by name.
+ *
+ * Returns 1, or 0 with `out` empty if memory ran out. Free with
+ * ncfg_new_choices_free().
+ */
+typedef struct {
+	char *ssid;  /* hex, what ncfg_client_wifi_add() takes */
+	char *label; /* the SSID as text */
+	int   signal;
+	int   secured;
+	int   enterprise;
+} ncfg_new_choice_t;
+
+typedef struct {
+	ncfg_new_choice_t *items;
+	size_t             count;
+} ncfg_new_choices_t;
+
+int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_choices_t *out);
+void ncfg_new_choices_free(ncfg_new_choices_t *choices);
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_inventory_free(ncfg_inventory_t *inventory);
 void ncfg_linksets_free(ncfg_linksets_t *linksets);

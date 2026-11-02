@@ -3,6 +3,7 @@
  */
 #include "tray.h"
 
+#include "add_network_dialog.h"
 #include "ncfg_connection.h"
 
 #include <QAction>
@@ -13,6 +14,7 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QSystemTrayIcon>
+#include <QTimer>
 
 #include <vector>
 
@@ -293,6 +295,48 @@ QList<ncfg_tray_choice> ncfg_tray::choices(const QList<ncfg_access_point_row> &s
 	return out;
 }
 
+QList<ncfg_tray_new_choice> ncfg_tray::new_choices(const QList<ncfg_access_point_row> &scanned)
+{
+	QList<ncfg_tray_new_choice> out;
+
+	/* `ncfg_new_choices`'s rule, and the same conversion as `choices`. */
+	QList<QByteArray> held;
+	std::vector<ncfg_access_point_t> points(static_cast<size_t>(scanned.size()));
+	for (int i = 0; i < scanned.size(); i++) {
+		held.append(scanned.at(i).ssid.toUtf8());
+		held.append(scanned.at(i).name.toUtf8());
+		held.append(scanned.at(i).configured.toUtf8());
+	}
+	for (int i = 0; i < scanned.size(); i++) {
+		const ncfg_access_point_row &row = scanned.at(i);
+		ncfg_access_point_t &point = points[static_cast<size_t>(i)];
+		point.ssid = held[i * 3].data();
+		point.name = held[i * 3 + 1].data();
+		point.named = row.named ? 1 : 0;
+		point.configured = held[i * 3 + 2].data();
+		point.signal = row.signal;
+		point.secured = row.secured ? 1 : 0;
+		point.enterprise = row.enterprise ? 1 : 0;
+		point.owe = row.owe ? 1 : 0;
+	}
+
+	ncfg_new_choices_t found = {};
+	if (!ncfg_new_choices(points.data(), points.size(), &found)) {
+		return out;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_tray_new_choice choice;
+		choice.ssid = QString::fromUtf8(found.items[i].ssid);
+		choice.label = QString::fromUtf8(found.items[i].label);
+		choice.signal = found.items[i].signal;
+		choice.secured = found.items[i].secured != 0;
+		choice.enterprise = found.items[i].enterprise != 0;
+		out.append(choice);
+	}
+	ncfg_new_choices_free(&found);
+	return out;
+}
+
 void ncfg_tray::rebuild_join(const QString &current)
 {
 	join_menu->clear();
@@ -350,6 +394,28 @@ void ncfg_tray::rebuild_join(const QString &current)
 			const QString network = choice.network;
 			connect(action, &QAction::triggered, this, [this, network] { join(network); });
 		}
+
+		/* The first few only: a scan in a block of flats hears dozens, and a
+		 * menu that long buries the saved networks above it. The rest are
+		 * on the wifi tab, which `Another network...` opens. */
+		const QList<ncfg_tray_new_choice> heard = new_choices(scanned);
+		const int shown = static_cast<int>(qMin(heard.size(), static_cast<qsizetype>(8)));
+		if (shown > 0) {
+			join_menu->addSeparator();
+			QAction *title = join_menu->addAction(QStringLiteral("New networks"));
+			title->setEnabled(false);
+		}
+		for (int i = 0; i < shown; i++) {
+			const ncfg_tray_new_choice &choice = heard.at(i);
+			const QString kind = choice.enterprise ? QStringLiteral("enterprise")
+			                     : choice.secured  ? QStringLiteral("passphrase")
+			                                       : QStringLiteral("open");
+			QAction *action = join_menu->addAction(QStringLiteral("%1  (%2 dBm, %3)...")
+			                                           .arg(choice.label)
+			                                           .arg(choice.signal)
+			                                           .arg(kind));
+			connect(action, &QAction::triggered, this, [this, choice] { add_network(choice); });
+		}
 	}
 
 	join_menu->addSeparator();
@@ -389,12 +455,86 @@ void ncfg_tray::scan()
 	/* The menu closed when the scan was chosen, so what it found is said
 	 * where it can be seen without reopening it. */
 	const int saved = choices(scanned, QString()).size();
-	icon->showMessage(QStringLiteral("netcfgd"),
-	    saved == 0 ? QStringLiteral("No saved network in range.")
-	               : QStringLiteral("%1 saved network(s) in range -- choose one under "
-	                                "Connect to.")
-	                         .arg(saved),
-	    QSystemTrayIcon::Information, 4000);
+	const int heard = new_choices(scanned).size();
+	QString said = saved == 0 ? QStringLiteral("No saved network in range.")
+	                          : QStringLiteral("%1 saved network(s) in range.").arg(saved);
+	if (heard > 0) {
+		said += QStringLiteral(" %1 new one(s) heard.").arg(heard);
+	}
+	if (saved > 0 || heard > 0) {
+		said += QStringLiteral(" Choose under Connect to.");
+	}
+	icon->showMessage(QStringLiteral("netcfgd"), said, QSystemTrayIcon::Information, 4000);
+}
+
+void ncfg_tray::add_network(const ncfg_tray_new_choice &choice)
+{
+	if (radio.isEmpty()) {
+		return;
+	}
+	/* The window's own dialog, so a network added here is the network the
+	 * wifi tab would have added -- the same fields, the same refusals, and
+	 * the passphrase sent once and forgotten. No parent: the window may be
+	 * hidden, and a dialog parented to a hidden window is one nobody sees. */
+	ncfg_add_network_dialog dialog(connection, choice.ssid, choice.label, choice.secured,
+	                               choice.enterprise);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	added_ssid = choice.ssid;
+	added_id = dialog.chosen_id();
+	added_label = choice.label;
+	added_looks = 0;
+	icon->setToolTip(QStringLiteral("joining %1...").arg(choice.label));
+	join_added();
+}
+
+void ncfg_tray::join_added()
+{
+	if (added_ssid.isEmpty()) {
+		return;
+	}
+	/* **The daemon writes the block and loads it on its own time**: the
+	 * write is answered before the watcher has re-read the configuration,
+	 * and `wifi_connect` joins only networks the loaded document names. So
+	 * this looks for the network among the saved ones -- by SSID, since the
+	 * id may be the daemon's choice -- and asks again shortly while it is
+	 * not there yet. Bounded: twenty looks half a second apart, after which
+	 * the operator is told where to find it rather than waited on. */
+	QList<ncfg_saved_network_row> saved;
+	QString error;
+	QString found;
+	if (connection->saved_networks(&saved, &error)) {
+		for (const ncfg_saved_network_row &network : saved) {
+			if (network.ssid == added_ssid &&
+			    (added_id.isEmpty() || network.id == added_id)) {
+				found = network.id;
+				break;
+			}
+		}
+	}
+	if (!found.isEmpty()) {
+		added_ssid.clear();
+		join(found);
+		return;
+	}
+	if (++added_looks < 20) {
+		QTimer::singleShot(500, this, &ncfg_tray::join_added);
+		return;
+	}
+	const QString label = added_label;
+	added_ssid.clear();
+	const QString said =
+	    error.isEmpty()
+	        ? QStringLiteral("%1 was added and is not loaded yet. Choose it under Connect "
+	                         "to once it is.")
+	              .arg(label)
+	        : error;
+	/* After the refresh, which would otherwise write the link state over
+	 * the one sentence that says what happened. */
+	refresh();
+	state_action->setText(said);
+	icon->setToolTip(said);
 }
 
 void ncfg_tray::join(const QString &network)

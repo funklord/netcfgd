@@ -94,5 +94,34 @@ int main(int argc, char **argv)
 
 	check(ncfg_tray::choices({}, QString()).isEmpty(), "an empty scan offers nothing");
 
+	/* Below the saved ones, the SSIDs nothing names: `ncfg_new_choices`,
+	 * whose rule client_test holds. What is checked here is that every
+	 * field the rule reads survives the conversion -- the SSID, and the three
+	 * flags that decide what the dialog asks and whether it is offered. */
+	QList<ncfg_access_point_row> around = scanned;
+	around[0].ssid = QStringLiteral("43616665");
+	around[0].secured = true;
+	around[1].ssid = around[2].ssid = QStringLiteral("486f6d65");
+	around[3].ssid = QStringLiteral("4f6666696365");
+	ncfg_access_point_row library = point("02:00:00:00:00:08", "Library", "", -62);
+	library.ssid = QStringLiteral("4c696272617279");
+	library.secured = true;
+	library.enterprise = true;
+	around.append(library);
+	ncfg_access_point_row owe = point("02:00:00:00:00:09", "Quiet", "", -30);
+	owe.ssid = QStringLiteral("5175696574");
+	owe.owe = true;
+	around.append(owe);
+
+	const QList<ncfg_tray_new_choice> heard = ncfg_tray::new_choices(around);
+	check(heard.size() == 2, "the unsaved SSIDs are offered, and an OWE one is not");
+	check(heard.size() == 2 && heard.at(0).label == QStringLiteral("Cafe") &&
+	          heard.at(0).ssid == QStringLiteral("43616665"),
+	    "by name, carrying the SSID the dialog sends");
+	check(heard.size() == 2 && heard.at(0).secured && !heard.at(0).enterprise,
+	    "a passphrase network says so");
+	check(heard.size() == 2 && heard.at(1).enterprise, "and an 802.1X one says so");
+	check(ncfg_tray::new_choices({}).isEmpty(), "an empty scan offers nothing new");
+
 	return failures ? 1 : 0;
 }

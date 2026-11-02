@@ -1785,6 +1785,103 @@ fail:
 	return 0;
 }
 
+void ncfg_new_choices_free(ncfg_new_choices_t *choices)
+{
+	if (!choices) {
+		return;
+	}
+	for (size_t i = 0; i < choices->count; i++) {
+		free(choices->items[i].ssid);
+		free(choices->items[i].label);
+	}
+	free(choices->items);
+	choices->items = NULL;
+	choices->count = 0;
+}
+
+static int new_choice_stronger(const void *a, const void *b)
+{
+	const ncfg_new_choice_t *left = a;
+	const ncfg_new_choice_t *right = b;
+
+	if (left->signal != right->signal) {
+		return left->signal > right->signal ? -1 : 1;
+	}
+	return strcmp(left->label, right->label);
+}
+
+/* Whether any access point in the scan carrying this SSID is one a network
+ * names. Asked over the whole scan rather than of the entry in hand: of two
+ * access points for one SSID, the stronger may be the one no block matched
+ * (a different security, say) while the network is saved all the same. */
+static int ssid_is_saved(const ncfg_access_point_t *points, size_t count, const char *ssid)
+{
+	for (size_t i = 0; i < count; i++) {
+		if (points[i].ssid && strcmp(points[i].ssid, ssid) == 0 && points[i].configured &&
+		    *points[i].configured) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_choices_t *out)
+{
+	ncfg_new_choices_t found = { NULL, 0 };
+
+	if (!out) {
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+	if (count == 0) {
+		return 1;
+	}
+	found.items = calloc(count, sizeof(*found.items));
+	if (!found.items) {
+		return 0;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		const ncfg_access_point_t *point = &points[i];
+		size_t                     at;
+
+		if (!point->ssid || !*point->ssid || !point->named || !point->name ||
+		    !*point->name || point->owe || ssid_is_saved(points, count, point->ssid)) {
+			continue;
+		}
+		for (at = 0; at < found.count; at++) {
+			if (strcmp(found.items[at].ssid, point->ssid) == 0) {
+				break;
+			}
+		}
+		if (at < found.count) {
+			/* The strongest access point's flags as well as its signal:
+			 * it is the one the dialog's answer will most likely meet. */
+			if (point->signal > found.items[at].signal) {
+				found.items[at].signal = point->signal;
+				found.items[at].secured = point->secured;
+				found.items[at].enterprise = point->enterprise;
+			}
+			continue;
+		}
+		found.items[at].ssid = dup_string(point->ssid);
+		found.items[at].label = dup_string(point->name);
+		found.count++;
+		if (!found.items[at].ssid || !found.items[at].label) {
+			ncfg_new_choices_free(&found);
+			return 0;
+		}
+		found.items[at].signal = point->signal;
+		found.items[at].secured = point->secured;
+		found.items[at].enterprise = point->enterprise;
+	}
+
+	qsort(found.items, found.count, sizeof(*found.items), new_choice_stronger);
+	*out = found;
+	return 1;
+}
+
 /*
  * The document's `addressing`, `routes` and `dns` readers, declared here and
  * defined with the interface view below.
