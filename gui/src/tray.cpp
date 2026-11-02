@@ -194,8 +194,23 @@ void ncfg_tray::refresh()
 		icon->setToolTip(error);
 		icon->setIcon(state_icon(ncfg_reach::offline));
 		disconnect_action->setEnabled(false);
+		state_known = false;
 		return;
 	}
+
+	/* **Said, because the icon alone is easy to miss.** A dropped network
+	 * changes a 22-pixel picture in a corner, and the first sign of it was
+	 * otherwise a page that would not load. Only on a change, and never for
+	 * the first answer, which is where things stand rather than news. */
+	if (state_known) {
+		const QString notice = notice_for(last_state, state);
+		if (!notice.isEmpty()) {
+			icon->showMessage(QStringLiteral("netcfgd"), notice,
+			                  QSystemTrayIcon::Information, 4000);
+		}
+	}
+	last_state = state;
+	state_known = true;
 
 	const ncfg_reach reach = reach_of(state.rung);
 	QString line = line_for(state);
@@ -252,6 +267,43 @@ QString ncfg_tray::line_for(const ncfg_connectivity_row &state)
 	default:
 		return QStringLiteral("offline");
 	}
+}
+
+/*
+ * Which changes are worth interrupting somebody for.
+ *
+ * - **Reaching somewhere to route through**, or moving to another network
+ *   while there: the join worked, or the radio roamed onto something else.
+ * - **Losing the route but keeping the network**: the one that looks fine
+ *   from every angle but a page that will not load.
+ * - **Losing the network.**
+ *
+ * Not the climb through `local` on the way up: a join passes through it for
+ * the second a lease takes, and announcing it would be a notice for every
+ * join that then says nothing wrong. And not `routed` against `online`: the
+ * icon draws them as one, because the difference is whether a probe looked.
+ */
+QString ncfg_tray::notice_for(const ncfg_connectivity_row &before,
+                              const ncfg_connectivity_row &after)
+{
+	const ncfg_reach was = reach_of(before.rung);
+	const ncfg_reach now = reach_of(after.rung);
+
+	if (now == ncfg_reach::routed &&
+	    (was != ncfg_reach::routed || before.label != after.label)) {
+		return QStringLiteral("Connected to %1.").arg(after.label);
+	}
+	if (now == ncfg_reach::local && was == ncfg_reach::routed) {
+		return QStringLiteral("%1 has no default route: connected, and nowhere to send "
+		                      "traffic.")
+		    .arg(after.label);
+	}
+	if (now == ncfg_reach::offline && was != ncfg_reach::offline) {
+		return before.label.isEmpty()
+		           ? QStringLiteral("Disconnected.")
+		           : QStringLiteral("Disconnected from %1.").arg(before.label);
+	}
+	return QString();
 }
 
 QList<ncfg_tray_choice> ncfg_tray::choices(const QList<ncfg_access_point_row> &scanned,

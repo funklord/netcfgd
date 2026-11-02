@@ -123,5 +123,37 @@ int main(int argc, char **argv)
 	check(heard.size() == 2 && heard.at(1).enterprise, "and an 802.1X one says so");
 	check(ncfg_tray::new_choices({}).isEmpty(), "an empty scan offers nothing new");
 
+	/* What the tray says unasked when the network moves. */
+	auto at = [](ncfg_rung_t rung, const char *label) {
+		ncfg_connectivity_row row;
+		row.rung = rung;
+		row.label = QString::fromLatin1(label);
+		return row;
+	};
+	const ncfg_connectivity_row off = at(ncfg_rung_offline, "");
+	const ncfg_connectivity_row home_local = at(ncfg_rung_local, "home");
+	const ncfg_connectivity_row home = at(ncfg_rung_routed, "home");
+	const ncfg_connectivity_row home_probed = at(ncfg_rung_online, "home");
+	const ncfg_connectivity_row elsewhere = at(ncfg_rung_routed, "cafe");
+	check(ncfg_tray::notice_for(off, home) == QStringLiteral("Connected to home."),
+	    "joining says where");
+	check(ncfg_tray::notice_for(off, home_local).isEmpty(),
+	    "the second a lease takes is not news");
+	check(ncfg_tray::notice_for(home_local, home) == QStringLiteral("Connected to home."),
+	    "and the route after it is");
+	check(ncfg_tray::notice_for(home, elsewhere) == QStringLiteral("Connected to cafe."),
+	    "moving to another network is said");
+	check(ncfg_tray::notice_for(home, home_probed).isEmpty() &&
+	          ncfg_tray::notice_for(home_probed, home).isEmpty(),
+	    "a probe confirming the route is not a change");
+	check(ncfg_tray::notice_for(home, home_local).contains(QStringLiteral("no default route")),
+	    "losing the route on a network is said");
+	check(ncfg_tray::notice_for(home, off) == QStringLiteral("Disconnected from home."),
+	    "and losing the network, naming it");
+	check(ncfg_tray::notice_for(home_local, off) == QStringLiteral("Disconnected from home."),
+	    "from a network with no route too");
+	check(ncfg_tray::notice_for(off, off).isEmpty() && ncfg_tray::notice_for(home, home).isEmpty(),
+	    "and nothing when nothing moved");
+
 	return failures ? 1 : 0;
 }

@@ -142,6 +142,11 @@ public:
 	static QIcon state_icon(ncfg_reach reach);
 	static ncfg_reach reach_of(ncfg_rung_t rung);
 	static QString line_for(const ncfg_connectivity_row &state);
+	/* What to say, unasked, when the machine's connectivity moved from
+	 * `before` to `after`; empty when nothing worth a notice changed. Public
+	 * for the reason `line_for` is. */
+	static QString notice_for(const ncfg_connectivity_row &before,
+	                          const ncfg_connectivity_row &after);
 	/* The submenu's entries, strongest first, from a scan and the network the
 	 * radio is on. Public for the reason the icon functions are: the menu
 	 * itself needs a notification host, and this is the part of it that
@@ -201,6 +206,11 @@ private:
 	/* The network just added, by SSID, while the tray waits for the daemon
 	 * to load it. The id is the one the dialog was given, or empty where
 	 * the daemon chose it -- which is why the wait looks by SSID. */
+	/* The last connectivity answer, so a change can be announced. Not held
+	 * across a refusal: the first answer after the daemon comes back is a
+	 * baseline, not news. */
+	ncfg_connectivity_row        last_state;
+	bool                         state_known = false;
 	QString                      added_ssid;
 	QString                      added_id;
 	QString                      added_label;

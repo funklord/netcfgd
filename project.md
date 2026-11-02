@@ -12626,6 +12626,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.654 The tray says when the network comes and goes
+
+The tray's only sign of a dropped network was its icon changing -- 22 pixels
+in a corner -- so the first a laptop's owner knew of it was a page that would
+not load. It now says so in a notice, on a change only and never for the
+first answer after it starts or after the daemon comes back (that is where
+things stand, not news):
+
+- `Connected to <network>.` on reaching a default route, and on moving to
+  another network while routed -- a join that worked, or a roam onto
+  something else.
+- `<network> has no default route: ...` on losing the route but keeping the
+  network, the state that looks fine from every angle but one.
+- `Disconnected from <network>.` on losing it.
+
+**Not the climb through `local`**: a join passes through it for the second a
+lease takes, and a notice there would come with every good join. **Nor
+`routed` against `online`**: the icon draws them as one picture, because
+the difference is only whether a probe has looked. The rule is
+`ncfg_tray::notice_for`, held by `gui/tests/tray_choices` to each case;
+without the roam clause it fails "moving to another network is said". The
+notice itself still wants a notification host (10.590).
+
 ## 10.653 A hidden network, added from the GUI at the `wifi` tier
 
 **Found walking the same aim as 10.652.** A network that does not broadcast its
