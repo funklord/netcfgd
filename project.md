@@ -995,6 +995,14 @@ them because no test had ever carried those keys.
    entitlement, so every activation ends in a reject cause rather than a
    bearer. It needs a SIM with a live subscription and nothing else. The
    remaining items need a person and a device rather than a design.
+
+   **No hardware is coming for a long time** (holder, 2026-11-02), so do not
+   rank this item, or propose it as the next step: it waits on the holder.
+   **The next hardware is expected to be a couple of OpenWrt routers**, possibly
+   ones that need work before OpenWrt runs on them properly -- not yet
+   scheduled. That makes the M5 embedded tier (procd, read-only root, the
+   multi-call binary) the path that will meet a device first, rather than the
+   laptop and modem paths.
 2. ~~The renderer's last refusals~~ -- **answered, re-read 2026-10-28.**
    0029 had already said what a snapshot may contain: secrets do not travel.
    The renderer has since rendered `wireguard`, `openvpn`, `tunnel`, `pppoe`
