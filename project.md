@@ -1152,7 +1152,13 @@ ESP parts are the easy end for it, being far more capable than those. **What
 the trial waits on is HAL9001's design, not a port**: it is meant to be the
 right abstraction from the start rather than a moving target, and settling
 one interface that also fits the small and odd architectures is the hard
-part. A netcfgd port would then target an interface that does not move. Its
+part. A netcfgd port would then target an interface that does not move.
+**Zephyr is a second path, to be evaluated** (holder, 2026-11-02): HAL9001
+predates it, so Zephyr is both a possible target for netcfgd in its own right
+and a source of knowledge for HAL9001's design. Not yet looked at here. What a
+netcfgd evaluation would check is whether Zephyr's own network management
+(interface events, Wi-Fi management, DHCP client and server) can carry the
+portable `Op` intents, and which of the two ESP parts it supports. Its
 tree is not on this machine, so what it would give netcfgd is unknown here. Read
 what follows with the C port in mind: the measurements below were taken on
 the Rust tree.
