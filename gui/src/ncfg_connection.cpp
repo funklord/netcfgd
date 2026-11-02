@@ -90,6 +90,14 @@ QString ncfg_wifi_status_row::summary() const
 	if (!blocked.isEmpty()) {
 		line += QStringLiteral(" -- %1").arg(blocked);
 	}
+	/* What `SCANNING` cannot say: the supplicant stopped trying, which is
+	 * credentials or settings and not distance -- a network out of range is
+	 * absent from a scan, never disabled (0192). */
+	if (!given_up.isEmpty()) {
+		line += QStringLiteral(" -- gave up on %1 after repeated failures, usually a wrong "
+		                       "passphrase")
+		            .arg(given_up.join(QStringLiteral(", ")));
+	}
 	return line;
 }
 
@@ -2031,6 +2039,14 @@ bool ncfg_connection::wifi_status(const QString &interface, ncfg_wifi_status_row
 	out->bssid = from_c(status.bssid);
 	out->network = from_c(status.network);
 	out->blocked = from_c(status.blocked);
+	for (size_t i = 0; i < status.not_trying_count; i++) {
+		const ncfg_not_trying_t &one = status.not_trying[i];
+		if (!strstr(one.flags, "TEMP-DISABLED")) {
+			continue;
+		}
+		out->given_up.append(one.name[0] ? from_c(one.name)
+		                                 : QStringLiteral("hex:%1").arg(from_c(one.ssid)));
+	}
 	out->display = from_c(status.name);
 	if (out->display.isEmpty() && status.ssid[0] != '\0') {
 		out->display = QStringLiteral("hex:%1").arg(from_c(status.ssid));

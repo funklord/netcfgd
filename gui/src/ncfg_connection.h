@@ -997,6 +997,10 @@ struct ncfg_wifi_status_row {
 	/* Empty unless rfkill has the radio off, and then the daemon's sentence
 	 * saying where and what clears it. */
 	QString blocked;
+	/* The networks the supplicant has given up on after repeated failures
+	 * (`[TEMP-DISABLED]`), by name. Not the ones merely turned off: those
+	 * are a choice somebody made, and this line is for what went wrong. */
+	QStringList given_up;
 
 	/*
 	 * The one line that says what a radio is doing.

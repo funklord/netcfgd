@@ -2282,6 +2282,39 @@ static void a_switched_off_radio_says_so(void)
 	ok("a radio that is on", got == 1, err);
 	if (got == 1) {
 		equals("says nothing about it", state.blocked, "");
+		ok("and an answer with no list has none", state.not_trying_count == 0 &&
+		    state.not_trying == NULL, NULL);
+		ncfg_wifi_status_free(&state);
+	}
+	staged_close(&staged);
+}
+
+/* The networks the supplicant has given up on, from the witness's own line:
+ * the half of a status `state` cannot say (0192). */
+static void a_status_says_what_is_not_being_tried(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_wifi_status_t state;
+
+	if (!staged_open(&staged, "a status with networks not tried can be staged",
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"SCANNING\","
+	    "\"ssid\":\"\",\"name\":\"\",\"bssid\":\"\",\"network\":\"\",\"not_trying\":["
+	    "{\"ssid\":\"4f6666696365\",\"name\":\"Office\",\"flags\":\"[TEMP-DISABLED]\"},"
+	    "{\"ssid\":\"4c6162\",\"name\":\"Lab\",\"flags\":\"[DISABLED]\"}]}\n")) {
+		return;
+	}
+	int got = ncfg_client_wifi_status(staged.client, "wlan0", &state, err, sizeof(err));
+	ok("a status with networks not tried arrives", got == 1, err);
+	if (got == 1) {
+		ok("carrying both", state.not_trying_count == 2, NULL);
+		if (state.not_trying_count == 2) {
+			equals("the one given up on, by name", state.not_trying[0].name, "Office");
+			equals("with the supplicant's flags", state.not_trying[0].flags,
+			    "[TEMP-DISABLED]");
+			equals("and its ssid as hex", state.not_trying[0].ssid, "4f6666696365");
+			equals("and the one turned off", state.not_trying[1].flags, "[DISABLED]");
+		}
 		ncfg_wifi_status_free(&state);
 	}
 	staged_close(&staged);
@@ -2800,6 +2833,7 @@ int main(int argc, char **argv)
 	new_choices_are_the_unsaved_networks_heard();
 	a_tray_says_when_the_network_moves();
 	a_switched_off_radio_says_so();
+	a_status_says_what_is_not_being_tried();
 	credentials_and_eap_are_read_as_written();
 	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();

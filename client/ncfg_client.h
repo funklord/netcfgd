@@ -705,7 +705,23 @@ typedef struct {
 	 * is one press away on any laptop.
 	 */
 	char *blocked;
+	/*
+	 * The networks the supplicant has and is not trying -- what `state`
+	 * cannot say, since an interface with nothing reads `SCANNING` whether it
+	 * is looking hopefully or has given up on everything (0192). `flags` is
+	 * the supplicant's own: `[TEMP-DISABLED]` is it giving up after repeated
+	 * failures, which is wrong credentials or settings rather than distance;
+	 * `[DISABLED]` is a network turned off. NULL and 0 when there are none.
+	 */
+	struct ncfg_not_trying *not_trying;
+	size_t                  not_trying_count;
 } ncfg_wifi_status_t;
+
+typedef struct ncfg_not_trying {
+	char *ssid;  /* hex */
+	char *name;  /* as text, "" when not text */
+	char *flags; /* e.g. "[TEMP-DISABLED]" */
+} ncfg_not_trying_t;
 
 /*
  * Whether a link with this kind and name is a radio.

@@ -1607,6 +1607,12 @@ void ncfg_wifi_status_free(ncfg_wifi_status_t *status)
 	free(status->bssid);
 	free(status->network);
 	free(status->blocked);
+	for (size_t i = 0; i < status->not_trying_count; i++) {
+		free(status->not_trying[i].ssid);
+		free(status->not_trying[i].name);
+		free(status->not_trying[i].flags);
+	}
+	free(status->not_trying);
 	memset(status, 0, sizeof(*status));
 }
 
@@ -5809,6 +5815,34 @@ static int convert_wifi_status(const ncfg_json_doc_t *doc, ncfg_wifi_status_t *o
 		set_error(err, err_size, "out of memory");
 		ncfg_wifi_status_free(out);
 		return 0;
+	}
+
+	uint32_t list = ncfg_json_member(doc, root, "not_trying");
+	uint32_t count = ncfg_json_count(doc, list);
+	if (!count) {
+		/* Absent and empty are one answer, and calloc(0) is the trap
+		 * convert_links() documents. */
+		return 1;
+	}
+	out->not_trying = calloc(count, sizeof(*out->not_trying));
+	if (!out->not_trying) {
+		set_error(err, err_size, "out of memory");
+		ncfg_wifi_status_free(out);
+		return 0;
+	}
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, list, i);
+		ncfg_not_trying_t *one = &out->not_trying[i];
+
+		out->not_trying_count++;
+		one->ssid = member_text(doc, entry, "ssid");
+		one->name = member_text(doc, entry, "name");
+		one->flags = member_text(doc, entry, "flags");
+		if (!one->ssid || !one->name || !one->flags) {
+			set_error(err, err_size, "out of memory");
+			ncfg_wifi_status_free(out);
+			return 0;
+		}
 	}
 	return 1;
 }

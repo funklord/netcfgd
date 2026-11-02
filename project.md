@@ -12626,6 +12626,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.659 A network the supplicant gave up on is named, and the lens that found it
+
+The same shape as 10.658, found by looking for it: **a member the daemon
+sends and the C client drops.** `wifi_status`'s `not_trying` is 0192's answer
+to what `SCANNING` cannot say -- the networks the supplicant has stopped
+trying -- and `ncfg wifi status` prints it with the sentence that matters:
+`[TEMP-DISABLED]` is the supplicant giving up after repeated failures, which
+is credentials or settings and never distance. The window and both trays
+showed a radio that had given up on its only network as one still looking.
+
+`ncfg_wifi_status_t.not_trying`, read in full; the Qt row's `given_up`, the
+`[TEMP-DISABLED]` ones by name; and the three radio lines append "gave up on
+<network> after repeated failures, usually a wrong passphrase". A network
+merely `[DISABLED]` is left out of that line: it was turned off on purpose.
+`client_test` reads the witness's own pair from a staged answer, and passes
+under ASan and UBSan; `tray_choices` holds the wifi tab's line.
+
+**The lens, run over the whole witness**: every member of every response in
+`doc/schema/socket.json`, against the strings `client/ncfg_client.c` reads.
+Besides these two, what the client does not read is `hello`'s and
+`document`'s version numbers and eleven of `status`'s per-link diagnostics -- `accept_ra_applied`,
+`address_proto_supported`, `backend_restarts`, `delegations`,
+`forwarding_applied`, `hook_state`, `ingress_applied`, `nat_conflicts`,
+`privacy_applied`, `qdisc_applied`, `reports`. Those are a router's
+diagnostics rather than anything a laptop's owner looks for, which is why
+this pass stopped at the radio; `nat_conflicts` is the one a router's window
+would most want, if one is ever asked for.
+
 ## 10.658 A radio switched off says so, in the window and both trays
 
 The daemon's `wifi_status` has carried `blocked` since 0062 -- the sentence

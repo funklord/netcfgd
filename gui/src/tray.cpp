@@ -169,11 +169,13 @@ void ncfg_tray::refresh()
 	 * ticked, which is the honest picture of "could not ask". */
 	QString current;
 	QString blocked;
+	QStringList given_up;
 	if (!radio.isEmpty()) {
 		ncfg_wifi_status_row status;
 		if (connection->wifi_status(radio, &status, nullptr)) {
 			current = status.network;
 			blocked = status.blocked;
+			given_up = status.given_up;
 		}
 	}
 	rebuild_join(current);
@@ -222,6 +224,12 @@ void ncfg_tray::refresh()
 	 * daemon says which, and what clears it. */
 	if (!blocked.isEmpty()) {
 		line += QStringLiteral(" -- %1").arg(blocked);
+	}
+	/* And where it is the supplicant that stopped: the wifi tab's words. */
+	if (!given_up.isEmpty()) {
+		line += QStringLiteral(" -- gave up on %1 after repeated failures, usually a wrong "
+		                       "passphrase")
+		            .arg(given_up.join(QStringLiteral(", ")));
 	}
 	state_action->setText(line);
 	icon->setToolTip(line);

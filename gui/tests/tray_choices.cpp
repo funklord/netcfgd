@@ -170,6 +170,11 @@ int main(int argc, char **argv)
 	                                "`rfkill unblock wifi` clears");
 	check(status.summary().contains(QStringLiteral("rfkill unblock wifi")),
 	    "and one switched off says what clears it");
+	check(!status.summary().contains(QStringLiteral("gave up")),
+	    "a radio the supplicant has not given up on says nothing of it");
+	status.given_up = QStringList() << QStringLiteral("Office");
+	check(status.summary().contains(QStringLiteral("gave up on Office")),
+	    "and one that has names the network");
 
 	return failures ? 1 : 0;
 }
