@@ -8,18 +8,22 @@
  *   express the case that breaks it: **a fact about one host that the estate
  *   should nonetheless see**, which is what an interface's address is.
  *
- * THE SCOPE VOCABULARY IS FUZZNET'S, AND THIS ENUM IS A PLACEHOLDER
+ * THE SCOPE VOCABULARY IS FUZZNET'S, AND THIS ENUM IS A COPY HELD TO IT
  *   **Settled by the copyright holder 2026-09-29: the scopes are a general
  *   feature of fuzznet, not netcfgd's.** Every consumer of a shared estate
  *   needs the same four-or-more answers about how far a value travels, and a
  *   second vocabulary here is how two trees come to disagree about one
  *   concept.
  *
- *   So `ncfg_scope_t` exists only until fuzznet carries it, and it is named
- *   and shaped to be replaced rather than reconciled: when that type lands,
- *   this enum goes and the table in `compile/scope.c` is retyped onto it. What
- *   stays netcfgd's is the **table**, because which scope `prefix` belongs to
- *   is a fact about netcfgd's language that no other consumer can know.
+ *   fuzznet carries it now, as `fzn_scope_t` in `state/scope.h`. **This copy
+ *   stays, held to it**, decided 2026-11-02 (project.md 10.664): retyping the
+ *   table onto fuzznet's type would put fuzznet on the daemon's build, which
+ *   0269 keeps out of the process holding CAP_NET_ADMIN. `bridge/
+ *   record_encode.c`, the one place both are visible, asserts at compile time
+ *   that every value agrees, so a drift stops the bridge building rather than
+ *   replicating a key under the wrong scope. What is netcfgd's is the
+ *   **table**, because which scope `prefix` belongs to is a fact about
+ *   netcfgd's language that no other consumer can know.
  *
  *   Signalled to fuzznet rather than assumed -- project.md 10.323.
  *

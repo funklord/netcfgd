@@ -12626,6 +12626,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.664 Five answers from the holder, 2026-11-02
+
+Asked at the end of the /go runs of 2026-11-02, answered the same evening.
+Each closes a question this document holds open somewhere; the entries that
+held them now point here.
+
+1. **Seen hosts: the daemon writes them itself.** "As it is the root user that
+   runs netcfgd and scans them it also is the one to write down what it sees
+   into the fuzznet data store." So the recorder is the daemon, not the
+   bridge, and it talks to the fuzznetd of the user it runs as -- root's. That
+   is a local socket and a line protocol, not fuzznet linked into the process:
+   0269 keeps fuzznet's *code* out of the process holding CAP_NET_ADMIN, and a
+   socket client of a local daemon is what netcfgd already is to
+   wpa_supplicant and hostapd. Closes 10.662's seam and 10.591's second half.
+2. **The scope enum: the holder did not know what it was**, so it is decided
+   here from the aims rather than asked again. It is the four-word list of how
+   far a setting travels -- host-private, host, group, estate -- which fuzznet
+   owns as `fzn_scope_t` and netcfgd kept a copy of so the daemon builds
+   without fuzznet. **The copy stays and is held to fuzznet's** by a
+   `_Static_assert` in `bridge/record_encode.c`, the third answer 10.567
+   named: no new dependency for the daemon, and a drift stops the bridge
+   building. Sabotaged: a misstated pair fails the build naming the drift.
+3. **Remote access is the same client.** "A client should connect to a local
+   netcfgd by default or be configurable to connect to a different host." So
+   `agent/` (or whatever terminates fuzznet's protocol on the host) is wanted,
+   and the GUI and the Android build are one client with a target -- local
+   socket by default, another host when told. Closes "whether agent/ exists".
+4. **Confirm windows: "do what makes sense for each".** For commit-confirm
+   across a suspend, what makes sense is that a window does not run out while
+   nobody can be at the machine to confirm: it pauses while the machine
+   sleeps. Built as its own change.
+5. **UPnP / NAT-PMP: yes, with a warning that it is a security risk.** Any
+   device on the LAN may then open a port on the router; the plan says so
+   whenever it is on.
+
 ## 10.663 A firewall rule may keep hours: parental controls, held by the kernel
 
 Found walking the router aim: every consumer router can keep a child's
@@ -17490,9 +17525,8 @@ one: the vocabulary is
 fuzznet's and the **agreement** between the two spellings is checkable at the
 one place both are visible, which is the bridge. A `_Static_assert` there
 costs nothing, fails the build the day they diverge, and leaves the daemon's
-build as 0269 wants it. **Not taken, because it is not a decision to make
-while doing something else**: it is the holder's, and it is the one thing
-10.567's work left open.
+build as 0269 wants it. **Taken, 2026-11-02** (10.664): the holder, asked,
+did not know the enum, so it was decided from the aims.
 
 ## 10.567 The coordination half is fuzznet's, decided a month ago, and this tree is still holding the placeholder
 

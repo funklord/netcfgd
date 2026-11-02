@@ -6,6 +6,8 @@
  */
 #include "record_encode.h"
 
+#include "state/scope.h"
+
 #include <string.h>
 
 /* The floor is fuzznet's and this is where the two files can be made to
@@ -17,6 +19,20 @@ _Static_assert(NCFG_STREAM_HOST >= FZN_STREAM_RESERVED,
 _Static_assert(NCFG_STREAM_ESTATE > NCFG_STREAM_GROUP &&
         NCFG_STREAM_GROUP > NCFG_STREAM_HOST,
     "the three scope streams must be distinct");
+
+/*
+ * **The scope vocabulary is fuzznet's, and netcfgd keeps a copy** (10.567,
+ * 10.664): `ncfg/scope.h` stays so the daemon's build never needs fuzznet,
+ * which 0269 keeps out of the process holding CAP_NET_ADMIN. This is the one
+ * place both spellings are visible, so it is where they are held to each
+ * other: the day fuzznet renumbers a scope, the bridge stops compiling rather
+ * than replicating a key under the wrong one.
+ */
+_Static_assert((int)NCFG_SCOPE_HOST_PRIVATE == (int)FZN_SCOPE_HOST_PRIVATE &&
+        (int)NCFG_SCOPE_HOST == (int)FZN_SCOPE_HOST &&
+        (int)NCFG_SCOPE_GROUP == (int)FZN_SCOPE_GROUP &&
+        (int)NCFG_SCOPE_ESTATE == (int)FZN_SCOPE_ESTATE,
+    "netcfgd's scope copy has drifted from fuzznet's state/scope.h");
 
 /*
  * The derivation's tag, versioned because changing how an object becomes a
