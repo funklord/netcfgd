@@ -431,14 +431,22 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 #define SUPPLICANT_STOP_PATIENCE_MS 3000
 #define SUPPLICANT_STOP_STEP_MS 25
 
-static int supplicant_gone(const char *run, const char *iface)
+static int supplicant_gone(pid_t pid, const char *run, const char *iface)
 {
-	int waited = 0;
+	char marker[NCFG_SUPPLICANT_PATH_MAX];
+	int  waited = 0;
 
+	/* By the pid taken before TERMINATE and never by re-reading the file:
+	 * the supplicant removes its own pid file on the way out, before it has
+	 * exited (ncfg_process_still). No pid to follow is the old answer. */
+	if (pid > 0 && !ncfg_supplicant_pid_path(run, iface, marker, sizeof(marker), NULL, 0)) {
+		pid = 0;
+	}
 	for (;;) {
 		struct timespec step;
 
-		if (ncfg_supplicant_running_pid(run, iface) <= 0) {
+		if (pid > 0 ? !ncfg_process_still(pid, marker)
+		            : ncfg_supplicant_running_pid(run, iface) <= 0) {
 			return 1;
 		}
 		if (waited >= SUPPLICANT_STOP_PATIENCE_MS) {
@@ -478,13 +486,15 @@ int ncfg_supplicant_stop(const char *run, const char *dir, const char *iface, in
 	client = ncfg_supplicant_connect_within(dir, iface,
 	    patience_ms > 0 ? patience_ms : NCFG_SUPPLICANT_IMPATIENT_MS, detail, sizeof(detail));
 	if (client) {
+		const pid_t running = ncfg_supplicant_running_pid(run, iface);
+
 		ok = ncfg_supplicant_command(client, "TERMINATE", detail, sizeof(detail));
 		if (!ok) {
 			ncfg_error_set(err, err_size, "could not stop the supplicant on %s: %s",
 			    iface, detail);
 		}
 		ncfg_supplicant_client_free(client);
-		if (ok && !supplicant_gone(run, iface)) {
+		if (ok && !supplicant_gone(running, run, iface)) {
 			ok = 0;
 			lingering = 1;
 			ncfg_error_set(err, err_size,

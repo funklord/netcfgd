@@ -306,6 +306,11 @@ pid_t ncfg_process_pid_of(const char *path, const char *marker)
 	return ncfg_process_pid_of_as(path, marker, my_uid());
 }
 
+int ncfg_process_still(pid_t pid, const char *marker)
+{
+	return pid > 0 && marker && cmdline_has_argument(pid, marker);
+}
+
 /* The pid a `/proc` entry names, or 0 for an entry that is not a process. */
 static pid_t pid_of_entry(const char *name)
 {

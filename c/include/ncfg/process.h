@@ -151,6 +151,20 @@ int ncfg_process_ours(pid_t pid, uid_t asking);
 pid_t ncfg_process_pid_of(const char *path, const char *marker);
 
 /*
+ * Whether `pid` is still a process whose command line carries `marker`.
+ *
+ * **For waiting on a stop, where the pid file cannot answer.** wpa_supplicant
+ * and hostapd remove their own pid file as they shut down, before the process
+ * has exited, so a wait that re-read the file concluded "gone" while the
+ * daemon was still running -- and under load the gap is long enough for the
+ * start that follows to meet it. Asked of the pid taken before the stop
+ * instead. A zombie's command line is empty, so one reads as gone, which is
+ * what it is to everything but its parent; and a pid reused by something
+ * without the marker reads as gone too, because the one asked about is.
+ */
+int ncfg_process_still(pid_t pid, const char *marker);
+
+/*
  * The pid of a process carrying `marker` as a whole argument, if any.
  *
  * **`ncfg_process_pid_of`'s recovery path, and it exists because the pid file

@@ -86,6 +86,7 @@
 #include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/openvpn.h"
+#include "ncfg/process.h"
 #include "ncfg/observed.h"
 #include "ncfg/dhcp_server.h"
 #include "ncfg/ra.h"
@@ -892,14 +893,22 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 #define ACCESS_POINT_STOP_PATIENCE_MILLISECONDS 3000
 #define ACCESS_POINT_STOP_STEP_MILLISECONDS 25
 
-static int access_point_gone(const char *run_dir, const char *device)
+static int access_point_gone(pid_t pid, const char *run_dir, const char *device)
 {
-	int waited = 0;
+	char marker[NCFG_HOSTAPD_PATH_MAX];
+	int  waited = 0;
 
+	/* By the pid taken before TERMINATE: hostapd removes its own pid file on
+	 * the way out, before it has exited (ncfg_process_still), so the file
+	 * said "gone" while it was still running. */
+	if (pid > 0 && !ncfg_hostapd_pid_path(run_dir, device, marker, sizeof(marker), NULL, 0)) {
+		pid = 0;
+	}
 	for (;;) {
 		struct timespec step;
 
-		if (ncfg_hostapd_running_pid(run_dir, device) <= 0) {
+		if (pid > 0 ? !ncfg_process_still(pid, marker)
+		            : ncfg_hostapd_running_pid(run_dir, device) <= 0) {
 			return 1;
 		}
 		if (waited >= ACCESS_POINT_STOP_PATIENCE_MILLISECONDS) {
@@ -930,13 +939,15 @@ static int stop_access_point(const char *run_dir, const char *device, int patien
 	client = ncfg_supplicant_connect_within(directory, device,
 	    patience_ms > 0 ? patience_ms : NCFG_SUPPLICANT_IMPATIENT_MS, detail, sizeof(detail));
 	if (client) {
+		const pid_t running = ncfg_hostapd_running_pid(run_dir, device);
+
 		ok = ncfg_supplicant_command(client, "TERMINATE", detail, sizeof(detail));
 		if (!ok) {
 			ncfg_error_set(err, err_size, "could not stop the access point on %s: %s",
 			    device, detail);
 		}
 		ncfg_supplicant_client_free(client);
-		if (ok && !access_point_gone(run_dir, device)) {
+		if (ok && !access_point_gone(running, run_dir, device)) {
 			ok = 0;
 			lingering = 1;
 			ncfg_error_set(err, err_size,

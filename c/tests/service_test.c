@@ -1479,7 +1479,8 @@ static void stopping_an_access_point_takes_the_passphrase_with_it(void)
  * by, and it lives `seconds` more whatever it is told. Its pid is written
  * where hostapd writes its own.
  */
-static pid_t a_hostapd_leaving(const char *pid_file, const char *seconds)
+static pid_t a_hostapd_leaving_by(const char *script, const char *pid_file,
+    const char *seconds)
 {
 	char  text[32];
 	pid_t pid = fork();
@@ -1489,8 +1490,8 @@ static pid_t a_hostapd_leaving(const char *pid_file, const char *seconds)
 	}
 	if (pid == 0) {
 		(void)signal(SIGTERM, SIG_IGN);
-		(void)execl("/bin/sh", "sh", "-c", "sleep \"$1\"", "hostapd", seconds, "-P",
-		    pid_file, (char *)NULL);
+		(void)execl("/bin/sh", "sh", "-c", script, "hostapd", seconds, "-P", pid_file,
+		    (char *)NULL);
 		_exit(127);
 	}
 	(void)snprintf(text, sizeof(text), "%ld\n", (long)pid);
@@ -1508,6 +1509,11 @@ static pid_t a_hostapd_leaving(const char *pid_file, const char *seconds)
 		}
 	}
 	return pid;
+}
+
+static pid_t a_hostapd_leaving(const char *pid_file, const char *seconds)
+{
+	return a_hostapd_leaving_by("sleep \"$1\"", pid_file, seconds);
 }
 
 /*
@@ -1553,6 +1559,30 @@ static void stopping_an_access_point_waits_for_it_to_go(void)
 	 * check of `running_pid` would pass whether or not it had waited. */
 	check(leaving > 0 && waitpid(leaving, &status, WNOHANG) == leaving,
 	    "  and the stop returns only once it has gone, so a start cannot meet it");
+	if (leaving > 0) {
+		(void)kill(leaving, SIGKILL);
+		(void)waitpid(leaving, &status, 0);
+	}
+	fake_stop();
+
+	/*
+	 * **hostapd removes its own pid file on the way out, before it has
+	 * exited**, and the wait re-read that file -- so it said "gone" while the
+	 * process was still deinitialising (10.661). This one removes the file a
+	 * fifth of a second in and runs on for most of a second after: the
+	 * process is what has to be waited for.
+	 */
+	memset(&fake_config, 0, sizeof(fake_config));
+	if (!fake_start(directory, "wlan0")) {
+		check(0, "a fake access point could be started for the file that goes first");
+		return;
+	}
+	leaving = a_hostapd_leaving_by("sleep 0.2; rm -f \"$3\"; sleep \"$1\"", pid_file, "0.6");
+	message[0] = '\0';
+	check(ncfg_service_backend_stop(&service, NCFG_BACKEND_ACCESS_POINT, "wlan0", message,
+	    sizeof(message)), "an access point whose pid file goes before it does is stopped");
+	check(leaving > 0 && waitpid(leaving, &status, WNOHANG) == leaving,
+	    "  and the stop waited for the process, not the file");
 	if (leaving > 0) {
 		(void)kill(leaving, SIGKILL);
 		(void)waitpid(leaving, &status, 0);

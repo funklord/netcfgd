@@ -43,6 +43,7 @@ import os
 import select
 import socket
 import sys
+import time
 
 # BSSID, frequency, signal (dBm), flags, ssid.
 #
@@ -460,7 +461,15 @@ def serve(ctrl_dir, interface, pidfile, told=None):
 		os.makedirs(os.path.dirname(pidfile), exist_ok=True)
 		with open(pidfile, "w") as handle:
 			handle.write(f"{os.getpid()}\n")
-		atexit.register(lambda: _unlink(pidfile))
+		# **The file goes before the process does**, as a real supplicant's
+		# does: it removes its own pid file on the way out. A caller waiting on
+		# the file therefore sees "gone" early, and under load early enough
+		# for a start to meet the old one. FAKE_SUPPLICANT_EXIT_DELAY_MS holds
+		# that gap open on purpose, so supplicant_launch_test can hold the
+		# stop to waiting on the process rather than the file. Unset, nothing
+		# waits, and the live scripts are as fast as they were.
+		delay = int(os.environ.get("FAKE_SUPPLICANT_EXIT_DELAY_MS", "0") or "0")
+		atexit.register(lambda: (_unlink(pidfile), time.sleep(delay / 1000.0)))
 	os.makedirs(ctrl_dir, exist_ok=True)
 	path = os.path.join(ctrl_dir, interface)
 	if os.path.exists(path):

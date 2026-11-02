@@ -12626,6 +12626,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.661 The stops waited on a file the daemon removes before it exits
+
+**Found by `make check` at f353458d**, under a machine at load 65:
+`supplicant_launch_test` failed "the supplicant it was told to stop has gone
+by the time the stop returns" -- 10.650's own check, which had passed every
+run before. Not a flake: 10.649 and 10.650 made both stops wait, and both
+waits re-read the pid file. **wpa_supplicant and hostapd remove their own pid
+file on the way out, before they have exited**, so the wait said "gone" for
+as long as deinitialising took after the unlink -- the same gap 10.649 exists
+to close, reopened by the instrument. The fake supplicant does it too, from
+an `atexit` hook, and Python's finalisation after it is the window load
+widened.
+
+**`ncfg_process_still(pid, marker)`**: whether that pid is still a process
+carrying netcfgd's marker. Both stops take the pid before `TERMINATE` and
+wait on it; a zombie, or a pid reused by something without the marker, reads
+as gone. dnsmasq's stop is untouched: it does not remove its pid file on
+exit, so re-reading the file was sound there.
+
+Proved both ways, deterministically. The fake supplicant gained
+`FAKE_SUPPLICANT_EXIT_DELAY_MS`, which the launch test sets to 300 and
+nothing else does, so the live scripts are no slower; with it the old wait
+fails that check and the new one passes. `service_test` gained an access
+point whose stand-in removes its pid file 0.2 s in and runs 0.6 s more: the
+old wait fails "the stop waited for the process, not the file", the new one
+passes.
+
 ## 10.660 What the ISP delegated is shown, by `ncfg status` and the window
 
 Found walking the router aim from the window's side: the daemon has observed
