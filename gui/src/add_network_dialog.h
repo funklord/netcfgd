@@ -75,6 +75,26 @@ class ncfg_connection;
  */
 QString ncfg_secret_name_for(const QString &path);
 
+/*
+ * The SSID a typed name stands for: its UTF-8 octets as lowercase hex, which
+ * is what `wifi_add` takes. Empty where there is no name or it is longer than
+ * the 32 octets an SSID can hold, so a caller can refuse it before asking.
+ *
+ * Only for a hidden network. Every other one comes from a scan row, as exact
+ * octets; this is the one case with no row to take them from, and the name
+ * the operator was told is the best there is.
+ */
+QString ncfg_ssid_hex_for(const QString &name);
+
+/*
+ * Ask for the two things a hidden network's dialog needs and no scan can say:
+ * its name, and which credential it wants. Returns false if the operator
+ * cancelled. Then open ncfg_add_network_dialog with what this filled in, and
+ * call set_hidden() on it.
+ */
+bool ncfg_ask_hidden_network(QWidget *parent, QString *ssid_hex, QString *shown, bool *secured,
+                             bool *enterprise);
+
 class ncfg_add_network_dialog : public QDialog {
 	Q_OBJECT
 
@@ -90,6 +110,10 @@ public:
 	/* The id the operator gave, which is empty where they left the daemon
 	 * to choose one. Read after the dialog is accepted. */
 	QString chosen_id() const;
+	/* Tick, and lock, "does not broadcast its name". For a network added by
+	 * typed name: it was never heard, so unticking it would write a block
+	 * the supplicant never probes for. */
+	void set_hidden();
 
 private slots:
 	void submit();

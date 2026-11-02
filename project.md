@@ -12626,6 +12626,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.653 A hidden network, added from the GUI at the `wifi` tier
+
+**Found walking the same aim as 10.652.** A network that does not broadcast its
+name never appears in a scan by name, and the add dialog opened only from a
+scan row. The one other way in, the wifi tab's `add by hand`, writes a whole
+block through `config_put`, which is `admin` -- so a laptop's owner holding
+`wifi` could not add their own hidden network from the GUI at all, though
+`wifi_add` has carried `hidden` all along.
+
+**`hidden network...`** on the wifi tab and `Hidden network...` in the tray's
+`Connect to` ask for the two things no scan can say -- the name, and whether
+it wants a passphrase, an 802.1X login or nothing -- then open the ordinary add
+dialog with its "does not broadcast" box ticked and locked. From the tray, the
+network is joined once loaded, by 10.652's path.
+
+- **The SSID is the typed name's UTF-8 as lowercase hex** (`ncfg_ssid_hex_for`),
+  and the 32-octet limit is checked in octets before the dialog goes on: a
+  name in another script reaches it well before 32 characters. This is the
+  only place a typed name becomes an SSID; every other add takes the octets a
+  radio heard.
+- **The box is locked** because a block for a hidden network without
+  `hidden` is one the supplicant never probes for, which joins nothing and
+  looks configured.
+
+Checked: `gui/tests/add_network_hidden` holds the conversion, each security
+choice, the length refusal and the locked box; sabotaged to Latin-1 and to an
+unlocked box it fails three checks.
+
 ## 10.652 The tray offers the networks it heard that nothing names yet
 
 **Found by walking the desktop aim** (10.590's brief: for a laptop's owner,

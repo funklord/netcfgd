@@ -164,6 +164,7 @@ ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
 	}
 
 	hidden = new QCheckBox(QStringLiteral("the network does not broadcast its name"), this);
+	hidden->setObjectName(QStringLiteral("hidden"));
 	form->addRow(QString(), hidden);
 	layout->addLayout(form);
 
@@ -371,6 +372,82 @@ void ncfg_add_network_dialog::revalidate()
 		ready = !passphrase->text().isEmpty();
 	}
 	add_button->setEnabled(ready);
+}
+
+QString ncfg_ssid_hex_for(const QString &name)
+{
+	const QByteArray octets = name.toUtf8();
+	if (octets.isEmpty() || octets.size() > 32) {
+		return QString();
+	}
+	return QString::fromLatin1(octets.toHex());
+}
+
+bool ncfg_ask_hidden_network(QWidget *parent, QString *ssid_hex, QString *shown, bool *secured,
+                             bool *enterprise)
+{
+	QDialog dialog(parent);
+	dialog.setWindowTitle(QStringLiteral("Add a hidden network"));
+	auto *layout = new QVBoxLayout(&dialog);
+	auto *form = new QFormLayout();
+
+	auto *name = new QLineEdit(&dialog);
+	name->setObjectName(QStringLiteral("hidden_name"));
+	name->setPlaceholderText(QStringLiteral("exactly as the network's owner gave it"));
+	form->addRow(QStringLiteral("network name"), name);
+
+	/* Asked because nothing else can say it: a scan reads the credential off
+	 * the beacon, and a hidden network's beacon carries no name to match it
+	 * to. */
+	auto *kind = new QComboBox(&dialog);
+	kind->setObjectName(QStringLiteral("hidden_kind"));
+	kind->addItem(QStringLiteral("passphrase"), QStringLiteral("psk"));
+	kind->addItem(QStringLiteral("login (802.1X)"), QStringLiteral("eap"));
+	kind->addItem(QStringLiteral("open -- no passphrase"), QStringLiteral("open"));
+	form->addRow(QStringLiteral("security"), kind);
+	layout->addLayout(form);
+
+	auto *note = new QLabel(&dialog);
+	note->setWordWrap(true);
+	layout->addWidget(note);
+
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+	QPushButton *next = buttons->button(QDialogButtonBox::Ok);
+	next->setText(QStringLiteral("Next"));
+	layout->addWidget(buttons);
+	QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+	/* Refused here rather than by the daemon, because the length is octets
+	 * and a name in another script reaches 32 of them well before 32
+	 * characters. */
+	auto check = [name, note, next]() {
+		const bool fits = !ncfg_ssid_hex_for(name->text()).isEmpty();
+		next->setEnabled(fits);
+		note->setText(name->text().isEmpty() || fits
+		                  ? QString()
+		                  : QStringLiteral("A network name is at most 32 bytes, and this "
+		                                   "one is %1.")
+		                        .arg(name->text().toUtf8().size()));
+	};
+	QObject::connect(name, &QLineEdit::textChanged, &dialog, check);
+	check();
+
+	if (dialog.exec() != QDialog::Accepted) {
+		return false;
+	}
+	const QString chosen = kind->currentData().toString();
+	*ssid_hex = ncfg_ssid_hex_for(name->text());
+	*shown = name->text();
+	*secured = chosen != QStringLiteral("open");
+	*enterprise = chosen == QStringLiteral("eap");
+	return true;
+}
+
+void ncfg_add_network_dialog::set_hidden()
+{
+	hidden->setChecked(true);
+	hidden->setEnabled(false);
 }
 
 QString ncfg_add_network_dialog::chosen_id() const

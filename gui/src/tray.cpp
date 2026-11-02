@@ -423,6 +423,8 @@ void ncfg_tray::rebuild_join(const QString &current)
 	connect(again, &QAction::triggered, this, &ncfg_tray::scan);
 	QAction *other = join_menu->addAction(QStringLiteral("Another network..."));
 	connect(other, &QAction::triggered, this, &ncfg_tray::wifi_requested);
+	QAction *hidden = join_menu->addAction(QStringLiteral("Hidden network..."));
+	connect(hidden, &QAction::triggered, this, &ncfg_tray::add_hidden);
 }
 
 void ncfg_tray::scan()
@@ -467,7 +469,17 @@ void ncfg_tray::scan()
 	icon->showMessage(QStringLiteral("netcfgd"), said, QSystemTrayIcon::Information, 4000);
 }
 
-void ncfg_tray::add_network(const ncfg_tray_new_choice &choice)
+void ncfg_tray::add_hidden()
+{
+	ncfg_tray_new_choice choice;
+	if (radio.isEmpty() || !ncfg_ask_hidden_network(nullptr, &choice.ssid, &choice.label,
+	                                                &choice.secured, &choice.enterprise)) {
+		return;
+	}
+	add_network(choice, true);
+}
+
+void ncfg_tray::add_network(const ncfg_tray_new_choice &choice, bool hidden)
 {
 	if (radio.isEmpty()) {
 		return;
@@ -478,6 +490,9 @@ void ncfg_tray::add_network(const ncfg_tray_new_choice &choice)
 	 * hidden, and a dialog parented to a hidden window is one nobody sees. */
 	ncfg_add_network_dialog dialog(connection, choice.ssid, choice.label, choice.secured,
 	                               choice.enterprise);
+	if (hidden) {
+		dialog.set_hidden();
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

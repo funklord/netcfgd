@@ -63,6 +63,11 @@ private slots:
 	void scan();
 	void join();
 	void add();
+	/* A network that does not broadcast its name, so no scan row can stand
+	 * for it: the name is typed, and `wifi_add` carries `hidden`. The `wifi`
+	 * tier, as `add` is -- "add by hand" writes a whole block and needs
+	 * `admin`, which a laptop's owner usually does not hold. */
+	void add_hidden();
 	void leave();
 	void activate();
 	void selection_changed();
@@ -97,6 +102,7 @@ private:
 	QPushButton     *scan_button;
 	QPushButton     *join_button;
 	QPushButton     *add_button;
+	QPushButton *hidden_button;
 	QPushButton     *leave_button;
 	/* Hands the chosen radio to netcfgd. Shown only when that is a thing
 	 * that could be done: a radio already netcfgd's needs no button, and one

@@ -87,12 +87,15 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	scan_button = new QPushButton(QStringLiteral("scan"), this);
 	join_button = new QPushButton(QStringLiteral("join"), this);
 	add_button = new QPushButton(QStringLiteral("add"), this);
+	hidden_button = new QPushButton(QStringLiteral("hidden network..."), this);
+	hidden_button->setObjectName(QStringLiteral("add_hidden"));
 	leave_button = new QPushButton(QStringLiteral("disconnect"), this);
 	activate_button = new QPushButton(QStringLiteral("activate radio"), this);
 	activate_button->setObjectName(QStringLiteral("activate_radio"));
 	controls->addWidget(scan_button);
 	controls->addWidget(join_button);
 	controls->addWidget(add_button);
+	controls->addWidget(hidden_button);
 	controls->addWidget(leave_button);
 	controls->addWidget(activate_button);
 	controls->addStretch();
@@ -225,6 +228,7 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	connect(scan_button, &QPushButton::clicked, this, &ncfg_wifi_view::scan);
 	connect(join_button, &QPushButton::clicked, this, &ncfg_wifi_view::join);
 	connect(add_button, &QPushButton::clicked, this, &ncfg_wifi_view::add);
+	connect(hidden_button, &QPushButton::clicked, this, &ncfg_wifi_view::add_hidden);
 	connect(leave_button, &QPushButton::clicked, this, &ncfg_wifi_view::leave);
 	connect(activate_button, &QPushButton::clicked, this, &ncfg_wifi_view::activate);
 	connect(table, &QTableWidget::itemSelectionChanged, this,
@@ -461,6 +465,24 @@ void ncfg_wifi_view::forget_selected()
 	const QString said = QStringLiteral("forgot `%1`").arg(id);
 	status->setText(said);
 	emit reported(said);
+}
+
+void ncfg_wifi_view::add_hidden()
+{
+	QString ssid_hex;
+	QString shown;
+	bool secured = false;
+	bool enterprise = false;
+	if (!ncfg_ask_hidden_network(this, &ssid_hex, &shown, &secured, &enterprise)) {
+		return;
+	}
+	ncfg_add_network_dialog dialog(connection, ssid_hex, shown, secured, enterprise, this);
+	dialog.set_hidden();
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	refresh();
+	emit changed();
 }
 
 void ncfg_wifi_view::add_manually()
@@ -838,6 +860,8 @@ void ncfg_wifi_view::selection_changed()
 	 * one is already configured, and offering to add it again would be
 	 * offering the refusal the daemon gives by name. */
 	add_button->setEnabled(usable && row >= 0 && !joinable);
+	/* Writing a block needs no radio and no scan, only a daemon to write it. */
+	hidden_button->setEnabled(reachable);
 }
 
 /* Hand the chosen radio to netcfgd, and look at what it can see.

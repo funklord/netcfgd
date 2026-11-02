@@ -30,8 +30,8 @@
  *   that nothing names are offered below the saved ones: choosing one opens
  *   the window's own add dialog on that access point, which is the review a
  *   plan would otherwise be, and joins the network once the daemon has loaded
- *   it. `Another network...` still opens the wifi tab, for what a menu cannot
- *   offer -- a hidden network, or one beyond the first few.
+ *   it. `Hidden network...` asks for a name the radio cannot hear, and
+ *   `Another network...` still opens the wifi tab for the rest.
  *
  * THE ONE ADMIN-TIER THING IT DOES, AND WHY
  *   **Switching profiles**, which is a configuration write and therefore the
@@ -171,7 +171,9 @@ private slots:
 	void scan();
 	void join(const QString &network);
 	/* Add a network through the dialog, then join it once it is loaded. */
-	void add_network(const ncfg_tray_new_choice &choice);
+	void add_network(const ncfg_tray_new_choice &choice, bool hidden = false);
+	/* The same for a network no scan can show: its name is typed. */
+	void add_hidden();
 	/* One look for the network just added among the daemon's saved ones,
 	 * joining it when it is there and asking again shortly when it is not. */
 	void join_added();
