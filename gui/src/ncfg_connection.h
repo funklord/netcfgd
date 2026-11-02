@@ -994,6 +994,9 @@ struct ncfg_wifi_status_row {
 	QString display;
 	QString bssid;
 	QString network;
+	/* Empty unless rfkill has the radio off, and then the daemon's sentence
+	 * saying where and what clears it. */
+	QString blocked;
 
 	/*
 	 * The one line that says what a radio is doing.

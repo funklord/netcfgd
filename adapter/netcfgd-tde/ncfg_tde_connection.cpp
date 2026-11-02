@@ -332,6 +332,7 @@ TQString ncfg_tde_connection::state_line( reach &out )
 	const TQString state   = TQString::fromLocal8Bit(status.state ? status.state : "");
 	const TQString network = TQString::fromLocal8Bit(status.network ? status.network : "");
 	m_network = network;
+	const TQString blocked = TQString::fromUtf8(status.blocked ? status.blocked : "");
 	TQString display = TQString::fromLocal8Bit(status.name ? status.name : "");
 	if (display.isEmpty())
 		display = TQString::fromLocal8Bit(status.ssid ? status.ssid : "");
@@ -358,6 +359,10 @@ TQString ncfg_tde_connection::state_line( reach &out )
 	if (out == reach_local)
 		line += addressed ? i18n(" -- no default route")
 		                  : i18n(" -- joined, no address");
+	/* A radio switched off by rfkill reads as one in range of nothing; the
+	 * daemon says which, and what clears it. */
+	if (!blocked.isEmpty())
+		line += TQString::fromLatin1(" -- ") + blocked;
 
 	return line;
 }

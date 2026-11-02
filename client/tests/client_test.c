@@ -2250,6 +2250,43 @@ static void new_choices_are_the_unsaved_networks_heard(void)
 	ncfg_new_choices_free(&choices);
 }
 
+/*
+ * A radio switched off says so. Not in the conformance dump, which the Rust
+ * CLI's must match line for line: this is the C client reading a member the
+ * daemon has sent since 0062 and every client here dropped.
+ */
+static void a_switched_off_radio_says_so(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_wifi_status_t state;
+
+	if (!staged_open(&staged, "a blocked status can be staged",
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"DISCONNECTED\","
+	    "\"ssid\":\"\",\"name\":\"\",\"bssid\":\"\",\"network\":\"\",\"blocked\":"
+	    "\"the radio is switched off at phy0 in software, which `rfkill unblock wifi` "
+	    "clears\"}\n"
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"COMPLETED\","
+	    "\"ssid\":\"686f6d65\",\"name\":\"home\",\"bssid\":\"00:11:22:33:44:55\","
+	    "\"network\":\"home\"}\n")) {
+		return;
+	}
+	int got = ncfg_client_wifi_status(staged.client, "wlan0", &state, err, sizeof(err));
+	ok("a switched-off radio's status arrives", got == 1, err);
+	if (got == 1) {
+		ok("and says what switched it off and what clears it",
+		    strstr(state.blocked, "rfkill unblock wifi") != NULL, state.blocked);
+		ncfg_wifi_status_free(&state);
+	}
+	got = ncfg_client_wifi_status(staged.client, "wlan0", &state, err, sizeof(err));
+	ok("a radio that is on", got == 1, err);
+	if (got == 1) {
+		equals("says nothing about it", state.blocked, "");
+		ncfg_wifi_status_free(&state);
+	}
+	staged_close(&staged);
+}
+
 /* What a tray says unasked when connectivity moves. Both trays say it. */
 static void notice_is(const char *what, char *got, const char *wanted)
 {
@@ -2762,6 +2799,7 @@ int main(int argc, char **argv)
 	join_choices_are_the_saved_networks_heard();
 	new_choices_are_the_unsaved_networks_heard();
 	a_tray_says_when_the_network_moves();
+	a_switched_off_radio_says_so();
 	credentials_and_eap_are_read_as_written();
 	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();

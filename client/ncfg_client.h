@@ -698,6 +698,13 @@ typedef struct {
 	char *name; /* as text, "" when not associated or not text */
 	char *bssid;
 	char *network; /* the `network` block it came from */
+	/*
+	 * "" unless the radio is switched off by rfkill, and then the daemon's
+	 * sentence saying where and what clears it. Read because a radio that is
+	 * off looks exactly like one in range of nothing, and the key that did it
+	 * is one press away on any laptop.
+	 */
+	char *blocked;
 } ncfg_wifi_status_t;
 
 /*

@@ -1606,6 +1606,7 @@ void ncfg_wifi_status_free(ncfg_wifi_status_t *status)
 	free(status->name);
 	free(status->bssid);
 	free(status->network);
+	free(status->blocked);
 	memset(status, 0, sizeof(*status));
 }
 
@@ -5802,8 +5803,9 @@ static int convert_wifi_status(const ncfg_json_doc_t *doc, ncfg_wifi_status_t *o
 	out->name = member_text(doc, root, "name");
 	out->bssid = member_text(doc, root, "bssid");
 	out->network = member_text(doc, root, "network");
+	out->blocked = member_text(doc, root, "blocked");
 	if (!out->interface || !out->state || !out->ssid || !out->name || !out->bssid
-	    || !out->network) {
+	    || !out->network || !out->blocked) {
 		set_error(err, err_size, "out of memory");
 		ncfg_wifi_status_free(out);
 		return 0;

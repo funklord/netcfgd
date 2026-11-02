@@ -12626,6 +12626,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.658 A radio switched off says so, in the window and both trays
+
+The daemon's `wifi_status` has carried `blocked` since 0062 -- the sentence
+naming where rfkill has the radio off and what clears it, "asked here because
+this is the command somebody runs when wifi is not working". `ncfg wifi
+status` prints it. **The C client never read it**, so the wifi tab, the Qt tray
+and the TDE tray all drew a radio switched off by the laptop's own key as one
+in range of nothing: offline, and no reason.
+
+`ncfg_wifi_status_t.blocked` ("" when on), the Qt row's `blocked`, and each of
+the three lines that say what a radio is doing appends it. **Not added to the
+conformance dump**, which the Rust CLI's must match line for line;
+`client_test` reads it from a staged answer of its own, both ways, and
+`tray_choices` holds the wifi tab's line to it.
+
 ## 10.657 The TDE tray joins networks too, and is compiled for the first time here
 
 10.590 left the TDE tray's `Connect to` as "the open half": the rule was in

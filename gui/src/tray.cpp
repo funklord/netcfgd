@@ -168,10 +168,12 @@ void ncfg_tray::refresh()
 	 * joined, and the radio may have moved since. A refusal leaves nothing
 	 * ticked, which is the honest picture of "could not ask". */
 	QString current;
+	QString blocked;
 	if (!radio.isEmpty()) {
 		ncfg_wifi_status_row status;
 		if (connection->wifi_status(radio, &status, nullptr)) {
 			current = status.network;
+			blocked = status.blocked;
 		}
 	}
 	rebuild_join(current);
@@ -215,6 +217,12 @@ void ncfg_tray::refresh()
 
 	const ncfg_reach reach = reach_of(state.rung);
 	QString line = line_for(state);
+	/* **Why it is offline, where the answer is a key on the keyboard.** A
+	 * radio switched off by rfkill reads as one in range of nothing; the
+	 * daemon says which, and what clears it. */
+	if (!blocked.isEmpty()) {
+		line += QStringLiteral(" -- %1").arg(blocked);
+	}
 	state_action->setText(line);
 	icon->setToolTip(line);
 	icon->setIcon(state_icon(reach));

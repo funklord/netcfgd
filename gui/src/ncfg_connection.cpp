@@ -85,6 +85,11 @@ QString ncfg_wifi_status_row::summary() const
 	} else if (!network.isEmpty()) {
 		line += QStringLiteral(" (%1)").arg(network);
 	}
+	/* Last, and whatever else the line says: a radio that is switched off
+	 * reads as one in range of nothing, and this is the only difference. */
+	if (!blocked.isEmpty()) {
+		line += QStringLiteral(" -- %1").arg(blocked);
+	}
 	return line;
 }
 
@@ -2025,6 +2030,7 @@ bool ncfg_connection::wifi_status(const QString &interface, ncfg_wifi_status_row
 	out->state = from_c(status.state);
 	out->bssid = from_c(status.bssid);
 	out->network = from_c(status.network);
+	out->blocked = from_c(status.blocked);
 	out->display = from_c(status.name);
 	if (out->display.isEmpty() && status.ssid[0] != '\0') {
 		out->display = QStringLiteral("hex:%1").arg(from_c(status.ssid));

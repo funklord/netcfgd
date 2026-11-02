@@ -159,5 +159,17 @@ int main(int argc, char **argv)
 	check(ncfg_tray::notice_for(off, off).isEmpty() && ncfg_tray::notice_for(home, home).isEmpty(),
 	    "and nothing when nothing moved");
 
+	/* The radio's line, which the wifi tab draws: a radio switched off says
+	 * so, because otherwise it reads as one in range of nothing. */
+	ncfg_wifi_status_row status;
+	status.interface = QStringLiteral("wlan0");
+	status.state = QStringLiteral("DISCONNECTED");
+	check(!status.summary().contains(QStringLiteral("rfkill")),
+	    "a radio that is on says nothing of rfkill");
+	status.blocked = QStringLiteral("the radio is switched off at phy0 in software, which "
+	                                "`rfkill unblock wifi` clears");
+	check(status.summary().contains(QStringLiteral("rfkill unblock wifi")),
+	    "and one switched off says what clears it");
+
 	return failures ? 1 : 0;
 }
