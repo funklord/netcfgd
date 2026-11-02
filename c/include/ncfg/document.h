@@ -2562,6 +2562,14 @@ typedef struct {
 	char   **states;
 	size_t   state_count;
 	/*
+	 * Whether the connection's destination was translated -- nftables' `ct
+	 * status dnat` (0310). What lets a forward chain that drops by policy
+	 * pass the mappings miniupnpd makes, and a port forward's traffic (0298),
+	 * in a rule the operator wrote rather than one netcfgd added unseen.
+	 * Omitted when false, so every ruleset before it is the document it was.
+	 */
+	int      translated;
+	/*
 	 * The sending station's hardware address, nftables' `ether saddr`
 	 * (project.md 10.592): exact addresses and `aa:bb:cc:*` prefixes,
 	 * normalised and sorted, since a station match is a set. A prefix is

@@ -977,6 +977,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 			}
 		}
 	}
+	/* Only where set, so no digest written before 0310 changes. */
+	if (rule->translated) {
+		ncfg_buf_add_text(out, "translated\n");
+	}
 	for (at = 0; at < rule->mac_count; at++) {
 		ncfg_buf_addf(out, "mac %s\n", rule->mac[at]);
 	}
@@ -1105,6 +1109,21 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 		 * every other integer this module writes. */
 		ncfg_buf_init(&data, 0);
 		put_be32(&data, NFTA_CT_KEY, NFT_CT_STATE);
+		put_be32(&data, NFTA_CT_DREG, NFT_REG_1);
+		put_expression(&expressions, "ct", &data);
+		ncfg_buf_free(&data);
+		put_mask(&expressions, (const uint8_t *)&bits, sizeof(bits));
+		put_cmp(&expressions, NFT_CMP_NEQ, &none, sizeof(none));
+	}
+	/* `ct status dnat`, as nft 1.1.3 writes it: the status register masked
+	 * with IPS_DST_NAT and compared against zero -- host order, as the state
+	 * is. */
+	if (rule->translated) {
+		uint32_t bits = IPS_DST_NAT;
+		uint32_t none = 0;
+
+		ncfg_buf_init(&data, 0);
+		put_be32(&data, NFTA_CT_KEY, NFT_CT_STATUS);
 		put_be32(&data, NFTA_CT_DREG, NFT_REG_1);
 		put_expression(&expressions, "ct", &data);
 		ncfg_buf_free(&data);
@@ -2163,6 +2182,19 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 		}
 		return 1;
 	}
+	if (reading->what == LOADED_CT && reading->key == NFT_CT_STATUS) {
+		uint32_t bits = 0;
+		uint32_t zero = 0;
+
+		memcpy(&bits, reading->mask, reading->mask_length == 4u ? 4u : 0u);
+		if (op != NFT_CMP_NEQ || length != 4u || reading->mask_length != 4u ||
+		    bits != IPS_DST_NAT || memcmp(value, &zero, 4u) != 0) {
+			ncfg_error_set(err, err_size, "a conntrack status test netcfgd does not write");
+			return 0;
+		}
+		out->translated = 1;
+		return 1;
+	}
 	if (op != NFT_CMP_EQ) {
 		ncfg_error_set(err, err_size, "a comparison other than equality, which netcfgd "
 		    "writes only for a conntrack state");
@@ -2962,7 +2994,8 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->from, observed->from) || !same_text(expected->to, observed->to) ||
 	    !same_text(expected->interface, observed->interface) ||
 	    !same_text(expected->out_interface, observed->out_interface) ||
-	    !same_text(expected->mac, observed->mac)) {
+	    !same_text(expected->mac, observed->mac) ||
+	    (expected->translated != 0) != (observed->translated != 0)) {
 		return 0;
 	}
 	{

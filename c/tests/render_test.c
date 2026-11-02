@@ -1897,6 +1897,11 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\tdrop \"weekend\" { days = [\"sat\", \"sun\"] }\n"
 	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so do a schedule's hours and days (10.663)");
+	round_trips("firewall {\n\tinput { policy = \"accept\" }\n\tforward {\n"
+	    "\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"mapped\" { interface = \"wan0\"; translated = true }\n"
+	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so does a rule accepting translated connections (0310)");
 }
 
 static void a_firewall_round_trips(void)

@@ -361,6 +361,11 @@ void ncfg_plan_nat(ncfg_builder_t *builder);
  */
 void ncfg_plan_input_warnings(ncfg_builder_t *builder);
 int  ncfg_plan_input_drops(const ncfg_document_t *desired);
+/* Whether the forward chain lets translated connections through: it does not
+ * drop by policy, or an accept rule says `translated = true` (0310). One rule
+ * covers every port forward and every UPnP mapping, which no address rule
+ * can for a mapping nobody wrote down. */
+int  ncfg_plan_forward_accepts_translated(const ncfg_document_t *desired);
 int  ncfg_plan_input_accepts(const ncfg_document_t *desired, const char *iface, int protocol,
     int64_t port);
 void ncfg_plan_rules(ncfg_builder_t *builder);

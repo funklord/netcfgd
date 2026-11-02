@@ -236,6 +236,17 @@ static void port_forwards_ride_the_table(void)
 	check(plan && !planfix_warned(plan, "with no accept rule naming that address"),
 	    "  and not once an accept rule names the host");
 	planfix_release(plan, document, observed);
+
+	/* One rule accepting translated connections covers every forward (0310),
+	 * so it quiets the warning without naming any host. */
+	plan = planfix_plan(DEVICE("wan0"), WAN_FORWARDING, "",
+	    ",\"firewall\":{\"input\":{\"policy\":\"accept\"},\"forward\":{\"policy\":\"drop\","
+	    "\"rules\":[{\"name\":\"mapped\",\"action\":\"accept\",\"protocol\":\"any\","
+	    "\"translated\":true}]},\"output\":{\"policy\":\"accept\"}}",
+	    "\"links\":[" PLANFIX_LINK("wan0", ",\"forwarding\":true") "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "with no accept rule naming that address"),
+	    "  nor once one accepts every translated connection");
+	planfix_release(plan, document, observed);
 }
 
 /*

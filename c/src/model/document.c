@@ -2741,6 +2741,10 @@ static const ncfg_field_t firewall_rule_fields[] = {
 	{ .name = "states", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_firewall_rule_t, states),
 	    .count_offset = offsetof(ncfg_firewall_rule_t, state_count) },
+	/* Absent when false (0310), so every ruleset before it reads and writes
+	 * back unchanged. */
+	{ .name = "translated", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_firewall_rule_t, translated) },
 	/* The three source-station fields, omitted when empty, so a ruleset that
 	 * names no station is the document it was (10.592). */
 	{ .name = "mac", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,

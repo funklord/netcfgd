@@ -46,6 +46,24 @@ int ncfg_plan_input_drops(const ncfg_document_t *desired)
 	    desired->firewall->input.policy == NCFG_FIREWALL_POLICY_DROP;
 }
 
+int ncfg_plan_forward_accepts_translated(const ncfg_document_t *desired)
+{
+	const ncfg_firewall_chain_t *chain;
+	size_t                       r;
+
+	if (!desired || !desired->firewall ||
+	    desired->firewall->forward.policy != NCFG_FIREWALL_POLICY_DROP) {
+		return 1;
+	}
+	chain = &desired->firewall->forward;
+	for (r = 0; r < chain->rule_count; r++) {
+		if (chain->rules[r].action == NCFG_FIREWALL_ACCEPT && chain->rules[r].translated) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int ncfg_plan_input_accepts(const ncfg_document_t *desired, const char *iface, int protocol,
     int64_t port)
 {

@@ -419,7 +419,10 @@
 #     protocol that has ports), `from` and `to` (addresses or CIDRs),
 #     `interface` (in `forward`, the one a packet arrives on), `out_interface`
 #     (in `forward` only, the one it leaves by), `state` (new, established,
-#     related, invalid), and `mac` --
+#     related, invalid), `translated = true` (a connection whose destination
+#     this router rewrote -- what a port forward or a UPnP mapping lets in,
+#     and the one rule a forward chain that drops needs for all of them), and
+#     `mac` --
 #     the sending station, by address, by manufacturer prefix (`aa:bb:cc:*`)
 #     or by `"@host_list:NAME"`, in `input` and `forward` only.
 #   - `hours` and `days` say when a rule applies, in this machine's local time:
@@ -462,6 +465,11 @@
 #		policy = "drop"
 #		accept "established" {
 #			state = ["established", "related"]
+#		}
+#		# What a port forward or a UPnP mapping opened, from the uplink.
+#		accept "mapped" {
+#			interface  = "eth0"
+#			translated = true
 #		}
 #		# A guest network that reaches the internet and not the LAN.
 #		drop "guest-lan" {

@@ -363,6 +363,7 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 			return 0;
 		}
 	}
+	out->translated = one->translated;
 	return 1;
 }
 

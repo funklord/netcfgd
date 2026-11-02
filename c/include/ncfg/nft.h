@@ -397,6 +397,7 @@ typedef struct {
 	/* Conntrack states as bits: new, established, related, invalid, in the
 	 * language's order -- bit 0 is `new`. */
 	unsigned states;
+	int      translated; /* `ct status dnat`, 0310 */
 	char     mac[NCFG_STATION_ADDRESS_SIZE];
 	/* One UTC piece of a schedule (10.663, `schedule.h`): `meta hour` in an
 	 * inclusive range of seconds, and `meta day` where one day is matched. */

@@ -12632,6 +12632,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.670 A firewall rule may match a translated connection
+
+**Built** (2026-11-03): `translated = true` on a firewall rule matches a
+connection whose destination this router rewrote -- nftables' `ct status
+dnat`. It is the rule a forward chain that drops by policy needs for UPnP's
+mappings, which no address rule can name because nobody wrote them down
+(0310, 10.671), and it covers every port forward of 0298 at once, so that
+forward's warning no longer asks for an address rule where a translated
+accept is already there.
+
+Explicit rather than added unseen, which is 0298's rule held to: an implicit
+`ct status dnat accept` would accept what any table translated, docker's
+included, in a chain the operator did not write it in.
+
+Written as the status register masked with IPS_DST_NAT and compared against
+zero, as nft 1.1.3 writes `ct status dnat`; read back as the same flag, any
+other status test refused; and part of the rule's digest only where set, so
+no rule digested before it changes. An undo rebuilds a rule with its
+translation, or undoing a change would widen it to every connection.
+**Checked:** written and read back, the digest differing, a render round
+trip, and the forward warning quieted -- sabotaged by dropping the helper
+from `nat.c`, which turns that check red.
+
 ## 10.669 The daemon is a fuzznet node: one store, the claim, its identity
 
 **Built** (2026-11-02): fuzznet's objects are linked into `c/`, and the

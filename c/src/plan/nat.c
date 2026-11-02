@@ -234,6 +234,7 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 			rule->protocol = protocol_of(one->protocol);
 			rule->interface = one->interface ? strdup(one->interface) : NULL;
 			rule->out_interface = one->out_interface ? strdup(one->out_interface) : NULL;
+			rule->translated = one->translated;
 			if (!rule->name || (one->interface && !rule->interface) ||
 			    (one->out_interface && !rule->out_interface)) {
 				ncfg_firewall_free(firewall);
@@ -734,7 +735,8 @@ static void warn_forwards(ncfg_builder_t *builder)
 		for (at = 0; at < interface->port_forward_count; at++) {
 			const ncfg_port_forward_t   *forward = &interface->port_forwards[at];
 			const ncfg_firewall_chain_t *chain = &desired->firewall->forward;
-			int                          accepted = 0;
+			int                          accepted =
+			    ncfg_plan_forward_accepts_translated(desired);
 			size_t                       r;
 			size_t                       t;
 

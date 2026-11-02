@@ -1511,6 +1511,7 @@ typedef struct {
 	char         *out_interface; /* forward chain only, 0302 */
 	char        **states;
 	size_t        state_count;
+	int           translated; /* `ct status dnat`, 0310 */
 	char         *mac;
 	/* One UTC piece of a schedule, as `schedule.h` writes it -- `"1 28800
 	 * 32399"`, day then inclusive seconds, `any` for every day -- NULL for a

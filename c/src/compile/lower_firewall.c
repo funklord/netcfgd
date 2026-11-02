@@ -458,6 +458,12 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			rule.out_interface = ncfg_as_interface_name(ctx, assignment->value);
 		} else if (strcmp(key, "state") == 0) {
 			rule_states(ctx, assignment, &rule);
+		} else if (strcmp(key, "translated") == 0) {
+			int flag;
+
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				rule.translated = flag;
+			}
 		} else if (strcmp(key, "mac") == 0) {
 			rule_macs(ctx, assignment, &rule);
 		} else if (strcmp(key, "hours") == 0) {
@@ -467,7 +473,7 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, out_interface, state, mac, hours, days", key);
+			    "interface, out_interface, state, translated, mac, hours, days", key);
 		}
 	}
 	/* What was written is the resolved set again where no list is named. */

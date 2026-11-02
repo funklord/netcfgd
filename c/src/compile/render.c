@@ -1327,6 +1327,9 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		ncfg_render_list_emit(body, "\t\t\t", "state", &list, 0);
 		ncfg_render_list_free(&list);
 	}
+	if (rule->translated) {
+		ncfg_buf_add_text(body, "\t\t\ttranslated = true\n");
+	}
 	/* The lists named, then what was written beside them; where no list is
 	 * named, `mac` is what was written (10.592). */
 	if (rule->mac_count != 0u || rule->mac_list_count != 0u) {

@@ -411,6 +411,67 @@ static void what_is_written_is_read_back(void)
 	ncfg_buf_free(&out);
 }
 
+/*
+ * `translated = true` is `ct status dnat` (0310): written as the status
+ * register masked with IPS_DST_NAT, read back as the same flag, and part of
+ * the digest -- so a rule that gains or loses it is one the kernel holds
+ * differently, and an apply is planned rather than "nothing to do".
+ */
+static void a_translated_rule_is_written_read_and_digested(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_buf_t           with;
+	ncfg_buf_t           without;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	int                  read_translated = -1;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"mapped";
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	rule.protocol = NCFG_FIREWALL_PROTO_ANY;
+	rule.interface = (char *)"wan0";
+	rule.translated = 1;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.forward.policy = NCFG_FIREWALL_POLICY_DROP;
+	firewall.forward.rules = &rule;
+	firewall.forward.rule_count = 1u;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a forward chain accepting translated connections is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err)) && strcmp(one.name, "mapped") == 0) {
+			read_translated = one.translated;
+		}
+	}
+	check(read_translated == 1, "  and reads back as translated, which the decoder refused before");
+	ncfg_buf_free(&out);
+
+	ncfg_buf_init(&with, 0);
+	ncfg_buf_init(&without, 0);
+	(void)ncfg_nft_firewall_rule_text("forward", &rule, &with);
+	rule.translated = 0;
+	(void)ncfg_nft_firewall_rule_text("forward", &rule, &without);
+	check(with.length != without.length || memcmp(with.data, without.data, with.length) != 0,
+	    "  the translation is part of what a rule's digest is taken over");
+	check(!strstr(without.data ? without.data : "", "translated"),
+	    "  and a rule without it digests as every rule before 0310 did");
+	ncfg_buf_free(&with);
+	ncfg_buf_free(&without);
+}
+
 /* The comment's digest of a one-rule input chain, at the fixed offset. */
 static void digest_of(ncfg_firewall_rule_t *rule, char *out, size_t out_size)
 {
@@ -1552,6 +1613,7 @@ int main(void)
 
 	a_rule_is_bounded_in_what_it_becomes();
 	what_is_written_is_read_back();
+	a_translated_rule_is_written_read_and_digested();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();
