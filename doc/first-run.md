@@ -127,9 +127,11 @@ and the passphrase into `secrets/YourNetworkName` at mode 0600, prompts without
 echoing, and compiles the result before leaving it there. The passphrase is
 never a command-line argument -- `ps` would show it to every user on the machine
 -- so pipe it in (`printf '%s\n' "$pass" | sudo ncfg wifi add ...`) if you are
-scripting. `--open` for a network with no passphrase, `--hidden` for one that
-does not broadcast its SSID, `--priority N` when several are in range, and
-`--id` for an SSID that is not usable as a filename. The file it writes is
+scripting. `--open` for a network with no passphrase, `--owe` for one that is
+encrypted with no passphrase ("Enhanced Open", which `--open` would not join),
+`--hidden` for one that does not broadcast its SSID, `--metric N` when several
+are in range (lower wins), and `--id` for an SSID that is not usable as a
+filename. The file it writes is
 ordinary configuration: read it, edit it, commit it, or delete it to forget the
 network.
 

@@ -147,6 +147,8 @@ typedef struct {
 	const char   *phase2;
 	const char   *interface;
 	int           open;
+	/* Opportunistic wireless encryption: encrypted, no passphrase. */
+	int           owe;
 	int           hidden;
 	ncfg_optint_t metric;
 } ncfg_cli_wifi_t;

@@ -262,6 +262,9 @@ int ncfg_wifi_profile_render(const ncfg_wifi_profile_t *profile, ncfg_buf_t *out
 	case NCFG_WIFI_SECURITY_OPEN:
 		ncfg_buf_add_text(&keys[count++], "open = true");
 		break;
+	case NCFG_WIFI_SECURITY_OWE:
+		ncfg_buf_add_text(&keys[count++], "owe = true");
+		break;
 	case NCFG_WIFI_SECURITY_EAP:
 		add_key(keys, &count, "eap", profile->method);
 		/*
@@ -406,6 +409,8 @@ static const ncfg_wifi_network_t *network_named(const ncfg_document_t *document,
 	return NULL;
 }
 
+static int wants_credential(const ncfg_wifi_profile_t *profile);
+
 /* The credential name a compiled network's security refers to, or NULL. */
 static const char *credential_name(const ncfg_security_t *security)
 {
@@ -510,7 +515,9 @@ static int compiles_back(const char *config_dir, const char *factory_dir,
 	}
 	(void)snprintf(reference, sizeof(reference), "@secret:%s", profile->id);
 	name = credential_name(&network->security);
-	secured = network->security.kind != NCFG_SECURITY_OPEN;
+	/* "Has a credential", which OWE is not although it is encrypted. */
+	secured = network->security.kind == NCFG_SECURITY_PSK ||
+	    network->security.kind == NCFG_SECURITY_EAP;
 
 	if (network->ssid.length != profile->ssid.length ||
 	    memcmp(network->ssid.bytes, profile->ssid.bytes, profile->ssid.length) != 0) {
@@ -520,7 +527,9 @@ static int compiles_back(const char *config_dir, const char *factory_dir,
 	} else if (profile->metric.has &&
 	    (!network->metric.has || network->metric.value != profile->metric.value)) {
 		reason = "metric";
-	} else if (secured != (profile->security != NCFG_WIFI_SECURITY_OPEN)) {
+	} else if (secured != wants_credential(profile) ||
+	    (network->security.kind == NCFG_SECURITY_OWE) !=
+	        (profile->security == NCFG_WIFI_SECURITY_OWE)) {
 		reason = "security";
 	} else if (secured && (!name || strcmp(name, profile->id) != 0)) {
 		/* The credential is referred to by the network's own label and by
@@ -568,7 +577,8 @@ void ncfg_wifi_installed_free(ncfg_wifi_installed_t *installed)
 /* Whether this network has to have a credential with it. */
 static int wants_credential(const ncfg_wifi_profile_t *profile)
 {
-	return profile->security != NCFG_WIFI_SECURITY_OPEN;
+	return profile->security == NCFG_WIFI_SECURITY_PSK ||
+	    profile->security == NCFG_WIFI_SECURITY_EAP;
 }
 
 /* The bytes are a credential and every refusal about them says only how many

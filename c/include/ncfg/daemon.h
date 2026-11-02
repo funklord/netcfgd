@@ -2187,7 +2187,10 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 typedef enum {
 	NCFG_WIFI_SECURITY_OPEN = 0,
 	NCFG_WIFI_SECURITY_PSK,
-	NCFG_WIFI_SECURITY_EAP
+	NCFG_WIFI_SECURITY_EAP,
+	/* Opportunistic wireless encryption: encrypted, and no credential. Not
+	 * `open`, which would write a block that does not associate (0227). */
+	NCFG_WIFI_SECURITY_OWE
 } ncfg_wifi_security_t;
 
 /*

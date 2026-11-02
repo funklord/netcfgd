@@ -1385,6 +1385,27 @@ static void adding_a_network_is_bounded_by_its_shape(void)
 	check(installed.security == NCFG_WIFI_SECURITY_OPEN && installed.credential_length == 0u,
 	    "  an open network stores nothing");
 
+	/* OWE is the third state 0227 found the request could not say: encrypted,
+	 * and with no credential to store. */
+	memset(&installed, 0, sizeof(installed));
+	wanted_reset(&wanted);
+	wanted.owe = 1;
+	check(ncfg_wifi_configure_network(NULL, &wanted, recording_install, NULL, &out, err,
+	        sizeof(err)) && installed.security == NCFG_WIFI_SECURITY_OWE &&
+	    installed.credential_length == 0u,
+	    "an OWE network is written as one, and stores nothing");
+	wanted_reset(&wanted);
+	wanted.owe = 1;
+	wanted.passphrase = ncfg_proto_str("NOT-A-REAL-SECRET");
+	check(!ncfg_wifi_configure_network(NULL, &wanted, recording_install, NULL, &out, err,
+	        sizeof(err)) && strstr(kept(err), "no credential at all") != NULL,
+	    "  and OWE with a passphrase is two networks at once, refused");
+	wanted_reset(&wanted);
+	wanted.owe = 1;
+	wanted.proto = ncfg_proto_str("wpa3");
+	check(!ncfg_wifi_configure_network(NULL, &wanted, recording_install, NULL, &out, err,
+	        sizeof(err)), "  as is OWE with a generation");
+
 	ncfg_buf_free(&out);
 	ncfg_buf_init(&out, 0);
 	memset(&installed, 0, sizeof(installed));

@@ -273,6 +273,9 @@ static int fully_populated(ncfg_proto_request_kind_t kind, ncfg_proto_request_t 
 		out->u.wifi_add.eap.phase2 = ncfg_proto_str("mschapv2");
 		out->u.wifi_add.eap.ca_cert = ncfg_proto_str("corp-ca");
 		out->u.wifi_add.eap.client_cert = ncfg_proto_str("corp-crt");
+		/* Set for the same reason, although no daemon accepts it beside a
+		 * passphrase: this is the wire, where every member is a key. */
+		out->u.wifi_add.owe = 1;
 		return 1;
 	case NCFG_PROTO_REQ_WIFI_CONNECT:
 		out->u.wifi_connect.interface = ncfg_proto_str("wlan0");

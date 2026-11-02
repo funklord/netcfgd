@@ -1153,9 +1153,12 @@ public:
 	 * network negotiates its own, and the daemon refuses the pair rather
 	 * than picking.
 	 */
+	/* `owe` is an encrypted network with no credential (0227): passphrase
+	 * and proto empty and eap null beside it. Last and defaulted, because it
+	 * is the one member every other caller leaves out. */
 	bool wifi_add(const QString &ssid, const QString &id, const QString &passphrase,
 	          const QString &proto, bool hidden, const eap_request *eap,
-	          QString *error);
+	          QString *error, bool owe = false);
 
 	/*
 	 * Store a credential under a name, which is how a certificate gets to

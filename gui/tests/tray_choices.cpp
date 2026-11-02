@@ -114,13 +114,17 @@ int main(int argc, char **argv)
 	around.append(owe);
 
 	const QList<ncfg_tray_new_choice> heard = ncfg_tray::new_choices(around);
-	check(heard.size() == 2, "the unsaved SSIDs are offered, and an OWE one is not");
-	check(heard.size() == 2 && heard.at(0).label == QStringLiteral("Cafe") &&
-	          heard.at(0).ssid == QStringLiteral("43616665"),
+	check(heard.size() == 3, "the unsaved SSIDs are offered");
+	check(heard.size() == 3 && heard.at(0).label == QStringLiteral("Quiet") && heard.at(0).owe &&
+	          !heard.at(0).secured,
+	    "an OWE one among them, saying so");
+	check(heard.size() == 3 && heard.at(1).label == QStringLiteral("Cafe") &&
+	          heard.at(1).ssid == QStringLiteral("43616665"),
 	    "by name, carrying the SSID the dialog sends");
-	check(heard.size() == 2 && heard.at(0).secured && !heard.at(0).enterprise,
+	check(heard.size() == 3 && heard.at(1).secured && !heard.at(1).enterprise &&
+	          !heard.at(1).owe,
 	    "a passphrase network says so");
-	check(heard.size() == 2 && heard.at(1).enterprise, "and an 802.1X one says so");
+	check(heard.size() == 3 && heard.at(2).enterprise, "and an 802.1X one says so");
 	check(ncfg_tray::new_choices({}).isEmpty(), "an empty scan offers nothing new");
 
 	/* What the tray says unasked when the network moves. */

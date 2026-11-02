@@ -473,11 +473,15 @@ void ncfg_wifi_view::add_hidden()
 	QString shown;
 	bool secured = false;
 	bool enterprise = false;
-	if (!ncfg_ask_hidden_network(this, &ssid_hex, &shown, &secured, &enterprise)) {
+	bool owe = false;
+	if (!ncfg_ask_hidden_network(this, &ssid_hex, &shown, &secured, &enterprise, &owe)) {
 		return;
 	}
 	ncfg_add_network_dialog dialog(connection, ssid_hex, shown, secured, enterprise, this);
 	dialog.set_hidden();
+	if (owe) {
+		dialog.set_owe();
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}
@@ -907,30 +911,16 @@ void ncfg_wifi_view::add()
 	 * `enterprise` became a third value the column can hold. */
 	const ncfg_access_point_row &point = scanned.at(row);
 
-	/* **An OWE network cannot be added from here, and used to be added
-	 * wrongly.** `secured` is false for it, so this dialog asked for nothing
-	 * and wrote an open network block -- which does not associate with an
-	 * access point doing opportunistic wireless encryption, because that is
-	 * `key_mgmt=OWE` with management frame protection required.
-	 *
-	 * netcfgd renders such a block correctly when a document names one; what
-	 * is missing is a way to *say* it over the socket, since `wifi_add`
-	 * carries a passphrase, a generation and an 802.1X arm and has no third
-	 * state between "a credential" and "none". Saying so beats writing a
-	 * block that looks right in the list and never connects. 0227. */
-	if (point.owe) {
-		QMessageBox::information(this, QStringLiteral("netcfgd"),
-		    QStringLiteral("`%1` uses opportunistic wireless encryption, which asks "
-		                   "for no passphrase and is still not an open network.\n\n"
-		                   "netcfgd can join one, but not add it from here yet. Put "
-		                   "this in your configuration:\n\n"
-		                   "network \"%1\" {\n\twifi { owe = true }\n}")
-		        .arg(shown->text()));
-		return;
-	}
-
+	/* **An OWE network is told apart from an open one.** `secured` is false
+	 * for both, and the open block this dialog used to write does not
+	 * associate with an access point doing opportunistic wireless
+	 * encryption -- that is `key_mgmt=OWE` with management frame protection
+	 * required. `wifi_add` can say `owe` now, where 0227 found it could not. */
 	ncfg_add_network_dialog dialog(connection, point.ssid, shown->text(), point.secured,
 	                   point.enterprise, this);
+	if (point.owe) {
+		dialog.set_owe();
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

@@ -383,6 +383,7 @@ QList<ncfg_tray_new_choice> ncfg_tray::new_choices(const QList<ncfg_access_point
 		choice.signal = found.items[i].signal;
 		choice.secured = found.items[i].secured != 0;
 		choice.enterprise = found.items[i].enterprise != 0;
+		choice.owe = found.items[i].owe != 0;
 		out.append(choice);
 	}
 	ncfg_new_choices_free(&found);
@@ -461,6 +462,7 @@ void ncfg_tray::rebuild_join(const QString &current)
 			const ncfg_tray_new_choice &choice = heard.at(i);
 			const QString kind = choice.enterprise ? QStringLiteral("enterprise")
 			                     : choice.secured  ? QStringLiteral("passphrase")
+			                     : choice.owe      ? QStringLiteral("encrypted")
 			                                       : QStringLiteral("open");
 			QAction *action = join_menu->addAction(QStringLiteral("%1  (%2 dBm, %3)...")
 			                                           .arg(choice.label)
@@ -525,7 +527,8 @@ void ncfg_tray::add_hidden()
 {
 	ncfg_tray_new_choice choice;
 	if (radio.isEmpty() || !ncfg_ask_hidden_network(nullptr, &choice.ssid, &choice.label,
-	                                                &choice.secured, &choice.enterprise)) {
+	                                                &choice.secured, &choice.enterprise,
+	                                                &choice.owe)) {
 		return;
 	}
 	add_network(choice, true);
@@ -544,6 +547,9 @@ void ncfg_tray::add_network(const ncfg_tray_new_choice &choice, bool hidden)
 	                               choice.enterprise);
 	if (hidden) {
 		dialog.set_hidden();
+	}
+	if (choice.owe) {
+		dialog.set_owe();
 	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;

@@ -1588,7 +1588,19 @@ int ncfg_wifi_configure_network(const ncfg_document_t *document,
 	 * personal one: `proto` pins a WPA generation for a passphrase and means
 	 * nothing here, and saying so beats writing a network that will not join.
 	 */
-	if (wanted->eap.present) {
+	if (wanted->owe) {
+		/* No credential and no generation: OWE is its own key management,
+		 * and either of the others alongside it is a request for two
+		 * networks at once. */
+		if (wanted->eap.present || wanted->passphrase.bytes || profile.proto) {
+			ncfg_error_set(err, err_size,
+			    "`owe` was given with a passphrase, a `proto` or an `eap` block. An OWE "
+			    "network is encrypted with no credential at all, so it takes none of "
+			    "them");
+			return 0;
+		}
+		profile.security = NCFG_WIFI_SECURITY_OWE;
+	} else if (wanted->eap.present) {
 		if (profile.proto) {
 			ncfg_error_set(err, err_size,
 			    "a `proto` was given with an `eap` block. `proto` pins the generation "

@@ -609,7 +609,7 @@ unsigned ncfg_connection::confirm_default()
 
 bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
                    const QString &passphrase, const QString &proto, bool hidden,
-                   const eap_request *eap, QString *error)
+                   const eap_request *eap, QString *error, bool owe)
 {
 	if (!client) {
 		if (error) {
@@ -636,6 +636,7 @@ bool ncfg_connection::wifi_add(const QString &ssid, const QString &id,
 	network.proto = proto.isEmpty() ? nullptr : proto_bytes.constData();
 	network.hidden = hidden ? 1 : 0;
 	network.metric = -1;
+	network.owe = owe ? 1 : 0;
 
 	/* Held at this scope for the same reason as the members above: the C
 	 * layer reads the pointers during the call, and a QByteArray built inside

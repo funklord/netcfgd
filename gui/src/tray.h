@@ -122,6 +122,7 @@ struct ncfg_tray_new_choice {
 	int     signal = 0;
 	bool    secured = false;
 	bool    enterprise = false;
+	bool    owe = false;
 };
 
 class ncfg_tray : public QObject {

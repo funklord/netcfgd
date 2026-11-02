@@ -656,7 +656,7 @@ static int say_added(const ncfg_wifi_installed_t *written, const char *id,
 	ncfg_json_write_init(&writer, &out);
 	ncfg_json_write_object_begin(&writer);
 	ncfg_json_write_member_string(&writer, "id", id);
-	ncfg_json_write_member_bool(&writer, "secured", !wanted->open);
+	ncfg_json_write_member_bool(&writer, "secured", !wanted->open && !wanted->owe);
 	ncfg_json_write_member_bool(&writer, "daemon", written == NULL);
 	if (written && written->file) {
 		ncfg_json_write_member_string(&writer, "file", written->file);
@@ -806,6 +806,7 @@ static int add_over_socket(const char *socket_path, const ncfg_wifi_profile_t *p
 		request.u.wifi_add.proto = ncfg_proto_str(profile->proto);
 	}
 	request.u.wifi_add.hidden = (unsigned char)(profile->hidden ? 1 : 0);
+	request.u.wifi_add.owe = (unsigned char)(profile->security == NCFG_WIFI_SECURITY_OWE);
 	if (profile->metric.has) {
 		request.u.wifi_add.metric.present = 1;
 		request.u.wifi_add.metric.value = profile->metric.value;
@@ -885,6 +886,14 @@ int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional
 		    "passphrase and the other says which generation protects it");
 		return 0;
 	}
+	/* OWE is its own key management, so each of the others beside it is a
+	 * second answer to one question. */
+	if (wanted->owe && (wanted->open || wanted->proto || wanted->eap)) {
+		ncfg_error_set(err, err_size,
+		    "--owe takes no --open, --wpa2/--wpa3 or --eap: an OWE network is "
+		    "encrypted with no credential at all, which is none of those");
+		return 0;
+	}
 	if (!check_enterprise(wanted, err, err_size)) {
 		return 0;
 	}
@@ -913,6 +922,8 @@ int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional
 	profile.proto = wanted->proto;
 	if (wanted->open) {
 		profile.security = NCFG_WIFI_SECURITY_OPEN;
+	} else if (wanted->owe) {
+		profile.security = NCFG_WIFI_SECURITY_OWE;
 	} else if (wanted->eap) {
 		profile.security = NCFG_WIFI_SECURITY_EAP;
 		profile.method = wanted->eap;
@@ -992,7 +1003,8 @@ int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional
 
 	/* The credential last, because it is the only step that stops and waits
 	 * for a person. */
-	if (!wanted->open && !read_credential(id, wanted, &credential, err, err_size)) {
+	if (!wanted->open && !wanted->owe &&
+	    !read_credential(id, wanted, &credential, err, err_size)) {
 		goto done;
 	}
 

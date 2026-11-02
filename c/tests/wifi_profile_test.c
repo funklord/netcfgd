@@ -410,6 +410,31 @@ static void what_an_install_writes(void)
 	free(body);
 	check(!testdir_exists(in(in(config_dir, "conf.d"), "wifi-Office.conf")),
 	    "  and no block was written beside it");
+
+	/* OWE: encrypted with no credential, so nothing stored, and a block that
+	 * compiles back to OWE rather than to open -- which would not associate
+	 * (0227). The read-back check is what refuses the second. */
+	fresh_tree();
+	plain(&profile, "Airport");
+	profile.security = NCFG_WIFI_SECURITY_OWE;
+	err[0] = '\0';
+	ok = ncfg_wifi_profile_install(config_dir, factory_dir, &profile, NULL, 0u, &written,
+	    NULL, err, sizeof(err));
+	check(ok, kept(err[0] ? err : "an OWE network installs"));
+	check(written.secret == NULL, "  storing nothing");
+	body = written.file ? testdir_read(written.file, NULL) : NULL;
+	check(body && strstr(body, "owe = true") != NULL && strstr(body, "open") == NULL,
+	    "  and says `owe`, not `open`");
+	free(body);
+	document = compiled();
+	{
+		const ncfg_wifi_network_t *network = network_of(document, "Airport");
+
+		check(network && network->security.kind == NCFG_SECURITY_OWE,
+		    "  and compiles back to an OWE network");
+	}
+	ncfg_document_free(document);
+	ncfg_wifi_installed_free(&written);
 }
 
 static void a_credential_that_cannot_be_one(void)

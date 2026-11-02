@@ -1034,8 +1034,8 @@ static void adding_a_network_sends_typed_fields_only(void)
 	char sent[1024];
 
 	char answers[512];
-	snprintf(answers, sizeof(answers), "%s%s", "{\"response\":\"ok\"}\n",
-	     "{\"response\":\"ok\"}\n");
+	snprintf(answers, sizeof(answers), "%s%s%s", "{\"response\":\"ok\"}\n",
+	     "{\"response\":\"ok\"}\n", "{\"response\":\"ok\"}\n");
 	if (!staged_open(&staged, "an add can be staged", answers)) {
 		return;
 	}
@@ -1074,6 +1074,21 @@ static void adding_a_network_sends_typed_fields_only(void)
 		       "{\"request\":\"wifi_add\",\"ssid\":\"63616665\"}\n");
 	} else {
 		ok("and an open network mentions nothing it does not have", 0, err);
+	}
+
+	/* OWE: no credential, and saying so, because leaving it out would be the
+	 * open network above -- which does not associate with one (0227). */
+	const ncfg_network_t enhanced_open = {
+		.ssid = "616972",
+		.metric = -1,
+		.owe = 1,
+	};
+	if (ncfg_client_wifi_add(staged.client, &enhanced_open, err, sizeof(err))) {
+		equals("an OWE network says owe, and carries no credential",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"wifi_add\",\"ssid\":\"616972\",\"owe\":true}\n");
+	} else {
+		ok("an OWE network says owe, and carries no credential", 0, err);
 	}
 
 	staged_close(&staged);
@@ -2185,8 +2200,8 @@ static void join_choices_are_the_saved_networks_heard(void)
  *
  * The cases are the ones the rule excludes, each beside a case it keeps: an
  * SSID saved under one access point and heard unsaved from another, a hidden
- * name, an OWE network, and two access points for one new SSID whose flags
- * differ -- the stronger one's are the ones carried.
+ * name, and two access points for one new SSID whose flags differ -- the
+ * stronger one's are the ones carried. An OWE network is offered, saying so.
  */
 static ncfg_access_point_t new_point(const char *ssid, const char *name, const char *configured,
                                      int signal, int secured)
@@ -2215,15 +2230,17 @@ static void new_choices_are_the_unsaved_networks_heard(void)
 
 	int got = ncfg_new_choices(points, sizeof(points) / sizeof(points[0]), &choices);
 	ok("the new choices are built", got == 1, NULL);
-	ok("one per unsaved SSID, and none hidden, saved or OWE", choices.count == 2, NULL);
-	if (choices.count == 2) {
-		equals("the strongest first", choices.items[0].label, "Cafe");
-		equals("carrying the SSID as hex", choices.items[0].ssid, "43616665");
-		ok("at the strongest signal heard", choices.items[0].signal == -45, NULL);
-		ok("with the strongest access point's security", choices.items[0].secured == 1,
-		    NULL);
-		equals("then the next", choices.items[1].label, "Lib");
-		ok("an 802.1X network says so", choices.items[1].enterprise == 1, NULL);
+	ok("one per unsaved SSID, and none hidden or saved", choices.count == 3, NULL);
+	if (choices.count == 3) {
+		equals("the strongest first", choices.items[0].label, "Owe");
+		ok("an OWE network says so, and is not secured", choices.items[0].owe == 1 &&
+		    choices.items[0].secured == 0, NULL);
+		equals("carrying the SSID as hex", choices.items[1].ssid, "43616665");
+		ok("at the strongest signal heard", choices.items[1].signal == -45, NULL);
+		ok("with the strongest access point's security", choices.items[1].secured == 1 &&
+		    choices.items[1].owe == 0, NULL);
+		equals("then the next", choices.items[2].label, "Lib");
+		ok("an 802.1X network says so", choices.items[2].enterprise == 1, NULL);
 	}
 	ncfg_new_choices_free(&choices);
 

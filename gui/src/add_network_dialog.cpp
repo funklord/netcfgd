@@ -159,8 +159,9 @@ ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
 	} else {
 		passphrase = nullptr;
 		proto = nullptr;
-		form->addRow(QStringLiteral("security"),
-		         new QLabel(QStringLiteral("open -- no passphrase"), this));
+		security_label = new QLabel(QStringLiteral("open -- no passphrase"), this);
+		security_label->setObjectName(QStringLiteral("security"));
+		form->addRow(QStringLiteral("security"), security_label);
 	}
 
 	hidden = new QCheckBox(QStringLiteral("the network does not broadcast its name"), this);
@@ -384,7 +385,7 @@ QString ncfg_ssid_hex_for(const QString &name)
 }
 
 bool ncfg_ask_hidden_network(QWidget *parent, QString *ssid_hex, QString *shown, bool *secured,
-                             bool *enterprise)
+                             bool *enterprise, bool *owe)
 {
 	QDialog dialog(parent);
 	dialog.setWindowTitle(QStringLiteral("Add a hidden network"));
@@ -404,6 +405,7 @@ bool ncfg_ask_hidden_network(QWidget *parent, QString *ssid_hex, QString *shown,
 	kind->addItem(QStringLiteral("passphrase"), QStringLiteral("psk"));
 	kind->addItem(QStringLiteral("login (802.1X)"), QStringLiteral("eap"));
 	kind->addItem(QStringLiteral("open -- no passphrase"), QStringLiteral("open"));
+	kind->addItem(QStringLiteral("encrypted, no passphrase (OWE)"), QStringLiteral("owe"));
 	form->addRow(QStringLiteral("security"), kind);
 	layout->addLayout(form);
 
@@ -439,9 +441,19 @@ bool ncfg_ask_hidden_network(QWidget *parent, QString *ssid_hex, QString *shown,
 	const QString chosen = kind->currentData().toString();
 	*ssid_hex = ncfg_ssid_hex_for(name->text());
 	*shown = name->text();
-	*secured = chosen != QStringLiteral("open");
+	*secured = chosen == QStringLiteral("psk") || chosen == QStringLiteral("eap");
 	*enterprise = chosen == QStringLiteral("eap");
+	*owe = chosen == QStringLiteral("owe");
 	return true;
+}
+
+void ncfg_add_network_dialog::set_owe()
+{
+	if (secured || !security_label) {
+		return;
+	}
+	owe = true;
+	security_label->setText(QStringLiteral("encrypted, with no passphrase (OWE)"));
 }
 
 void ncfg_add_network_dialog::set_hidden()
@@ -473,7 +485,7 @@ void ncfg_add_network_dialog::submit()
 	const bool done = connection->wifi_add(ssid_hex, id->text(),
 	                       passphrase ? passphrase->text() : QString(),
 	                       chosen, hidden->isChecked(),
-	                       eap_method ? &eap : nullptr, &error);
+	                       eap_method ? &eap : nullptr, &error, owe);
 	if (!done) {
 		/* The daemon's own sentence. A refusal names the tier that would have
 		 * been needed, and `admin` is one a desktop session often does not

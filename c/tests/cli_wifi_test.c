@@ -366,6 +366,12 @@ static void the_flags_that_contradict_each_other(void)
 	    "`--open --eap` is refused: one says no authentication, the other which kind");
 
 	nothing_asked_for();
+	options.wifi.owe = 1;
+	options.wifi.proto = "wpa3";
+	check(!add("Cafe", err, sizeof(err)) && strstr(err, "--owe takes no") != NULL,
+	    "`--owe --wpa3` is refused: OWE is its own key management");
+
+	nothing_asked_for();
 	check(!ncfg_cli_wifi_add(&options, NULL, 0u, err, sizeof(err)) &&
 	    strstr(kept(err), "takes one SSID") != NULL,
 	    "`ncfg wifi add` with no ssid says what it wanted");
@@ -703,6 +709,24 @@ static void json_says_what_was_written_and_what_was_forgotten(void)
 	check(strstr(printed, "no security") == NULL,
 	    "  with the warning itself not on the stream");
 	options.json = 0;
+	memset(&options.wifi, 0, sizeof(options.wifi));
+	fresh_tree();
+
+	/* OWE asks for nothing either, and writes the block that associates with
+	 * one: `owe`, not `open` (0227). */
+	nothing_asked_for();
+	options.wifi.owe = 1;
+	options.wifi.interface = "wlan0";
+	ok = add("Airport", err, sizeof(err));
+	check(ok, err[0] ? err : "`wifi add --owe` adds an OWE network");
+	check(the_prompt_was_not_reached(), "  without asking for a passphrase");
+	{
+		char *block = testdir_read(in(in(config_dir, "conf.d"), "wifi-Airport.conf"), NULL);
+
+		check(block && strstr(block, "owe = true") != NULL && strstr(block, "open") == NULL,
+		    "  and its block says `owe`");
+		free(block);
+	}
 	memset(&options.wifi, 0, sizeof(options.wifi));
 	fresh_tree();
 }

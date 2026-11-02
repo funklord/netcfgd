@@ -66,7 +66,7 @@ static const char *const members_apply[] = {
 static const char *const members_subject[] = { "subject" };
 static const char *const members_interface[] = { "interface" };
 static const char *const members_wifi_add[] = {
-	"ssid", "id", "passphrase", "proto", "hidden", "metric", "eap"
+	"ssid", "id", "passphrase", "proto", "hidden", "metric", "eap", "owe"
 };
 static const char *const members_wifi_connect[] = { "interface", "network" };
 static const char *const members_id[] = { "id" };
@@ -367,6 +367,9 @@ static int encode_payload(const ncfg_proto_request_t *request, ncfg_json_writer_
 			member_str_if(writer, "client_cert", eap->client_cert);
 			ncfg_json_write_object_end(writer);
 		}
+		/* Last, so every request that does not say it encodes exactly as it
+		 * did before the member existed. */
+		member_flag_if(writer, "owe", request->u.wifi_add.owe);
 		break;
 	case NCFG_PROTO_REQ_WIFI_CONNECT:
 		/* By id in the configuration, never by SSID and never with a
@@ -689,6 +692,7 @@ int ncfg_proto_decode_request(ncfg_proto_dec_t *dec, uint32_t object, ncfg_proto
 		    !ncfg_proto_get_str(dec, object, "proto", 0, what, &out->u.wifi_add.proto) ||
 		    !ncfg_proto_get_bool(dec, object, "hidden", 0, 0, what,
 		        &out->u.wifi_add.hidden) ||
+		    !ncfg_proto_get_bool(dec, object, "owe", 0, 0, what, &out->u.wifi_add.owe) ||
 		    !ncfg_proto_get_int(dec, object, "metric", 0, what, &out->u.wifi_add.metric)) {
 			return 0;
 		}

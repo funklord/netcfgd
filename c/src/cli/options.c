@@ -164,6 +164,8 @@ static const char usage_text[] =
     "  --id LABEL               name the block this, for an SSID that is not usable\n"
     "                           as a name. The SSID itself is kept exactly, as hex\n"
     "  --open                   no security at all, and no passphrase asked for\n"
+    "  --owe                    encrypted with no passphrase (OWE, \"Enhanced Open\"):\n"
+    "                           not --open, which would not associate with one\n"
     "  --wpa2, --wpa3           pin one generation; the default negotiates both\n"
     "  --hidden                 the SSID is not broadcast, so probe for it\n"
     "  --metric N               lower wins; ranks this network against every link\n"
@@ -411,6 +413,8 @@ int ncfg_cli_parse(int count, char *const *arguments, ncfg_cli_options_t *option
 			return 0;
 		} else if (strcmp(argument, "--open") == 0) {
 			options->wifi.open = 1;
+		} else if (strcmp(argument, "--owe") == 0) {
+			options->wifi.owe = 1;
 		} else if (strcmp(argument, "--wpa2") == 0) {
 			options->wifi.proto = "wpa2";
 		} else if (strcmp(argument, "--wpa3") == 0) {

@@ -93,7 +93,7 @@ QString ncfg_ssid_hex_for(const QString &name);
  * call set_hidden() on it.
  */
 bool ncfg_ask_hidden_network(QWidget *parent, QString *ssid_hex, QString *shown, bool *secured,
-                             bool *enterprise);
+                             bool *enterprise, bool *owe);
 
 class ncfg_add_network_dialog : public QDialog {
 	Q_OBJECT
@@ -114,6 +114,10 @@ public:
 	 * typed name: it was never heard, so unticking it would write a block
 	 * the supplicant never probes for. */
 	void set_hidden();
+	/* An OWE network: encrypted, and nothing to type. Opened as an open
+	 * one -- `secured` is false for both -- and then told which it is, so
+	 * the row says so and the request carries `owe` (0227). */
+	void set_owe();
 
 private slots:
 	void submit();
@@ -139,6 +143,10 @@ private:
 	QPushButton     *add_button;
 	bool             secured;
 	bool             enterprise;
+	bool             owe = false;
+	/* The row saying what protects an open network, relabelled by
+	 * set_owe(). Null where the network wants a credential. */
+	QLabel          *security_label = nullptr;
 
 	/* The enterprise arm. All null when the network is not one, which is
 	 * what submit() and revalidate() test rather than carrying a second

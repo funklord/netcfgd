@@ -12626,6 +12626,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.655 An OWE network can be added, from the desktop and from `ncfg`
+
+0227 left it open and
+[0306](doc/decision/0306-an-owe-network-can-be-added.md) closes it:
+`wifi_add` carries `owe`, so "Enhanced Open" -- encrypted, no passphrase --
+can be added at the `wifi` tier. Before, the wifi tab refused and printed the
+block to write by hand, which needs `admin`, and the tray's new networks left
+OWE out.
+
+- **The daemon** writes `wifi { owe = true }` and stores nothing, and refuses
+  `owe` beside a passphrase, `proto` or `eap`. **The profile writer** gained
+  `NCFG_WIFI_SECURITY_OWE`, and its read-back check now tells OWE from open:
+  "secured" there meant "has a credential", which OWE is not, so the check
+  compares the kind as well.
+- **`ncfg wifi add --owe`** asks for no passphrase and refuses `--open`,
+  `--wpa2`/`--wpa3` and `--eap` beside it.
+- **The GUI**: an OWE scan row opens the add dialog saying "encrypted, with no
+  passphrase (OWE)"; the hidden-network prompt (10.653) offers OWE as a fourth
+  kind; the tray offers OWE networks among the new ones, marked `encrypted`.
+
+Checked: `daemon_wifi_test`, `wifi_profile_test` (installs and compiles back
+to OWE, not open), `cli_wifi_test` (no prompt reached, block says `owe`),
+`proto_test` (the member round-trips), `client_test` (the request carries
+`"owe":true` and no credential; the rule offers OWE), and the
+`add_network_hidden` and `tray_choices` probes. `doc/first-run.md` names
+`--owe`, and says `--metric` where it still said `--priority`, a flag the
+CLI has refused by name since 0154.
+
 ## 10.654 The tray says when the network comes and goes
 
 The tray's only sign of a dropped network was its icon changing -- 22 pixels

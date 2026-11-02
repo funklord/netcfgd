@@ -410,6 +410,10 @@ typedef struct {
 	unsigned char    hidden;
 	ncfg_proto_int_t metric;
 	ncfg_proto_eap_t eap;
+	/* Opportunistic wireless encryption: no credential, and not open. The
+	 * third state between "a passphrase" and "none" that 0227 found this
+	 * message did not have. */
+	unsigned char    owe;
 } ncfg_proto_wifi_add_t;
 
 /* `config_put` and `probe_put`, which carry the same three members. */

@@ -1847,7 +1847,7 @@ int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_c
 		size_t                     at;
 
 		if (!point->ssid || !*point->ssid || !point->named || !point->name ||
-		    !*point->name || point->owe || ssid_is_saved(points, count, point->ssid)) {
+		    !*point->name || ssid_is_saved(points, count, point->ssid)) {
 			continue;
 		}
 		for (at = 0; at < found.count; at++) {
@@ -1862,6 +1862,7 @@ int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_c
 				found.items[at].signal = point->signal;
 				found.items[at].secured = point->secured;
 				found.items[at].enterprise = point->enterprise;
+				found.items[at].owe = point->owe;
 			}
 			continue;
 		}
@@ -1875,6 +1876,7 @@ int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_c
 		found.items[at].signal = point->signal;
 		found.items[at].secured = point->secured;
 		found.items[at].enterprise = point->enterprise;
+		found.items[at].owe = point->owe;
 	}
 
 	qsort(found.items, found.count, sizeof(*found.items), new_choice_stronger);
@@ -5894,6 +5896,13 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
 			request[at++] = '}';
 		} else {
 			built = 0;
+		}
+	}
+	if (built && network->owe) {
+		int span = snprintf(request + at, sizeof(request) - at, ",\"owe\":true");
+		built = span >= 0 && (size_t)span < sizeof(request) - at;
+		if (built) {
+			at += (size_t)span;
 		}
 	}
 	if (!built || at + 2 > sizeof(request)) {

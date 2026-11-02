@@ -771,11 +771,11 @@ void ncfg_join_choices_free(ncfg_join_choices_t *choices);
  * - Only SSIDs no access point in the scan is configured for. An SSID some
  *   network already names is offered above, by that network's id; offering
  *   it here too would add a second block for one network.
- * - Only what a click can finish: an SSID that arrived as text, since an
- *   operator cannot recognise a hidden or non-text one from a menu, and not
- *   an OWE network, which `wifi_add` cannot say yet (0227).
+ * - Only an SSID that arrived as text, since an operator cannot recognise a
+ *   hidden or non-text one from a menu.
  * - One entry per SSID, at the strongest signal heard, carrying that access
- *   point's `secured` and `enterprise`: they decide what the dialog asks.
+ *   point's `secured`, `enterprise` and `owe`: they decide what the dialog
+ *   asks, and an OWE network is not an open one (0227).
  * - Strongest first, ties by name.
  *
  * Returns 1, or 0 with `out` empty if memory ran out. Free with
@@ -787,6 +787,7 @@ typedef struct {
 	int   signal;
 	int   secured;
 	int   enterprise;
+	int   owe;
 } ncfg_new_choice_t;
 
 typedef struct {
@@ -917,6 +918,13 @@ typedef struct {
 	 * negotiates its own. The daemon refuses the pair rather than picking.
 	 */
 	const ncfg_eap_t *eap;
+	/*
+	 * Opportunistic wireless encryption: encrypted, with no credential. With
+	 * it, `passphrase`, `proto` and `eap` are all NULL; the daemon refuses
+	 * any of them beside it. Not the same as an open network, whose block
+	 * would not associate with one (0227).
+	 */
+	int               owe;
 } ncfg_network_t;
 
 /*

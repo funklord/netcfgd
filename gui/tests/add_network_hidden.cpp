@@ -26,6 +26,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTimer>
@@ -96,25 +97,30 @@ int main(int argc, char **argv)
 	QString shown;
 	bool secured = false;
 	bool enterprise = false;
+	bool owe = false;
 	bool next_enabled = false;
 
 	answer_prompt(QStringLiteral("Attic"), 0, &next_enabled);
-	bool asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise);
+	bool asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise, &owe);
 	check(asked && next_enabled, "a name and a passphrase can go on");
 	check(ssid_hex == QStringLiteral("4174746963") && shown == QStringLiteral("Attic"),
 	    "carrying the SSID and the name shown");
 	check(secured && !enterprise, "as a passphrase network");
 
 	answer_prompt(QStringLiteral("Corp"), 1, &next_enabled);
-	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise);
+	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise, &owe);
 	check(asked && secured && enterprise, "a login is an 802.1X network");
 
 	answer_prompt(QStringLiteral("Guest"), 2, &next_enabled);
-	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise);
-	check(asked && !secured && !enterprise, "and open is neither");
+	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise, &owe);
+	check(asked && !secured && !enterprise && !owe, "and open is neither");
+
+	answer_prompt(QStringLiteral("Quiet"), 3, &next_enabled);
+	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise, &owe);
+	check(asked && !secured && !enterprise && owe, "and OWE is encrypted with no credential");
 
 	answer_prompt(QString(33, QLatin1Char('x')), 0, &next_enabled);
-	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise);
+	asked = ncfg_ask_hidden_network(nullptr, &ssid_hex, &shown, &secured, &enterprise, &owe);
 	check(!asked && !next_enabled, "a name too long cannot go on");
 
 	{
@@ -126,6 +132,18 @@ int main(int argc, char **argv)
 		dialog.set_hidden();
 		check(box && box->isChecked() && !box->isEnabled(),
 		    "a typed one has it ticked, and locked");
+	}
+	{
+		/* Opened as an open network, as the wifi tab does for an OWE row,
+		 * and then told: the row must say what the request will. */
+		ncfg_add_network_dialog dialog(&connection, QStringLiteral("5175696574"),
+		                               QStringLiteral("Quiet"), false, false);
+		QLabel *security = dialog.findChild<QLabel *>(QStringLiteral("security"));
+		check(security && security->text().startsWith(QStringLiteral("open")),
+		    "an open network's dialog says open");
+		dialog.set_owe();
+		check(security && security->text().contains(QStringLiteral("OWE")),
+		    "and an OWE one's says encrypted, not open");
 	}
 
 	return failures ? 1 : 0;
