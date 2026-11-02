@@ -12626,6 +12626,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.656 The Qt tray starts at login
+
+The TDE tray has had an autostart entry since it was packaged; the Qt one had
+none, so on every other desktop a laptop's owner started the tray by hand each
+session or did without. And `--tray` is the wrong thing for a session to run:
+with no daemon it opens a modal Retry box, and with no notification area it
+opens the whole window -- each right for somebody at a prompt and wrong at
+login, where a box at every login on a machine not running netcfgd teaches
+people to remove the package.
+
+**`netcfgd-gui --login`** waits, bounded -- thirty looks two seconds apart --
+for netcfgd and for a notification area, since the panel and the daemon can
+each come up after the session starts its autostart entries; then starts in
+the tray only. If either never appears it says which on stderr and exits 0,
+with no window and no dialog. **`/etc/xdg/autostart/netcfgd-gui-tray.desktop`**
+runs it, `NotShowIn=TDE`, which has its own tray and autostart. Installing a
+thing that starts at login narrows "installing starts nothing", and the
+narrowing is the TDE package's own, for the same reason: a tray holds no
+authority and changes nothing about the network. `debian/control` says so
+for `netcfgd-gui` as it does for the TDE tray.
+
+Measured, offscreen (which has no notification area): `--login` with no
+daemon leaves after 60 s naming the socket, against a control `--tray` still
+sitting on its dialog when `timeout 5` killed it; and `--login` against a
+scratch daemon in `unshare -rn` leaves after 60 s saying the desktop has no
+notification area. The tray branch itself still wants a notification host
+(10.590). `desktop-file-validate` passes the entry.
+
 ## 10.655 An OWE network can be added, from the desktop and from `ncfg`
 
 0227 left it open and

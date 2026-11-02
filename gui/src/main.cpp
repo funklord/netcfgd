@@ -15,6 +15,8 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QMessageBox>
+#include <QSystemTrayIcon>
+#include <QThread>
 
 #include <cstdio>
 
@@ -148,6 +150,12 @@ int main(int argc, char **argv)
 	    QStringLiteral("Start in the notification area with no window. Closing the window "
 	               "then hides it rather than quitting."));
 	parser.addOption(tray_option);
+	QCommandLineOption login_option(
+	    QStringList() << QStringLiteral("login"),
+	    QStringLiteral("For the desktop's autostart: wait up to a minute for netcfgd and a "
+	               "notification area, then start in the tray. If either never appears, "
+	               "exit without a window or a dialog."));
+	parser.addOption(login_option);
 #ifdef NETCFGD_QTTY
 	/* Registered so the parser accepts them; `want_tui` has already read
 	 * them, because the frontend is decided before an application exists. */
@@ -165,6 +173,41 @@ int main(int argc, char **argv)
 
 	ncfg_connection connection;
 	QString error;
+
+	/*
+	 * **Started by the session, so nobody is watching.** `--tray` is for
+	 * somebody at a prompt: a daemon that is not there gets a dialog, and a
+	 * desktop with no notification area gets the window, because whoever
+	 * typed the flag is there to read either. At login both would be wrong.
+	 * A dialog at every login on a machine that does not run netcfgd teaches
+	 * people to delete the package, and a window opening by itself is not a
+	 * tray.
+	 *
+	 * So this waits, bounded, for the two things a tray needs -- the panel
+	 * and netcfgd can each come up after the session starts its autostart
+	 * entries -- and leaves quietly if either never does. Thirty looks two
+	 * seconds apart.
+	 */
+	const bool login = parser.isSet(login_option);
+	if (login) {
+		bool reached = false;
+		bool shelf = false;
+		for (int look = 0; look < 30; look++) {
+			reached = reached || connection.open(parser.value(socket_option), &error);
+			shelf = QSystemTrayIcon::isSystemTrayAvailable();
+			if (reached && shelf) {
+				break;
+			}
+			QThread::sleep(2);
+		}
+		if (!reached || !shelf) {
+			fprintf(stderr, "netcfgd-gui: %s, so there is no tray this session\n",
+			        !reached ? qPrintable(QStringLiteral("netcfgd could not be reached (%1)")
+			                                  .arg(error))
+			                 : "this desktop has no notification area");
+			return 0;
+		}
+	}
 	/* **Retry rather than exit**, because the thing to do about this happens
 	 * in another window. The dialog names the commands (the C layer's message
 	 * does), and every one of them ends with netcfgd running -- so quitting
@@ -180,7 +223,7 @@ int main(int argc, char **argv)
 	 * `Retry` is the default button, since somebody who has just read the
 	 * message is about to act on it. Cancel is what closing the dialog does,
 	 * so there is no way to dismiss it into a window that would lie. */
-	while (!connection.open(parser.value(socket_option), &error)) {
+	while (!login && !connection.open(parser.value(socket_option), &error)) {
 		QMessageBox box(QMessageBox::Critical, QStringLiteral("netcfgd"), error,
 		            QMessageBox::Retry | QMessageBox::Cancel);
 		box.setDefaultButton(QMessageBox::Retry);
@@ -195,9 +238,16 @@ int main(int argc, char **argv)
 	 * ordinary rather than an error: the window then behaves exactly as it did
 	 * before this existed. */
 	ncfg_tray *tray = ncfg_tray::create(&connection, &window);
-	const bool wanted_tray = parser.isSet(tray_option);
+	const bool wanted_tray = parser.isSet(tray_option) || login;
 	if (tray) {
 		window.attach_tray(tray);
+	} else if (login) {
+		/* The area was there a moment ago and is not now. Still nobody to
+		 * show a window to. */
+		fputs("netcfgd-gui: the notification area went away, so there is no tray this "
+		      "session\n",
+		      stderr);
+		return 0;
 	} else if (wanted_tray) {
 		/* Asked for something the desktop cannot give. Complained about on
 		 * stderr and then carried on with a window, which is the daemon's own

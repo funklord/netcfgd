@@ -190,6 +190,13 @@ Description: desktop client and tray applet for netcfgd
  .
  or `make deb-gui`, which does the same. A plain build produces the daemon
  and needs no Qt.
+ .
+ It installs an autostart entry, so the tray appears at the next login on
+ desktops other than TDE, which has its own. It starts only the tray, and
+ leaves quietly where netcfgd is not running or the desktop has no
+ notification area: a tray holds no authority of its own and changes
+ nothing about the machine's network. The desktop's autostart settings turn
+ it off.
 
 Package: netcfgd-trinity
 Architecture: any

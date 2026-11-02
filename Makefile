@@ -751,6 +751,16 @@ install-gui:
 	install -m 0755 $(GUI_BUILD_DIR)/netcfgd-gui $(DESTDIR)$(BINDIR)/netcfgd-gui
 	install -m 0644 gui/packaging/netcfgd-gui.desktop \
 		$(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	@# **The tray at login**, which is where a laptop's owner looks for it.
+	@# A tray holds no authority and changes nothing about the network, so
+	@# this is the TDE tray's narrowing of "starts nothing" (debian/control)
+	@# rather than a new one. `--login` leaves quietly where there is no
+	@# netcfgd or no notification area, so the entry costs nothing on a
+	@# machine that does not use it; the desktop's own autostart settings
+	@# turn it off. Not on TDE, which has its own tray and autostart.
+	install -d $(DESTDIR)$(SYSCONFDIR)/xdg/autostart
+	install -m 0644 gui/packaging/netcfgd-gui-tray.desktop \
+		$(DESTDIR)$(SYSCONFDIR)/xdg/autostart/netcfgd-gui-tray.desktop
 	@$(MAKE) --no-print-directory install-icons ICON_PREFIX=$(DATADIR)
 	@# **One binary, two names**, the way `ncfg` is the daemon's second name.
 	@# The program reads argv[0] and a name ending `-tui` selects the terminal
@@ -3911,6 +3921,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-tui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	rm -f $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/netcfgd-gui-tray.desktop
 	@$(MAKE) --no-print-directory uninstall-icons ICON_PREFIX=$(DATADIR)
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-at

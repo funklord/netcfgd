@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=netcfgd tray
+Comment=Whether this machine is on the network, and joining one, from the panel
+Exec=netcfgd-gui --login
+Icon=netcfgd
+Terminal=false
+NoDisplay=true
+NotShowIn=TDE;
+X-GNOME-Autostart-enabled=true
