@@ -2979,6 +2979,9 @@ typedef struct {
 	 * not arm from this loop; a daemon that restarted inside a window has one
 	 * that is empty, and `ncfg_confirm_revert` says what that falls back to. */
 	ncfg_confirm_armed_t  *armed;
+	/* Writes the hosts this machine sees into fuzznet's records (10.666).
+	 * NULL records nothing, which is every test that does not ask. */
+	struct ncfg_seen      *seen;
 	ncfg_reconcile_world_t world;
 	/*
 	 * `--no-apply-on-start`, as a latch rather than a startup skip.

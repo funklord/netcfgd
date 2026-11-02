@@ -49,6 +49,7 @@
 #include "ncfg/observe.h"
 #include "ncfg/portal.h"
 #include "ncfg/nft.h"
+#include "ncfg/seen.h"
 #include "ncfg/state.h"
 
 #include <limits.h>
@@ -1398,6 +1399,12 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
 		    "%zu of %zu drifting things are reported; the rest are the same fight",
 		    drifts->count, drifts->total);
+	}
+
+	/* What was seen, written down before anything acts on it (10.666). A
+	 * machine with no fuzznetd writes nothing and says so once. */
+	if (loop->seen && loop->state->observed) {
+		(void)ncfg_seen_record(loop->seen, loop->state->observed, now_of(&loop->world));
 	}
 
 	/* Before the reconcile, so a script sees the machine as it drifted. */

@@ -38,6 +38,7 @@
 
 #include "loop_internal.h"
 
+#include "ncfg/seen.h"
 #include "ncfg/cli.h"
 #include "ncfg/config.h"
 #include "ncfg/dhcp.h"
@@ -901,9 +902,14 @@ static int start(const options_t *options)
 
 	loop.probes = ncfg_probes_new(err, sizeof(err));
 	loop.sims = ncfg_sims_new(err, sizeof(err));
+	/* fuzznetd's own default socket for this user, or NCFG_FUZZNET_SOCKET
+	 * where a test or an unusual layout names another (10.666). A recorder
+	 * that could not be made records nothing; that is not a reason to stop. */
+	loop.seen = ncfg_seen_new(getenv("NCFG_FUZZNET_SOCKET"));
 	if (!loop.probes || !loop.sims) {
 		ncfg_probes_free(loop.probes);
 		ncfg_sims_free(loop.sims);
+		ncfg_seen_free(loop.seen);
 		ncfg_main_policy_free(&policy);
 		ncfg_daemon_state_free(&state);
 		return cannot("this daemon cannot hold what it has to count across ticks", err);
@@ -934,6 +940,7 @@ static int start(const options_t *options)
 	    sizeof(err))) {
 		ncfg_probes_free(loop.probes);
 		ncfg_sims_free(loop.sims);
+		ncfg_seen_free(loop.seen);
 		ncfg_main_policy_free(&policy);
 		ncfg_daemon_state_free(&state);
 		return cannot("this daemon cannot reach the machine it manages", err);
@@ -1228,6 +1235,7 @@ done:
 	ncfg_main_subscribers_close(&subscribers);
 	ncfg_probes_free(loop.probes);
 	ncfg_sims_free(loop.sims);
+	ncfg_seen_free(loop.seen);
 	ncfg_confirm_armed_free(&armed);
 	ncfg_main_policy_free(&policy);
 	ncfg_daemon_state_free(&state);

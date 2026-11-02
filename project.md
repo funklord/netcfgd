@@ -12620,6 +12620,45 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.666 The hosts this machine sees are written into fuzznet's records
+
+10.591's second half, unblocked by fuzznet's records (10.662) and placed by the
+holder (10.664, item 1): the daemon, which is root and observes the stations
+and leases, writes them down itself, into the fuzznetd of the user it runs
+as. **A socket client, not fuzznet linked**: `add record KEY VALUE` over
+fuzznetd's local stream socket, the way netcfgd already talks to
+wpa_supplicant and hostapd, so 0269 holds.
+
+- **KEY** is `seen/<interface>/<mac>`, dashes for the colons fuzznet's key
+  grammar does not take, which is what fuzznet's retention selects by
+  (`text=seen/wlan0/`, `text=aa-bb-cc`). An interface name outside that
+  grammar is not written rather than mangled.
+- **VALUE** is `station` for one associated to netcfgd's access point, or
+  `lease ADDRESS [NAME]` for one holding a lease from its DHCP server, escaped
+  with fuzznet's `%XX`.
+- **When**: first seen, changed, or a day since it was last written while it
+  stays -- fuzznet keeps every record, so writing every pass would fill a
+  month's bucket with one station. At most 4096 remembered between passes.
+- **Where**: fuzznetd's own default for the daemon's user
+  (`$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, else `/tmp/fuzznet-UID/`),
+  written again here rather than asked of fuzznet, or `NCFG_FUZZNET_SOCKET`.
+  `netcfgd.service` has no private `/tmp`, so root's is reachable.
+- **Nobody listening is ordinary**: nothing is written, one note says so, and
+  it is not asked again for a minute. Each wait is bounded at a second, so a
+  wedged fuzznetd cannot stall a pass.
+
+`c/src/host/seen.c`, called from the loop after each observation. Checked:
+`seen_test` against a forked stand-in fuzznetd -- the key, the three records
+and their exact lines, nothing rewritten a minute on, one rewritten when a
+lease's name changes, two rewritten a day on, nothing and no failure with no
+fuzznetd and no retry within the minute, a refusal kept for the next pass.
+**Not run against a real fuzznetd**, which would need one running as root.
+
+**What this does not do yet**: read the records back. An allow list's prefix
+is still refused at compile time (10.591), because expanding it needs the
+resolver to ask fuzznetd for the stations seen with that prefix -- the next
+step, now that there is something to read.
+
 ## 10.665 A confirm window pauses while the machine sleeps
 
 The holder's "do what makes sense for each confirm window" (10.664, item 4).
@@ -12759,7 +12798,9 @@ deleted. Three are fuzznet's answers to netcfgd's asks; two are fmake's.
   successor, a joining member moving only the keys it now ranks first. What
   counts as the first having failed stays the caller's.
 
-**None of it is wired here yet, and the reason is a seam rather than effort.**
+**Since answered: 10.664 and 10.666 -- the daemon writes the records itself.**
+What follows is the question as it stood. **None of it is wired here yet, and
+the reason is a seam rather than effort.**
 fuzznetd answers its own user only, on `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`;
 netcfgd's daemon runs as root and, by 0269 and the shared-protocol brief,
 never links fuzznet -- only `bridge/` does. So "which process writes a
