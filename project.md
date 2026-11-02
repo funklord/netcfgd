@@ -12650,8 +12650,13 @@ did:
   `scope.h` -- retype the table onto `fzn_scope_t` and delete the copy --
   becomes the right one.
 
-**Open, asked of the holder**: whether "IPC" includes the local control
-socket that `ncfg` and the GUI use, or means netcfgd-to-netcfgd only.
+**Answered: the local socket too** -- "We need only one protocol, the fuzznet
+protocol + extensions needed for netcfgd."
+[0309](doc/decision/0309-one-protocol-the-local-socket-is-fuzznets-too.md):
+`ncfg` and the GUI speak fuzznet to the daemon, local or remote alike, and
+newline-delimited JSON goes (`doc/socket-protocol.md` 3.1 superseded). The
+vocabulary and the tiers carry over; the framing does not. raidcfgd, which
+adopted netcfgd's JSON socket, is told through its inbox, `20261102T2345Z`.
 
 **fuzznetd and netcfgd run side by side, sharing a store** (the holder, the
 same evening): "fuzznetd and netcfgd need to be able to run simultaneously but

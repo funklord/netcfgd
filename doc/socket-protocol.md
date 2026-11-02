@@ -52,6 +52,10 @@ back, which is why it takes a connection of its own.
 
 ### 3.1 Why text, and why JSON
 
+**Superseded 2026-11-02 by decision 0309**: the local socket speaks fuzznet's
+protocol with netcfgd's extensions, the one protocol for local and remote
+clients alike. What follows is the reasoning as it stood.
+
 Design section 6 states the choice and its reason in one line: **"deliberately
 boring: no D-Bus, no IDL, no codegen, no bindings. You can drive it from
 `socat` and a shell script."** That is worth expanding here, because a reader
