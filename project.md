@@ -12626,6 +12626,54 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.662 fuzznet built three things this tree asked for, and the seam they meet
+
+Five inbox messages, 2026-11-02 and 03, recorded here before they are
+deleted. Three are fuzznet's answers to netcfgd's asks; two are fmake's.
+
+**fuzznet, at `2a13964` and after (its sections 811, 814-816, 820):**
+
+- **Records, the half 10.591 waited on.** A record is a setting a host signs
+  about itself -- KEY what it observed (`seen/wlan0/aa-bb-cc-dd-ee-ff`, the
+  setting-key grammar), VALUE up to 256 printable bytes, its time in ms --
+  every one kept, a month a bucket per observing host, carried to every
+  estate member each round. On fuzznetd's local socket, its own user only:
+  `add record KEY VALUE`, `list record [HOST] [FROM]` (paged, `ok FROM SHOWN
+  MORE HOST,KEY,AT,VALUE ...`), and `get record KEY [HOST]` for the newest of
+  a key. Retention is fuzznet's rule engine with a `records` word: `prune|keep
+  records [source=HOST] [text=SUBSTRING] age|count N` and `policy records
+  keep|drop`, where `text=seen/wlan0/` selects an interface and a MAC prefix a
+  station. Not built yet: a keep rule that reads a list's members.
+- **`list setting-holders KEY [FROM]`** (its 811, answering 724): for an
+  estate setting, the version in force and, per other device of the user, the
+  version it holds and when it was last heard -- the "has it reached them"
+  half 10.567 found netcfgd was the second to ask for. Paged; positions are
+  in memory, so every device reads 0 after a restart until the first round.
+- **`fzn_responsible_order` and `list responsible KEY`** (its 820, answering
+  the 2026-09-29 report and the holder's active/active answer): rendezvous
+  order over the estate's hosts, the first responsible and the next its
+  successor, a joining member moving only the keys it now ranks first. What
+  counts as the first having failed stays the caller's.
+
+**None of it is wired here yet, and the reason is a seam rather than effort.**
+fuzznetd answers its own user only, on `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`;
+netcfgd's daemon runs as root and, by 0269 and the shared-protocol brief,
+never links fuzznet -- only `bridge/` does. So "which process writes a
+station it saw as a record, to which fuzznetd, and how the resolver that
+expands an allow-list prefix in the daemon reads records back" is a
+deployment question no tree has answered: a root fuzznetd on a router, the
+bridge as a recorder under fuzznet's user feeding the daemon, or the daemon
+speaking fuzznetd's line protocol without linking fuzznet. It is the same seam
+10.567 left with the holder for the scope enum. Raised with the holder rather
+than chosen here.
+
+**fmake (`c0d0746`, `c5c1801`, its sections 559-560)**: the README's `fmake`
+line had stopped building anything -- kernel-doc in the hwsim rootfs this tree
+stages under `dist/` tripped a directive, and a Debian rootfs's `lib ->
+usr/lib` made `git check-ignore` fail for the whole batch, so every ignored
+file was read, `c/libncfg.a` and `client/libncfg_client.a` among them. Both
+fixed in fmake; nothing here changes. `fmake -C . -n` writes nothing.
+
 ## 10.661 Five stops waited on a file the daemon removes before it exits
 
 **Found by `make check` at f353458d**, under a machine at load 65:
