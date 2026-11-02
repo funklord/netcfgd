@@ -1142,6 +1142,13 @@ system" -- and then sharpened past embedded Linux to an ESP32.** Nothing here
 is a plan. It is what the tree measures when the question is put to it, so that
 deciding does not start from zero.
 
+**A trial on ESP8266 and ESP32 is wanted, later** (holder, 2026-11-02): after
+the OpenWrt routers in section 10, and probably only once the holder's
+HAL9001, a hardware abstraction layer for microcontrollers, is finished. That
+project is not on this machine, so what it will offer is unknown here. Read
+what follows with the C port in mind: the measurements below were taken on
+the Rust tree.
+
 **The core is already portable, and nobody designed it that way.**
 `netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` depend on serde and
 serde_json and nothing else, and their entire OS surface is 31 references, all
