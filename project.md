@@ -19823,7 +19823,8 @@ decision, the layering, the mechanism each layer points at, and the eight
 questions that stay open -- the grammar, the precedence between layers, the
 carve-out syntax, layer 4's tier, how a zone names a host, whether a controller
 is netcfgd on another host or a separate program, how time enters a rule, and
-size.
+size. **How time enters a rule is answered** (10.663, 0307): `hours` and `days`
+in local time, expanded into UTC pieces the kernel holds.
 
 ## 10.539 The scope was never the holder's, and 0283 says so
 

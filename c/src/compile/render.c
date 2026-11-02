@@ -40,6 +40,7 @@
  *   separately, which is what the class costs when it has no name: each
  *   instance looks like its own oversight.
  */
+#include "ncfg/schedule.h"
 #include "ncfg/render.h"
 
 #include "lower_internal.h"
@@ -1238,6 +1239,34 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		    ncfg_usable_name(rule->interface && ncfg_usable_name(rule->interface)
 		                         ? rule->interface : rule->out_interface));
 		return;
+	}
+	/* UTC pieces belong to an undo copy rebuilt from the kernel (10.663),
+	 * whose local schedule is gone: there is nothing to write back as
+	 * configuration, and writing the pieces as `hours` would be wrong by the
+	 * offset. A compiled document never carries them. */
+	if (rule->utc_piece_count != 0u) {
+		ncfg_render_refuse(missing, "firewall", chain,
+		    "rule `%s` carries its schedule only as the kernel holds it, in UTC, which "
+		    "has no local hours to write back", rule->name ? rule->name : "(unnamed)");
+		return;
+	}
+	/* A schedule the compiler would refuse is refused here rather than
+	 * written, as an interface is above: the extreme sweep found `hours` an
+	 * arbitrary string the day it was added. */
+	if (rule->hours &&
+	    !ncfg_schedule_hours_parse(rule->hours, NULL, NULL, NULL, 0, NULL, 0)) {
+		ncfg_render_refuse(missing, "firewall", chain,
+		    "rule `%s` has hours `%s`, which are not a window of the day",
+		    rule->name ? rule->name : "(unnamed)", rule->hours);
+		return;
+	}
+	for (at = 0; at < rule->day_count; at++) {
+		if (ncfg_schedule_day(rule->days[at], NULL) < 0) {
+			ncfg_render_refuse(missing, "firewall", chain,
+			    "rule `%s` has `%s` among its days, which is not a day",
+			    rule->name ? rule->name : "(unnamed)", rule->days[at]);
+			return;
+		}
 	}
 	ncfg_buf_addf(body, "\t\t%s ", action);
 	ncfg_render_quote(body, rule->name);
