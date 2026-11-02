@@ -12653,6 +12653,17 @@ did:
 **Open, asked of the holder**: whether "IPC" includes the local control
 socket that `ncfg` and the GUI use, or means netcfgd-to-netcfgd only.
 
+**fuzznetd and netcfgd run side by side, sharing a store** (the holder, the
+same evening): "fuzznetd and netcfgd need to be able to run simultaneously but
+they will be delegating and lock-writing the same files." So linking fuzznet
+does not mean netcfgd owns a store alone: on a machine where fuzznetd also
+runs as the same user, both open the same files and write them under locks.
+Whether fuzznet's store is safe for two processes today is fuzznet's to say.
+Measured here only as far as `claim/claim_file.c`, an exclusive `flock`;
+nothing found says a node re-reads its in-memory state when the other writes.
+Signalled to fuzznet's inbox, `20261102T2330Z`, with the recorder as the
+caller. **Step 2 above waits on that answer**; step 1, linking, does not.
+
 **The first steps, in order**: link fuzznet into `c/` (its objects, as
 `bridge/Makefile` already does, minus the program's `main`); give the daemon a
 node identity and a store under its state directory; move the recorder onto
