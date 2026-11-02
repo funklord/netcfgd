@@ -12620,6 +12620,59 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.667 Next, planned rather than started: remote access, UPnP, reading seen back
+
+Three things the holder's answers (10.664) opened, each larger than the end of
+the week that produced them. Written down as steps so the next session starts
+building rather than deciding. Each step lands on its own and is useful alone.
+
+**Remote access -- one client, aimed at a host** (10.664, item 3). What
+exists: the daemon's `remote.sock`, whose tiers come from `global.remote` and
+whose origin is the socket (0128); `tests/live/remote_tiers.sh` drives it;
+`bridge/netcfgd-remote` links fuzznet and reads a frame. What is missing is
+everything between a phone and that socket.
+
+1. The client's target: `client/` and the GUI take a *target* -- the local
+   socket by default, or a host -- and say which in the window's title.
+   Today it is `--socket PATH` only. The connection type is the seam the
+   Android build needs anyway.
+2. The agent: `bridge/netcfgd-remote` grows from reading a frame to
+   terminating fuzznet's session (its contact and pairing, sections 11.x
+   there) and relaying lines to `remote.sock`. fuzznet's protocol is
+   settled (10.567); netcfgd adds no transport of its own.
+3. Pairing: the operator is root on the host, so the first pairing can be a
+   command there that prints what the client scans or types -- the simpler
+   path gui/project.md section 9 noted.
+4. Packaging: the agent ships in its own package, installed disabled, since
+   it is a network service this project never had (the open half of 6171).
+
+**UPnP and NAT-PMP, with the warning** (10.664, item 5). miniupnpd is the
+daemon (Debian 2.3.9, nftables build), run as a backend the way dnsmasq and
+hostapd are: a generated configuration under `/run`, started, watched,
+stopped by its own pid.
+
+1. Language: `global { upnp { lan = ["lan0"]; uplink = "wan0" } }`, with
+   `secure_mode` always on (a client maps only to itself) and NAT-PMP/PCP on
+   the same switch. Refused without a NAT uplink.
+2. The plan says it every time it is on, as a warning: *any device on these
+   networks may open a port on this router, without asking; a compromised
+   one can expose itself or anything behind it.* That is the holder's
+   condition, and it is the plan's job because the plan is what is read
+   before applying.
+3. Coexistence: miniupnpd writes its own nftables table (`miniupnpd`); it is
+   named as a known neighbour rather than reported as a stranger (the
+   carve-out 10.539 asks to be named, not inferred).
+4. `ncfg status` lists the mappings miniupnpd holds, so the firewall state
+   outside the document is at least visible -- the objection the old parked
+   question raised.
+5. A rig: two machines in hull, a client asking for a mapping with `upnpc`,
+   the mapping reaching the kernel and leaving it.
+
+**Reading seen back** (10.666's half). The resolver that expands a deny
+list's prefix against stations associated now (10.591) gains fuzznet's
+`list record` as a second source, so an allow list may name a prefix: its
+stations are the ones ever seen with it. Paged reads, bounded per pass.
+
 ## 10.666 The hosts this machine sees are written into fuzznet's records
 
 10.591's second half, unblocked by fuzznet's records (10.662) and placed by the
