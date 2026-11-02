@@ -83,6 +83,10 @@ These are design commitments with records behind them. If the library's shape
 conflicts with one, that is a conversation with the maintainer, not something
 to work around.
 
+**Superseded 2026-11-02 by decision 0308: fuzznet is linked into the daemon,
+which is its own node; no separate process speaks for it.** What follows is
+the rule as it stood.
+
 **The daemon never grows a network listener.** Design §11.3 fixes this and
 constraint 6 says it from the other side: whatever speaks UDP is a separate
 process holding an ordinary local socket connection, exactly as the

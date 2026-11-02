@@ -12620,6 +12620,44 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.668 fuzznet is linked into netcfgd: 0269 is superseded
+
+The holder, 2026-11-02, on being asked what 0269 was: fuzznet "should be
+linked in directly. Separation of process concerns for separations sake rarely
+adds much security but makes the code substantially harder to reason about.
+All peer networking and IPC should be coming from fuzznet, and no fuzznetd
+should be necessary for netcfgd."
+[0308](doc/decision/0308-fuzznet-is-linked-into-netcfgd.md) records it and
+supersedes [0269](doc/decision/0269-the-remote-half-is-a-separate-program.md).
+
+**This session had built on the superseded premise**, and says so where it
+did:
+
+- **10.666's recorder talks to a fuzznetd over its socket.** That transport is
+  wrong under 0308: netcfgd is its own node and writes its own store. The
+  recorder's policy -- the key, the value, when to write, the bound -- is
+  what carries over; the transport is replaced by fuzznet's records API
+  called in-process. Until then it writes nothing on a machine with no
+  fuzznetd, which is every machine, so it does no harm standing.
+- **10.664 item 1 and 10.666 said the daemon "never links fuzznet"**, citing
+  0269. Read them as history.
+- **10.667's remote-access plan had an agent relay to `remote.sock`.** Under
+  0308 the daemon speaks fuzznet to a client itself; the plan's steps 2 and 4
+  are replaced by that, and 0128's tiers still decide what a remote caller may
+  do.
+- **The scope `_Static_assert` in `bridge/` (aa0ef36c)** was chosen to keep
+  fuzznet off the daemon's build. With fuzznet linked, the original plan in
+  `scope.h` -- retype the table onto `fzn_scope_t` and delete the copy --
+  becomes the right one.
+
+**Open, asked of the holder**: whether "IPC" includes the local control
+socket that `ncfg` and the GUI use, or means netcfgd-to-netcfgd only.
+
+**The first steps, in order**: link fuzznet into `c/` (its objects, as
+`bridge/Makefile` already does, minus the program's `main`); give the daemon a
+node identity and a store under its state directory; move the recorder onto
+the records API; retype the scope table.
+
 ## 10.667 Next, planned rather than started: remote access, UPnP, reading seen back
 
 Three things the holder's answers (10.664) opened, each larger than the end of

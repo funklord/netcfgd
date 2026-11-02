@@ -5,11 +5,11 @@
  * WHO WRITES, AND WHERE
  *   The daemon, as the holder settled on 2026-11-02: it is root that runs
  *   netcfgd and observes the stations and leases, so it is root that writes
- *   down what it saw. Into the fuzznetd of the user the daemon runs as,
- *   through that daemon's local socket and line protocol -- a client of a
- *   local daemon, as netcfgd already is of wpa_supplicant and hostapd. No
- *   fuzznet code is linked here, which is what 0269 keeps out of the process
- *   holding CAP_NET_ADMIN.
+ *   down what it saw. **For now into a fuzznetd's socket, and that is to be
+ *   replaced**: 0308 superseded 0269 the same day this was written, so
+ *   fuzznet is to be linked into the daemon, netcfgd is its own node, and
+ *   this writes its own store through fuzznet's records API (project.md
+ *   10.668). The policy below carries over; the transport does not.
  *
  * WHAT A RECORD SAYS
  *   KEY is `seen/<interface>/<mac>`, the MAC with dashes because a colon is
