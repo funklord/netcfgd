@@ -116,7 +116,8 @@ void ncfg_node_close(ncfg_node_t *node);
  * 10.676, the holder's "in-loop"). One loop owns the process's descriptors
  * (fuzznet sec 831), so the daemon's own is not run: `loop` is asked for its
  * descriptors each pass of the node's, told which are readable, and ticked
- * after the pass. `tick` answers nonzero once the daemon is stopping.
+ * after the pass. `tick` answers nonzero once the daemon is stopping;
+ * fuzznet's loop then ends after that pass, and `ncfg_node_serve` returns.
  */
 typedef struct {
 	void   *context;
@@ -144,9 +145,16 @@ typedef enum {
 } ncfg_node_serve_t;
 
 /* `extra` are fuzznet's own node options, passed as given (`--fuzznet-arg`),
- * after `--fuzznet-dir` naming this node's store. `err` says why where the
- * answer is not STOPPED. */
+ * after `--fuzznet-dir` naming this node's store; `restart_argv`, NULL-ended,
+ * is what a restart after a join executes -- the daemon's own command line.
+ * `err` says why where the answer is not STOPPED. */
 ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
-    size_t extra_count, const ncfg_node_loop_t *loop, char *err, size_t err_size);
+    size_t extra_count, char *const *restart_argv, const ncfg_node_loop_t *loop, char *err,
+    size_t err_size);
+
+/* A line asked of this node in-process, as its own user (fuzznet's
+ * `fzn_daemon_local`): the reply's length with its newline, or 0 where the node
+ * is not serving. Only from the loop's `tick`. */
+size_t ncfg_node_local(const char *line, char *reply, size_t cap);
 
 #endif /* NCFG_NODE_H */

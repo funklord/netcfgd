@@ -53,8 +53,9 @@ struct ncfg_seen {
 	int      listing;      /* a listing is under way */
 	uint64_t next_listing; /* when the next may begin */
 	int      said_unread;  /* the line saying a listing stopped is out */
-	/* This process is the face, so the face's socket is its own (10.676). */
-	int      face_is_here;
+	/* This process is the face, so the face's socket is its own and a line
+	 * is asked in-process instead (10.676). NULL for the socket. */
+	ncfg_seen_local_fn local;
 };
 
 static void free_list(char **list, size_t count)
@@ -129,19 +130,11 @@ static int face_socket(const char *store, char *out, size_t out_size)
 	return length > 0u && out[0] == '/';
 }
 
-void ncfg_seen_face_is_here(ncfg_seen_t *seen, int here)
+void ncfg_seen_in_process(ncfg_seen_t *seen, ncfg_seen_local_fn local)
 {
-	if (!seen || seen->face_is_here == !!here) {
-		return;
+	if (seen) {
+		seen->local = local;
 	}
-	seen->face_is_here = !!here;
-	if (!here) {
-		return;
-	}
-	ncfg_log_emitf("seen", NCFG_LOG_NOTE,
-	    "this daemon is its fuzznet store's face, and fuzznet does not yet take a record "
-	    "in-process, so stations seen are neither written nor read back until it does "
-	    "(project.md 10.676)");
 }
 
 void ncfg_seen_free(ncfg_seen_t *seen)
@@ -263,8 +256,8 @@ static int read_line(int fd, char *buffer, size_t buffer_size, size_t *have, cha
  * (its newline taken off); 0 with `*silent` set where nobody answered, which
  * is the absence the header describes, and a sentence in `why` either way.
  */
-static int ask(const char *socket_path, const char *line, char *reply, size_t reply_size,
-    int *silent, char *why, size_t why_size)
+static int ask_socket(const char *socket_path, const char *line, char *reply,
+    size_t reply_size, int *silent, char *why, size_t why_size)
 {
 	struct sockaddr_un address;
 	struct pollfd      wait;
@@ -329,9 +322,50 @@ static int ask(const char *socket_path, const char *line, char *reply, size_t re
 	return 1;
 }
 
+/*
+ * One line asked of whichever serves the store: in-process where this process
+ * is its face (`ncfg_seen_in_process`), else over the socket. In-process, a
+ * line comes back with its newline and an empty one is fuzznet saying the
+ * node is not serving yet, which is the same absence as nobody at a socket.
+ */
+static int ask(const ncfg_seen_t *seen, const char *line, char *reply, size_t reply_size,
+    int *silent, char *why, size_t why_size)
+{
+	char   bare[2048];
+	size_t length;
+
+	if (!seen->local) {
+		return ask_socket(seen->socket_path, line, reply, reply_size, silent, why, why_size);
+	}
+	length = strlen(line);
+	if (length >= sizeof(bare)) {
+		*silent = 0;
+		(void)snprintf(why, why_size, "the request is too long to ask");
+		return 0;
+	}
+	memcpy(bare, line, length + 1u);
+	while (length && bare[length - 1u] == '\n') {
+		bare[--length] = '\0';
+	}
+	reply[0] = '\0';
+	length = seen->local(bare, reply, reply_size);
+	if (length == 0u || length >= reply_size) {
+		*silent = 1;
+		reply[0] = '\0';
+		(void)snprintf(why, why_size, "this node is not serving its store yet");
+		return 0;
+	}
+	reply[length] = '\0';
+	while (length && (reply[length - 1u] == '\n' || reply[length - 1u] == '\r')) {
+		reply[--length] = '\0';
+	}
+	*silent = 0;
+	return 1;
+}
+
 /* One record, one connection. 1 where fuzznetd said `ok`; 0 with `*silent`
  * set where nobody answered, which is the absence the header describes. */
-static int add_record(const char *socket_path, const char *key, const char *value,
+static int add_record(const ncfg_seen_t *seen, const char *key, const char *value,
     int *silent, char *why, size_t why_size)
 {
 	char escaped[NCFG_SEEN_VALUE_MAX * 3u + 1u];
@@ -351,7 +385,7 @@ static int add_record(const char *socket_path, const char *key, const char *valu
 		(void)snprintf(why, why_size, "the record for %s is too long to send", key);
 		return 0;
 	}
-	if (!ask(socket_path, line, reply, sizeof(reply), silent, why, why_size)) {
+	if (!ask(seen, line, reply, sizeof(reply), silent, why, why_size)) {
 		return 0;
 	}
 	/*
@@ -431,7 +465,7 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 	}
 	/* Asked of the store each time where there is one: the face is whichever
 	 * process holds the claim now. */
-	if (seen->store[0] && !face_socket(seen->store, seen->socket_path,
+	if (!seen->local && seen->store[0] && !face_socket(seen->store, seen->socket_path,
 	        sizeof(seen->socket_path))) {
 		*stop = 1;
 		seen->silent_until = now + NCFG_SEEN_RETRY_SECONDS;
@@ -443,7 +477,7 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 		}
 		return 0;
 	}
-	if (!add_record(seen->socket_path, key, value, &silent, why, sizeof(why))) {
+	if (!add_record(seen, key, value, &silent, why, sizeof(why))) {
 		if (silent) {
 			*stop = 1;
 			seen->silent_until = now + NCFG_SEEN_RETRY_SECONDS;
@@ -474,7 +508,7 @@ size_t ncfg_seen_record(ncfg_seen_t *seen, const ncfg_observed_t *observed, uint
 	size_t one;
 	int    stop = 0;
 
-	if (!seen || !observed || now < seen->silent_until || seen->face_is_here) {
+	if (!seen || !observed || now < seen->silent_until) {
 		return 0;
 	}
 	for (at = 0; at < observed->backend_count && !stop; at++) {
@@ -651,7 +685,7 @@ void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now)
 	char     why[NCFG_ERROR_MAX];
 	unsigned page;
 
-	if (!seen || seen->face_is_here) {
+	if (!seen) {
 		return;
 	}
 	if (!seen->listing) {
@@ -671,13 +705,13 @@ void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now)
 		int  silent = 0;
 		int  more = 0;
 
-		if (seen->store[0] && !face_socket(seen->store, seen->socket_path,
+		if (!seen->local && seen->store[0] && !face_socket(seen->store, seen->socket_path,
 		        sizeof(seen->socket_path))) {
 			listing_stopped(seen, now, "no process serves the fuzznet store");
 			return;
 		}
 		(void)snprintf(line, sizeof(line), "list record %zu\n", seen->cursor);
-		if (!ask(seen->socket_path, line, reply, sizeof(reply), &silent, why,
+		if (!ask(seen, line, reply, sizeof(reply), &silent, why,
 		        sizeof(why))) {
 			listing_stopped(seen, now, why);
 			return;

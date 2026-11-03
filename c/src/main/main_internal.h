@@ -188,6 +188,9 @@ typedef struct ncfg_main_options {
 	int         fuzznet_serve;
 	const char *fuzznet_args[32];
 	size_t      fuzznet_arg_count;
+	/* The daemon's own command line, NULL-ended, for a restart fuzznet
+	 * makes after a join (10.676). */
+	char *const *argv;
 	int         apply_on_start;
 	int         poll_config;
 	/*

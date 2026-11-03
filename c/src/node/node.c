@@ -30,7 +30,6 @@
 #include "ncfg/scope.h"
 
 #include <errno.h>
-#include <setjmp.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -370,23 +369,15 @@ void ncfg_node_close(ncfg_node_t *node)
  * Serving the store, inside fuzznet's loop (project.md 10.676)
  * ------------------------------------------------------------------------ */
 
-/*
- * The loop being served, and where a stop goes. **One serve per process**, as
- * `fzn_daemon_main` is: it keeps its state in statics, so a second would be a
- * second node in one address space.
- *
- * **The stop is a `longjmp` out of fuzznet's loop**, until fuzznet gives an
- * extension a way to end it (10.676, ask 4): `fzn_daemon_main` serves until
- * the process is signalled, and netcfgd stops on a byte and then does its own
- * shutdown -- holds, the servers joined, `<run>/node` removed -- which a
- * signal would skip. Jumping from the tick abandons fuzznet's frames with
- * nothing of theirs half-written, since the tick runs between steps of its
- * loop, and the process exits shortly after; fuzznet's `face` goes with its
- * `atexit`, and its socket file is left as a SIGTERM leaves fuzznetd's.
- */
 #ifdef NCFG_NODE_SERVE
+/*
+ * The loop being served. **One serve per process**, as `fzn_daemon_main` is:
+ * it keeps its state in statics, so a second would be a second node in one
+ * address space. `stopped` says the end was asked for, rather than fuzznet's
+ * loop ending by itself.
+ */
 static const ncfg_node_loop_t *serving;
-static jmp_buf                 serve_stop;
+static int                     stopped;
 
 static size_t serve_fds(void *ctx, int *out, size_t cap)
 {
@@ -404,8 +395,13 @@ static void serve_tick(void *ctx, uint64_t now)
 {
 	(void)ctx;
 	(void)now;
-	if (serving->tick(serving->context)) {
-		longjmp(serve_stop, 1);
+	/* fuzznet's stop (its sec 835): after this pass, its socket closed and
+	 * removed, `face` removed, the claim released, and `fzn_daemon_main`
+	 * returns -- so the daemon's own shutdown runs after it, as after its
+	 * own loop. */
+	if (!stopped && serving->tick(serving->context)) {
+		stopped = 1;
+		fzn_daemon_stop();
 	}
 }
 
@@ -439,8 +435,14 @@ static int claim_free(const char *dir, char *err, size_t err_size)
 	return claimed == FZN_CLAIM_OK;
 }
 
+size_t ncfg_node_local(const char *line, char *reply, size_t cap)
+{
+	return fzn_daemon_local(line, reply, cap);
+}
+
 ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
-    size_t extra_count, const ncfg_node_loop_t *loop, char *err, size_t err_size)
+    size_t extra_count, char *const *restart_argv, const ncfg_node_loop_t *loop, char *err,
+    size_t err_size)
 {
 	static fzn_daemon_ext_t ext;
 	static char             dir_arg[NCFG_NODE_DIR_MAX + 16u];
@@ -469,25 +471,39 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 	ext.fds = serve_fds;
 	ext.ready = serve_ready;
 	ext.tick = serve_tick;
+	/* A join's restart, or a follower's on taking the claim, executes the
+	 * daemon's own command line rather than the fuzznet options above. */
+	ext.restart_argv = restart_argv;
 	serving = loop;
+	stopped = 0;
 	if (loop->begin) {
 		loop->begin(loop->context);
-	}
-	if (setjmp(serve_stop) != 0) {
-		return NCFG_NODE_SERVE_STOPPED;
 	}
 	code = fzn_daemon_main(argc, argv, &ext);
 	serving = NULL;
 	if (loop->end) {
 		loop->end(loop->context);
 	}
+	if (stopped) {
+		return NCFG_NODE_SERVE_STOPPED;
+	}
 	ncfg_error_set(err, err_size, "fuzznet's loop ended with status %d", code);
 	return NCFG_NODE_SERVE_ENDED;
 }
 #else
-ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
-    size_t extra_count, const ncfg_node_loop_t *loop, char *err, size_t err_size)
+size_t ncfg_node_local(const char *line, char *reply, size_t cap)
 {
+	(void)line;
+	(void)reply;
+	(void)cap;
+	return 0u;
+}
+
+ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
+    size_t extra_count, char *const *restart_argv, const ncfg_node_loop_t *loop, char *err,
+    size_t err_size)
+{
+	(void)restart_argv;
 	(void)node;
 	(void)extra;
 	(void)extra_count;

@@ -890,12 +890,14 @@ typedef struct {
 } node_driven_t;
 
 /* A record written to the face's socket from inside the face's loop would
- * wait for an answer only that loop gives. */
+ * wait for an answer only that loop gives, so it is asked in-process: the
+ * recorder runs in the pass, and the pass runs in the tick, where fuzznet
+ * allows `fzn_daemon_local` (its sec 835). */
 static void node_begin(void *context)
 {
 	node_driven_t *driven = context;
 
-	ncfg_seen_face_is_here(driven->seen, 1);
+	ncfg_seen_in_process(driven->seen, ncfg_node_local);
 	ncfg_log_emitf("node", NCFG_LOG_INFO, "serving this daemon's fuzznet store as its face");
 }
 
@@ -903,7 +905,7 @@ static void node_end(void *context)
 {
 	node_driven_t *driven = context;
 
-	ncfg_seen_face_is_here(driven->seen, 0);
+	ncfg_seen_in_process(driven->seen, NULL);
 }
 
 static size_t node_fds(void *context, int *out, size_t cap)
@@ -956,8 +958,8 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	loop.ready = node_ready;
 	loop.tick = node_tick;
 	err[0] = '\0';
-	served = ncfg_node_serve(node, options->fuzznet_args, options->fuzznet_arg_count, &loop,
-	    err, sizeof(err));
+	served = ncfg_node_serve(node, options->fuzznet_args, options->fuzznet_arg_count,
+	    options->argv, &loop, err, sizeof(err));
 	if (served == NCFG_NODE_SERVE_STOPPED) {
 		return 1;
 	}
@@ -1477,6 +1479,7 @@ int ncfg_main_netcfgd(int argc, char **argv)
 	if (done) {
 		return NCFG_MAIN_EXIT_OK;
 	}
+	options.argv = argv;
 	/*
 	 * **No gate, and the loop runs.** 0265 settled it: this build reconciles
 	 * when it is started, the way the Rust does. What stood here was a refusal

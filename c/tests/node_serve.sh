@@ -12,7 +12,12 @@
 #     which only fuzznet's loop polls now. Without `ready` it waits for the
 #     five-second backstop (measured: 4797 ms against 5);
 #   - an edit to the configuration is compiled, through the inotify watch;
-#   - SIGTERM stops it with status 0, `face` and `<run>/node` gone.
+#   - a station a fuzznetd recorded in the store beforehand is read back
+#     in-process (`fzn_daemon_local`, fuzznet sec 835) and is in
+#     `ncfg status --json` -- over the socket it would be this process asking
+#     its own blocked loop;
+#   - SIGTERM stops it with status 0, through `fzn_daemon_stop`: `face`,
+#     fuzznet's socket and `<run>/node` all gone.
 #
 # HOW IT STOPS: every wait is bounded (50 looks of 0.2 s), each client call is
 # under `timeout 10`, and the daemon under `timeout -k 5 60` -- the kill
@@ -20,6 +25,7 @@
 # directory is mktemp's, checked by shape, and removed at the end.
 here=$(cd "$(dirname "$0")/.." && pwd)
 N=$here/netcfgd
+F=$here/fuzznet-build/fuzznetd
 C=$here/ncfg
 R=$(mktemp -d /tmp/ncs.XXXXXX) || exit 1
 case "$R" in /tmp/ncs.?*) ;; *) echo "node_serve: odd scratch $R"; exit 1;; esac
@@ -39,11 +45,23 @@ while not out.endswith(b"\n"):
 print(out.decode(errors="replace").strip())' "$1" "$2" 2>&1
 }
 conf() { # the configuration, $1 an extra stanza
-	printf 'global {\n\tcontrol {\n\t\tadmin = "any"\n\t}\n}\n%s' "$1" > "$R/conf/netcfgd.conf"
+	printf 'global {\n\tcontrol {\n\t\tobserve = "any"\n\t\tadmin = "any"\n\t}\n}\n%s' "$1" \
+		> "$R/conf/netcfgd.conf"
 }
 
 mkdir "$R/store" "$R/run" "$R/conf"
 conf ''
+
+# The record, written by a real fuzznetd as the store's face, which then goes.
+timeout -k 5 30 "$F" --fuzznet-dir="$R/store" --socket="$R/fzd.sock" --no-log-file \
+	--fuzznet-service=1 --fuzznet-product=1 > "$R/fzd.log" 2>&1 &
+fzd=$!
+n=0
+until [ -S "$R/fzd.sock" ] || [ $n -gt 50 ]; do sleep 0.2; n=$((n + 1)); done
+[ "$(ask "$R/fzd.sock" 'add record seen/wlan9/aa-bb-cc-00-00-07 station')" = ok ]
+check $? "a fuzznetd, as the face first, keeps a seen record"
+kill -TERM $fzd
+wait $fzd
 timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
 	--fuzznet-dir "$R/store" --fuzznet-serve --fuzznet-arg "--socket=$R/fz.sock" \
 	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
@@ -58,8 +76,8 @@ done
 check $? "fuzznet's socket is served, and the store's face names it"
 [ "$(ask "$R/fz.sock" 'add record seen/test/1 hello')" = ok ]
 check $? "a fuzznet client's add record is answered ok"
-ask "$R/fz.sock" 'list record' | grep -q '^ok 0 1 0'
-check $? "and list record shows the one record"
+ask "$R/fz.sock" 'list record' | grep -q '^ok 0 2 0'
+check $? "and list record shows both records"
 
 t0=$(date +%s%N)
 said=$(timeout 10 "$C" reload --run-dir "$R/run" 2>&1 | grep -v nftables | head -1)
@@ -76,11 +94,14 @@ done
 grep -q dummy7 "$R/run/desired.json" 2>/dev/null
 check $? "an edit to the configuration is compiled"
 
+timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
+check $? "the station that fuzznetd recorded is read back in-process, in ncfg status"
+
 kill -TERM $pid
 wait $pid
 code=$?
-[ $code -eq 0 ] && [ ! -e "$R/store/face" ] && [ ! -e "$R/run/node" ]
-check $? "SIGTERM stops it with status 0 ($code), face and <run>/node gone"
+[ $code -eq 0 ] && [ ! -e "$R/store/face" ] && [ ! -e "$R/run/node" ] && [ ! -e "$R/fz.sock" ]
+check $? "SIGTERM stops it with status 0 ($code); face, socket, <run>/node gone"
 
 if [ $failed -ne 0 ]; then
 	grep -v 'nftables\|supplicant\|previous configuration' "$R/log" | tail -12 | sed 's/^/  log: /'

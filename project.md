@@ -998,8 +998,9 @@ them because no test had ever carried those keys.
    **Linking and the identity are done (10.669)**, and the shared store is
    answered there: one store is one node, the claim's face writes. **How it
    becomes the face is decided (10.676)**: in fuzznet's loop, the round split
-   so either loop drives it, and serving the store built as `NODE_SERVE=1`;
-   by default it waits on the size (65 per cent) and the asks of fuzznet there.
+   so either loop drives it, and serving the store built as `NODE_SERVE=1`,
+   on fuzznet's stop, in-process request and restart (its sec 835); by
+   default it waits on the size (65 per cent) and the follower's loop.
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
@@ -12743,21 +12744,31 @@ loop.** `make NODE_SERVE=1` and `netcfgd --fuzznet-serve` (with
 `--fuzznet-arg` for fuzznet's own node options, passed as given) run
 `fzn_daemon_main` with the three calls above as its extension
 (`ncfg_node_serve` in `c/src/node/node.c`, the adapters in `daemon_main.c`).
-Three things in it are interim, each until one of the asks lands:
+**fuzznet answered asks 1 to 5 the same hour** (its `08c9aa2`, sec 835;
+netcfgd's inbox `20261103T1239Z`), and the pin is at `08c9aa2`:
 
-- **Only as the face.** The claim is tried first; held by another process,
-  the daemon says so and runs its own loop, since a follower's loop runs no
-  extension (ask 6) and netcfgd must not stop watching the network for as
-  long as somebody's fuzznetd runs.
-- **The stop is a `longjmp` out of fuzznet's tick** (ask 4): the daemon's
-  own shutdown then runs as usual. fuzznet's `face` goes with its `atexit`;
-  its socket file is left, as a SIGTERM leaves fuzznetd's.
-- **Seen hosts are neither written nor read back while serving**
-  (`ncfg_seen_face_is_here`, ask 3): the face's socket is the face's own
-  thread, and said once in the log. Records written by fuzznet clients
-  through the socket are served, as any face serves them.
+- **Its waits poll the extension's descriptors** and call `ready` (ask 1).
+- **`ready` may run mid-step** and may call nothing of fuzznet's but
+  `fzn_daemon_stop`; **`tick` never runs mid-step, follows every pass** --
+  a contract now -- and may call `fzn_daemon_local`,
+  `fzn_daemon_journal_append` and `fzn_daemon_stop` (asks 2 and the
+  confirmation). netcfgd's `ready` only reads its descriptor into memory,
+  and its pass runs in `tick`, so both were already where they belong.
+- **Seen hosts go in-process**: `ncfg_seen_in_process` hands the recorder
+  `ncfg_node_local` (fuzznet's `fzn_daemon_local`, ask 3) when serving
+  begins, and both the record and the listing are asked through it -- from
+  the pass, so from `tick`, where fuzznet allows it.
+- **The stop is `fzn_daemon_stop`** (ask 4), replacing the `longjmp`: after
+  that pass fuzznet closes and removes its socket, removes `face`, releases
+  the claim and returns, and the daemon's own shutdown runs after it.
+- **A restart executes the daemon's own command line**
+  (`fzn_daemon_ext_t.restart_argv`, ask 5), not the fuzznet options.
 
-And a join's restart re-executes only the fuzznet options (ask 5).
+**One interim part is left: only as the face.** The claim is tried first;
+held by another process, the daemon says so and runs its own loop, since a
+follower's loop still runs no extension (ask 6, which fuzznet's answer
+names as unchanged) and netcfgd must not stop watching the network for as
+long as somebody's fuzznetd runs.
 
 **Why a build option, measured:** linking `fzn_daemon_main` grows the
 installed program from 1,518,760 bytes to 2,494,056, 65 per cent. Most of it
@@ -12771,20 +12782,26 @@ pays that, or fuzznet's loop comes apart from its consumer services first,
 is the holder's** (asked of fuzznet too, as a build it might offer). Until
 then the default build carries a stub that says so.
 
-Checked: `make node-serve-test` (`c/tests/node_serve.sh`, six checks, no
+Checked: `make node-serve-test` (`c/tests/node_serve.sh`, eight checks, no
 privilege): fuzznet's socket served and named in `face`; a fuzznet client's
 `add record` and `list record` answered; `ncfg reload` through the daemon in
-8 ms; a configuration edit compiled; SIGTERM ends it with 0, `face` and
-`<run>/node` gone. Sabotaged -- `ready` doing nothing -- the reload took
+8 ms; a configuration edit compiled; **a station a real fuzznetd recorded in
+the store before netcfgd started is read back in-process and shown by
+`ncfg status`**; SIGTERM ends it with 0 and `face`, fuzznet's socket and
+`<run>/node` all gone. Sending the recorder back to the socket while serving
+turns the read-back red. (A reset of the recorder's back-off on switching to
+in-process was tried and made no difference -- the startup pass never lists
+-- so it is not there.) The read-back check needs the `observe` tier opened in
+the test's configuration: `ncfg status` takes the seen set from the daemon
+and, refused, quietly goes without, which first read as the read failing. Sabotaged -- `ready` doing nothing -- the reload took
 4826 ms (the backstop's tick), the edit was never compiled and SIGTERM was
 not heard (status 137, under the script's `timeout -k`): three red. Not in
 `make test` or `check` while it is a build option, since it rebuilds the
 node module under other flags.
 
-**Next, as the asks land:** the claim kept rather than tried (10.669), a
-follower's loop served as well, `seen.c` in-process, the stop returned
-rather than jumped -- and then serving by default, once the size is
-decided.
+**Next:** a follower's loop served as well (ask 6), and then the claim kept
+rather than tried (10.669) -- and serving by default, once the size is
+decided (ask 8, and the holder's).
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 

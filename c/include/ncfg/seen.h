@@ -81,12 +81,15 @@ ncfg_seen_t *ncfg_seen_new(const char *socket_path);
 void ncfg_seen_use_store(ncfg_seen_t *seen, const char *dir);
 /*
  * This process is now its store's face (project.md 10.676): the socket the
- * `face` file names is served by the thread that would be blocked writing to
- * it, so nothing is written or read through it -- until fuzznet takes a local
- * request in-process. Said once in the log. `here` 0 undoes it, for a face
- * whose loop has ended.
+ * `face` file names is served by this process's own loop, so a line asked
+ * through it would wait on the thread asking. `local` answers a line
+ * in-process instead -- fuzznet's `fzn_daemon_local`, through
+ * `ncfg_node_local` -- and must be called only from the loop's tick, which
+ * is where the reconcile pass that records and reads runs. NULL goes back to
+ * the socket, for a face whose loop has ended.
  */
-void ncfg_seen_face_is_here(ncfg_seen_t *seen, int here);
+typedef size_t (*ncfg_seen_local_fn)(const char *line, char *reply, size_t cap);
+void ncfg_seen_in_process(ncfg_seen_t *seen, ncfg_seen_local_fn local);
 void ncfg_seen_free(ncfg_seen_t *seen);
 
 /*
