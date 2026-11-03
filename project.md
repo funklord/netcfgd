@@ -12683,6 +12683,43 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.701 The parsers of another host's bytes are fuzzed, and today's code sanitized
+
+10.688 to 10.700 added three parsers that read another host's bytes, and they
+are reached from the network:
+
+- `ncfg_status_page_read`, which reads a node's page;
+- `ask`'s `FROM REQUEST` and `@DIGEST`;
+- `askpart`'s `TOTAL OFFSET DIGEST PIECE`.
+
+Two targets join `FUZZ_TARGETS`, with seeds:
+
+- **`status_page`**: a page read stays inside its own bytes, and pages
+  joined end in a whole their digest names or in a refusal. The source
+  answers the same bytes to every offset, which is the shape of most hostile
+  answers.
+- **`ask_args`**: every `ask` answer is a page that reads back as one, every
+  `askpart` answer is one line of `ok`, `error` or `malformed`, and what is
+  kept between calls is let go, which the leak checker holds it to. Several
+  calls run from one state, so a staged request and a kept answer meet the
+  next call. `daemon_ask.c` is the program's and in no archive, so the target
+  names it as a source of its own.
+
+Runs and controls:
+
+- `status_page`: 15 million runs, clean. With the COUNT-is-the-bytes check
+  removed, the fuzzer aborts on a page read outside itself within seconds.
+- `ask_args`: 3 million runs, clean. With `askpart`'s piece bound removed,
+  ASan reports a heap overflow in its `memcpy`.
+- **Sanitizers over the rest:** `ask_test`, `status_page_test`,
+  `fuzznet_line_test`, `node_answer_test`, `seen_test` and `mesh_peer_test`,
+  then `node_fleet.sh` and `node_serve.sh` live, on an ASan and UBSan build
+  (instrumentation confirmed with `nm`), with no report.
+
+**And the fuzz archive had 10.690's stale-member hazard**, the third
+`ar rcs` rule in this tree that never removed one. It is removed and remade
+like the other two.
+
 ## 10.700 `ncfg tui --at HOST`
 
 The TUI asks through `ncfg_cli_ask`, so `--at` (10.694) carried its panes

@@ -491,7 +491,8 @@ syntax-tests:
 #   clobbering a plain one; `BUILD_DIR` is not reused because this is not the
 #   same build with a different destination.
 FUZZ_TARGETS   = config_parse document_json netlink_wire backend_ipc socket_message \
-		 observed_json kernel_bytes values block_list seen_listing
+		 observed_json kernel_bytes values block_list seen_listing status_page \
+		 ask_args
 FUZZ_REPLAYS   = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
 FUZZ_PROGRAMS  = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
 FUZZ_BUILD_DIR ?= fuzz/build
@@ -565,7 +566,14 @@ $(FUZZ_BUILD_DIR)/src/node/%.o: FUZZ_CFLAGS += $(NODE_CFLAGS)
 $(FUZZ_BUILD_DIR)/src/node/node.o: | $(FUZZNET_LIB)
 
 $(FUZZ_LIB): $(FUZZ_OBJS)
+	rm -f $@
 	$(AR) rcs $@ $(FUZZ_OBJS)
+
+# `ask` and `askpart` are the program's, in `src/main/daemon_ask.c`, which no
+# archive holds: their target names that one source as well, and both rules
+# compile `$(filter %.c,$^)`, so it reaches the compiler for this target alone
+# (10.701).
+fuzz/ask_args_replay fuzz/ask_args_fuzz: src/main/daemon_ask.c
 
 fuzz/%_fuzz: fuzz/%.c fuzz/fuzz_libfuzzer.c fuzz/fuzz_text.c $(FUZZ_LIB) $(FUZZNET_LIB)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) -fsanitize=fuzzer $(filter %.c,$^) $(FUZZ_LIB) $(FUZZNET_LIB) \
