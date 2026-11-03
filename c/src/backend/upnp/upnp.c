@@ -311,3 +311,86 @@ int ncfg_upnp_stop(const char *run, char *err, size_t err_size)
 	}
 	return 1;
 }
+
+void ncfg_upnp_mappings_free(ncfg_observed_mapping_t *mappings, size_t count)
+{
+	size_t at;
+
+	for (at = 0; mappings && at < count; at++) {
+		free(mappings[at].protocol);
+		free(mappings[at].address);
+		free(mappings[at].description);
+	}
+	free(mappings);
+}
+
+static char *copy_text(const char *text)
+{
+	size_t length = strlen(text) + 1u;
+	char  *copy = malloc(length);
+
+	if (copy) {
+		memcpy(copy, text, length);
+	}
+	return copy;
+}
+
+int ncfg_upnp_mappings_in_text(const char *text, ncfg_observed_mapping_t **out, size_t *count)
+{
+	const char *line = text;
+
+	*out = NULL;
+	*count = 0;
+	while (line && *line && *count < NCFG_UPNP_MAPPINGS_MAX) {
+		const char              *end = strchr(line, '\n');
+		const size_t             length = end ? (size_t)(end - line) : strlen(line);
+		char                     one[512];
+		char                     protocol[8];
+		char                     address[64];
+		char                     description[256];
+		unsigned                 external = 0;
+		unsigned                 internal = 0;
+		unsigned long long       expiry = 0;
+		ncfg_observed_mapping_t *grown;
+		ncfg_observed_mapping_t *mapping;
+
+		const char              *start = line;
+
+		line = end ? end + 1 : NULL;
+		if (length >= sizeof(one)) {
+			continue;
+		}
+		memcpy(one, start, length);
+		one[length] = '\0';
+		description[0] = '\0';
+		if (sscanf(one, "%7[^:]:%u:%63[^:]:%u:%llu:%255[^\n]", protocol, &external, address,
+		        &internal, &expiry, description) < 4 ||
+		    external == 0u || external > 65535u || internal == 0u || internal > 65535u) {
+			continue;
+		}
+		grown = realloc(*out, (*count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_upnp_mappings_free(*out, *count);
+			*out = NULL;
+			*count = 0;
+			return 0;
+		}
+		*out = grown;
+		mapping = &grown[*count];
+		memset(mapping, 0, sizeof(*mapping));
+		mapping->protocol = copy_text(protocol);
+		mapping->address = copy_text(address);
+		mapping->description = copy_text(description);
+		mapping->external_port = (int64_t)external;
+		mapping->internal_port = (int64_t)internal;
+		mapping->expires = (int64_t)expiry;
+		(*count)++;
+		if (!mapping->protocol || !mapping->address || !mapping->description) {
+			ncfg_upnp_mappings_free(*out, *count);
+			*out = NULL;
+			*count = 0;
+			return 0;
+		}
+	}
+	return 1;
+}

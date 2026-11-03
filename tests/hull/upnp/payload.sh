@@ -146,6 +146,9 @@ say "  from the uplink side through 18080: ${crossed:-nothing}"
 table=$(nft list table inet netcfgd_upnp 2>/dev/null | grep -c 'dnat ip to 192.168.7.10:8080')
 shown=$("$build/ncfg" status 2>/dev/null | grep -c 'TCP 18080 -> 192.168.7.10:8080')
 say "  ncfg status lists the mapping: $shown time(s)"
+# And the observation carries it (10.675), which is what the GUI reads.
+in_json=$("$build/ncfg" status --json 2>/dev/null | grep -c '"external_port": *18080')
+say "  the observation carries it: $in_json time(s)"
 
 "$build/ncfg" plan > "$work/plan.log" 2>&1
 again=$(grep -c '^nothing to do' "$work/plan.log")
@@ -167,6 +170,7 @@ case "$other" in *redirected*) say "  secure mode let a host map a port to anoth
 [ "$crossed" = mapped ] || { say "  nothing crossed the mapping"; failed=1 ;}
 [ "$table" -ge 1 ] || { say "  the mapping was not in netcfgd_upnp"; failed=1; }
 [ "$shown" -eq 1 ] || { say "  ncfg status did not list the mapping"; failed=1; }
+[ "$in_json" -ge 1 ] || { say "  the observation did not carry the mapping"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the second plan was not empty"; failed=1; }
 [ "$warned" -eq 1 ] || { say "  the plan did not warn, once, that any LAN device may open ports"; failed=1; }
 [ "$removed" -eq 0 ] && [ "$gone_table" = gone ] && [ "$gone_daemon" = stopped ] ||

@@ -1210,6 +1210,22 @@ static const ncfg_field_t observed_lease_fields[] = {
 };
 static const ncfg_type_t observed_lease_type = TYPE("lease", observed_lease_fields);
 
+static const ncfg_field_t observed_mapping_fields[] = {
+	{ .name = "protocol", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_mapping_t, protocol) },
+	{ .name = "external_port", .kind = NCFG_F_INT,
+	    .offset = offsetof(ncfg_observed_mapping_t, external_port) },
+	{ .name = "address", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_mapping_t, address) },
+	{ .name = "internal_port", .kind = NCFG_F_INT,
+	    .offset = offsetof(ncfg_observed_mapping_t, internal_port) },
+	{ .name = "expires", .kind = NCFG_F_INT,
+	    .offset = offsetof(ncfg_observed_mapping_t, expires) },
+	{ .name = "description", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_mapping_t, description) }
+};
+static const ncfg_type_t observed_mapping_type = TYPE("mapping", observed_mapping_fields);
+
 static const ncfg_field_t observed_backend_fields[] = {
 	{ .name = "kind", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
 	    .choices = &backend_kind_set, .offset = offsetof(ncfg_observed_backend_t, kind) },
@@ -1245,7 +1261,11 @@ static const ncfg_field_t observed_backend_fields[] = {
 	{ .name = "leases", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &observed_lease_type, .element_size = sizeof(ncfg_observed_lease_t),
 	    .offset = offsetof(ncfg_observed_backend_t, leases),
-	    .count_offset = offsetof(ncfg_observed_backend_t, lease_count) }
+	    .count_offset = offsetof(ncfg_observed_backend_t, lease_count) },
+	{ .name = "mappings", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_mapping_type, .element_size = sizeof(ncfg_observed_mapping_t),
+	    .offset = offsetof(ncfg_observed_backend_t, mappings),
+	    .count_offset = offsetof(ncfg_observed_backend_t, mapping_count) }
 };
 static const ncfg_type_t observed_backend_type = TYPE("backend", observed_backend_fields);
 

@@ -176,10 +176,34 @@ void ncfg_global_view::refresh()
 	};
 	constexpr int row_count = static_cast<int>(sizeof(rows) / sizeof(rows[0]));
 
-	table->setRowCount(row_count);
+	/*
+	 * **And every port UPnP has opened**, one row each (10.675): these are
+	 * openings in the firewall that no document wrote, so a person who
+	 * turned UPnP on can see what their devices asked for. Only while it is
+	 * on; a read that fails costs these rows and nothing else.
+	 */
+	QList<ncfg_mapping_row> mapped;
+	if (upnp_on) {
+		(void)connection->upnp_mappings(&mapped, nullptr);
+	}
+
+	table->setRowCount(row_count + static_cast<int>(mapped.size()));
 	for (int row = 0; row < row_count; row++) {
 		table->setItem(row, 0, new QTableWidgetItem(rows[row].first));
 		table->setItem(row, 1, new QTableWidgetItem(rows[row].second));
+	}
+	for (int at = 0; at < static_cast<int>(mapped.size()); at++) {
+		const ncfg_mapping_row &one = mapped.at(at);
+		QString reaches = QStringLiteral("%1:%2").arg(one.address).arg(one.internal_port);
+
+		if (!one.description.isEmpty()) {
+			reaches += QStringLiteral(", for \"%1\"").arg(one.description);
+		}
+		table->setItem(row_count + at, 0,
+		    new QTableWidgetItem(QStringLiteral("mapped %1 %2")
+		                             .arg(one.protocol)
+		                             .arg(one.external_port)));
+		table->setItem(row_count + at, 1, new QTableWidgetItem(reaches));
 	}
 	table->resizeColumnsToContents();
 	table->horizontalHeader()->setStretchLastSection(true);

@@ -585,46 +585,33 @@ void ncfg_cli_print_node(const char *run_dir)
 	ncfg_out_writef("  its store: %s\n", store);
 }
 
-void ncfg_cli_print_upnp(const char *run_dir)
+void ncfg_cli_print_upnp(const ncfg_observed_t *observed)
 {
-	char  path[1100];
-	char  line[512];
-	FILE *file;
-	int   said = 0;
+	size_t at;
+	size_t one;
+	int    said = 0;
 
-	if (!run_dir) {
-		return;
-	}
-	(void)snprintf(path, sizeof(path), "%s/upnp/miniupnpd.leases", run_dir);
-	file = fopen(path, "r");
-	if (!file) {
-		return;
-	}
-	/* `PROTO:EXTPORT:INTADDR:INTPORT:EXPIRY:DESCRIPTION`, one a line, as
-	 * miniupnpd writes them; a line that is not that shape is skipped
-	 * rather than shown half read. */
-	while (fgets(line, sizeof(line), file)) {
-		char protocol[8];
-		char address[64];
-		char description[256];
-		unsigned external = 0;
-		unsigned internal = 0;
-		unsigned long long expiry = 0;
+	for (at = 0; observed && at < observed->backend_count; at++) {
+		const ncfg_observed_backend_t *backend = &observed->backends[at];
 
-		description[0] = '\0';
-		if (sscanf(line, "%7[^:]:%u:%63[^:]:%u:%llu:%255[^\n]", protocol, &external, address,
-		        &internal, &expiry, description) < 4) {
+		if (backend->kind != NCFG_BACKEND_UPNP) {
 			continue;
 		}
-		if (!said) {
-			ncfg_out_line("");
-			ncfg_out_line("ports mapped by UPnP and NAT-PMP clients:");
-			said = 1;
+		for (one = 0; one < backend->mapping_count; one++) {
+			const ncfg_observed_mapping_t *mapping = &backend->mappings[one];
+			const char *description = mapping->description ? mapping->description : "";
+
+			if (!said) {
+				ncfg_out_line("");
+				ncfg_out_line("ports mapped by UPnP and NAT-PMP clients:");
+				said = 1;
+			}
+			ncfg_out_writef("  %s %lld -> %s:%lld%s%s\n", mapping->protocol,
+			    (long long)mapping->external_port, mapping->address,
+			    (long long)mapping->internal_port, description[0] ? ", for " : "",
+			    description);
 		}
-		ncfg_out_writef("  %s %u -> %s:%u%s%s\n", protocol, external, address, internal,
-		    description[0] ? ", for " : "", description);
 	}
-	(void)fclose(file);
 }
 
 void ncfg_cli_take_regdom_setter(ncfg_observed_t *mine, const ncfg_observed_t *theirs)

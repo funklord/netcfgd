@@ -172,6 +172,26 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
 					return 0;
 				}
 			}
+			/* And the ports clients had it map (10.675), from its lease
+			 * file, read whole and bounded: shown, never planned against. A
+			 * file not there yet is a miniupnpd that has mapped nothing. */
+			if (ncfg_upnp_leases_path(run_dir, path, sizeof(path), NULL, 0)) {
+				char *mapped = read_config(path, 256u * 1024u);
+
+				if (mapped) {
+					ncfg_upnp_mappings_free(backend->mappings, backend->mapping_count);
+					backend->mappings = NULL;
+					backend->mapping_count = 0;
+					if (!ncfg_upnp_mappings_in_text(mapped, &backend->mappings,
+					        &backend->mapping_count)) {
+						free(mapped);
+						ncfg_error_set(err, err_size,
+						    "out of memory reading the ports UPnP has mapped");
+						return 0;
+					}
+					free(mapped);
+				}
+			}
 			continue;
 		}
 		if (backend->kind == NCFG_BACKEND_DHCP_SERVER && backend->running &&

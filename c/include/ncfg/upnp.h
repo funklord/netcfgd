@@ -72,4 +72,16 @@ int ncfg_upnp_start(const char *run, const ncfg_upnp_t *upnp, const char *progra
 int ncfg_upnp_stop(const char *run, char *err, size_t err_size);
 pid_t ncfg_upnp_running_pid(const char *run);
 
+/* The most mappings read from one lease file. */
+#define NCFG_UPNP_MAPPINGS_MAX 1024u
+
+/*
+ * The mappings in miniupnpd's lease file text (10.675): one a line,
+ * `PROTO:EXTPORT:INTADDR:INTPORT:EXPIRY:DESCRIPTION`, as miniupnpd writes
+ * them. A line not of that shape is skipped rather than shown half read, and
+ * past NCFG_UPNP_MAPPINGS_MAX the rest are left out. 0 on out of memory only.
+ */
+int ncfg_upnp_mappings_in_text(const char *text, ncfg_observed_mapping_t **out, size_t *count);
+void ncfg_upnp_mappings_free(ncfg_observed_mapping_t *mappings, size_t count);
+
 #endif /* NCFG_UPNP_H */

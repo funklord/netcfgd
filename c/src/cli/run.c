@@ -1247,7 +1247,7 @@ static int command_status(const ncfg_cli_options_t *options)
 	} else {
 		ncfg_cli_print_status(observed);
 		ncfg_cli_print_node(run_dir);
-		ncfg_cli_print_upnp(run_dir);
+		ncfg_cli_print_upnp(observed);
 		/* After the listing, like the two notes under `plan`: it is a fact
 		 * about the machine rather than a member of the answer. */
 		warn_about_disabled_networks(document, observed);

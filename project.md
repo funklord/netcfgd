@@ -12632,6 +12632,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.675 The ports UPnP opened are in the observation, and on the global tab
+
+10.671 listed the mappings miniupnpd holds in `ncfg status` by reading its
+lease file there, so a GUI user who turned UPnP on (10.673) could not see
+what their devices had opened -- the objection 10.667 step 4 answered for
+the command line only. The observer now reads that file for a running
+miniupnpd into the upnp backend's `mappings`, as it reads a DHCP server's
+leases (0303): protocol, both ports, the LAN host, the expiry and the
+client's description. `ncfg status` prints from the observation, so the
+file has one parser, and the global tab adds a row per mapped port while
+UPnP is on.
+
+Shown and never planned against, which is 0310's line: `hull-upnp` still
+finds a second plan with nothing to do while a mapping is held, and now
+also asserts the mapping is in `ncfg status --json`, which is what the GUI
+reads -- against a real miniupnpd and a real `upnpc`. `upnp_test` reads the
+file's lines, the malformed and out-of-range ones skipped; `client_test`
+reads a status answer's mappings and leaves another kind's alone.
+
 ## 10.674 An allow list's prefix: the stations ever seen with it
 
 10.667's third step, **reading seen back**: `allow = ["aa:bb:cc:*"]`

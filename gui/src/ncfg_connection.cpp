@@ -1616,6 +1616,41 @@ bool ncfg_connection::leases(QList<ncfg_lease_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::upnp_mappings(QList<ncfg_mapping_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_mappings_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_upnp_mappings(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_mapping_row row;
+		row.protocol = from_c(found.items[i].protocol);
+		row.external_port = found.items[i].external_port;
+		row.address = from_c(found.items[i].address);
+		row.internal_port = found.items[i].internal_port;
+		row.expires = found.items[i].expires;
+		row.description = from_c(found.items[i].description);
+		out->append(row);
+	}
+	ncfg_mappings_free(&found);
+	return true;
+}
+
 bool ncfg_connection::block_lists(QList<ncfg_block_list_row> *out, QString *error)
 {
 	if (!out) {

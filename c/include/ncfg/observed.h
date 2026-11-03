@@ -1139,6 +1139,22 @@ typedef struct {
 	int64_t expires;
 } ncfg_observed_lease_t;
 
+/*
+ * One port a UPnP or NAT-PMP client had miniupnpd map (0310, 10.675), as its
+ * lease file says: the protocol (`TCP` or `UDP`), the port opened on the
+ * uplink, the LAN host and port it reaches, when it expires (a Unix time, 0
+ * for never) and the description the client gave -- a client chooses it, so
+ * it is shown and never acted on.
+ */
+typedef struct {
+	char   *protocol;
+	int64_t external_port;
+	char   *address;
+	int64_t internal_port;
+	int64_t expires;
+	char   *description;
+} ncfg_observed_mapping_t;
+
 /* A backend process as netcfgd currently believes it to be. */
 typedef struct {
 	int   kind; /* ncfg_backend_kind_t */
@@ -1211,6 +1227,11 @@ typedef struct {
 	 * put under /run, read back. Unexpired leases only. */
 	ncfg_observed_lease_t *leases;
 	size_t                 lease_count;
+	/* The ports a running miniupnpd has mapped for clients (10.675), read
+	 * from its lease file. What the firewall holds outside the document, so
+	 * it is shown, and never planned against. */
+	ncfg_observed_mapping_t *mappings;
+	size_t                   mapping_count;
 } ncfg_observed_backend_t;
 
 /* How many times netcfgd has started one backend without it staying up. Reset

@@ -399,6 +399,16 @@ struct ncfg_lease_row {
 	long long expires = 0;
 };
 
+/* One port UPnP has mapped for a client (10.675). */
+struct ncfg_mapping_row {
+	QString   protocol;
+	long long external_port = 0;
+	QString   address;
+	long long internal_port = 0;
+	long long expires = 0;
+	QString   description;
+};
+
 struct ncfg_bluetooth_row {
 	QString id;
 	QString address;
@@ -1347,6 +1357,8 @@ public:
 	bool block_lists(QList<ncfg_block_list_row> *out, QString *error);
 	/* The leases netcfgd's DHCP servers hold, from the observation (0303). */
 	bool leases(QList<ncfg_lease_row> *out, QString *error);
+	/* The ports UPnP has mapped for clients, from the observation. */
+	bool upnp_mappings(QList<ncfg_mapping_row> *out, QString *error);
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);

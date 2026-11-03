@@ -919,6 +919,55 @@ static void a_status_becomes_leases(void)
 	staged_close(&staged);
 }
 
+/*
+ * The ports UPnP has mapped (10.675), from a status answer: a upnp backend's
+ * mappings, and a backend of another kind carrying a `mappings` member left
+ * alone.
+ */
+static const char mappings_response[] =
+    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"backends\":["
+    "{\"kind\":\"upnp\",\"interface\":\"wan0\",\"running\":true,\"mappings\":["
+    "{\"protocol\":\"TCP\",\"external_port\":18080,\"address\":\"192.168.1.20\","
+    "\"internal_port\":8080,\"expires\":1893456000,\"description\":\"game server\"},"
+    "{\"protocol\":\"UDP\",\"external_port\":3074,\"address\":\"192.168.1.21\","
+    "\"internal_port\":3074,\"expires\":0,\"description\":\"\"}]},"
+    "{\"kind\":\"dhcp_server\",\"interface\":\"lan0\",\"running\":true,\"mappings\":["
+    "{\"protocol\":\"TCP\",\"address\":\"10.0.0.1\"}]}]}\n";
+
+static void a_status_becomes_mappings(void)
+{
+	struct staged   staged;
+	char            err[NCFG_ERROR_MAX];
+	ncfg_mappings_t mappings;
+
+	if (!staged_open(&staged, "a status answer with mappings can be staged",
+	        mappings_response)) {
+		return;
+	}
+	if (!ncfg_client_upnp_mappings(staged.client, &mappings, err, sizeof(err))) {
+		ok("a status converts to mappings", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("the UPnP backend's mappings are read, and only its", mappings.count == 2u, NULL);
+	if (mappings.count == 2u) {
+		ok("  each with its protocol, ports, host, expiry and description",
+		    !strcmp(mappings.items[0].protocol, "TCP") &&
+		        mappings.items[0].external_port == 18080 &&
+		        !strcmp(mappings.items[0].address, "192.168.1.20") &&
+		        mappings.items[0].internal_port == 8080 &&
+		        mappings.items[0].expires == 1893456000LL &&
+		        !strcmp(mappings.items[0].description, "game server"),
+		    NULL);
+		ok("  and one never expiring with no description",
+		    !strcmp(mappings.items[1].protocol, "UDP") && mappings.items[1].expires == 0 &&
+		        !mappings.items[1].description[0],
+		    NULL);
+	}
+	ncfg_mappings_free(&mappings);
+	staged_close(&staged);
+}
+
 static void a_status_becomes_links(void)
 {
 	struct staged staged;
@@ -2827,6 +2876,7 @@ int main(int argc, char **argv)
 	a_plan_becomes_a_model();
 	a_status_becomes_links();
 	a_status_becomes_leases();
+	a_status_becomes_mappings();
 	a_scan_becomes_access_points();
 	a_scan_that_could_not_be_taken_says_so();
 	joining_names_a_network_and_never_a_secret();

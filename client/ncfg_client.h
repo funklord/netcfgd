@@ -1349,6 +1349,29 @@ void ncfg_leases_free(ncfg_leases_t *leases);
  * `observe`. */
 int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, size_t err_size);
 
+/* One port a UPnP or NAT-PMP client had mapped (0310, 10.675): `protocol`
+ * TCP or UDP, the port on the uplink, the LAN host and port it reaches,
+ * `expires` a Unix time (0 for never), and the client's own description. */
+typedef struct {
+	char     *protocol;
+	long long external_port;
+	char     *address;
+	long long internal_port;
+	long long expires;
+	char     *description;
+} ncfg_mapping_entry_t;
+
+typedef struct {
+	ncfg_mapping_entry_t *items;
+	size_t                count;
+} ncfg_mappings_t;
+
+void ncfg_mappings_free(ncfg_mappings_t *mappings);
+
+/* The ports UPnP has mapped, from the observation. Needs `observe`. */
+int ncfg_client_upnp_mappings(ncfg_client_t *client, ncfg_mappings_t *out, char *err,
+    size_t err_size);
+
 /* The DNS records the configuration declares. Needs `observe`. */
 int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char *err,
                             size_t err_size);
