@@ -12691,8 +12691,8 @@ mostly; what serving costs in memory is about 1.3 MB, not 13.
 
 **Every program in the multi-call binary refuses them**, `ncfg` included,
 because the call is first in `main` and costs nothing where the kernel has
-no such setting. Whether a router's kernel is `always` is per build -- OpenWrt
-leaves THP off in most targets -- which is the other reason not to scope it.
+no such setting. Whether a router's kernel has THP at `always` is per build and
+unmeasured here, which is the other reason not to scope it.
 
 **What is not answered:** the program's size, 1,518,800 bytes default against
 2,494,336 serving, and fuzznet's consumer services as build options, which
