@@ -992,8 +992,22 @@ static int node_tick(void *context)
  * asked, or fuzznet's loop ended by itself, which is said.
  */
 static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_main_run_t *run,
-    ncfg_seen_t *seen, const ncfg_main_policy_t *policy)
+    ncfg_seen_t *seen, const ncfg_main_policy_t *policy, const char *run_dir)
 {
+	/*
+	 * **fuzznet's socket in the run directory, unless one is named**
+	 * (10.683): `/run/netcfgd/fuzznet.sock` on a machine, beside the control
+	 * socket it will replace. fuzznet's default is per user, so a non-root
+	 * `ncfg` or GUI looking there would find its own runtime directory and
+	 * never root's daemon -- and a client that had to be told where would be
+	 * a client with configuration of its own, which the holder ruled out.
+	 */
+	static char        socket_arg[NCFG_NODE_DIR_MAX + 32u];
+	static const char *args[33];
+	size_t             arg_count = 0;
+	size_t             at;
+	int                named = 0;
+
 	static node_driven_t driven;
 	ncfg_node_loop_t     loop;
 	char                 err[NCFG_ERROR_MAX];
@@ -1015,9 +1029,18 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	loop.ready = node_ready;
 	loop.tick = node_tick;
 	loop.local = node_answer;
+	for (at = 0; at < options->fuzznet_arg_count && arg_count < 32u; at++) {
+		if (strncmp(options->fuzznet_args[at], "--socket", 8u) == 0) {
+			named = 1;
+		}
+		args[arg_count++] = options->fuzznet_args[at];
+	}
+	if (!named && arg_count < 32u) {
+		(void)snprintf(socket_arg, sizeof(socket_arg), "--socket=%s/fuzznet.sock", run_dir);
+		args[arg_count++] = socket_arg;
+	}
 	err[0] = '\0';
-	served = ncfg_node_serve(node, options->fuzznet_args, options->fuzznet_arg_count,
-	    options->argv, &loop, err, sizeof(err));
+	served = ncfg_node_serve(node, args, arg_count, options->argv, &loop, err, sizeof(err));
 	if (served == NCFG_NODE_SERVE_STOPPED) {
 		return 1;
 	}
@@ -1495,7 +1518,7 @@ static int start(const options_t *options)
 	 * ticks (`ncfg_main_run_t::next_tick`, project.md 10.678). */
 	run.next_tick = &next_tick;
 	err[0] = '\0';
-	if (!serve_node(node, options, &run, loop.seen, &policy) &&
+	if (!serve_node(node, options, &run, loop.seen, &policy, where.run) &&
 	    !ncfg_main_serve(&run, err, sizeof(err))) {
 		code = cannot("this daemon stopped watching its descriptors", err);
 	}

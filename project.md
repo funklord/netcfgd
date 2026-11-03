@@ -12707,10 +12707,33 @@ So three things are settled for 0309:
   non-root client looking there would find its own runtime directory and
   never root's daemon; decided from the rule above rather than asked, since
   the alternative is a client that has to be told where the daemon is -- a
-  configuration of its own. Not built: it lands with 0309's client.
+  configuration of its own. **Built in the serve build**: unless a
+  `--fuzznet-arg --socket=...` names one, the daemon gives fuzznet
+  `<run>/fuzznet.sock`. It does not make a following netcfgd's verbs
+  reachable: measured, the follower passes a connection at its own socket
+  through to the face, which answers `unsupported` -- so that stays asked of
+  fuzznet (10.682's second finding). **The holder's direction, the same
+  hour:** "We need to have a method for fuzznetd to forward extensions
+  without fully understanding them" -- the face hands an extension's verbs
+  on to the process serving them. Passed to fuzznet as information, in the
+  same message.
 
 **External callers are not decided** beyond the simple case (0128's tiers by
 origin); the holder says so, and nothing here assumes more.
+
+**What would change "nothing kept on a user"** (the holder, the same day): a
+feature that needs every user authenticated toward root, for something that
+is about the user rather than the machine. The holder's example is NuFW, the
+authenticating firewall, now abandoned: a client agent (`nutcpc`)
+authenticated each user to an authentication server (`nuauth`, over LDAP,
+PAM or a file), and a daemon on the firewall held each new connection in
+netfilter's queue until `nuauth` said whether that user's connection was
+accepted -- rules written by who opened a connection, not by its address,
+which is what made properly managed multi-user systems over a network
+possible, and which today's tooling makes too hard. A netcfgd feature of
+that kind would give each user an identity and something stored, and the
+rule above would be revisited with it rather than worked around.
+(NuFW: https://en.wikipedia.org/wiki/NuFW)
 
 ## 10.682 0309's first verb: `get status PATH`, judged by netcfgd's tiers
 
@@ -12745,8 +12768,11 @@ the status written for a caller who may not observe.
 - **A follower on the default socket has no socket of its own** (sec 841),
   so a client there reaches the face -- a fuzznetd, which does not know
   netcfgd's verbs. While netcfgd follows, its verbs are unreachable; told to
-  fuzznet in the same message, and **withdrawn by 10.683**: netcfgd's socket
-  goes at `/run/netcfgd`, its own path, where a follower serves its verbs.
+  fuzznet in the same message. **Not withdrawn by a socket of its own**,
+  measured (10.683): a follower passes every connection to the face (sec
+  666), so `get status` at a following netcfgd's own socket answers
+  `unsupported`. Asked of fuzznet: a follower answering its extension's own
+  verbs itself.
 
 ~~Still the holder's, through fuzznet (sec 849): whether an extension may judge
 local users fuzznet would deny (`judges_local`)~~ -- **answered yes, 10.683.**
