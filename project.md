@@ -12683,6 +12683,57 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.703 Another node's events: netcfgd publishes, and `ncfg monitor --at` reads a cursor
+
+fuzznet carries no stream across the estate and plans none. Instead each node
+keeps its last 256 published events, and its own procedure `events [FROM]`
+reads them from a cursor (its `db35c7b`, sec 866). Two halves:
+
+- **netcfgd publishes its events into fuzznet's.**
+  - Every event goes through `ncfg_main_subscribers_tell`, which now notes
+    its kind as a bit before its no-local-subscriber return, since another
+    host may be reading.
+  - The node's tick publishes the noted kinds through
+    `ncfg_node_publish_event` as `net-observed`, `net-reloaded`,
+    `net-drift`, `net-armed` and `net-resolved`. It has to be the tick,
+    because fuzznet takes a publication from its `tick` only and an event is
+    told from inside an answer too.
+  - A kind added without a subject is a build error rather than an event
+    that goes unpublished.
+- **`ncfg monitor --at HOST`** polls that node's cursor every two seconds and
+  prints each event as its word. A FIRST past the cursor is said as missed
+  events, and a NEXT below it as a restart, both with "re-read its status".
+  It runs until interrupted, and a call fuzznet cannot carry ends it.
+  - The reader takes a subject of lower-case letters and hyphens only.
+    That is held here, not trusted to the other host's fuzznet, since a
+    subject is printed into `--json`, where a quote would forge a line.
+  - A page with more events than room is said as a gap, because NEXT is
+    already past them all.
+
+**The scripted test first agreed with a wrong parser.** fuzznet's note gave
+the answer as "`ok NEXT FIRST ...`, escaped". The parser and the scripted
+answers in `fuzznet_line_test` both expected an inner `ok`, so the unit test
+passed. The live check failed with `that node answered 1 1`: the escaped text
+is `NEXT FIRST ...` (`fzn_node_events_since`), and the `ok` is the call's own.
+Both are fixed, and the scripted answers are now copied from fuzznet's
+writer, not from the note. **A fake written from the same reading as the
+code it tests is one witness, not two.**
+
+`node_fleet.sh`, in A's third start:
+
+- `monitor --at A` runs in the background through B, and the 2.5 KB config
+  put's reload shows up in it as `reloaded`;
+- without the tick's publish, it never does, and the check fails.
+
+`fuzznet_line_test` checks:
+
+- a page read with its cursor;
+- a quoted subject refused, which fails without the character check;
+- an overfull page said as a gap.
+
+**Not done yet:** the GUI and TUI node views polling this cursor, in place of
+their 15-second full refresh (go item 32).
+
 ## 10.702 fuzznet's answers taken: its bound, its huge pages, its services off, and gc-sections
 
 Two inbox messages from fuzznet, 2026-11-03 (`20261103T2225Z`, and one written
@@ -19460,7 +19511,16 @@ specific error"*.
    is to wait for 724 rather than to build a second one. The hard half --
    which nodes need a value -- is answered in fuzznet by the scope itself,
    and the place it meets netcfgd's "every node whose rules reference it" is
-   group membership, which fuzznet has no settings for yet.
+   group membership, which fuzznet has no settings for yet. **Built since**
+   (fuzznet `f1fdea6`, its sec 868, told here 2026-11-03): `FZN_SCOPE_GROUP`
+   cells, set as `group=NAME`, a host's membership as its `group/member`
+   setting, and the value in force resolved own cell, then first group, then
+   estate (`get setting here KEY`). **What it does not do yet** is keep a
+   group's value from the estate's other hosts. Every host holds the bytes
+   and only members resolve them, so a zone's mesh password or roaming key
+   would reach non-members. Sealing values to a group's members is recorded
+   in fuzznet as the holder's question. netcfgd's use of group scope waits on
+   it, for exactly those values.
 
 The fifth, command propagation, neither tree has.
 

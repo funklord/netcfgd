@@ -216,4 +216,13 @@ size_t ncfg_node_local(const char *line, char *reply, size_t cap);
  */
 void ncfg_node_refuse_huge_pages(char *const *argv);
 
+/*
+ * Tell fuzznet's node that `subject` changed here (`fzn_daemon_publish`, its
+ * sec 843), for its local `get events` subscribers and for another host
+ * reading `events` (its sec 866). `subject` is lower-case letters and hyphens,
+ * at most 16. From the loop's `tick` only, which is fuzznet's rule; anywhere
+ * else it is refused and nothing is published. The subscribers it reached.
+ */
+size_t ncfg_node_publish_event(const char *subject);
+
 #endif /* NCFG_NODE_H */

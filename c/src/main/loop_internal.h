@@ -984,6 +984,12 @@ typedef struct ncfg_main_subscribers {
 	 * a caller that wants to say so, and for a test that would otherwise have
 	 * to infer it from a count that went down. */
 	size_t dropped;
+	/* The kinds told since fuzznet's node last published them, a bit each
+	 * (10.703): fuzznet takes a publication from its tick only, and an
+	 * event is told from inside an answer too, so it waits here for the
+	 * next tick. Set whether or not anybody is subscribed locally, since
+	 * another host reads them through fuzznet's `events`. */
+	unsigned unpublished;
 } ncfg_main_subscribers_t;
 
 void ncfg_main_subscribers_init(ncfg_main_subscribers_t *subscribers);

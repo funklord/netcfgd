@@ -510,7 +510,7 @@ OWE_USAGE = ("  --owe                    encrypted with no passphrase (OWE, \"En
 AT_USAGE = ("  --at HOST                another node of this estate, HOST its key in hex,\n"
 	    "                           asked through your own fuzznetd: for status,\n"
 	    "                           wifi, modem, reload, confirm, revert, apply,\n"
-	    "                           config, secret, profile and tui\n")
+	    "                           config, secret, profile, tui and monitor\n")
 # And `ncfg nodes`, 10.692: the estate's members, for `--at`, the same reason.
 NODES_USAGE = ("  ncfg nodes [--json]      the other nodes of your estate, by key, for\n"
 	       "                           `status --at`\n")

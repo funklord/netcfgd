@@ -903,6 +903,8 @@ typedef struct {
 	/* `ask` (0312): the socket's dispatcher on this daemon's desk, and the
 	 * answers kept for callers paging through them. */
 	ncfg_main_ask_t           ask;
+	/* Where the events told since the last tick wait to be published. */
+	ncfg_main_subscribers_t  *subscribers;
 } node_driven_t;
 
 /*
@@ -1097,6 +1099,33 @@ static int node_tick(void *context)
 		driven->permitted = 1;
 		node_permit(driven->policy ? &driven->policy->control.observe : NULL);
 	}
+	/* **netcfgd's events into fuzznet's** (10.703), from the tick, which is
+	 * the one place fuzznet takes them: for another host reading `events`
+	 * from a cursor, since no stream crosses the estate (fuzznet sec 866).
+	 * Thin, as fuzznet's are: the subject says what to re-read. */
+	if (driven->subscribers && driven->subscribers->unpublished) {
+		static const char *const subject[] = {
+			[NCFG_PROTO_EVENT_OBSERVED] = "net-observed",
+			[NCFG_PROTO_EVENT_RELOADED] = "net-reloaded",
+			[NCFG_PROTO_EVENT_DRIFT] = "net-drift",
+			[NCFG_PROTO_EVENT_CONFIRM_ARMED] = "net-armed",
+			[NCFG_PROTO_EVENT_CONFIRM_RESOLVED] = "net-resolved",
+		};
+		unsigned pending = driven->subscribers->unpublished;
+		size_t   kind;
+
+		/* A kind added to the protocol without a subject here would go
+		 * unpublished without a word, so the build refuses instead. */
+		_Static_assert(sizeof(subject) / sizeof(subject[0]) == NCFG_PROTO_EVENT_COUNT,
+		    "every event kind needs a fuzznet subject");
+
+		driven->subscribers->unpublished = 0;
+		for (kind = 0; kind < sizeof(subject) / sizeof(subject[0]); kind++) {
+			if ((pending & (1u << kind)) && subject[kind]) {
+				(void)ncfg_node_publish_event(subject[kind]);
+			}
+		}
+	}
 	return ncfg_main_outside_tick(driven->run, &driven->outside, &report) && report.stopping;
 }
 
@@ -1145,6 +1174,7 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	driven.ask.control = &policy->control;
 	driven.ask.remote = &policy->remote;
 	driven.ask.roots = driven.roots;
+	driven.subscribers = desk->subscribers;
 	loop.context = &driven;
 	loop.begin = node_begin;
 	loop.end = node_end;

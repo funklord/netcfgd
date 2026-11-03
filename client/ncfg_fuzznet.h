@@ -158,6 +158,25 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *request, char **out,
     size_t *length, char *err, size_t err_size);
 
+/* An event's subject as fuzznet carries it: lower-case letters and hyphens,
+ * at most 16, and its NUL. */
+#define NCFG_FUZZNET_SUBJECT_TEXT 17u
+
+/*
+ * Another node's events since `from` (10.703): fuzznet's own procedure,
+ * `call events at HOST FROM` (its sec 866), whose answer is `NEXT FIRST
+ * [SUBJECT NAME]...`, escaped inside the call's own `ok`, from the last 256
+ * that node published. The subjects into
+ * `subjects`, at most `cap`, their number in `*count`; `*next`, where to ask
+ * from next time; `*first`, the oldest it still holds. **A FIRST above
+ * `from` means some were missed, and a NEXT below it that the node
+ * restarted**: either way the caller re-reads the node's status rather than
+ * trusting what it had. 1, or 0 with a sentence.
+ */
+int ncfg_fuzznet_events_at(const char *socket, const char *host, size_t from, size_t *next,
+    size_t *first, char (*subjects)[NCFG_FUZZNET_SUBJECT_TEXT], size_t cap, size_t *count,
+    char *err, size_t err_size);
+
 /* A host's key in hex, and its NUL. */
 #define NCFG_FUZZNET_KEY_TEXT 65u
 

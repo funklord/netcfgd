@@ -549,6 +549,11 @@ static void serve_tick(void *ctx, uint64_t now)
 	}
 }
 
+size_t ncfg_node_publish_event(const char *subject)
+{
+	return fzn_daemon_publish(subject, NULL);
+}
+
 void ncfg_node_refuse_huge_pages(char *const *argv)
 {
 	fzn_daemon_refuse_huge_pages(argv);

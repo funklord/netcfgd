@@ -760,3 +760,101 @@ int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT]
 	} while (from < total && ++pages < 100000u);
 	return from >= total;
 }
+
+int ncfg_fuzznet_events_at(const char *socket, const char *host, size_t from, size_t *next,
+    size_t *first, char (*subjects)[NCFG_FUZZNET_SUBJECT_TEXT], size_t cap, size_t *count,
+    char *err, size_t err_size)
+{
+	char          line[160];
+	char          reply[2048];
+	char          text[2048];
+	char         *at;
+	char         *end;
+	unsigned long value;
+	long          n;
+	int           silent = 0;
+	size_t        digit;
+
+	for (digit = 0; host && host[digit]; digit++) {
+		if (!((host[digit] >= '0' && host[digit] <= '9') ||
+		        (host[digit] >= 'a' && host[digit] <= 'f'))) {
+			break;
+		}
+	}
+	if (!socket || !host || digit != 64u || host[digit] != '\0' || !next || !first ||
+	    !count) {
+		say(err, err_size, "a host is its key, 64 lower-case hex digits");
+		return 0;
+	}
+	*count = 0;
+	(void)snprintf(line, sizeof(line), "call events at %s %zu", host, from);
+	if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 8000, &silent, err, err_size)) {
+		return 0;
+	}
+	if (strncmp(reply, "ok ", 3) != 0) {
+		say(err, err_size, "fuzznet answered %.160s", reply);
+		return 0;
+	}
+	n = ncfg_fuzznet_unescape(reply + 3, strlen(reply + 3), text, sizeof(text) - 1u);
+	if (n < 0) {
+		say(err, err_size, "fuzznet's answer is not escaped as fuzznet escapes");
+		return 0;
+	}
+	text[n] = '\0';
+	/* `NEXT FIRST`, then a SUBJECT and a NAME for each event: fuzznet's
+	 * `fzn_node_events_since`, with no `ok` of its own inside the call's. */
+	value = strtoul(text, &end, 10);
+	if (end == text || *end != ' ' || text[0] < '0' || text[0] > '9') {
+		say(err, err_size, "that node's events are not a list: %.80s", text);
+		return 0;
+	}
+	*next = (size_t)value;
+	at = end + 1;
+	value = strtoul(at, &end, 10);
+	if (end == at || (*end != ' ' && *end != '\0')) {
+		say(err, err_size, "that node's events are not a list: %.80s", text);
+		return 0;
+	}
+	*first = (size_t)value;
+	at = end;
+	while (*at == ' ') {
+		char  *subject = ++at;
+		size_t length;
+
+		while (*at && *at != ' ') {
+			at++;
+		}
+		length = (size_t)(at - subject);
+		if (length == 0u || length >= NCFG_FUZZNET_SUBJECT_TEXT || *at != ' ') {
+			say(err, err_size, "that node listed an event that is not one: %.80s", subject);
+			return 0;
+		}
+		/* Lower-case letters and hyphens, as fuzznet publishes them -- held
+		 * here too, not trusted to the other host's fuzznet, since a subject
+		 * is printed and a quote in one would forge a line of `--json`. */
+		for (digit = 0; digit < length; digit++) {
+			if (!((subject[digit] >= 'a' && subject[digit] <= 'z') || subject[digit] == '-')) {
+				say(err, err_size, "that node listed an event that is not one: %.80s",
+				    subject);
+				return 0;
+			}
+		}
+		at++;
+		while (*at && *at != ' ') {
+			at++; /* the NAME, which netcfgd's events do not carry */
+		}
+		if (*count < cap) {
+			memcpy(subjects[*count], subject, length);
+			subjects[*count][length] = '\0';
+		}
+		(*count)++;
+	}
+	/* More than room: NEXT is already past them all, so the ones not kept are
+	 * gone from this caller's view -- said the way a gap is said, FIRST past
+	 * the cursor, so the caller re-reads the status rather than missing them. */
+	if (*count > cap) {
+		*count = cap;
+		*first = *next;
+	}
+	return 1;
+}

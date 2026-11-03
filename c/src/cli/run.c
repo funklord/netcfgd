@@ -667,10 +667,79 @@ static int command_modem(const ncfg_cli_options_t *options, const char **positio
 }
 
 /* Stream events from the daemon until interrupted. */
+/*
+ * `ncfg monitor --at HOST` (10.703): another node's events, which no stream
+ * carries across the estate (fuzznet sec 866). So this polls that node's
+ * `events` cursor every two seconds and prints each event as its word --
+ * thin, as fuzznet's events are: what changed, to be re-read with `status
+ * --at`. A gap, or the node restarting, is said as such. Runs until it is
+ * interrupted, as the local monitor runs until its stream ends; a call that
+ * fuzznet cannot carry ends it, with the reason, rather than retrying for
+ * ever against a node that has gone.
+ */
+static int command_monitor_at(const ncfg_cli_options_t *options)
+{
+	static char subjects[256][NCFG_FUZZNET_SUBJECT_TEXT];
+	char        socket[1100];
+	char        err[NCFG_ERROR_MAX];
+	size_t      cursor = (size_t)-1 / 2u; /* past the end: answers where it is now */
+	size_t      next = 0;
+	size_t      first = 0;
+	size_t      count = 0;
+	size_t      at;
+
+	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
+		return fail("this user's fuzznetd socket path does not fit");
+	}
+	if (!ncfg_fuzznet_events_at(socket, options->at, cursor, &next, &first, subjects,
+	        sizeof(subjects) / sizeof(subjects[0]), &count, err, sizeof(err))) {
+		return fail(err);
+	}
+	cursor = next;
+	if (!options->json) {
+		ncfg_out_writef("watching node %s\n", options->at);
+	}
+	for (;;) {
+		struct timespec pause = { 2, 0 };
+
+		(void)nanosleep(&pause, NULL);
+		if (!ncfg_fuzznet_events_at(socket, options->at, cursor, &next, &first, subjects,
+		        sizeof(subjects) / sizeof(subjects[0]), &count, err, sizeof(err))) {
+			return fail(err);
+		}
+		if (next < cursor) {
+			ncfg_out_writef(options->json ? "{\"event\":\"restarted\"}\n"
+			                              : "that node restarted; re-read its status\n");
+		} else if (first > cursor) {
+			ncfg_out_writef(options->json ? "{\"event\":\"missed\"}\n"
+			                              : "some events on that node were missed; re-read "
+			                                "its status\n");
+		}
+		for (at = 0; at < count; at++) {
+			/* `net-observed` and the rest: the word after `net-`; anything
+			 * else that node published is fuzznet's own and shown whole. */
+			const char *word = strncmp(subjects[at], "net-", 4) == 0 ? subjects[at] + 4
+			                                                         : subjects[at];
+
+			if (options->json) {
+				ncfg_out_writef("{\"event\":\"%s\"}\n", word);
+			} else {
+				ncfg_out_writef("%s\n", word);
+			}
+		}
+		cursor = next;
+		(void)fflush(stdout);
+	}
+}
+
 static int command_monitor(const ncfg_cli_options_t *options)
 {
 	char path[NCFG_CLI_TEXT_MAX];
 	char err[NCFG_ERROR_MAX];
+
+	if (options->at) {
+		return command_monitor_at(options);
+	}
 
 	if (!socket_for(options, path, sizeof(path))) {
 		return fail("the run directory makes a socket path too long to connect to");
@@ -2412,7 +2481,7 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
     const char **positional, size_t count)
 {
 	static const char *const carried[] = { "wifi", "modem", "reload", "confirm", "revert",
-		"apply", "config", "secret", "profile", "tui" };
+		"apply", "config", "secret", "profile", "tui", "monitor" };
 	char   why[NCFG_ERROR_MAX];
 	size_t at;
 

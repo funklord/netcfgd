@@ -195,6 +195,69 @@ int main(void)
 	(void)waitpid(child, &status, 0);
 	check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "the server served all three");
 
+	/* Another node's events from a cursor (10.703): fuzznet's `events`, its
+	 * `NEXT FIRST ...` escaped inside the call's own `ok`, as
+	 * `fzn_node_events_since` writes it -- these answers first carried an
+	 * inner `ok` too, agreeing with a parser that expected one, which the
+	 * live test caught. A quote in a subject is
+	 * refused, since a subject is printed into `--json`; a page holding more
+	 * than room is said as a gap. */
+	{
+		static char subjects[2][NCFG_FUZZNET_SUBJECT_TEXT];
+		static const char *const answers[] = {
+			"ok 7%203%20net-observed%20-%20net-drift%20-\n",
+			"ok 8%203%20net-%22x%20-\n",
+			"ok 9%203%20a%20-%20b%20-%20c%20-\n",
+		};
+		static const char host[] =
+		    "abababababababababababababababababababababababababababababababab";
+		size_t next = 0;
+		size_t first = 0;
+		size_t count = 0;
+		int    fine;
+
+		listener = socket(AF_UNIX, SOCK_STREAM, 0);
+		(void)unlink(path);
+		if (listener < 0 || bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+		    listen(listener, 4) != 0) {
+			perror("listen");
+			return 1;
+		}
+		child = fork();
+		if (child == 0) {
+			size_t page;
+
+			alarm(10);
+			for (page = 0; page < sizeof(answers) / sizeof(answers[0]); page++) {
+				char line[160];
+				int  fd = accept(listener, NULL, NULL);
+
+				if (fd < 0) {
+					_exit(1);
+				}
+				(void)recv(fd, line, sizeof(line), 0);
+				(void)send(fd, answers[page], strlen(answers[page]), MSG_NOSIGNAL);
+				close(fd);
+			}
+			_exit(0);
+		}
+		close(listener);
+		fine = ncfg_fuzznet_events_at(path, host, 5u, &next, &first, subjects, 2u, &count, why,
+		    sizeof(why));
+		check(fine && next == 7u && first == 3u && count == 2u &&
+		        strcmp(subjects[0], "net-observed") == 0 && strcmp(subjects[1], "net-drift") == 0,
+		    "another node's events read from a cursor, with where to ask from next");
+		fine = ncfg_fuzznet_events_at(path, host, 7u, &next, &first, subjects, 2u, &count, why,
+		    sizeof(why));
+		check(!fine && strstr(why, "not one") != NULL,
+		    "  a subject with a quote in it is refused, not printed");
+		fine = ncfg_fuzznet_events_at(path, host, 8u, &next, &first, subjects, 2u, &count, why,
+		    sizeof(why));
+		check(fine && count == 2u && first == next && first > 8u,
+		    "  and more than room is said as a gap, not dropped quietly");
+		(void)waitpid(child, &status, 0);
+	}
+
 	/* The estate's members (10.692): `list peer` in two pages, a contact
 	 * among them, which is no member and is left out. */
 	{

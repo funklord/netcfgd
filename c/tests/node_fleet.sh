@@ -18,7 +18,8 @@
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
 #   - and with its admin tier open, a configuration longer than one line,
-#     put through B, goes in pieces and lands in A's conf.d whole; and an
+#     put through B, goes in pieces and lands in A's conf.d whole, its reload
+#     seen by `monitor --at A` from A's events cursor; and an
 #     apply with a window, confirmed from B, then finds no second window,
 #     and a window nobody confirms reverts by itself;
 #   - and a key that is not one is refused before anything is asked.
@@ -237,12 +238,30 @@ pids="$pids $!"
 		i=$((i + 1))
 	done
 } > "$R/big.conf"
+# Watching A's events through B while the put lands (10.703): no stream
+# crosses the estate, so `monitor --at` polls A's `events` cursor, and the
+# put's reload must show up in it. Under `timeout`, and killed after.
+XDG_RUNTIME_DIR=$R/xdg timeout 40 "$C" monitor --at "$host" > "$R/monitor.out" 2>&1 &
+mpid=$!
+n=0
+until grep -q '^watching' "$R/monitor.out" 2>/dev/null || [ $n -gt 60 ]; do
+	sleep 0.5
+	n=$((n + 1))
+done
 deadline=$(( $(date +%s) + 60 ))
 while [ "$(date +%s)" -lt $deadline ]; do
 	XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" config put --at "$host" --config-dir "$R/bconf" \
 		big "$R/big.conf" > "$R/big.out" 2>&1 && break
 	sleep 1
 done
+deadline=$(( $(date +%s) + 20 ))
+until grep -qx 'reloaded' "$R/monitor.out" 2>/dev/null || [ "$(date +%s)" -ge $deadline ]; do
+	sleep 0.5
+done
+kill -TERM $mpid 2>/dev/null
+wait $mpid 2>/dev/null
+grep -qx 'reloaded' "$R/monitor.out"
+check $? "monitor --at A shows A reloading for the put, from A's events cursor"
 [ "$(wc -c < "$R/big.conf")" -gt 1500 ] && [ -f "$R/conf/conf.d/big.conf" ] &&
 	[ "$(grep -c padding "$R/conf/conf.d/big.conf")" = 40 ] && [ -z "$(ls -A "$R/bconf")" ]
 check $? "a $(wc -c < "$R/big.conf")-byte config put --at A goes in pieces and lands in A's conf.d whole"
@@ -275,7 +294,7 @@ check $? "  and a window nobody confirms reverts by itself ($(grep -i revert "$R
 check $? "netcfgd's log carries no sanitizer report"
 
 if [ $failed -ne 0 ]; then
-	for f in a.log b.log root.out a3.log big.out apply.out confirm.out tui.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
+	for f in a.log b.log root.out a3.log big.out apply.out confirm.out tui.out monitor.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
 	echo "node_fleet: some checks FAILED"
 	exit 1
 fi

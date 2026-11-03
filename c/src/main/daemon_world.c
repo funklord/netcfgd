@@ -265,6 +265,9 @@ void ncfg_main_subscribers_tell(ncfg_main_subscribers_t *subscribers,
 	size_t      at;
 	size_t      kept = 0;
 
+	if (subscribers && event && (unsigned)event->kind < 8u * sizeof(subscribers->unpublished)) {
+		subscribers->unpublished |= 1u << (unsigned)event->kind;
+	}
 	if (!subscribers || subscribers->count == 0u || !event) {
 		return;
 	}
