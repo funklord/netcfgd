@@ -12671,6 +12671,47 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.683 Local callers are judged by netcfgd's group; nothing is kept for them
+
+**The holder, 2026-11-03, on fuzznet's sec 849 `judges_local`:** "Yes,
+netcfgd and raidcfgd local auth is gated by their resp. groups. External auth
+is a different story and not completely fleshed out other than the simple
+case. We should avoid storing anything on users that aren't full fuzznet
+users. They only see what the root daemon tells them, and have no config of
+their own. (if they connect to external hosts, they may need to store those
+adresses/auth)"
+
+So three things are settled for 0309:
+
+- **A local caller of netcfgd's verbs is judged by netcfgd's tiers**, which
+  name its groups (`observe = "group:netcfgd"`), not by fuzznet's own local
+  rule -- the `judges_local` shape fuzznet proposed: a caller fuzznet would
+  deny reaches only the extension's verbs, never fuzznet's. Told to fuzznet
+  as information (its inbox `20261103T1745Z`); the flag is fuzznet's to
+  build, and the holder's word to fuzznet is the holder's to give.
+- **A local client keeps nothing.** `ncfg` and the GUI on the machine are
+  not fuzznet users: no identity, no store, no configuration of their own --
+  they ask the root daemon and show what it answers. fuzznet's local
+  protocol needs none of those (a line per request on a unix socket, the
+  caller judged by its credentials), so a 0309 client is a socket client and
+  nothing more. **Audited 2026-11-03:** nothing netcfgd ships writes into a
+  user's home today -- no `QSettings`, no XDG config, no file written by the
+  GUI, `client/` or `ncfg` except where a directory is named to it. The
+  exception the holder names, an external host's address and credentials,
+  is the remote-access client, not yet built; it is where storage on a user
+  is allowed, and only for that.
+- **The socket therefore sits where those clients can find it without
+  knowing anything: `/run/netcfgd`**, beside the control socket it replaces,
+  with the mode and group `apply_policy_permissions` already sets from the
+  control policy. fuzznet's default is per user (`$XDG_RUNTIME_DIR`), so a
+  non-root client looking there would find its own runtime directory and
+  never root's daemon; decided from the rule above rather than asked, since
+  the alternative is a client that has to be told where the daemon is -- a
+  configuration of its own. Not built: it lands with 0309's client.
+
+**External callers are not decided** beyond the simple case (0128's tiers by
+origin); the holder says so, and nothing here assumes more.
+
 ## 10.682 0309's first verb: `get status PATH`, judged by netcfgd's tiers
 
 **Built, in the serve build**, on fuzznet's framing (its sec 843) and its
@@ -12704,11 +12745,11 @@ the status written for a caller who may not observe.
 - **A follower on the default socket has no socket of its own** (sec 841),
   so a client there reaches the face -- a fuzznetd, which does not know
   netcfgd's verbs. While netcfgd follows, its verbs are unreachable; told to
-  fuzznet in the same message.
+  fuzznet in the same message, and **withdrawn by 10.683**: netcfgd's socket
+  goes at `/run/netcfgd`, its own path, where a follower serves its verbs.
 
-Still the holder's, through fuzznet (sec 849): whether an extension may judge
-local users fuzznet would deny (`judges_local`), which is what lets a GUI user
-in `group:netcfgd` reach these verbs without being admitted to fuzznet's own.
+~~Still the holder's, through fuzznet (sec 849): whether an extension may judge
+local users fuzznet would deny (`judges_local`)~~ -- **answered yes, 10.683.**
 
 ## 10.681 The seen listing is fuzzed, and `make fuzz` builds again
 
