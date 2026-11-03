@@ -601,6 +601,8 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
 void ncfg_cli_ask_through(const char *host);
 /* Whether requests go to another node, so nothing may fall back to this one. */
 int ncfg_cli_asking_elsewhere(void);
+/* That node's key, or NULL for this machine. */
+const char *ncfg_cli_asking_host(void);
 
 int ncfg_cli_ask_if_there(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, int *absent, char *err, size_t err_size);

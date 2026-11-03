@@ -29,6 +29,14 @@ class ncfg_events_view : public QWidget {
 public:
 	explicit ncfg_events_view(ncfg_connection *connection, QWidget *parent = nullptr);
 
+	/*
+	 * An event read from another node's cursor (10.704): its word, as
+	 * `ncfg monitor --at` prints it, put in the list with the node named, so
+	 * the tab shows what moved on the node the window shows. Thin, as
+	 * fuzznet's events are: the views are refreshed for the detail.
+	 */
+	void from_node(const QString &word);
+
 public slots:
 	/* Subscribes if the stream is not running. Refresh on a live pane is
 	 * deliberately a no-op rather than a reconnect: the events already on

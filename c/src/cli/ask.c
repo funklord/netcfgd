@@ -242,6 +242,11 @@ int ncfg_cli_asking_elsewhere(void)
 	return through_host != NULL;
 }
 
+const char *ncfg_cli_asking_host(void)
+{
+	return through_host;
+}
+
 /*
  * The request asked of another node (0312, 10.694): its socket's own line, as
  * `call ask at HOST`, through this user's fuzznetd, and the answer read as

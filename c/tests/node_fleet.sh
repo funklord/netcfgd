@@ -170,7 +170,7 @@ except ProcessLookupError:
     pass
 os.waitpid(pid, 0)
 sys.stdout.write(seen.decode(errors="replace"))' "$C" "$host" > "$R/tui.out" 2>&1
-grep -q 'not carried from another node' "$R/tui.out"
+grep -q 'no stream comes from another node' "$R/tui.out"
 check $? "ncfg tui --at A says it has no event stream from another node"
 
 # Nothing under --at falls back to this machine (10.694): `config put` asks

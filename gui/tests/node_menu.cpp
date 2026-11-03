@@ -18,11 +18,19 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QListWidget>
 #include <QTemporaryDir>
 #include <QTimer>
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 static int failures;
 
@@ -53,12 +61,67 @@ int main(int argc, char **argv)
 	QComboBox *nodes = window.findChild<QComboBox *>(QStringLiteral("nodes"));
 	bool polling = false;
 	for (QTimer *timer : window.findChildren<QTimer *>()) {
-		polling = polling || (timer->interval() == 15000 && timer->isActive());
+		polling = polling || (timer->interval() == 5000 && timer->isActive());
 	}
 	check(nodes && nodes->itemData(0).toString().isEmpty() &&
 	          nodes->currentData().toString() == key,
 	      "the node box shows this machine first, and the node it was opened on");
-	check(polling, "  and the window refreshes every 15 seconds, having no event stream");
+	check(polling, "  and the window reads the node's events cursor every 5 seconds");
+
+	{
+		/* The node's events cursor (10.704): a fake fuzznetd on this user's
+		 * socket answers `call events` twice -- where the node is, then one
+		 * event past it -- and the second read lists it in the events tab. */
+		static const char *const answers[] = { "ok 5%205\n", "ok 6%205%20net-drift%20-\n" };
+		const QByteArray dir = (empty.path() + QStringLiteral("/fuzznet")).toUtf8();
+		const QByteArray sock = dir + "/fuzznetd.sock";
+		struct sockaddr_un address;
+		int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+
+		(void)mkdir(dir.constData(), 0700);
+		memset(&address, 0, sizeof(address));
+		address.sun_family = AF_UNIX;
+		memcpy(address.sun_path, sock.constData(), (size_t)sock.size() + 1u);
+		if (listener >= 0 && bind(listener, (struct sockaddr *)&address, sizeof(address)) == 0 &&
+		    listen(listener, 2) == 0) {
+			pid_t child = fork();
+
+			if (child == 0) {
+				alarm(10);
+				for (const char *answer : answers) {
+					char line[256];
+					int fd = accept(listener, nullptr, nullptr);
+
+					if (fd < 0) {
+						_exit(1);
+					}
+					(void)!read(fd, line, sizeof(line));
+					(void)!write(fd, answer, strlen(answer));
+					close(fd);
+				}
+				_exit(0);
+			}
+			close(listener);
+			window.poll_node();
+			window.poll_node();
+			waitpid(child, nullptr, 0);
+			QListWidget *lines = nullptr;
+			for (QListWidget *list : window.findChildren<QListWidget *>()) {
+				for (int row = 0; row < list->count(); row++) {
+					if (list->item(row)->text().contains(QStringLiteral("drift (on node"))) {
+						lines = list;
+					}
+				}
+			}
+			check(lines != nullptr && lines->item(lines->count() - 1)->text() ==
+			                              QStringLiteral("drift (on node %1)").arg(key),
+			      "the node's events cursor lists its event, by the node's whole key");
+		} else {
+			check(false, "a fake fuzznetd for the cursor listens");
+		}
+		(void)unlink(sock.constData());
+		(void)rmdir(dir.constData());
+	}
 
 	if (nodes) {
 		nodes->setCurrentIndex(0); /* this machine, which cannot be reached */

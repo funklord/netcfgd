@@ -75,7 +75,7 @@ int main(int argc, char **argv)
 		events.refresh();
 		events.refresh();
 		check(lines && lines->count() == 1 &&
-		          lines->item(0)->text().contains(QStringLiteral("not carried")),
+		          lines->item(0)->text().contains(QStringLiteral("no stream comes")),
 		      "the events tab on a node says it has no stream, once over three refreshes",
 		      lines ? QStringLiteral("%1 line(s)").arg(lines->count()) : QString());
 	}

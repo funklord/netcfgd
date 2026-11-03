@@ -92,6 +92,16 @@ private slots:
 	void note(const QString &summary);
 	/* Another node chosen in the toolbar's node box, or this machine (10.699). */
 	void node_chosen(int index);
+
+public slots:
+	/*
+	 * Another node's events cursor, read on the node timer (10.704): a new
+	 * event, a gap or a restart refreshes the window and lists the events;
+	 * where the cursor cannot be read, every third tick refreshes anyway, as
+	 * the 15-second refresh did before there was a cursor. Public so that a
+	 * probe can drive it without waiting on the timer.
+	 */
+	void poll_node();
 	void tab_changed();
 
 	/* An event says the machine moved. Restarts the settle timer rather than
@@ -113,6 +123,10 @@ private:
 	QTimer            *poll;
 	QString            home_socket;
 	void               follow_node();
+	/* Where the node's events were last read to, once known (10.704). */
+	size_t             node_cursor = 0;
+	bool               cursor_known = false;
+	int                blind_ticks = 0;
 	QTabWidget        *tabs;
 	/* The three groups. Thirteen tabs in one row is a list to read rather
 	 * than a place to look, and the grouping is the question an operator

@@ -61,8 +61,9 @@ void ncfg_events_view::refresh()
 		}
 		if (told_node != connection->node()) {
 			told_node = connection->node();
-			append(QStringLiteral("events are not carried from another node, so the views "
-			                      "refresh every 15 seconds instead"), QString());
+			append(QStringLiteral("no stream comes from another node: its events are read "
+			                      "from its cursor every 5 seconds, and the views follow"),
+			       QString());
 			emit reported(QStringLiteral("no event stream from node %1").arg(told_node));
 		}
 		return;
@@ -83,6 +84,13 @@ void ncfg_events_view::refresh()
 	}
 	append(QStringLiteral("subscribed to %1").arg(connection->where()), QString());
 	emit reported(QStringLiteral("monitoring %1").arg(connection->where()));
+}
+
+void ncfg_events_view::from_node(const QString &word)
+{
+	/* The whole key, as `where()` gives it: an abbreviation another node
+	 * could share is the one thing this line must not be. */
+	append(QStringLiteral("%1 (on node %2)").arg(word, connection->node()), QString());
 }
 
 void ncfg_events_view::arrived(const ncfg_event_row &event)

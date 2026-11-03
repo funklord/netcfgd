@@ -1009,9 +1009,9 @@ them because no test had ever carried those keys.
    - **the fleet in the GUI is a box** (10.698, 10.699): the window moves
      between this machine and the estate's nodes, refreshing a node on a
      timer for want of a stream;
-   - **events across the estate**. `monitor` is a stream and is not carried
-     (0312). fuzznet's `get events` is the estate's stream, and netcfgd
-     publishing into it is unbuilt;
+   - ~~events across the estate~~ -- **built** (10.703, 10.704): netcfgd
+     publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
+     from a cursor, and the GUI and TUI follow a node by it;
    - **beyond the simple case** (partial authority, callers who are not
      operators), which is the holder's, as 0311 left it.
 
@@ -12683,6 +12683,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.704 The GUI and TUI follow another node by its events cursor
+
+10.698 to 10.700 refreshed a node's views every 15 seconds for want of an
+event stream. 10.703 gave every node an events cursor, so both front ends
+now read it every 5 seconds, and refresh only when it moved: a new event, a
+gap, or a restart.
+
+- **The GUI** (`ncfg_main_window::poll_node`). The first read learns where
+  the node is, and each later one lists every event in the events tab as
+  `WORD (on node KEY)`, by the whole key as `where()` gives it. Choosing
+  another node resets the cursor. Where the cursor cannot be read, every
+  third tick refreshes anyway, which is the old 15 seconds.
+- **The TUI**, every 5 idle ticks, the same way into its events pane, with
+  the 15-tick refresh left for when the cursor cannot be read.
+
+The `node_menu` probe runs a fake fuzznetd on the probe's user socket that
+answers two `call events`. `poll_node` twice lists `drift (on node KEY)`,
+and without the listing the check fails. The pty check of 10.700 reads the
+TUI's new sentence. **The TUI's listing of an event is not under test**:
+nothing happens on A inside the pty's four seconds.
+
 ## 10.703 Another node's events: netcfgd publishes, and `ncfg monitor --at` reads a cursor
 
 fuzznet carries no stream across the estate and plans none. Instead each node
@@ -12731,8 +12752,7 @@ code it tests is one witness, not two.**
 - a quoted subject refused, which fails without the character check;
 - an overfull page said as a gap.
 
-**Not done yet:** the GUI and TUI node views polling this cursor, in place of
-their 15-second full refresh (go item 32).
+The GUI and TUI node views followed in 10.704.
 
 ## 10.702 fuzznet's answers taken: its bound, its huge pages, its services off, and gc-sections
 

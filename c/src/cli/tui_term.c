@@ -31,6 +31,8 @@
  */
 #include "cli_internal.h"
 
+#include "ncfg_fuzznet.h"
+
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/state.h"
@@ -63,6 +65,8 @@
 /* Ticks between refreshes of another node's panes: fifteen seconds, as the
  * GUI's window refreshes one (10.699, 10.700). */
 #define NODE_TICKS 15
+/* Ticks between reads of another node's events cursor (10.704). */
+#define NODE_EVENT_TICKS 5
 
 /* Enough for a burst of keystrokes and for the longest sequence in it. */
 #define KEYS_MAX 64
@@ -580,6 +584,10 @@ static void loop(ncfg_tui_t *tui, const char *socket_path, int events_fd,
 	size_t pending_length = 0;
 	int    streaming = events_fd >= 0;
 	int    idle_ticks = 0;
+	/* Another node's events cursor (10.704): where it was last read to. */
+	size_t node_cursor = 0;
+	int    cursor_known = 0;
+	int    event_ticks = 0;
 
 	for (;;) {
 		struct pollfd watch[2];
@@ -620,6 +628,40 @@ static void loop(ncfg_tui_t *tui, const char *socket_path, int events_fd,
 				(void)act(tui, socket_path, 0x1b);
 				pending_length = 0;
 				continue;
+			}
+			/* **Another node's events cursor, every 5 ticks** (10.704): a new
+			 * event, a gap or a restart is listed and refreshes the panes, as
+			 * a local stream's event does. Where it cannot be read, the
+			 * 15-tick refresh below is what is left. */
+			if (ncfg_cli_asking_elsewhere() && ++event_ticks >= NODE_EVENT_TICKS) {
+				static char subjects[64][NCFG_FUZZNET_SUBJECT_TEXT];
+				char        socket[1100];
+				char        ignored[NCFG_ERROR_MAX];
+				size_t      next = 0;
+				size_t      first = 0;
+				size_t      got = 0;
+				size_t      at;
+
+				event_ticks = 0;
+				if (ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
+				    ncfg_fuzznet_events_at(socket, ncfg_cli_asking_host(),
+				        cursor_known ? node_cursor : (size_t)-1 / 2u, &next, &first,
+				        subjects, 64u, &got, ignored, sizeof(ignored))) {
+					int moved = cursor_known &&
+					    (got > 0 || first > node_cursor || next < node_cursor);
+
+					for (at = 0; cursor_known && at < got; at++) {
+						ncfg_tui_event_push(tui, strncmp(subjects[at], "net-", 4) == 0
+						        ? subjects[at] + 4 : subjects[at]);
+					}
+					cursor_known = 1;
+					node_cursor = next;
+					idle_ticks = 0;
+					if (moved) {
+						refresh(tui, socket_path);
+					}
+					continue;
+				}
 			}
 			/* Another node is asked across the estate, a call that may wait
 			 * on fuzznet's round, so not every second (10.700). */
@@ -731,8 +773,9 @@ int ncfg_tui_run(const ncfg_cli_options_t *options)
 	 * clock instead. */
 	if (ncfg_cli_asking_elsewhere()) {
 		events_fd = -1;
-		ncfg_tui_event_push(&tui, "events are not carried from another node, so the "
-		                          "panes refresh every 15 seconds instead");
+		ncfg_tui_event_push(&tui, "no stream comes from another node: its events are "
+		                          "read from its cursor every 5 seconds, and the panes "
+		                          "follow");
 	} else {
 		events_fd = subscribe(socket_path, err, sizeof(err));
 		if (events_fd < 0) {

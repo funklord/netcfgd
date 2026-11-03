@@ -308,8 +308,8 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * call across the estate each time is not a load on the node. Started
 	 * and stopped as the window moves between nodes (`follow_node`). */
 	poll = new QTimer(this);
-	poll->setInterval(15000);
-	connect(poll, &QTimer::timeout, this, &ncfg_main_window::refresh);
+	poll->setInterval(5000);
+	connect(poll, &QTimer::timeout, this, &ncfg_main_window::poll_node);
 	home_socket = connection->node().isEmpty() ? connection->where() : QString();
 	/* Here, after the timer exists: the node box above is built first, and
 	 * following the node from there touched a timer not yet made. */
@@ -366,8 +366,54 @@ void ncfg_main_window::closeEvent(QCloseEvent *event)
 	QMainWindow::closeEvent(event);
 }
 
+void ncfg_main_window::poll_node()
+{
+	static char subjects[64][NCFG_FUZZNET_SUBJECT_TEXT];
+	char        socket[1100];
+	char        err[NCFG_ERROR_MAX];
+	size_t      next = 0;
+	size_t      first = 0;
+	size_t      count = 0;
+	const QByteArray key = connection->node().toUtf8();
+
+	if (key.isEmpty()) {
+		return;
+	}
+	const size_t from = cursor_known ? node_cursor : (size_t)-1 / 2u;
+	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket)) ||
+	    !ncfg_fuzznet_events_at(socket, key.constData(), from, &next, &first, subjects, 64u,
+	                            &count, err, sizeof(err))) {
+		/* No cursor to read: refresh on the old clock rather than never. */
+		if (++blind_ticks >= 3) {
+			blind_ticks = 0;
+			refresh();
+		}
+		return;
+	}
+	blind_ticks = 0;
+	if (!cursor_known) {
+		/* Where the node is now; what came before was shown when opened. */
+		cursor_known = true;
+		node_cursor = next;
+		return;
+	}
+	const bool moved = count > 0 || first > node_cursor || next < node_cursor;
+	for (size_t at = 0; at < count; at++) {
+		const char *word = strncmp(subjects[at], "net-", 4) == 0 ? subjects[at] + 4
+		                                                         : subjects[at];
+		events->from_node(QString::fromUtf8(word));
+	}
+	node_cursor = next;
+	if (moved) {
+		refresh();
+	}
+}
+
 void ncfg_main_window::follow_node()
 {
+	/* A cursor is one node's: a new node is read from where it is now. */
+	cursor_known = false;
+	blind_ticks = 0;
 	if (connection->node().isEmpty()) {
 		poll->stop();
 	} else if (!poll->isActive()) {
