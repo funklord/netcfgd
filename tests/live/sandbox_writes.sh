@@ -421,6 +421,24 @@ else
 	check "the unit's own ProtectSystem= and ReadWritePaths= leave /etc writable" \
 		"$etc_state" "rw"
 
+	# **And what HOME a root service has**, because the fuzznet store is
+	# found from it (project.md 10.677): procd and a boot-time sysvinit
+	# script hand a service init's HOME=/, which put the store at
+	# //.local/share/fuzznet. A system unit is meant to have none, so the
+	# daemon takes root's home from the password database. Asked of
+	# systemd rather than assumed, as the two scripts' cases were measured.
+	# Bracketed, so an empty HOME -- which fuzznet's default also passes
+	# over to the password database -- is told from a probe that printed
+	# nothing at all.
+	unit_home=$(timeout 60 systemd-run --quiet --wait --pipe --collect \
+		/bin/sh -c 'echo "home=[${HOME-unset}]"' 2>/dev/null || echo unknown)
+	case "$unit_home" in
+	"home=[unset]" | "home=[]" | "home=[/root]") home_ok=yes ;;
+	*) home_ok="no: $unit_home" ;;
+	esac
+	check "a root system service has no HOME of /, so the store is root's" \
+		"$home_ok" "yes"
+
 	# **And that a script in netcfgd's runtime directory can be executed.**
 	# systemd mounts /run `noexec` by default since v256, and netcfgd writes
 	# scripts there for the programs it drives: udhcpc's, odhcp6c's prefix

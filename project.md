@@ -12696,7 +12696,10 @@ kernel starts init with `HOME=/`, and a script run at boot inherits it:
 at boot). So `packaging/sysvinit/netcfgd` names the store the same way.
 `openrc-run` clears the environment, and the OpenRC script's daemon found
 root's home by its own default with `HOME=/` set, so it is left as it is.
-systemd starts a root service with no `HOME`, which is the default's case.
+systemd gives a root system service an empty `HOME`, measured in
+`hull-sandbox` (`tests/live/sandbox_writes.sh` asks `systemd-run`), and
+fuzznet's default passes an empty one over to the password database as it
+does an unset one -- so the unit needs nothing.
 **The rig had been unable to see this**: its payload starts the scripts from
 a shell holding root's `HOME`, so the first version of the check passed with
 the old script. It now starts both with `HOME=/`, and the old LSB script
