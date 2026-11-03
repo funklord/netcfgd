@@ -940,6 +940,65 @@ static void a_descriptor_that_hung_up_is_dropped(void)
 }
 
 
+
+/*
+ * The daemon's own loop, the same fault (10.678): with the deadline kept in
+ * `next_tick`, a round that something ended after the five seconds were up
+ * ticks as well. Without it each round began a fresh five seconds, which is
+ * the second half of this check.
+ */
+static void an_event_every_few_seconds_does_not_switch_the_backstop_off(void)
+{
+	static const uint64_t    first[3] = { 0u, 100u, 200u };
+	static const uint64_t    later[2] = { 5100u, 5200u };
+	ncfg_main_sources_t      sources;
+	ncfg_main_run_t          run;
+	ncfg_main_round_report_t report;
+	counter_t                counter;
+	char                     err[NCFG_ERROR_MAX];
+	uint64_t                 next_tick = 0;
+	int                      reading = -1;
+	int                      writing = -1;
+	int                      kept;
+
+	if (!pipe_of(&reading, &writing)) {
+		check(0, "a pipe for the steady events");
+		return;
+	}
+	for (kept = 1; kept >= 0; kept--) {
+		memset(&counter, 0, sizeof(counter));
+		counter.fd = reading;
+		ncfg_main_sources_init(&sources);
+		install(&sources, NCFG_MAIN_SOURCE_KERNEL, reading, drain_counter, &counter);
+		memset(&run, 0, sizeof(run));
+		run.sources = &sources;
+		run.ticks = fake_ticks;
+		next_tick = 0;
+		run.next_tick = kept ? &next_tick : NULL;
+
+		(void)!write(writing, "k", 1u);
+		clock_is(first, kept ? 3u : 2u);
+		err[0] = '\0';
+		(void)ncfg_main_round(&run, &report, err, sizeof(err));
+		if (kept) {
+			check(report.wake.kernel_changed == 1 && !report.wake.ticked,
+			    "an event before the deadline is a round that does not tick");
+		}
+		(void)!write(writing, "k", 1u);
+		clock_is(later, 2u);
+		(void)ncfg_main_round(&run, &report, err, sizeof(err));
+		if (kept) {
+			check(report.wake.kernel_changed == 1 && report.wake.ticked,
+			    "  and one after it ticks as well, the deadline kept across rounds");
+		} else {
+			check(!report.wake.ticked,
+			    "  where a round measures its own five seconds, the same one does not");
+		}
+	}
+	(void)close(reading);
+	(void)close(writing);
+}
+
 /*
  * The same round, driven by a loop this daemon does not own (10.676).
  *
@@ -953,6 +1012,8 @@ static void a_descriptor_that_hung_up_is_dropped(void)
 static void an_outside_loop_drives_the_same_round(void)
 {
 	static const uint64_t    quiet[3] = { 0u, 100u, (uint64_t)NCFG_MAIN_TICK_MS };
+	static const uint64_t    early[2] = { 0u, 100u };
+	static const uint64_t    steady[3] = { 0u, 3000u, 6000u };
 	ncfg_main_sources_t      sources;
 	ncfg_main_run_t          run;
 	ncfg_main_outside_t      outside;
@@ -992,7 +1053,7 @@ static void an_outside_loop_drives_the_same_round(void)
 	for (at = 0; at < 50; at++) {
 		(void)!write(writing, "k", 1u);
 	}
-	clock_is_expired();
+	clock_is(early, 2u);
 	ncfg_main_outside_begin(&run, &outside);
 	ncfg_main_outside_ready(&run, &outside, reading);
 	ncfg_main_outside_ready(&run, &outside, 1000);
@@ -1003,6 +1064,26 @@ static void an_outside_loop_drives_the_same_round(void)
 	ncfg_main_outside_ready(&run, &outside, reading);
 	check(!outside.took,
 	    "a readiness the descriptor no longer has, asked again, is nothing");
+
+	/*
+	 * **A round ended by a readiness does not restart the backstop** (10.678).
+	 * Something readable at 3 s and again at 6 s: the first is an ordinary
+	 * round, and the second, past the five seconds counted from the start, is
+	 * the tick as well. Restarting the deadline at every round's end -- the
+	 * first version -- made the second "not yet" too, and a daemon asked
+	 * something every few seconds never ticked at all.
+	 */
+	clock_is(steady, 3u);
+	ncfg_main_outside_begin(&run, &outside);
+	(void)!write(writing, "k", 1u);
+	ncfg_main_outside_ready(&run, &outside, reading);
+	check(ncfg_main_outside_tick(&run, &outside, &report) && !report.wake.ticked,
+	    "a readiness three seconds in ends a round that is not the backstop");
+	(void)!write(writing, "k", 1u);
+	ncfg_main_outside_ready(&run, &outside, reading);
+	check(ncfg_main_outside_tick(&run, &outside, &report) && report.wake.ticked &&
+	        report.wake.kernel_changed == 1,
+	    "  and one at six seconds is the backstop as well as the news, not postponed");
 
 	(void)close(writing);
 	for (at = 0; at < 8 && sources.count > 1u; at++) {
@@ -2752,6 +2833,7 @@ int main(void)
 	a_source_that_will_not_be_read_loses_its_place();
 	a_signal_mid_wait_does_not_restart_the_backstop();
 	an_outside_loop_drives_the_same_round();
+	an_event_every_few_seconds_does_not_switch_the_backstop_off();
 
 	the_configuration_watch_answers_the_same_question_either_way(base, 0);
 	the_configuration_watch_answers_the_same_question_either_way(base, 1);

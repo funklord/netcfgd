@@ -970,6 +970,7 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 
 static int start(const options_t *options)
 {
+	uint64_t                 next_tick = 0;
 	ncfg_main_where_t        where;
 	ncfg_daemon_state_t      state;
 	ncfg_observe_source_t    source;
@@ -1433,6 +1434,9 @@ static int start(const options_t *options)
 	run.subscribers = &subscribers;
 	run.refresh = ncfg_main_watchers_refresh;
 	run.refresh_context = &watchers;
+	/* Kept across rounds, so a daemon asked something every second still
+	 * ticks (`ncfg_main_run_t::next_tick`, project.md 10.678). */
+	run.next_tick = &next_tick;
 	err[0] = '\0';
 	if (!serve_node(node, options, &run, loop.seen) && !ncfg_main_serve(&run, err, sizeof(err))) {
 		code = cannot("this daemon stopped watching its descriptors", err);

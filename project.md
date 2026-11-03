@@ -12671,6 +12671,42 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.678 The backstop was switched off by anything asked more often than it
+
+**Found** (2026-11-03) while writing 10.676's follower phase: a daemon asked
+`ncfg status` every half second re-observed nothing at all -- measured, no
+`look` in fourteen seconds, **in netcfgd's own loop as well as in fuzznet's**.
+Every round that an event or a request ended began a fresh five seconds, so
+anything arriving more often than the tick postponed it for ever. That is
+exactly what `loop_internal.h` said the tick was measured to survive -- "the
+backstop is switched off by exactly the chattiness it is meant to survive",
+of the Rust's `recv_timeout` -- and the C had kept the same fault one level
+up: the deadline was per round, not per loop.
+
+**What it cost while it lasted:** the periodic re-observation is how netcfgd
+notices drift the kernel does not announce, and how the stations seen are
+read back (10.674); a status-bar script polling `ncfg status`, or a kernel
+chattier than one event in five seconds, stopped both. The GUI does not poll
+-- it follows `monitor` -- so a desktop with only the GUI open was not
+affected. A confirm window's deadline has its own timer and was not affected
+either.
+
+**Fixed in both loops.** The own loop keeps its deadline in
+`ncfg_main_run_t::next_tick`, set by the daemon: a round that ends for an
+event after the deadline has passed ticks as well, and a round that ticked
+sets the next one. The outside loop keeps its deadline across rounds and
+moves it only on a tick. A run with no `next_tick` measures per round as
+before, which is what the existing checks of the round still describe.
+
+Checked: `loop_test`, three new checks -- an event before the deadline does
+not tick, one after it does, and without `next_tick` the same one does not;
+the outside loop's readiness at 3 s and at 6 s ticks on the second. Removing
+the late tick, or restarting the outside deadline every round, each turns
+one red. End to end, `status` every half second for fourteen seconds: three
+looks in the own loop and two in fuzznet's, where there had been none.
+`node_serve.sh`'s follower phase no longer makes a configuration edit to get
+a pass.
+
 ## 10.677 procd names the fuzznet store: root's, where a shell's fuzznetd looks
 
 **The holder, 2026-11-03, on 10.672's open point:** the init script passes
@@ -12854,9 +12890,11 @@ node module under other flags.
 answers `ncfg reload` in 5 ms and reads the station back through the face;
 the fuzznetd stopped, netcfgd is the face (`face` names its socket) and
 answers again after restarting itself; SIGTERM ends it with 0. Clean under
-`SANITIZE=1` as well. A reload is not a pass that lists records, which is why
-the phase makes a configuration edit before looking for the station -- the
-first version of the check failed for that.
+`SANITIZE=1` as well. ~~A reload is not a pass that lists records~~ -- that
+was this phase's first explanation for a failure, and it was wrong: the
+cause was the backstop being switched off by the test's own `status`
+polling, a fault in both loops (10.678). The phase now relies on the
+backstop for the read-back, which checks that fix on the follower path.
 
 **Next:** serving by default, once the size is decided (ask 8, then the
 holder's), and ask 7, whose answer says whether a follower and a face may

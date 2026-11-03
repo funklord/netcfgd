@@ -741,6 +741,20 @@ typedef struct {
 	/* Look for radios that have appeared or gone. NULL never looks. */
 	void               (*refresh)(void *context, ncfg_main_sources_t *sources);
 	void                *refresh_context;
+	/*
+	 * The backstop's deadline, kept across rounds: monotonic milliseconds,
+	 * 0 for "not set yet". NULL measures it from the top of each round.
+	 *
+	 * **Kept, because a round that ends for an event must not restart it.**
+	 * Per round, any event or request arriving more often than the tick --
+	 * `ncfg status` polled from a status bar, a chatty kernel -- ended every
+	 * round before its deadline, and the backstop never fired: measured, no
+	 * observation at all in fourteen seconds of `status` every half second
+	 * (project.md 10.678). That is the chattiness the tick is described above
+	 * as surviving. With this set, a round that ends after the deadline has
+	 * passed ticks as well as reporting what woke it.
+	 */
+	uint64_t            *next_tick;
 } ncfg_main_run_t;
 
 /*

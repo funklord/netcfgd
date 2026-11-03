@@ -141,9 +141,10 @@ said=$(timeout 10 "$C" reload --run-dir "$R/run" 2>&1 | grep -v nftables | head 
 ms=$(( ($(date +%s%N) - t0) / 1000000 ))
 echo "$said" | grep -q '^reloaded' && [ "$ms" -lt 2000 ]
 check $? "  and still answers ncfg reload at once ($ms ms)"
-# An edit, for a pass that observes: phase one's read-back came from the pass
-# its own edit started, and a reload alone is not one that lists records.
-conf "$(printf 'device dummy8 {\n\tkind = "dummy"\n}\n')"
+# No edit, so the read-back comes from the backstop's pass -- while the loop
+# below asks `status` every half second. Before 10.678 each of those requests
+# restarted the five seconds and this never arrived; the first version of
+# this phase blamed the reload instead and made an edit to get a pass.
 n=0
 until timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null |
 	grep -q 'aa:bb:cc:00:00:07' || [ $n -gt 20 ]; do

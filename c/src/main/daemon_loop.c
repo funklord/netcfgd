@@ -776,7 +776,14 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 		run->refresh(run->refresh_context, run->sources);
 	}
 
-	deadline = ticks_of(run) + (uint64_t)NCFG_MAIN_TICK_MS;
+	if (run->next_tick) {
+		if (*run->next_tick == 0u) {
+			*run->next_tick = ticks_of(run) + (uint64_t)NCFG_MAIN_TICK_MS;
+		}
+		deadline = *run->next_tick;
+	} else {
+		deadline = ticks_of(run) + (uint64_t)NCFG_MAIN_TICK_MS;
+	}
 
 	for (round = 0u;; round++) {
 		ncfg_main_wait_t meant;
@@ -885,6 +892,23 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 		}
 	}
 
+	/*
+	 * A backstop kept across rounds (`next_tick`): a round that ended for an
+	 * event after the deadline had passed is the tick as well, and a round
+	 * that ticked starts the next deadline. Without this, every round that
+	 * something ended early began a fresh five seconds.
+	 */
+	if (run->next_tick) {
+		const uint64_t now = ticks_of(run);
+
+		if (!harvest.wake.ticked && now >= deadline) {
+			ncfg_reconcile_collapse(&harvest.wake, NCFG_WOKE_TICK);
+		}
+		if (harvest.wake.ticked) {
+			*run->next_tick = now + (uint64_t)NCFG_MAIN_TICK_MS;
+		}
+	}
+
 	if (report) {
 		/* Waits, not extra waits: one is an ordinary round. A test that had
 		 * to add one to reach the bound would be a test spelling an
@@ -982,22 +1006,37 @@ int ncfg_main_outside_tick(const ncfg_main_run_t *run, ncfg_main_outside_t *outs
     ncfg_main_round_report_t *report)
 {
 	ncfg_main_round_report_t mine;
+	const uint64_t           now = ticks_of(run);
+	const int                due = now >= outside->deadline;
 
 	if (!report) {
 		report = &mine;
 	}
 	memset(report, 0, sizeof(*report));
-	if (!outside->took) {
-		if (ticks_of(run) < outside->deadline) {
-			return 0;
-		}
-		/* A quiet round's backstop, as the round's own wait timing out is. */
+	if (!outside->took && !due) {
+		return 0;
+	}
+	/*
+	 * The backstop, whether or not something else ended this round: the
+	 * deadline is the outside loop's for as long as it runs, and only a round
+	 * that ticked moves it on. Restarting it at every round's end was the
+	 * fault `next_tick` describes, in this loop's form.
+	 */
+	if (due) {
 		ncfg_reconcile_collapse(&outside->harvest.wake, NCFG_WOKE_TICK);
 	}
 	ask_the_unwaited(run->sources, &outside->harvest);
 	report->drains = 1u;
 	report->dropped = outside->dropped;
 	round_end(run, &outside->harvest, report);
-	ncfg_main_outside_begin(run, outside);
+	memset(&outside->harvest, 0, sizeof(outside->harvest));
+	outside->took = 0;
+	outside->dropped = 0;
+	if (run->refresh) {
+		run->refresh(run->refresh_context, run->sources);
+	}
+	if (due) {
+		outside->deadline = now + (uint64_t)NCFG_MAIN_TICK_MS;
+	}
 	return 1;
 }
