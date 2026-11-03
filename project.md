@@ -12671,6 +12671,38 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.696 A refused `seen` record is asked again a minute on, and said once
+
+Found by deriving a lens from 10.695's bug, a limit taken from the wrong
+one of fuzznet's bounds, and asking every line netcfgd sends to fuzznet
+whether it fits 512 bytes. Most do. A `seen` record need not:
+
+- `NCFG_SEEN_VALUE_MAX` is 256 bytes, and escaping can triple that.
+- A lease's value carries the hostname the DHCP client chose, and option 12
+  allows 255 bytes.
+
+So a client with a long enough hostname makes a record fuzznet refuses,
+`malformed a request is at most 512 bytes`. The recorder then asked it again
+**every pass** and warned each time, because a refused record was never held.
+That is a log any device joining the network could fill.
+
+The retry was deliberate: `seen_test` asserted "asked again next pass, since
+nothing was kept", because a refusal may lift once a permit is given or a
+record trimmed. So it stays, but **a minute on**, the backoff the recorder
+already uses when fuzznet is silent (`NCFG_SEEN_RETRY_SECONDS`), and the
+warning is said once for each record and value. The held record carries
+`refused`, so it is asked again sooner than a written one's daily refresh
+but not every pass. A changed value is asked at once, as before. The
+test's two checks of this, a refusal and a fuzznetd with no record store
+that answers with its status line, now say the record is not asked the next
+pass and is asked a minute on. Saying the warning once is counted rather
+than asserted, because `seen_test` cannot capture the log: three warnings
+for two rounds of three refused records, and six with the once-only rule
+removed.
+
+Not changed: what a record says. Cutting a client's hostname to fit would
+write something the network did not say.
+
 ## 10.695 A request longer than a line goes in pieces: `askpart`
 
 10.694's open limit. A request travels inside one fuzznet line, about 1 KB,

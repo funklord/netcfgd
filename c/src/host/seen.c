@@ -38,6 +38,10 @@ typedef struct {
 	char     key[NCFG_SEEN_KEY_MAX + 1u];
 	char     value[NCFG_SEEN_VALUE_MAX + 1u];
 	uint64_t written;
+	/* Refused, not written (10.696): `written` is when it was last asked, and
+	 * it is asked again a minute on rather than every pass, its warning said
+	 * once for this value. */
+	int      refused;
 } held_t;
 
 struct ncfg_seen {
@@ -282,6 +286,7 @@ static void held_keep(ncfg_seen_t *seen, const char *key, const char *value, uin
 	}
 	(void)snprintf(one->value, sizeof(one->value), "%s", value);
 	one->written = now;
+	one->refused = 0;
 }
 
 /* Write one host if it is new, changed or due. Returns 1 where written; sets
@@ -298,7 +303,8 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 		return 0;
 	}
 	one = held_find(seen, key);
-	if (one && strcmp(one->value, value) == 0 && now < one->written + NCFG_SEEN_REFRESH_SECONDS) {
+	if (one && strcmp(one->value, value) == 0 &&
+	    now < one->written + (one->refused ? NCFG_SEEN_RETRY_SECONDS : NCFG_SEEN_REFRESH_SECONDS)) {
 		return 0;
 	}
 	/* Asked of the store each time where there is one: the face is whichever
@@ -325,7 +331,24 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 				seen->said_silent = 1;
 			}
 		} else {
-			ncfg_log_emitf("seen", NCFG_LOG_WARNING, "%s", why);
+			/*
+			 * **Refused: asked again a minute on, and said once** (10.696). A
+			 * refusal may lift -- a permit given, a record trimmed -- so it is
+			 * asked again; but every pass, warning each time, was a log a
+			 * joining client could fill, since a lease's value carries the
+			 * hostname the client chose, and one long enough escapes past
+			 * fuzznet's 512-byte line.
+			 */
+			int said = one && one->refused && strcmp(one->value, value) == 0;
+
+			held_keep(seen, key, value, now);
+			one = held_find(seen, key);
+			if (one) {
+				one->refused = 1;
+			}
+			if (!said) {
+				ncfg_log_emitf("seen", NCFG_LOG_WARNING, "%s", why);
+			}
 		}
 		return 0;
 	}

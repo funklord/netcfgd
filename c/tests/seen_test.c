@@ -229,8 +229,10 @@ static void nobody_listening(const char *run)
 	seen = ncfg_seen_new(socket_path);
 	check(ncfg_seen_record(seen, &observed, now) == 0u,
 	    "a refusal writes nothing");
-	check(ncfg_seen_record(seen, &observed, now + 1u) == 0u && lines_in(log) == 6,
-	    "  and is asked again next pass, since nothing was kept");
+	check(ncfg_seen_record(seen, &observed, now + 1u) == 0u && lines_in(log) == 3,
+	    "  and is not asked again the next pass (10.696)");
+	check(ncfg_seen_record(seen, &observed, now + 61u) == 0u && lines_in(log) == 6,
+	    "  but a minute on, since a refusal may lift");
 	stop_serving();
 	ncfg_seen_free(seen);
 
@@ -241,8 +243,10 @@ static void nobody_listening(const char *run)
 	serve(socket_path, log, STATUS_LINE, 6);
 	seen = ncfg_seen_new(socket_path);
 	check(ncfg_seen_record(seen, &observed, now) == 0u &&
-	        ncfg_seen_record(seen, &observed, now + 1u) == 0u && lines_in(log) == 6,
-	    "a fuzznetd's status line, which begins `ok`, keeps nothing and is asked again");
+	        ncfg_seen_record(seen, &observed, now + 1u) == 0u && lines_in(log) == 3 &&
+	        ncfg_seen_record(seen, &observed, now + 61u) == 0u && lines_in(log) == 6,
+	    "a fuzznetd's status line, which begins `ok`, keeps nothing and is asked again "
+	    "a minute on (10.696)");
 	stop_serving();
 	ncfg_seen_free(seen);
 }
