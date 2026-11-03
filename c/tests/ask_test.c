@@ -216,6 +216,74 @@ int main(void)
 	pages = gather(&ask, operator_key, NULL, "{\"request\":\"plan\"}", 200u, 90000u, &joined);
 	check(pages > 10u && runs == 3u, "two callers' answers are kept apart");
 
+	/* A request too long for one line, in pieces (10.695). */
+	{
+		static char big[2200];
+		char        piece_args[1200];
+		char        digest_text[20];
+		uint64_t    digest;
+		size_t      total;
+		size_t      offset = 0;
+		int         whole = 1;
+
+		(void)snprintf(big, sizeof(big), "{\"request\":\"config_put\",\"name\":\"big\","
+		    "\"text\":\"");
+		at = strlen(big);
+		while (at < sizeof(big) - 3u) {
+			big[at++] = 'x';
+		}
+		memcpy(big + at, "\"}", 3u);
+		total = strlen(big);
+		digest = ncfg_status_page_digest(big, total);
+		(void)snprintf(digest_text, sizeof(digest_text), "%016llx", (unsigned long long)digest);
+
+		(void)snprintf(piece_args, sizeof(piece_args), "%zu 600 %s %.600s", total, digest_text,
+		    big + 600);
+		n = ncfg_main_ask_part(&ask, NULL, &root, piece_args, strlen(piece_args), reply,
+		    sizeof(reply), 100000u);
+		reply[n < sizeof(reply) ? n : 0] = '\0';
+		check(strncmp(reply, "error ", 6) == 0, "a piece out of order is refused");
+
+		runs = 0;
+		while (offset < total) {
+			size_t piece = total - offset < 600u ? total - offset : 600u;
+
+			(void)snprintf(piece_args, sizeof(piece_args), "%zu %zu %s %.*s", total, offset,
+			    digest_text, (int)piece, big + offset);
+			n = ncfg_main_ask_part(&ask, NULL, &root, piece_args, strlen(piece_args), reply,
+			    sizeof(reply), 100000u);
+			reply[n < sizeof(reply) ? n : 0] = '\0';
+			whole = whole && strncmp(reply, "ok ", 3) == 0;
+			offset += piece;
+		}
+		check(whole && runs == 0u, "a long request is staged in pieces, none of them run");
+		(void)snprintf(args, sizeof(args), "@%s", digest_text);
+		pages = gather(&ask, NULL, &root, args, 200u, 100000u, &joined);
+		check(pages > 10u && runs == 1u && joined.length == strlen(long_answer),
+		    "  and `ask FROM @DIGEST` runs it once, paged from its kept answer");
+		said = once(&ask, NULL, &root, args, 100001u);
+		check(runs == 1u && strstr(said, "staged") != NULL,
+		    "  and once run it is staged no longer");
+
+		/* Joined pieces that are not the request their digest names. */
+		(void)snprintf(piece_args, sizeof(piece_args), "%zu 0 0000000000000001 %.600s", total,
+		    big);
+		(void)ncfg_main_ask_part(&ask, NULL, &root, piece_args, strlen(piece_args), reply,
+		    sizeof(reply), 100002u);
+		offset = 600u;
+		while (offset < total) {
+			size_t piece = total - offset < 600u ? total - offset : 600u;
+
+			(void)snprintf(piece_args, sizeof(piece_args), "%zu %zu 0000000000000001 %.*s",
+			    total, offset, (int)piece, big + offset);
+			n = ncfg_main_ask_part(&ask, NULL, &root, piece_args, strlen(piece_args), reply,
+			    sizeof(reply), 100002u);
+			reply[n < sizeof(reply) ? n : 0] = '\0';
+			offset += piece;
+		}
+		check(strstr(reply, "digest") != NULL, "pieces that are not their digest are refused");
+	}
+
 	ncfg_buf_free(&joined);
 	ncfg_main_ask_free(&ask);
 	if (failures) {

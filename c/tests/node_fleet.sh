@@ -16,6 +16,8 @@
 #     command that works on this machine is refused with `--at`;
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
+#   - and with its admin tier open, a configuration longer than one line,
+#     put through B, goes in pieces and lands in A's conf.d whole;
 #   - and a key that is not one is refused before anything is asked.
 #
 # HOW IT STOPS: every wait is bounded (socket waits by a count of 0.5 s
@@ -177,11 +179,43 @@ done
 echo "$said" | grep -q 'denied.*observe'
 check $? "with A's remote observe tier closed, A denies it, naming the tier"
 
-! grep -q 'runtime error\|Sanitizer' "$R/a.log" "$R/a2.log"
+# A configuration longer than one fuzznet line, put through B (10.695):
+# sent in pieces with `askpart` and run by digest, under A's remote admin
+# tier, open this time. It lands in A's conf.d, whole, and nothing is
+# written here.
+apid=${pids##* }
+kill -TERM "$apid" 2>/dev/null
+wait "$apid" 2>/dev/null
+printf 'global {\n\tcontrol {\n\t\tobserve = "any"\n\t}\n\tremote {\n\t\tobserve = true\n\t\tadmin = true\n\t}\n}\n' \
+	> "$R/conf/netcfgd.conf"
+timeout -k 5 120 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/a" --fuzznet-arg "--socket=$R/a.sock" --fuzznet-arg --no-log-file \
+	--fuzznet-arg "--udp-port=$PA" --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/a3.log" 2>&1 &
+pids="$pids $!"
+{
+	printf 'device lo {\n\tmanaged = false\n}\n'
+	i=0
+	while [ $i -lt 40 ]; do
+		printf '# padding line %02d, so that this drop-in is longer than a line\n' $i
+		i=$((i + 1))
+	done
+} > "$R/big.conf"
+deadline=$(( $(date +%s) + 60 ))
+while [ "$(date +%s)" -lt $deadline ]; do
+	XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" config put --at "$host" --config-dir "$R/bconf" \
+		big "$R/big.conf" > "$R/big.out" 2>&1 && break
+	sleep 1
+done
+[ "$(wc -c < "$R/big.conf")" -gt 1500 ] && [ -f "$R/conf/conf.d/big.conf" ] &&
+	[ "$(grep -c padding "$R/conf/conf.d/big.conf")" = 40 ] && [ -z "$(ls -A "$R/bconf")" ]
+check $? "a $(wc -c < "$R/big.conf")-byte config put --at A goes in pieces and lands in A's conf.d whole"
+
+! grep -q 'runtime error\|Sanitizer' "$R/a.log" "$R/a2.log" "$R/a3.log"
 check $? "netcfgd's log carries no sanitizer report"
 
 if [ $failed -ne 0 ]; then
-	for f in a.log b.log root.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
+	for f in a.log b.log root.out a3.log big.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
 	echo "node_fleet: some checks FAILED"
 	exit 1
 fi

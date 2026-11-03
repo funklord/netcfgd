@@ -49,6 +49,14 @@
 int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t reply_size,
     int wait_ms, int *silent, char *why, size_t why_size);
 
+/*
+ * The longest line fuzznet's local socket reads, its newline included: its
+ * `FZN_REQUEST_MAX` (`local/vocabulary.h`). Far less than a reply's 1024,
+ * which is the number 10.694 first sized requests by -- measured when a 600-
+ * byte piece came back `malformed a request is at most 512 bytes`.
+ */
+#define NCFG_FUZZNET_REQUEST_MAX 512u
+
 /* `text` escaped into `out`, NUL-ended: 0 where it does not fit. */
 int ncfg_fuzznet_escape(const char *text, char *out, size_t out_size);
 
@@ -141,9 +149,11 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
  * FROM REQUEST` through the fuzznetd at `socket`, every page joined. 1 with
  * the node's answer line in `*out`, as its socket would have written it.
  *
- * **A request is one fuzznet line**, so one longer than about 900 bytes is
- * refused here with a sentence rather than cut: fuzznet's local grammar caps
- * a line at FZN_REPLY_MAX, and a request half-sent is a different request.
+ * **A request longer than one fuzznet line is sent in pieces** (10.695):
+ * `call askpart at HOST TOTAL OFFSET DIGEST PIECE` in order from 0, each
+ * answered `ok HAVE TOTAL`, and then `ask` names it as `@DIGEST`. That node
+ * keeps the pieces for this caller only until it is whole and run, and
+ * refuses one past 256 KiB.
  */
 int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *request, char **out,
     size_t *length, char *err, size_t err_size);

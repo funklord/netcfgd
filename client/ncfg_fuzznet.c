@@ -218,6 +218,13 @@ int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t rep
 		return 0;
 	}
 	length = strlen(line);
+	if (length + (length && line[length - 1u] == '\n' ? 0u : 1u) > NCFG_FUZZNET_REQUEST_MAX) {
+		say(why, why_size, "a line to fuzznet is at most %u bytes, and this is %zu",
+		    NCFG_FUZZNET_REQUEST_MAX, length);
+		(void)close(fd);
+		*silent = 0;
+		return 0;
+	}
 	if (!send_within(fd, path, line, length, wait_ms, why, why_size) ||
 	    ((length == 0u || line[length - 1u] != '\n') &&
 	        !send_within(fd, path, "\n", 1u, wait_ms, why, why_size))) {
@@ -477,6 +484,7 @@ typedef struct {
 	const char *path;
 	const char *host;
 	const char *request; /* for `ask`; NULL asks `status` */
+	char        staged[18]; /* `@DIGEST` once it went in pieces, else "" */
 } asked_t;
 
 /* One page over fuzznet: `call status [at HOST] FROM` on the socket in
@@ -486,14 +494,14 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
     char *err, size_t err_size)
 {
 	const asked_t *asked = context;
-	char           line[1000];
+	char           line[NCFG_FUZZNET_REQUEST_MAX];
 	char           reply[2048];
 	int            silent = 0;
 	long           n;
 
 	if (asked->request) {
 		int wrote = snprintf(line, sizeof(line), "call ask at %s %zu %s", asked->host, from,
-		    asked->request);
+		    asked->staged[0] ? asked->staged : asked->request);
 
 		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
 			say(err, err_size, "the request is too long for one fuzznet line: %zu bytes",
@@ -581,6 +589,45 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
 
+/* A piece of a long request: what fits fuzznet's 512-byte line beside `call
+ * askpart at HOST TOTAL OFFSET DIGEST ` (about 110 bytes), with room to
+ * spare; and the longest request sent whole beside `call ask at HOST FROM `. */
+#define ASK_PIECE 360u
+
+/* `request` to `host` in pieces, in order, each answered `ok HAVE TOTAL`. */
+static int send_in_pieces(const char *socket, const char *host, const char *request,
+    char *err, size_t err_size)
+{
+	size_t   total = strlen(request);
+	uint64_t digest = ncfg_status_page_digest(request, total);
+	size_t   offset = 0;
+
+	while (offset < total) {
+		char   line[NCFG_FUZZNET_REQUEST_MAX];
+		char   reply[256];
+		size_t piece = total - offset < ASK_PIECE ? total - offset : ASK_PIECE;
+		int    silent = 0;
+		int    wrote = snprintf(line, sizeof(line), "call askpart at %s %zu %zu %016llx %.*s",
+		    host, total, offset, (unsigned long long)digest, (int)piece, request + offset);
+
+		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
+			say(err, err_size, "a piece of the request does not fit a line");
+			return 0;
+		}
+		if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 8000, &silent, err,
+		        err_size)) {
+			return 0;
+		}
+		/* fuzznet's `ok`, then the node's escaped `ok%20HAVE%20TOTAL`. */
+		if (strncmp(reply, "ok ok%20", 8) != 0) {
+			say(err, err_size, "sending the request in pieces: %.160s", reply);
+			return 0;
+		}
+		offset += piece;
+	}
+	return 1;
+}
+
 int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *request, char **out,
     size_t *length, char *err, size_t err_size)
 {
@@ -606,6 +653,14 @@ int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *reques
 	asked.path = socket;
 	asked.host = host;
 	asked.request = request;
+	asked.staged[0] = '\0';
+	if (strlen(request) > ASK_PIECE) {
+		if (!send_in_pieces(socket, host, request, err, err_size)) {
+			return 0;
+		}
+		(void)snprintf(asked.staged, sizeof(asked.staged), "@%016llx",
+		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
+	}
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
 

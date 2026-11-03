@@ -173,6 +173,8 @@ typedef struct {
 /* And `ask FROM REQUEST`: any request the control socket reads, answered as
  * the socket answers it (0312, 10.693). */
 #define NCFG_NODE_PROCEDURE_ASK "ask"
+/* And `askpart`, a piece of a request too long for one line (10.695). */
+#define NCFG_NODE_PROCEDURE_ASK_PART "askpart"
 
 /*
  * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to

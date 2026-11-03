@@ -368,6 +368,21 @@ typedef struct {
 	unsigned long uid;
 } ncfg_main_ask_slot_t;
 
+/* A request too long for one fuzznet line, arriving in pieces (10.695). */
+typedef struct {
+	char    *bytes;   /* NULL for an empty slot */
+	size_t   total;
+	size_t   have;
+	uint64_t digest;  /* of the whole request, which `ask FROM @DIGEST` names */
+	uint64_t until;
+	int      remote;
+	uint8_t  key[32];
+	unsigned long uid;
+} ncfg_main_ask_part_t;
+
+/* The longest request staged in pieces: a configuration drop-in's worth. */
+#define NCFG_MAIN_ASK_PART_MAX (256u * 1024u)
+
 typedef struct {
 	/* The socket's dispatcher and its desk: `ncfg_main_answer`. NULL answers
 	 * nothing but `hello`, which is this module's. */
@@ -377,6 +392,7 @@ typedef struct {
 	const ncfg_remote_policy_t *remote;
 	ncfg_authz_roots_t          roots;
 	ncfg_main_ask_slot_t        slots[NCFG_MAIN_ASK_SLOTS];
+	ncfg_main_ask_part_t        parts[NCFG_MAIN_ASK_SLOTS];
 } ncfg_main_ask_t;
 
 /*
@@ -390,7 +406,17 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
     const char *args, size_t length, char *reply, size_t cap, size_t escaped_cap,
     uint64_t now_ms);
 
-/* Every answer it keeps, let go. */
+/*
+ * One piece of a long request, `call askpart TOTAL OFFSET DIGEST PIECE`
+ * (10.695): pieces in order from 0, kept for this caller until the request
+ * is whole and run, or a minute has passed. `ok HAVE TOTAL`, a newline, into
+ * `reply`; a refusal is `error` and a sentence. `ask FROM @DIGEST` then runs
+ * the whole one.
+ */
+size_t ncfg_main_ask_part(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *args, size_t length, char *reply, size_t cap, uint64_t now_ms);
+
+/* Every answer it keeps, and every request part-way in, let go. */
 void ncfg_main_ask_free(ncfg_main_ask_t *ask);
 
 int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *out, char *err,

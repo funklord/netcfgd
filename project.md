@@ -12671,6 +12671,42 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.695 A request longer than a line goes in pieces: `askpart`
+
+10.694's open limit. A request travels inside one fuzznet line, about 1 KB,
+so a `config put` of a real configuration could not cross the estate.
+
+- **`call askpart at HOST TOTAL OFFSET DIGEST PIECE`** stages it on the node,
+  in order from 0, each piece answered `ok HAVE TOTAL`. Then **`call ask at
+  HOST FROM @DIGEST`** runs the whole request under every rule of 0312: the
+  same reader, the same gate, a page made once and kept, only a read made
+  again.
+- **Nothing new in fuzznet's grammar.** It is a second procedure beside
+  `ask`, so fuzznet carries the pieces as it carries any call's arguments.
+- **The node holds it for this caller only**, one request at a time, until
+  it is whole and run or a minute has passed, and at most 256 KiB. Pieces out
+  of order are refused, and so are joined pieces that are not the request
+  their digest names. A staged request runs once, and its later pages come
+  from its kept answer, which is filed under the same digest.
+- The client splits any request past 360 bytes into 360-byte pieces
+  (`client/ncfg_fuzznet.c`), so `ncfg ... --at` needs no change. **The line
+  is 512 bytes**, fuzznet's `FZN_REQUEST_MAX`, and not the 1024 of a reply
+  that 10.694 sized by. The live test found that: its first 600-byte piece
+  came back `malformed a request is at most 512 bytes`. `ncfg_fuzznet_ask` now
+  refuses a longer line itself, naming the bound, and
+  `NCFG_FUZZNET_REQUEST_MAX` says where the number comes from.
+
+`ask_test` stages a 2 KB `config_put` and checks that:
+
+- it runs once by digest and pages from its kept answer;
+- once run it is staged no longer;
+- a piece out of order is refused;
+- pieces that are not their digest are refused.
+
+`node_fleet.sh` restarts A with its remote `admin` tier open and puts a
+drop-in of about 2 KB through B. It lands in A's `conf.d` whole, and the
+empty local configuration directory stays empty.
+
 ## 10.694 `ncfg --at HOST`: the socket verbs asked of another node
 
 0312's client half. `ask.c` is the transport under every `ncfg` verb whose
@@ -12708,12 +12744,13 @@ and `profile` all ask that node, and `status --at` keeps its own path
 - **`apply --at` needs `--confirm-within`**, refused here before anything is
   asked. The node insists on it too (0312), but an operator should hear it
   from their own command.
-- **A request is one fuzznet line**, so one longer than about 900 bytes is
-  refused with a sentence rather than cut. That rules out a `config put` of a
-  real configuration over the estate, which is **the open limit here**. It
-  wants either a chunked request or the configuration carried as a fuzznet
-  record that the node reads. A request half-sent would be a different
-  request.
+- **A request is one fuzznet line**, and fuzznet's local line is 512 bytes
+  (`FZN_REQUEST_MAX`), not the 1024 of a reply. This entry first said about
+  900 bytes, which was the reply's figure. Until 10.695, a longer request was
+  refused with a sentence rather than cut, because a request half-sent would
+  be a different request. That ruled out a `config put` of a real
+  configuration over the estate until 10.695, which sends a longer request
+  in pieces.
 
 `node_fleet.sh` runs these against A through B:
 

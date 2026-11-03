@@ -58,6 +58,12 @@ static void slot_clear(ncfg_main_ask_slot_t *slot)
 	memset(slot, 0, sizeof(*slot));
 }
 
+static void part_clear(ncfg_main_ask_part_t *part)
+{
+	free(part->bytes);
+	memset(part, 0, sizeof(*part));
+}
+
 void ncfg_main_ask_free(ncfg_main_ask_t *ask)
 {
 	size_t at;
@@ -67,7 +73,152 @@ void ncfg_main_ask_free(ncfg_main_ask_t *ask)
 	}
 	for (at = 0; at < NCFG_MAIN_ASK_SLOTS; at++) {
 		slot_clear(&ask->slots[at]);
+		part_clear(&ask->parts[at]);
 	}
+}
+
+static int part_caller(const ncfg_main_ask_part_t *part, const uint8_t *key,
+    const ncfg_peer_t *peer)
+{
+	if (key) {
+		return part->remote && memcmp(part->key, key, sizeof(part->key)) == 0;
+	}
+	return !part->remote && peer && part->uid == (unsigned long)peer->uid;
+}
+
+/* This caller's staged request named by `digest`, or NULL; expired ones go. */
+static ncfg_main_ask_part_t *part_of(ncfg_main_ask_t *ask, const uint8_t *key,
+    const ncfg_peer_t *peer, uint64_t digest, uint64_t now_ms)
+{
+	size_t at;
+
+	for (at = 0; at < NCFG_MAIN_ASK_SLOTS; at++) {
+		ncfg_main_ask_part_t *part = &ask->parts[at];
+
+		if (part->bytes && now_ms >= part->until) {
+			part_clear(part);
+		}
+		if (part->bytes && part->digest == digest && part_caller(part, key, peer)) {
+			return part;
+		}
+	}
+	return NULL;
+}
+
+static size_t part_said(char *reply, size_t cap, const char *word, const char *sentence)
+{
+	int wrote = snprintf(reply, cap, "%s %s\n", word, sentence);
+
+	return wrote > 0 && (size_t)wrote < cap ? (size_t)wrote : 0u;
+}
+
+/* A decimal number at `*at`, then a space: 1, or 0. */
+static int part_number(const char *args, size_t length, size_t *at, size_t *out)
+{
+	size_t value = 0;
+	size_t start = *at;
+
+	while (*at < length && args[*at] >= '0' && args[*at] <= '9' && *at - start < 10u) {
+		value = value * 10u + (size_t)(args[*at] - '0');
+		(*at)++;
+	}
+	if (*at == start || *at >= length || args[*at] != ' ') {
+		return 0;
+	}
+	(*at)++;
+	*out = value;
+	return 1;
+}
+
+size_t ncfg_main_ask_part(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *args, size_t length, char *reply, size_t cap, uint64_t now_ms)
+{
+	ncfg_main_ask_part_t *part;
+	size_t                at = 0;
+	size_t                total;
+	size_t                offset;
+	size_t                digits;
+	size_t                piece;
+	uint64_t              digest = 0;
+	char                  said[64];
+
+	if (!ask || !args || !reply || cap == 0u || (!key && !peer)) {
+		return 0u;
+	}
+	if (!part_number(args, length, &at, &total) || !part_number(args, length, &at, &offset)) {
+		return part_said(reply, cap, "malformed", "askpart takes TOTAL OFFSET DIGEST PIECE");
+	}
+	for (digits = 0; digits < 16u; digits++, at++) {
+		char c = at < length ? args[at] : '\0';
+		int  v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+
+		if (v < 0) {
+			return part_said(reply, cap, "malformed", "a digest is sixteen hex digits");
+		}
+		digest = (digest << 4) | (uint64_t)v;
+	}
+	if (at >= length || args[at] != ' ') {
+		return part_said(reply, cap, "malformed", "askpart takes TOTAL OFFSET DIGEST PIECE");
+	}
+	at++;
+	piece = length - at;
+	if (total == 0u || total > NCFG_MAIN_ASK_PART_MAX) {
+		return part_said(reply, cap, "error", "a request staged in pieces is at most 256 KiB");
+	}
+	part = part_of(ask, key, peer, digest, now_ms);
+	if (offset == 0u) {
+		size_t slot;
+
+		if (part) {
+			part_clear(part);
+		}
+		/* A caller stages one request at a time: its earlier one goes. */
+		for (slot = 0; slot < NCFG_MAIN_ASK_SLOTS; slot++) {
+			if (ask->parts[slot].bytes && part_caller(&ask->parts[slot], key, peer)) {
+				part_clear(&ask->parts[slot]);
+			}
+		}
+		part = NULL;
+		for (slot = 0; slot < NCFG_MAIN_ASK_SLOTS && !part; slot++) {
+			if (!ask->parts[slot].bytes) {
+				part = &ask->parts[slot];
+			}
+		}
+		if (!part) {
+			return part_said(reply, cap, "error", "every staging place is in use; try again");
+		}
+		part->bytes = malloc(total);
+		if (!part->bytes) {
+			return part_said(reply, cap, "error", "no memory to stage the request");
+		}
+		part->total = total;
+		part->have = 0;
+		part->digest = digest;
+		part->until = now_ms + 60000u;
+		part->remote = key != NULL;
+		if (key) {
+			memcpy(part->key, key, sizeof(part->key));
+		} else {
+			part->uid = (unsigned long)peer->uid;
+		}
+	}
+	if (!part || part->total != total || offset != part->have) {
+		return part_said(reply, cap, "error",
+		    "the pieces of a request arrive in order from 0, and this is not the next one");
+	}
+	if (piece == 0u || piece > total - part->have) {
+		return part_said(reply, cap, "error", "that piece does not fit the request");
+	}
+	memcpy(part->bytes + part->have, args + at, piece);
+	part->have += piece;
+	if (part->have == part->total &&
+	    ncfg_status_page_digest(part->bytes, part->total) != part->digest) {
+		part_clear(part);
+		return part_said(reply, cap, "error", "the pieces joined are not the request their "
+		                                      "digest names; send it again from 0");
+	}
+	(void)snprintf(said, sizeof(said), "%zu %zu", part->have, part->total);
+	return part_said(reply, cap, "ok", said);
 }
 
 /* The slot holding this caller's answer to `request`, or NULL. */
@@ -240,6 +391,7 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 {
 	ncfg_proto_message_t  message;
 	ncfg_main_ask_slot_t *slot;
+	ncfg_main_ask_part_t *staged;
 	ncfg_buf_t            out;
 	char                  err[NCFG_ERROR_MAX];
 	const char           *line;
@@ -263,6 +415,39 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	}
 	line = args + at + 1u;
 	length -= at + 1u;
+	/* `@DIGEST`: a request staged in pieces by `askpart` (10.695), whole. */
+	staged = NULL;
+	if (length == 17u && line[0] == '@') {
+		uint64_t named = 0;
+		size_t   digit;
+
+		for (digit = 1; digit < 17u; digit++) {
+			char c = line[digit];
+			int  v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+
+			if (v < 0) {
+				break;
+			}
+			named = (named << 4) | (uint64_t)v;
+		}
+		/* A later page of one already run is cut from its kept answer, which
+		 * is filed under the same digest: the digest of the whole line. */
+		if (digit == 17u && from > 0u && (slot = kept(ask, key, peer, named, now_ms))) {
+			n = page_of(slot->answer, slot->length, slot->digest, from, reply, cap,
+			    escaped_cap);
+			if (n && from + (n - (size_t)(strchr(reply, '\n') - reply + 1)) >= slot->length) {
+				slot_clear(slot);
+			}
+			return n;
+		}
+		staged = digit == 17u ? part_of(ask, key, peer, named, now_ms) : NULL;
+		if (!staged || staged->have != staged->total) {
+			return refused("no whole request is staged under that digest; send it with "
+			               "askpart from 0", reply, cap, escaped_cap);
+		}
+		line = staged->bytes;
+		length = staged->total;
+	}
 	asked = ncfg_status_page_digest(line, length);
 
 	slot = kept(ask, key, peer, asked, now_ms);
@@ -296,6 +481,9 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 		return refused(err[0] ? err : "the request was not answered", reply, cap, escaped_cap);
 	}
 	ncfg_proto_message_free(&message);
+	if (staged) {
+		part_clear(staged); /* run; a staged request is run once */
+	}
 	if (ncfg_buf_failed(&out)) {
 		ncfg_buf_free(&out);
 		return refused("the answer did not fit in memory", reply, cap, escaped_cap);
