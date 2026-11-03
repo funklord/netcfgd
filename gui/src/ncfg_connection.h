@@ -454,6 +454,10 @@ struct ncfg_globals {
 	bool    remote_admin = false;
 	/* The pinned country (0296), empty where it follows the machine. */
 	QString regdom;
+	/* UPnP (0310): the uplink, empty where it is off, and the LAN
+	 * interfaces as the client joins them, "lan0, lan1". */
+	QString upnp_uplink;
+	QString upnp_lan;
 };
 
 /*

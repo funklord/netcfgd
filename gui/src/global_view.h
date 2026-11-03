@@ -25,6 +25,13 @@
  * own drop-in, `50-regdom`, so unpinning removes the file rather than writing
  * an empty value somebody has to know means "follow".
  *
+ * **UPnP and NAT-PMP are the third** (0310), written to `50-upnp`: the uplink
+ * mappings are made on and the LAN interfaces that may ask. Turning it on
+ * asks first, in the holder's words, because it lets any device on those
+ * networks open a port on this router; turning it off removes the drop-in.
+ * The compiler's refusals -- an uplink without NAT, a LAN with no interface
+ * block -- come back as the write's error, so the tab does not restate them.
+ *
  * The rest is shown and not settable yet. Reading a policy you cannot change
  * is still worth the tab: `control` says who may do what on this machine, and
  * an operator who cannot see it cannot know why a client is being refused.
@@ -59,6 +66,11 @@ private slots:
 	void toggle_networking();
 	/* Pin the country typed, or follow the machine again where it is blank. */
 	void set_country();
+	/* Ask, then turn UPnP on with the interfaces typed, or off. */
+	void toggle_upnp();
+	/* The write alone, which is what a test drives: the question is the
+	 * button's. */
+	void write_upnp();
 
 private:
 	ncfg_connection *connection;
@@ -69,6 +81,13 @@ private:
 	/* Whether `50-regdom` was there at the last refresh, so a blank country
 	 * removes a pin rather than asking to remove a file that is not there. */
 	bool             pinned = false;
+	QLineEdit       *upnp_uplink;
+	QLineEdit       *upnp_lan;
+	QPushButton     *upnp_button;
+	/* Whether UPnP was on at the last refresh, and whether this tab's
+	 * `50-upnp` was what turned it on, which is the only file it removes. */
+	bool             upnp_on = false;
+	bool             upnp_ours = false;
 	QLabel          *note;
 	/* What the last refresh read, so the button knows which way it points
 	 * without re-asking the daemon at the moment it is clicked. */

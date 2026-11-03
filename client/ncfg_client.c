@@ -3606,6 +3606,8 @@ void ncfg_globals_free(ncfg_globals_t *globals)
 	free(globals->networking);
 	free(globals->profile);
 	free(globals->regdom);
+	free(globals->upnp_uplink);
+	free(globals->upnp_lan);
 	free(globals->hostname);
 	free(globals->on_drift);
 	free(globals->control_observe);
@@ -5249,6 +5251,10 @@ int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, s
 	out->remote_wifi = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "wifi"), 0);
 	out->remote_admin = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "admin"), 0);
 	out->regdom = member_text(doc, globals, "regdom");
+
+	uint32_t upnp = ncfg_json_member(doc, globals, "upnp");
+	out->upnp_uplink = member_text(doc, upnp, "uplink");
+	out->upnp_lan = join_strings(doc, ncfg_json_member(doc, upnp, "lan"));
 
 	ncfg_json_free(doc);
 	return 1;

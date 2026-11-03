@@ -1524,6 +1524,10 @@ typedef struct {
 	/* The country the machine is pinned to (0296), or empty where it
 	 * follows what its radios hear. */
 	char *regdom;
+	/* UPnP and NAT-PMP (0310): the uplink mappings are made on, empty where
+	 * it is off, and the LAN interfaces it listens on, comma-separated. */
+	char *upnp_uplink;
+	char *upnp_lan;
 } ncfg_globals_t;
 
 void ncfg_globals_free(ncfg_globals_t *globals);

@@ -12632,6 +12632,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.673 The global tab turns UPnP on, after saying what it costs
+
+10.671 built UPnP for the document and `ncfg`, and a GUI user -- the person
+this project's near-term bar names, who should never meet the language --
+could neither turn it on nor see that it was on. The global tab now shows a
+row for it and carries the uplink, the LAN interfaces and a button, written
+to its own `50-upnp` drop-in, as the country is to `50-regdom` (10.630), so
+off is removing the file. Turning it on asks first, in the words of the
+holder's condition (10.664 item 5): any device on those networks may then
+open a port on this router without asking. Off is not asked; a client asks
+again for what it still wants.
+
+The tab restates none of 0310's refusals. A write is validated by the
+daemon, so an uplink without NAT comes back as the compiler's sentence and
+nothing is written. `global_load` drives it through a real daemon: refused
+without NAT, on with it, shown, and off again by removing the drop-in. With
+the client's reading of `upnp` taken out, four of its checks fail.
+
 ## 10.672 procd runs netcfgd, and an edit during a start was lost
 
 **`packaging/procd/netcfgd` has run for the first time** (2026-11-03), 10.183

@@ -1,5 +1,6 @@
 /*
- * global_load.cpp -- the global tab pins the country, and unpins it.
+ * global_load.cpp -- the global tab pins the country, and unpins it; and it
+ * turns UPnP on and off (0310).
  *
  * 0296: a machine follows the country its radios hear unless one is pinned.
  * The tab writes the pin to its own drop-in so that unpinning is removing the
@@ -140,6 +141,73 @@ int main(int argc, char **argv)
 	        ? QStringLiteral("left") : QStringLiteral("removed"),
 	    QStringLiteral("removed"), "  by removing the drop-in");
 	stop(&daemon);
+
+	/* UPnP: an uplink without NAT first, which the compiler refuses and the
+	 * tab must not write; then one with it. */
+	QTemporaryDir   router;
+	QProcess        routed;
+	ncfg_connection upnp_connection;
+	const QString   lan_wan = QStringLiteral(
+	    "global { control { observe = \"any\"; admin = \"any\" } }\n"
+	    "interface lan0 { config = \"192.168.1.1/24\" }\n"
+	    "interface wan0 { config = \"81.0.0.1/24\"\n%1 }\n");
+	const QString upnp_socket = start(&routed, router.path(), lan_wan.arg(QString()), QString());
+	if (upnp_socket.isEmpty() || !upnp_connection.open(upnp_socket, &error)) {
+		fprintf(stderr, "global_load: the router daemon never started\n");
+		stop(&routed);
+		return 1;
+	}
+	ncfg_global_view upnp_view(&upnp_connection);
+	upnp_view.refresh();
+	auto *uplink = upnp_view.findChild<QLineEdit *>(QStringLiteral("global_upnp_uplink"));
+	auto *lans = upnp_view.findChild<QLineEdit *>(QStringLiteral("global_upnp_lan"));
+	const QString drop_in = router.path() + QStringLiteral("/etc/conf.d/50-upnp.conf");
+	auto upnp_of = [&upnp_connection]() {
+		ncfg_globals globals;
+		QString      why;
+		if (!upnp_connection.globals(&globals, &why)) {
+			return why;
+		}
+		return globals.upnp_uplink.isEmpty()
+		           ? QStringLiteral("<off>")
+		           : globals.upnp_uplink + QStringLiteral(" for ") + globals.upnp_lan;
+	};
+	check(upnp_of(), QStringLiteral("<off>"), "UPnP starts off");
+
+	uplink->setText(QStringLiteral("wan0"));
+	lans->setText(QStringLiteral("lan0"));
+	QMetaObject::invokeMethod(&upnp_view, "write_upnp");
+	check(QFile::exists(drop_in) ? QStringLiteral("written") : QStringLiteral("refused"),
+	    QStringLiteral("refused"), "an uplink without NAT is refused by the compiler");
+	check(upnp_of(), QStringLiteral("<off>"), "  and UPnP stays off");
+	stop(&routed);
+
+	/* A directory of its own: the killed daemon's socket file is still in
+	 * the first, and the wait for one would end before this one binds. */
+	QTemporaryDir nat_router;
+	const QString routed_socket =
+	    start(&routed, nat_router.path(), lan_wan.arg(QStringLiteral("nat = true")), QString());
+	const QString nat_drop_in = nat_router.path() + QStringLiteral("/etc/conf.d/50-upnp.conf");
+	if (routed_socket.isEmpty() || !upnp_connection.open(routed_socket, &error)) {
+		fprintf(stderr, "global_load: the router daemon never started again\n");
+		stop(&routed);
+		return 1;
+	}
+	upnp_view.refresh();
+	uplink->setText(QStringLiteral("wan0"));
+	lans->setText(QStringLiteral(" lan0 ,"));
+	QMetaObject::invokeMethod(&upnp_view, "write_upnp");
+	check(upnp_of(), QStringLiteral("wan0 for lan0"), "with NAT on the uplink, UPnP is on");
+	check(QFile::exists(nat_drop_in) ? QStringLiteral("written") : QStringLiteral("absent"),
+	    QStringLiteral("written"), "  from its own drop-in");
+	check(uplink->isEnabled() ? QStringLiteral("editable") : QStringLiteral("fixed"),
+	    QStringLiteral("fixed"), "  and the fields show it, not to be edited while on");
+
+	QMetaObject::invokeMethod(&upnp_view, "write_upnp");
+	check(upnp_of(), QStringLiteral("<off>"), "turned off");
+	check(QFile::exists(nat_drop_in) ? QStringLiteral("left") : QStringLiteral("removed"),
+	    QStringLiteral("removed"), "  by removing the drop-in");
+	stop(&routed);
 
 	fprintf(stderr, "global_load: %s\n", failures ? "FAILED" : "all checks passed");
 	return failures ? 1 : 0;
