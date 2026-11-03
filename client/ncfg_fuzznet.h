@@ -117,4 +117,22 @@ int ncfg_status_pages_join(ncfg_status_page_ask_fn ask, void *context, char **ou
 int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *err,
     size_t err_size);
 
+/*
+ * This user's own fuzznetd, where it serves when given no `--socket` and a
+ * client looks when told nowhere (fuzznet's sec 663): `$XDG_RUNTIME_DIR/
+ * fuzznet/fuzznetd.sock`, or `/tmp/fuzznet-UID/fuzznetd.sock` where that
+ * variable is unset or not absolute. Into `out`; 0 where it does not fit.
+ */
+int ncfg_fuzznet_user_socket(char *out, size_t out_size);
+
+/*
+ * Another node's status, asked as an operator of its estate (0311, 10.691):
+ * through the fuzznetd at `socket` -- this user's own, the third of
+ * fuzznet's three models -- `call status at HOST FROM`, `host` the node's
+ * key in hex, every page joined as `ncfg_status_pages_join` says. That node
+ * answers by its own `remote` block. 1 with the JSON in `*out`.
+ */
+int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, size_t *length,
+    char *err, size_t err_size);
+
 #endif /* NCFG_FUZZNET_H */

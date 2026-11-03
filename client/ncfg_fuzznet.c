@@ -471,19 +471,32 @@ int ncfg_fuzznet_daemon_socket(const char *run_dir, char *out, size_t out_size)
 	return wrote > 0 && (size_t)wrote < out_size;
 }
 
-/* One page over fuzznet: `call status FROM` on the socket in `context`, the
- * answer unescaped. */
+/* Where a page is asked: a socket, and the host for a call across the estate
+ * (NULL for the daemon on this machine). */
+typedef struct {
+	const char *path;
+	const char *host;
+} asked_t;
+
+/* One page over fuzznet: `call status [at HOST] FROM` on the socket in
+ * `context`, the answer unescaped. A call across the estate waits for
+ * fuzznet's round, three seconds (its sec 853), so it is given more. */
 static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size_t *length,
     char *err, size_t err_size)
 {
-	const char *path = context;
-	char        line[48];
-	char        reply[2048];
-	int         silent = 0;
-	long        n;
+	const asked_t *asked = context;
+	char           line[160];
+	char           reply[2048];
+	int            silent = 0;
+	long           n;
 
-	(void)snprintf(line, sizeof(line), "call status %zu", from);
-	if (!ncfg_fuzznet_ask(path, line, reply, sizeof(reply), 2000, &silent, err, err_size)) {
+	if (asked->host) {
+		(void)snprintf(line, sizeof(line), "call status at %s %zu", asked->host, from);
+	} else {
+		(void)snprintf(line, sizeof(line), "call status %zu", from);
+	}
+	if (!ncfg_fuzznet_ask(asked->path, line, reply, sizeof(reply), asked->host ? 8000 : 2000,
+	        &silent, err, err_size)) {
 		return 0;
 	}
 	if (strncmp(reply, "ok ", 3) != 0) {
@@ -504,9 +517,54 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
 {
 	char path[1100];
 
+	asked_t asked;
+
 	if (!ncfg_fuzznet_daemon_socket(run_dir, path, sizeof(path))) {
 		say(err, err_size, "no fuzznet socket path fits");
 		return 0;
 	}
-	return ncfg_status_pages_join(fuzznet_page, path, out, length, err, err_size);
+	asked.path = path;
+	asked.host = NULL;
+	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
+}
+
+int ncfg_fuzznet_user_socket(char *out, size_t out_size)
+{
+	const char *run = getenv("XDG_RUNTIME_DIR");
+	int         wrote;
+
+	if (!out || out_size == 0u) {
+		return 0;
+	}
+	if (run && run[0] == '/') {
+		wrote = snprintf(out, out_size, "%s/fuzznet/fuzznetd.sock", run);
+	} else {
+		wrote = snprintf(out, out_size, "/tmp/fuzznet-%lu/fuzznetd.sock",
+		    (unsigned long)getuid());
+	}
+	return wrote > 0 && (size_t)wrote < out_size;
+}
+
+int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, size_t *length,
+    char *err, size_t err_size)
+{
+	asked_t asked;
+	size_t  at;
+
+	/* The key as fuzznet writes it, 64 hex digits: anything else would put
+	 * a word of the caller's into the line fuzznet reads. */
+	for (at = 0; host && host[at]; at++) {
+		char c = host[at];
+
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+			break;
+		}
+	}
+	if (!socket || !host || at != 64u || host[at] != '\0') {
+		say(err, err_size, "a host is its key, 64 lower-case hex digits");
+		return 0;
+	}
+	asked.path = socket;
+	asked.host = host;
+	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }

@@ -1253,6 +1253,56 @@ static void take_from_daemon(const ncfg_cli_options_t *options, ncfg_observed_t 
 	ncfg_proto_message_free(&message);
 }
 
+/*
+ * **Another node of the estate** (0311's fleet, 10.691): its own
+ * observation, asked through this user's fuzznetd -- the third of fuzznet's
+ * models, a client and its daemon calling a remote one -- and judged there
+ * by that node's `remote` block. Nothing of this machine is observed or
+ * written: the answer is that node's, and this one is not the subject.
+ */
+static int command_status_at(const ncfg_cli_options_t *options)
+{
+	char             socket[1100];
+	char             err[NCFG_ERROR_MAX];
+	char            *json = NULL;
+	size_t           length = 0;
+	ncfg_json_doc_t *doc;
+	ncfg_observed_t *observed;
+	int              code = NCFG_CLI_EXIT_OK;
+
+	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
+		return fail("this user's fuzznetd socket path does not fit");
+	}
+	err[0] = '\0';
+	if (!ncfg_fuzznet_status_at(socket, options->at, &json, &length, err, sizeof(err))) {
+		return fail(err[0] ? err : "the node did not answer");
+	}
+	doc = ncfg_json_parse(json, length, err, sizeof(err));
+	free(json);
+	if (!doc) {
+		return fail(err);
+	}
+	observed = ncfg_observed_from_status(doc, ncfg_json_root(doc), err, sizeof(err));
+	ncfg_json_free(doc);
+	if (!observed) {
+		return fail(err);
+	}
+	if (options->json) {
+		ncfg_buf_t buf;
+
+		ncfg_buf_init(&buf, 0);
+		code = say_json_for_a_person(&buf, ncfg_observed_write(observed, &buf, err, sizeof(err)),
+		    err);
+		ncfg_buf_free(&buf);
+	} else {
+		ncfg_out_writef("node %s\n", options->at);
+		ncfg_cli_print_status(observed);
+		ncfg_cli_print_upnp(observed);
+	}
+	ncfg_observed_free(observed);
+	return code;
+}
+
 static int command_status(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
@@ -1261,6 +1311,9 @@ static int command_status(const ncfg_cli_options_t *options)
 	ncfg_observed_t *observed = NULL;
 	int              code = NCFG_CLI_EXIT_OK;
 
+	if (options->at) {
+		return command_status_at(options);
+	}
 	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
 	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);

@@ -142,6 +142,8 @@ static const char usage_text[] =
     "  --replace                for `secret set` and `profile save`: overwrite one\n"
     "                           that already exists\n"
     "  --run-dir PATH           default /run/netcfgd, or $NCFG_RUN_DIR\n"
+    "  --at HOST                for `status`: that node of this estate, HOST its\n"
+    "                           key in hex, asked through your own fuzznetd\n"
     "  --oneshot                apply once and exit; the default, there being no\n"
     "                           daemon yet\n"
     "  --json                   machine-readable output\n"
@@ -304,6 +306,11 @@ int ncfg_cli_parse(int count, char *const *arguments, ncfg_cli_options_t *option
 				return 0;
 			}
 			options->factory_dir = value;
+		} else if (strcmp(argument, "--at") == 0) {
+			if (!(value = take_value("--at", count, arguments, &index, err, err_size))) {
+				return 0;
+			}
+			options->at = value;
 		} else if (strcmp(argument, "--run-dir") == 0) {
 			if (!(value = take_value("--run-dir", count, arguments, &index, err,
 			    err_size))) {

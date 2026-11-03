@@ -192,6 +192,8 @@ typedef struct {
 	/* `secret set` and `profile save`: overwrite one that already exists. */
 	int             replace;
 	const char     *run_dir;
+	/* `status --at HOST`: another node of this estate, by its key. */
+	const char     *at;
 	int             json;
 	ncfg_optint_t   confirm;
 	ncfg_cli_list_t allow_disruption;

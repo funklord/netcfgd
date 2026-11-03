@@ -12671,6 +12671,47 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.691 An operator asks another node: `ncfg status --at HOST`
+
+The fleet of 0311 is the estate: an authenticated operator managing every
+node of it. 10.688 gave each node a `status` procedure that an estate member
+may call. This is the operator's side. `ncfg status --at HOST`, with HOST the
+node's key in hex, asks this user's own fuzznetd to `call status at HOST
+FROM`, page by page. That is the third of fuzznet's three models: a client
+and its daemon calling a remote one. The command prints the node's
+observation, and `--json` writes it in `observed.json`'s shape. Nothing of
+the local machine is observed or written, because that node is the subject.
+
+- **The node decides**, by its own `remote` block (0128's tiers), as 10.685
+  set out: each node is configured in detail. The operator's fuzznetd
+  carries the call and judges nothing.
+- **This user's fuzznetd** is found where fuzznet's clients look when told
+  nowhere (its sec 663): `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, else
+  `/tmp/fuzznet-UID/`. The operator is a full fuzznet user, with a fuzznetd
+  of their own that is a member of the estate, so the holder's rule against
+  storing anything for non-fuzznet users (10.683) is not touched.
+- **The key is checked before it is sent.** It must be 64 lower-case hex
+  digits, so no word of the caller's reaches the line fuzznet reads.
+- A call across the estate waits for fuzznet's round, three seconds, so a
+  page is given eight seconds rather than the local two.
+
+`tests/node_fleet.sh` sets the estate up as fuzznet's own `live_ext.py`
+phase c does. A is netcfgd serving a store made root by `fuzznetd
+--new-root`; B is a fuzznetd on this user's default socket, under a scratch
+`XDG_RUNTIME_DIR`, joined by `add peer ... delegable` and `add join`. It
+checks that:
+
+- `ncfg status --at A` answers A's observation;
+- a host that is no member is refused, not waited on;
+- a malformed key is refused before anything is asked;
+- with A restarted and its remote `observe` tier closed, A denies the call
+  and names the tier. Closing the tier also fails the first check, which is
+  the control.
+
+`make test` runs it under `timeout 400`, and it has a target of its own,
+`node-fleet-test`. Every wait in it is bounded, by a count of looks or a
+wall-clock deadline, and a trap stops both daemons on every way out.
+
 ## 10.690 The GUI's status comes over fuzznet, from one copy in `client/`
 
 `ncfg_client_status` is the single function every status read of the GUI

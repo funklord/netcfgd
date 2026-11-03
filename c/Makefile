@@ -162,7 +162,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE netcfgd-static node-serve-test
+.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE netcfgd-static node-serve-test node-fleet-test
 
 # **The default goal is pinned, and it is not decoration.** A target added
 # above `all` becomes what a bare `make` here does -- which is how `syntax`,
@@ -356,6 +356,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	done; \
 	echo "== tests/node_serve.sh"; \
 	sh tests/node_serve.sh || fail=1; \
+	echo "== tests/node_fleet.sh"; \
+	timeout 400 sh tests/node_fleet.sh || fail=1; \
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
@@ -364,6 +366,13 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 # too, for running it alone.
 node-serve-test: $(PROGRAM) $(PROGRAM_LINK)
 	sh tests/node_serve.sh
+
+# An operator of the estate asking a netcfgd node, through a fuzznetd of
+# their own (0311, 10.691): two hosts on localhost, B joined to A's estate.
+# `timeout` from outside as well as the script's own bounds, since it starts
+# two daemons.
+node-fleet-test: $(PROGRAM) $(PROGRAM_LINK) $(FUZZNET_LIB)
+	timeout 400 sh tests/node_fleet.sh
 
 tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@

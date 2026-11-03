@@ -504,10 +504,15 @@ BLOCK_FETCH_USAGE = "  ncfg block fetch [LIST...] download block lists from thei
 # the member, so its CLI has no flag to describe.
 OWE_USAGE = ("  --owe                    encrypted with no passphrase (OWE, \"Enhanced Open\"):\n"
 	     "                           not --open, which would not associate with one\n")
+# 0311's fleet, 10.691: `status --at HOST`, another node of the estate asked
+# through this user's fuzznetd. fuzznet is the C's alone, so the Rust has no
+# estate to ask across.
+AT_USAGE = ("  --at HOST                for `status`: that node of this estate, HOST its\n"
+	    "                           key in hex, asked through your own fuzznetd\n")
 C_ONLY_LINES = {
 	# Both spellings of asking for the usage.
-	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE],
-	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE],
+	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE],
+	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE],
 }
 
 
