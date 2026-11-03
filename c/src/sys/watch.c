@@ -194,6 +194,30 @@ static int same_fingerprint(const ncfg_watch_marks_t *one, const ncfg_watch_mark
 	return 1;
 }
 
+int ncfg_watch_fingerprint_of(const char *const *paths, size_t count, ncfg_watch_marks_t *out)
+{
+	ncfg_watch_t borrowed;
+
+	memset(&borrowed, 0, sizeof(borrowed));
+	/* The fingerprint reads only the paths; they are the caller's, borrowed
+	 * for the one call and never freed here. */
+	borrowed.paths = (char **)(uintptr_t)paths;
+	borrowed.path_count = count;
+	return fingerprint(&borrowed, out);
+}
+
+int ncfg_watch_marks_same(const ncfg_watch_marks_t *one, const ncfg_watch_marks_t *two)
+{
+	return one && two && same_fingerprint(one, two);
+}
+
+void ncfg_watch_marks_free(ncfg_watch_marks_t *marks)
+{
+	if (marks) {
+		marks_free(marks);
+	}
+}
+
 static int paths_copy(ncfg_watch_t *watch, const char *const *paths, size_t count,
     char *err, size_t err_size)
 {

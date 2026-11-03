@@ -405,6 +405,34 @@ int main(void)
 		ncfg_watch_close(&watch);
 	}
 
+	/*
+	 * The fingerprint on its own (project.md 10.672): what the daemon takes
+	 * before its first compile and again once its watch is open, so that an
+	 * edit landing between the two is compiled rather than lost.
+	 */
+	{
+		const char        *directories[2] = { root, missing };
+		ncfg_watch_marks_t before;
+		ncfg_watch_marks_t again;
+		ncfg_watch_marks_t after;
+		char               added[400];
+		int                taken;
+
+		(void)snprintf(added, sizeof(added), "%s/during-start.conf", root);
+		taken = ncfg_watch_fingerprint_of(directories, 2u, &before) &&
+		    ncfg_watch_fingerprint_of(directories, 2u, &again);
+		check(taken && ncfg_watch_marks_same(&before, &again),
+		    "a fingerprint taken twice over an unchanged tree is the same");
+		check(make_file(added, "global { }\n") &&
+		        ncfg_watch_fingerprint_of(directories, 2u, &after) &&
+		        !ncfg_watch_marks_same(&before, &after),
+		    "  and a file written between the two is a difference");
+		ncfg_watch_marks_free(&after);
+		check(unlink(added) == 0, "  which is removed again by name");
+		ncfg_watch_marks_free(&before);
+		ncfg_watch_marks_free(&again);
+	}
+
 	/* Removed by name: what this test made, and only that. */
 	if (rmdir(missing) != 0) {
 		printf("watch_test: could not remove %s\n", missing);

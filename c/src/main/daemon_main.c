@@ -39,6 +39,7 @@
 #include "loop_internal.h"
 
 #include "ncfg/node.h"
+#include "ncfg/watch.h"
 #include "ncfg/seen.h"
 #include "ncfg/cli.h"
 #include "ncfg/config.h"
@@ -880,6 +881,8 @@ static int start(const options_t *options)
 	ncfg_daemon_server_t    *local = NULL;
 	ncfg_daemon_server_t    *remote = NULL;
 	ncfg_node_t             *node = NULL;
+	ncfg_watch_marks_t       compiled_from = { NULL, 0, 0 };
+	int                      compiled_from_ok = 0;
 	const ncfg_principal_t  *reach[3];
 	char                     rendered[NCFG_MAIN_PATH_MAX];
 	const ncfg_principal_t  *agent[1];
@@ -941,6 +944,29 @@ static int start(const options_t *options)
 	 * file gets a working daemon without restarting it. Refusing instead would
 	 * mean a typo in a drop-in takes the machine's network manager away.
 	 */
+	/*
+	 * **The probe first, and the configuration's fingerprint with it**, so
+	 * that an edit made while this daemon starts is not lost. The compile
+	 * below and the watch opened much further down are not one moment: an
+	 * edit landing between them raises no event, and before this it was
+	 * applied by nobody until the next edit. Measured under procd in an
+	 * OpenWrt vm (project.md 10.672): a config edited as procd respawned the
+	 * daemon was never applied. The fingerprint is taken again once the watch
+	 * is open, and a difference is a second compile. The probe writes into
+	 * the directory, so it runs before the first fingerprint and not between
+	 * the two -- see its own comment below for what writing after the watch
+	 * cost.
+	 */
+	report_writability(where.config);
+	{
+		char        conf_d[NCFG_MAIN_PATH_MAX + 8];
+		const char *directories[2];
+
+		(void)snprintf(conf_d, sizeof(conf_d), "%s/conf.d", where.config);
+		directories[0] = where.config;
+		directories[1] = conf_d;
+		compiled_from_ok = ncfg_watch_fingerprint_of(directories, 2u, &compiled_from);
+	}
 	err[0] = '\0';
 	if (!ncfg_daemon_state_reload(&state, err, sizeof(err))) {
 		ncfg_log_emitf("config", NCFG_LOG_ERROR,
@@ -1054,9 +1080,9 @@ static int start(const options_t *options)
 	 * So the invariant is the ordering: **nothing this daemon does may write
 	 * into a watched directory after `ncfg_main_watchers_open`.** A refresh
 	 * after the fact would hide a real edit made while the daemon was
-	 * starting, which is the opposite mistake.
+	 * starting, which is the opposite mistake. So the probe now runs before
+	 * the first compile, above, beside the fingerprint that catches that edit.
 	 */
-	report_writability(where.config);
 
 	memset(&watch, 0, sizeof(watch));
 	watch.config_dir = where.config;
@@ -1074,8 +1100,34 @@ static int start(const options_t *options)
 	watch.poll_config = options->poll_config;
 	err[0] = '\0';
 	if (!ncfg_main_watchers_open(&watchers, &watch, err, sizeof(err))) {
+		ncfg_watch_marks_free(&compiled_from);
 		code = cannot("this daemon cannot open the descriptors it watches", err);
 		goto done;
+	}
+	/* What changed between the first compile and the watch, compiled now. */
+	{
+		char               conf_d[NCFG_MAIN_PATH_MAX + 8];
+		const char        *directories[2];
+		ncfg_watch_marks_t now;
+
+		(void)snprintf(conf_d, sizeof(conf_d), "%s/conf.d", where.config);
+		directories[0] = where.config;
+		directories[1] = conf_d;
+		if (compiled_from_ok && ncfg_watch_fingerprint_of(directories, 2u, &now)) {
+			if (!ncfg_watch_marks_same(&compiled_from, &now)) {
+				ncfg_log_emitf("config", NCFG_LOG_INFO,
+				    "the configuration changed while this daemon was starting; compiling "
+				    "it again");
+				err[0] = '\0';
+				if (!ncfg_daemon_state_reload(&state, err, sizeof(err))) {
+					ncfg_log_emitf("config", NCFG_LOG_ERROR,
+					    "the configuration does not compile:\n%s",
+					    state.diagnostics ? state.diagnostics : err);
+				}
+			}
+			ncfg_watch_marks_free(&now);
+		}
+		ncfg_watch_marks_free(&compiled_from);
 	}
 	/* After the watchers, because the handler writes to a pipe they own. */
 	err[0] = '\0';

@@ -249,6 +249,17 @@ int ncfg_watch_open_polling(ncfg_watch_t *watch, const char *const *paths, size_
  * opened. */
 void ncfg_watch_close(ncfg_watch_t *watch);
 
+/*
+ * The polling watcher's fingerprint of these directories, taken on its own:
+ * for a caller that has to know whether they moved between two moments with
+ * no watch open across both -- the daemon's start, between its first compile
+ * and the watch that catches every later edit. 0 on out of memory; free it
+ * with `ncfg_watch_marks_free`.
+ */
+int  ncfg_watch_fingerprint_of(const char *const *paths, size_t count, ncfg_watch_marks_t *out);
+int  ncfg_watch_marks_same(const ncfg_watch_marks_t *one, const ncfg_watch_marks_t *two);
+void ncfg_watch_marks_free(ncfg_watch_marks_t *marks);
+
 /* Which mechanism is in use. */
 ncfg_watch_mechanism_t ncfg_watch_mechanism(const ncfg_watch_t *watch);
 
