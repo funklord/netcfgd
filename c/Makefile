@@ -389,6 +389,8 @@ tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 # other two halves of the same sentence.
 tests/node_answer_test: tests/node_answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+tests/ask_test: tests/ask_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 

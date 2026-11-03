@@ -170,6 +170,9 @@ typedef struct {
  * `get status [FROM]` answers it (10.688).
  */
 #define NCFG_NODE_PROCEDURE_STATUS "status"
+/* And `ask FROM REQUEST`: any request the control socket reads, answered as
+ * the socket answers it (0312, 10.693). */
+#define NCFG_NODE_PROCEDURE_ASK "ask"
 
 /*
  * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to

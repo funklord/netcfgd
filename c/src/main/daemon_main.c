@@ -900,6 +900,9 @@ typedef struct {
 	ncfg_authz_roots_t        roots;
 	/* Whether the `status` permit has been put in step with `observe`. */
 	int                       permitted;
+	/* `ask` (0312): the socket's dispatcher on this daemon's desk, and the
+	 * answers kept for callers paging through them. */
+	ncfg_main_ask_t           ask;
 } node_driven_t;
 
 /*
@@ -978,9 +981,18 @@ static size_t node_call(void *context, const char *name, const uint8_t *key,
     const ncfg_peer_t *peer, const char *args, size_t length, char *answer, size_t cap,
     size_t escaped_cap)
 {
-	node_driven_t *driven = context;
+	node_driven_t  *driven = context;
+	struct timespec now;
 
-	if (strcmp(name, NCFG_NODE_PROCEDURE_STATUS) != 0 || (!key && !peer)) {
+	if (!key && !peer) {
+		return 0u;
+	}
+	if (strcmp(name, NCFG_NODE_PROCEDURE_ASK) == 0) {
+		(void)clock_gettime(CLOCK_MONOTONIC, &now);
+		return ncfg_main_ask(&driven->ask, key, key ? NULL : peer, args, length, answer, cap,
+		    escaped_cap, (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
+	}
+	if (strcmp(name, NCFG_NODE_PROCEDURE_STATUS) != 0) {
 		return 0u;
 	}
 	return ncfg_main_node_status(driven->policy,
@@ -1089,7 +1101,8 @@ static int node_tick(void *context)
  * asked, or fuzznet's loop ended by itself, which is said.
  */
 static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_main_run_t *run,
-    ncfg_seen_t *seen, const ncfg_main_policy_t *policy, const char *run_dir)
+    ncfg_seen_t *seen, const ncfg_main_policy_t *policy, ncfg_main_desk_t *desk,
+    const char *run_dir)
 {
 	/*
 	 * **fuzznet's socket in the run directory, unless one is named**
@@ -1122,6 +1135,11 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	driven.seen = seen;
 	driven.policy = policy;
 	driven.roots = ncfg_authz_roots_default();
+	driven.ask.answer = ncfg_main_answer;
+	driven.ask.context = desk;
+	driven.ask.control = &policy->control;
+	driven.ask.remote = &policy->remote;
+	driven.ask.roots = driven.roots;
 	loop.context = &driven;
 	loop.begin = node_begin;
 	loop.end = node_end;
@@ -1143,6 +1161,7 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	}
 	err[0] = '\0';
 	served = ncfg_node_serve(node, args, arg_count, options->argv, &loop, err, sizeof(err));
+	ncfg_main_ask_free(&driven.ask);
 	if (served == NCFG_NODE_SERVE_STOPPED) {
 		return 1;
 	}
@@ -1620,7 +1639,7 @@ static int start(const options_t *options)
 	 * ticks (`ncfg_main_run_t::next_tick`, project.md 10.678). */
 	run.next_tick = &next_tick;
 	err[0] = '\0';
-	if (!serve_node(node, options, &run, loop.seen, &policy, where.run) &&
+	if (!serve_node(node, options, &run, loop.seen, &policy, &desk, where.run) &&
 	    !ncfg_main_serve(&run, err, sizeof(err))) {
 		code = cannot("this daemon stopped watching its descriptors", err);
 	}

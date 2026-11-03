@@ -51,6 +51,7 @@
 #include "ncfg/observed.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* ------------------------------------------------------------------------ *
  * What a program leaves with
@@ -348,6 +349,49 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
  * or a name fuzznet's grants cannot carry.
  */
 int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t size);
+
+/*
+ * `ask`, the control vocabulary as one fuzznet procedure (0312, 10.693,
+ * `daemon_ask.c`): what it answers with, whom it judges by, and the answers
+ * it keeps for the callers paging through them.
+ */
+#define NCFG_MAIN_ASK_SLOTS 8u
+
+typedef struct {
+	char    *answer;  /* NULL for an empty slot */
+	size_t   length;
+	uint64_t digest;  /* of `answer`, what each page names */
+	uint64_t asked;   /* of the request line, so another request is another answer */
+	uint64_t until;   /* when it stops being kept, in the loop's milliseconds */
+	int      remote;  /* `key` names the caller, else `uid` */
+	uint8_t  key[32];
+	unsigned long uid;
+} ncfg_main_ask_slot_t;
+
+typedef struct {
+	/* The socket's dispatcher and its desk: `ncfg_main_answer`. NULL answers
+	 * nothing but `hello`, which is this module's. */
+	ncfg_daemon_answer_fn       answer;
+	void                       *context;
+	const ncfg_control_t       *control;
+	const ncfg_remote_policy_t *remote;
+	ncfg_authz_roots_t          roots;
+	ncfg_main_ask_slot_t        slots[NCFG_MAIN_ASK_SLOTS];
+} ncfg_main_ask_t;
+
+/*
+ * One page of the answer to `call ask FROM REQUEST`, `args` being `FROM
+ * REQUEST`: `key` the calling host's, an operator of the estate, or NULL for
+ * a caller on this machine whose credentials are `peer`. A page fits `cap`,
+ * and `escaped_cap` once escaped where that is not 0. Its length; a refusal
+ * is a page too, the socket's error line.
+ */
+size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *args, size_t length, char *reply, size_t cap, size_t escaped_cap,
+    uint64_t now_ms);
+
+/* Every answer it keeps, let go. */
+void ncfg_main_ask_free(ncfg_main_ask_t *ask);
 
 int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *out, char *err,
     size_t err_size);

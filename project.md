@@ -12671,6 +12671,59 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.693 The control vocabulary is one fuzznet procedure: `ask` ([0312](doc/decision/0312-the-control-vocabulary-is-one-fuzznet-procedure.md))
+
+The control socket has some forty verbs. Rather than a procedure for each,
+`call ask FROM REQUEST` carries the socket's own JSON line, and the daemon
+answers it as the socket does (`src/main/daemon_ask.c`, from `serve_one` in
+`server.c`):
+
+1. the line is read strictly by the socket's reader;
+2. it is judged by `ncfg_authz_permitted` with the caller fuzznet
+   identified: a peer on this machine under the `control` tiers, an
+   operator of the estate under the node's `remote` block;
+3. `hello` is answered with this caller's own tiers, and `monitor` is
+   refused as the stream it is;
+4. everything else goes to `ncfg_main_answer`, the socket's dispatcher, on
+   the loop's thread. That is where a fuzznet procedure already runs, and
+   where the mailbox would have taken the request.
+
+The desk is the daemon's own, passed to `serve_node`. Every answer is paged
+in the digest pages of 10.689.
+
+- **Every answer is made once and kept**, per caller, until it has been read
+  to its end or a minute has passed. Later pages are cut from the copy, so a
+  `plan` is computed once rather than once a page.
+- **Only a read is made again for a page.** Where no copy stands behind a
+  later page, an `observe`-tier request is answered afresh and anything else
+  is refused. That is not the order class of 10.351, which this first used:
+  there `apply` is idempotent, and rightly, because netcfgd is declarative.
+  But running it again to make page two would open a second confirm window.
+  `ask_test` showed it, because the test assumed otherwise and failed.
+- **An operator's apply needs a confirm window.** Without one it is refused
+  before it reaches the daemon, since across the estate a change that cuts
+  the operator off has no other way back. At the console, the same request
+  stays legal without one.
+
+`ask_test` drives the procedure with a fake dispatcher that counts its runs,
+and checks that:
+
+- an answer is made once and paged from the copy, byte for byte;
+- a change is not run again for a page;
+- an operator's apply is refused without a window;
+- the remote and control tiers decide;
+- `hello` and `monitor` are handled;
+- two callers' answers are kept apart.
+
+Removing the read-only page rule fails it, and so does removing the window
+rule. `node_fleet.sh` calls `ask` at A through B: a plan comes back
+(`{"response":"plan",...}`, A having no configuration), and an apply carrying
+a comma through fuzznet's grammar is refused by A's closed remote `admin`
+tier.
+
+**Not done yet:** `ncfg`'s socket verbs over `ask`, which is a transport swap
+in `c/src/cli/ask.c` (go item 20).
+
 ## 10.692 `ncfg nodes`: the estate's members, by the key `--at` takes
 
 10.691 asks a node by its 64-digit key, which nobody types from memory.

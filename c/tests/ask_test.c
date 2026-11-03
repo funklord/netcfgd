@@ -1,0 +1,227 @@
+/*
+ * ask_test.c -- `ask`, the control vocabulary as one fuzznet procedure
+ * (`src/main/daemon_ask.c`, decision 0312, project.md 10.693), driven with an
+ * answer of its own that counts how often it ran.
+ *
+ * WHAT HAS TO HOLD
+ *   An answer is made once and paged from the copy, joining to exactly what
+ *   the dispatcher wrote; a change is never run twice, a later page of one
+ *   with no copy behind it being refused; an operator's apply needs a window
+ *   and is refused without reaching the dispatcher; the node's `remote`
+ *   block and `control` tiers decide, as on the socket; `hello` is answered
+ *   with the caller's own tiers and `monitor` is refused as a stream; and two
+ *   callers' answers are kept apart.
+ */
+#include "../src/main/main_internal.h"
+
+#include "ncfg_fuzznet.h"
+
+#include "ncfg/buf.h"
+#include "ncfg/daemon.h"
+#include "ncfg/proto.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int    failures;
+static size_t runs;
+static char   long_answer[3001];
+
+static void check(int condition, const char *what)
+{
+	printf("%-72s %s\n", what, condition ? "ok" : "FAILED");
+	if (!condition) {
+		failures++;
+	}
+}
+
+/* The dispatcher, faked: a long answer for anything, counted. */
+static int fake_answer(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	(void)context;
+	(void)request;
+	(void)peer;
+	(void)arrival;
+	(void)err;
+	(void)err_size;
+	runs++;
+	ncfg_buf_add_text(out, long_answer);
+	ncfg_buf_add_char(out, '\n');
+	return 1;
+}
+
+/* Every page of `request` from this caller, joined into `out`; the number of
+ * pages, or 0 where one was not a page of the same answer. */
+static size_t gather(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *request, size_t escaped_cap, uint64_t now, ncfg_buf_t *out)
+{
+	char               args[512];
+	char               reply[2048];
+	ncfg_status_page_t page;
+	uint64_t           digest = 0;
+	size_t             from = 0;
+	size_t             pages = 0;
+	size_t             n;
+
+	ncfg_buf_free(out);
+	do {
+		(void)snprintf(args, sizeof(args), "%zu %s", from, request);
+		n = ncfg_main_ask(ask, key, peer, args, strlen(args), reply, sizeof(reply),
+		    escaped_cap, now);
+		if (!n || !ncfg_status_page_read(reply, n, &page) || page.from != from ||
+		    (pages && page.digest != digest) || ++pages > 1000u) {
+			return 0;
+		}
+		digest = page.digest;
+		ncfg_buf_add(out, page.bytes, page.count);
+		from += page.count;
+	} while (from < page.total && page.count > 0u);
+	return pages;
+}
+
+/* The one page answering `request` from 0, as text. */
+static const char *once(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *request, uint64_t now)
+{
+	static char        text[2048];
+	char               args[512];
+	char               reply[2048];
+	ncfg_status_page_t page;
+	size_t             n;
+
+	(void)snprintf(args, sizeof(args), "0 %s", request);
+	n = ncfg_main_ask(ask, key, peer, args, strlen(args), reply, sizeof(reply), 0u, now);
+	if (!n || !ncfg_status_page_read(reply, n, &page) || page.count >= sizeof(text)) {
+		return "";
+	}
+	memcpy(text, page.bytes, page.count);
+	text[page.count] = '\0';
+	return text;
+}
+
+int main(void)
+{
+	static const uint8_t operator_key[32] = { 7 };
+	static const uint8_t other_key[32] = { 9 };
+	ncfg_control_t       control;
+	ncfg_remote_policy_t remote;
+	ncfg_main_ask_t      ask;
+	ncfg_peer_t          root;
+	ncfg_peer_t          user;
+	ncfg_buf_t           joined;
+	char                 args[256];
+	char                 reply[2048];
+	size_t               pages;
+	size_t               at;
+	size_t               n;
+	const char          *said;
+
+	for (at = 0; at < sizeof(long_answer) - 1u; at++) {
+		long_answer[at] = (char)('a' + at % 26u);
+	}
+	/* The prefix without its NUL, which would end the answer at 23 bytes. */
+	memcpy(long_answer, "{\"response\":\"x\",\"pad\":\"", 23u);
+	memcpy(long_answer + sizeof(long_answer) - 3u, "\"}", 2u);
+	long_answer[sizeof(long_answer) - 1u] = '\0';
+
+	memset(&control, 0, sizeof(control)); /* every tier root's */
+	memset(&remote, 0, sizeof(remote));   /* every remote tier closed */
+	memset(&ask, 0, sizeof(ask));
+	ask.answer = fake_answer;
+	ask.control = &control;
+	ask.remote = &remote;
+	ask.roots = ncfg_authz_roots_default();
+	memset(&root, 0, sizeof(root));
+	root.groups_known = 1;
+	memset(&user, 0, sizeof(user));
+	user.uid = 1000;
+	user.gid = 1000;
+	user.groups_known = 1;
+	ncfg_buf_init(&joined, 0);
+
+	runs = 0;
+	pages = gather(&ask, NULL, &root, "{\"request\":\"plan\"}", 200u, 1000u, &joined);
+	check(pages > 10u && runs == 1u && joined.length == strlen(long_answer) &&
+	        memcmp(joined.data, long_answer, joined.length) == 0,
+	    "an answer is made once and paged from the copy, byte for byte");
+
+	runs = 0;
+	pages = gather(&ask, NULL, &root, "{\"request\":\"apply\",\"confirm\":null}", 200u, 2000u,
+	    &joined);
+	check(pages > 10u && runs == 1u, "a change runs once, however many pages it answers in");
+
+	runs = 0;
+	(void)snprintf(args, sizeof(args), "0 {\"request\":\"apply\",\"confirm\":null}");
+	(void)ncfg_main_ask(&ask, NULL, &root, args, strlen(args), reply, sizeof(reply), 200u,
+	    3000u);
+	(void)snprintf(args, sizeof(args), "40 {\"request\":\"apply\",\"confirm\":null}");
+	n = ncfg_main_ask(&ask, NULL, &root, args, strlen(args), reply, sizeof(reply), 0u,
+	    3000u + 61000u);
+	reply[n < sizeof(reply) ? n : sizeof(reply) - 1u] = '\0';
+	check(runs == 1u && strstr(reply, "not run again") != NULL,
+	    "  and a later page of one no longer kept is refused, not run again");
+	(void)snprintf(args, sizeof(args), "40 {\"request\":\"plan\"}");
+	n = ncfg_main_ask(&ask, NULL, &root, args, strlen(args), reply, sizeof(reply), 200u,
+	    70000u);
+	check(runs == 2u && n > 0u && strncmp(reply, "ok ", 3) == 0,
+	    "  where a read no longer kept is answered afresh");
+
+	runs = 0;
+	said = once(&ask, operator_key, NULL, "{\"request\":\"plan\"}", 80000u);
+	check(runs == 0u && strstr(said, "error") && strstr(said, "observe"),
+	    "an operator is judged by the node's remote block: observe closed, denied");
+	remote.observe = 1;
+	said = once(&ask, operator_key, NULL, "{\"request\":\"plan\"}", 81000u);
+	check(runs == 1u && strncmp(said, "{\"response\":\"x\"", 15) == 0,
+	    "  and with it open, answered");
+
+	remote.admin = 1;
+	runs = 0;
+	said = once(&ask, operator_key, NULL, "{\"request\":\"apply\",\"confirm\":null}", 82000u);
+	check(runs == 0u && strstr(said, "confirm window") != NULL,
+	    "an operator's apply without a window is refused before it reaches the daemon");
+	said = once(&ask, operator_key, NULL, "{\"request\":\"apply\",\"confirm\":90}", 83000u);
+	check(runs == 1u && strncmp(said, "{\"response\":\"x\"", 15) == 0,
+	    "  and with one, applied");
+
+	runs = 0;
+	said = once(&ask, NULL, &user, "{\"request\":\"plan\"}", 84000u);
+	check(runs == 0u && strstr(said, "error") != NULL,
+	    "a caller on this machine is judged by the control tiers: not root, denied");
+	said = once(&ask, NULL, &root, "{\"request\":\"apply\",\"confirm\":null}", 85000u);
+	check(runs == 1u, "  and root may apply with no window, being at the console");
+
+	runs = 0;
+	said = once(&ask, NULL, &root, "{\"request\":\"hello\"}", 86000u);
+	check(runs == 0u && strstr(said, "hello") != NULL && strstr(said, "admin") != NULL,
+	    "hello is answered here, with the tiers this caller holds");
+	said = once(&ask, NULL, &root, "{\"request\":\"monitor\"}", 87000u);
+	check(runs == 0u && strstr(said, "stream") != NULL, "monitor is refused as the stream it is");
+	said = once(&ask, NULL, &root, "{\"request\":\"nonsense\"}", 88000u);
+	check(runs == 0u && strstr(said, "error") != NULL, "a request the reader refuses is refused");
+	n = ncfg_main_ask(&ask, NULL, &root, "x", 1u, reply, sizeof(reply), 0u, 89000u);
+	reply[n < sizeof(reply) ? n : sizeof(reply) - 1u] = '\0';
+	check(n > 0u && strstr(reply, "offset") != NULL, "and so are arguments without an offset");
+
+	/* Two operators, each part-way through an answer: each gets its own. */
+	runs = 0;
+	(void)snprintf(args, sizeof(args), "0 {\"request\":\"plan\"}");
+	(void)ncfg_main_ask(&ask, operator_key, NULL, args, strlen(args), reply, sizeof(reply),
+	    200u, 90000u);
+	(void)ncfg_main_ask(&ask, other_key, NULL, args, strlen(args), reply, sizeof(reply), 200u,
+	    90000u);
+	pages = gather(&ask, operator_key, NULL, "{\"request\":\"plan\"}", 200u, 90000u, &joined);
+	check(pages > 10u && runs == 3u, "two callers' answers are kept apart");
+
+	ncfg_buf_free(&joined);
+	ncfg_main_ask_free(&ask);
+	if (failures) {
+		printf("\nask_test: %d check(s) FAILED\n", failures);
+		return 1;
+	}
+	printf("\nask_test: all checks passed\n");
+	return 0;
+}

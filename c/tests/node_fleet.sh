@@ -11,6 +11,7 @@
 #   - `ncfg status --at A` through B, the third of fuzznet's models, answers
 #     A's observation, judged by A's `remote` block: open here;
 #   - `ncfg nodes` lists A by the same key, for `--at`;
+#   - `call ask at A` answers a plan and refuses an apply, by A's tiers;
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
 #   - and a key that is not one is refused before anything is asked.
@@ -107,6 +108,16 @@ check $? "ncfg nodes, through B, lists A by the key status --at takes"
 XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" nodes --json 2>/dev/null |
 	python3 -I -c 'import json, sys; d = json.load(sys.stdin); sys.exit(0 if sys.argv[1] in d else 1)' "$host"
 check $? "  and --json is a list of them"
+
+# The control vocabulary as one procedure (0312, 10.693), through B, raw:
+# a read under A's open `observe`, and a change under its closed `admin`,
+# whose request carries a comma for fuzznet's grammar to pass through.
+said=$(ask "$B" "call ask at $host 0 {\"request\":\"plan\"}")
+echo "$said" | grep -q '^ok ok%20[0-9]*%200%20[0-9]*%20[0-9a-f]\{16\}%0a{"response":"plan"'
+check $? "call ask at A answers a plan, A's remote observe tier open ($(echo "$said" | cut -c1-30))"
+said=$(ask "$B" "call ask at $host 0 {\"request\":\"apply\",\"confirm\":90}")
+echo "$said" | grep -q 'error.*admin'
+check $? "  and refuses an apply, its remote admin tier closed"
 
 other=$(printf '%064d' 7)
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" status --at "$other" > "$R/other.out" 2>&1
