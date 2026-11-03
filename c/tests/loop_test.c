@@ -939,6 +939,82 @@ static void a_descriptor_that_hung_up_is_dropped(void)
 	(void)close(reading);
 }
 
+
+/*
+ * The same round, driven by a loop this daemon does not own (10.676).
+ *
+ * fuzznet's node loop asks for the descriptors each pass, says which are
+ * readable, and calls the tick after the pass. What has to hold is what holds
+ * for the daemon's own loop: a burst is one wake, a quiet machine still ticks
+ * on the backstop and not before it, a descriptor that hung up is dropped and
+ * stops being named, and a readiness on a descriptor that is not ours is
+ * nothing.
+ */
+static void an_outside_loop_drives_the_same_round(void)
+{
+	static const uint64_t    quiet[3] = { 0u, 100u, (uint64_t)NCFG_MAIN_TICK_MS };
+	ncfg_main_sources_t      sources;
+	ncfg_main_run_t          run;
+	ncfg_main_outside_t      outside;
+	ncfg_main_round_report_t report;
+	counter_t                counter;
+	counter_t                asked;
+	int                      fds[NCFG_MAIN_SOURCES_MAX];
+	int                      reading = -1;
+	int                      writing = -1;
+	int                      at;
+
+	if (!pipe_of(&reading, &writing)) {
+		check(0, "a pipe for the outside loop");
+		return;
+	}
+	memset(&counter, 0, sizeof(counter));
+	counter.fd = reading;
+	memset(&asked, 0, sizeof(asked));
+	asked.fd = -1;
+	ncfg_main_sources_init(&sources);
+	install(&sources, NCFG_MAIN_SOURCE_KERNEL, reading, drain_counter, &counter);
+	install(&sources, NCFG_MAIN_SOURCE_CONFIG, -1, drain_counter, &asked);
+	memset(&run, 0, sizeof(run));
+	run.sources = &sources;
+	run.ticks = fake_ticks;
+
+	clock_is(quiet, 3u);
+	ncfg_main_outside_begin(&run, &outside);
+	check(ncfg_main_outside_fds(&run, fds, NCFG_MAIN_SOURCES_MAX) == 1u && fds[0] == reading,
+	    "the outside loop is given the one descriptor there is to wait on, not the asked one");
+	check(!ncfg_main_outside_tick(&run, &outside, &report) && counter.asked == 0u,
+	    "a pass with nothing readable, before the backstop, ends no round");
+	check(ncfg_main_outside_tick(&run, &outside, &report) && report.wake.ticked &&
+	        asked.asked == 1u,
+	    "and once the backstop's five seconds are up, a round ticks and asks the unwaited");
+
+	for (at = 0; at < 50; at++) {
+		(void)!write(writing, "k", 1u);
+	}
+	clock_is_expired();
+	ncfg_main_outside_begin(&run, &outside);
+	ncfg_main_outside_ready(&run, &outside, reading);
+	ncfg_main_outside_ready(&run, &outside, 1000);
+	check(ncfg_main_outside_tick(&run, &outside, &report),
+	    "a readiness in the pass ends a round at the tick after it");
+	check(counter.taken == 50u && report.wake.kernel_changed == 1 && !report.wake.ticked,
+	    "fifty events in one pass are one wake, and not the backstop");
+	ncfg_main_outside_ready(&run, &outside, reading);
+	check(!outside.took,
+	    "a readiness the descriptor no longer has, asked again, is nothing");
+
+	(void)close(writing);
+	for (at = 0; at < 8 && sources.count > 1u; at++) {
+		ncfg_main_outside_ready(&run, &outside, reading);
+		(void)ncfg_main_outside_tick(&run, &outside, &report);
+	}
+	check(sources.count == 1u && ncfg_main_outside_fds(&run, fds, NCFG_MAIN_SOURCES_MAX) == 0u,
+	    "a descriptor that hung up is dropped, and the outside loop stops being given it");
+
+	(void)close(reading);
+}
+
 /*
  * A round sweeps the streams, on a machine where nothing at all happened.
  *
@@ -2675,6 +2751,7 @@ int main(void)
 	a_round_sweeps_the_streams_even_when_nothing_happened();
 	a_source_that_will_not_be_read_loses_its_place();
 	a_signal_mid_wait_does_not_restart_the_backstop();
+	an_outside_loop_drives_the_same_round();
 
 	the_configuration_watch_answers_the_same_question_either_way(base, 0);
 	the_configuration_watch_answers_the_same_question_either_way(base, 1);

@@ -602,18 +602,159 @@ static void ask_the_unwaited(ncfg_main_sources_t *sources, ncfg_main_harvest_t *
 	}
 }
 
+/*
+ * What one ready source does to the round: taken, counted against its
+ * patience, or dropped. 1 where it is to be taken out of the set, which the
+ * caller does, since only the caller knows whether it is walking the set.
+ */
+static int look_at(ncfg_main_source_t *source, ncfg_main_ready_t ready,
+    ncfg_main_harvest_t *harvest)
+{
+	if (ready == NCFG_MAIN_READY_DATA) {
+		take_from(source, harvest);
+		/*
+		 * A drain that failed is the same shape as a queued error and is
+		 * asked the same question, which is what keeps a source that is
+		 * readable for ever and unreadable for ever from costing a full burst
+		 * every round until the daemon stops. `take_from` clears the count on
+		 * any drain that worked.
+		 */
+		if (source->failures > 0u &&
+		    !ncfg_main_source_survives(NCFG_MAIN_READY_ERRORED, source->failures)) {
+			say_dropped(source, NCFG_MAIN_READY_ERRORED);
+			return 1;
+		}
+		return 0;
+	}
+	if (ready == NCFG_MAIN_READY_NOTHING) {
+		return 0;
+	}
+	source->failures++;
+	if (ncfg_main_source_survives(ready, source->failures)) {
+		/* An error that may clear: read it out, since the read is what clears
+		 * it, and count the round against the patience above. */
+		take_from(source, harvest);
+		return 0;
+	}
+	say_dropped(source, ready);
+	return 1;
+}
+
+/*
+ * Steps 4 to 6: the requests, the sweep, the pass, the answers. Every round
+ * ends here, whichever loop waited for it -- this daemon's own `poll` below,
+ * or a loop it runs inside (`ncfg_main_outside_tick`, project.md 10.676) --
+ * so the order `loop_test.c` reads back is one order and not two.
+ */
+static void round_end(const ncfg_main_run_t *run, ncfg_main_harvest_t *harvest,
+    ncfg_main_round_report_t *report)
+{
+	ncfg_reconcile_roam_t roams[NCFG_MAIN_ROAMS_MAX];
+	ncfg_proto_request_t  requests[NCFG_MAIN_PENDING_MAX];
+	size_t                request_count = 0;
+	size_t                pruned = 0;
+
+	if (run->mailbox) {
+		request_count = ncfg_main_mailbox_take(run->mailbox, requests,
+		    (size_t)NCFG_MAIN_PENDING_MAX);
+	}
+
+	/*
+	 * Sweep the streams before the pass announces down them, not after.
+	 *
+	 * A subscriber whose client has gone is otherwise found only by a write
+	 * that fails, and a converged machine writes nothing -- so on the machine
+	 * that most needs the places in that list, nothing ever frees one. Here
+	 * rather than inside `ncfg_main_subscribers_tell` because that is the same
+	 * arrangement one layer down: a list swept only when it is written to is a
+	 * list nobody sweeps.
+	 *
+	 * Before the pass so that an event this round announces is not written to
+	 * a descriptor already known to be gone, and after the mailbox has been
+	 * emptied so that a `monitor` that arrived this round is in the list and
+	 * is swept with everything else -- it will not be found gone, having just
+	 * been handed over, and a sweep that skipped it would be a rule with an
+	 * exception in it.
+	 */
+	if (run->subscribers) {
+		pruned = ncfg_main_subscribers_prune(run->subscribers);
+	}
+
+	if (report) {
+		report->pruned = pruned;
+		report->wake = harvest->wake;
+		report->roam_count = harvest->roam_count;
+		report->roams_missed = harvest->roams_missed;
+		report->request_count = request_count;
+		report->sources = run->sources->count;
+		report->stopping = harvest->stopping;
+	}
+	if (harvest->roams_missed > 0u) {
+		ncfg_log_emitf("loop", NCFG_LOG_WARNING,
+		    "%zu roam(s) in one round did not fit and were not reported",
+		    harvest->roams_missed);
+	}
+
+	/*
+	 * Who set the regulatory domain, before the pass that observes it. Here
+	 * rather than in the drain, because the drain holds the watchers and not
+	 * the state, and the loss first: a change heard after one was lost in the
+	 * same round is the current answer.
+	 */
+	if (run->loop && run->loop->state) {
+		if (harvest->lost_regdom) {
+			ncfg_daemon_state_heard_regdom(run->loop->state, NULL);
+		}
+		if (harvest->heard_regdom) {
+			ncfg_daemon_state_heard_regdom(run->loop->state, &harvest->regdom);
+		}
+	}
+
+	if (run->loop && ncfg_main_passes(&harvest->wake, harvest->roam_count, request_count)) {
+		char   message[NCFG_ERROR_MAX];
+		size_t at;
+
+		for (at = 0; at < harvest->roam_count; at++) {
+			roams[at].interface = harvest->roams[at].interface;
+			roams[at].bssid = harvest->roams[at].bssid;
+		}
+		message[0] = '\0';
+		if (!ncfg_reconcile_pass(run->loop, &harvest->wake, roams, harvest->roam_count,
+		    requests, request_count, report ? &report->pass : NULL, message,
+		    sizeof(message))) {
+			/*
+			 * Reported and not returned. `daemon.h` says a pass answers 0 only
+			 * where it could not be carried out at all, and even that is not a
+			 * reason to stop watching: a daemon that stopped reconciling
+			 * because one pass failed is a daemon that stopped, and the next
+			 * tick is five seconds away.
+			 */
+			ncfg_log_emitf("reconcile", NCFG_LOG_ERROR, "this pass did not run: %s",
+			    message);
+		}
+		if (report) {
+			report->passed = 1;
+		}
+	}
+
+	/*
+	 * Last, and unconditionally. A round that ran no pass still answers what
+	 * was waiting -- otherwise a request arriving on a quiet machine would
+	 * hold its connection until something else woke the loop.
+	 */
+	if (run->mailbox) {
+		ncfg_main_mailbox_settle(run->mailbox);
+	}
+}
+
 int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report, char *err,
     size_t err_size)
 {
 	ncfg_main_harvest_t   harvest;
-	ncfg_reconcile_roam_t roams[NCFG_MAIN_ROAMS_MAX];
-	ncfg_proto_request_t  requests[NCFG_MAIN_PENDING_MAX];
 	struct pollfd         waiting[NCFG_MAIN_SOURCES_MAX];
 	size_t                from[NCFG_MAIN_SOURCES_MAX];
 	int                   drop[NCFG_MAIN_SOURCES_MAX];
-	size_t                request_count = 0;
 	size_t                dropped = 0;
-	size_t                pruned = 0;
 	unsigned              interrupted = 0;
 	unsigned              round;
 	uint64_t              deadline;
@@ -711,36 +852,7 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 			ncfg_main_source_t *source = &run->sources->at[which];
 			ncfg_main_ready_t   ready = ncfg_main_readiness(waiting[at].revents);
 
-			if (ready == NCFG_MAIN_READY_DATA) {
-				take_from(source, &harvest);
-				/*
-				 * A drain that failed is the same shape as a queued error and
-				 * is asked the same question, which is what keeps a source
-				 * that is readable for ever and unreadable for ever from
-				 * costing a full burst every round until the daemon stops.
-				 * `take_from` clears the count on any drain that worked.
-				 */
-				if (source->failures > 0u &&
-				    !ncfg_main_source_survives(NCFG_MAIN_READY_ERRORED,
-				    source->failures)) {
-					say_dropped(source, NCFG_MAIN_READY_ERRORED);
-					drop[which] = 1;
-				}
-				continue;
-			}
-			if (ready == NCFG_MAIN_READY_NOTHING) {
-				continue;
-			}
-			source->failures++;
-			if (ncfg_main_source_survives(ready, source->failures)) {
-				/* An error that may clear: read it out, since the read is
-				 * what clears it, and count the round against the patience
-				 * above. */
-				take_from(source, &harvest);
-				continue;
-			}
-			say_dropped(source, ready);
-			drop[which] = 1;
+			drop[which] = look_at(source, ready, &harvest);
 		}
 
 		/*
@@ -773,103 +885,15 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 		}
 	}
 
-	if (run->mailbox) {
-		request_count = ncfg_main_mailbox_take(run->mailbox, requests,
-		    (size_t)NCFG_MAIN_PENDING_MAX);
-	}
-
-	/*
-	 * Sweep the streams before the pass announces down them, not after.
-	 *
-	 * A subscriber whose client has gone is otherwise found only by a write
-	 * that fails, and a converged machine writes nothing -- so on the machine
-	 * that most needs the places in that list, nothing ever frees one. Here
-	 * rather than inside `ncfg_main_subscribers_tell` because that is the same
-	 * arrangement one layer down: a list swept only when it is written to is a
-	 * list nobody sweeps.
-	 *
-	 * Before the pass so that an event this round announces is not written to
-	 * a descriptor already known to be gone, and after the mailbox has been
-	 * emptied so that a `monitor` that arrived this round is in the list and
-	 * is swept with everything else -- it will not be found gone, having just
-	 * been handed over, and a sweep that skipped it would be a rule with an
-	 * exception in it.
-	 */
-	if (run->subscribers) {
-		pruned = ncfg_main_subscribers_prune(run->subscribers);
-	}
-
 	if (report) {
-		report->pruned = pruned;
-		report->wake = harvest.wake;
-		report->roam_count = harvest.roam_count;
-		report->roams_missed = harvest.roams_missed;
-		report->request_count = request_count;
 		/* Waits, not extra waits: one is an ordinary round. A test that had
 		 * to add one to reach the bound would be a test spelling an
 		 * off-by-one. */
 		report->drains = round + 1u;
 		report->interrupted = interrupted;
 		report->dropped = dropped;
-		report->sources = run->sources->count;
-		report->stopping = harvest.stopping;
 	}
-	if (harvest.roams_missed > 0u) {
-		ncfg_log_emitf("loop", NCFG_LOG_WARNING,
-		    "%zu roam(s) in one round did not fit and were not reported",
-		    harvest.roams_missed);
-	}
-
-	/*
-	 * Who set the regulatory domain, before the pass that observes it. Here
-	 * rather than in the drain, because the drain holds the watchers and not
-	 * the state, and the loss first: a change heard after one was lost in the
-	 * same round is the current answer.
-	 */
-	if (run->loop && run->loop->state) {
-		if (harvest.lost_regdom) {
-			ncfg_daemon_state_heard_regdom(run->loop->state, NULL);
-		}
-		if (harvest.heard_regdom) {
-			ncfg_daemon_state_heard_regdom(run->loop->state, &harvest.regdom);
-		}
-	}
-
-	if (run->loop && ncfg_main_passes(&harvest.wake, harvest.roam_count, request_count)) {
-		char   message[NCFG_ERROR_MAX];
-		size_t at;
-
-		for (at = 0; at < harvest.roam_count; at++) {
-			roams[at].interface = harvest.roams[at].interface;
-			roams[at].bssid = harvest.roams[at].bssid;
-		}
-		message[0] = '\0';
-		if (!ncfg_reconcile_pass(run->loop, &harvest.wake, roams, harvest.roam_count,
-		    requests, request_count, report ? &report->pass : NULL, message,
-		    sizeof(message))) {
-			/*
-			 * Reported and not returned. `daemon.h` says a pass answers 0 only
-			 * where it could not be carried out at all, and even that is not a
-			 * reason to stop watching: a daemon that stopped reconciling
-			 * because one pass failed is a daemon that stopped, and the next
-			 * tick is five seconds away.
-			 */
-			ncfg_log_emitf("reconcile", NCFG_LOG_ERROR, "this pass did not run: %s",
-			    message);
-		}
-		if (report) {
-			report->passed = 1;
-		}
-	}
-
-	/*
-	 * Last, and unconditionally. A round that ran no pass still answers what
-	 * was waiting -- otherwise a request arriving on a quiet machine would
-	 * hold its connection until something else woke the loop.
-	 */
-	if (run->mailbox) {
-		ncfg_main_mailbox_settle(run->mailbox);
-	}
+	round_end(run, &harvest, report);
 	return 1;
 }
 
@@ -892,5 +916,88 @@ int ncfg_main_serve(const ncfg_main_run_t *run, char *err, size_t err_size)
 			break;
 		}
 	}
+	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * A loop this daemon runs inside (project.md 10.676)
+ * ------------------------------------------------------------------------ */
+
+void ncfg_main_outside_begin(const ncfg_main_run_t *run, ncfg_main_outside_t *outside)
+{
+	memset(outside, 0, sizeof(*outside));
+	if (run->refresh) {
+		run->refresh(run->refresh_context, run->sources);
+	}
+	outside->deadline = ticks_of(run) + (uint64_t)NCFG_MAIN_TICK_MS;
+}
+
+size_t ncfg_main_outside_fds(const ncfg_main_run_t *run, int *out, size_t cap)
+{
+	size_t count = 0;
+	size_t at;
+
+	for (at = 0; at < run->sources->count && count < cap; at++) {
+		if (run->sources->at[at].fd >= 0) {
+			out[count++] = run->sources->at[at].fd;
+		}
+	}
+	return count;
+}
+
+void ncfg_main_outside_ready(const ncfg_main_run_t *run, ncfg_main_outside_t *outside, int fd)
+{
+	struct pollfd look;
+	size_t        at;
+
+	for (at = 0; at < run->sources->count; at++) {
+		if (run->sources->at[at].fd == fd) {
+			break;
+		}
+	}
+	if (at == run->sources->count) {
+		/* Asked about last pass and dropped since: nothing of ours. */
+		return;
+	}
+	/*
+	 * The outside loop says only that the descriptor is readable or hung up,
+	 * and what the patience decides on is which: asked again, at once, of the
+	 * descriptor itself. A look that finds nothing is a readiness somebody
+	 * else consumed, and costs nothing.
+	 */
+	look.fd = fd;
+	look.events = POLLIN;
+	look.revents = 0;
+	if (poll(&look, 1, 0) <= 0) {
+		return;
+	}
+	outside->took = 1;
+	if (look_at(&run->sources->at[at], ncfg_main_readiness(look.revents), &outside->harvest)) {
+		ncfg_main_sources_forget(run->sources, at);
+		outside->dropped++;
+	}
+}
+
+int ncfg_main_outside_tick(const ncfg_main_run_t *run, ncfg_main_outside_t *outside,
+    ncfg_main_round_report_t *report)
+{
+	ncfg_main_round_report_t mine;
+
+	if (!report) {
+		report = &mine;
+	}
+	memset(report, 0, sizeof(*report));
+	if (!outside->took) {
+		if (ticks_of(run) < outside->deadline) {
+			return 0;
+		}
+		/* A quiet round's backstop, as the round's own wait timing out is. */
+		ncfg_reconcile_collapse(&outside->harvest.wake, NCFG_WOKE_TICK);
+	}
+	ask_the_unwaited(run->sources, &outside->harvest);
+	report->drains = 1u;
+	report->dropped = outside->dropped;
+	round_end(run, &outside->harvest, report);
+	ncfg_main_outside_begin(run, outside);
 	return 1;
 }

@@ -764,6 +764,34 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
  */
 int ncfg_main_serve(const ncfg_main_run_t *run, char *err, size_t err_size);
 
+/*
+ * THE SAME ROUND, DRIVEN BY A LOOP THIS DAEMON DOES NOT OWN (project.md
+ * 10.676): fuzznet's node loop, when this daemon is its store's face. One
+ * loop owns the process's descriptors (fuzznet's sec 831), so this one is
+ * not run at all; instead the outside loop asks for the descriptors each of
+ * its passes (`_fds`), says which are readable (`_ready`, which takes what is
+ * there), and calls `_tick` after the pass, which ends a round -- the same
+ * steps 4 to 6 `ncfg_main_round` ends with -- when anything was taken or the
+ * backstop's five seconds are up. A burst is collapsed by the outside pass
+ * itself: everything readable in one pass is one round.
+ *
+ * `_tick` answers 1 where a round ended, with `report` (may be NULL) filled,
+ * and 0 where nothing was owed. `report->stopping` is the stop byte, which
+ * the caller acts on: the outside loop is the one that has to end.
+ */
+typedef struct {
+	ncfg_main_harvest_t harvest;
+	uint64_t            deadline;
+	int                 took;
+	size_t              dropped;
+} ncfg_main_outside_t;
+
+void   ncfg_main_outside_begin(const ncfg_main_run_t *run, ncfg_main_outside_t *outside);
+size_t ncfg_main_outside_fds(const ncfg_main_run_t *run, int *out, size_t cap);
+void   ncfg_main_outside_ready(const ncfg_main_run_t *run, ncfg_main_outside_t *outside, int fd);
+int    ncfg_main_outside_tick(const ncfg_main_run_t *run, ncfg_main_outside_t *outside,
+    ncfg_main_round_report_t *report);
+
 /* ------------------------------------------------------------------------ *
  * The real descriptors -- daemon_watchers.c
  * ------------------------------------------------------------------------ */

@@ -996,7 +996,10 @@ them because no test had ever carried those keys.
    the records API in-process; retype `scope.h` onto `fzn_scope_t`. Then
    10.667's UPnP/NAT-PMP (with its warning) and reading seen hosts back.
    **Linking and the identity are done (10.669)**, and the shared store is
-   answered there: one store is one node, the claim's face writes.
+   answered there: one store is one node, the claim's face writes. **How it
+   becomes the face is decided (10.676)**: in fuzznet's loop, the round split
+   so either loop drives it; the move waits on the five things asked of
+   fuzznet there.
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
@@ -12632,6 +12635,67 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.676 netcfgd runs in fuzznet's loop: the round split, and five asks
+
+**The holder, 2026-11-03, on 10.669's open question** (in-loop or a thread):
+"in-loop, ask fuzznet to poll extension fds during waits." So netcfgd becomes
+its store's face by running inside `fzn_daemon_main`, its descriptors given
+to the node's loop through `fzn_daemon_ext_t`'s `fds`/`ready`/`tick` (fuzznet
+`f12ee4b`, its sec 831), and the 3 s per step in which that loop polls no
+extension descriptor (10.669's last paragraph) is fuzznet's to close rather
+than netcfgd's to work around. A thread was the alternative and is the one
+not taken: two threads would be two writers of one store (fuzznet sec 827).
+
+**Built: the round split, so both loops drive one round.**
+`c/src/main/daemon_loop.c` ends every round in one function, `round_end`
+(requests, the stream sweep, the regulatory note, the pass, the answers),
+and the per-descriptor patience is one function, `look_at`.
+`ncfg_main_round` -- this daemon's own `poll` -- uses both, unchanged in what
+it does, and so does a loop the daemon does not own: `ncfg_main_outside_fds`
+names the descriptors for the outside loop's pass, `_ready` takes one that
+is readable (asking the descriptor itself for the hang-up fuzznet does not
+pass on), and `_tick`, after the pass, ends a round when anything was taken
+or the five-second backstop is up. Everything readable in one outside pass
+is one round, which is the burst collapse. Its own loop stays for a daemon
+with no store, which is every test and any machine without a node.
+
+Checked: `loop_test`'s `an_outside_loop_drives_the_same_round`, seven
+checks -- the asked source is not named, a quiet pass ends no round before
+the backstop and a tick after it, fifty events in one pass are one wake, a
+readiness already consumed is nothing, and a hung-up descriptor is dropped
+and stops being named. Sabotaged: not marking a readiness taken fails one,
+not dropping the hung-up source fails another. The other 194 checks of the
+round are unchanged.
+
+**What the move waits on: asked of fuzznet in its inbox, `20261103T1211Z`.**
+
+1. **Poll the extension's descriptors during a wait in turn** -- the
+   holder's ask. A confirm window is a deadline the operator is racing, and
+   an `ncfg` request held 6 s reads as a hung daemon.
+2. **What `ready` and `tick` may call, and whether either runs mid-step.**
+   netcfgd's `ready` only reads its own descriptor; its pass runs in `tick`.
+3. **A local request in-process.** `node_records` is static in fuzznet's
+   `daemon.c`, and once netcfgd is the face, `c/src/host/seen.c` writing to
+   the `face` socket is the loop's thread writing to a socket only it
+   serves: a deadlock to the client's timeout, every pass. **This is the
+   one that would break something if the move went first**, so the move
+   does not go first.
+4. **A clean stop.** `fzn_daemon_main` serves until the process is
+   signalled; netcfgd stops on a byte and does its own shutdown, and wants
+   fuzznet's socket closed and `face` removed rather than left as a SIGTERM
+   leaves fuzznetd's.
+5. **A restart after a join re-executes the argv fuzznet parsed**, which
+   for netcfgd is only the fuzznet options it passes on.
+
+And one to confirm: `ext_tick()` runs after every pass of the node's loop,
+not once a second, which the round collapse above relies on.
+
+**Next, as those land:** the pin moves past `f12ee4b`; `c/src/node/`
+gains the extension -- `fds`/`ready`/`tick` over the three calls above, the
+stop byte ending the node's loop -- and the daemon keeps the claim it takes
+rather than giving it back (10.669); `seen.c` writes in-process when this
+process is the face.
+
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 
 10.671 listed the mappings miniupnpd holds in `ncfg status` by reading its
@@ -12972,7 +13036,7 @@ If the language ever needs fuzznet's scope *functions* (`fzn_scope_widens`),
 that is the time to retype, and the node module is where the seam would grow.
 
 **Next, from 10.668's list:** netcfgd running fuzznet's loop as the face
-(below).
+(below, and 10.676 for the decision and what it waits on).
 
 **And how netcfgd becomes a face that serves, answered by fuzznet** (inbox
 `20261102T2329Z`, its sec 831, built in its `f12ee4b`). Writing records
@@ -12988,7 +13052,8 @@ takes the caller's own descriptors (`fds`, up to 16, asked each pass),
 process's descriptors, because two threads would be two writers of one
 store (sec 827).
 
-**One cost to weigh before building on it, and it is netcfgd's to weigh:**
+**The cost weighed, and decided by the holder in 10.676** -- in the loop,
+with fuzznet asked to poll the extension's descriptors during waits. It was:
 fuzznet's caution that while a round waits in turn on a peer the loop polls
 neither its own descriptors nor the caller's, for up to a few seconds. For
 this daemon that is a few seconds in which an `ncfg` request, a netlink
