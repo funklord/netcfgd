@@ -93,6 +93,15 @@ left=$(pidof netcfgd)
 say "stopped: process ${left:-gone}, dummy0 $(address)"
 [ -z "$left" ] && address | grep -q 192.0.2.4 || failed=1
 
+# This kernel has no nf_tables, so every observation fails to open netfilter.
+# Each daemon says so once (10.672 found it said on every pass): no process
+# may have said it twice.
+repeated=$(logread 2>/dev/null | grep 'no netfilter socket' |
+	sed -n 's/.*netcfgd\[\([0-9]*\)\].*/\1/p' | sort | uniq -c | awk '$1 > 1' | wc -l)
+noted=$(logread 2>/dev/null | grep -c 'no netfilter socket')
+say "the no-netfilter note: $noted line(s), $repeated process(es) saying it twice"
+[ "$noted" -ge 1 ] && [ "$repeated" -eq 0 ] || failed=1
+
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep netcfgd | grep -v 'no netfilter socket' | tail -12 |
 		sed 's/^/  log: /' >> "$out"

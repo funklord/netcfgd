@@ -707,6 +707,17 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 	return 1;
 }
 
+/*
+ * Whether the note below has been said since a socket last opened. The
+ * daemon observes every few seconds, and a kernel built without nf_tables
+ * fails the same way on every pass: said each time, the note was a line every
+ * few seconds in a router's `logread` (10.672), which buries everything else
+ * in a log that small. So it is said when the condition starts and again only
+ * after a socket has opened in between. Atomic, because a request on a
+ * connection thread observes too.
+ */
+static int unavailable_said;
+
 int observe_netfilter_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out)
 {
 	char why[NCFG_ERROR_MAX];
@@ -723,11 +734,14 @@ int observe_netfilter_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out)
 		 * -- and the observation goes on being taken.
 		 */
 		ncfg_netlink_close(socket);
-		ncfg_log_emitf("observe", NCFG_LOG_NOTE,
-		    "no netfilter socket could be opened (%s), so this observation reports no "
-		    "NAT installed and no conflicting table", why);
+		if (!__atomic_exchange_n(&unavailable_said, 1, __ATOMIC_RELAXED)) {
+			ncfg_log_emitf("observe", NCFG_LOG_NOTE,
+			    "no netfilter socket could be opened (%s), so observations report no "
+			    "NAT installed and no conflicting table; said once until one opens", why);
+		}
 		return 0;
 	}
+	__atomic_store_n(&unavailable_said, 0, __ATOMIC_RELAXED);
 	/* Without a timeout a lost message wedges the caller for ever, which is
 	 * `ncfg_observe_collect`'s argument and is asked above rather than here so
 	 * that a socket which opened and could not be timed out is closed with the

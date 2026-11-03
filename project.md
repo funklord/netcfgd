@@ -12660,9 +12660,12 @@ expected next run OpenWrt, so this is the path that meets them first.
   that case, and it is recorded rather than chosen.
 - **The guest has none of the kernel's modules**, so the rig hands it the
   host's own dummy module; nf_tables is absent too, and the observation's
-  note that no netfilter socket opens **repeats on every pass** -- a line
-  every few seconds in `logread`. On a real OpenWrt build nf_tables is in, so
-  it is a rig artifact, but a kernel without it would fill a router's log.
+  note that no netfilter socket opens **repeated on every pass** -- a line
+  every few seconds in `logread`. On a real OpenWrt build nf_tables is in,
+  but a kernel without it would fill a router's log, so the note is now said
+  once, and again only after a socket has opened in between. The rig asserts
+  no process says it twice; with the fix reverted it failed, nine lines in
+  one short run.
 
 **The fault it found: an edit made while the daemon starts was lost.** The
 daemon compiled its configuration long before it opened the watch that
