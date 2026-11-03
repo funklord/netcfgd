@@ -52,6 +52,22 @@ ncfg_events_view::ncfg_events_view(ncfg_connection *connection, QWidget *parent)
 
 void ncfg_events_view::refresh()
 {
+	/* **Another node is checked before a running stream**, which would
+	 * otherwise return early and keep showing this machine's events under the
+	 * other node's name once the window moved to it (10.698). */
+	if (!connection->node().isEmpty()) {
+		if (stream->is_running()) {
+			stream->stop();
+		}
+		if (told_node != connection->node()) {
+			told_node = connection->node();
+			append(QStringLiteral("events are not carried from another node, so the views "
+			                      "refresh every 15 seconds instead"), QString());
+			emit reported(QStringLiteral("no event stream from node %1").arg(told_node));
+		}
+		return;
+	}
+	told_node.clear();
 	if (stream->is_running()) {
 		return;
 	}

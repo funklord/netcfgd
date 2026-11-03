@@ -57,6 +57,9 @@ private:
 
 	ncfg_connection     *connection;
 	ncfg_monitor_stream *stream;
+	/* The node the "not carried" line was said for, so it is said once rather
+	 * than at every 15-second refresh (10.698); empty for this machine. */
+	QString told_node;
 	QListWidget         *lines;
 	int                  counted = 0;
 };

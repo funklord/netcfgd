@@ -162,8 +162,36 @@ bool ncfg_connection::reopen_if_broken(QString *error)
 	 * Both halves of this were found separately, one on each branch, and each
 	 * fixed only its own: the copy without passing the error on, and the error
 	 * passed on without the copy. */
+	if (!node_key.isEmpty()) {
+		const QString key = node_key; /* copied, for `open`'s reason below */
+		return open_at(key, error);
+	}
 	const QString where = path;
 	return open(where, error);
+}
+
+bool ncfg_connection::open_at(const QString &key, QString *error)
+{
+	const QByteArray requested = key.toUtf8();
+
+	close();
+
+	char message[NCFG_ERROR_MAX];
+
+	client = ncfg_client_open_at(requested.constData(), message, sizeof(message));
+	if (!client) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	node_key = QString::fromUtf8(requested);
+	return true;
+}
+
+QString ncfg_connection::node() const
+{
+	return node_key;
 }
 
 bool ncfg_connection::open(const QString &socket_path, QString *error)
@@ -210,11 +238,14 @@ void ncfg_connection::close()
 		client = nullptr;
 	}
 	path.clear();
+	node_key.clear();
 }
 
 QString ncfg_connection::where() const
 {
-	return path;
+	/* The whole key, never an abbreviation another node could share: this is
+	 * the line that says whose network the window changes. */
+	return node_key.isEmpty() ? path : QStringLiteral("node %1").arg(node_key);
 }
 
 /*

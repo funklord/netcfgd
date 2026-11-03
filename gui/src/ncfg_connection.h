@@ -1083,6 +1083,17 @@ public:
 	 * installed location, resolved by the C layer so that this client and
 	 * `ncfg` cannot disagree about which daemon they are talking to. */
 	bool open(const QString &socket_path, QString *error);
+	/*
+	 * Another node of the estate, `key` in hex (`--at`, project.md 10.698):
+	 * every request asked of that node through this user's fuzznetd and
+	 * judged by its `remote` block. A reopen reopens the node, never the
+	 * default socket -- which would be this machine, shown as the other.
+	 */
+	bool open_at(const QString &key, QString *error);
+	/* The node's key, or empty for this machine's daemon on a socket. A
+	 * monitor stream is this machine's, so a view that streams asks this
+	 * first and does not subscribe while another node is shown. */
+	QString node() const;
 	void close();
 	/*
 	 * Whether this connection can still be asked anything.
@@ -1440,6 +1451,7 @@ public:
 private:
 	ncfg_client_t *client = nullptr;
 	QString        path;
+	QString        node_key;
 };
 
 #endif /* NCFG_CONNECTION_H */

@@ -67,6 +67,20 @@ void ncfg_client_close(ncfg_client_t *client);
 const char *ncfg_client_socket_path(const ncfg_client_t *client);
 
 /*
+ * A client of another node of the estate, `host` its key in hex (10.698):
+ * every request asked through this user's fuzznetd as `call ask at HOST`,
+ * answered as that node's socket would answer it, judged by its `remote`
+ * block. Nothing is connected until a request, so this fails only on a key
+ * that is not one. **Its socket path is ""**, and a caller reopening a
+ * broken client must reopen it with this, never with that path, which would
+ * name this machine's daemon. `monitor` is a stream and is not carried.
+ */
+ncfg_client_t *ncfg_client_open_at(const char *host, char *err, size_t err_size);
+
+/* The node a client asks, or NULL for one on a socket. */
+const char *ncfg_client_node(const ncfg_client_t *client);
+
+/*
  * Whether the connection is dead, as opposed to the daemon having said no.
  *
  * **A long-running client cannot tell those apart from an error string, and

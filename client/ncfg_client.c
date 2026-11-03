@@ -41,6 +41,9 @@ struct ncfg_client {
 	 * fuzznet that holds its socket and never answers would otherwise cost
 	 * every refresh its whole wait. */
 	time_t fuzznet_after;
+	/* Another node of the estate, by its key, where this client asks that
+	 * node rather than a socket (10.698); "" for a socket. `fd` is -1 then. */
+	char   at[65];
 };
 
 static void set_error(char *err, size_t err_size, const char *format, ...)
@@ -185,6 +188,37 @@ ncfg_client_t *ncfg_client_open(const char *socket_path, char *err, size_t err_s
 	client->fd = fd;
 	snprintf(client->path, sizeof(client->path), "%s", socket_path);
 	return client;
+}
+
+ncfg_client_t *ncfg_client_open_at(const char *host, char *err, size_t err_size)
+{
+	size_t at;
+
+	if (err && err_size) {
+		err[0] = '\0';
+	}
+	for (at = 0; host && host[at]; at++) {
+		if (!((host[at] >= '0' && host[at] <= '9') || (host[at] >= 'a' && host[at] <= 'f'))) {
+			break;
+		}
+	}
+	if (!host || at != 64u || host[at] != '\0') {
+		set_error(err, err_size, "a node is its key, 64 lower-case hex digits");
+		return NULL;
+	}
+	ncfg_client_t *client = calloc(1, sizeof(*client));
+	if (!client) {
+		set_error(err, err_size, "out of memory");
+		return NULL;
+	}
+	client->fd = -1;
+	memcpy(client->at, host, 65u);
+	return client;
+}
+
+const char *ncfg_client_node(const ncfg_client_t *client)
+{
+	return client && client->at[0] ? client->at : NULL;
 }
 
 void ncfg_client_close(ncfg_client_t *client)
@@ -338,6 +372,32 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 		return NULL;
 	}
 
+	/* **Another node** (10.698): the request asked through this user's
+	 * fuzznetd, `call ask at HOST`, and its answer read as that node's socket
+	 * would have written it -- a refusal still arrives as a document. Only a
+	 * transport that failed makes the client broken, the cue to reopen. */
+	if (client->at[0]) {
+		char   socket[1100];
+		char  *answer = NULL;
+		size_t answer_length = 0;
+
+		if (!ncfg_fuzznet_user_socket(socket, sizeof(socket)) ||
+		    !ncfg_fuzznet_ask_at(socket, client->at, request, &answer, &answer_length, err,
+		        err_size)) {
+			client->broken = 1;
+			return NULL;
+		}
+		char parse_failed[NCFG_ERROR_MAX];
+		ncfg_json_doc_t *answered = ncfg_json_parse(answer, answer_length, parse_failed,
+		                            sizeof(parse_failed));
+		free(answer);
+		if (!answered) {
+			set_error(err, err_size, "that node sent something this cannot read: %s",
+			    parse_failed);
+		}
+		return answered;
+	}
+
 	size_t length = strlen(request);
 	if (!write_all(client->fd, request, length) || !write_all(client->fd, "\n", 1)) {
 		set_error(err, err_size, "cannot send to netcfgd: %s", strerror(errno));
@@ -395,7 +455,8 @@ ncfg_json_doc_t *ncfg_client_status(ncfg_client_t *client, char *err, size_t err
 	/* Only a socket named as a daemon names its own, `<run>/netcfgd.sock`,
 	 * says its directory is a run directory: one somewhere else -- a test's
 	 * in /tmp -- would send this asking /tmp for a stranger's fuzznet. */
-	if (client && now >= client->fuzznet_after && (slash = strrchr(client->path, '/')) &&
+	if (client && !client->at[0] && now >= client->fuzznet_after &&
+	    (slash = strrchr(client->path, '/')) &&
 	    slash != client->path && strcmp(slash, "/netcfgd.sock") == 0) {
 		ncfg_json_doc_t *doc = NULL;
 

@@ -145,6 +145,12 @@ int main(int argc, char **argv)
 	               "installed location."),
 	    QStringLiteral("path"));
 	parser.addOption(socket_option);
+	QCommandLineOption at_option(
+	    QStringList() << QStringLiteral("at"),
+	    QStringLiteral("Another node of this estate, by its key in hex, asked through your "
+	               "own fuzznetd: `ncfg nodes` lists them."),
+	    QStringLiteral("key"));
+	parser.addOption(at_option);
 	QCommandLineOption tray_option(
 	    QStringList() << QStringLiteral("tray"),
 	    QStringLiteral("Start in the notification area with no window. Closing the window "
@@ -188,12 +194,22 @@ int main(int argc, char **argv)
 	 * entries -- and leaves quietly if either never does. Thirty looks two
 	 * seconds apart.
 	 */
+	/* `--at` names another node, `--socket` this machine's daemon; both at
+	 * once is two answers to "which machine", so it is refused. */
+	if (parser.isSet(at_option) && parser.isSet(socket_option)) {
+		fprintf(stderr, "netcfgd-gui: --at and --socket each say which machine; give one\n");
+		return 2;
+	}
+	auto open_it = [&](QString *why) {
+		return parser.isSet(at_option) ? connection.open_at(parser.value(at_option), why)
+		                               : connection.open(parser.value(socket_option), why);
+	};
 	const bool login = parser.isSet(login_option);
 	if (login) {
 		bool reached = false;
 		bool shelf = false;
 		for (int look = 0; look < 30; look++) {
-			reached = reached || connection.open(parser.value(socket_option), &error);
+			reached = reached || open_it(&error);
 			shelf = QSystemTrayIcon::isSystemTrayAvailable();
 			if (reached && shelf) {
 				break;
@@ -223,7 +239,7 @@ int main(int argc, char **argv)
 	 * `Retry` is the default button, since somebody who has just read the
 	 * message is about to act on it. Cancel is what closing the dialog does,
 	 * so there is no way to dismiss it into a window that would lie. */
-	while (!login && !connection.open(parser.value(socket_option), &error)) {
+	while (!login && !open_it(&error)) {
 		QMessageBox box(QMessageBox::Critical, QStringLiteral("netcfgd"), error,
 		            QMessageBox::Retry | QMessageBox::Cancel);
 		box.setDefaultButton(QMessageBox::Retry);

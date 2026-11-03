@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -579,6 +580,127 @@ static void status_over_fuzznet_first(void)
 	waitpid(control_child, NULL, 0);
 	unlink(control);
 	unlink(fuzznet);
+	rmdir(dir);
+}
+
+/*
+ * A client of another node (10.698): with this user's fuzznetd faked at
+ * `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, a request goes as `call ask at
+ * KEY 0 REQUEST` and the node's answer comes back as a document; the client
+ * names its node and has no socket path, so nothing can reopen it onto this
+ * machine; a fuzznet that answers `error` leaves it broken.
+ *
+ * HOW IT STOPS: the fake serves two connections under `alarm(10)` and exits;
+ * the socket, its directory and the scratch directory are removed by name.
+ */
+static void a_client_of_another_node(void)
+{
+	static const char key[] =
+	    "abababababababababababababababababababababababababababababababab";
+	static const char json[] = "{\"response\":\"modems\",\"modems\":[]}";
+	char dir[] = "/tmp/ncfg-client-at.XXXXXX";
+	char runtime[64];
+	char fuzznet[96];
+	char socket_path[128];
+	char err[NCFG_ERROR_MAX];
+	char *saved = getenv("XDG_RUNTIME_DIR") ? strdup(getenv("XDG_RUNTIME_DIR")) : NULL;
+	pid_t child;
+	int listener;
+
+	if (!mkdtemp(dir)) {
+		ok("a directory for the node test", 0, strerror(errno));
+		return;
+	}
+	snprintf(runtime, sizeof(runtime), "%s", dir);
+	snprintf(fuzznet, sizeof(fuzznet), "%s/fuzznet", dir);
+	snprintf(socket_path, sizeof(socket_path), "%s/fuzznetd.sock", fuzznet);
+	(void)mkdir(fuzznet, 0700);
+	listener = listen_at(socket_path);
+	if (listener < 0) {
+		ok("a fake fuzznetd listens", 0, strerror(errno));
+		return;
+	}
+	child = fork();
+	if (child == 0) {
+		int at;
+
+		alarm(10);
+		for (at = 0; at < 2; at++) {
+			char line[600];
+			char page[256];
+			char escaped[700];
+			int fd = accept(listener, NULL, NULL);
+			size_t i;
+			size_t w = 3;
+			int wrote;
+
+			if (fd < 0) {
+				_exit(1);
+			}
+			(void)read_request(fd, line, sizeof(line));
+			if (at == 1 || strncmp(line, "call ask at ", 12) != 0 ||
+			    strncmp(line + 12, key, 64) != 0) {
+				(void)!write(fd, "error no such host\n", 19u);
+				close(fd);
+				continue;
+			}
+			wrote = snprintf(page, sizeof(page), "ok %zu 0 %zu %016llx\n", strlen(json),
+			                 strlen(json),
+			                 (unsigned long long)ncfg_status_page_digest(json, strlen(json)));
+			memcpy(page + wrote, json, strlen(json));
+			memcpy(escaped, "ok ", 3u);
+			for (i = 0; i < (size_t)wrote + strlen(json); i++) {
+				unsigned char c = (unsigned char)page[i];
+
+				if (c <= ' ' || c == '%' || c == ',' || c == 0x7f) {
+					w += (size_t)snprintf(escaped + w, sizeof(escaped) - w, "%%%02x", c);
+				} else {
+					escaped[w++] = (char)c;
+				}
+			}
+			escaped[w++] = '\n';
+			(void)!write(fd, escaped, w);
+			close(fd);
+		}
+		_exit(0);
+	}
+	close(listener);
+	setenv("XDG_RUNTIME_DIR", runtime, 1);
+
+	ok("a key that is not one is refused when opened",
+	   ncfg_client_open_at("not-a-key", err, sizeof(err)) == NULL, NULL);
+	ncfg_client_t *client = ncfg_client_open_at(key, err, sizeof(err));
+	ok("a client of another node opens without connecting", client != NULL, err);
+	if (client) {
+		ok("  it names its node, and has no socket path to be reopened onto",
+		   ncfg_client_node(client) && strcmp(ncfg_client_node(client), key) == 0 &&
+		       strcmp(ncfg_client_socket_path(client), "") == 0, NULL);
+		ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"modem_list\"}",
+		                                           err, sizeof(err));
+		ok("  a request is that node's answer, through ask",
+		   doc && ncfg_json_string_equals(doc, ncfg_json_member(doc, ncfg_json_root(doc),
+		                                  "response"), "modems") && !ncfg_client_broken(client),
+		   err);
+		if (doc) {
+			ncfg_json_free(doc);
+		}
+		doc = ncfg_client_request(client, "{\"request\":\"modem_list\"}", err, sizeof(err));
+		ok("  and a fuzznet that cannot carry it leaves the client broken",
+		   doc == NULL && ncfg_client_broken(client), NULL);
+		if (doc) {
+			ncfg_json_free(doc);
+		}
+		ncfg_client_close(client);
+	}
+	waitpid(child, NULL, 0);
+	if (saved) {
+		setenv("XDG_RUNTIME_DIR", saved, 1);
+		free(saved);
+	} else {
+		unsetenv("XDG_RUNTIME_DIR");
+	}
+	unlink(socket_path);
+	rmdir(fuzznet);
 	rmdir(dir);
 }
 
@@ -3040,6 +3162,7 @@ int main(int argc, char **argv)
 	a_member_can_be_asked_its_own_name();
 	a_refusal_is_not_a_dead_socket();
 	status_over_fuzznet_first();
+	a_client_of_another_node();
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();
 	a_status_becomes_links();

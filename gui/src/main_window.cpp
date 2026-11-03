@@ -262,6 +262,16 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	settle->setInterval(400);
 	connect(settle, &QTimer::timeout, this, &ncfg_main_window::refresh);
 	connect(events, &ncfg_events_view::moved, this, &ncfg_main_window::moved);
+	/* **Another node has no event stream** (0312, 10.698), so nothing would
+	 * tell the views it moved: they are refreshed on a timer instead, often
+	 * enough to follow a change made from this window, seldom enough that a
+	 * call across the estate each time is not a load on the node. */
+	if (!connection->node().isEmpty()) {
+		auto *poll = new QTimer(this);
+		poll->setInterval(15000);
+		connect(poll, &QTimer::timeout, this, &ncfg_main_window::refresh);
+		poll->start();
+	}
 
 	status = new QLabel(this);
 	statusBar()->addWidget(status);

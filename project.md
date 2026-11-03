@@ -1006,9 +1006,9 @@ them because no test had ever carried those keys.
      read the status over fuzznet first (10.690).
 
    **What is left**, in the order the aims give it:
-   - **the GUI's other verbs over `ask`**. Only its status crosses fuzznet so
-     far, and a node selector in the GUI would make the fleet a desktop
-     thing rather than a shell one;
+   - **a node menu in the GUI**. Its verbs reach another node with `--at`
+     (10.698), and choosing the node inside the window would make the fleet
+     a desktop thing rather than a shell one;
    - **events across the estate**. `monitor` is a stream and is not carried
      (0312). fuzznet's `get events` is the estate's stream, and netcfgd
      publishing into it is unbuilt;
@@ -12682,6 +12682,57 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.698 The GUI on another node: `netcfgd-gui --at KEY`
+
+Section 10's first next step names the GUI's verbs over `ask`. The client
+library had every one of them on one function, `ncfg_client_request`. So a
+client that asks a node, **`ncfg_client_open_at(KEY)`**, sends each request as
+`call ask at KEY` through this user's fuzznetd, and the GUI's typed calls
+work on another node unchanged.
+
+- **A refusal is still a document**, as from the socket. Only a fuzznet
+  that cannot carry the request marks the client broken, which is the GUI's
+  cue to reopen.
+- **It reopens the node, never this machine.** `ncfg_connection` reopened a
+  broken connection by its socket path, and a node's path is empty, which
+  the C layer reads as the default socket: this machine's daemon, while the
+  window said the other node. That is exactly what `gui/project.md`
+  section 4's rule exists to prevent, the operator unsure whose network
+  they are changing. A node connection reopens by its key. `where()` names
+  the node by its whole key, never an abbreviation another node could share.
+- **No event stream from another node** (0312). The events tab says so
+  rather than subscribing to this machine's stream, and the window refreshes
+  on a 15-second timer instead, because otherwise nothing would tell its
+  views the node moved. An earlier draft of the events tab's sentence said
+  the views refreshed on their own. They did not: only events and the
+  Refresh button refreshed them, and the timer is what made the sentence
+  true. **The timer then made a second fault.** The window's refresh
+  refreshes the events tab when it is showing, so the tab gained its line
+  every 15 seconds. It is said once per node now. The tab also stops a
+  stream of this machine's when a node is shown: it had returned early for
+  a running stream before asking whether a node was open, which would have
+  kept this machine's events under the other node's name once the window
+  could move between them.
+- `--at` and `--socket` together are refused, as two answers to which
+  machine.
+
+`client_test` checks that a node client:
+
+- opens without connecting;
+- names its node and has no socket path;
+- answers a request through a fake fuzznetd;
+- is left broken by a fuzznet that cannot carry the request.
+
+Removing the node branch fails it. The GUI probe `node_connection` breaks a
+node connection with no fuzznetd and reopens it, and it must still be that
+node. Without the node branch in `reopen_if_broken`, the reopen fails, being
+aimed at this machine's default socket. The probe also refreshes the events
+tab three times on a node and finds one line, where without the once-only
+rule it finds three.
+
+**Not done yet:** a node menu in the window, from `ncfg nodes`'s list, so
+the GUI can move between nodes without a restart.
 
 ## 10.697 The remote safety path, live: a window armed, confirmed, and left to revert
 
