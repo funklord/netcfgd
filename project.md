@@ -12691,6 +12691,12 @@ round are unchanged.
    (`follower_main`): a netcfgd started beside a running fuzznetd would watch
    nothing until that fuzznetd went.
 7. **Whose is the default socket** when a face and a follower both take it.
+8. **What linking the loop costs** (below): fuzznet's consumer services
+   optional in its daemon build, as its spool and log files already are.
+9. **For 0309, how an extension's answer outgrows one line**: `ext->local`
+   writes at most 1024 bytes, `ncfg status --json` is 19,866 here, and
+   `monitor` is a stream. 0309 left the carrying to be worked out with
+   fuzznet when the transport is built; this is that question, with sizes.
 
 And one to confirm: `ext_tick()` runs after every pass of the node's loop,
 not once a second, which the round collapse above relies on.
@@ -12724,7 +12730,9 @@ installed program from 1,518,760 bytes to 2,494,056, 65 per cent. Most of it
 is the chat services `node/daemon.c` calls and no feature flag leaves out --
 `notes.o`, `files.o`, `stickers.o`, `groups.o`, `shelf.o` among the largest
 after `daemon.o`'s own 197 KB -- and `daemon.o` declares 19 MB of static
-storage, which the RSS gate has never been asked about. **Whether netcfgd
+storage. **Most of it is touched**: the same binary, three seconds after
+starting on an empty scratch store, is 3,512 kB resident without serving
+and 16,760 kB serving with no peers, against the RSS budget's 4,608 kB. **Whether netcfgd
 pays that, or fuzznet's loop comes apart from its consumer services first,
 is the holder's** (asked of fuzznet too, as a build it might offer). Until
 then the default build carries a stub that says so.
