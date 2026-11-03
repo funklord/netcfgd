@@ -1000,7 +1000,8 @@ them because no test had ever carried those keys.
    becomes the face is decided (10.676)**: in fuzznet's loop, the round split
    so either loop drives it, and serving the store built as `NODE_SERVE=1`,
    on fuzznet's stop, in-process request and restart (its sec 835); by
-   default it waits on the size (65 per cent) and the follower's loop.
+   default it waits on the size (65 per cent), which the holder decides after
+   fuzznet's answer to request 8.
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
@@ -12810,11 +12811,14 @@ netcfgd's inbox `20261103T1239Z`), and the pin is at `08c9aa2`:
 - **A restart executes the daemon's own command line**
   (`fzn_daemon_ext_t.restart_argv`, ask 5), not the fuzznet options.
 
-**One interim part is left: only as the face.** The claim is tried first;
-held by another process, the daemon says so and runs its own loop, since a
-follower's loop still runs no extension (ask 6, which fuzznet's answer
-names as unchanged) and netcfgd must not stop watching the network for as
-long as somebody's fuzznetd runs.
+**And ask 6 the same afternoon** (fuzznet `7d85b54`, sec 838; netcfgd's
+inbox `20261103T1338Z`): a follower polls the extension's descriptors and
+ticks after every pass, `fzn_daemon_stop` ends it, and `fzn_daemon_local`
+in it is asked of the face over its socket within 5 s. So the daemon no
+longer tries the claim first: started beside a running fuzznetd it follows
+it and goes on watching the network, and when that fuzznetd goes it takes
+the claim and restarts itself as the face, through `restart_argv`. The pin
+is at `7d85b54`.
 
 **Why a build option, measured:** linking `fzn_daemon_main` grows the
 installed program from 1,518,760 bytes to 2,494,056, 65 per cent. Most of it
@@ -12845,9 +12849,18 @@ not heard (status 137, under the script's `timeout -k`): three red. Not in
 `make test` or `check` while it is a build option, since it rebuilds the
 node module under other flags.
 
-**Next:** a follower's loop served as well (ask 6), and then the claim kept
-rather than tried (10.669) -- and serving by default, once the size is
-decided (ask 8, and the holder's).
+**Checked beside a fuzznetd too:** `node_serve.sh` gains a second phase,
+16 checks in all -- netcfgd started while a fuzznetd is the face follows it,
+answers `ncfg reload` in 5 ms and reads the station back through the face;
+the fuzznetd stopped, netcfgd is the face (`face` names its socket) and
+answers again after restarting itself; SIGTERM ends it with 0. Clean under
+`SANITIZE=1` as well. A reload is not a pass that lists records, which is why
+the phase makes a configuration edit before looking for the station -- the
+first version of the check failed for that.
+
+**Next:** serving by default, once the size is decided (ask 8, then the
+holder's), and ask 7, whose answer says whether a follower and a face may
+both be left on the default socket.
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 

@@ -132,11 +132,6 @@ typedef struct {
 
 /* How a serve ended. */
 typedef enum {
-	/* Another process is the store's face, so nothing was served and the
-	 * caller runs its own loop: a follower's loop runs no extension yet
-	 * (10.676, fuzznet ask 6), and netcfgd will not stop watching the
-	 * network for the length of somebody else's fuzznetd. */
-	NCFG_NODE_SERVE_NOT_FACE,
 	/* `tick` asked to stop and the node's loop was left. */
 	NCFG_NODE_SERVE_STOPPED,
 	/* fuzznet's loop returned on its own -- refused to start, or an identity

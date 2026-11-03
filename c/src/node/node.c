@@ -405,36 +405,6 @@ static void serve_tick(void *ctx, uint64_t now)
 	}
 }
 
-/* Whether the claim is free this moment: taken and given straight back, since
- * `fzn_daemon_main` takes it on a descriptor of its own and a flock conflicts
- * between two of them even in one process. */
-static int claim_free(const char *dir, char *err, size_t err_size)
-{
-	fzn_claim_file_t claim_file;
-	fzn_claim_ops_t  claim_ops;
-	fzn_claim_t      claim;
-	fzn_claim_err_t  claimed;
-	char             claim_path[NCFG_NODE_DIR_MAX + 8u];
-
-	memset(&claim_file, 0, sizeof(claim_file));
-	claim_file.fd = -1;
-	(void)snprintf(claim_path, sizeof(claim_path), "%s/claim", dir);
-	if (fzn_claim_file_open(&claim_file, claim_path, &claim_ops) != FZN_CLAIM_OK ||
-	    fzn_claim_init(&claim, &claim_ops) != FZN_CLAIM_OK) {
-		ncfg_error_set(err, err_size, "the claim at %s would not open", claim_path);
-		(void)fzn_claim_file_close(&claim_file);
-		return 0;
-	}
-	claimed = fzn_claim_take(&claim);
-	if (claimed == FZN_CLAIM_OK) {
-		(void)fzn_claim_release(&claim);
-	} else {
-		ncfg_error_set(err, err_size, "another process is the face of %s", dir);
-	}
-	(void)fzn_claim_file_close(&claim_file);
-	return claimed == FZN_CLAIM_OK;
-}
-
 size_t ncfg_node_local(const char *line, char *reply, size_t cap)
 {
 	return fzn_daemon_local(line, reply, cap);
@@ -456,9 +426,10 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 		    : "more than 32 fuzznet options");
 		return NCFG_NODE_SERVE_ENDED;
 	}
-	if (!claim_free(node->dir, err, err_size)) {
-		return NCFG_NODE_SERVE_NOT_FACE;
-	}
+	/* Face or follower, whichever the claim makes this process: since
+	 * fuzznet's 7d85b54 (its sec 838) a follower runs the extension too, so a
+	 * daemon started beside a running fuzznetd still watches the network,
+	 * and becomes the face, by restarting itself, when that one goes. */
 	(void)snprintf(dir_arg, sizeof(dir_arg), "--fuzznet-dir=%s", node->dir);
 	argv[argc++] = (char *)"netcfgd";
 	argv[argc++] = dir_arg;

@@ -87,8 +87,8 @@ static const char usage_text[] =
     "  --fuzznet-dir PATH     this node's fuzznet store, or $" NCFG_FUZZNET_DIR_ENV ";\n"
     "                         default fuzznet's own, for a daemon on the default\n"
     "                         --run-dir only. Empty for none\n"
-    "  --fuzznet-serve        be the store's face and serve it, inside fuzznet's\n"
-    "                         loop, while no other process is (experimental)\n"
+    "  --fuzznet-serve        run inside fuzznet's loop, as the store's face or\n"
+    "                         beside the process that is (experimental)\n"
     "  --fuzznet-arg ARG      one of fuzznet's own node options, for that loop\n"
     "  --no-apply-on-start    observe and watch, but change nothing until asked\n"
     "  --poll-config          use mtime polling rather than inotify\n"
@@ -892,13 +892,15 @@ typedef struct {
 /* A record written to the face's socket from inside the face's loop would
  * wait for an answer only that loop gives, so it is asked in-process: the
  * recorder runs in the pass, and the pass runs in the tick, where fuzznet
- * allows `fzn_daemon_local` (its sec 835). */
+ * allows `fzn_daemon_local` (its sec 835). As a follower the same call is
+ * asked of the face over its socket by fuzznet, within 5 s (sec 838). */
 static void node_begin(void *context)
 {
 	node_driven_t *driven = context;
 
 	ncfg_seen_in_process(driven->seen, ncfg_node_local);
-	ncfg_log_emitf("node", NCFG_LOG_INFO, "serving this daemon's fuzznet store as its face");
+	ncfg_log_emitf("node", NCFG_LOG_INFO,
+	    "running in fuzznet's loop, as its store's face or beside the process that is");
 }
 
 static void node_end(void *context)
@@ -931,10 +933,9 @@ static int node_tick(void *context)
 }
 
 /*
- * Serve the node, if asked to and if this process can be its face: 1 where
- * the daemon was served there and has been asked to stop, 0 where its own
- * loop is to run -- because it was not asked, another process is the face,
- * or fuzznet's loop ended by itself. Each of the last two said once.
+ * Serve the node, if asked to: 1 where the daemon ran in fuzznet's loop and
+ * has been asked to stop, 0 where its own loop is to run -- because it was not
+ * asked, or fuzznet's loop ended by itself, which is said.
  */
 static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_main_run_t *run,
     ncfg_seen_t *seen)
@@ -963,8 +964,7 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	if (served == NCFG_NODE_SERVE_STOPPED) {
 		return 1;
 	}
-	ncfg_log_emitf("node", served == NCFG_NODE_SERVE_NOT_FACE ? NCFG_LOG_NOTE
-	    : NCFG_LOG_WARNING, "%s, so this daemon runs its own loop", err);
+	ncfg_log_emitf("node", NCFG_LOG_WARNING, "%s, so this daemon runs its own loop", err);
 	return 0;
 }
 

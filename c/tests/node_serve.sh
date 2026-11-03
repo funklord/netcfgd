@@ -20,6 +20,12 @@
 #     fuzznet's socket and `<run>/node` all gone;
 #   - and its log carries no sanitizer report, for a `SANITIZE=1` run.
 #
+# Then beside a fuzznetd that is already the face (fuzznet sec 838): netcfgd
+# runs as a follower and still answers `ncfg reload` at once and reads the
+# station back through the face; when the fuzznetd stops, netcfgd takes the
+# claim, restarts itself as the face (its own command line, `restart_argv`)
+# and answers again.
+#
 # HOW IT STOPS: every wait is bounded (50 looks of 0.2 s), each client call is
 # under `timeout 10`, and the daemon under `timeout -k 5 60` -- the kill
 # because a daemon that never reads its stop byte ignores SIGTERM. The
@@ -109,8 +115,73 @@ check $? "SIGTERM stops it with status 0 ($code); face, socket, <run>/node gone"
 ! grep -q 'runtime error\|Sanitizer' "$R/log"
 check $? "the daemon's log carries no sanitizer report"
 
+# ---- beside a running fuzznetd, then taking over from it ----
+timeout -k 5 60 "$F" --fuzznet-dir="$R/store" --socket="$R/fzd.sock" --no-log-file \
+	--fuzznet-service=1 --fuzznet-product=1 > "$R/fzd.log" 2>&1 &
+fzd=$!
+n=0
+until [ "$(cat "$R/store/face" 2>/dev/null)" = "$R/fzd.sock" ] || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/store" --fuzznet-serve --fuzznet-arg "--socket=$R/fz.sock" \
+	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/log2" 2>&1 &
+pid=$!
+n=0
+until { [ -S "$R/fz.sock" ] && [ -S "$R/run/netcfgd.sock" ]; } || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+[ "$(cat "$R/store/face" 2>/dev/null)" = "$R/fzd.sock" ]
+check $? "beside a fuzznetd that is the face, netcfgd follows it"
+t0=$(date +%s%N)
+said=$(timeout 10 "$C" reload --run-dir "$R/run" 2>&1 | grep -v nftables | head -1)
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+echo "$said" | grep -q '^reloaded' && [ "$ms" -lt 2000 ]
+check $? "  and still answers ncfg reload at once ($ms ms)"
+# An edit, for a pass that observes: phase one's read-back came from the pass
+# its own edit started, and a reload alone is not one that lists records.
+conf "$(printf 'device dummy8 {\n\tkind = "dummy"\n}\n')"
+n=0
+until timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null |
+	grep -q 'aa:bb:cc:00:00:07' || [ $n -gt 20 ]; do
+	sleep 0.5
+	n=$((n + 1))
+done
+[ $n -le 20 ]
+check $? "  and reads the station back through the face"
+
+kill -TERM $fzd
+wait $fzd
+n=0
+until [ "$(cat "$R/store/face" 2>/dev/null)" = "$R/fz.sock" ] || [ $n -gt 75 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+[ "$(cat "$R/store/face" 2>/dev/null)" = "$R/fz.sock" ] && [ -d /proc/$pid ]
+check $? "when the fuzznetd stops, netcfgd takes over as the face"
+n=0
+until timeout 10 "$C" reload --run-dir "$R/run" 2>&1 | grep -q '^reloaded' || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+[ $n -le 50 ]
+check $? "  and answers ncfg again, having restarted itself"
+
+kill -TERM $pid
+wait $pid
+code=$?
+[ $code -eq 0 ] && [ ! -e "$R/store/face" ] && [ ! -e "$R/fz.sock" ]
+check $? "  and SIGTERM still stops it with status 0 ($code)"
+! grep -q 'runtime error\|Sanitizer' "$R/log2"
+check $? "  with no sanitizer report"
+
 if [ $failed -ne 0 ]; then
 	grep -v 'nftables\|supplicant\|previous configuration' "$R/log" | tail -12 | sed 's/^/  log: /'
+	grep -v 'nftables\|supplicant\|previous configuration' "$R/log2" | tail -12 |
+		sed 's/^/  log2: /'
 fi
 rm -rf "$R"
 [ $failed -eq 0 ] && echo "node_serve: all checks passed" || echo "node_serve: some checks FAILED"
