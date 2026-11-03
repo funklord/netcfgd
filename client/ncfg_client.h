@@ -1259,6 +1259,9 @@ typedef struct {
 	 * as `mon` to `sun` joined, both empty where the rule has none. */
 	char *hours;
 	char *days;
+	/* `translated = true` (10.670): the rule matches a connection whose
+	 * destination NAT rewrote. Read so a Save keeps it. */
+	int   translated;
 } ncfg_firewall_entry_t;
 
 /* One base chain: its policy and its rules, in the document's order -- which

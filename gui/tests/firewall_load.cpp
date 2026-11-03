@@ -124,7 +124,8 @@ static QString dump(const ncfg_firewall_settings &settings)
 				ports.join(QLatin1Char(',')), rule.from.join(QLatin1Char(',')),
 				rule.to.join(QLatin1Char(',')), rule.interface, rule.out_interface,
 				rule.states.join(QLatin1Char(',')), rule.stations.join(QLatin1Char(',')),
-				rule.hours, rule.days.join(QLatin1Char(',')) }
+				rule.hours, rule.days.join(QLatin1Char(',')),
+				rule.translated ? QStringLiteral("translated") : QString() }
 			             .join(QLatin1Char('|'));
 		}
 	}
@@ -147,7 +148,7 @@ static const char every_key[] =
     "\tforward {\n"
     "\t\tpolicy = \"drop\"\n"
     "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\"; "
-    "hours = \"22:00-07:00\"; days = [\"mon\", \"tue\"] }\n"
+    "hours = \"22:00-07:00\"; days = [\"mon\", \"tue\"]; translated = true }\n"
     "\t\taccept \"out\" { out_interface = \"wan0\"; to = [\"192.0.2.0/24\"] }\n"
     "\t}\n"
     "\toutput { policy = \"accept\" }\n"
@@ -209,6 +210,10 @@ int main(int argc, char **argv)
 		check(loaded.forward.rules.at(0).hours + QLatin1Char(' ') +
 		          loaded.forward.rules.at(0).days.join(QLatin1Char(',')),
 		    QStringLiteral("22:00-07:00 mon,tue"), "  and its schedule (10.663)");
+		/* A member the dialog did not read was one its Save deleted, which
+		 * `form_coverage_gate` found for this one (10.684). */
+		check(loaded.forward.rules.at(0).translated ? QStringLiteral("yes") : QStringLiteral("no"),
+		    QStringLiteral("yes"), "  and that it matches translated connections (10.670)");
 	}
 
 	/* **Save with no change, and nothing moves.** The block the tab would

@@ -98,6 +98,7 @@ private:
 	QLineEdit *stations;
 	QLineEdit *hours;
 	QLineEdit *days;
+	QCheckBox *translated;
 	QLabel      *note;
 	QPushButton *save_button;
 };

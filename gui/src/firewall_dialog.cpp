@@ -90,6 +90,9 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (!rule.days.isEmpty()) {
 		body << QStringLiteral("\t\t\tdays = %1").arg(quoted_list(rule.days));
 	}
+	if (rule.translated) {
+		body << QStringLiteral("\t\t\ttranslated = true");
+	}
 	body << QStringLiteral("\t\t}");
 }
 
@@ -254,6 +257,14 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	days->setToolTip(QStringLiteral(
 	    "The days the hours apply on. A window past midnight runs into the next day."));
 	form->addRow(QStringLiteral("days"), days);
+	/* 10.670: a connection whose destination a port forward or UPnP mapping
+	 * rewrote, which is how a forward chain lets mapped traffic through. */
+	translated = new QCheckBox(QStringLiteral("only connections a port forward translated"), this);
+	translated->setObjectName(QStringLiteral("firewall_translated"));
+	translated->setToolTip(QStringLiteral(
+	    "Matches a connection whose destination was rewritten by a port forward or a UPnP "
+	    "mapping -- what lets mapped traffic through a forward chain that drops."));
+	form->addRow(QString(), translated);
 	layout->addLayout(form);
 
 	note = new QLabel(this);
@@ -300,6 +311,7 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		stations->setText(rule.stations.join(QStringLiteral(", ")));
 		hours->setText(rule.hours);
 		days->setText(rule.days.join(QStringLiteral(", ")));
+		translated->setChecked(rule.translated);
 	}
 	connect(chain, &QComboBox::currentIndexChanged, this,
 	    &ncfg_firewall_rule_dialog::shape_changed);
@@ -385,6 +397,7 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 	 * shape to use; a second copy of the rule here would be one to drift. */
 	rule->hours = hours->text().trimmed();
 	rule->days = split_list(days->text());
+	rule->translated = translated->isChecked();
 	return true;
 }
 

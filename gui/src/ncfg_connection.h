@@ -330,6 +330,7 @@ struct ncfg_firewall_rule_row {
 	/* The schedule as written (10.663), empty where the rule has none. */
 	QString     hours;
 	QStringList days;
+	bool        translated = false;
 };
 
 struct ncfg_firewall_chain_row {
