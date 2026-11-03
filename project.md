@@ -12690,7 +12690,9 @@ round are unchanged.
 And one to confirm: `ext_tick()` runs after every pass of the node's loop,
 not once a second, which the round collapse above relies on.
 
-**Next, as those land:** the pin moves past `f12ee4b`; `c/src/node/`
+**The pin is past `f12ee4b`** (at fuzznet `49b2312`, nine commits on; the
+installed program 1,514,376 bytes, inside `size-budget.txt`'s tolerance).
+**Next, as those land:** `c/src/node/`
 gains the extension -- `fds`/`ready`/`tick` over the three calls above, the
 stop byte ending the node's loop -- and the daemon keeps the claim it takes
 rather than giving it back (10.669); `seen.c` writes in-process when this
