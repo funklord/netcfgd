@@ -12864,7 +12864,10 @@ in the digest pages of 10.689.
 - **An operator's apply needs a confirm window.** Without one it is refused
   before it reaches the daemon, since across the estate a change that cuts
   the operator off has no other way back. At the console, the same request
-  stays legal without one.
+  stays legal without one. **This answered a question `gui/project.md`
+  section 9 lists to raise rather than answer alone**, so it waits on the
+  holder. The refusing side is the cautious one, and either answer is one
+  condition each in `daemon_ask.c` and `run.c`.
 
 `ask_test` drives the procedure with a fake dispatcher that counts its runs,
 and checks that:

@@ -536,6 +536,11 @@ to decide, not this tree's.
 ## 9. Questions to raise rather than answer alone
 
 - Whether a remote `apply` may ever run without a confirm window (§5).
+  **Still the holder's.** [0312](../doc/decision/0312-the-control-vocabulary-is-one-fuzznet-procedure.md)
+  took the refusing side for an operator of the estate, on 2026-11-03, without
+  having seen that this was listed here to raise. It is one condition in
+  `c/src/main/daemon_ask.c` and one in `c/src/cli/run.c`, so either answer is
+  cheap to make.
 - How a phone finds a host on the LAN (§6).
 - How pairing works the first time: the sibling has QR and camera code in its
   `client/` for exactly this, and reusing it is plausible — but netcfgd's first
