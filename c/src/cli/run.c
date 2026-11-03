@@ -1303,6 +1303,42 @@ static int command_status_at(const ncfg_cli_options_t *options)
 	return code;
 }
 
+/*
+ * The other nodes of this user's estate (10.692): the keys `status --at`
+ * takes, from this user's fuzznetd, contacts left out. Every member, not
+ * only netcfgd's -- which of them answers `status` is each node's to say,
+ * and asking all of them would turn a listing into a fleet-wide wait.
+ */
+static int command_nodes(const ncfg_cli_options_t *options)
+{
+	static char keys[4096][NCFG_FUZZNET_KEY_TEXT];
+	char        socket[1100];
+	char        err[NCFG_ERROR_MAX];
+	size_t      count = 0;
+	size_t      at;
+
+	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
+		return fail("this user's fuzznetd socket path does not fit");
+	}
+	err[0] = '\0';
+	if (!ncfg_fuzznet_members(socket, keys, sizeof(keys) / sizeof(keys[0]), &count, err,
+	        sizeof(err))) {
+		return fail(err[0] ? err : "this user's fuzznetd did not answer");
+	}
+	if (options->json) {
+		ncfg_out_writef("[");
+		for (at = 0; at < count; at++) {
+			ncfg_out_writef("%s\"%s\"", at ? "," : "", keys[at]);
+		}
+		ncfg_out_writef("]\n");
+		return NCFG_CLI_EXIT_OK;
+	}
+	for (at = 0; at < count; at++) {
+		ncfg_out_writef("%s\n", keys[at]);
+	}
+	return NCFG_CLI_EXIT_OK;
+}
+
 static int command_status(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
@@ -2386,6 +2422,9 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	 * changes it, and `command_apply` is where that is argued out. */
 	if (strcmp(command, "status") == 0) {
 		return command_status(options);
+	}
+	if (strcmp(command, "nodes") == 0) {
+		return command_nodes(options);
 	}
 	if (strcmp(command, "plan") == 0) {
 		return command_plan(options);

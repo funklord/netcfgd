@@ -568,3 +568,100 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 	asked.host = host;
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
+
+/* A key of 64 lower-case hex digits at `text`, ending at `end`. */
+static int key_at(const char *text, const char *end)
+{
+	const char *at;
+
+	if (end - text != 64) {
+		return 0;
+	}
+	for (at = text; at < end; at++) {
+		if (!((*at >= '0' && *at <= '9') || (*at >= 'a' && *at <= 'f'))) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT], size_t cap,
+    size_t *count, char *err, size_t err_size)
+{
+	char   reply[2048];
+	size_t from = 0;
+	size_t pages = 0;
+	size_t total = 0;
+
+	if (!socket || !keys || !count) {
+		say(err, err_size, "nowhere to list the estate's members into");
+		return 0;
+	}
+	*count = 0;
+	do {
+		char          line[48];
+		char         *at;
+		char         *end;
+		unsigned long t;
+		unsigned long f;
+		size_t        taken = 0;
+		int           silent = 0;
+
+		(void)snprintf(line, sizeof(line), "list peer %zu", from);
+		if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 2000, &silent, err,
+		        err_size)) {
+			return 0;
+		}
+		if (strncmp(reply, "ok ", 3) != 0) {
+			say(err, err_size, "fuzznet answered %.160s", reply);
+			return 0;
+		}
+		t = strtoul(reply + 3, &end, 10);
+		if (end == reply + 3 || *end != ' ') {
+			say(err, err_size, "fuzznet's peer list is not one: %.80s", reply);
+			return 0;
+		}
+		at = end + 1;
+		f = strtoul(at, &end, 10);
+		if (end == at || (*end != ' ' && *end != '\0') || f != from || t > 1000000ul) {
+			say(err, err_size, "fuzznet's peer list is not one: %.80s", reply);
+			return 0;
+		}
+		total = (size_t)t;
+		at = end;
+		while (*at == ' ') {
+			char *word = ++at;
+			char *stop = strchr(word, ' ');
+			char *key_end;
+
+			if (!stop) {
+				stop = word + strlen(word);
+			}
+			key_end = memchr(word, ',', (size_t)(stop - word));
+			if (!key_end) {
+				key_end = stop;
+			}
+			if (!key_at(word, key_end)) {
+				say(err, err_size, "fuzznet listed a peer that is not a key: %.80s", word);
+				return 0;
+			}
+			taken++;
+			if (key_end == stop) { /* no `,contact`: a member */
+				if (*count >= cap) {
+					say(err, err_size, "the estate has more than %zu members", cap);
+					return 0;
+				}
+				memcpy(keys[*count], word, 64u);
+				keys[*count][64] = '\0';
+				(*count)++;
+			}
+			at = stop;
+		}
+		if (taken == 0 && from < total) {
+			say(err, err_size, "fuzznet's peer list made no progress from %zu", from);
+			return 0;
+		}
+		from += taken;
+	} while (from < total && ++pages < 100000u);
+	return from >= total;
+}

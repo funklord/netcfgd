@@ -10,6 +10,7 @@
 # estate by verbs (`add peer ... delegable` at A, `add join` at B). Then:
 #   - `ncfg status --at A` through B, the third of fuzznet's models, answers
 #     A's observation, judged by A's `remote` block: open here;
+#   - `ncfg nodes` lists A by the same key, for `--at`;
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
 #   - and a key that is not one is refused before anything is asked.
@@ -97,6 +98,15 @@ while [ "$(date +%s)" -lt $deadline ]; do
 done
 echo "$said" | python3 -I -c 'import json, sys; d = json.load(sys.stdin); sys.exit(0 if "links" in d else 1)'
 check $? "ncfg status --at A, through B, answers A's observation"
+
+# The keys an operator asks by (10.692): B lists A among its estate's
+# members, the same key `--at` took, so a peer's key is the host a call names.
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" nodes > "$R/nodes.out" 2>&1
+grep -qx "$host" "$R/nodes.out"
+check $? "ncfg nodes, through B, lists A by the key status --at takes"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" nodes --json 2>/dev/null |
+	python3 -I -c 'import json, sys; d = json.load(sys.stdin); sys.exit(0 if sys.argv[1] in d else 1)' "$host"
+check $? "  and --json is a list of them"
 
 other=$(printf '%064d' 7)
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" status --at "$other" > "$R/other.out" 2>&1

@@ -135,4 +135,18 @@ int ncfg_fuzznet_user_socket(char *out, size_t out_size);
 int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, size_t *length,
     char *err, size_t err_size);
 
+/* A host's key in hex, and its NUL. */
+#define NCFG_FUZZNET_KEY_TEXT 65u
+
+/*
+ * The members of this user's estate, as the fuzznetd at `socket` knows them
+ * (`list peer [FROM]`, every page): the keys `ncfg_fuzznet_status_at` takes,
+ * into `keys`, at most `cap`, their number in `*count`. A contact -- a peer
+ * paired for a share, marked `,contact` -- is no member and is left out;
+ * the node itself is not its own peer. 1, or 0 with a sentence, including
+ * for more members than `cap` rather than a list cut short.
+ */
+int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT], size_t cap,
+    size_t *count, char *err, size_t err_size);
+
 #endif /* NCFG_FUZZNET_H */

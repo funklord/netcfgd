@@ -194,6 +194,63 @@ int main(void)
 
 	(void)waitpid(child, &status, 0);
 	check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "the server served all three");
+
+	/* The estate's members (10.692): `list peer` in two pages, a contact
+	 * among them, which is no member and is left out. */
+	{
+		static char keys[4][NCFG_FUZZNET_KEY_TEXT];
+		static const char *const pages[] = {
+			"ok 3 0 "
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+			"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,contact\n",
+			"ok 3 2 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+			"ok 3 0 "
+			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "
+			"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,contact\n",
+			"ok 3 2 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+			"ok 1 0 not-a-key\n",
+		};
+		size_t count = 0;
+		int    fine;
+
+		listener = socket(AF_UNIX, SOCK_STREAM, 0);
+		(void)unlink(path);
+		if (listener < 0 || bind(listener, (struct sockaddr *)&address, sizeof(address)) != 0 ||
+		    listen(listener, 4) != 0) {
+			perror("listen");
+			return 1;
+		}
+		child = fork();
+		if (child == 0) {
+			size_t page;
+
+			alarm(10);
+			for (page = 0; page < sizeof(pages) / sizeof(pages[0]); page++) {
+				char line[64];
+				int  fd = accept(listener, NULL, NULL);
+
+				if (fd < 0) {
+					_exit(1);
+				}
+				(void)recv(fd, line, sizeof(line), 0);
+				(void)send(fd, pages[page], strlen(pages[page]), MSG_NOSIGNAL);
+				close(fd);
+			}
+			_exit(0);
+		}
+		close(listener);
+		fine = ncfg_fuzznet_members(path, keys, 4u, &count, why, sizeof(why));
+		check(fine && count == 2u && keys[0][0] == 'a' && keys[1][0] == 'c' &&
+		        strlen(keys[1]) == 64u,
+		    "the members are every page's keys, and a contact is left out");
+		fine = ncfg_fuzznet_members(path, keys, 1u, &count, why, sizeof(why));
+		check(!fine && strstr(why, "more than") != NULL,
+		    "  more of them than room is said, not a list cut short");
+		fine = ncfg_fuzznet_members(path, keys, 4u, &count, why, sizeof(why));
+		check(!fine && strstr(why, "not a key") != NULL,
+		    "  and a peer that is not a key is refused");
+		(void)waitpid(child, &status, 0);
+	}
 	(void)unlink(path);
 	(void)rmdir(dir);
 	if (failures) {

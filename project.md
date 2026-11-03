@@ -12671,6 +12671,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.692 `ncfg nodes`: the estate's members, by the key `--at` takes
+
+10.691 asks a node by its 64-digit key, which nobody types from memory.
+`ncfg nodes` lists the other members of this user's estate, one key a line
+or a JSON array with `--json`. It reads them from this user's fuzznetd with
+`list peer [FROM]`, every page.
+
+- **Members only.** fuzznet lists a contact, a peer paired for a share
+  (its sec 436), with `,contact` after the key, and a contact is no operator
+  of anything here (10.685), so it is left out. The node is not its own peer.
+- **Every member, not only netcfgd's.** Which of them answers `status` is
+  each node's own business, and asking all of them would turn a listing into
+  a fleet-wide wait.
+- **More members than room is an error**, not a list cut short. That is the
+  same refusal fuzznet's own paging makes (`list_peers` in its
+  `node/admin.c`).
+
+`node_fleet.sh` showed the open question settled: B's list holds A under
+the same key `status --at` used, so a peer's key is the host a call names.
+`fuzznet_line_test` covers the parts the live estate cannot, using scripted
+pages: two pages joined, a contact left out, a cap exceeded, and a peer
+that is not a key. Removing the contact filter fails it. Its two help lines
+are in agree_gate's `C_ONLY_LINES`, as `--at`'s are.
+
 ## 10.691 An operator asks another node: `ncfg status --at HOST`
 
 The fleet of 0311 is the estate: an authenticated operator managing every

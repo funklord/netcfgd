@@ -509,10 +509,13 @@ OWE_USAGE = ("  --owe                    encrypted with no passphrase (OWE, \"En
 # estate to ask across.
 AT_USAGE = ("  --at HOST                for `status`: that node of this estate, HOST its\n"
 	    "                           key in hex, asked through your own fuzznetd\n")
+# And `ncfg nodes`, 10.692: the estate's members, for `--at`, the same reason.
+NODES_USAGE = ("  ncfg nodes [--json]      the other nodes of your estate, by key, for\n"
+	       "                           `status --at`\n")
 C_ONLY_LINES = {
 	# Both spellings of asking for the usage.
-	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE],
-	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE],
+	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE],
+	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE],
 }
 
 
