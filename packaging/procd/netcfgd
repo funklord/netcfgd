@@ -12,9 +12,20 @@ START=21
 STOP=89
 
 start_service() {
+	local home store
+
 	mkdir -p /run/netcfgd
+	# The fuzznet store, named rather than left to the default. procd starts a
+	# service with HOME=/, so the default would be //.local/share/fuzznet --
+	# a second node, where a fuzznetd run from root's shell never looks
+	# (project.md 10.677). Root's home from the password database is where it
+	# does look. Made here because netcfgd never makes a store it is told to
+	# use: a mistyped one is refused rather than becoming a second node.
+	home=$(awk -F: '$1 == "root" { print $6; exit }' /etc/passwd)
+	store="${home:-/root}/.local/share/fuzznet"
+	mkdir -p "$store" && chmod 700 "$store"
 	procd_open_instance
-	procd_set_param command /usr/sbin/netcfgd
+	procd_set_param command /usr/sbin/netcfgd --fuzznet-dir "$store"
 	# Reload rather than restart when the config changes: netcfgd recompiles
 	# and reconciles, which is the whole point of it, and a reload does that
 	# with no gap at all.

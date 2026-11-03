@@ -14,7 +14,11 @@
 #     which it was not before 10.672: the daemon compiled before its watch
 #     was open, and an edit between the two was lost until the next one;
 #   - `stop` takes the process away and leaves the address, since a stop
-#     holds (0134).
+#     holds (0134);
+#   - the fuzznet store is root's, `/root/.local/share/fuzznet`, named by the
+#     init script (10.677) -- procd's HOME=/ would otherwise put it at
+#     `//.local/share/fuzznet`, where a fuzznetd from root's shell never looks
+#     -- and the node's key is the same after procd respawns the daemon.
 #
 # Always exits 0 and reports through /verdict/openwrt. BusyBox's `sleep`
 # takes whole seconds, which is why every wait here counts them.
@@ -54,6 +58,15 @@ listed=$(ubus call service list '{"name":"netcfgd"}' 2>/dev/null | grep -c '"run
 say "started by procd: listed running $listed time(s), dummy0 $(address)after $took s"
 [ "$took" != never ] && [ "$listed" -ge 1 ] || failed=1
 
+n=0
+until [ -s /run/netcfgd/node ] || [ $n -gt 20 ]; do sleep 1; n=$((n + 1)); done
+store=$(sed -n 's/^store=//p' /run/netcfgd/node 2>/dev/null)
+key=$(sed -n 's/^key=//p' /run/netcfgd/node 2>/dev/null)
+# `ls`, because this BusyBox is built without `stat`.
+mode=$(ls -ld /root/.local/share/fuzznet 2>/dev/null | cut -c1-10)
+say "fuzznet store: ${store:-none}, mode ${mode:-absent}, key ${key:-none}"
+[ "$store" = /root/.local/share/fuzznet ] && [ "$mode" = drwx------ ] && [ -n "$key" ] || failed=1
+
 first=$(pidof netcfgd)
 kill -9 "$first"
 n=0
@@ -64,6 +77,14 @@ done
 second=$(pidof netcfgd)
 say "killed $first; procd started ${second:-nothing}"
 [ -n "$second" ] && [ "$second" != "$first" ] || failed=1
+n=0
+until [ "$(sed -n 's/^key=//p' /run/netcfgd/node 2>/dev/null)" = "$key" ] || [ $n -gt 20 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+again=$(sed -n 's/^key=//p' /run/netcfgd/node 2>/dev/null)
+say "the respawned daemon's key: ${again:-none}, $([ "$again" = "$key" ] && echo the same || echo DIFFERENT)"
+[ -n "$key" ] && [ "$again" = "$key" ] || failed=1
 
 # The race: the edit as soon as the new pid is there, no wait at all.
 kill -9 "$second"

@@ -12670,6 +12670,32 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.677 procd names the fuzznet store: root's, where a shell's fuzznetd looks
+
+**The holder, 2026-11-03, on 10.672's open point:** the init script passes
+`--fuzznet-dir` under procd. procd starts a service with `HOME=/`, so
+netcfgd's default store was `//.local/share/fuzznet` -- a node of its own,
+apart from the one a fuzznetd started from root's shell keeps in
+`/root/.local/share/fuzznet`, where 10.669's requirement is that the two meet
+without being told.
+
+**Which directory, decided from that requirement:** root's home from
+`/etc/passwd` plus `.local/share/fuzznet`, the path a root shell's fuzznetd
+takes from `$HOME`. Read with `awk` in the script rather than asked of the
+daemon, because the static glibc binary OpenWrt runs answers no account
+lookup without its NSS modules (10.672), so netcfgd itself cannot find root's
+home there. `/root` if the line is missing. **The script makes it, 0700**,
+because netcfgd never makes a store it is named: a mistyped one is refused
+rather than becoming a second node (10.669). A fuzznetd packaged for OpenWrt
+under procd would want the same `--fuzznet-dir`; that is fuzznet's packaging.
+
+Checked: `make hull-openwrt` asserts `<run>/node` names
+`/root/.local/share/fuzznet`, the directory is `drwx------`, and the node's
+key is the same after procd respawns the daemon -- the identity kept, not
+made twice. With the script as it was, the same run reads
+`//.local/share/fuzznet` and is bad. OpenWrt's BusyBox has no `stat`, which
+is why the payload reads the mode with `ls`.
+
 ## 10.676 netcfgd runs in fuzznet's loop: the round split, and five asks
 
 **The holder, 2026-11-03, on 10.669's open question** (in-loop or a thread):
@@ -12917,11 +12943,9 @@ expected next run OpenWrt, so this is the path that meets them first.
   in `all`): OpenWrt's libc is musl. glibc's account and address lookups
   need its NSS modules at run time and answer nothing without them, which
   every caller here already takes as "none" -- the DHCP server's `nobody`,
-  the node's home directory. **The node's store lands at `//.local/share/
-  fuzznet`** under procd, whose services run with `HOME=/`: on a router that
-  is the root of the overlay. Not wrong, and not where an OpenWrt package
-  would put state either; a package wants `--fuzznet-dir` or a default for
-  that case, and it is recorded rather than chosen.
+  the node's home directory. ~~The node's store lands at `//.local/share/
+  fuzznet`~~ under procd, whose services run with `HOME=/` -- **settled in
+  10.677**: the init script names the store, root's home from `/etc/passwd`.
 - **The guest has none of the kernel's modules**, so the rig hands it the
   host's own dummy module; nf_tables is absent too, and the observation's
   note that no netfilter socket opens **repeated on every pass** -- a line
