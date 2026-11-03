@@ -358,6 +358,14 @@ static int wireless_interface(const ncfg_cli_options_t *options, const char *giv
 		(void)snprintf(out, out_size, "%s", given);
 		return 1;
 	}
+	/* The radio is found in this machine's configuration, which does not say
+	 * which another node has (10.694). */
+	if (ncfg_cli_asking_elsewhere()) {
+		*code = fail("with --at, name the interface: this machine's configuration "
+		             "does not say which radio that node has. `ncfg wifi radios --at` "
+		             "lists them");
+		return 0;
+	}
 	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
 	if (!document) {
 		*code = fail(err);
@@ -2392,9 +2400,62 @@ static int subcommand(int (*run)(const ncfg_cli_options_t *, const char **, size
 }
 
 /* Which verb, once the options are off the front. */
+/*
+ * `--at HOST` (0312, 10.694): the commands whose whole answer is the
+ * daemon's are asked of that node instead; any other is refused, by name,
+ * because it works on this machine -- compiles here, observes here, writes
+ * here -- and doing that while the operator believes it reached another node
+ * is the worst thing `--at` could do. `apply` is carried only with a window,
+ * which the node insists on as well.
+ */
+static int at_refused(const char *command, const ncfg_cli_options_t *options,
+    const char **positional, size_t count)
+{
+	static const char *const carried[] = { "wifi", "modem", "reload", "confirm", "revert",
+		"apply", "config", "secret", "profile" };
+	char   why[NCFG_ERROR_MAX];
+	size_t at;
+
+	if (strcmp(command, "status") == 0) {
+		return 0; /* its own path, the `status` procedure */
+	}
+	for (at = 0; at < sizeof(carried) / sizeof(carried[0]); at++) {
+		if (strcmp(command, carried[at]) == 0) {
+			break;
+		}
+	}
+	if (at == sizeof(carried) / sizeof(carried[0])) {
+		(void)snprintf(why, sizeof(why),
+		    "`--at` asks another node, and `ncfg %s` works on this machine, so it is "
+		    "refused rather than done here", command);
+		return fail(why);
+	}
+	/* `wifi add` and `forget` read this machine's configuration and radios to
+	 * decide what to write, so they would decide for the wrong machine. */
+	if (strcmp(command, "wifi") == 0 && count > 0 &&
+	    (strcmp(positional[0], "add") == 0 || strcmp(positional[0], "forget") == 0)) {
+		(void)snprintf(why, sizeof(why),
+		    "`ncfg wifi %s` reads this machine's configuration and radios to decide what "
+		    "to write, so it is refused with --at rather than deciding for the wrong "
+		    "machine. `config put --at` carries a network block", positional[0]);
+		return fail(why);
+	}
+	if (strcmp(command, "apply") == 0 && !options->confirm.has) {
+		return fail("`apply --at` needs --confirm-within, so that a change which cuts you "
+		            "off from that node undoes itself");
+	}
+	ncfg_cli_ask_through(options->at);
+	return 0;
+}
+
 static int dispatch(const char *command, const ncfg_cli_options_t *options,
     const char **positional, size_t count)
 {
+	int refused;
+
+	if (options->at && (refused = at_refused(command, options, positional, count)) != 0) {
+		return refused;
+	}
 	if (strcmp(command, "wifi") == 0) {
 		return command_wifi(options, positional, count);
 	}

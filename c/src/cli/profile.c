@@ -92,6 +92,11 @@ static void listing_free(listing_t *listing)
  * another kind -- is "it did not answer", which is the Rust's `_ => None` and
  * is what makes this a fallback rather than a failure.
  */
+/* Why the daemon did not answer, for a caller that may not fall back: one
+ * asking another node (`--at`, 10.694), where this machine's profiles would
+ * be the wrong machine's. */
+static char not_answered[NCFG_ERROR_MAX];
+
 static int ask_daemon(const ncfg_cli_options_t *options, listing_t *out)
 {
 	char                 socket_path[NCFG_CLI_PATH_MAX];
@@ -107,11 +112,21 @@ static int ask_daemon(const ncfg_cli_options_t *options, listing_t *out)
 	}
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_PROFILE_LIST;
+	ignored[0] = '\0';
 	if (!ncfg_cli_ask(socket_path, &request, &message, ignored, sizeof(ignored))) {
+		(void)snprintf(not_answered, sizeof(not_answered), "%s", ignored);
 		return 0;
 	}
 	if (message.kind != NCFG_PROTO_MESSAGE_RESPONSE ||
 	    message.u.response.kind != NCFG_PROTO_RESP_PROFILES) {
+		if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
+		    message.u.response.kind == NCFG_PROTO_RESP_ERROR) {
+			(void)ncfg_cli_text(message.u.response.u.error.message, not_answered,
+			    sizeof(not_answered));
+		} else {
+			(void)snprintf(not_answered, sizeof(not_answered),
+			    "the daemon answered something other than its profiles");
+		}
 		ncfg_proto_message_free(&message);
 		return 0;
 	}
@@ -159,6 +174,11 @@ static int profile_dirs(const ncfg_cli_options_t *options, listing_t *out, char 
 	if (ask_daemon(options, out)) {
 		return 1;
 	}
+	if (ncfg_cli_asking_elsewhere()) {
+		ncfg_error_set(err, err_size, "that node did not list its profiles: %s",
+		    not_answered[0] ? not_answered : "no answer");
+		return 0;
+	}
 	(void)ncfg_config_resolve_dir(options->config_dir, config_dir, sizeof(config_dir));
 	(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
 	    sizeof(factory_dir));
@@ -181,6 +201,11 @@ static int active(const ncfg_cli_options_t *options, char **chosen_out, char *er
 		return 1;
 	}
 	listing_free(&said);
+	if (ncfg_cli_asking_elsewhere()) {
+		ncfg_error_set(err, err_size, "that node did not say its profile: %s",
+		    not_answered[0] ? not_answered : "no answer");
+		return 0;
+	}
 	document = ncfg_cli_compile_to_read(options, err, err_size);
 	if (!document) {
 		return 0;

@@ -12671,6 +12671,65 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.694 `ncfg --at HOST`: the socket verbs asked of another node
+
+0312's client half. `ask.c` is the transport under every `ncfg` verb whose
+answer is the daemon's. With `--at`, it writes the socket's own request line
+and sends it as `call ask at HOST FROM REQUEST` through this user's
+fuzznetd. It then reads the joined pages as that node's socket would have
+answered them. Nothing about the transport shows past that one function, so
+`wifi`, `modem`, `reload`, `confirm`, `revert`, `apply`, `config`, `secret`
+and `profile` all ask that node, and `status --at` keeps its own path
+(10.691).
+
+- **Every other command is refused with `--at`, by name.** It compiles,
+  observes or writes on this machine. Doing that while the operator believes
+  it reached another node is the worst thing `--at` could do, worse than
+  refusing.
+- **Nothing under `--at` may fall back to this machine**, and four commands
+  would have. Each was found by reading every subcommand of a command
+  before carrying it:
+  - `config put` and `rm`, `secret set`, `profile save` and `set`, and
+    `wifi add` and `forget` ask the daemon only when one is listening, and
+    otherwise write locally. On a machine with no daemon, an operator's
+    change for the node would have landed in this machine's `/etc`. So
+    `ncfg_cli_daemon_listening` answers yes whenever another node is asked.
+  - `profile list` and `get` fell back to the local profiles when the daemon
+    did not answer, so a node that refused the caller would have been
+    reported with this machine's profiles. Under `--at` that is now an error
+    carrying the node's own sentence.
+  - `secret set` checked this machine's file for `--replace` and then listed
+    this machine's configuration's users of the secret. Under `--at` the node
+    judges `--replace`, and the report says only that the node stored it.
+  - `wifi add` and `forget` read this machine's configuration and radios to
+    decide what to write, so they are refused. A `wifi` verb without an
+    interface found the radio in this machine's configuration, so under
+    `--at` it must name one.
+- **`apply --at` needs `--confirm-within`**, refused here before anything is
+  asked. The node insists on it too (0312), but an operator should hear it
+  from their own command.
+- **A request is one fuzznet line**, so one longer than about 900 bytes is
+  refused with a sentence rather than cut. That rules out a `config put` of a
+  real configuration over the estate, which is **the open limit here**. It
+  wants either a chunked request or the configuration carried as a fuzznet
+  record that the node reads. A request half-sent would be a different
+  request.
+
+`node_fleet.sh` runs these against A through B:
+
+- `ncfg modem --at A` is A's answer (`no device in the configuration has a
+  modem block`);
+- `reload --at A` is A's refusal, naming its closed remote `admin` tier;
+- `show --at` is refused as a command that works here;
+- `apply --at` without a window is refused before anything is asked;
+- `config put --at A` is A's refusal and leaves an empty local
+  `--config-dir` empty;
+- `profile list --at A` is A's answer.
+
+With the transport branch disabled, the first two fail, because `ncfg` then
+asks this machine's daemon, which is not running. With the listening guard
+removed, `config put --at` writes locally and fails its check.
+
 ## 10.693 The control vocabulary is one fuzznet procedure: `ask` ([0312](doc/decision/0312-the-control-vocabulary-is-one-fuzznet-procedure.md))
 
 The control socket has some forty verbs. Rather than a procedure for each,
@@ -12721,8 +12780,7 @@ rule. `node_fleet.sh` calls `ask` at A through B: a plan comes back
 a comma through fuzznet's grammar is refused by A's closed remote `admin`
 tier.
 
-**Not done yet:** `ncfg`'s socket verbs over `ask`, which is a transport swap
-in `c/src/cli/ask.c` (go item 20).
+`ncfg`'s socket verbs followed in 10.694.
 
 ## 10.692 `ncfg nodes`: the estate's members, by the key `--at` takes
 

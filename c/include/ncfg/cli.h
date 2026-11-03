@@ -192,7 +192,7 @@ typedef struct {
 	/* `secret set` and `profile save`: overwrite one that already exists. */
 	int             replace;
 	const char     *run_dir;
-	/* `status --at HOST`: another node of this estate, by its key. */
+	/* `--at HOST`: another node of this estate, by its key (10.691, 10.694). */
 	const char     *at;
 	int             json;
 	ncfg_optint_t   confirm;
@@ -596,6 +596,12 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
  * between the two. A daemon that refuses this caller's permission is there,
  * and its sentence comes back as any refusal does.
  */
+/* Every request after this asked of that node of the estate, by its key,
+ * through this user's fuzznetd (`--at`, 0312); NULL for this machine. */
+void ncfg_cli_ask_through(const char *host);
+/* Whether requests go to another node, so nothing may fall back to this one. */
+int ncfg_cli_asking_elsewhere(void);
+
 int ncfg_cli_ask_if_there(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, int *absent, char *err, size_t err_size);
 

@@ -396,7 +396,9 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 	 * calls the one thing on a machine that nobody can get back. A flag is
 	 * cheap; that is not.
 	 */
-	replacing = stat(path, &about) == 0;
+	/* This machine's file, which says nothing about another node's: with
+	 * `--at` (10.694) that node judges `--replace` itself. */
+	replacing = !ncfg_cli_asking_elsewhere() && stat(path, &about) == 0;
 	if (replacing && !options->replace) {
 		ncfg_error_set(err, err_size,
 		    "%s already exists. Pass --replace to overwrite it -- and note that a "
@@ -449,6 +451,15 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 		forget(value);
 		if (!stored) {
 			return 0;
+		}
+		/* Not this machine's path, nor its configuration's users of the
+		 * secret: both would describe the wrong machine. */
+		if (ncfg_cli_asking_elsewhere()) {
+			if (!options->json) {
+				ncfg_out_writef("that node stored `%s`\n", name);
+				return 1;
+			}
+			return say_secret(name, "", 0, 1, 0, NULL, 0, err, err_size);
 		}
 		return report(path, name, replacing, 1, options, err, err_size);
 	}

@@ -507,8 +507,10 @@ OWE_USAGE = ("  --owe                    encrypted with no passphrase (OWE, \"En
 # 0311's fleet, 10.691: `status --at HOST`, another node of the estate asked
 # through this user's fuzznetd. fuzznet is the C's alone, so the Rust has no
 # estate to ask across.
-AT_USAGE = ("  --at HOST                for `status`: that node of this estate, HOST its\n"
-	    "                           key in hex, asked through your own fuzznetd\n")
+AT_USAGE = ("  --at HOST                another node of this estate, HOST its key in hex,\n"
+	    "                           asked through your own fuzznetd: for status,\n"
+	    "                           wifi, modem, reload, confirm, revert, apply,\n"
+	    "                           config, secret and profile\n")
 # And `ncfg nodes`, 10.692: the estate's members, for `--at`, the same reason.
 NODES_USAGE = ("  ncfg nodes [--json]      the other nodes of your estate, by key, for\n"
 	       "                           `status --at`\n")

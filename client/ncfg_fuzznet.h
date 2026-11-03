@@ -135,6 +135,19 @@ int ncfg_fuzznet_user_socket(char *out, size_t out_size);
 int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, size_t *length,
     char *err, size_t err_size);
 
+/*
+ * Any control-socket request of another node (0312, 10.694): `request` the
+ * socket's own JSON line, without its newline, carried as `call ask at HOST
+ * FROM REQUEST` through the fuzznetd at `socket`, every page joined. 1 with
+ * the node's answer line in `*out`, as its socket would have written it.
+ *
+ * **A request is one fuzznet line**, so one longer than about 900 bytes is
+ * refused here with a sentence rather than cut: fuzznet's local grammar caps
+ * a line at FZN_REPLY_MAX, and a request half-sent is a different request.
+ */
+int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *request, char **out,
+    size_t *length, char *err, size_t err_size);
+
 /* A host's key in hex, and its NUL. */
 #define NCFG_FUZZNET_KEY_TEXT 65u
 

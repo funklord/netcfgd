@@ -91,6 +91,13 @@ int ncfg_cli_daemon_listening(const char *socket_path)
 {
 	struct stat about;
 
+	/* **Asking another node, that node is the daemon** (10.695). The commands
+	 * that ask first and write locally only when nothing is listening -- `config
+	 * put`, `secret set`, `profile` -- would otherwise write an operator's
+	 * remote change into this machine's /etc whenever no daemon ran here. */
+	if (ncfg_cli_asking_elsewhere()) {
+		return 1;
+	}
 	return socket_path != NULL && stat(socket_path, &about) == 0;
 }
 

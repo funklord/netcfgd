@@ -12,6 +12,8 @@
 #     A's observation, judged by A's `remote` block: open here;
 #   - `ncfg nodes` lists A by the same key, for `--at`;
 #   - `call ask at A` answers a plan and refuses an apply, by A's tiers;
+#   - `ncfg modem --at A` is A's answer, `reload --at A` A's refusal, and a
+#     command that works on this machine is refused with `--at`;
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
 #   - and a key that is not one is refused before anything is asked.
@@ -118,6 +120,32 @@ check $? "call ask at A answers a plan, A's remote observe tier open ($(echo "$s
 said=$(ask "$B" "call ask at $host 0 {\"request\":\"apply\",\"confirm\":90}")
 echo "$said" | grep -q 'error.*admin'
 check $? "  and refuses an apply, its remote admin tier closed"
+
+# `ncfg --at` (10.694): a socket verb asked of A through B, as A's socket
+# would answer it. `modem` is A's observe tier, open; `reload` its admin
+# tier, closed, and A's refusal must come back as A's, naming the tier.
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" modem --at "$host" > "$R/modem.out" 2>&1
+check $? "ncfg modem --at A is answered by A ($(head -c 50 "$R/modem.out"))"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" reload --at "$host" > "$R/reload.out" 2>&1
+[ $? -ne 0 ] && grep -q 'admin' "$R/reload.out"
+check $? "  ncfg reload --at A is refused by A's closed remote admin tier"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" show --at "$host" 2>&1 | grep -q 'works on this machine'
+check $? "  a command that works here is refused with --at, not done here"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" 2>&1 | grep -q 'confirm-within'
+check $? "  and apply --at without a window is refused before anything is asked"
+
+# Nothing under --at falls back to this machine (10.694): `config put` asks
+# first and writes locally only where no daemon listens, so with A's admin
+# tier closed it must be A's refusal, and the local directory stays empty.
+mkdir "$R/bconf"
+printf 'device lo {\n\tmanaged = false\n}\n' > "$R/drop.conf"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" config put --at "$host" --config-dir "$R/bconf" \
+	lab "$R/drop.conf" > "$R/put.out" 2>&1
+[ $? -ne 0 ] && grep -q 'admin' "$R/put.out" && [ -z "$(ls -A "$R/bconf")" ]
+check $? "  config put --at A is A's refusal, and nothing is written here"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" profile list --at "$host" --config-dir "$R/bconf" \
+	> "$R/profiles.out" 2>&1
+check $? "  profile list --at A is A's answer ($(head -c 40 "$R/profiles.out"))"
 
 other=$(printf '%064d' 7)
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" status --at "$other" > "$R/other.out" 2>&1

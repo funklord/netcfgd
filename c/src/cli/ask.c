@@ -30,12 +30,15 @@
  */
 #include "cli_internal.h"
 
+#include "ncfg_fuzznet.h"
+
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/log.h"
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -226,6 +229,57 @@ static void what_it_said_instead(int fd, int why, char *err, size_t err_size)
 static int ask_noting(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, int *absent, char *err, size_t err_size);
 
+/* Another node of the estate, by its key, or NULL for this machine's daemon. */
+static const char *through_host;
+
+void ncfg_cli_ask_through(const char *host)
+{
+	through_host = host;
+}
+
+int ncfg_cli_asking_elsewhere(void)
+{
+	return through_host != NULL;
+}
+
+/*
+ * The request asked of another node (0312, 10.694): its socket's own line, as
+ * `call ask at HOST`, through this user's fuzznetd, and the answer read as
+ * that node's socket would have written it. Nothing about the transport shows
+ * past this function, so every verb asking the daemon asks that node instead.
+ */
+static int ask_elsewhere(const ncfg_proto_request_t *request, ncfg_proto_message_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_buf_t line;
+	char       socket[1100];
+	char      *answer = NULL;
+	size_t     length = 0;
+	int        read_it;
+
+	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
+		ncfg_error_set(err, err_size, "this user's fuzznetd socket path does not fit");
+		return 0;
+	}
+	ncfg_buf_init(&line, NCFG_PROTO_MAX_LINE);
+	if (!ncfg_proto_request_write(request, &line, err, err_size)) {
+		ncfg_buf_free(&line);
+		return 0;
+	}
+	while (line.length && line.data[line.length - 1u] == '\n') {
+		line.data[--line.length] = '\0';
+	}
+	read_it = ncfg_fuzznet_ask_at(socket, through_host, ncfg_buf_text(&line), &answer, &length,
+	    err, err_size);
+	ncfg_buf_free(&line);
+	if (!read_it) {
+		return 0;
+	}
+	read_it = ncfg_proto_response_read(answer, length, out, err, err_size);
+	free(answer);
+	return read_it;
+}
+
 int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, char *err, size_t err_size)
 {
@@ -251,6 +305,9 @@ static int ask_noting(const char *socket_path, const ncfg_proto_request_t *reque
 	int                 fd;
 	int                 read_it;
 
+	if (through_host) {
+		return ask_elsewhere(request, out, err, err_size);
+	}
 	ncfg_buf_init(&line, NCFG_PROTO_MAX_LINE);
 	if (!ncfg_proto_request_write(request, &line, err, err_size)) {
 		ncfg_buf_free(&line);

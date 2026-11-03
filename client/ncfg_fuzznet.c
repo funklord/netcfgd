@@ -476,6 +476,7 @@ int ncfg_fuzznet_daemon_socket(const char *run_dir, char *out, size_t out_size)
 typedef struct {
 	const char *path;
 	const char *host;
+	const char *request; /* for `ask`; NULL asks `status` */
 } asked_t;
 
 /* One page over fuzznet: `call status [at HOST] FROM` on the socket in
@@ -485,12 +486,21 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
     char *err, size_t err_size)
 {
 	const asked_t *asked = context;
-	char           line[160];
+	char           line[1000];
 	char           reply[2048];
 	int            silent = 0;
 	long           n;
 
-	if (asked->host) {
+	if (asked->request) {
+		int wrote = snprintf(line, sizeof(line), "call ask at %s %zu %s", asked->host, from,
+		    asked->request);
+
+		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
+			say(err, err_size, "the request is too long for one fuzznet line: %zu bytes",
+			    strlen(asked->request));
+			return 0;
+		}
+	} else if (asked->host) {
 		(void)snprintf(line, sizeof(line), "call status at %s %zu", asked->host, from);
 	} else {
 		(void)snprintf(line, sizeof(line), "call status %zu", from);
@@ -525,6 +535,7 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
 	}
 	asked.path = path;
 	asked.host = NULL;
+	asked.request = NULL;
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
 
@@ -566,6 +577,35 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 	}
 	asked.path = socket;
 	asked.host = host;
+	asked.request = NULL;
+	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
+}
+
+int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *request, char **out,
+    size_t *length, char *err, size_t err_size)
+{
+	asked_t asked;
+	size_t  at;
+
+	for (at = 0; host && host[at]; at++) {
+		char c = host[at];
+
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+			break;
+		}
+	}
+	if (!socket || !host || at != 64u || host[at] != '\0') {
+		say(err, err_size, "a host is its key, 64 lower-case hex digits");
+		return 0;
+	}
+	/* One line: a newline in it would be a second request to fuzznet. */
+	if (!request || strchr(request, '\n')) {
+		say(err, err_size, "a request is one line");
+		return 0;
+	}
+	asked.path = socket;
+	asked.host = host;
+	asked.request = request;
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
 
