@@ -388,6 +388,11 @@ DAEMON_DIFFERENCES = {
 		("c", "  --fuzznet-dir PATH     this node's fuzznet store, or $NCFG_FUZZNET_DIR;"),
 		("c", "                         default fuzznet's own, for a daemon on the default"),
 		("c", "                         --run-dir only. Empty for none"),
+		# `--fuzznet-arg`, the C's alone for the same reason: fuzznet's own
+		# node options, passed to the loop the C daemon serves its store in
+		# (0311, project.md 10.676). Missing here from 3813fcf3, which added it,
+		# until 10.684's gate run found this gate red.
+		("c", "  --fuzznet-arg ARG      one of fuzznet's own node options, for its loop"),
 	],
 }
 
