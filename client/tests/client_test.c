@@ -20,6 +20,7 @@
  *   goes wrong.
  */
 #include "../ncfg_client.h"
+#include "../ncfg_fuzznet.h"
 #include "../ncfg_json.h"
 
 #include <errno.h>
@@ -413,6 +414,172 @@ static void a_member_can_be_asked_its_own_name(void)
 	   name && length == 4u && memcmp(name, "list", 4u) == 0 && name[4] != '\0', NULL);
 
 	ncfg_json_free(doc);
+}
+
+/* One line from `fd`, to its newline, into `line`; its length. */
+static size_t read_request(int fd, char *line, size_t size)
+{
+	size_t have = 0;
+	ssize_t n;
+
+	while (have + 1u < size && (have == 0u || line[have - 1u] != '\n') &&
+	       (n = read(fd, line + have, size - 1u - have)) > 0) {
+		have += (size_t)n;
+	}
+	line[have] = '\0';
+	return have;
+}
+
+/* A listening socket at `path`, or -1. */
+static int listen_at(const char *path)
+{
+	struct sockaddr_un address;
+	int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+	if (listener < 0 || bind(listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+	    listen(listener, 4) < 0) {
+		if (listener >= 0) {
+			close(listener);
+		}
+		return -1;
+	}
+	return listener;
+}
+
+/*
+ * The status over fuzznet first (project.md 10.690): beside a control socket
+ * at `<run>/netcfgd.sock`, a fuzznet at `<run>/fuzznet.sock` that answers
+ * `call status FROM` in pages, and the two statuses say which they are. The
+ * fuzznet one is taken; once fuzznet refuses, the control socket's is.
+ *
+ * HOW IT STOPS: each fake serves a fixed count of connections under
+ * `alarm(10)` and exits; the parent waits for both, and removes the two
+ * sockets and the directory by name.
+ */
+static void status_over_fuzznet_first(void)
+{
+	static const char fuzznet_json[] =
+	    "{\"response\":\"status\",\"links\":[],\"said_by\":\"fuzznet\"}";
+	char dir[] = "/tmp/ncfg-client-fz.XXXXXX";
+	char control[96];
+	char fuzznet[96];
+	char err[NCFG_ERROR_MAX];
+	pid_t control_child;
+	pid_t fuzznet_child;
+	int control_listener;
+	int fuzznet_listener;
+
+	if (!mkdtemp(dir)) {
+		ok("a directory for the fuzznet test", 0, strerror(errno));
+		return;
+	}
+	snprintf(control, sizeof(control), "%s/netcfgd.sock", dir);
+	snprintf(fuzznet, sizeof(fuzznet), "%s/fuzznet.sock", dir);
+	control_listener = listen_at(control);
+	fuzznet_listener = listen_at(fuzznet);
+	if (control_listener < 0 || fuzznet_listener < 0) {
+		ok("the two fake sockets listen", 0, strerror(errno));
+		return;
+	}
+
+	/* fuzznet: two pages of its status, then a refusal. */
+	fuzznet_child = fork();
+	if (fuzznet_child == 0) {
+		size_t total = strlen(fuzznet_json);
+		size_t half = total / 2u;
+		int at;
+
+		close(control_listener);
+		alarm(10);
+		for (at = 0; at < 3; at++) {
+			char line[128];
+			char page[512];
+			char escaped[1400];
+			int fd = accept(fuzznet_listener, NULL, NULL);
+			size_t from = at == 1 ? half : 0u;
+			size_t count = at == 0 ? half : total - half;
+			size_t i;
+			size_t w = 0;
+			int wrote;
+
+			if (fd < 0) {
+				_exit(1);
+			}
+			(void)read_request(fd, line, sizeof(line));
+			if (at == 2) {
+				(void)!write(fd, "error no procedure status here\n", 31u);
+				close(fd);
+				continue;
+			}
+			wrote = snprintf(page, sizeof(page), "ok %zu %zu %zu %016llx\n", total, from,
+			                 count,
+			                 (unsigned long long)ncfg_status_page_digest(fuzznet_json, total));
+			memcpy(page + wrote, fuzznet_json + from, count);
+			memcpy(escaped, "ok ", 3u);
+			w = 3;
+			for (i = 0; i < (size_t)wrote + count; i++) {
+				unsigned char c = (unsigned char)page[i];
+
+				if (c <= ' ' || c == '%' || c == ',' || c == 0x7f) {
+					w += (size_t)snprintf(escaped + w, sizeof(escaped) - w, "%%%02x", c);
+				} else {
+					escaped[w++] = (char)c;
+				}
+			}
+			escaped[w++] = '\n';
+			(void)!write(fd, escaped, w);
+			close(fd);
+		}
+		_exit(0);
+	}
+	/* The control socket: one connection, any number of requests. */
+	control_child = fork();
+	if (control_child == 0) {
+		static const char answer[] =
+		    "{\"response\":\"status\",\"links\":[],\"said_by\":\"control\"}\n";
+		char line[256];
+		int fd;
+
+		close(fuzznet_listener);
+		alarm(10);
+		fd = accept(control_listener, NULL, NULL);
+		while (fd >= 0 && read_request(fd, line, sizeof(line)) > 0) {
+			(void)!write(fd, answer, strlen(answer));
+		}
+		_exit(0);
+	}
+	close(control_listener);
+	close(fuzznet_listener);
+
+	ncfg_client_t *client = ncfg_client_open(control, err, sizeof(err));
+	ncfg_json_doc_t *first = client ? ncfg_client_status(client, err, sizeof(err)) : NULL;
+	size_t length = 0;
+	const char *said = first ? ncfg_json_string(first, ncfg_json_member(first,
+	                               ncfg_json_root(first), "said_by"), &length) : NULL;
+	ok("the status comes over fuzznet first, both pages joined",
+	   said && length == 7u && memcmp(said, "fuzznet", 7u) == 0, err);
+	ncfg_json_doc_t *second = client ? ncfg_client_status(client, err, sizeof(err)) : NULL;
+	said = second ? ncfg_json_string(second, ncfg_json_member(second,
+	                    ncfg_json_root(second), "said_by"), &length) : NULL;
+	ok("and over the control socket once fuzznet will not answer",
+	   said && length == 7u && memcmp(said, "control", 7u) == 0, err);
+	if (first) {
+		ncfg_json_free(first);
+	}
+	if (second) {
+		ncfg_json_free(second);
+	}
+	if (client) {
+		ncfg_client_close(client);
+	}
+	waitpid(fuzznet_child, NULL, 0);
+	waitpid(control_child, NULL, 0);
+	unlink(control);
+	unlink(fuzznet);
+	rmdir(dir);
 }
 
 static void a_refusal_is_not_a_dead_socket(void)
@@ -2872,6 +3039,7 @@ int main(int argc, char **argv)
 	connection_reads_lines_however_they_arrive();
 	a_member_can_be_asked_its_own_name();
 	a_refusal_is_not_a_dead_socket();
+	status_over_fuzznet_first();
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();
 	a_status_becomes_links();

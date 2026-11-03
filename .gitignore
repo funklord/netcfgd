@@ -38,10 +38,12 @@ c/src/*/*/*.d
 c/tests/*.d
 c/examples/*.d
 c/ncfg_json.d
+c/ncfg_fuzznet.d
 # The shared JSON reader's object, which `c/` builds under its own name rather
 # than beside the source in `client/` -- one file, two builds, two objects, so
 # that a sanitized build here cannot poison the archive `client/` links.
 c/ncfg_json.o
+c/ncfg_fuzznet.o
 # fuzznet, built from the submodule into a directory of `c/`'s own and
 # archived, because netcfgd links it (0308). The directory is the build's and
 # `make -C c clean` removes it after checking its name.

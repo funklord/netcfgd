@@ -80,7 +80,7 @@ SRCS = $(filter-out src/main/%,$(wildcard src/*/*.c)) $(wildcard src/*/*/*.c)
 #
 # One source, two builds, two objects. The file is still shared; only the
 # output is ours.
-SHARED_SRCS = ../client/ncfg_json.c
+SHARED_SRCS = ../client/ncfg_json.c ../client/ncfg_fuzznet.c
 SHARED_OBJS = $(notdir $(SHARED_SRCS:.c=.o))
 
 # **And kept OUT of the archive**, which is the other half of sharing it.
@@ -189,7 +189,14 @@ examples: $(EXAMPLES)
 examples/%: examples/%.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
+# **Made afresh, never updated in place.** `ar rcs` adds and replaces members
+# and never removes one, so an object whose source was deleted stays in the
+# archive for good: when `fuzznet_line.c` and `status_page.c` moved to
+# `client/ncfg_fuzznet.c` (10.690), the archive went on defining their symbols
+# beside the shared object on the same link line. A fresh clone never sees
+# it, which is how it outlives everybody who would notice.
 $(LIB): $(LIB_OBJS)
+	rm -f $@
 	$(AR) rcs $@ $(LIB_OBJS)
 
 # FUZZNET, LINKED IN (0308)
@@ -325,8 +332,11 @@ $(PROGRAM_LINK): $(PROGRAM)
 %.o: %.c .build-flags
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Named, because the pattern rule above would write it into `client/`.
-$(SHARED_OBJS): $(SHARED_SRCS) .build-flags
+# Named, because the pattern rule above would write it into `client/`. A
+# static pattern, so each object is compiled from its own source: with a
+# second shared source, `$<` of the one rule they shared was the first source
+# for both, and `ncfg_fuzznet.o` would have been a second `ncfg_json.o`.
+$(SHARED_OBJS): %.o: ../client/%.c .build-flags
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Each test is its own binary, and each is run. A suite that stops at the

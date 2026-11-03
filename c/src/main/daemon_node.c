@@ -19,7 +19,8 @@
  *   kilobytes. A caller asks again from FROM + COUNT until it has TOTAL.
  *
  *   DIGEST is of the whole status the page was cut from, so pages of two
- *   statuses are never joined: `status_page.h` says why, and joins them.
+ *   statuses are never joined: `client/ncfg_fuzznet.h` says why, and joins
+ *   them.
  *
  * Kept apart from `daemon_main.c` so a test can ask it without a node.
  */
@@ -30,7 +31,7 @@
 #include "ncfg/daemon.h"
 #include "ncfg/observed.h"
 #include "ncfg/proto.h"
-#include "ncfg/status_page.h"
+#include "ncfg_fuzznet.h"
 
 #include <stdint.h>
 #include <stdio.h>

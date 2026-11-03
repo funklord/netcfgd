@@ -31,7 +31,7 @@ CC ?= gcc
 AR ?= ar
 
 LIB    = libncfg_client.a
-SRCS   = ncfg_json.c ncfg_client.c
+SRCS   = ncfg_json.c ncfg_client.c ncfg_fuzznet.c
 OBJS   = $(SRCS:.c=.o)
 HEADERS = ncfg_json.h ncfg_client.h
 
@@ -106,7 +106,10 @@ syntax-tests:
 	@cmp -s $@.candidate $@ || mv $@.candidate $@
 	@rm -f $@.candidate
 
+# Made afresh rather than updated: `ar rcs` never removes a member, so an
+# object whose source left `SRCS` would stay archived (c/Makefile, 10.690).
 $(LIB): $(OBJS)
+	rm -f $@
 	$(AR) rcs $@ $(OBJS)
 
 %.o: %.c $(HEADERS) .build-flags

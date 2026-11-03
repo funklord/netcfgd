@@ -2,6 +2,7 @@
  * ncfg_client.c -- the connection described in ncfg_client.h.
  */
 #include "ncfg_client.h"
+#include "ncfg_fuzznet.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -11,6 +12,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 /* The daemon's compiled-in default, and the one `ncfg` resolves to. Kept as a
@@ -35,6 +37,10 @@ struct ncfg_client {
 	/* Set when the socket, rather than the daemon, is what failed. See
 	 * `ncfg_client_broken`. */
 	int    broken;
+	/* When the status may next be asked over fuzznet, after it failed: a
+	 * fuzznet that holds its socket and never answers would otherwise cost
+	 * every refresh its whole wait. */
+	time_t fuzznet_after;
 };
 
 static void set_error(char *err, size_t err_size, const char *format, ...)
@@ -370,8 +376,40 @@ ncfg_json_doc_t *ncfg_client_hello(ncfg_client_t *client, char *err, size_t err_
 	return ncfg_client_request(client, "{\"request\":\"hello\"}", err, err_size);
 }
 
+/*
+ * **Over fuzznet first** (0311, project.md 10.689): the `status` procedure on
+ * the fuzznet socket of the daemon whose control socket this is -- the run
+ * directory is the same -- judged by its tiers and fuzznet's permit; the
+ * control socket where fuzznet does not answer this caller. The document is
+ * the same either way, `{"response":"status",...}`, so no caller can tell.
+ */
 ncfg_json_doc_t *ncfg_client_status(ncfg_client_t *client, char *err, size_t err_size)
 {
+	char        run_dir[sizeof(client->path)];
+	char        ignored[NCFG_ERROR_MAX];
+	const char *slash;
+	char       *json = NULL;
+	size_t      length = 0;
+	time_t      now = time(NULL);
+
+	/* Only a socket named as a daemon names its own, `<run>/netcfgd.sock`,
+	 * says its directory is a run directory: one somewhere else -- a test's
+	 * in /tmp -- would send this asking /tmp for a stranger's fuzznet. */
+	if (client && now >= client->fuzznet_after && (slash = strrchr(client->path, '/')) &&
+	    slash != client->path && strcmp(slash, "/netcfgd.sock") == 0) {
+		ncfg_json_doc_t *doc = NULL;
+
+		memcpy(run_dir, client->path, (size_t)(slash - client->path));
+		run_dir[slash - client->path] = '\0';
+		if (ncfg_fuzznet_status(run_dir, &json, &length, ignored, sizeof(ignored))) {
+			doc = ncfg_json_parse(json, length, ignored, sizeof(ignored));
+		}
+		free(json);
+		if (doc) {
+			return doc;
+		}
+		client->fuzznet_after = now + 60;
+	}
 	return ncfg_client_request(client, "{\"request\":\"status\"}", err, err_size);
 }
 

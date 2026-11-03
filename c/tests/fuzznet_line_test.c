@@ -1,6 +1,6 @@
 /*
  * fuzznet_line_test.c -- the escape, and the bounded one-line conversation
- * (`src/host/fuzznet_line.c`, 10.688), against a scripted socket.
+ * (`client/ncfg_fuzznet.c`, 10.688), against a scripted socket.
  *
  * WHAT IS CHECKED
  *   The escape round-trips every byte, unescaping refuses a broken `%XX` and
@@ -9,10 +9,10 @@
  *   be silent rather than refusing.
  *
  * HOW IT STOPS: the server child serves three connections and exits, under
- * `alarm(10)` either way; the scratch directory is mkdtemp's and its two
- * names are removed by name.
+ * `alarm(10)` either way; the scratch directory is mkdtemp's and the four
+ * names written in it are removed by name.
  */
-#include "ncfg/fuzznet_line.h"
+#include "ncfg_fuzznet.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -158,6 +158,39 @@ int main(void)
 	check(!ncfg_fuzznet_ask(gone, "y", reply, sizeof(reply), 200, &silent, why, sizeof(why)) &&
 	        silent && strstr(why, "not at") != NULL,
 	    "and none there is silence, said as such");
+
+	/* Where the daemon is asked (10.689): its run directory's socket, until
+	 * `<run>/node` names a store whose `face` names another. */
+	{
+		char  where[256];
+		char  file[200];
+		FILE *out;
+		int   fell_back;
+		int   faced;
+
+		fell_back = ncfg_fuzznet_daemon_socket(dir, where, sizeof(where)) &&
+		    strcmp(where + strlen(dir), "/fuzznet.sock") == 0;
+		(void)snprintf(file, sizeof(file), "%s/node", dir);
+		out = fopen(file, "w");
+		if (out) {
+			(void)fprintf(out, "key=00\nstore=%s\n", dir);
+			(void)fclose(out);
+		}
+		(void)snprintf(file, sizeof(file), "%s/face", dir);
+		out = fopen(file, "w");
+		if (out) {
+			(void)fprintf(out, "%s/elsewhere.sock\n", dir);
+			(void)fclose(out);
+		}
+		faced = ncfg_fuzznet_daemon_socket(dir, where, sizeof(where)) &&
+		    strcmp(where + strlen(dir), "/elsewhere.sock") == 0;
+		check(fell_back && faced,
+		    "the daemon's socket is the run directory's, or the one its store's face names");
+		(void)snprintf(file, sizeof(file), "%s/node", dir);
+		(void)unlink(file);
+		(void)snprintf(file, sizeof(file), "%s/face", dir);
+		(void)unlink(file);
+	}
 
 	(void)waitpid(child, &status, 0);
 	check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "the server served all three");

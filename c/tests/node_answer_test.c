@@ -15,7 +15,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/daemon.h"
 #include "ncfg/proto.h"
-#include "ncfg/status_page.h"
+#include "ncfg_fuzznet.h"
 
 #include <stdio.h>
 #include <stdlib.h>

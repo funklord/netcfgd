@@ -38,7 +38,7 @@
 #include "ncfg/daemon.h"
 #include "ncfg/dhcp_server.h"
 #include "ncfg/explain.h"
-#include "ncfg/fuzznet_line.h"
+#include "ncfg_fuzznet.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
 #include "ncfg/log.h"
@@ -46,7 +46,6 @@
 #include "ncfg/plan.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/state.h"
-#include "ncfg/status_page.h"
 #include "ncfg/supplicant.h"
 
 #include <errno.h>
@@ -1197,67 +1196,26 @@ static void take_theirs(const ncfg_json_doc_t *doc, uint32_t object, ncfg_observ
 	}
 }
 
-/* One page of the daemon's status over fuzznet: `call status FROM` on the
- * socket named in `context`, the answer unescaped (fuzznet's sec 853). */
-static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size_t *length,
-    char *err, size_t err_size)
-{
-	const char *path = context;
-	char        line[48];
-	char        reply[2048];
-	int         silent = 0;
-	long        n;
-
-	(void)snprintf(line, sizeof(line), "call status %zu", from);
-	if (!ncfg_fuzznet_ask(path, line, reply, sizeof(reply), 2000, &silent, err, err_size)) {
-		return 0;
-	}
-	if (strncmp(reply, "ok ", 3) != 0) {
-		ncfg_error_set(err, err_size, "fuzznet answered %.160s", reply);
-		return 0;
-	}
-	n = ncfg_fuzznet_unescape(reply + 3, strlen(reply + 3), page, cap);
-	if (n < 0) {
-		ncfg_error_set(err, err_size, "fuzznet's answer is not escaped as fuzznet escapes");
-		return 0;
-	}
-	*length = (size_t)n;
-	return 1;
-}
-
 /*
  * **Over fuzznet first** (0311: everything internal goes over its protocols,
- * 10.689): the `status` procedure on the run directory's `fuzznet.sock`,
- * which a daemon with a node serves, judged by its tiers and fuzznet's
- * permit. 1 where it answered whole.
+ * 10.689): the `status` procedure, on the socket `ncfg_fuzznet_daemon_socket`
+ * finds without configuration, judged by the daemon's tiers and fuzznet's
+ * permit -- the same function the GUI's client asks through. 1 where it
+ * answered whole.
  */
 static int take_over_fuzznet(const ncfg_cli_options_t *options, ncfg_observed_t *observed)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
-	char             path[NCFG_CLI_TEXT_MAX + 16u];
-	char             store[NCFG_CLI_TEXT_MAX];
 	char             ignored[NCFG_ERROR_MAX];
-	ncfg_buf_t       json;
+	char            *json = NULL;
+	size_t           length = 0;
 	ncfg_json_doc_t *doc = NULL;
-	int              wrote;
 
 	(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
-	/* The store's face where this caller may read the store, which names
-	 * whatever socket fuzznet was given; else the run directory's, which is
-	 * where a daemon puts it unless told otherwise (10.683), and the one a
-	 * caller who cannot read root's store can still reach. */
-	if (!ncfg_cli_node_store(run_dir, store, sizeof(store)) ||
-	    !ncfg_fuzznet_face(store, path, sizeof(path))) {
-		wrote = snprintf(path, sizeof(path), "%s/fuzznet.sock", run_dir);
-		if (wrote <= 0 || (size_t)wrote >= sizeof(path)) {
-			return 0;
-		}
+	if (ncfg_fuzznet_status(run_dir, &json, &length, ignored, sizeof(ignored))) {
+		doc = ncfg_json_parse(json, length, ignored, sizeof(ignored));
 	}
-	ncfg_buf_init(&json, NCFG_STATUS_PAGE_TOTAL_MAX);
-	if (ncfg_status_pages_join(fuzznet_page, path, &json, ignored, sizeof(ignored))) {
-		doc = ncfg_json_parse(json.data, json.length, ignored, sizeof(ignored));
-	}
-	ncfg_buf_free(&json);
+	free(json);
 	if (!doc) {
 		return 0;
 	}

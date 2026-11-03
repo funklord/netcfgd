@@ -12671,6 +12671,48 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.690 The GUI's status comes over fuzznet, from one copy in `client/`
+
+`ncfg_client_status` is the single function every status read of the GUI
+and the NM shim goes through, so changing it moved both. It now asks the
+`status` procedure first and the control socket where fuzznet does not
+answer. The document is `{"response":"status",...}` either way, so no
+caller can tell which one answered.
+
+- **One copy, in `client/`.** The GUI and the shim link `libncfg_client.a`
+  and not `libncfg`, so 10.689's `fuzznet_line.c` and `status_page.c` moved
+  to `client/ncfg_fuzznet.c`, libc only. `c/` compiles it in as it does
+  `ncfg_json.c` (`SHARED_SRCS`), and `ncfg`, the seen recorder and the daemon
+  all use it. The joiner now returns a malloc'd string, since `ncfg_buf` is
+  `libncfg`'s.
+- **The run directory is only a guess where the socket says so.** The client
+  knows only its control socket's path. Its directory is taken for the run
+  directory, and asked for `node` and `fuzznet.sock`, only when the socket
+  is named `netcfgd.sock`, as a daemon names its own. A socket elsewhere, such
+  as a test's in `/tmp`, would otherwise send the client to a stranger's
+  fuzznet.
+- **A fuzznet that fails is left alone for a minute.** The GUI asks for the
+  status often, and a fuzznet that holds its socket without answering would
+  otherwise cost every refresh the 2 s wait.
+- `client_test` runs a fake control socket beside a fake fuzznet that answers
+  in two escaped pages and then refuses. The first status comes from fuzznet,
+  and the second from the control socket. Breaking the run-directory test
+  fails the first check.
+
+**Two build faults found on the way, both of the kind that leave a stale
+artifact rather than an error:**
+
+- **The shared-object rule compiled every object from the first source.** It
+  was one rule, `$(SHARED_OBJS): $(SHARED_SRCS)`, using `$<`, which was
+  correct while there was one shared source. With a second, `ncfg_fuzznet.o`
+  would have been a copy of `ncfg_json.o`. It is a static pattern rule now.
+- **`libncfg.a` kept the deleted objects.** `ar rcs` adds and replaces
+  members and never removes one, so after the move the archive still held
+  `fuzznet_line.o` and `status_page.o`. It defined their symbols a second
+  time beside the shared object on the same link line. A fresh clone never
+  sees this, which is why it lasts. The archive is now removed and rebuilt
+  from `LIB_OBJS` each time, and `ar t` lists neither.
+
 ## 10.689 `ncfg status` asks the daemon over fuzznet, and pages carry a digest
 
 10.688's client half. The holder's rule from 0311 is that everything internal
@@ -12713,8 +12755,8 @@ the recorder and `ncfg` cannot drift apart in how long they wait.
 pieces, a socket that never answers given up on within the wait, and an
 absent one reported as silence.
 
-**Not done yet:** the GUI still reads the control socket. Its client is the
-next consumer of `call status`.
+**The GUI followed the same day (10.690)**, and the two files named above
+moved to `client/ncfg_fuzznet.c` with it.
 
 ## 10.688 `status` is a fuzznet procedure: `call status [FROM]`
 

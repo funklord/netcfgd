@@ -1,6 +1,6 @@
 /*
  * status_page_test.c -- a status page read, and pages joined
- * (`src/daemon/status_page.c`, project.md 10.689), against a fake source.
+ * (`client/ncfg_fuzznet.c`, project.md 10.689), against a fake source.
  *
  * WHAT HAS TO HOLD
  *   A page is read only in its exact shape; a steady status joins byte for
@@ -10,12 +10,12 @@
  *   holds still is given up on; and a page whose digest does not name its
  *   bytes, or that makes no progress, is refused.
  */
-#include "ncfg/status_page.h"
+#include "ncfg_fuzznet.h"
 
 #include "ncfg/base.h"
-#include "ncfg/buf.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int failures;
@@ -101,7 +101,8 @@ static void reading(void)
 int main(void)
 {
 	source_t   source;
-	ncfg_buf_t out;
+	char      *out = NULL;
+	size_t     length = 0;
 	char       err[NCFG_ERROR_MAX];
 	size_t     at;
 	int        ok;
@@ -113,39 +114,42 @@ int main(void)
 		source.b[at] = (char)('A' + at % 26u); /* the same length, other bytes */
 	}
 	source.page = 100;
-	ncfg_buf_init(&out, 0);
 
-	ok = ncfg_status_pages_join(ask, &source, &out, err, sizeof(err));
-	check(ok && out.length == sizeof(source.a) && memcmp(out.data, source.a, out.length) == 0 &&
-	        source.asks == 10u,
+	ok = ncfg_status_pages_join(ask, &source, &out, &length, err, sizeof(err));
+	check(ok && length == sizeof(source.a) && memcmp(out, source.a, length) == 0 &&
+	        out[length] == '\0' && source.asks == 10u,
 	    "a steady status joins byte for byte, in its ten pages");
 
+	free(out);
+	out = NULL;
 	source.asks = 0;
 	source.switch_at = 4;
-	ok = ncfg_status_pages_join(ask, &source, &out, err, sizeof(err));
-	check(ok && out.length == sizeof(source.b) && memcmp(out.data, source.b, out.length) == 0,
+	ok = ncfg_status_pages_join(ask, &source, &out, &length, err, sizeof(err));
+	check(ok && length == sizeof(source.b) && memcmp(out, source.b, length) == 0,
 	    "one that moves mid-way, at the same length, comes back the newer whole");
 
+	free(out);
+	out = NULL;
 	source.asks = 0;
 	source.switch_at = 0;
 	source.every = 1;
-	ok = ncfg_status_pages_join(ask, &source, &out, err, sizeof(err));
+	ok = ncfg_status_pages_join(ask, &source, &out, &length, err, sizeof(err));
 	check(!ok && strstr(err, "moved") != NULL && source.asks <= 8u,
 	    "one that never holds still is given up on, within four tries");
 
 	source.asks = 0;
 	source.every = 0;
 	source.lie = 1;
-	ok = ncfg_status_pages_join(ask, &source, &out, err, sizeof(err));
+	ok = ncfg_status_pages_join(ask, &source, &out, &length, err, sizeof(err));
 	check(!ok && strstr(err, "digest") != NULL,
 	    "pages whose digest does not name their bytes are refused");
 
 	source.lie = 0;
 	source.stall = 1;
-	ok = ncfg_status_pages_join(ask, &source, &out, err, sizeof(err));
+	ok = ncfg_status_pages_join(ask, &source, &out, &length, err, sizeof(err));
 	check(!ok && strstr(err, "progress") != NULL, "and so is a page that carries nothing");
 
-	ncfg_buf_free(&out);
+	free(out);
 	if (failures) {
 		printf("\nstatus_page_test: %d check(s) FAILED\n", failures);
 		return 1;

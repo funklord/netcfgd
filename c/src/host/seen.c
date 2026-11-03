@@ -12,12 +12,13 @@
  *   **Bounded at both ends.** The connect and the reply each wait at most a
  *   second, because a pass of the reconcile loop must not stall on a daemon
  *   that is wedged, and a line longer than the buffer is no answer. The
- *   conversation and the escape are `fuzznet_line.c`'s, shared with `ncfg`.
+ *   conversation and the escape are `client/ncfg_fuzznet.c`'s, shared with
+ *   `ncfg` and the GUI.
  */
 #include "ncfg/seen.h"
 
 #include "ncfg/base.h"
-#include "ncfg/fuzznet_line.h"
+#include "ncfg_fuzznet.h"
 #include "ncfg/log.h"
 
 #include <errno.h>
