@@ -909,6 +909,19 @@ typedef struct {
  * this daemon is root and the caller need not be. Answered on the loop's
  * thread between steps of fuzznet's loop, where the state is whole.
  */
+/* An operator of the estate, over fuzznet's remote hop (`daemon_node.c`). */
+static size_t node_remote(void *context, const uint8_t key[NCFG_NODE_KEY_LEN], int contact,
+    const char *body, size_t length, char *reply, size_t cap)
+{
+	node_driven_t *driven = context;
+
+	(void)key;
+	return ncfg_main_node_remote(driven->policy,
+	    driven->run->loop && driven->run->loop->state ? driven->run->loop->state->observed
+	                                                  : NULL,
+	    contact, body, length, reply, cap);
+}
+
 static size_t node_answer(void *context, const ncfg_peer_t *peer, const char *line,
     char *reply, size_t cap)
 {
@@ -1036,6 +1049,7 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	loop.ready = node_ready;
 	loop.tick = node_tick;
 	loop.local = node_answer;
+	loop.remote = node_remote;
 	for (at = 0; at < options->fuzznet_arg_count && arg_count < 32u; at++) {
 		if (strncmp(options->fuzznet_args[at], "--socket", 8u) == 0) {
 			named = 1;

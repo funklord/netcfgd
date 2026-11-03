@@ -139,7 +139,25 @@ typedef struct {
 	 */
 	size_t (*local)(void *context, const ncfg_peer_t *peer, const char *line, char *reply,
 	    size_t cap);
+	/*
+	 * A request of netcfgd's own remote type from a host of the estate
+	 * (decision 0311): `key` the sender, `contact` nonzero where it is a
+	 * contact rather than a member, `body` the request after its two type
+	 * bytes. The answer's length, at most `cap`, written after the answer's
+	 * own type bytes, which the node module adds; 0 for none. NULL answers
+	 * none.
+	 */
+	size_t (*remote)(void *context, const uint8_t key[NCFG_NODE_KEY_LEN], int contact,
+	    const char *body, size_t length, char *reply, size_t cap);
 } ncfg_node_loop_t;
+
+/*
+ * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to
+ * 191): a request, and the answer to one. A line in each, the same vocabulary
+ * as the local socket's (10.685).
+ */
+#define NCFG_NODE_TYPE_REQUEST 128u
+#define NCFG_NODE_TYPE_ANSWER  129u
 
 /* How a serve ended. */
 typedef enum {

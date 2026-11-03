@@ -47,6 +47,7 @@
 #define NCFG_MAIN_INTERNAL_H
 
 #include "ncfg/document.h"
+#include "ncfg/observed.h"
 
 #include <stddef.h>
 
@@ -325,6 +326,15 @@ typedef struct {
  * opened the socket to everybody would be the worst possible reading of an
  * unreadable file.
  */
+/*
+ * A request an operator of this node's estate sent over fuzznet's remote hop
+ * (decision 0311, `daemon_node.c`): `request` the line, `contact` whether
+ * fuzznet says the sender is a contact rather than a member. The answer's
+ * length, at most `cap`; 0 for a verb this daemon does not answer.
+ */
+size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
+    int contact, const char *request, size_t length, char *reply, size_t cap);
+
 int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *out, char *err,
     size_t err_size);
 

@@ -368,6 +368,8 @@ tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 # for the reason 0263 gives -- a library never exits and never owns a `poll`
 # that decides when a process stops. `world_test` and `answer_test` are the
 # other two halves of the same sentence.
+tests/node_answer_test: tests/node_answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 

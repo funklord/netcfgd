@@ -18,6 +18,7 @@
 #include "cli/cli.h"
 #include "node/daemon.h"
 #include "node/identity.h"
+#include "node/types.h"
 #include "persist/persist_file.h"
 #include "session/agree_monocypher.h"
 #include "session/hash_monocypher.h"
@@ -49,6 +50,14 @@ _Static_assert((int)NCFG_SCOPE_HOST_PRIVATE == (int)FZN_SCOPE_HOST_PRIVATE &&
         (int)NCFG_SCOPE_GROUP == (int)FZN_SCOPE_GROUP &&
         (int)NCFG_SCOPE_ESTATE == (int)FZN_SCOPE_ESTATE,
     "netcfgd's scope copy has drifted from fuzznet's state/scope.h");
+
+/* netcfgd's remote types inside fuzznet's extensions' range, checked where
+ * both are visible, as the scope table's are. */
+_Static_assert(NCFG_NODE_TYPE_REQUEST >= FZN_TYPES_EXTENSION_FIRST &&
+        NCFG_NODE_TYPE_REQUEST <= FZN_TYPES_EXTENSION_LAST &&
+        NCFG_NODE_TYPE_ANSWER >= FZN_TYPES_EXTENSION_FIRST &&
+        NCFG_NODE_TYPE_ANSWER <= FZN_TYPES_EXTENSION_LAST,
+    "netcfgd's remote types are outside fuzznet's extensions' range");
 
 /* Everything the identity points into, in one allocation that outlives it:
  * `identity.agree_secret` is a pointer to `agree_secret`, and the signer the
@@ -430,6 +439,29 @@ static size_t serve_local_from(void *ctx, fzn_origin_t origin, const fzn_peer_t 
 	return serving->local(serving->context, &peer, line, reply, cap);
 }
 
+/* A remote request of netcfgd's type, its two type bytes taken off and the
+ * answer's put on: version 2, `NCFG_NODE_TYPE_ANSWER`. Any other type is not
+ * this daemon's, and fuzznet answers it `unsupported`. */
+static size_t serve_remote(void *ctx, const uint8_t sender[FZN_PUBKEY_LEN], int contact,
+    const uint8_t *request, size_t request_len, uint8_t *reply, size_t cap)
+{
+	size_t n;
+
+	(void)ctx;
+	if (!serving->remote || !request || request_len < 2u || cap < 3u ||
+	    request[0] != FZN_TYPES_VERSION_SHARED || request[1] != NCFG_NODE_TYPE_REQUEST) {
+		return 0u;
+	}
+	n = serving->remote(serving->context, sender, contact, (const char *)request + 2,
+	    request_len - 2u, (char *)reply + 2, cap - 2u);
+	if (n == 0u) {
+		return 0u;
+	}
+	reply[0] = FZN_TYPES_VERSION_SHARED;
+	reply[1] = NCFG_NODE_TYPE_ANSWER;
+	return n + 2u;
+}
+
 static void serve_tick(void *ctx, uint64_t now)
 {
 	(void)ctx;
@@ -482,6 +514,7 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 	ext.ready = serve_ready;
 	ext.tick = serve_tick;
 	ext.local_from = serve_local_from;
+	ext.remote = serve_remote;
 	/* A join's restart, or a follower's on taking the claim, executes the
 	 * daemon's own command line rather than the fuzznet options above. */
 	ext.restart_argv = restart_argv;

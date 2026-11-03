@@ -12671,6 +12671,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.685 An estate operator asks a node over fuzznet: `get status`, paged
+
+**Built** (the holder: "you are getting bogged down in details pretending they
+are blockers" -- so the open details are decided here and marked as guesses).
+`ncfg_main_node_remote` (`c/src/main/daemon_node.c`) answers fuzznet's remote
+hop through `ext->remote`, for netcfgd's own extension types:
+
+- **128, a request; 129, its answer** -- from fuzznet's extensions' range
+  (`node/types.h`, 128 to 191), told to fuzznet so its list can carry them
+  (its inbox `20261103T2000Z`). A request is a line in the local vocabulary.
+- **`get status [FROM]`** answers `ok TOTAL FROM COUNT`, a newline and COUNT
+  bytes of the same JSON the control socket's `status` gives, from offset
+  FROM: paged, so it never depends on the remote reply cap. *Guess:* paging
+  rather than relying on fuzznet's multi-frame replies, because the cap is
+  fuzznet's and status grows with the machine.
+- **Who:** a contact is refused -- someone the estate shares with, not
+  someone it is run by. A member is judged by this node's `remote` block,
+  the per-tier booleans 0128 gave a remote caller, all off by default: the
+  holder's "each node can be granularly configured as to what permissions it
+  has". *Guess:* any member fuzznet authenticates is an operator, and the
+  node's tiers bound what it may do; if fuzznet's admin capability should
+  narrow that, it narrows here.
+
+Checked: `node_answer_test`, 11 checks -- denied with `observe` closed;
+a contact refused; the status in one page byte for byte against the socket's,
+and in many pages at a 40-byte reply, put back exactly; an offset past the end
+an empty page; a signed offset malformed; other verbs left to fuzznet; no
+observation an error. Skipping the tier check turns the first red. **Not
+tested end to end:** nothing in fuzznet sends an extension's request to a
+peer from a test, asked of it in the same message.
+
 ## 10.684 fuzznet is not optional: serving in the default build, and the estate is the fleet
 
 **The holder, 2026-11-03:** "Fleet management is settled within the simple
