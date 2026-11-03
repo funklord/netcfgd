@@ -38,6 +38,7 @@
 #include "ncfg/daemon.h"
 #include "ncfg/dhcp_server.h"
 #include "ncfg/explain.h"
+#include "ncfg/fuzznet_line.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
 #include "ncfg/log.h"
@@ -45,6 +46,7 @@
 #include "ncfg/plan.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/state.h"
+#include "ncfg/status_page.h"
 #include "ncfg/supplicant.h"
 
 #include <errno.h>
@@ -1182,15 +1184,101 @@ static void warn_about_disabled_networks(const ncfg_document_t *document,
  * Quietly: a daemon that is not there, refuses this caller's tier or answers
  * something unreadable costs the listing that one fact and nothing else.
  */
+/* What only the daemon knows, from its own status, onto this observation. */
+static void take_theirs(const ncfg_json_doc_t *doc, uint32_t object, ncfg_observed_t *observed)
+{
+	char             ignored[NCFG_ERROR_MAX];
+	ncfg_observed_t *theirs = ncfg_observed_from_status(doc, object, ignored, sizeof(ignored));
+
+	if (theirs) {
+		ncfg_cli_take_regdom_setter(observed, theirs);
+		ncfg_cli_take_seen(observed, theirs);
+		ncfg_observed_free(theirs);
+	}
+}
+
+/* One page of the daemon's status over fuzznet: `call status FROM` on the
+ * socket named in `context`, the answer unescaped (fuzznet's sec 853). */
+static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size_t *length,
+    char *err, size_t err_size)
+{
+	const char *path = context;
+	char        line[48];
+	char        reply[2048];
+	int         silent = 0;
+	long        n;
+
+	(void)snprintf(line, sizeof(line), "call status %zu", from);
+	if (!ncfg_fuzznet_ask(path, line, reply, sizeof(reply), 2000, &silent, err, err_size)) {
+		return 0;
+	}
+	if (strncmp(reply, "ok ", 3) != 0) {
+		ncfg_error_set(err, err_size, "fuzznet answered %.160s", reply);
+		return 0;
+	}
+	n = ncfg_fuzznet_unescape(reply + 3, strlen(reply + 3), page, cap);
+	if (n < 0) {
+		ncfg_error_set(err, err_size, "fuzznet's answer is not escaped as fuzznet escapes");
+		return 0;
+	}
+	*length = (size_t)n;
+	return 1;
+}
+
+/*
+ * **Over fuzznet first** (0311: everything internal goes over its protocols,
+ * 10.689): the `status` procedure on the run directory's `fuzznet.sock`,
+ * which a daemon with a node serves, judged by its tiers and fuzznet's
+ * permit. 1 where it answered whole.
+ */
+static int take_over_fuzznet(const ncfg_cli_options_t *options, ncfg_observed_t *observed)
+{
+	char             run_dir[NCFG_CLI_TEXT_MAX];
+	char             path[NCFG_CLI_TEXT_MAX + 16u];
+	char             store[NCFG_CLI_TEXT_MAX];
+	char             ignored[NCFG_ERROR_MAX];
+	ncfg_buf_t       json;
+	ncfg_json_doc_t *doc = NULL;
+	int              wrote;
+
+	(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
+	/* The store's face where this caller may read the store, which names
+	 * whatever socket fuzznet was given; else the run directory's, which is
+	 * where a daemon puts it unless told otherwise (10.683), and the one a
+	 * caller who cannot read root's store can still reach. */
+	if (!ncfg_cli_node_store(run_dir, store, sizeof(store)) ||
+	    !ncfg_fuzznet_face(store, path, sizeof(path))) {
+		wrote = snprintf(path, sizeof(path), "%s/fuzznet.sock", run_dir);
+		if (wrote <= 0 || (size_t)wrote >= sizeof(path)) {
+			return 0;
+		}
+	}
+	ncfg_buf_init(&json, NCFG_STATUS_PAGE_TOTAL_MAX);
+	if (ncfg_status_pages_join(fuzznet_page, path, &json, ignored, sizeof(ignored))) {
+		doc = ncfg_json_parse(json.data, json.length, ignored, sizeof(ignored));
+	}
+	ncfg_buf_free(&json);
+	if (!doc) {
+		return 0;
+	}
+	take_theirs(doc, ncfg_json_root(doc), observed);
+	ncfg_json_free(doc);
+	return 1;
+}
+
 static void take_from_daemon(const ncfg_cli_options_t *options, ncfg_observed_t *observed)
 {
 	ncfg_proto_request_t request;
 	ncfg_proto_message_t message;
-	ncfg_observed_t     *theirs;
 	char                 path[NCFG_CLI_TEXT_MAX];
 	char                 ignored[NCFG_ERROR_MAX];
 	int                  absent = 0;
 
+	if (take_over_fuzznet(options, observed)) {
+		return;
+	}
+	/* A daemon with no node, or a fuzznet that would not answer this
+	 * caller: the control socket, as before. */
 	if (!socket_for(options, path, sizeof(path))) {
 		return;
 	}
@@ -1201,13 +1289,8 @@ static void take_from_daemon(const ncfg_cli_options_t *options, ncfg_observed_t 
 	}
 	if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
 	    message.u.response.kind == NCFG_PROTO_RESP_STATUS) {
-		theirs = ncfg_observed_from_status(message.u.response.u.payload.doc,
-		    message.u.response.u.payload.object, ignored, sizeof(ignored));
-		if (theirs) {
-			ncfg_cli_take_regdom_setter(observed, theirs);
-			ncfg_cli_take_seen(observed, theirs);
-			ncfg_observed_free(theirs);
-		}
+		take_theirs(message.u.response.u.payload.doc, message.u.response.u.payload.object,
+		    observed);
 	}
 	ncfg_proto_message_free(&message);
 }

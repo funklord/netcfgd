@@ -11,11 +11,13 @@
  *
  *   **Bounded at both ends.** The connect and the reply each wait at most a
  *   second, because a pass of the reconcile loop must not stall on a daemon
- *   that is wedged, and a line longer than the buffer is no answer.
+ *   that is wedged, and a line longer than the buffer is no answer. The
+ *   conversation and the escape are `fuzznet_line.c`'s, shared with `ncfg`.
  */
 #include "ncfg/seen.h"
 
 #include "ncfg/base.h"
+#include "ncfg/fuzznet_line.h"
 #include "ncfg/log.h"
 
 #include <errno.h>
@@ -106,30 +108,6 @@ void ncfg_seen_use_store(ncfg_seen_t *seen, const char *dir)
 	(void)snprintf(seen->store, sizeof(seen->store), "%s", dir);
 }
 
-/*
- * The face's socket, as the store's `face` file names it, into `out`: one
- * line, an absolute path, which is how fuzznetd writes it and reads it
- * (`face_socket` in its `node/daemon.c`). 0 where there is no face.
- */
-static int face_socket(const char *store, char *out, size_t out_size)
-{
-	char   path[1100];
-	FILE  *file;
-	size_t length;
-
-	(void)snprintf(path, sizeof(path), "%s/face", store);
-	file = fopen(path, "r");
-	if (!file) {
-		return 0;
-	}
-	length = fread(out, 1u, out_size - 1u, file);
-	(void)fclose(file);
-	while (length && (out[length - 1u] == '\n' || out[length - 1u] == '\r')) {
-		length--;
-	}
-	out[length] = '\0';
-	return length > 0u && out[0] == '/';
-}
 
 void ncfg_seen_in_process(ncfg_seen_t *seen, ncfg_seen_local_fn local)
 {
@@ -180,149 +158,6 @@ int ncfg_seen_key(const char *interface, const char *mac, char *out, size_t out_
 	return 1;
 }
 
-/* fuzznet's escape: a byte up to a space, `%`, a comma or DEL as %XX. */
-static int escape_value(const char *value, char *out, size_t out_size)
-{
-	static const char hex[] = "0123456789abcdef";
-	size_t            at = 0;
-
-	for (; *value; value++) {
-		const unsigned char c = (unsigned char)*value;
-
-		if (c <= ' ' || c == '%' || c == ',' || c == 0x7f) {
-			if (at + 3u >= out_size) {
-				return 0;
-			}
-			out[at++] = '%';
-			out[at++] = hex[c >> 4];
-			out[at++] = hex[c & 0x0f];
-		} else {
-			if (at + 1u >= out_size) {
-				return 0;
-			}
-			out[at++] = (char)c;
-		}
-	}
-	out[at] = '\0';
-	return 1;
-}
-
-/*
- * One line of the socket into `out`, from `buffer` (which holds `*have`
- * bytes read already, kept for the next line). 1 with the line, its newline
- * taken off; 0 where none came within the wait, or it did not fit.
- */
-static int read_line(int fd, char *buffer, size_t buffer_size, size_t *have, char *out,
-    size_t out_size)
-{
-	struct pollfd wait;
-	char         *end;
-
-	while (!(end = memchr(buffer, '\n', *have))) {
-		ssize_t n;
-
-		if (*have + 1u >= buffer_size) {
-			return 0;
-		}
-		wait.fd = fd;
-		wait.events = POLLIN;
-		if (poll(&wait, 1, SEEN_WAIT_MS) <= 0) {
-			return 0;
-		}
-		n = recv(fd, buffer + *have, buffer_size - 1u - *have, 0);
-		if (n <= 0) {
-			if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
-				continue;
-			}
-			return 0;
-		}
-		*have += (size_t)n;
-	}
-	{
-		const size_t length = (size_t)(end - buffer);
-
-		if (length >= out_size) {
-			return 0;
-		}
-		memcpy(out, buffer, length);
-		out[length] = '\0';
-		*have -= length + 1u;
-		memmove(buffer, end + 1, *have);
-	}
-	return 1;
-}
-
-/*
- * One line asked, one line back, one connection. 1 with the reply in `reply`
- * (its newline taken off); 0 with `*silent` set where nobody answered, which
- * is the absence the header describes, and a sentence in `why` either way.
- */
-static int ask_socket(const char *socket_path, const char *line, char *reply,
-    size_t reply_size, int *silent, char *why, size_t why_size)
-{
-	struct sockaddr_un address;
-	struct pollfd      wait;
-	char               buffer[4096];
-	size_t             length = strlen(line);
-	size_t             sent = 0;
-	size_t             have = 0;
-	int                fd;
-
-	*silent = 1;
-	why[0] = '\0';
-	reply[0] = '\0';
-	if (!socket_path[0] || strlen(socket_path) >= sizeof(address.sun_path)) {
-		(void)snprintf(why, why_size, "no fuzznetd socket path fits");
-		return 0;
-	}
-	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-	if (fd < 0) {
-		(void)snprintf(why, why_size, "no socket: %s", strerror(errno));
-		return 0;
-	}
-	memset(&address, 0, sizeof(address));
-	address.sun_family = AF_UNIX;
-	memcpy(address.sun_path, socket_path, strlen(socket_path) + 1u);
-	if (connect(fd, (const struct sockaddr *)&address, sizeof(address)) != 0 &&
-	    errno != EINPROGRESS) {
-		(void)snprintf(why, why_size, "fuzznetd is not at %s: %s", socket_path,
-		    strerror(errno));
-		(void)close(fd);
-		return 0;
-	}
-	while (sent < length) {
-		ssize_t n;
-
-		wait.fd = fd;
-		wait.events = POLLOUT;
-		if (poll(&wait, 1, SEEN_WAIT_MS) <= 0) {
-			(void)snprintf(why, why_size, "fuzznetd at %s did not take the request",
-			    socket_path);
-			(void)close(fd);
-			return 0;
-		}
-		n = send(fd, line + sent, length - sent, MSG_NOSIGNAL);
-		if (n < 0 && errno != EAGAIN && errno != EINTR) {
-			(void)snprintf(why, why_size, "fuzznetd at %s: %s", socket_path,
-			    strerror(errno));
-			(void)close(fd);
-			return 0;
-		}
-		if (n > 0) {
-			sent += (size_t)n;
-		}
-	}
-	if (!read_line(fd, buffer, sizeof(buffer), &have, reply, reply_size)) {
-		(void)snprintf(why, why_size, "fuzznetd at %s gave no answer", socket_path);
-		reply[0] = '\0';
-		(void)close(fd);
-		return 0;
-	}
-	(void)close(fd);
-	*silent = 0;
-	return 1;
-}
-
 /*
  * One line asked of whichever serves the store: in-process where this process
  * is its face (`ncfg_seen_in_process`), else over the socket. In-process, a
@@ -336,7 +171,8 @@ static int ask(const ncfg_seen_t *seen, const char *line, char *reply, size_t re
 	size_t length;
 
 	if (!seen->local) {
-		return ask_socket(seen->socket_path, line, reply, reply_size, silent, why, why_size);
+		return ncfg_fuzznet_ask(seen->socket_path, line, reply, reply_size, SEEN_WAIT_MS, silent,
+		    why, why_size);
 	}
 	length = strlen(line);
 	if (length >= sizeof(bare)) {
@@ -375,7 +211,7 @@ static int add_record(const ncfg_seen_t *seen, const char *key, const char *valu
 	int  wrote;
 
 	*silent = 1;
-	if (!escape_value(value, escaped, sizeof(escaped))) {
+	if (!ncfg_fuzznet_escape(value, escaped, sizeof(escaped))) {
 		*silent = 0;
 		(void)snprintf(why, why_size, "the value for %s is too long to write", key);
 		return 0;
@@ -466,7 +302,7 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 	}
 	/* Asked of the store each time where there is one: the face is whichever
 	 * process holds the claim now. */
-	if (!seen->local && seen->store[0] && !face_socket(seen->store, seen->socket_path,
+	if (!seen->local && seen->store[0] && !ncfg_fuzznet_face(seen->store, seen->socket_path,
 	        sizeof(seen->socket_path))) {
 		*stop = 1;
 		seen->silent_until = now + NCFG_SEEN_RETRY_SECONDS;
@@ -715,7 +551,7 @@ void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now)
 		int  silent = 0;
 		int  more = 0;
 
-		if (!seen->local && seen->store[0] && !face_socket(seen->store, seen->socket_path,
+		if (!seen->local && seen->store[0] && !ncfg_fuzznet_face(seen->store, seen->socket_path,
 		        sizeof(seen->socket_path))) {
 			listing_stopped(seen, now, "no process serves the fuzznet store");
 			return;

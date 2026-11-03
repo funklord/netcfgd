@@ -556,6 +556,27 @@ static int node_value(const char *text, const char *name, char *out, size_t out_
 	return 0;
 }
 
+int ncfg_cli_node_store(const char *run_dir, char *out, size_t out_size)
+{
+	char  path[1100];
+	char  text[2400];
+	FILE *file;
+	size_t got;
+
+	if (!run_dir || !out || out_size == 0u) {
+		return 0;
+	}
+	(void)snprintf(path, sizeof(path), "%s/node", run_dir);
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	got = fread(text, 1u, sizeof(text) - 1u, file);
+	(void)fclose(file);
+	text[got] = '\0';
+	return node_value(text, "store", out, out_size);
+}
+
 void ncfg_cli_print_node(const char *run_dir)
 {
 	char  path[1100];

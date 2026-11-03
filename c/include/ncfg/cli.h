@@ -359,6 +359,8 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed);
  * node is not network state, and the observed model is frozen (0020).
  */
 void ncfg_cli_print_node(const char *run_dir);
+/* The store `<run>/node` names, into `out`: 0 where there is no node. */
+int ncfg_cli_node_store(const char *run_dir, char *out, size_t out_size);
 
 /*
  * The ports UPnP and NAT-PMP clients have mapped (0310), as the observation

@@ -106,6 +106,14 @@ check $? "an edit to the configuration is compiled"
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
 check $? "the station that fuzznetd recorded is read back in-process, in ncfg status"
 
+# The same over fuzznet alone (10.689): with the control socket out of the
+# way, only `call status` can bring the daemon's stations to `ncfg status`.
+# Renamed rather than removed, so the daemon's listener is untouched.
+mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
+timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
+check $? "  and over fuzznet's call status, with the control socket out of the way"
+mv "$R/run/hidden.sock" "$R/run/netcfgd.sock"
+
 # 0309's first verb (10.682): the observation written where the caller says,
 # judged by netcfgd's own tiers on the caller fuzznet read (sec 849).
 mkdir -m 700 "$R/out"
@@ -119,8 +127,8 @@ echo "$said" | grep -q "^error .*not the caller's" && [ ! -e "/tmp/netcfgd-node-
 check $? "  and not into a directory that is not the caller's"
 
 # The same status as a fuzznet procedure (its sec 853, 10.688): `call status
-# FROM` answers `ok` and the page escaped, `ok TOTAL FROM COUNT` and the
-# bytes. This caller is the node's own user, so fuzznet lets it call.
+# FROM` answers `ok` and the page escaped, `ok TOTAL FROM COUNT DIGEST`
+# and the bytes. This caller is the node's own user, so fuzznet lets it call.
 said=$(ask "$R/fz.sock" "call status 0")
 echo "$said" > "$R/out/call.txt"
 echo "$said" | grep -q '^ok ok%20[0-9][0-9]*%200%20[0-9]'

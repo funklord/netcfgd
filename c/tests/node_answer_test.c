@@ -15,6 +15,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/daemon.h"
 #include "ncfg/proto.h"
+#include "ncfg/status_page.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,8 @@ static size_t ask(const ncfg_main_policy_t *policy, const ncfg_observed_t *obser
 
 /* Every page of the status at a reply of `cap`, joined, into `out`; the
  * number of pages, or 0 where an answer was not a page. */
+static const ncfg_buf_t *whole_status; /* what every page's digest must name */
+
 static size_t pages(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
     size_t cap, ncfg_buf_t *out)
 {
@@ -55,24 +58,22 @@ static size_t pages(const ncfg_main_policy_t *policy, const ncfg_observed_t *obs
 		return 0;
 	}
 	do {
-		char          line[64];
-		size_t        n;
-		unsigned long t;
-		unsigned long f;
-		unsigned long c;
-		int           used = 0;
+		char               line[64];
+		size_t             n;
+		ncfg_status_page_t page;
 
 		(void)snprintf(line, sizeof(line), "get status %zu", from);
 		n = ask(policy, observed, 0, line, reply, cap);
-		if (n == 0 || sscanf(reply, "ok %lu %lu %lu\n%n", &t, &f, &c, &used) != 3 ||
-		    f != from || (size_t)used + c != n || ++count > 100000u) {
+		if (n == 0 || !ncfg_status_page_read(reply, n, &page) || page.from != from ||
+		    page.digest != ncfg_status_page_digest(whole_status->data, whole_status->length) ||
+		    ++count > 100000u) {
 			free(reply);
 			return 0;
 		}
-		ncfg_buf_add(out, reply + used, c);
-		total = t;
-		from += c;
-		if (c == 0 && from < total) {
+		ncfg_buf_add(out, page.bytes, page.count);
+		total = page.total;
+		from += page.count;
+		if (page.count == 0 && from < total) {
 			free(reply);
 			return 0; /* no progress: a page too small to carry anything */
 		}
@@ -91,12 +92,14 @@ int main(void)
 	char               err[NCFG_ERROR_MAX];
 	size_t             n;
 	size_t             count;
+	ncfg_status_page_t past;
 
 	memset(&policy, 0, sizeof(policy));
 	memset(&observed, 0, sizeof(observed));
 	ncfg_buf_init(&whole, NCFG_PROTO_MAX_LINE);
 	check(ncfg_daemon_status_encode(&observed, &whole, err, sizeof(err)) && whole.length > 20u,
 	    "the control socket's status, to compare against");
+	whole_status = &whole;
 
 	n = ask(&policy, &observed, 0, "get status", reply, sizeof(reply));
 	check(n > 0 && strncmp(reply, "denied ", 7) == 0 && strstr(reply, "`observe`") != NULL,
@@ -136,13 +139,10 @@ int main(void)
 
 		ncfg_buf_init(&joined, NCFG_PROTO_MAX_LINE);
 		while (fine && from < whole.length) {
-			char          offset[32];
-			unsigned long t;
-			unsigned long f;
-			unsigned long c;
-			int           used = 0;
-			size_t        escaped = 0;
-			size_t        at;
+			char               offset[32];
+			ncfg_status_page_t page;
+			size_t             escaped = 0;
+			size_t             at;
 
 			(void)snprintf(offset, sizeof(offset), "%zu", from);
 			n = ncfg_main_node_status(&policy, &observed, NULL, offset, strlen(offset), reply,
@@ -155,11 +155,10 @@ int main(void)
 			}
 			worst = escaped > worst ? escaped : worst;
 			fine = n > 0 && escaped <= 120u && ++count < 100000u &&
-			    sscanf(reply, "ok %lu %lu %lu\n%n", &t, &f, &c, &used) == 3 && f == from &&
-			    c > 0 && (size_t)used + c == n;
+			    ncfg_status_page_read(reply, n, &page) && page.from == from && page.count > 0;
 			if (fine) {
-				ncfg_buf_add(&joined, reply + used, c);
-				from += c;
+				ncfg_buf_add(&joined, page.bytes, page.count);
+				from += page.count;
 			}
 		}
 		check(fine && joined.length == whole.length &&
@@ -170,7 +169,8 @@ int main(void)
 	}
 
 	n = ask(&policy, &observed, 0, "get status 99999999", reply, sizeof(reply));
-	check(n > 0 && strstr(reply, " 0\n") != NULL,
+	check(n > 0 && ncfg_status_page_read(reply, n, &past) && past.count == 0u &&
+	        past.from == past.total,
 	    "an offset past the end is an empty page, not an error");
 	n = ask(&policy, &observed, 0, "get status -1", reply, sizeof(reply));
 	check(n > 0 && strncmp(reply, "malformed ", 10) == 0, "a signed offset is malformed");

@@ -13,10 +13,13 @@
  * THE VOCABULARY IS THE LOCAL ONE
  *   A request is a line, as on the local socket, so a verb means one thing
  *   wherever it is asked. `get status [FROM]` answers
- *   `ok TOTAL FROM COUNT`, a newline, and COUNT bytes of the observation's
- *   JSON from offset FROM: paged, because a remote reply has a cap this side
- *   does not choose, and the status of a busy router is tens of kilobytes. A
- *   caller asks again from FROM + COUNT until it has TOTAL.
+ *   `ok TOTAL FROM COUNT DIGEST`, a newline, and COUNT bytes of the
+ *   observation's JSON from offset FROM: paged, because a remote reply has a
+ *   cap this side does not choose, and the status of a busy router is tens of
+ *   kilobytes. A caller asks again from FROM + COUNT until it has TOTAL.
+ *
+ *   DIGEST is of the whole status the page was cut from, so pages of two
+ *   statuses are never joined: `status_page.h` says why, and joins them.
  *
  * Kept apart from `daemon_main.c` so a test can ask it without a node.
  */
@@ -27,7 +30,9 @@
 #include "ncfg/daemon.h"
 #include "ncfg/observed.h"
 #include "ncfg/proto.h"
+#include "ncfg/status_page.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +96,7 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
 	unsigned long        from = 0;
 	size_t               header;
 	size_t               count;
+	uint64_t             digest;
 	int                  wrote;
 	int                  allowed;
 
@@ -133,7 +139,9 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
 		from = status.length;
 	}
 	/* The header at its longest, so the page is sized before it is written. */
-	wrote = snprintf(reply, cap, "ok %zu %lu %zu\n", status.length, from, status.length);
+	digest = ncfg_status_page_digest(status.data, status.length);
+	wrote = snprintf(reply, cap, "ok %zu %lu %zu %016llx\n", status.length, from, status.length,
+	    (unsigned long long)digest);
 	if (wrote <= 0 || (size_t)wrote >= cap ||
 	    (escaped_cap && escaped_length(reply, (size_t)wrote) >= escaped_cap)) {
 		ncfg_buf_free(&status);
@@ -158,7 +166,8 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
 		}
 		count = take;
 	}
-	wrote = snprintf(reply, cap, "ok %zu %lu %zu\n", status.length, from, count);
+	wrote = snprintf(reply, cap, "ok %zu %lu %zu %016llx\n", status.length, from, count,
+	    (unsigned long long)digest);
 	header = (size_t)wrote;
 	memcpy(reply + header, status.data + from, count);
 	ncfg_buf_free(&status);

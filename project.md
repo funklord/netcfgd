@@ -12671,6 +12671,51 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.689 `ncfg status` asks the daemon over fuzznet, and pages carry a digest
+
+10.688's client half. The holder's rule from 0311 is that everything internal
+goes over fuzznet's protocols. So `ncfg status` takes what only the daemon
+knows, the regulatory-domain setter and the stations fuzznet recorded, from
+the `status` procedure first. It falls back to the control socket only where
+fuzznet does not answer this caller.
+
+**Where the socket is, without configuration.** `ncfg` tries the store's
+`face` file first, with the store taken from `<run>/node`, because the face
+names whatever socket fuzznet was given. Otherwise it uses
+`<run>/fuzznet.sock`, the daemon's default since 10.683. That is also the
+only one a user who cannot read root's store can reach. `node_serve.sh`
+renames the control socket out of the way, and `ncfg status --json` still
+carries the station only the daemon knows. With the fuzznet path disabled,
+that check fails.
+
+**Found while writing the client: joined pages could mix two statuses.**
+Each page is cut from the status as it is when that page is asked, and a
+router's status moves between asks. Joined pages of two statuses usually fail
+to parse. But if the two are the same length, they can parse as a status that
+never existed. So each page now ends its header with a digest of the whole
+status it was cut from (FNV-1a, 64 bits, sixteen hex digits):
+`ok TOTAL FROM COUNT DIGEST`. The remote type 129 answer has the same header,
+since it is the same function.
+
+- `ncfg_status_pages_join` (`status_page.h`) starts again when a page names
+  another digest, at most four times, then checks the joined bytes against
+  the digest. A status that moves faster than it can be read is refused.
+- `status_page_test` feeds it a status that changes mid-way at the same
+  length, one that never holds still, pages whose digest lies, and pages that
+  make no progress. With the per-page comparison removed, two of those fail.
+- The page reader is strict, because a page may be another host's bytes:
+  digits where numbers are, lower-case hex, COUNT exactly the bytes after it.
+
+**One copy of the fuzznet conversation.** The bounded one-line ask, the `%XX`
+escape, and the `face` lookup moved out of `seen.c` into `fuzznet_line.c`, so
+the recorder and `ncfg` cannot drift apart in how long they wait.
+`fuzznet_line_test` checks them against a scripted socket: a reply in two
+pieces, a socket that never answers given up on within the wait, and an
+absent one reported as silence.
+
+**Not done yet:** the GUI still reads the control socket. Its client is the
+next consumer of `call status`.
+
 ## 10.688 `status` is a fuzznet procedure: `call status [FROM]`
 
 fuzznet's answer to 10.685's ask (its inbox message 20261103T1938Z, its secs
