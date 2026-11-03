@@ -12902,12 +12902,29 @@ socket, a netcfgd on the same store given no `--socket` cannot listen there,
 `fzn_daemon_main` returns 1, and netcfgd runs its own loop -- the network
 configured and `ncfg` answered, but outside fuzznet's loop and never taking
 the face. The face's socket is untouched. Distinct sockets work. That is the
-router case, both under procd and neither told a socket, so until fuzznet
-answers, `--fuzznet-serve` beside a fuzznetd wants `--fuzznet-arg
---socket=PATH`.
+router case, both under procd and neither told a socket. **Answered within
+the hour** (fuzznet `16830dc`, sec 841; netcfgd's inbox `20261103T1441Z`): a
+daemon with an extension whose path is the face's now follows with no socket
+of its own, clients at the default reach the face, and it binds the path when
+it takes the face. The holder had said to pass `--socket` in the init scripts
+until fuzznet answered; it had, so they pass none. `node_serve.sh`'s follower
+phase now runs both on one default socket.
 
-**Next:** serving by default, once the size is decided (ask 8, then the
-holder's), and the socket a second process on one store takes (ask 7).
+**Ask 9 answered in the same message (fuzznet `49c8f7b`, sec 843): no new
+framing.** The local protocol stays one line per request; a long listing
+pages, as `list record` does; a document is written to a path the client
+names and answered `ok` with its length -- so netcfgd's status would be
+`get status PATH`; and a stream is events: `fzn_daemon_publish(subject,
+name)`, from `tick`, reaches every `get events` subscriber, which is what
+`monitor` becomes. That is 0309's carrying, settled by fuzznet's framing as
+0309 said it would be; the vocabulary that rides on it is netcfgd's.
+
+**Ask 8's memory half answered too (fuzznet `e49d6fb`, sec 842)** -- 10.679;
+the program's size and the consumer services as build options are recorded
+there and not started.
+
+**Next:** serving by default, once the size is decided (the holder's, after
+fuzznet's request 8), and 0309 on the framing above.
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 
