@@ -12684,6 +12684,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.706 The rss band re-derived again: four runs in ten failed it unchanged
+
+The `rss` gate failed this session's last full check at 3352 KB against 3328,
+and on its own one run in three. The day's earlier full checks had read 3168
+to 3344. **Ten back-to-back `make rss` runs** at load 4 read 3124 3124 3184
+3204 3248 3248 3360 3360 3376 3380, so the band no longer covered the noise:
+the failure at 252118af's check was the same gate, not a change.
+
+- **What netcfgd allocates did rise**, and that is the part a ratchet is
+  for. `RssAnon` read 396 to 400 KB in every run, against 324..328 when the
+  band was last derived (2026-10-29). It was 400 already at this session's
+  first check, so the rise is in the commits between, fuzznet's loop served
+  by default among them (0311). It was not taken commit by commit, so no
+  change is named as its cause.
+- **The spread is not the first observation pass**, which was the guess.
+  Sampled at 2 s and again just after the first observation, the two modes
+  are already there at 2 s, and the pass adds 40..100 KB to each. What
+  splits them happens earlier, and outside what netcfgd allocates.
+  - A first attempt at that measurement read `timeout`'s own memory, since
+    `$!` named the wrapper. It is said here because the numbers it gave,
+    about 2 MB, looked like a finding.
+- So, as 2026-10-29 did: the observed peak plus a band wider than the spread,
+  3380 + 264 = **3644**, and still a ratchet. Three runs afterwards read
+  3208 to 3360.
+
 ## 10.705 The events reader is fuzzed, and reads numbers as digits only
 
 `ncfg_fuzznet_events_at` read another host's events inline, after its socket

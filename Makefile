@@ -2311,7 +2311,21 @@ footprint:
 # text (802.11k/v, the 802.11n/ac widths, steering; `size` text 1088472) and
 # nothing resident. So the limit is the observed peak plus a band wider than
 # the observed spread (3064 + 264, the spread being 252), and still a ratchet.
-RSS_LIMIT_KB ?= 3328
+#
+# **Re-derived 2026-11-04, for the same reason** (project.md 10.706). Ten
+# back-to-back `make rss` runs at load 4 read 3124 3124 3184 3204 3248 3248
+# 3360 3360 3376 3380, and the day's `make check` runs 3168 to 3352, so four
+# runs in ten failed a gate nothing had changed under. `RssAnon` read 396 to
+# 400 KB in every one, against 324..328 on 2026-10-29: what netcfgd allocates
+# rose by about 70 KB across the commits between, fuzznet's loop served by
+# default among them (0311) -- measured at this session's first check already,
+# not taken commit by commit, so no single change is named for it. **The
+# spread is not the first pass**, which was the guess: sampled at 2 s and again
+# after the first observation, the two modes are there at 2 s and the pass
+# adds 40..100 KB to each, so what splits them happens earlier and is not in
+# what netcfgd allocates. So, as before, the observed peak plus a band wider
+# than the spread: 3380 + 264, the spread being 256.
+RSS_LIMIT_KB ?= 3644
 
 # **The control directory is redirected too, and was not (0224).**
 # `--config-dir` and `--run-dir` send this daemon's own state into a scratch
