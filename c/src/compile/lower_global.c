@@ -484,6 +484,69 @@ void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 
 /* The four sub-blocks of `global`, each of which holds assignments and
  * nothing else. */
+/*
+ * `upnp { lan = [...]; uplink = "..." }` (0310): which interfaces miniupnpd
+ * listens on, and the one it maps ports on. Both are needed, so a block with
+ * either missing is refused here; that the uplink translates is asked once
+ * every interface is lowered (`check_upnp` in lower.c).
+ */
+static void lower_upnp(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *inner)
+{
+	ncfg_globals_t *globals = &ctx->document->globals;
+	ncfg_upnp_t    *upnp;
+	size_t          i;
+
+	if (globals->upnp) {
+		ncfg_diag(ctx, inner->span, "`upnp` is written twice in `global`; write it once");
+		return;
+	}
+	upnp = calloc(1u, sizeof(*upnp));
+	if (!upnp) {
+		ncfg_lower_oom(ctx);
+		return;
+	}
+	for (i = 0; i < inner->items.count; i++) {
+		const ncfg_ast_item_t       *item = inner->items.at[i];
+		const ncfg_ast_assignment_t *assignment;
+
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			ncfg_diag(ctx, inner->span, "`upnp` holds `lan` and `uplink`, and no blocks");
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "lan") == 0) {
+			ncfg_words_t words;
+			size_t       at;
+
+			if (ncfg_as_words(ctx, assignment->value, &words)) {
+				for (at = 0; at < words.count; at++) {
+					if (ncfg_name_ok(ctx, words.at[at].text, words.at[at].span,
+					    ncfg_link_name_help)) {
+						(void)ncfg_push_string(ctx, &upnp->lan, &upnp->lan_count,
+						    words.at[at].text);
+					}
+				}
+			}
+			ncfg_words_free(&words);
+		} else if (strcmp(assignment->key, "uplink") == 0) {
+			free(upnp->uplink);
+			upnp->uplink = ncfg_as_interface_name(ctx, assignment->value);
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "`%s` is not a upnp key: `lan` names the interfaces clients ask on, "
+			    "`uplink` the one ports are mapped on", assignment->key);
+		}
+	}
+	if (upnp->lan_count == 0u || !upnp->uplink) {
+		ncfg_diag(ctx, inner->span,
+		    "`upnp` needs `lan = [\"...\"]`, the interfaces clients may ask on, and "
+		    "`uplink = \"...\"`, the one their ports are opened on");
+	}
+	globals->upnp = upnp;
+	ctx->upnp_span = inner->span;
+	ctx->upnp_source = ctx->source;
+}
+
 static void lower_global_sub_block(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *inner)
 {
 	ncfg_globals_t *globals = &ctx->document->globals;
@@ -527,6 +590,8 @@ void ncfg_lower_global_block(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *b
 			if (strcmp(head, "dns") == 0 || strcmp(head, "control") == 0 ||
 			    strcmp(head, "connectivity") == 0 || strcmp(head, "remote") == 0) {
 				lower_global_sub_block(ctx, &item->as.block);
+			} else if (strcmp(head, "upnp") == 0) {
+				lower_upnp(ctx, &item->as.block);
 			} else {
 				ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `global`", head);
 			}

@@ -2649,6 +2649,14 @@ static void hostname_policy_release(void *field)
 static const ncfg_custom_t hostname_policy_custom = { hostname_policy_read,
 	hostname_policy_write, NULL, hostname_policy_release, NULL };
 
+static const ncfg_field_t upnp_fields[] = {
+	{ .name = "lan", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_upnp_t, lan), .count_offset = offsetof(ncfg_upnp_t, lan_count) },
+	{ .name = "uplink", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_upnp_t, uplink) }
+};
+static const ncfg_type_t upnp_type = TYPE("upnp", upnp_fields);
+
 static const ncfg_field_t globals_fields[] = {
 	{ .name = "dns", .kind = NCFG_F_STRUCT, .type = &dns_policy_type,
 	    .offset = offsetof(ncfg_globals_t, dns) },
@@ -2689,7 +2697,11 @@ static const ncfg_field_t globals_fields[] = {
 	 * compares and which cost four fixtures before this flag was found. */
 	{ .name = "locked", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_globals_t, locked),
-	    .count_offset = offsetof(ncfg_globals_t, locked_count) }
+	    .count_offset = offsetof(ncfg_globals_t, locked_count) },
+	/* Absent when off (0310), which is what keeps every document before it
+	 * byte for byte what it was, and the Rust half's renderings with it. */
+	{ .name = "upnp", .kind = NCFG_F_OPT_STRUCT, .type = &upnp_type,
+	    .element_size = sizeof(ncfg_upnp_t), .offset = offsetof(ncfg_globals_t, upnp) }
 };
 static const ncfg_type_t globals_type = TYPE("globals block", globals_fields);
 

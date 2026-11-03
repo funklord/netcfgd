@@ -89,6 +89,19 @@
 #define NCFG_NFT_CHAIN_PREROUTING "prerouting"
 
 /*
+ * The table miniupnpd adds UPnP and NAT-PMP mappings to (0310): netcfgd's by
+ * name and by lifetime, made when the backend starts and deleted when it
+ * stops, and NOT replaced on every apply as the table above is -- that would
+ * drop every mapping a client holds. Three hooked chains that accept by
+ * policy and hold nothing of netcfgd's; miniupnpd is told their names and
+ * adds its rules to them directly, which was measured to work.
+ */
+#define NCFG_NFT_UPNP_TABLE             "netcfgd_upnp"
+#define NCFG_NFT_UPNP_CHAIN_FORWARD     "forward"
+#define NCFG_NFT_UPNP_CHAIN_PREROUTING  "prerouting"
+#define NCFG_NFT_UPNP_CHAIN_POSTROUTING "postrouting"
+
+/*
  * What a rule's comment can hold: nft refuses a comment over 128 characters,
  * measured (0295), so the name and the digest share that rather than the
  * kernel's 256.
@@ -259,6 +272,19 @@ int ncfg_nft_gen_read(const void *payload, size_t length, uint32_t *out, char *e
  * Nothing is appended to `out` unless the finished transaction passes
  * `ncfg_nft_writes_only_our_table`.
  */
+/*
+ * The UPnP table (0310): deleted where `table_exists`, then -- where
+ * `wanted` -- made again with its three empty accepting chains. Audited on
+ * its own terms: the one table, the three chains, and no rule, since every
+ * rule in it is miniupnpd's. Marked empty where there is nothing to delete
+ * and nothing wanted, which asks for no acknowledgement and must not be sent.
+ */
+int ncfg_nft_build_upnp_table(ncfg_buf_t *out, uint32_t first_seq, int table_exists, int wanted,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size);
+/* Whether a transaction touches only the UPnP table, and holds no rule. */
+int ncfg_nft_writes_only_upnp_table(const void *bytes, size_t length, char *err,
+    size_t err_size);
+
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size);

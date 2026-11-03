@@ -1076,4 +1076,7 @@ netcfgd
 # archive, so only what the node calls came in; built without fuzznet's
 # default `-g`, which had added 288 KB of debug sections on the first try.
 # Measured again with `ncfg status`'s node section in: 1,491,568.
-total 1491568
+# And UPnP and NAT-PMP (decision 0310): the language, miniupnpd as a
+# backend, the table it maps into and its own audit, `ncfg status`'s list of
+# mappings, and `translated` on a firewall rule, +17,376.
+total 1508944

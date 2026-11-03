@@ -2354,6 +2354,21 @@ typedef struct {
 	ncfg_principal_t agent;
 } ncfg_remote_policy_t;
 
+/*
+ * UPnP IGD and NAT-PMP/PCP on a router (0310): miniupnpd, started by netcfgd,
+ * listening on `lan` and mapping ports on `uplink`.
+ *
+ * **Absent is off, and the pointer is what says so**, as the firewall's is: a
+ * document that never mentions it is the document it was. `secure_mode` is not
+ * a field because it is always on -- a client maps ports only to itself -- and
+ * NAT-PMP is not one either: the holder asked for both, on one switch.
+ */
+typedef struct {
+	char  **lan;
+	size_t  lan_count;
+	char   *uplink;
+} ncfg_upnp_t;
+
 /* What the document says should count as connected. */
 typedef enum {
 	NCFG_REQUIRES_ROUTE, /* a default route; what a machine with no probe can know */
@@ -2471,6 +2486,8 @@ typedef struct {
 	char                     **locked;
 	size_t                     locked_count;
 	ncfg_connectivity_policy_t connectivity;
+	/* UPnP and NAT-PMP, or NULL for off (0310). */
+	ncfg_upnp_t               *upnp;
 } ncfg_globals_t;
 
 /* ------------------------------------------------------------------------ *

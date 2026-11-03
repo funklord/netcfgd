@@ -408,6 +408,30 @@
 #	nat    = true
 #}
 
+# UPNP AND NAT-PMP, so a game console or a phone on the LAN can open the port
+# it needs on this router by asking, rather than somebody writing a port
+# forward for it (decision 0310). Two keys: the interfaces clients ask on, and
+# the uplink -- the one with `nat = true` -- their ports are opened on.
+#
+#   - Any device on those networks may open a port without asking anybody,
+#     and a compromised one can expose itself to the internet. `ncfg plan`
+#     says so every time UPnP is on, and `ncfg status` lists every port that
+#     is open and which host asked for it.
+#   - A client can only open ports to itself, and none below 1024.
+#   - A firewall whose forward chain drops by default needs one rule to let
+#     the mapped traffic through, `translated = true` (see the firewall
+#     below); the plan names it when it is missing.
+#   - It needs miniupnpd with its nftables backend (Debian: miniupnpd and
+#     miniupnpd-nftables). netcfgd starts and stops it, and the ports it
+#     mapped go with it.
+
+#global {
+#	upnp {
+#		lan    = ["lan0"]
+#		uplink = "eth0"
+#	}
+#}
+
 # A FIREWALL for this host (decision 0294). Three chains -- `input`, `forward`
 # and `output` -- in netcfgd's own nftables table, so nothing anybody else
 # writes is touched. Each chain has a `policy` (`accept` or `drop`) and named

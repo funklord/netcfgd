@@ -361,6 +361,14 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed);
 void ncfg_cli_print_node(const char *run_dir);
 
 /*
+ * The ports UPnP and NAT-PMP clients have mapped (0310), from the lease file
+ * miniupnpd keeps under `<run_dir>/upnp/`, or nothing where there is none.
+ * Shown because these are openings in the firewall that no document wrote,
+ * and an operator should be able to see each one and who asked for it.
+ */
+void ncfg_cli_print_upnp(const char *run_dir);
+
+/*
  * Put the daemon's answer to who set the regulatory domain on an observation
  * this program took itself.
  *

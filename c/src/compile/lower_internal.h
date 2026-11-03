@@ -88,6 +88,10 @@ typedef struct {
 	ncfg_provenance_t      *provenance;
 	/* Set by the first allocation failure and never cleared. */
 	int                     failed;
+	/* Where `global { upnp { } }` was written, for the refusal that needs
+	 * every interface lowered first (0310). */
+	ncfg_span_t             upnp_span;
+	const char             *upnp_source;
 } ncfg_lower_ctx_t;
 
 /* Note that something could not be allocated. Sticky. */

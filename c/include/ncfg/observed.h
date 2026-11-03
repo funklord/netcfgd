@@ -940,7 +940,10 @@ typedef enum {
 	NCFG_BACKEND_LINK_LOCAL,
 	/* A DHCPv4 server, dnsmasq with its DNS side off (decision 0297).
 	 * Appended, for the link-local client's reason. */
-	NCFG_BACKEND_DHCP_SERVER
+	NCFG_BACKEND_DHCP_SERVER,
+	/* miniupnpd, for UPnP IGD and NAT-PMP (0310), keyed by its uplink.
+	 * Appended for the same reason. */
+	NCFG_BACKEND_UPNP
 } ncfg_backend_kind_t;
 
 const char *ncfg_backend_kind_name(int kind);

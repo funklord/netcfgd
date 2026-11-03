@@ -2605,7 +2605,8 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
       hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
-      hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac
+      hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac \
+      hull-upnp
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2995,6 +2996,24 @@ hull-roam-sae:
 	sed 's/^/roam-sae: /' tests/hull/roam-sae/verdict/roam-sae; \
 	grep -q '^VERDICT ok' tests/hull/roam-sae/verdict/roam-sae
 
+# UPnP and NAT-PMP (0310, 10.671): netcfgd's router with miniupnpd, a LAN host
+# mapping its own port with upnpc and a host on the uplink side reaching it
+# through the mapping, a mapping to another host refused, and the table and
+# the daemon gone once `upnp` is removed. Its own image, which adds miniupnpd.
+hull-upnp:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/upnp)
+	@$(call hull_image,upnp)
+	@rm -f tests/hull/upnp/verdict/upnp
+	@mkdir -p tests/hull/upnp/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/upnp/hull.conf || true
+	@if [ ! -f tests/hull/upnp/verdict/upnp ]; then \
+		echo "upnp: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/upnp: /' tests/hull/upnp/verdict/upnp; \
+	grep -q '^VERDICT ok' tests/hull/upnp/verdict/upnp
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -3132,7 +3151,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

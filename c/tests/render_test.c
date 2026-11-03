@@ -1094,6 +1094,10 @@ static void the_hostname_policy_round_trips(void)
 	    "and a stated hostname survives one too");
 	/* The machine's country (0296), which a saved profile must not drop. */
 	round_trips("global { regdom = \"DE\" }\n", "a machine's regdom survives a round trip");
+	round_trips("interface lan0 { config = \"192.168.7.1/24\" }\n"
+	    "interface wan0 {\n\tconfig = \"81.0.0.1/24\"\n\tnat = true\n}\n"
+	    "global {\n\tupnp {\n\t\tlan = [\"lan0\"]\n\t\tuplink = \"wan0\"\n\t}\n}\n",
+	    "UPnP survives a round trip (0310)");
 	stated = rendering_of("global { hostname = \"router\" }\n");
 	check(stated && strstr(stated, "hostname = \"router\"") != NULL,
 	    "written as itself, not as the policy");

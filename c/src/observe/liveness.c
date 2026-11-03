@@ -72,6 +72,7 @@
 #include "ncfg/hostapd.h"
 #include "ncfg/openvpn.h"
 #include "ncfg/dhcp_server.h"
+#include "ncfg/upnp.h"
 #include "ncfg/ra.h"
 #include "ncfg/supplicant.h"
 
@@ -135,6 +136,9 @@ static int backend_pid_file(const ncfg_observed_backend_t *backend, const char *
 		named = ncfg_dhcp_server_pid_path(run_dir, backend->interface, path, sizeof(path),
 		    NULL, 0);
 		break;
+	case NCFG_BACKEND_UPNP:
+		named = ncfg_upnp_pid_path(run_dir, path, sizeof(path), NULL, 0);
+		break;
 	case NCFG_BACKEND_OPENVPN:
 		named = ncfg_openvpn_pid_path(run_dir, backend->interface, path, sizeof(path),
 		    NULL, 0);
@@ -174,6 +178,7 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 	case NCFG_BACKEND_ACCESS_POINT:
 	case NCFG_BACKEND_ROUTER_ADVERT:
 	case NCFG_BACKEND_DHCP_SERVER:
+	case NCFG_BACKEND_UPNP:
 	case NCFG_BACKEND_OPENVPN:
 		/* The file's absence is the test, not the pid's -- see
 		 * `backend_pid_file`, and the DHCP arm below for the same rule
@@ -193,6 +198,9 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 		}
 		if (backend->kind == (int)NCFG_BACKEND_DHCP_SERVER) {
 			return ncfg_dhcp_server_running_pid(run_dir, backend->interface);
+		}
+		if (backend->kind == (int)NCFG_BACKEND_UPNP) {
+			return ncfg_upnp_running_pid(run_dir);
 		}
 		return ncfg_openvpn_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_DHCP4:

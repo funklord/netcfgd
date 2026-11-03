@@ -351,6 +351,10 @@ void ncfg_plan_offloads(ncfg_builder_t *builder);
  */
 void ncfg_plan_ipv6_token(ncfg_builder_t *builder);
 void ncfg_plan_nat(ncfg_builder_t *builder);
+/* UPnP and NAT-PMP (0310): the holder's warning every time it is on, the
+ * firewall's, and miniupnpd started after every action on its uplink and
+ * LAN interfaces, which it needs addressed to listen on. */
+void ncfg_plan_upnp(ncfg_builder_t *builder);
 /*
  * The services netcfgd runs, against an `input` chain that drops by default
  * (project.md 10.620): a warning for each the operator's rules would starve.

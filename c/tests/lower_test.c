@@ -727,6 +727,23 @@ static void global_cases(void)
 	 * `EINVAL` on a file write, which names neither the key nor the line. */
 	refuses("global { hostname = \"-nope\" }\n", "is not a hostname",
 	    "a leading hyphen is not a hostname");
+	/* UPnP (0310): an uplink that translates, LANs it has, and never itself. */
+	refuses("interface lan0 { config = \"192.168.7.1/24\" }\n"
+	    "interface wan0 { config = \"81.0.0.1/24\" }\n"
+	    "global { upnp { lan = [\"lan0\"]; uplink = \"wan0\" } }\n", "does not translate",
+	    "UPnP on an uplink without NAT is refused, naming the key to add");
+	refuses("interface lan0 { config = \"192.168.7.1/24\" }\n"
+	    "interface wan0 {\n\tconfig = \"81.0.0.1/24\"\n\tnat = true\n}\n"
+	    "global { upnp { lan = [\"lan0\", \"wan0\"]; uplink = \"wan0\" } }\n",
+	    "anybody on the internet", "  and listening on the uplink itself is refused");
+	refuses("interface lan0 { config = \"192.168.7.1/24\" }\n"
+	    "interface wan0 {\n\tconfig = \"81.0.0.1/24\"\n\tnat = true\n}\n"
+	    "global { upnp { lan = [\"lan9\"]; uplink = \"wan0\" } }\n",
+	    "has no `interface` block", "  and so is a LAN interface the document does not have");
+	refuses("interface lan0 { config = \"192.168.7.1/24\" }\n"
+	    "interface wan0 {\n\tconfig = \"81.0.0.1/24\"\n\tnat = true\n}\n"
+	    "global { upnp { uplink = \"wan0\" } }\n", "needs `lan",
+	    "  and a block with no LAN interfaces");
 	refuses("global { hostname = \"a..b\" }\n", "is not a hostname",
 	    "an empty label is not a hostname");
 
@@ -2851,8 +2868,10 @@ static void interface_cases(void)
  *     declares is refused on purpose (10.591).
  *   - the `interface "br0"` applying a block list names it, for the same
  *     reason (0305).
+ *   - the `global` turning UPnP on names its LAN and its uplink, and an
+ *     uplink with no `interface` block is refused on purpose (0310).
  *
- * All five are correct as documentation and meaningless in isolation. A gate
+ * All six are correct as documentation and meaningless in isolation. A gate
  * that silently tolerated "anything that does not compile" would tolerate the
  * next real error too. `tool/example_gate.py` keeps the same list.
  */
@@ -2864,6 +2883,7 @@ static const char *const expected_incomplete[] = {
 	/* Parenthesised, which is how clang is told a joined literal is meant. */
 	("interface \"br0\" {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
 	 "\t\tdns_forward = true\n"),
+	"global {\n\tupnp {",
 };
 
 /* Every top-level block head this build accepts. The example calls itself

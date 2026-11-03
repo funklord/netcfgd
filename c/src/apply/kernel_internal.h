@@ -559,6 +559,12 @@ int ncfg_kernel_wds_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
     size_t err_size);
 int ncfg_kernel_offloads_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
+/*
+ * The UPnP table (0310): made empty where `wanted`, deleted otherwise, and in
+ * both cases deleted first if it is there, so a start never inherits a
+ * mapping a stopped miniupnpd left behind. Its own socket, as the NAT op's.
+ */
+int ncfg_kernel_upnp_table(int wanted, char *err, size_t err_size);
 int ncfg_kernel_nat_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
 

@@ -287,8 +287,10 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, const ncfg_netlin
 			skipped++;
 			continue;
 		}
+		/* Nor the UPnP table, whose translations netcfgd arranged (0310). */
 		if (!ncfg_nft_chain_is_source_nat(&chain) ||
-		    strcmp(chain.table, NCFG_NFT_TABLE) == 0) {
+		    strcmp(chain.table, NCFG_NFT_TABLE) == 0 ||
+		    strcmp(chain.table, NCFG_NFT_UPNP_TABLE) == 0) {
 			continue;
 		}
 		if (count >= ceiling_of(kernel)) {
@@ -399,6 +401,18 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 
 		if (!ncfg_nft_chain_read(reply->items[at].bytes, reply->items[at].length, &chain, NULL,
 		        0) || strcmp(chain.kind, "filter") != 0 || !chain.has_hook) {
+			continue;
+		}
+		/*
+		 * **The UPnP table is skipped outright** (0310): netcfgd's, accepting
+		 * by policy, so no neighbour to name -- and NOT netcfgd's firewall
+		 * either, though its forward chain has the firewall's name. The first
+		 * version only kept it out of the neighbours, and it fell through to
+		 * here: its `forward` was read as the firewall's policy, `drop` came
+		 * back as `accept`, and every plan replaced a firewall that had not
+		 * changed. The UPnP rig's second plan is what showed it.
+		 */
+		if (strcmp(chain.table, NCFG_NFT_UPNP_TABLE) == 0) {
 			continue;
 		}
 		/* Somebody else's filter chain at one of the three hooks: reported,

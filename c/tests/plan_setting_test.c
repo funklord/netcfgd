@@ -250,6 +250,80 @@ static void port_forwards_ride_the_table(void)
 }
 
 /*
+ * UPnP (0310): the holder's warning every time it is on, the forward chain's
+ * when it drops and accepts nothing translated, and miniupnpd started on its
+ * uplink after that interface's own actions.
+ */
+static ncfg_plan_t *upnp_plan(const char *firewall, ncfg_document_t **document_out,
+    ncfg_observed_t **observed_out)
+{
+	static char *lan[] = { (char *)"lan0" };
+	char         message[NCFG_ERROR_MAX];
+	ncfg_upnp_t *upnp;
+
+	*document_out = planfix_document(DEVICE("lan0") "," DEVICE("wan0"),
+	    "{\"name\":\"lan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"192.168.7.1/24\"}],\"forwarding\":true},"
+	    "{\"name\":\"wan0\",\"addressing\":[],\"nat\":true,\"forwarding\":true}", "",
+	    firewall);
+	*observed_out = planfix_observed("\"links\":[" PLANFIX_LINK("lan0", "") ","
+	    PLANFIX_LINK("wan0", "") "]");
+	if (!*document_out || !*observed_out) {
+		return NULL;
+	}
+	upnp = calloc(1u, sizeof(*upnp));
+	if (!upnp) {
+		return NULL;
+	}
+	/* Owned by the document from here, which frees it through its table:
+	 * the strings are copied for that reason. */
+	upnp->lan = calloc(1u, sizeof(*upnp->lan));
+	upnp->lan[0] = strdup(lan[0]);
+	upnp->lan_count = 1u;
+	upnp->uplink = strdup("wan0");
+	(*document_out)->globals.upnp = upnp;
+	message[0] = '\0';
+	return ncfg_plan_build(*document_out, *observed_out, NULL, message, sizeof(message));
+}
+
+static void upnp_is_planned_and_warned(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan;
+	const ncfg_action_t *start = NULL;
+	size_t               at;
+
+	plan = upnp_plan(",\"firewall\":{\"input\":{\"policy\":\"accept\"},"
+	    "\"forward\":{\"policy\":\"drop\"},\"output\":{\"policy\":\"accept\"}}",
+	    &document, &observed);
+	check(plan && planfix_warned(plan, "may open a port on this router without asking"),
+	    "UPnP on is warned about every time, the holder's condition");
+	check(plan && planfix_warned(plan, "accepts no translated connection") &&
+	        planfix_warned(plan, "translated = true"),
+	    "  and a forward chain that drops it all is told the rule to add");
+	for (at = 0; plan && at < plan->action_count; at++) {
+		if (plan->actions[at].op.kind == NCFG_OP_BACKEND_START &&
+		    plan->actions[at].op.u.backend.kind == NCFG_BACKEND_UPNP) {
+			start = &plan->actions[at];
+		}
+	}
+	check(start && strcmp(start->op.u.backend.iface, "wan0") == 0 && start->depends_count > 0u,
+	    "  miniupnpd is started on its uplink, after the interfaces' own actions");
+	planfix_release(plan, document, observed);
+
+	plan = upnp_plan(",\"firewall\":{\"input\":{\"policy\":\"accept\"},"
+	    "\"forward\":{\"policy\":\"drop\",\"rules\":[{\"name\":\"mapped\","
+	    "\"action\":\"accept\",\"protocol\":\"any\",\"translated\":true}]},"
+	    "\"output\":{\"policy\":\"accept\"}}",
+	    &document, &observed);
+	check(plan && !planfix_warned(plan, "accepts no translated connection") &&
+	        planfix_warned(plan, "may open a port on this router without asking"),
+	    "  a translated accept quiets the firewall's warning and not the holder's");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * Hairpin (0299): reflected at every address the uplink has -- the document's
  * static one, and an observed lease on an uplink addressed by DHCP -- with a
  * return path from the network that holds the host; none with `hairpin =
@@ -633,6 +707,7 @@ int main(void)
 {
 	the_uplinks_are_a_sorted_list_replaced_whole();
 	port_forwards_ride_the_table();
+	upnp_is_planned_and_warned();
 	a_forward_is_reachable_from_inside();
 	the_firewall_is_planned_with_the_table();
 	a_document_that_stops_asking_removes_the_table();

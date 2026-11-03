@@ -58,6 +58,7 @@
 #include "ncfg/pppoe.h"
 #include "ncfg/process.h"
 #include "ncfg/dhcp_server.h"
+#include "ncfg/upnp.h"
 #include "ncfg/ra.h"
 #include "ncfg/supplicant.h"
 
@@ -159,6 +160,11 @@ int ncfg_service_backend_handle(const char *run, int kind, const char *iface, ch
 		 * gone, which is the same recovery one layer in.
 		 */
 		return 0;
+	case NCFG_BACKEND_UPNP:
+		/* One per machine, so the paths name no interface: `-f <path>` is
+		 * the marker, as dnsmasq's `-C` is (0310). */
+		return ncfg_upnp_pid_path(run, pid_path, pid_size, scratch, sizeof(scratch)) &&
+		    ncfg_upnp_config_path(run, marker, marker_size, scratch, sizeof(scratch));
 	case NCFG_BACKEND_DHCP_SERVER:
 		/* dnsmasq is started with `-C <path>`, which carries the generated
 		 * file's path as an argument of its own, as radvd's `--config` does

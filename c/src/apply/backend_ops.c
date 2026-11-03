@@ -92,6 +92,9 @@
 #include "ncfg/ra.h"
 #include "ncfg/state.h"
 #include "ncfg/supplicant.h"
+#include "ncfg/upnp.h"
+
+#include "kernel_internal.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -197,6 +200,7 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	/* The tenth, and the first kind this build carries out that the Rust
 	 * has no word for at all -- 0266's situation rather than a gap. */
 	case NCFG_BACKEND_LINK_LOCAL:
+	case NCFG_BACKEND_UPNP:
 		return 1;
 	/* Answered above, before the verb was looked at, because the sentence is
 	 * the kind's rather than the verb's. Named here rather than removed so
@@ -425,6 +429,46 @@ static int start_dhcp_server(const ncfg_service_t *service, const char *run_dir,
 		return 0;
 	}
 	return ncfg_dhcp_server_start(run_dir, service->document, interface, NULL, err, err_size);
+}
+
+/*
+ * miniupnpd, keyed by its uplink (0310): the table it maps into first, since
+ * a mapping asked for before the table exists fails with UPnP error 501, and
+ * a start that cannot make the table starts nothing.
+ */
+static int start_upnp(const ncfg_service_t *service, const char *run_dir, const char *iface,
+    char *err, size_t err_size)
+{
+	const ncfg_upnp_t *upnp = service->document ? service->document->globals.upnp : NULL;
+
+	if (!upnp || !upnp->uplink || strcmp(upnp->uplink, iface) != 0) {
+		ncfg_error_set(err, err_size,
+		    "backend.start asks for UPnP on %s, and the document this plan was built from "
+		    "has no `upnp` block with that uplink", iface);
+		return 0;
+	}
+	if (ncfg_upnp_running_pid(run_dir) > 0) {
+		return 1;
+	}
+	if (!ncfg_kernel_upnp_table(1, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_upnp_start(run_dir, upnp, NULL, err, err_size)) {
+		char said[NCFG_ERROR_MAX];
+
+		/* No daemon to fill it, so no table: an empty one costs nothing, but
+		 * it would be one more thing nobody started. */
+		(void)ncfg_kernel_upnp_table(0, said, sizeof(said));
+		return 0;
+	}
+	return 1;
+}
+
+/* The daemon, then its table -- whose mappings it would otherwise leave
+ * behind, open to hosts with nothing renewing them (0310). */
+static int stop_upnp(const char *run_dir, char *err, size_t err_size)
+{
+	return ncfg_upnp_stop(run_dir, err, err_size) && ncfg_kernel_upnp_table(0, err, err_size);
 }
 
 static int start_advertising(const ncfg_service_t *service, const char *run_dir,
@@ -816,6 +860,8 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 		return start_advertising(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP_SERVER:
 		return start_dhcp_server(service, run_dir, iface, err, err_size);
+	case NCFG_BACKEND_UPNP:
+		return start_upnp(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_OPENVPN:
 		return start_tunnel(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP4:
@@ -1008,6 +1054,8 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		return ncfg_ra_stop(run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP_SERVER:
 		return ncfg_dhcp_server_stop(run_dir, iface, err, err_size);
+	case NCFG_BACKEND_UPNP:
+		return stop_upnp(run_dir, err, err_size);
 	case NCFG_BACKEND_LINK_LOCAL:
 		/* By the pid netcfgd recorded, never by `--kill <iface>`, which would
 		 * stop whichever client is on the interface. `autoip.h` argues it. */

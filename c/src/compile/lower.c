@@ -408,6 +408,62 @@ static int linkset_cycle(const ncfg_document_t *document, const char *name,
  * resolves to nothing, a set that shares a name with a link, and a set that
  * contains itself through a chain of other sets.
  */
+/*
+ * UPnP maps ports on an uplink that translates, and listens on interfaces the
+ * document configures (0310). Both refused rather than planned: a mapping on
+ * an uplink with no NAT is a forward to a private address nobody outside can
+ * reach, and a listener on an interface netcfgd does not configure has no
+ * address to listen on.
+ */
+static void check_upnp(ncfg_lower_ctx_t *ctx)
+{
+	const ncfg_upnp_t *upnp = ctx->document->globals.upnp;
+	size_t             at;
+
+	if (!upnp || !upnp->uplink) {
+		return;
+	}
+	ctx->source = ctx->upnp_source;
+	for (at = 0; at < ctx->document->interface_count; at++) {
+		const ncfg_interface_t *interface = &ctx->document->interfaces[at];
+
+		if (interface->name && strcmp(interface->name, upnp->uplink) == 0) {
+			if (!interface->nat.has || !interface->nat.value) {
+				ncfg_diag(ctx, ctx->upnp_span,
+				    "`upnp` maps ports on `%s`, which does not translate: add `nat = "
+				    "true` to `interface %s`, or name the uplink that has it",
+				    upnp->uplink, upnp->uplink);
+			}
+			break;
+		}
+	}
+	if (at == ctx->document->interface_count) {
+		ncfg_diag(ctx, ctx->upnp_span,
+		    "`upnp` maps ports on `%s`, which has no `interface` block; the uplink is "
+		    "the interface with `nat = true`", upnp->uplink);
+	}
+	for (at = 0; at < upnp->lan_count; at++) {
+		size_t one;
+
+		for (one = 0; one < ctx->document->interface_count; one++) {
+			const char *name = ctx->document->interfaces[one].name;
+
+			if (name && strcmp(name, upnp->lan[at]) == 0) {
+				break;
+			}
+		}
+		if (one == ctx->document->interface_count) {
+			ncfg_diag(ctx, ctx->upnp_span,
+			    "`upnp` listens on `%s`, which has no `interface` block, so it has no "
+			    "address to listen on", upnp->lan[at]);
+		} else if (strcmp(upnp->lan[at], upnp->uplink) == 0) {
+			ncfg_diag(ctx, ctx->upnp_span,
+			    "`upnp` listens on its own uplink `%s`, which would let anybody on the "
+			    "internet open ports on this router", upnp->uplink);
+		}
+	}
+}
+
 static void check_linksets(ncfg_lower_ctx_t *ctx, const deferred_t *spans, size_t count)
 {
 	const ncfg_document_t *document = ctx->document;
@@ -1115,6 +1171,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
 	resolve_forward_hosts(&ctx, forwarders, forwarder_count);
 	resolve_block_lists(&ctx, blockers, blocker_count);
+	check_upnp(&ctx);
 
 	deferred_free(memberships, membership_count);
 	deferred_free(shapers, shaper_count);

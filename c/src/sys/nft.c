@@ -332,6 +332,77 @@ int ncfg_nft_writes_only_our_table(const void *bytes, size_t length, char *err, 
 	}
 }
 
+/* The UPnP table's audit: its own name, its three chains, and no rule -- so
+ * netcfgd can make and delete the structure and cannot write a mapping. */
+static int audit_upnp_message(const ncfg_wire_message_t *message, char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	uint16_t          subsystem = (uint16_t)(message->header.kind >> 8);
+	uint16_t          kind = (uint16_t)(message->header.kind & 0xffu);
+
+	if (subsystem == 0) {
+		if (kind != NFNL_MSG_BATCH_BEGIN && kind != NFNL_MSG_BATCH_END) {
+			ncfg_error_set(err, err_size,
+			    "a netlink message of type %u with no subsystem", (unsigned)kind);
+			return 0;
+		}
+		return marker_is_nftables(message, err, err_size);
+	}
+	if (subsystem != NFNL_SUBSYS_NFTABLES) {
+		ncfg_error_set(err, err_size,
+		    "a message for netlink subsystem %u, which is not nftables",
+		    (unsigned)subsystem);
+		return 0;
+	}
+	if (!ncfg_wire_message_attrs(message, NCFG_NFT_NFGENMSG_LEN, &area, err, err_size)) {
+		return 0;
+	}
+	switch (kind) {
+	case NFT_MSG_NEWTABLE:
+	case NFT_MSG_DELTABLE:
+		return name_must_be(&area, NFTA_TABLE_NAME, NCFG_NFT_UPNP_TABLE, "table", err,
+		    err_size);
+	case NFT_MSG_NEWCHAIN:
+		return name_must_be(&area, NFTA_CHAIN_TABLE, NCFG_NFT_UPNP_TABLE, "table", err,
+		    err_size) &&
+		    (name_must_be(&area, NFTA_CHAIN_NAME, NCFG_NFT_UPNP_CHAIN_FORWARD, "chain",
+		        NULL, 0) ||
+		     name_must_be(&area, NFTA_CHAIN_NAME, NCFG_NFT_UPNP_CHAIN_PREROUTING, "chain",
+		        NULL, 0) ||
+		     name_must_be(&area, NFTA_CHAIN_NAME, NCFG_NFT_UPNP_CHAIN_POSTROUTING, "chain",
+		        err, err_size));
+	default:
+		break;
+	}
+	ncfg_error_set(err, err_size,
+	    "an nftables message of type %u in the UPnP table, whose rules are miniupnpd's",
+	    (unsigned)kind);
+	return 0;
+}
+
+int ncfg_nft_writes_only_upnp_table(const void *bytes, size_t length, char *err,
+    size_t err_size)
+{
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+
+	if (!bytes && length) {
+		ncfg_error_set(err, err_size, "a transaction with no bytes behind it");
+		return 0;
+	}
+	ncfg_wire_messages_start(&walk, bytes, length);
+	for (;;) {
+		ncfg_wire_step_t step = ncfg_wire_messages_next(&walk, &message, err, err_size);
+
+		if (step == NCFG_WIRE_END) {
+			return 1;
+		}
+		if (step != NCFG_WIRE_OK || !audit_upnp_message(&message, err, err_size)) {
+			return 0;
+		}
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * Building requests
  * ------------------------------------------------------------------------ */
@@ -1795,6 +1866,108 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 	 */
 	if (ok) {
 		ok = ncfg_nft_writes_only_our_table(transaction.data, transaction.length, err,
+		    err_size);
+	}
+	if (ok) {
+		ncfg_buf_add(out, transaction.data, transaction.length);
+		if (ncfg_buf_failed(out)) {
+			ncfg_error_set(err, err_size,
+			    "a %zu-byte transaction did not fit its buffer", transaction.length);
+			ok = 0;
+		}
+	}
+	if (ok) {
+		batch->last_acked = last_acked;
+		batch->next_seq = seq;
+	}
+	ncfg_buf_free(&transaction);
+	return ok;
+}
+
+/* One of the UPnP table's chains: hooked, accepting by policy, empty. */
+static void upnp_chain(ncfg_buf_t *attrs, const char *name, const char *type, uint32_t hook,
+    int32_t priority)
+{
+	ncfg_buf_t nest;
+
+	ncfg_buf_init(&nest, 0);
+	put_be32(&nest, NFTA_HOOK_HOOKNUM, hook);
+	/* Signed on the wire, as `nat_chain` says. */
+	put_be32(&nest, NFTA_HOOK_PRIORITY, (uint32_t)priority);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_TABLE, NCFG_NFT_UPNP_TABLE);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_NAME, name);
+	ncfg_wire_attr_put_nested(attrs, NFTA_CHAIN_HOOK, &nest);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_TYPE, type);
+	put_be32(attrs, NFTA_CHAIN_POLICY, (uint32_t)NF_ACCEPT);
+	ncfg_buf_free(&nest);
+}
+
+int ncfg_nft_build_upnp_table(ncfg_buf_t *out, uint32_t first_seq, int table_exists, int wanted,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size)
+{
+	static const struct {
+		const char *name;
+		const char *type;
+		uint32_t    hook;
+		int32_t     priority;
+	} chains[3] = {
+		{ NCFG_NFT_UPNP_CHAIN_FORWARD, "filter", NF_INET_FORWARD, 0 },
+		{ NCFG_NFT_UPNP_CHAIN_PREROUTING, "nat", NF_INET_PRE_ROUTING, NF_IP_PRI_NAT_DST },
+		{ NCFG_NFT_UPNP_CHAIN_POSTROUTING, "nat", NF_INET_POST_ROUTING, NF_IP_PRI_NAT_SRC },
+	};
+	ncfg_buf_t transaction;
+	ncfg_buf_t attrs;
+	uint32_t   seq = first_seq;
+	uint32_t   last_acked = first_seq;
+	size_t     at;
+	int        ok;
+
+	if (!out || !batch) {
+		ncfg_error_set(err, err_size, "a transaction needs somewhere to be built");
+		return 0;
+	}
+	memset(batch, 0, sizeof(*batch));
+	batch->last_acked = first_seq;
+	batch->next_seq = first_seq;
+	if (!table_exists && !wanted) {
+		batch->empty = 1;
+		return 1;
+	}
+	ncfg_buf_init(&transaction, 0);
+	ok = batch_marker(&transaction, NFNL_MSG_BATCH_BEGIN, seq++, err, err_size);
+	/* Deleted first, so a start always begins from the empty structure and a
+	 * mapping a stopped miniupnpd left behind -- 0310's third measurement --
+	 * cannot outlive it. */
+	if (ok && table_exists) {
+		ncfg_buf_init(&attrs, 0);
+		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_UPNP_TABLE);
+		last_acked = seq;
+		ok = build(&transaction, NFT_MSG_DELTABLE, NLM_F_ACK, seq++, NFPROTO_INET, &attrs,
+		    err, err_size);
+		ncfg_buf_free(&attrs);
+	}
+	if (ok && wanted) {
+		ncfg_buf_init(&attrs, 0);
+		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_UPNP_TABLE);
+		last_acked = seq;
+		ok = build(&transaction, NFT_MSG_NEWTABLE, (uint16_t)(NLM_F_ACK | NLM_F_CREATE),
+		    seq++, NFPROTO_INET, &attrs, err, err_size);
+		ncfg_buf_free(&attrs);
+		for (at = 0; ok && at < 3u; at++) {
+			ncfg_buf_init(&attrs, 0);
+			upnp_chain(&attrs, chains[at].name, chains[at].type, chains[at].hook,
+			    chains[at].priority);
+			last_acked = seq;
+			ok = build(&transaction, NFT_MSG_NEWCHAIN, (uint16_t)(NLM_F_ACK | NLM_F_CREATE),
+			    seq++, NFPROTO_INET, &attrs, err, err_size);
+			ncfg_buf_free(&attrs);
+		}
+	}
+	if (ok) {
+		ok = batch_marker(&transaction, NFNL_MSG_BATCH_END, seq++, err, err_size);
+	}
+	if (ok) {
+		ok = ncfg_nft_writes_only_upnp_table(transaction.data, transaction.length, err,
 		    err_size);
 	}
 	if (ok) {

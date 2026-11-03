@@ -689,6 +689,12 @@
       "served": "192.168.1.100-192.168.1.249, 43200 s, dns 192.168.1.1"
     },
     {
+      "kind": "upnp",
+      "interface": "wan0",
+      "running": true,
+      "served": "uplink wan0 lan lan0"
+    },
+    {
       "kind": "open_vpn",
       "interface": "vpn0",
       "running": true,

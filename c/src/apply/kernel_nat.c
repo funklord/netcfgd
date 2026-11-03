@@ -41,6 +41,7 @@
 
 #include "ncfg/base.h"
 
+#include <linux/netfilter.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -140,6 +141,79 @@ static int tables_seen(ncfg_netlink_t *socket, int *exists, char *err, size_t er
 	}
 	ncfg_netlink_reply_free(&reply);
 	ncfg_buf_free(&message);
+	return ok;
+}
+
+/* Whether the dump holds the UPnP table. */
+static int upnp_table_seen(ncfg_netlink_t *socket, int *exists, char *err, size_t err_size)
+{
+	ncfg_netlink_reply_t reply;
+	ncfg_buf_t           message;
+	char                 detail[NCFG_ERROR_MAX];
+	uint32_t             seq = ncfg_netlink_take_seq(socket);
+	size_t               i;
+	int                  ok;
+
+	*exists = 0;
+	detail[0] = '\0';
+	memset(&reply, 0, sizeof(reply));
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_nft_build_table_dump(&message, seq, err, err_size);
+	if (ok) {
+		ok = ncfg_netlink_send_batch(socket, message.data, message.length, seq, &reply,
+		    detail, sizeof(detail));
+		if (!ok) {
+			ncfg_error_set(err, err_size, "could not read the nftables tables: %s",
+			    detail);
+		}
+	}
+	for (i = 0; ok && i < reply.count; i++) {
+		ncfg_nft_table_t table;
+
+		if (ncfg_nft_table_read(reply.items[i].bytes, reply.items[i].length, &table, NULL,
+		        0) && table.family == NFPROTO_INET &&
+		    strcmp(table.name, NCFG_NFT_UPNP_TABLE) == 0) {
+			*exists = 1;
+		}
+	}
+	ncfg_netlink_reply_free(&reply);
+	ncfg_buf_free(&message);
+	return ok;
+}
+
+int ncfg_kernel_upnp_table(int wanted, char *err, size_t err_size)
+{
+	ncfg_netlink_t   socket;
+	ncfg_nft_batch_t batch;
+	ncfg_buf_t       message;
+	int              exists = 0;
+	int              ok;
+
+	ncfg_netlink_init(&socket);
+	if (!ncfg_netlink_open_protocol(&socket, NCFG_NFT_NETLINK_PROTOCOL, 0, err, err_size)) {
+		char detail[NCFG_ERROR_MAX];
+
+		(void)snprintf(detail, sizeof(detail), "%s", err);
+		ncfg_error_set(err, err_size,
+		    "cannot reach nftables for UPnP's table: %s. It needs `nf_tables` in this "
+		    "kernel and CAP_NET_ADMIN in this namespace", detail);
+		return 0;
+	}
+	if (!ncfg_netlink_set_timeout(&socket, REQUEST_SECONDS, err, err_size) ||
+	    !upnp_table_seen(&socket, &exists, err, err_size)) {
+		ncfg_netlink_close(&socket);
+		return 0;
+	}
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_nft_build_upnp_table(&message, ncfg_netlink_take_seq(&socket), exists, wanted,
+	    &batch, err, err_size);
+	if (ok && !batch.empty) {
+		ok = ncfg_kernel_send(&socket, &message, batch.last_acked, NCFG_OP_BACKEND_START,
+		    wanted ? "make the `" NCFG_NFT_UPNP_TABLE "` table"
+		           : "delete the `" NCFG_NFT_UPNP_TABLE "` table", err, err_size);
+	}
+	ncfg_buf_free(&message);
+	ncfg_netlink_close(&socket);
 	return ok;
 }
 

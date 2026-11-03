@@ -12632,6 +12632,71 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.671 UPnP and NAT-PMP: miniupnpd, in a table netcfgd makes (0310)
+
+**Built** (2026-11-03): 10.667's UPnP plan, all five steps.
+[0310](doc/decision/0310-upnp-is-miniupnpd-in-a-table-netcfgd-makes.md) is
+the design and the measurements behind it, each taken in a vm with the image
+`tests/hull/upnp/` builds: miniupnpd makes no nftables structure of its own
+(its first mapping failed with UPnP error 501), a mapping cannot pass
+netcfgd's own drop-policy forward chain without an accept for translated
+connections (10.670), miniupnpd leaves its mappings behind when it stops, and
+it adds its rules straight into three hooked chains when it is told their
+names -- so the table netcfgd makes is a table and three empty accepting
+chains, and nothing else.
+
+- **The language**: `global { upnp { lan = ["lan0"]; uplink = "wan0" } }`.
+  Refused at compile time, each naming the line to change: an uplink without
+  `nat = true`, a LAN interface with no block, the uplink named as a LAN
+  (anybody on the internet could map ports), and a block missing either key.
+  `secure_mode` is always on, and NAT-PMP/PCP is on the same switch.
+- **The plan** says the holder's warning on every plan while UPnP is on --
+  any device on the LAN may open a port without asking -- and names the
+  `translated = true` rule where the forward chain drops without one, and an
+  SSDP accept where the input chain drops. miniupnpd is a backend keyed by
+  its uplink, started after every action on its uplink and LAN interfaces,
+  and restarted when the `upnp` block's summary differs from the first line
+  of the running daemon's configuration.
+- **The executor** makes `inet netcfgd_upnp` before starting miniupnpd and
+  deletes it after stopping it, deleting first on a start so a mapping a dead
+  daemon left cannot survive. The table has an audit of its own: its name,
+  its three chains, and no rule -- netcfgd cannot write a mapping. It is not
+  replaced on each apply as `netcfgd` is, or every apply would drop every
+  mapping.
+- **The observation** finds miniupnpd by its `-f <config>` marker, as dnsmasq
+  is found, and skips `netcfgd_upnp` outright: it is neither a stranger's NAT
+  nor a filter neighbour -- and not netcfgd's firewall either, though its
+  chain is called `forward`. **That last was a fault the rig found**: the
+  first version only kept it out of the neighbours, its `forward` chain's
+  `accept` was read as the firewall's `drop`, and every plan replaced a
+  firewall that had not changed.
+- **`ncfg status`** lists every mapping from miniupnpd's lease file, with the
+  host and what asked for it: openings in the firewall no document wrote.
+
+**Checked:** lowering refusals and a round trip; a plan test for the two
+warnings and the start's dependencies; and `make hull-upnp` -- netcfgd's
+router with a forward chain that drops, a LAN host and a host on the uplink
+side in namespaces of one vm. Before the apply `upnpc` finds no router (the
+control); after it the LAN host maps 18080 to its own 8080, a mapping to
+another host is refused (UPnP error 606, secure mode), a connection from the
+uplink side through 18080 reaches the LAN host, `ncfg status` lists the
+mapping, a second plan has nothing to do and carries the warning once, and
+with `upnp` removed miniupnpd is gone and so is the table. **Sabotaged**:
+without the translated accept, the mapping is made and nothing crosses it,
+and the rig says so. A first sabotage that swapped it for `state = ["new"]`
+proved nothing -- that accepts every new connection from the uplink, mapped
+or not -- which is worth knowing about the rule as well as the rig.
+
+**Measured as well:** the installed program grew 17,376 bytes, and `make rss`
+read 3,236 KB of its 3,328 limit where it read 3,132 before -- inside it,
+and the closest this tree has come, which the next resident feature should
+know before it starts.
+
+**Not built:** IPv6 pinholes (PCP can ask for them; miniupnpd's IPv6 side
+wants `ip6tables` hooks of its own and is a separate measurement), and
+reading the mappings into the observation for the TUI and the GUI rather
+than only `ncfg status`.
+
 ## 10.670 A firewall rule may match a translated connection
 
 **Built** (2026-11-03): `translated = true` on a firewall rule matches a
@@ -12760,6 +12825,14 @@ this daemon that is a few seconds in which an `ncfg` request, a netlink
 event and a confirm window's deadline all wait. Measuring how long a round
 holds the loop on a real estate, and whether fuzznet can bound it, comes
 before moving the reconcile loop into it.
+
+**fuzznet's own figures, sent 2026-11-03 so they need not be measured
+again**: a single wait in turn is capped at 3 s (`recv_answering` in
+`node/daemon.c`, resends included), and steps follow one another, so two
+back to back reached about 6.3 s with a lossy peer (its sec 747). Its local
+socket and UDP are still answered during those waits (secs 748 and after);
+an extension's descriptors and tick are not, for up to about 3 s per step.
+So for netcfgd the figure to design against is several seconds, not one.
 
 ## 10.668 fuzznet is linked into netcfgd: 0269 is superseded
 

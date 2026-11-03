@@ -981,6 +981,9 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * without forwarding does nothing, and the pass warns where the document
 	 * asks for one and not the other. */
 	ncfg_plan_nat(&builder);
+	/* After every interface and the table: miniupnpd listens on addresses
+	 * the interfaces' actions put there and maps into NAT that table does. */
+	ncfg_plan_upnp(&builder);
 	ncfg_plan_input_warnings(&builder);
 	ncfg_plan_dns_record_warnings(&builder);
 	ncfg_plan_block_list_warnings(&builder);

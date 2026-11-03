@@ -562,6 +562,30 @@ static void render_control(const ncfg_control_t *control, ncfg_buf_t *body)
 	ncfg_buf_add_text(body, "\t}\n");
 }
 
+/* `upnp { }` as written, or nothing where it is off (0310). */
+static void render_upnp(const ncfg_upnp_t *upnp, ncfg_buf_t *body)
+{
+	ncfg_render_list_t list;
+	size_t             at;
+
+	if (!upnp) {
+		return;
+	}
+	ncfg_buf_add_text(body, "\tupnp {\n");
+	ncfg_render_list_init(&list);
+	for (at = 0; at < upnp->lan_count; at++) {
+		ncfg_render_quote(ncfg_render_list_next(&list), upnp->lan[at]);
+	}
+	ncfg_render_list_emit(body, "\t\t", "lan", &list, 0);
+	ncfg_render_list_free(&list);
+	if (upnp->uplink) {
+		ncfg_buf_add_text(body, "\t\tuplink = ");
+		ncfg_render_quote(body, upnp->uplink);
+		ncfg_buf_add_char(body, '\n');
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
 static void render_remote(const ncfg_remote_policy_t *remote, ncfg_buf_t *body)
 {
 	static const char *const keys[] = { "observe", "wifi", "admin" };
@@ -712,6 +736,7 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 	(void)ncfg_render_dns(&globals->dns, "\t", &body, missing, "global", NULL);
 	render_control(&globals->control, &body);
 	render_remote(&globals->remote, &body);
+	render_upnp(globals->upnp, &body);
 	render_connectivity(&globals->connectivity, &body);
 
 	if (ncfg_buf_text(&body)[0] != '\0') {

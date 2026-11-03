@@ -118,7 +118,7 @@ static const ncfg_enum_t origin_set = WORD_SET("addressing origin", origin_words
 
 static const char *const backend_kind_words[] = { "dhcp4", "dhcp6", "supplicant",
 	"access_point", "wire_guard", "pppoe", "open_vpn", "dns", "router_advert",
-	"link_local", "dhcp_server" };
+	"link_local", "dhcp_server", "upnp" };
 static const ncfg_enum_t backend_kind_set = WORD_SET("backend kind", backend_kind_words);
 
 static const char *const link_category_words[] = { "loopback", "ethernet", "wifi", "modem",

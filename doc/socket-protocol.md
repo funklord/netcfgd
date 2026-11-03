@@ -655,6 +655,7 @@ wrong way round three times before one table answered both.
 | `pppoe` | yes | yes |  |
 | `router_advert` | yes | yes | yes |
 | `supplicant` | yes | yes |  |
+| `upnp` | yes | yes |  |
 | `wire_guard` |  |  |  |
 
 **Only a router advertisement daemon re-reads its configuration**, which is
@@ -663,6 +664,13 @@ restart, and a DHCP client's is the client's own business. `dns` and
 `wire_guard` are started by nothing — the first is a file netcfgd writes and
 the second is configured through netlink rather than run as a daemon — and
 they are in the vocabulary because an observation can report either.
+
+**`upnp` is the twelfth** (decision 0310): miniupnpd answering UPnP IGD and
+NAT-PMP, one per machine and so keyed by the uplink it maps ports on. Its
+`served` is the line the running daemon's configuration opens with -- the
+uplink and the LAN interfaces -- and a changed `upnp` block is a stop and a
+start, netcfgd deleting and remaking the table miniupnpd maps into between
+the two.
 
 **`dhcp_server` is the eleventh** (decision 0297): dnsmasq serving DHCPv4 with
 its DNS side off. It has no `reload`, since dnsmasq re-reads its hosts and

@@ -39,6 +39,7 @@
 
 #include "ncfg/base.h"
 #include "ncfg/dhcp_server.h"
+#include "ncfg/upnp.h"
 #include "ncfg/ra.h"
 
 #include <stdio.h>
@@ -158,6 +159,21 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
 		size_t                   count = 0;
 		char                    *text;
 
+		if (backend->kind == NCFG_BACKEND_UPNP && backend->running) {
+			char served[NCFG_UPNP_SUMMARY_MAX];
+
+			/* What miniupnpd was started to do, by its file's first line
+			 * (0310), for the restart that a changed `upnp` block needs. */
+			if (ncfg_upnp_recorded(run_dir, served, sizeof(served))) {
+				free(backend->served);
+				backend->served = observe_dup(served);
+				if (!backend->served) {
+					ncfg_error_set(err, err_size, "out of memory reading what UPnP maps");
+					return 0;
+				}
+			}
+			continue;
+		}
 		if (backend->kind == NCFG_BACKEND_DHCP_SERVER && backend->running &&
 		    backend->interface) {
 			char served[NCFG_DHCP_SERVER_SUMMARY_MAX];
