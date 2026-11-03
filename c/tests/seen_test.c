@@ -218,6 +218,45 @@ static void nobody_listening(const char *run)
 	ncfg_seen_free(seen);
 }
 
+/*
+ * Through a node's store (0308, fuzznet sec 827): the record goes to whatever
+ * socket the store's `face` file names, read at the write -- so a face that
+ * appears after the recorder was made is found, and a store with no face is
+ * the quiet absence rather than a write to fuzznetd's guessed default.
+ */
+static void through_the_store_s_face(const char *run)
+{
+	char         sock[600];
+	char         log[600];
+	char         store[600];
+	char         face[700];
+	char        *heard;
+	ncfg_seen_t *seen;
+
+	(void)snprintf(sock, sizeof(sock), "%s/face.sock", run);
+	(void)snprintf(log, sizeof(log), "%s/face.log", run);
+	(void)snprintf(store, sizeof(store), "%s/store", run);
+	(void)snprintf(face, sizeof(face), "%s/face", store);
+	testdir_mkdirp(store);
+	/* A path nothing serves, which a store's face must override. */
+	seen = ncfg_seen_new("/nonexistent/fuzznetd.sock");
+	ncfg_seen_use_store(seen, store);
+	an_observation("x");
+	check(ncfg_seen_record(seen, &observed, 1000u) == 0u,
+	    "a store no process serves writes nothing, and is not an error");
+
+	serve(sock, log, "ok\n", 3);
+	(void)testdir_write(face, sock, strlen(sock));
+	check(ncfg_seen_record(seen, &observed, 1000u + NCFG_SEEN_RETRY_SECONDS + 1u) == 3u,
+	    "once a face writes its socket into the store, the record goes there");
+	stop_serving();
+	heard = testdir_read(log, NULL);
+	check(heard && strstr(heard, "add record seen/ap0/02-00-00-00-00-01 station\n"),
+	    "  as the same line fuzznetd's own socket takes");
+	free(heard);
+	ncfg_seen_free(seen);
+}
+
 int main(void)
 {
 	const char *run = testdir_make("seen");
@@ -225,6 +264,7 @@ int main(void)
 	the_key();
 	what_is_written_and_when(run);
 	nobody_listening(run);
+	through_the_store_s_face(run);
 	if (failures) {
 		printf("\nseen_test: %d check(s) FAILED\n", failures);
 		return 1;

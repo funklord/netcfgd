@@ -5,11 +5,14 @@
  * WHO WRITES, AND WHERE
  *   The daemon, as the holder settled on 2026-11-02: it is root that runs
  *   netcfgd and observes the stations and leases, so it is root that writes
- *   down what it saw. **For now into a fuzznetd's socket, and that is to be
- *   replaced**: 0308 superseded 0269 the same day this was written, so
- *   fuzznet is to be linked into the daemon, netcfgd is its own node, and
- *   this writes its own store through fuzznet's records API (project.md
- *   10.668). The policy below carries over; the transport does not.
+ *   down what it saw. **Into the face of the daemon's own fuzznet store**
+ *   (0308, project.md 10.669): netcfgd is a node but holds no claim, since
+ *   it does not run fuzznet's loop yet, so a record goes where any
+ *   follower's would -- to the socket the store's `face` file names, read
+ *   again before each write (`ncfg_seen_use_store`). Without a node, the
+ *   socket the environment or fuzznetd's default names. When netcfgd runs
+ *   the loop itself it is the face, and writes in-process; the policy below
+ *   carries over either way.
  *
  * WHAT A RECORD SAYS
  *   KEY is `seen/<interface>/<mac>`, the MAC with dashes because a colon is
@@ -54,6 +57,21 @@ typedef struct ncfg_seen ncfg_seen_t;
  * user where it is NULL: `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, else
  * `/tmp/fuzznet-UID/fuzznetd.sock`. NULL on out of memory. */
 ncfg_seen_t *ncfg_seen_new(const char *socket_path);
+
+/*
+ * Write to whichever process is the face of the fuzznet store at `dir`, as
+ * that store's `face` file names it (fuzznet sec 827), read again before each
+ * write since the face can change. This is the daemon's node's store
+ * (`ncfg/node.h`): netcfgd holds no claim, so a record it makes goes to the
+ * face as any follower's would. A store no process serves is the absence the
+ * header describes -- nothing is written and a line says so once.
+ *
+ * It replaces fuzznetd's guessed default socket, which a service started
+ * without `$XDG_RUNTIME_DIR` would look for in another place from the one a
+ * fuzznetd started in a shell serves on. An explicit `NCFG_FUZZNET_SOCKET`
+ * is not overridden: the daemon does not call this where one is given.
+ */
+void ncfg_seen_use_store(ncfg_seen_t *seen, const char *dir);
 void ncfg_seen_free(ncfg_seen_t *seen);
 
 /*

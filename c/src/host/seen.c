@@ -38,6 +38,8 @@ typedef struct {
 
 struct ncfg_seen {
 	char     socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+	/* The store whose face is asked for the socket, or "" for `socket_path`. */
+	char     store[1024];
 	held_t  *held;
 	size_t   held_count;
 	uint64_t silent_until; /* fuzznetd did not answer; not asked before then */
@@ -71,6 +73,39 @@ ncfg_seen_t *ncfg_seen_new(const char *socket_path)
 		seen->socket_path[0] = '\0';
 	}
 	return seen;
+}
+
+void ncfg_seen_use_store(ncfg_seen_t *seen, const char *dir)
+{
+	if (!seen || !dir || strlen(dir) >= sizeof(seen->store)) {
+		return;
+	}
+	(void)snprintf(seen->store, sizeof(seen->store), "%s", dir);
+}
+
+/*
+ * The face's socket, as the store's `face` file names it, into `out`: one
+ * line, an absolute path, which is how fuzznetd writes it and reads it
+ * (`face_socket` in its `node/daemon.c`). 0 where there is no face.
+ */
+static int face_socket(const char *store, char *out, size_t out_size)
+{
+	char   path[1100];
+	FILE  *file;
+	size_t length;
+
+	(void)snprintf(path, sizeof(path), "%s/face", store);
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	length = fread(out, 1u, out_size - 1u, file);
+	(void)fclose(file);
+	while (length && (out[length - 1u] == '\n' || out[length - 1u] == '\r')) {
+		length--;
+	}
+	out[length] = '\0';
+	return length > 0u && out[0] == '/';
 }
 
 void ncfg_seen_free(ncfg_seen_t *seen)
@@ -300,6 +335,20 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 	}
 	one = held_find(seen, key);
 	if (one && strcmp(one->value, value) == 0 && now < one->written + NCFG_SEEN_REFRESH_SECONDS) {
+		return 0;
+	}
+	/* Asked of the store each time where there is one: the face is whichever
+	 * process holds the claim now. */
+	if (seen->store[0] && !face_socket(seen->store, seen->socket_path,
+	        sizeof(seen->socket_path))) {
+		*stop = 1;
+		seen->silent_until = now + NCFG_SEEN_RETRY_SECONDS;
+		if (!seen->said_silent) {
+			ncfg_log_emitf("seen", NCFG_LOG_NOTE,
+			    "the hosts this machine sees are not being written down: no process "
+			    "serves the fuzznet store %s", seen->store);
+			seen->said_silent = 1;
+		}
 		return 0;
 	}
 	if (!add_record(seen->socket_path, key, value, &silent, why, sizeof(why))) {

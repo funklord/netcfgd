@@ -1249,6 +1249,12 @@ static int start(const options_t *options)
 	}
 	err[0] = '\0';
 	node = open_node(options, &where);
+	/* The node's store names its face, which is where a record goes; a
+	 * socket the environment names is a test's or an unusual layout's, and
+	 * is left as it was. */
+	if (node && loop.seen && !getenv("NCFG_FUZZNET_SOCKET")) {
+		ncfg_seen_use_store(loop.seen, ncfg_node_dir(node));
+	}
 
 	if (!ncfg_reconcile_start(&loop, options->apply_on_start, reverted, err, sizeof(err))) {
 		/* The startup apply failing is a machine that needs looking at, not a

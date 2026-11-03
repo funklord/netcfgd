@@ -12799,10 +12799,18 @@ face with netcfgd's key and wrote `face`; fuzznetd first, then netcfgd --
 which loaded the same key "beside the process serving it". `ncfg status`
 showed the node, `<run>/node` went at SIGTERM, and nothing was left running.
 
-**Next, from 10.668's list:** the recorder (10.666) forwarded to the face
-named in the store's `face` file -- the conversation `c/src/host/seen.c`
-already has, found from the store rather than from fuzznetd's default
-socket; then the scope table retyped onto `fzn_scope_t`.
+**The recorder now goes through the store's face** (2026-11-03): with a
+node, `c/src/host/seen.c` reads the socket from the store's `face` file
+before each write, as a fuzznet follower does, rather than guessing
+fuzznetd's default -- which a service started with no `$XDG_RUNTIME_DIR`
+would look for in `/tmp/fuzznet-UID/` while a fuzznetd started in a shell
+serves under `/run/user/UID/`. A store nobody serves writes nothing and says
+so once; `NCFG_FUZZNET_SOCKET` still overrides it. `seen_test` puts a face
+file in a store after the recorder was made and the records arrive there;
+skipping the lookup turns that red.
+
+**Next, from 10.668's list:** the scope table retyped onto `fzn_scope_t`, and
+netcfgd running fuzznet's loop as the face (below).
 
 **And how netcfgd becomes a face that serves, answered by fuzznet** (inbox
 `20261102T2329Z`, its sec 831, built in its `f12ee4b`). Writing records
