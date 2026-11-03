@@ -206,4 +206,14 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
  * is not serving. Only from the loop's `tick`. */
 size_t ncfg_node_local(const char *line, char *reply, size_t cap);
 
+/*
+ * No transparent huge pages for this process, as the first thing it does:
+ * fuzznet's `fzn_daemon_refuse_huge_pages` (its sec 862), which refuses them
+ * and, where one was faulted before `main` -- in the loop's large bss --
+ * runs the program again once, since a page already faulted stays resident.
+ * Only a program's own `main` may call it: the re-exec reruns `main` and
+ * keeps descriptors without CLOEXEC.
+ */
+void ncfg_node_refuse_huge_pages(char *const *argv);
+
 #endif /* NCFG_NODE_H */

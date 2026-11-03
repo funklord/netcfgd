@@ -129,6 +129,15 @@ WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 CFLAGS  ?= -Os
 CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client -MMD -MP
 
+# **Each function and datum in a section of its own, and the ones nothing
+# reaches dropped at link** (fuzznet sec 860, project.md 10.702). fuzznet links
+# its daemons this way, and asked that a program linking its loop do the same
+# to get the same effect: most of what the node module pulls in serves verbs
+# netcfgd never calls. Appended rather than defaulted, as `-std=c11` is: it is
+# how this tree is linked, not an optimisation a packager chooses.
+CFLAGS  += -ffunction-sections -fdata-sections
+LDFLAGS += -Wl,--gc-sections
+
 # HEADER DEPENDENCIES, AND WHAT THEIR ABSENCE COST
 #
 # **This build had none until 2026-09-29.** No `-MMD`, no `.d` files, nothing
@@ -225,6 +234,14 @@ FUZZNET_LIB   = fuzznet.a
 # wrong.
 FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 		-DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
+# **The consumer services off: `FZN_STICKERS`, `FZN_CATALOG`, `FZN_NOTES`,
+# `FZN_GROUPS` all 0** (fuzznet secs 856, 860; project.md 10.702). netcfgd uses
+# none of them, and 0311 took the reduction when it came. Each removes that
+# service's verbs and the node's own use of its data, while the estate's data
+# stays carried and relayed, so a fuzzypickles host in the same estate loses
+# nothing through this node. The flags reach fuzznet's `.c` files only and no
+# header, so `src/node/` compiled with this tree's flags still agrees with it.
+#
 # **`FZN_LOG_PACK=0`: no zstd** (project.md 10.684). fuzznet packs its closed
 # log segments with libzstd wherever its probe finds it, and with the node loop
 # always linked (0311) that made netcfgd link `libzstd.so.1` -- a mandatory
@@ -238,7 +255,7 @@ FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 # (project.md 10.669). Given through the environment because fuzznet sets
 # `CFLAGS ?=` and then appends its warnings and `-std=c11`, which a
 # command-line `CFLAGS` would discard.
-FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os)
+FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os) -ffunction-sections -fdata-sections
 # The system libraries the objects decided they need, asked of the archive
 # with `nm` for the reason `bridge/Makefile` gives (fuzznet probes for zstd,
 # so naming it here would be a claim about another tree's configuration) --
@@ -284,7 +301,8 @@ $(FUZZNET_LIB): FORCE
 		}; \
 	fi
 	@CFLAGS='$(FUZZNET_CFLAGS)' $(MAKE) --no-print-directory -s -C $(FUZZNET) \
-		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) FZN_LOG_PACK=0 all
+		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) FZN_LOG_PACK=0 \
+		FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 all
 	@if [ ! -e $@ ] || [ -n "$$(find $(FUZZNET_BUILD) -name '*.o' -newer $@ | head -1)" ]; then \
 		objects=$$(find $(FUZZNET_BUILD) -name '*.o' | sort | while read -r o; do \
 			nm "$$o" 2>/dev/null | grep -qE ' [TtWw] main$$' || echo "$$o"; \

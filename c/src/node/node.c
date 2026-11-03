@@ -484,11 +484,12 @@ static size_t serve_status(void *ctx, const uint8_t *caller, const fzn_peer_t *f
 	if (!caller) {
 		peer_of(from, &peer);
 	}
-	/* `ok `, the escaped answer and a newline in one of fuzznet's replies:
-	 * the bound its `call_said` holds an answer to, whoever asked. */
+	/* The most an answer may be, escaped, and still reach its caller, here
+	 * or across hosts: fuzznet's own bound (its sec 863), which this
+	 * computed as FZN_REPLY_MAX - 5 until fuzznet named it. */
 	return serving->call(serving->context, NCFG_NODE_PROCEDURE_STATUS, caller,
 	    caller ? NULL : &peer, (const char *)args, args_len, (char *)answer, cap,
-	    FZN_REPLY_MAX - 5u);
+	    FZN_DAEMON_CALL_ESCAPED_MAX);
 }
 
 /* A call of `ask` (0312): the same shape, its own name. */
@@ -506,7 +507,7 @@ static size_t serve_ask(void *ctx, const uint8_t *caller, const fzn_peer_t *from
 	}
 	return serving->call(serving->context, NCFG_NODE_PROCEDURE_ASK, caller,
 	    caller ? NULL : &peer, (const char *)args, args_len, (char *)answer, cap,
-	    FZN_REPLY_MAX - 5u);
+	    FZN_DAEMON_CALL_ESCAPED_MAX);
 }
 
 /* A call of `askpart` (10.695): a piece of a long request. Its answer is a
@@ -525,7 +526,7 @@ static size_t serve_ask_part(void *ctx, const uint8_t *caller, const fzn_peer_t 
 	}
 	return serving->call(serving->context, NCFG_NODE_PROCEDURE_ASK_PART, caller,
 	    caller ? NULL : &peer, (const char *)args, args_len, (char *)answer, cap,
-	    FZN_REPLY_MAX - 5u);
+	    FZN_DAEMON_CALL_ESCAPED_MAX);
 }
 
 static const fzn_daemon_procedure_t procedures[] = {
@@ -546,6 +547,11 @@ static void serve_tick(void *ctx, uint64_t now)
 		stopped = 1;
 		fzn_daemon_stop();
 	}
+}
+
+void ncfg_node_refuse_huge_pages(char *const *argv)
+{
+	fzn_daemon_refuse_huge_pages(argv);
 }
 
 size_t ncfg_node_local(const char *line, char *reply, size_t cap)

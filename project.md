@@ -12683,6 +12683,53 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.702 fuzznet's answers taken: its bound, its huge pages, its services off, and gc-sections
+
+Two inbox messages from fuzznet, 2026-11-03 (`20261103T2225Z`, and one written
+at 22:27 local under the reused name `20261103T1938Z`), answered four asks. The
+pin moves to fuzznet `f1fdea6d`.
+
+- **The bound a call's answer reaches its caller within** (fuzznet
+  `3b8f055`, its sec 863) is `FZN_DAEMON_CALL_ESCAPED_MAX`, 1020 escaped
+  bytes, here or across hosts. `node.c` used `FZN_REPLY_MAX - 5`, which is
+  1019, so nothing on the wire changes. The constant names what the number
+  is and moves with it.
+- **Huge pages** (its sec 862): `fzn_daemon_refuse_huge_pages(argv)` refuses
+  them, and where one was faulted before `main`, in the loop's large bss, it
+  runs the program again once. A `prctl` here refused new ones and left that
+  one resident. `main` calls it through `ncfg_node_refuse_huge_pages`, since
+  only `src/node/` includes fuzznet, and `ncfg` takes it as the same
+  program.
+- **The consumer services are build options** (its secs 856, 860), and
+  netcfgd's node is built with all four off. The flags reach fuzznet's `.c`
+  files only, no header, so `src/node/` compiled with this tree's flags
+  still agrees with the archive. Each removes that service's verbs and the
+  node's own use of its data, while the estate's data is still carried and
+  relayed, so a fuzzypickles host in the same estate loses nothing through
+  this node.
+- **`-ffunction-sections -fdata-sections` and `--gc-sections`**, as fuzznet
+  links its daemons and asked a program linking its loop to do. `readelf`
+  shows per-function sections in netcfgd's objects and fuzznet's (624 in
+  `daemon.o`), so the collection reaches both.
+
+Measured on the installed program:
+
+| | file | text | bss |
+|---|---|---|---|
+| before | 2,492,936 | 2,110,913 | 31,051,928 |
+| services off | 2,457,024 | 2,079,674 | 30,109,688 |
+| and gc-sections | 2,383,200 | 2,017,634 | 26,420,472 |
+
+`size-budget.txt` comes down to 2,383,200, as its own line said it would
+when the services became options. The bss fell by 4.6 MB with it, which is
+the resident gate's business.
+
+**And another host's events** (fuzznet `db35c7b`, its sec 866): there is no
+subscription across hosts and none is planned. Each node keeps its last 256
+published events, and fuzznet's own procedure `events [FROM]` answers `ok
+NEXT FIRST [SUBJECT NAME]...` from a cursor. Remote monitoring is built on
+that next (go item 31) instead of polling the status.
+
 ## 10.701 The parsers of another host's bytes are fuzzed, and today's code sanitized
 
 10.688 to 10.700 added three parsers that read another host's bytes, and they

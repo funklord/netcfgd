@@ -1093,4 +1093,13 @@ netcfgd
 # (10.679). Measured again once fuzznet was built without its log packing
 # (`FZN_LOG_PACK=0`), which had made the program link libzstd against
 # constraint 3: 2,447,392, so +928,184 in all.
-total 2447392
+#
+# **And it has come down**, as the line above said it would (project.md
+# 10.702). fuzznet made the services build options (its secs 856, 860), and
+# netcfgd builds its node with stickers, the catalogue, notes and groups off
+# (-35,912), then links with `-ffunction-sections -fdata-sections` and
+# `--gc-sections`, as fuzznet asked of a program linking its loop (-73,824).
+# Measured together with fuzznet at f1fdea6d: 2,383,200, which is -64,192 on
+# 2,447,392 and the 2,492,936 the program had reached since. The bss fell by
+# 4.6 MB with it, which is the resident gate's business rather than this one's.
+total 2383200

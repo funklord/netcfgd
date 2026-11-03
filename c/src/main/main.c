@@ -18,8 +18,8 @@
 
 #include "ncfg/log.h"
 #include "ncfg/cli.h"
+#include "ncfg/node.h"
 
-#include <sys/prctl.h>
 
 int main(int argc, char **argv)
 {
@@ -41,8 +41,13 @@ int main(int argc, char **argv)
 	 * them itself, and fuzznet's own measurement says the page faulted before
 	 * that call is most of the rest. Here it is first. Ignored where the
 	 * kernel has no such setting: the process runs as it would have.
+	 *
+	 * **Through fuzznet's own call** (its sec 862), which a `prctl` here was
+	 * not: refusing stops new huge pages, and one the loader already faulted
+	 * in the bss stays resident, so fuzznet runs the program again once when
+	 * it finds one. `ncfg` takes it too, being the same program.
 	 */
-	(void)prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
+	ncfg_node_refuse_huge_pages(argv);
 
 	switch (ncfg_main_program_for(called_as)) {
 	case NCFG_MAIN_PROGRAM_CLIENT:
