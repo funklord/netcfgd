@@ -21254,6 +21254,20 @@ dhcp read a pid file their program writes, and none of them reads it inside the
 start -- radvd's start returns on the exit status alone. So the class has one
 member and it is fixed.
 
+**Seen again, in a different shape, 2026-11-03 -- open.** One full `make test`
+at a load average near 40 failed the late-client case the other way round:
+the start *succeeded* after 16 ms (the check asks for at least 300), and then
+`ncfg_autoip_running_pid` found no client. So something carrying both markers
+was found at once and was gone moments later. Not reproduced since: 5 runs
+alone and 12 under eight CPU spinners, all clean. A leftover client of an
+earlier run on the same interface name -- the shape the control's leftovers
+had above -- fits all three symptoms, but needs this run's pid reused within
+that client's five seconds, and pids here advance about 240 in five seconds
+against a `pid_max` of 32768. That is a candidate, not a finding. The cost if
+it is real is the one this section names: a start reported good with
+nothing recorded to stop. Next time it shows, read `/proc` for
+`--force-bind ll<pid>` at the moment of the start.
+
 ## 10.532 The hull rigs got targets, and `clean` would have eaten the images
 
 "add the hull targets then", the copyright holder, 2026-10-23, closing the item
