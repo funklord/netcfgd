@@ -12683,6 +12683,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.700 `ncfg tui --at HOST`
+
+The TUI asks through `ncfg_cli_ask`, so `--at` (10.694) carried its panes
+unchanged, and `tui` joins the carried commands. It had the GUI's two
+hazards, met the same way:
+
+- **Its events pane subscribed to this machine's socket**, which under
+  `--at` would have listed this machine's events in a pane showing another
+  node. It does not subscribe then, and the pane says that events are not
+  carried from another node.
+- **It refreshed the devices and plan panes every idle second**, which for
+  another node is a call across the estate each second, possibly waiting on
+  fuzznet's round. A node's panes refresh every 15 ticks instead, as the
+  GUI's window does (10.699).
+
+`node_fleet.sh` runs `ncfg tui --at A` in a pty: it is drawn, `e` shows the
+events pane with its sentence, and `q` ends it, under the script's own read
+deadline and `timeout`. Removing the `--at` branch fails the check, because
+the pane then tries this machine's socket. The 15-tick throttle is not under
+test.
+
 ## 10.699 The window moves between nodes: the node box
 
 10.698's open half. The toolbar's node box lists this machine first, then

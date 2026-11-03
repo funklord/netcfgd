@@ -60,6 +60,9 @@
 
 /* How often a pane that watches the machine re-asks. The Rust's 1000. */
 #define TICK_MS 1000
+/* Ticks between refreshes of another node's panes: fifteen seconds, as the
+ * GUI's window refreshes one (10.699, 10.700). */
+#define NODE_TICKS 15
 
 /* Enough for a burst of keystrokes and for the longest sequence in it. */
 #define KEYS_MAX 64
@@ -576,6 +579,7 @@ static void loop(ncfg_tui_t *tui, const char *socket_path, int events_fd,
 	char   pending[KEYS_MAX];
 	size_t pending_length = 0;
 	int    streaming = events_fd >= 0;
+	int    idle_ticks = 0;
 
 	for (;;) {
 		struct pollfd watch[2];
@@ -617,8 +621,12 @@ static void loop(ncfg_tui_t *tui, const char *socket_path, int events_fd,
 				pending_length = 0;
 				continue;
 			}
-			if (tui->pane == NCFG_TUI_PANE_DEVICES ||
-			    tui->pane == NCFG_TUI_PANE_PLAN) {
+			/* Another node is asked across the estate, a call that may wait
+			 * on fuzznet's round, so not every second (10.700). */
+			if ((tui->pane == NCFG_TUI_PANE_DEVICES ||
+			        tui->pane == NCFG_TUI_PANE_PLAN) &&
+			    (!ncfg_cli_asking_elsewhere() || ++idle_ticks >= NODE_TICKS)) {
+				idle_ticks = 0;
 				refresh(tui, socket_path);
 			}
 			continue;
@@ -716,9 +724,20 @@ int ncfg_tui_run(const ncfg_cli_options_t *options)
 	 * renderer has to reach for an environment. */
 	tui.no_color = getenv("NO_COLOR") != NULL;
 
-	events_fd = subscribe(socket_path, err, sizeof(err));
-	if (events_fd < 0) {
-		ncfg_tui_event_push(&tui, err);
+	/* **Not another node's stream** (10.700): the subscription is a socket of
+	 * this machine's, and under `--at` it would put this machine's events in
+	 * a pane that shows another node. fuzznet carries no stream across the
+	 * estate (0312), so the pane says so and the panes refresh on a slower
+	 * clock instead. */
+	if (ncfg_cli_asking_elsewhere()) {
+		events_fd = -1;
+		ncfg_tui_event_push(&tui, "events are not carried from another node, so the "
+		                          "panes refresh every 15 seconds instead");
+	} else {
+		events_fd = subscribe(socket_path, err, sizeof(err));
+		if (events_fd < 0) {
+			ncfg_tui_event_push(&tui, err);
+		}
 	}
 	ncfg_proto_framer_init(&framer);
 

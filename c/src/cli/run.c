@@ -2412,7 +2412,7 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
     const char **positional, size_t count)
 {
 	static const char *const carried[] = { "wifi", "modem", "reload", "confirm", "revert",
-		"apply", "config", "secret", "profile" };
+		"apply", "config", "secret", "profile", "tui" };
 	char   why[NCFG_ERROR_MAX];
 	size_t at;
 

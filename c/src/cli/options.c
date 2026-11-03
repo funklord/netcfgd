@@ -147,7 +147,7 @@ static const char usage_text[] =
     "  --at HOST                another node of this estate, HOST its key in hex,\n"
     "                           asked through your own fuzznetd: for status,\n"
     "                           wifi, modem, reload, confirm, revert, apply,\n"
-    "                           config, secret and profile\n"
+    "                           config, secret, profile and tui\n"
     "  --oneshot                apply once and exit; the default, there being no\n"
     "                           daemon yet\n"
     "  --json                   machine-readable output\n"

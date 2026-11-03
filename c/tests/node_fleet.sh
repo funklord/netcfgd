@@ -14,6 +14,7 @@
 #   - `call ask at A` answers a plan and refuses an apply, by A's tiers;
 #   - `ncfg modem --at A` is A's answer, `reload --at A` A's refusal, and a
 #     command that works on this machine is refused with `--at`;
+#   - `ncfg tui --at A` runs in a pty and says it has no event stream;
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
 #   - and with its admin tier open, a configuration longer than one line,
@@ -138,6 +139,39 @@ check $? "  a command that works here is refused with --at, not done here"
 XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" 2>&1 | grep -q 'confirm-within'
 check $? "  and apply --at without a window is refused before anything is asked"
 
+# `ncfg tui --at A` (10.700), in a pty for four seconds: drawn, then `e` for
+# the events pane, which says it has no stream from another node, and `q`
+# ends it. Bounded by the pty's own deadline and by `timeout`.
+XDG_RUNTIME_DIR=$R/xdg timeout 30 python3 -I -c '
+import os, pty, select, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], [sys.argv[1], "tui", "--at", sys.argv[2]])
+seen = b""
+def read_for(seconds):
+    global seen
+    until = time.monotonic() + seconds
+    while time.monotonic() < until:
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if ready:
+            try:
+                seen += os.read(fd, 65536)
+            except OSError:
+                return
+read_for(2.0)
+os.write(fd, b"e")  # the events pane
+read_for(2.0)
+os.write(fd, b"q")
+time.sleep(0.5)
+try:
+    os.kill(pid, 15)
+except ProcessLookupError:
+    pass
+os.waitpid(pid, 0)
+sys.stdout.write(seen.decode(errors="replace"))' "$C" "$host" > "$R/tui.out" 2>&1
+grep -q 'not carried from another node' "$R/tui.out"
+check $? "ncfg tui --at A says it has no event stream from another node"
+
 # Nothing under --at falls back to this machine (10.694): `config put` asks
 # first and writes locally only where no daemon listens, so with A's admin
 # tier closed it must be A's refusal, and the local directory stays empty.
@@ -241,7 +275,7 @@ check $? "  and a window nobody confirms reverts by itself ($(grep -i revert "$R
 check $? "netcfgd's log carries no sanitizer report"
 
 if [ $failed -ne 0 ]; then
-	for f in a.log b.log root.out a3.log big.out apply.out confirm.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
+	for f in a.log b.log root.out a3.log big.out apply.out confirm.out tui.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
 	echo "node_fleet: some checks FAILED"
 	exit 1
 fi
