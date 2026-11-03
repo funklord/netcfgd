@@ -1024,6 +1024,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	free(builder.link_up);
 	free(builder.added);
 	free(builder.declined);
+	free(builder.stopped_early);
 	free(builder.appearing);
 	free(builder.unmanaged);
 	/* Shallow: it borrowed every string from the caller's observation, which

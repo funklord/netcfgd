@@ -147,7 +147,7 @@ static const ncfg_enum_t tun_mode_set = WORD_SET("tun mode", tun_mode_words);
  * configuration language's are `wireguard` and `openvpn`. */
 static const char *const interface_kind_words[] = { "physical", "bridge", "bond", "vlan",
 	"vxlan", "wire_guard", "pppoe", "open_vpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
-	"tun", "ifb" };
+	"tun", "ifb", "mesh_point" };
 static const ncfg_enum_t interface_kind_set = WORD_SET("interface kind", interface_kind_words);
 
 static const char *const qdisc_kind_words[] = { "fq_codel", "cake", "fq", "pfifo_fast",
@@ -217,7 +217,7 @@ const char *ncfg_interface_kind_name(int kind)
  */
 static const char *const language_kind_words[] = { "physical", "bridge", "bond", "vlan",
 	"vxlan", "wireguard", "pppoe", "openvpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
-	"tun", "ifb" };
+	"tun", "ifb", "mesh_point" };
 static const ncfg_enum_t language_kind_set = WORD_SET("interface kind", language_kind_words);
 
 const char *ncfg_interface_kind_language_name(int kind)
@@ -1552,6 +1552,12 @@ static const ncfg_field_t tun_fields[] = {
 };
 static const ncfg_type_t tun_type = TAGGED("tun device", tun_fields, "kind");
 
+static const ncfg_field_t mesh_point_fields[] = {
+	{ .name = "parent", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_mesh_point_config_t, parent) }
+};
+static const ncfg_type_t mesh_point_type = TAGGED("mesh point", mesh_point_fields, "kind");
+
 static const ncfg_type_t physical_type = { "physical device", NULL, 0, "kind" };
 static const ncfg_type_t dummy_type = { "dummy device", NULL, 0, "kind" };
 static const ncfg_type_t ifb_type = { "ifb device", NULL, 0, "kind" };
@@ -1604,6 +1610,9 @@ static const ncfg_type_t *kind_arm(int kind, ncfg_interface_kind_t *value, void 
 	case NCFG_KIND_IFB:
 		*payload = &value->kind;
 		return &ifb_type;
+	case NCFG_KIND_MESH_POINT:
+		*payload = &value->mesh_point;
+		return &mesh_point_type;
 	default:
 		*payload = &value->kind;
 		return &physical_type;

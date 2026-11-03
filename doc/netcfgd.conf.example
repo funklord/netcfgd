@@ -1022,7 +1022,8 @@
 # way and peers with any other that is; there is no master.
 #
 #   - The radio is given to the mesh and does nothing else: no `network` is
-#     joined on it and no `access_point` may name it.
+#     joined on it and no `access_point` may name it -- unless the mesh runs on
+#     a second interface of the radio, below.
 #   - `channel` is required. Mesh nodes meet on the channel they are given
 #     rather than searching for each other.
 #   - Security is SAE (`psk`, used as the SAE password) or none. WPA2 does not
@@ -1039,6 +1040,41 @@
 #}
 #interface wlan2 {
 #	config = "10.20.0.1/24"
+#}
+
+# A MESH AND AN ACCESS POINT ON ONE RADIO: a `mesh_point` device is a second
+# interface netcfgd makes on the radio, the mesh runs on it, and the access
+# point stays on the radio's own interface -- the usual shape of a mesh
+# router with one radio for both backhaul and clients.
+#
+#   - Both on one channel, the mesh's: a radio is on one channel at a time, so
+#     the access point must name it, and a different one is refused.
+#   - The mesh point gets an address of its own, derived from the radio's, and
+#     is taken away again when its `device` block goes.
+
+#device mesh0 {
+#	mesh_point { parent = "wlan3" }
+#}
+#mesh "backhaul-shared" {
+#	device  = "mesh0"
+#	channel = 6
+#	wifi {
+#		psk = "@secret:mesh"
+#	}
+#}
+#interface mesh0 {
+#	config = "10.21.0.1/24"
+#}
+#access_point "Clients" {
+#	device  = "wlan3"
+#	channel = 6
+#	ssid    = "436c69656e7473"
+#	wifi {
+#		psk = "@secret:clients"
+#	}
+#}
+#interface wlan3 {
+#	config = "192.168.60.1/24"
 #}
 
 # THE ADDRESS IS NOT OPTIONAL, and netcfgd cannot supply what comes after it.

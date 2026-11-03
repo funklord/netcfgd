@@ -540,6 +540,10 @@ typedef struct {
 int ncfg_kernel_wg_configure_new(const ncfg_kernel_world_t *world, const char *iface,
     const ncfg_interface_kind_t *kind, char *err, size_t err_size);
 
+/* A mesh point made (`create` its `link.create`) or the link `name` taken
+ * away, over nl80211 (10.687). */
+int ncfg_kernel_mesh_point_op(const ncfg_op_t *create, const char *name, char *err,
+    size_t err_size);
 int ncfg_kernel_link_kind_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
 int ncfg_kernel_bridge_vlan_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op,

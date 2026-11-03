@@ -939,10 +939,46 @@ drop:
  * The dispatcher
  * ------------------------------------------------------------------------ */
 
+/*
+ * `mesh_point { parent = "wlan2" }`: a second interface on that radio's phy,
+ * as a mesh point (project.md 10.687), which is what lets a `mesh` block and
+ * an `access_point` share one radio -- the mesh on this interface, the access
+ * point on the parent. Made over nl80211, so it has nothing to configure but
+ * where it lives.
+ */
+static int lower_mesh_point(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_interface_kind_t *out)
+{
+	const ncfg_ast_item_t       *item;
+	const ncfg_ast_assignment_t *assignment;
+	char                        *parent = NULL;
+	size_t                       at;
+
+	FOR_ASSIGNMENTS(block, item, assignment) {
+		if (strcmp(assignment->key, "parent") == 0) {
+			free(parent);
+			parent = ncfg_as_interface_name(ctx, assignment->value);
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown mesh_point key `%s`: a mesh point has a `parent`, the radio "
+			    "it is made on", assignment->key);
+		}
+	}
+	if (!parent) {
+		ncfg_diag(ctx, block->span,
+		    "a mesh_point needs a `parent`: the radio's interface it is made beside, "
+		    "for example: mesh_point { parent = \"wlan2\" }");
+		return 0;
+	}
+	out->kind = NCFG_KIND_MESH_POINT;
+	out->mesh_point.parent = parent;
+	return 1;
+}
+
 int ncfg_is_kind_block(const char *head)
 {
 	static const char *const heads[] = { "bridge", "bond", "vlan", "veth", "vxlan", "vrf",
-		"macvlan", "tunnel", "tun", "tap", "wireguard", "pppoe", "openvpn" };
+		"macvlan", "tunnel", "tun", "tap", "wireguard", "pppoe", "openvpn", "mesh_point" };
 	size_t i;
 
 	for (i = 0; i < sizeof(heads) / sizeof(heads[0]); i++) {
@@ -995,6 +1031,9 @@ int ncfg_lower_kind_block(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *inner,
 	}
 	if (strcmp(head, "openvpn") == 0) {
 		return lower_openvpn(ctx, inner, out);
+	}
+	if (strcmp(head, "mesh_point") == 0) {
+		return lower_mesh_point(ctx, inner, out);
 	}
 	return 0;
 }

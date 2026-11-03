@@ -1141,6 +1141,11 @@ static const char *recreatable_kind(const ncfg_interface_kind_t *kind)
 	 * (0254). */
 	case NCFG_KIND_TUN:
 		return "tun";
+	/* **Made over nl80211, and never remade by deletion** (10.687): the kernel
+	 * gives a mac80211 interface no `IFLA_INFO_KIND` to compare, so the kind
+	 * cannot be read back, and a mesh point is created only where its name is
+	 * free -- an interface of that name is never thrown away for it. */
+	case NCFG_KIND_MESH_POINT:
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_PPPOE:
 	case NCFG_KIND_OPENVPN:

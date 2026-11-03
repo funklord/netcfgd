@@ -944,6 +944,10 @@ static void refuse_unusable_names(const ncfg_document_t *document, ncfg_unrender
 			refuse_unusable_name(missing, "device", device->name, "`parent`",
 			    kind->macvlan.parent);
 			break;
+		case NCFG_KIND_MESH_POINT:
+			refuse_unusable_name(missing, "device", device->name, "`parent`",
+			    kind->mesh_point.parent);
+			break;
 		case NCFG_KIND_TUNNEL:
 			refuse_unusable_name(missing, "device", device->name, "`parent`",
 			    kind->tunnel.parent);

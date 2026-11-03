@@ -153,6 +153,10 @@ typedef struct {
 	/* Devices this plan has declined to create, having already said why. */
 	const char **declined;
 	size_t       declined_count;
+	/* Radios whose supplicant was stopped ahead of an access point's start
+	 * on them (10.687), so teardown does not stop it a second time. */
+	const char **stopped_early;
+	size_t       stopped_early_count;
 	/* Names that will exist by the end of this plan without anything creating
 	 * them directly. Only veth peers, so far: creating one end creates both. */
 	const char **appearing;

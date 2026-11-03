@@ -415,6 +415,63 @@ static int linkset_cycle(const ncfg_document_t *document, const char *name,
  * reach, and a listener on an interface netcfgd does not configure has no
  * address to listen on.
  */
+/*
+ * **A mesh point and an access point on one radio share its channel**
+ * (10.687). A `mesh_point` device lets a `mesh` block and an `access_point`
+ * use one radio -- the mesh on the second interface, the access point on the
+ * parent -- but a radio is on one channel at a time, so the two must name the
+ * same one: the mesh's is required, and an access point left to choose would
+ * be one the mesh could never come up beside. After every block is read,
+ * because the device, the mesh and the access point may come in any order.
+ */
+static void check_shared_radio(ncfg_lower_ctx_t *ctx, const deferred_t *meshes, size_t count)
+{
+	const ncfg_document_t *document = ctx->document;
+	size_t                 at;
+
+	for (at = 0; at < count; at++) {
+		const ncfg_mesh_t   *mesh = NULL;
+		const ncfg_device_t *point;
+		size_t               one;
+
+		for (one = 0; one < document->mesh_count; one++) {
+			if (strcmp(document->meshes[one].id, meshes[at].name) == 0) {
+				mesh = &document->meshes[one];
+			}
+		}
+		point = mesh && mesh->device ? ncfg_document_device(document, mesh->device) : NULL;
+		if (!point || point->kind.kind != NCFG_KIND_MESH_POINT ||
+		    !point->kind.mesh_point.parent) {
+			continue;
+		}
+		ctx->source = meshes[at].source;
+		for (one = 0; one < document->access_point_count; one++) {
+			const ncfg_access_point_t *access_point = &document->access_points[one];
+
+			if (!access_point->device ||
+			    strcmp(access_point->device, point->kind.mesh_point.parent) != 0) {
+				continue;
+			}
+			if (!access_point->channel.has) {
+				ncfg_diag(ctx, meshes[at].span,
+				    "mesh `%s` is on %s, a mesh point on %s, and access point `%s` is on "
+				    "%s with no channel: one radio is on one channel, so give the access "
+				    "point the mesh's, channel = %lld",
+				    mesh->id, mesh->device, access_point->device, access_point->id,
+				    access_point->device, (long long)mesh->channel.value);
+			} else if (mesh->channel.has &&
+			    access_point->channel.value != mesh->channel.value) {
+				ncfg_diag(ctx, meshes[at].span,
+				    "mesh `%s` is on channel %lld and access point `%s` on %lld, on one "
+				    "radio (%s): a radio is on one channel at a time, so they must name "
+				    "the same one",
+				    mesh->id, (long long)mesh->channel.value, access_point->id,
+				    (long long)access_point->channel.value, access_point->device);
+			}
+		}
+	}
+}
+
 static void check_upnp(ncfg_lower_ctx_t *ctx)
 {
 	const ncfg_upnp_t *upnp = ctx->document->globals.upnp;
@@ -843,6 +900,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	 * read. */
 	deferred_t      *linksets = NULL;
 	size_t           linkset_count = 0;
+	deferred_t      *mesh_spans = NULL;
+	size_t           mesh_span_count = 0;
 	/* Each access point naming a host list, resolved once every list has been
 	 * read (10.591). */
 	deferred_t      *referrers = NULL;
@@ -1017,6 +1076,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 				continue;
 			}
 			check_mesh_radio(&ctx, block->block->span, mesh.device, "mesh", mesh.id);
+			(void)remember(&ctx, &mesh_spans, &mesh_span_count, mesh.id, NULL,
+			    block->block->span, block->source);
 			ncfg_record(&ctx, block->source, block->block->span, "mesh.%s", mesh.id);
 			{
 				ncfg_mesh_t *slot = ncfg_push(&ctx, &ctx.document->meshes,
@@ -1170,10 +1231,12 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	resolve_forward_hosts(&ctx, forwarders, forwarder_count);
 	resolve_block_lists(&ctx, blockers, blocker_count);
 	check_upnp(&ctx);
+	check_shared_radio(&ctx, mesh_spans, mesh_span_count);
 
 	deferred_free(memberships, membership_count);
 	deferred_free(shapers, shaper_count);
 	deferred_free(linksets, linkset_count);
+	deferred_free(mesh_spans, mesh_span_count);
 	deferred_free(referrers, referrer_count);
 	deferred_free(forwarders, forwarder_count);
 	deferred_free(blockers, blocker_count);

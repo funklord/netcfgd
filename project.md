@@ -12671,6 +12671,66 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.687 One radio meshes and runs an access point: the `mesh_point` device
+
+10.588's open item, and the usual shape of a mesh router: one radio for both
+the backhaul and the clients. A radio was given to a mesh and did nothing else.
+Now `device mesh0 { mesh_point { parent = "wlan2" } }` is a second interface
+netcfgd makes on that radio's phy, the `mesh` block names `mesh0`, and an
+`access_point` stays on `wlan2`.
+
+**What it took, layer by layer:**
+
+- **A kind, `mesh_point`, with a `parent`** -- model, language, renderer,
+  plan encoding, the socket document's kinds table (6.4, now sixteen).
+- **Made over nl80211, not rtnetlink**: `NL80211_CMD_NEW_INTERFACE` with the
+  parent's index standing for its phy and type mesh point, as `iw dev wlan2
+  interface add mesh0 type mp` sends it; taken away with
+  `NL80211_CMD_DEL_INTERFACE`, because a mac80211 interface has no rtnetlink
+  delete -- a link netcfgd deletes that has a `phy80211` is one of these.
+  Marked as netcfgd's by the same altname as everything it creates.
+- **An address of its own**, the radio's with the locally administered bit
+  set (and the last octet's low bit flipped if it was set already): mac80211
+  refuses to bring up a second interface with the address of one already up,
+  `ENOTUNIQ`, which was the rig's first failure.
+- **Never remade by deletion**: the kernel gives a mac80211 interface no
+  `IFLA_INFO_KIND` to compare, so the planner creates one only where its name
+  is free and never throws an interface of that name away for it.
+- **One channel**: a radio is on one at a time, so a mesh point's mesh and an
+  access point on its parent must name the same channel, and an access point
+  left to choose is told the mesh's -- refused at compile time otherwise.
+
+**Three faults the rig found, each a real one**, in going from a radio that
+meshed to one that meshes on `mesh0` and serves an access point on `wlan0`:
+
+- **No supplicant was planned for a mesh point the plan was creating**: the
+  radio rule asked the observation whether the interface was wireless, and a
+  link that does not exist yet is not. A mesh on a `mesh_point` device is
+  wanted before it exists, and waits on its creation.
+- **hostapd started before the radio's old supplicant stopped**, because
+  teardown runs after the device walk -- and a supplicant leaving puts the
+  interface back in station mode, so `wlan0` ended `managed` under an access
+  point the plan had started. The access point's pass now stops a supplicant
+  still running on its radio first and waits on that stop, and teardown leaves
+  it alone. This holds for a radio going from station to access point too.
+- **hostapd would not beacon beside the mesh** ("Failed to set beacon
+  parameters", every time and not a race -- a second apply failed the same
+  way): two beaconing interfaces on one radio must share a beacon interval
+  where the driver says so, and the mesh was left to wpa_supplicant's own. The
+  mesh network now names `beacon_int=100`, hostapd's default; with it the
+  first apply converges.
+
+Checked: `hull-mesh` gains two phases -- one apply makes `mesh0` a mesh point,
+`wlan0` an access point, the peer link established on `mesh0` and the echo
+crossing it; then with the device block gone `mesh0` is taken away over
+nl80211. The runs before each fix are its controls: without the beacon
+interval hostapd refused; without the planner's want no supplicant started on
+`mesh0`; without the early stop `wlan0` ended managed. `lower_test` gains six
+checks (the kind, one channel, a missing one told the mesh's, no parent, an
+unknown key); `hull-steer` still passes with the access point's new ordering.
+`hull-ap-lease` did not run: its image has no hostapd and wants rebuilding,
+which is the rig's state and not this change.
+
 ## 10.686 `ncfg status` says who a mesh node is meshed with
 
 10.588's open item: netcfgd joined an 802.11s mesh and nothing it reported
@@ -16872,9 +16932,9 @@ which is how the driver came to ask about meshes. Unit tests in
 `plan_radio_test` (a supplicant with no `wifi` block, none when unmanaged;
 sabotaged red once).
 
-**Not built**: a mesh and a station or access point on one radio at once
-(which needs a second virtual interface on the phy), and mesh gating to a
-wired LAN beyond bridging the mesh interface. ~~`ncfg status` saying who the
+**Not built**: ~~a mesh and a station or access point on one radio at once~~
+-- **a mesh and an access point, built in 10.687** (a station beside a mesh
+is not); and mesh gating to a wired LAN beyond bridging the mesh interface. ~~`ncfg status` saying who the
 peers are~~ -- **built, 10.686.**
 
 **Found on the way: the example gate could not see two of the language's ten

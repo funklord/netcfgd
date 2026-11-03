@@ -16,6 +16,11 @@
 #     the probe can tell a mesh from no mesh;
 #   - `ncfg status` names that peer under wlan0 (10.686), read from the
 #     kernel's station dump as `iw` reads it;
+#   - with a `mesh_point` device (10.687), one radio meshes and runs an access
+#     point at once: mesh0 is a mesh point netcfgd made on wlan0's phy, the
+#     peer link is established and the echo crosses on it, and wlan0 is an
+#     access point beside it; and with the device block gone, mesh0 is taken
+#     away over nl80211;
 #   - a second `ncfg plan` has nothing to do, which is the apply's record and
 #     the observation's digest agreeing -- the two sides of 10.588's one
 #     fingerprint question.
@@ -145,9 +150,88 @@ say "ncfg status names the peer: $shown time(s)"
 again=$(grep -c '^nothing to do' "$work/plan.log")
 say "a second plan: $(head -1 "$work/plan.log")"
 
+# ---- 10.687: the mesh on a mesh point, an access point on the same radio ----
+# One radio, two interfaces: netcfgd makes mesh0 on wlan0's phy and meshes on
+# it, and wlan0 becomes an access point, both on channel 1.
+printf 'staywithme' > "$work/etc/secrets/ap"
+chmod 600 "$work/etc/secrets/ap"
+cat > "$work/etc/netcfgd.conf" <<CONF
+device mesh0 {
+	mesh_point { parent = "wlan0" }
+}
+
+mesh "backhaul" {
+	device  = "mesh0"
+	channel = 1
+	wifi { psk = "@secret:mesh" }
+}
+
+interface mesh0 {
+	config = "10.20.0.1/24"
+}
+
+access_point "ap" {
+	device  = "wlan0"
+	channel = 1
+	ssid    = "7368617265"
+	wifi { psk = "@secret:ap" }
+}
+
+interface wlan0 {
+	config = "10.30.0.1/24"
+}
+CONF
+# One apply, from a radio that was meshing to one that meshes on a second
+# interface and serves an access point on its first. Each of three faults
+# found here stopped it (10.687): no supplicant planned for the mesh point the
+# plan was creating; hostapd started before the radio's old supplicant
+# stopped, which put it back in station mode; and hostapd refused to beacon
+# ("Failed to set beacon parameters") beside a mesh whose beacon interval
+# was not its own.
+"$build/ncfg" apply > "$work/apply2.log" 2>&1
+applied2=$?
+cp "$work/run/hostapd/wlan0.log" "$work/hostapd2.log" 2>/dev/null
+n=0
+until iw dev mesh0 station dump 2>/dev/null | grep -q 'mesh plink:.*ESTAB' || [ "$n" -gt 200 ]; do
+	sleep 0.1
+	n=$((n + 1))
+done
+point_type=$(iw dev mesh0 info 2>/dev/null | sed -n 's/^[[:space:]]*type //p')
+radio_type=$(iw dev wlan0 info 2>/dev/null | sed -n 's/^[[:space:]]*type //p')
+link2=$(iw dev mesh0 station dump 2>/dev/null | grep -A20 "^Station $peer_mac" |
+	sed -n 's/^[[:space:]]*mesh plink:[[:space:]]*//p' | head -1)
+after2=$(python3 "$work/echo.py" send 2>/dev/null)
+say "one radio: apply rc=$applied2, mesh0 ${point_type:-absent}, wlan0 ${radio_type:-?}," \
+	"peer link ${link2:-none}, the echo ${after2:-nothing}"
+
+# And taken away: the mesh point leaves with its device block, over nl80211,
+# since a mac80211 interface has no rtnetlink delete.
+cat > "$work/etc/netcfgd.conf" <<CONF
+access_point "ap" {
+	device  = "wlan0"
+	channel = 1
+	ssid    = "7368617265"
+	wifi { psk = "@secret:ap" }
+}
+
+interface wlan0 {
+	config = "10.30.0.1/24"
+}
+CONF
+"$build/ncfg" apply > "$work/apply3.log" 2>&1
+applied3=$?
+gone=$([ -e /sys/class/net/mesh0 ] && echo still || echo gone)
+say "the mesh point removed: apply rc=$applied3, mesh0 $gone"
+
 kill "$server" 2>/dev/null
 wait "$server" 2>/dev/null
 failed=0
+[ "$applied2" -eq 0 ] || { say "  the one-radio apply failed"; failed=1; }
+[ "$point_type" = "mesh point" ] || { say "  mesh0 is not a mesh point"; failed=1; }
+[ "$radio_type" = AP ] || { say "  wlan0 is not an access point beside it"; failed=1; }
+[ "$link2" = ESTAB ] || { say "  no established peer link on mesh0"; failed=1; }
+[ "$after2" = echoed ] || { say "  no traffic crossed the mesh on mesh0"; failed=1; }
+[ "$applied3" -eq 0 ] && [ "$gone" = gone ] || { say "  the mesh point was not taken away"; failed=1; }
 [ "$applied" -eq 0 ] || { say "  the apply failed"; failed=1; }
 [ "$before" = silent ] || { say "  the control failed: an echo came back with no mesh"; failed=1; }
 [ "$iftype" = "mesh point" ] || { say "  wlan0 is not a mesh point"; failed=1; }
@@ -158,6 +242,9 @@ failed=0
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -12 >> "$out"
 	sed 's/^/  plan: /' "$work/plan.log" | head -8 >> "$out"
+	sed 's/^/  apply2: /' "$work/apply2.log" | tail -12 >> "$out"
+	sed 's/^/  apply3: /' "$work/apply3.log" | tail -8 >> "$out"
+	sed 's/^/  hostapd: /' "$work/hostapd2.log" 2>/dev/null | tail -25 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

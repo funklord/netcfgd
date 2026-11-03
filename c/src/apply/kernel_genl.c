@@ -46,6 +46,7 @@
 #include "ncfg/observe.h"
 #include "ncfg/state.h"
 #include "ncfg/wds.h"
+#include "ncfg/mesh_peer.h"
 #include "ncfg/wire.h"
 
 #include <errno.h>
@@ -776,6 +777,104 @@ int ncfg_kernel_wds_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
 		(void)snprintf(doing, sizeof(doing), "turn four-address mode %s on %s",
 		    op->u.set_wds.on ? "on" : "off", op->u.set_wds.name);
 		ok = ncfg_kernel_send(&socket, &message, seq, op->kind, doing, err, err_size);
+	}
+	ncfg_buf_free(&message);
+	ncfg_genl_family_free(&family);
+	ncfg_netlink_close(&socket);
+	return ok;
+}
+
+/*
+ * A mesh point made, or taken away, over nl80211 (10.687): `create` the
+ * `link.create` of a `mesh_point` device, made on its parent's phy; otherwise
+ * `name` the interface to delete, which `kernel.c` hands here when the link is
+ * a mac80211 one -- rtnetlink has no delete for those.
+ */
+/* An interface's address from `/sys/class/net/NAME/address`, as six octets. */
+static int radio_address(const char *name, uint8_t out[6])
+{
+	char         path[128];
+	char         text[32];
+	unsigned int octet[6];
+	FILE        *file;
+	int          got;
+	size_t       at;
+
+	if (!name || strchr(name, '/') != NULL ||
+	    snprintf(path, sizeof(path), "/sys/class/net/%s/address", name) >= (int)sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	got = fgets(text, sizeof(text), file) != NULL;
+	(void)fclose(file);
+	if (!got || sscanf(text, "%2x:%2x:%2x:%2x:%2x:%2x", &octet[0], &octet[1], &octet[2],
+	        &octet[3], &octet[4], &octet[5]) != 6) {
+		return 0;
+	}
+	for (at = 0; at < 6u; at++) {
+		out[at] = (uint8_t)octet[at];
+	}
+	return 1;
+}
+
+int ncfg_kernel_mesh_point_op(const ncfg_op_t *create, const char *name, char *err,
+    size_t err_size)
+{
+	ncfg_netlink_t     socket;
+	ncfg_genl_family_t family;
+	ncfg_buf_t         message;
+	char               doing[NCFG_ERROR_MAX];
+	unsigned int       index;
+	uint32_t           seq;
+	uint8_t            address[6];
+	int                has_address = 0;
+	int                ok;
+
+	if (create) {
+		const ncfg_interface_kind_t *kind = create->u.link_create.kind;
+		uint8_t                      parent[6];
+
+		name = create->u.link_create.name;
+		index = kind && kind->mesh_point.parent ? if_nametoindex(kind->mesh_point.parent) : 0u;
+		if (index == 0u) {
+			ncfg_error_set(err, err_size,
+			    "%s is a mesh point on %s, which is not an interface this machine has",
+			    name ? name : "?",
+			    kind && kind->mesh_point.parent ? kind->mesh_point.parent : "no radio");
+			return 0;
+		}
+		/* An address of its own, or the kernel refuses to bring it up beside
+		 * its radio (`ncfg_mesh_point_address`). Read from sysfs, where the
+		 * radio's interface says it. */
+		if (radio_address(kind->mesh_point.parent, parent)) {
+			ncfg_mesh_point_address(parent, address);
+			has_address = 1;
+		}
+	} else {
+		index = name ? if_nametoindex(name) : 0u;
+		if (index == 0u) {
+			ncfg_error_set(err, err_size, "%s is not an interface this machine has",
+			    name ? name : "?");
+			return 0;
+		}
+	}
+	if (!ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, err, err_size)) {
+		return 0;
+	}
+	seq = ncfg_netlink_take_seq(&socket);
+	ncfg_buf_init(&message, 0);
+	ok = create ? ncfg_mesh_point_add_request(&message, &family, (uint32_t)index, name,
+	                  has_address ? address : NULL, seq, err, err_size)
+	            : ncfg_mesh_point_delete_request(&message, &family, (uint32_t)index, seq, err,
+	                  err_size);
+	if (ok) {
+		(void)snprintf(doing, sizeof(doing), "%s the mesh point %s",
+		    create ? "make" : "take away", name);
+		ok = ncfg_kernel_send(&socket, &message, seq,
+		    create ? create->kind : NCFG_OP_LINK_DELETE, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
 	ncfg_genl_family_free(&family);

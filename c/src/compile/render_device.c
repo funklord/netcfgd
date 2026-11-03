@@ -454,6 +454,11 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 	case NCFG_KIND_VXLAN:
 		render_vxlan(&kind->vxlan, name, body, missing);
 		break;
+	case NCFG_KIND_MESH_POINT:
+		ncfg_buf_add_text(body, "\tmesh_point {\n\t\tparent = ");
+		ncfg_render_quote(body, kind->mesh_point.parent);
+		ncfg_buf_add_text(body, "\n\t}\n");
+		break;
 	case NCFG_KIND_MACVLAN:
 		ncfg_buf_add_text(body, "\tmacvlan {\n\t\tparent = ");
 		ncfg_render_quote(body, kind->macvlan.parent);
@@ -716,7 +721,9 @@ static int our_ifb_name(const char *name, const char *shaped)
  * The clauses stay because the assertion above cannot see a field that is
  * merely unexamined, and because the cost of being wrong here is silence.
  */
-#define NCFG_RENDER_DEVICE_SIZE 592u /* measured, x86-64, 2026-10-09 */
+/* 600 from 2026-11-03: the kind gained `mesh_point` (10.687), a config a
+ * synthesised `ifb` never carries, so `bare_ifb` needs no clause for it. */
+#define NCFG_RENDER_DEVICE_SIZE 600u /* measured, x86-64, 2026-11-03 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
     "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
 

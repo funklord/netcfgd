@@ -79,6 +79,13 @@ int ncfg_plan_radio_supplicant_wanted(const ncfg_document_t *desired,
 		if (device && !device->managed) {
 			return 0;
 		}
+		/* A mesh point this plan creates is wanted before it exists
+		 * (10.687): the supplicant waits on its creation, as everything on an
+		 * interface does, and asking the observation would answer "not a
+		 * radio" until the apply after the one that made it. */
+		if (device && device->kind.kind == NCFG_KIND_MESH_POINT) {
+			return 1;
+		}
 		link = ncfg_observed_link(observed, name);
 		return link && link->wireless;
 	}

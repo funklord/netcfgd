@@ -78,3 +78,60 @@ int ncfg_mesh_peer_parse(const void *payload, size_t length, ncfg_mesh_peer_t *o
 	}
 	return 1;
 }
+
+void ncfg_mesh_point_address(const uint8_t parent[6], uint8_t out[6])
+{
+	memcpy(out, parent, 6u);
+	out[0] |= 0x02u;
+	if (memcmp(out, parent, 6u) == 0) {
+		out[5] ^= 0x01u;
+	}
+}
+
+int ncfg_mesh_point_add_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    uint32_t parent, const char *name, const uint8_t mac[6], uint32_t seq, char *err,
+    size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                ok;
+
+	if (!family || parent == 0u || !name || !name[0]) {
+		ncfg_error_set(err, err_size, "a mesh point needs nl80211, its radio and a name");
+		return 0;
+	}
+	header.cmd = NL80211_CMD_NEW_INTERFACE;
+	header.version = 0;
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_IFINDEX, parent);
+	ncfg_wire_attr_put_str(&attrs, NL80211_ATTR_IFNAME, name);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_IFTYPE, NL80211_IFTYPE_MESH_POINT);
+	if (mac) {
+		ncfg_wire_attr_put(&attrs, NL80211_ATTR_MAC, mac, 6u);
+	}
+	ok = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs, err,
+	    err_size);
+	ncfg_buf_free(&attrs);
+	return ok;
+}
+
+int ncfg_mesh_point_delete_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    uint32_t index, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                ok;
+
+	if (!family || index == 0u) {
+		ncfg_error_set(err, err_size, "taking a mesh point away needs nl80211 and its index");
+		return 0;
+	}
+	header.cmd = NL80211_CMD_DEL_INTERFACE;
+	header.version = 0;
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_IFINDEX, index);
+	ok = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs, err,
+	    err_size);
+	ncfg_buf_free(&attrs);
+	return ok;
+}

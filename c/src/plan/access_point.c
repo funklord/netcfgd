@@ -114,8 +114,56 @@ void ncfg_plan_access_point(ncfg_builder_t *builder, const ncfg_interface_t *int
 	 * one holding something else, and it is the *only* thing that may, because
 	 * an access point cannot be handed anything while it runs.
 	 */
-	ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_ACCESS_POINT, "access_point",
-	    base, out);
+	/*
+	 * **A radio changing role stops its supplicant first** (10.687). A radio
+	 * that was a station or a mesh point has wpa_supplicant on it, which the
+	 * access point makes unwanted; stopped by teardown, it would stop after
+	 * hostapd started, and a supplicant leaving puts the interface back in
+	 * station mode under hostapd -- measured in hull-mesh, `wlan0` left
+	 * `managed` by a plan that had started its access point. So it is stopped
+	 * here, and the access point waits on it.
+	 */
+	{
+		const ncfg_observed_backend_t *running = NULL;
+		ncfg_plan_ids_t                gated = { NULL, 0, 0 };
+		size_t                         at;
+
+		for (at = 0; at < builder->observed->backend_count; at++) {
+			const ncfg_observed_backend_t *one = &builder->observed->backends[at];
+
+			if (one->running && one->kind == NCFG_BACKEND_SUPPLICANT && one->interface &&
+			    strcmp(one->interface, interface->name) == 0) {
+				running = one;
+			}
+		}
+		ncfg_plan_ids_extend(builder->plan, &gated, base);
+		if (running && !ncfg_plan_supplicant_wanted(builder->desired, builder->observed,
+		        interface->name)) {
+			ncfg_op_t     op;
+			ncfg_op_t     inverse;
+			ncfg_reason_t reason;
+			uint32_t      id;
+
+			memset(&op, 0, sizeof(op));
+			op.kind = NCFG_OP_BACKEND_STOP;
+			op.u.backend.kind = NCFG_BACKEND_SUPPLICANT;
+			op.u.backend.iface = running->interface;
+			memset(&inverse, 0, sizeof(inverse));
+			inverse.kind = NCFG_OP_BACKEND_START;
+			inverse.u.backend.kind = NCFG_BACKEND_SUPPLICANT;
+			inverse.u.backend.iface = running->interface;
+			reason = ncfg_plan_reason_unwanted(running->interface, "wifi/dot1x",
+			    ncfg_backend_kind_name(NCFG_BACKEND_SUPPLICANT));
+			id = ncfg_builder_push(builder, &op, &reason, base ? base->ids : NULL,
+			    base ? base->count : 0u, &inverse);
+			ncfg_plan_ids_push(builder->plan, &gated, id);
+			ncfg_builder_note_string(builder, &builder->stopped_early,
+			    &builder->stopped_early_count, running->interface);
+		}
+		ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_ACCESS_POINT, "access_point",
+		    &gated, out);
+		ncfg_plan_ids_free(&gated);
+	}
 }
 
 /*

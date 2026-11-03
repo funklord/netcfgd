@@ -38,6 +38,7 @@
 #include <net/if.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -290,6 +291,20 @@ static int create_tun(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, siz
 	return 1;
 }
 
+/* Whether `name` is a mac80211 interface, which sysfs says by giving it a
+ * `phy80211`. */
+static int wireless_link(const char *name)
+{
+	char path[128];
+	int  wrote;
+
+	if (!name || !name[0] || strchr(name, '/') != NULL) {
+		return 0;
+	}
+	wrote = snprintf(path, sizeof(path), "/sys/class/net/%s/phy80211", name);
+	return wrote > 0 && (size_t)wrote < sizeof(path) && access(path, F_OK) == 0;
+}
+
 static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_t err_size)
 {
 	ncfg_ops_newlink_t link;
@@ -300,6 +315,16 @@ static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, si
 	if (op->u.link_create.kind &&
 	    op->u.link_create.kind->kind == (int)NCFG_KIND_TUN) {
 		return create_tun(kernel, op, err, err_size);
+	}
+	/* A mesh point is made over nl80211 (10.687), and marked as netcfgd's
+	 * the same way as anything else it creates, once the kernel has it. */
+	if (op->u.link_create.kind &&
+	    op->u.link_create.kind->kind == (int)NCFG_KIND_MESH_POINT) {
+		if (!ncfg_kernel_mesh_point_op(op, NULL, err, err_size)) {
+			return 0;
+		}
+		mark_as_ours(kernel, op->u.link_create.name, op->kind);
+		return 1;
 	}
 	/* `ncfg_kernel_newlink_of`, in `kernel_link.c`, and **not a conversion of
 	 * this file's own**: the five `link.set_*` ops need the identical nest,
@@ -747,8 +772,16 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		}
 		return finish_create(&world, op, err, err_size);
 	case NCFG_OP_LINK_DELETE:
-		if (!on_link(kernel, op->u.named.name, op, build_delete, "delete the link", err,
-		    err_size)) {
+		/* **A mac80211 interface has no rtnetlink delete** (10.687), and the
+		 * only one netcfgd deletes is a mesh point it made -- a link is only
+		 * ever deleted here once ownership said it was netcfgd's. So a link
+		 * with a `phy80211` goes to nl80211. */
+		if (wireless_link(op->u.named.name)) {
+			if (!ncfg_kernel_mesh_point_op(NULL, op->u.named.name, err, err_size)) {
+				return 0;
+			}
+		} else if (!on_link(kernel, op->u.named.name, op, build_delete, "delete the link",
+		    err, err_size)) {
 			return 0;
 		}
 		/* **After the kernel took the link, and only then.** The two

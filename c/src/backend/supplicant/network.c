@@ -568,9 +568,16 @@ int ncfg_supplicant_mesh_settings(const ncfg_mesh_t *mesh, const ncfg_secret_res
 	 * itself; the mesh ID travels as `ssid`. Measured over the control socket
 	 * on hwsim, each of these answered OK and two nodes peered (10.588).
 	 */
+	/*
+	 * **And the beacon interval named, 100 TU** (10.687): a radio that meshes
+	 * and runs an access point beacons on two interfaces, and mac80211 asks
+	 * the two to agree where the driver says so -- hostapd's default is 100,
+	 * so the mesh says 100 too rather than leaving it to wpa_supplicant.
+	 */
 	if (!add_plain(out, "ssid", hex, err, err_size) ||
 	    !add_plain(out, "mode", "5", err, err_size) ||
-	    !add_plain(out, "frequency", frequency, err, err_size)) {
+	    !add_plain(out, "frequency", frequency, err, err_size) ||
+	    !add_plain(out, "beacon_int", "100", err, err_size)) {
 		ncfg_supplicant_settings_free(out);
 		return 0;
 	}

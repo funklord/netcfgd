@@ -353,13 +353,15 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
 		return 1;
 	}
 	case NCFG_KIND_TUN:
+	case NCFG_KIND_MESH_POINT:
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_PPPOE:
 	case NCFG_KIND_OPENVPN:
 		break;
 	}
 	/*
-	 * A `tun` is made through `/dev/net/tun` and the other three are not made
+	 * A `tun` is made through `/dev/net/tun`, a mesh point over nl80211
+	 * (`ncfg_kernel_mesh_point_op`, 10.687), and the other three are not made
 	 * by a netlink message at all. Said rather than left as a fall-through, so
 	 * that a caller finds a sentence instead of a link half made.
 	 */

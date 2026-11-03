@@ -801,6 +801,13 @@ typedef struct {
 	char *group;
 } ncfg_tun_config_t;
 
+/* A second interface on a radio, as a mesh point (project.md 10.687):
+ * `parent` the radio's interface whose phy it is made on. What lets one radio
+ * mesh and run an access point at once. */
+typedef struct {
+	char *parent;
+} ncfg_mesh_point_config_t;
+
 /*
  * What kind of thing a device is.
  *
@@ -829,7 +836,11 @@ typedef enum {
 	 * Never written by hand: netcfgd synthesises one per interface asking for
 	 * `ingress_bandwidth`, so creation, ownership and teardown all work on it
 	 * without knowing what it is for. */
-	NCFG_KIND_IFB
+	NCFG_KIND_IFB,
+	/* A mesh point made on a radio's phy beside its own interface (10.687):
+	 * created over nl80211, not rtnetlink, so the planner creates it and
+	 * never remakes it by deletion. */
+	NCFG_KIND_MESH_POINT
 } ncfg_interface_kind_tag_t;
 
 typedef struct {
@@ -846,6 +857,7 @@ typedef struct {
 	ncfg_macvlan_config_t   macvlan;
 	ncfg_tunnel_config_t    tunnel;
 	ncfg_tun_config_t       tun;
+	ncfg_mesh_point_config_t mesh_point;
 } ncfg_interface_kind_t;
 
 /* The document's word for a kind, which is not always the language's. NULL

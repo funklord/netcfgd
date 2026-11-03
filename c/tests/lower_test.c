@@ -1249,6 +1249,45 @@ static void mesh_cases(void)
 	refuses("access_point \"ap\" {\n\tdevice = \"wlan2\"\n\twifi { psk = \"@secret:ap\" }\n}\n"
 	    "mesh \"a\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n\twifi { open = true }\n}\n",
 	    "runs access point `ap`", "  whichever of the two is written first");
+
+	/*
+	 * **And on one radio after all, through a mesh point** (10.687): a
+	 * `mesh_point` device is a second interface on the radio's phy, the mesh
+	 * runs on it and the access point on the parent -- on one channel, the
+	 * mesh's, because a radio is on one at a time.
+	 */
+	{
+		static const char shared[] =
+		    "device mesh0 {\n\tmesh_point { parent = \"wlan2\" }\n}\n"
+		    "mesh \"a\" {\n\tdevice = \"mesh0\"\n\tchannel = 6\n\twifi { open = true }\n}\n"
+		    "access_point \"ap\" {\n\tdevice = \"wlan2\"\n\tchannel = %d\n"
+		    "\twifi { psk = \"@secret:ap\" }\n}\n";
+		char                  text[sizeof(shared) + 8u];
+		const ncfg_device_t  *point;
+
+		(void)snprintf(text, sizeof(text), shared, 6);
+		document = compiles(text,
+		    "a mesh on a mesh point and an access point on its radio compile, on one channel");
+		if (document) {
+			point = ncfg_document_device(document, "mesh0");
+			check(point && point->kind.kind == NCFG_KIND_MESH_POINT &&
+			        strcmp(point->kind.mesh_point.parent, "wlan2") == 0,
+			    "  the mesh point is a device of its own kind, on its radio");
+			ncfg_document_free(document);
+		}
+		(void)snprintf(text, sizeof(text), shared, 11);
+		refuses(text, "on one channel at a time",
+		    "  and on two channels they are refused: one radio, one channel");
+	}
+	refuses("device mesh0 {\n\tmesh_point { parent = \"wlan2\" }\n}\n"
+	    "mesh \"a\" {\n\tdevice = \"mesh0\"\n\tchannel = 6\n\twifi { open = true }\n}\n"
+	    "access_point \"ap\" {\n\tdevice = \"wlan2\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "give the access point the mesh's, channel = 6",
+	    "  as is an access point left to choose, which is told the mesh's channel");
+	refuses("device mesh0 {\n\tmesh_point { }\n}\n", "needs a `parent`",
+	    "a mesh point with no radio is refused");
+	refuses("device mesh0 {\n\tmesh_point { parent = \"wlan2\"; mode = \"x\" }\n}\n",
+	    "unknown mesh_point key `mode`", "  and one with a key it does not have");
 }
 
 static void access_point_cases(void)

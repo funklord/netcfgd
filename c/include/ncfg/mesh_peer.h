@@ -43,4 +43,27 @@ int ncfg_mesh_peers_request(ncfg_buf_t *out, const ncfg_genl_family_t *family, u
 int ncfg_mesh_peer_parse(const void *payload, size_t length, ncfg_mesh_peer_t *out, char *err,
     size_t err_size);
 
+/*
+ * A mesh point made on the phy of interface `parent` and named `name`
+ * (`NL80211_CMD_NEW_INTERFACE`, 10.687) -- the parent's index standing for its
+ * phy, as `iw dev wlan2 interface add mesh0 type mp` sends it -- and one taken
+ * away (`NL80211_CMD_DEL_INTERFACE`). mac80211 interfaces have no rtnetlink
+ * delete, which is why the second exists.
+ */
+int ncfg_mesh_point_add_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    uint32_t parent, const char *name, const uint8_t mac[6], uint32_t seq, char *err,
+    size_t err_size);
+
+/*
+ * The address a mesh point on a radio of address `parent` is given, into
+ * `out`. **It must differ from the radio's own**: mac80211 refuses to bring up
+ * a second interface with the address of one already up, ENOTUNIQ, measured
+ * in hull-mesh. Derived rather than chosen, so it is the same on every start:
+ * the parent's address with the locally administered bit set, and where that
+ * bit was set already, the last octet's lowest bit flipped as well.
+ */
+void ncfg_mesh_point_address(const uint8_t parent[6], uint8_t out[6]);
+int ncfg_mesh_point_delete_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    uint32_t index, uint32_t seq, char *err, size_t err_size);
+
 #endif /* NCFG_MESH_PEER_H */

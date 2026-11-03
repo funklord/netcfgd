@@ -241,6 +241,12 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder)
 		if (backend_wanted(builder, backend, &field)) {
 			continue;
 		}
+		/* Stopped already, ahead of an access point's start on its radio. */
+		if (backend->kind == NCFG_BACKEND_SUPPLICANT && backend->interface &&
+		    ncfg_plan_names(builder->stopped_early, builder->stopped_early_count,
+		        backend->interface)) {
+			continue;
+		}
 
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_BACKEND_STOP;
