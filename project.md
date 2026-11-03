@@ -12671,6 +12671,45 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.682 0309's first verb: `get status PATH`, judged by netcfgd's tiers
+
+**Built, in the serve build**, on fuzznet's framing (its sec 843) and its
+`local_from` (`5e3b41a`, sec 849, the half of request 10 it built): a
+request fuzznet's handlers decline reaches `ncfg_node_loop_t.local` with
+the caller as the socket read it, converted to `ncfg_peer_t`. `get status
+PATH` is judged by `ncfg_authz_permitted` -- the control socket's own check,
+`observe` as for its `status` -- encoded by `ncfg_daemon_status_encode` as
+the socket encodes it, written by `ncfg_caller_file_create` (10.680) and
+answered `ok LENGTH`; `denied ...` and `error ...` with netcfgd's sentences
+otherwise. It runs on the loop's thread between fuzznet's steps, so the
+state it reads is whole. A remote origin is not answered by this hook.
+
+Checked in `node_serve.sh`, three checks: the observation written into a
+directory of the caller's and its length answered (13 KB of JSON, which
+parses); refused into `/tmp`; denied, with nothing written, by a daemon whose
+`observe` tier is root's. Skipping the tier check turns the last red, with
+the status written for a caller who may not observe.
+
+**Three things found on the way, for 0309's design:**
+
+- **The control policy is read once, at start** (`ncfg_main_policy_copy`,
+  `daemon_main.c`), and the socket's servers hold the same copy: an edit to
+  `control` takes effect at the next start. The verb agrees with the socket
+  in that; the denial check runs a daemon of its own because of it.
+- **fuzznet routes no request to an extension without a service and
+  product** (`--fuzznet-service`, `--fuzznet-product`): measured, the same
+  request is answered with fuzznet's status line. Every phase of the test
+  names `1` for both; what netcfgd should name is an estate choice, asked of
+  fuzznet (its inbox `20261103T1700Z`).
+- **A follower on the default socket has no socket of its own** (sec 841),
+  so a client there reaches the face -- a fuzznetd, which does not know
+  netcfgd's verbs. While netcfgd follows, its verbs are unreachable; told to
+  fuzznet in the same message.
+
+Still the holder's, through fuzznet (sec 849): whether an extension may judge
+local users fuzznet would deny (`judges_local`), which is what lets a GUI user
+in `group:netcfgd` reach these verbs without being admitted to fuzznet's own.
+
 ## 10.681 The seen listing is fuzzed, and `make fuzz` builds again
 
 **A target for the listing** (`c/fuzz/seen_listing.c`): fuzznet's `list
@@ -13036,7 +13075,8 @@ there and not started.
   **decided and built, 10.680**, given the caller's uid however it arrives.
 
 **Next:** serving by default, once the size is decided (the holder's, after
-fuzznet's request 8), and 0309 once request 10 is answered.
+fuzznet's request 8); 0309's verbs on 10.682's first one, once fuzznet's
+`judges_local` is decided by the holder.
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 

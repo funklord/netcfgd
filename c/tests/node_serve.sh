@@ -105,6 +105,18 @@ check $? "an edit to the configuration is compiled"
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
 check $? "the station that fuzznetd recorded is read back in-process, in ncfg status"
 
+# 0309's first verb (10.682): the observation written where the caller says,
+# judged by netcfgd's own tiers on the caller fuzznet read (sec 849).
+mkdir -m 700 "$R/out"
+said=$(ask "$R/fz.sock" "get status $R/out/status.json")
+length=$(echo "$said" | sed -n 's/^ok \([0-9]*\)$/\1/p')
+[ -n "$length" ] && [ "$(wc -c < "$R/out/status.json" 2>/dev/null)" = "$length" ] &&
+	python3 -I -c 'import json, sys; json.load(open(sys.argv[1]))' "$R/out/status.json"
+check $? "get status PATH writes the observation there and answers its length ($said)"
+said=$(ask "$R/fz.sock" "get status /tmp/netcfgd-node-serve-$$.json")
+echo "$said" | grep -q "^error .*not the caller's" && [ ! -e "/tmp/netcfgd-node-serve-$$.json" ]
+check $? "  and not into a directory that is not the caller's"
+
 kill -TERM $pid
 wait $pid
 code=$?
@@ -115,6 +127,27 @@ check $? "SIGTERM stops it with status 0 ($code); face, socket, <run>/node gone"
 # removed below, so a report would otherwise go unread.
 ! grep -q 'runtime error\|Sanitizer' "$R/log"
 check $? "the daemon's log carries no sanitizer report"
+
+# ---- the observe tier closed: the same verb denied ----
+# A daemon of its own, because the control policy is read once at start (the
+# socket's servers hold the same copy), so an edit would not close it. With a
+# service and product named, as every phase here: without them fuzznet routes
+# no request to an extension's verbs and answers its own status line instead
+# (measured, 10.682).
+printf 'global {\n\tcontrol {\n\t\tadmin = "any"\n\t}\n}\n' > "$R/conf/netcfgd.conf"
+timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/store" --fuzznet-serve --fuzznet-arg "--socket=$R/fz.sock" \
+	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/log3" 2>&1 &
+pid=$!
+n=0
+until [ -S "$R/fz.sock" ] || [ $n -gt 50 ]; do sleep 0.2; n=$((n + 1)); done
+said=$(ask "$R/fz.sock" "get status $R/out/denied.json")
+echo "$said" | grep -q '^denied .*observe' && [ ! -e "$R/out/denied.json" ]
+check $? "  and is denied where the observe tier is not the caller's ($said)"
+kill -TERM $pid
+wait $pid
+conf ''
 
 # ---- beside a running fuzznetd, then taking over from it ----
 # Neither told a socket, which is the router's case: both under procd, both on

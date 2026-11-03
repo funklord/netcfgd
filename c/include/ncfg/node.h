@@ -43,6 +43,8 @@
 #ifndef NCFG_NODE_H
 #define NCFG_NODE_H
 
+#include "ncfg/daemon.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -128,6 +130,15 @@ typedef struct {
 	size_t (*fds)(void *context, int *out, size_t cap);
 	void   (*ready)(void *context, int fd);
 	int    (*tick)(void *context);
+	/*
+	 * A local request fuzznet's own handlers declined (0309): `line` the
+	 * request as sent, verb and argument; `peer` the caller as the socket
+	 * read it (fuzznet's `local_from`, its sec 849), whom netcfgd's tiers
+	 * judge. The reply's length, ending in a newline, at most `cap`; 0 for one
+	 * this daemon does not answer either. NULL answers none.
+	 */
+	size_t (*local)(void *context, const ncfg_peer_t *peer, const char *line, char *reply,
+	    size_t cap);
 } ncfg_node_loop_t;
 
 /* How a serve ended. */

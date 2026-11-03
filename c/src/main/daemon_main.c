@@ -39,6 +39,9 @@
 #include "loop_internal.h"
 
 #include "ncfg/node.h"
+#include "ncfg/buf.h"
+#include "ncfg/caller_file.h"
+#include "ncfg/proto.h"
 #include "ncfg/watch.h"
 #include "ncfg/seen.h"
 #include "ncfg/cli.h"
@@ -884,10 +887,61 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
  * run `start` built for its own.
  */
 typedef struct {
-	const ncfg_main_run_t *run;
-	ncfg_main_outside_t    outside;
-	ncfg_seen_t           *seen;
+	const ncfg_main_run_t    *run;
+	ncfg_main_outside_t       outside;
+	ncfg_seen_t              *seen;
+	/* What the 0309 verbs answer from and are judged by: the same policy the
+	 * control socket's servers hold, read here on the loop's own thread. */
+	const ncfg_main_policy_t *policy;
+	ncfg_authz_roots_t        roots;
 } node_driven_t;
+
+/*
+ * 0309's first verb, on fuzznet's framing (its sec 843): `get status PATH`
+ * writes the observation -- what the control socket's `status` answers -- to
+ * PATH and answers `ok LENGTH`. Judged by netcfgd's own tiers against the
+ * caller fuzznet read (`observe`, as on the socket), and written only where
+ * that caller could have put it (`ncfg_caller_file_create`, 10.680), because
+ * this daemon is root and the caller need not be. Answered on the loop's
+ * thread between steps of fuzznet's loop, where the state is whole.
+ */
+static size_t node_answer(void *context, const ncfg_peer_t *peer, const char *line,
+    char *reply, size_t cap)
+{
+	static const char    verb[] = "get status ";
+	node_driven_t       *driven = context;
+	ncfg_proto_request_t request;
+	ncfg_buf_t           status;
+	char                 err[NCFG_ERROR_MAX];
+	const char          *path;
+	int                  wrote;
+
+	if (strncmp(line, verb, sizeof(verb) - 1u) != 0) {
+		return 0u;
+	}
+	path = line + sizeof(verb) - 1u;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_STATUS;
+	err[0] = '\0';
+	if (!ncfg_authz_permitted(&driven->roots, &driven->policy->control,
+	        &driven->policy->remote, NCFG_ARRIVED_LOCAL, peer, &request, err, sizeof(err))) {
+		wrote = snprintf(reply, cap, "denied %s\n", err);
+		return wrote > 0 && (size_t)wrote < cap ? (size_t)wrote : 0u;
+	}
+	ncfg_buf_init(&status, NCFG_PROTO_MAX_LINE);
+	if (!driven->run->loop || !driven->run->loop->state ||
+	    !ncfg_daemon_status_encode(driven->run->loop->state->observed, &status, err,
+	        sizeof(err)) ||
+	    !ncfg_caller_file_create(path, peer->uid, peer->gid, status.data, status.length, err,
+	        sizeof(err))) {
+		ncfg_buf_free(&status);
+		wrote = snprintf(reply, cap, "error %s\n", err[0] ? err : "the status was not written");
+		return wrote > 0 && (size_t)wrote < cap ? (size_t)wrote : 0u;
+	}
+	wrote = snprintf(reply, cap, "ok %zu\n", status.length);
+	ncfg_buf_free(&status);
+	return wrote > 0 && (size_t)wrote < cap ? (size_t)wrote : 0u;
+}
 
 /* A record written to the face's socket from inside the face's loop would
  * wait for an answer only that loop gives, so it is asked in-process: the
@@ -938,7 +992,7 @@ static int node_tick(void *context)
  * asked, or fuzznet's loop ended by itself, which is said.
  */
 static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_main_run_t *run,
-    ncfg_seen_t *seen)
+    ncfg_seen_t *seen, const ncfg_main_policy_t *policy)
 {
 	static node_driven_t driven;
 	ncfg_node_loop_t     loop;
@@ -952,12 +1006,15 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	driven.run = run;
 	ncfg_main_outside_begin(run, &driven.outside);
 	driven.seen = seen;
+	driven.policy = policy;
+	driven.roots = ncfg_authz_roots_default();
 	loop.context = &driven;
 	loop.begin = node_begin;
 	loop.end = node_end;
 	loop.fds = node_fds;
 	loop.ready = node_ready;
 	loop.tick = node_tick;
+	loop.local = node_answer;
 	err[0] = '\0';
 	served = ncfg_node_serve(node, options->fuzznet_args, options->fuzznet_arg_count,
 	    options->argv, &loop, err, sizeof(err));
@@ -1438,7 +1495,8 @@ static int start(const options_t *options)
 	 * ticks (`ncfg_main_run_t::next_tick`, project.md 10.678). */
 	run.next_tick = &next_tick;
 	err[0] = '\0';
-	if (!serve_node(node, options, &run, loop.seen) && !ncfg_main_serve(&run, err, sizeof(err))) {
+	if (!serve_node(node, options, &run, loop.seen, &policy) &&
+	    !ncfg_main_serve(&run, err, sizeof(err))) {
 		code = cannot("this daemon stopped watching its descriptors", err);
 	}
 

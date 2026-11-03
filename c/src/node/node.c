@@ -391,6 +391,48 @@ static void serve_ready(void *ctx, int fd)
 	serving->ready(serving->context, fd);
 }
 
+/* A request fuzznet declined, with its caller, as netcfgd's own types: the
+ * peer as `ncfg_peer_t`, which is what the tiers judge, and the line as text.
+ * A remote origin is not answered here: 0128 decides what a remote caller may
+ * do, and that is not this hook. */
+static size_t serve_local_from(void *ctx, fzn_origin_t origin, const fzn_peer_t *from,
+    const fzn_request_t *request, char *reply, size_t cap)
+{
+	ncfg_peer_t peer;
+	char        line[1024];
+	size_t      length;
+
+	(void)ctx;
+	if (!serving->local || !from || !request || origin == FZN_ORIGIN_REMOTE) {
+		return 0u;
+	}
+	memset(&peer, 0, sizeof(peer));
+	peer.pid = (pid_t)from->pid;
+	peer.uid = (uid_t)from->uid;
+	peer.gid = (gid_t)from->primary_gid;
+	peer.groups_known = from->groups_known;
+	if (from->groups_known) {
+		size_t at;
+
+		peer.group_total = from->group_count;
+		for (at = 0; at < from->group_count && at < NCFG_PEER_GROUPS_MAX; at++) {
+			peer.groups[at] = (gid_t)from->groups[at];
+		}
+		peer.group_count = at;
+	}
+	length = request->verb_len + (request->arg_len ? 1u + request->arg_len : 0u);
+	if (length >= sizeof(line)) {
+		return 0u;
+	}
+	memcpy(line, request->verb, request->verb_len);
+	if (request->arg_len) {
+		line[request->verb_len] = ' ';
+		memcpy(line + request->verb_len + 1u, request->arg, request->arg_len);
+	}
+	line[length] = '\0';
+	return serving->local(serving->context, &peer, line, reply, cap);
+}
+
 static void serve_tick(void *ctx, uint64_t now)
 {
 	(void)ctx;
@@ -442,6 +484,7 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 	ext.fds = serve_fds;
 	ext.ready = serve_ready;
 	ext.tick = serve_tick;
+	ext.local_from = serve_local_from;
 	/* A join's restart, or a follower's on taking the claim, executes the
 	 * daemon's own command line rather than the fuzznet options above. */
 	ext.restart_argv = restart_argv;
