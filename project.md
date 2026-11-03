@@ -12671,6 +12671,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.681 The seen listing is fuzzed, and `make fuzz` builds again
+
+**A target for the listing** (`c/fuzz/seen_listing.c`): fuzznet's `list
+record` page is text the estate's hosts chose -- a record is a setting its
+own host signs, carried to every other by the rounds -- and what
+`ncfg_seen_parse_listing` returns becomes a MAC in an access point's allow
+list (10.674). The target asserts what the header promises: -1 or the count;
+no more stations than room; sorted and unique; each a MAC as the kernel
+spells one.
+
+**It failed within seconds:** `ok 8 -3 1 ...` returned -3. `%lu` takes a
+leading minus and wraps it, so SHOWN read as a huge count that came back
+negative. The caller treats any negative as a failed listing, and SHOWN is the
+local node's count rather than a peer's, so this was the contract broken
+rather than an opening; but a count past `LONG_MAX` was taken into the
+listing's cursor the same way. The header is now digits only and at most
+`LONG_MAX`, and the input is in the corpus as `crash-negative-shown.txt`;
+without the fix its replay aborts. Five minutes of the fixed target, 8.46
+million runs, found nothing more. The same shape -- an unsigned parse taking a
+minus -- was looked for across `c/src`: the sixteen other `strtoul`,
+`strtoull` and `%lu` sites each bound their value, so a wrapped negative is
+refused.
+
+**And the exploring half had not built for a day.** fuzznet was linked into
+the plain build on 2026-11-02 (10.669), and the fuzz tree's objects never got
+the node module's include paths: `make fuzz` failed on `src/node/node.c` for
+every target, and the `*_fuzz` programs on disk were the build before. The
+replays kept passing, because they link the plain archive, and no gate runs
+the exploring half -- so nothing said so until a new target needed building.
+The fuzz tree now compiles `src/node/` with `NODE_CFLAGS` and links fuzznet's
+archive, and all ten programs build. A shadowed `count` in `backend_ipc.c`
+that clang's `-Wshadow` found on the way is renamed.
+
 ## 10.680 A document for a caller goes only where the caller could have put it
 
 **Decided from 0309 and the tiers, and built ahead of the verb that uses it.**

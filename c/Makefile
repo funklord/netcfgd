@@ -464,7 +464,7 @@ syntax-tests:
 #   clobbering a plain one; `BUILD_DIR` is not reused because this is not the
 #   same build with a different destination.
 FUZZ_TARGETS   = config_parse document_json netlink_wire backend_ipc socket_message \
-		 observed_json kernel_bytes values block_list
+		 observed_json kernel_bytes values block_list seen_listing
 FUZZ_REPLAYS   = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
 FUZZ_PROGRAMS  = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
 FUZZ_BUILD_DIR ?= fuzz/build
@@ -527,11 +527,22 @@ $(FUZZ_BUILD_DIR)/client/%.o: ../client/%.c
 	@mkdir -p $(dir $@)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) -MMD -MP -c $< -o $@
 
+# The node module includes fuzznet, here as in the plain build (10.669), and
+# the programs link fuzznet's archive as the replays do. **Neither was here
+# until 2026-11-03**: fuzznet was linked into the plain build on 11-02 and
+# `make fuzz` then failed on `node.c` for every target, leaving the
+# `*_fuzz` programs in this directory a build older than the code they named
+# (10.681). The replays kept passing throughout, because they link the plain
+# archive; only the exploring half was broken, which is the half no gate runs.
+$(FUZZ_BUILD_DIR)/src/node/%.o: FUZZ_CFLAGS += $(NODE_CFLAGS)
+$(FUZZ_BUILD_DIR)/src/node/node.o: | $(FUZZNET_LIB)
+
 $(FUZZ_LIB): $(FUZZ_OBJS)
 	$(AR) rcs $@ $(FUZZ_OBJS)
 
-fuzz/%_fuzz: fuzz/%.c fuzz/fuzz_libfuzzer.c fuzz/fuzz_text.c $(FUZZ_LIB)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) -fsanitize=fuzzer $(filter %.c,$^) $(FUZZ_LIB) -o $@
+fuzz/%_fuzz: fuzz/%.c fuzz/fuzz_libfuzzer.c fuzz/fuzz_text.c $(FUZZ_LIB) $(FUZZNET_LIB)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -fsanitize=fuzzer $(filter %.c,$^) $(FUZZ_LIB) $(FUZZNET_LIB) \
+	    $(FUZZNET_SYSLIBS) -o $@
 
 # What this build made, by the same wildcard that made it -- and nothing by
 # pattern that this directory does not own. The program and its second name are

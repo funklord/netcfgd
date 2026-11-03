@@ -146,10 +146,10 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		/* Every lease at once (0303), the same hostile text. */
 		{
 			ncfg_observed_lease_t *leases = NULL;
-			size_t                 count = 0;
+			size_t                 lease_count = 0;
 
-			if (ncfg_dhcp_server_leases_in_text(text, 0, &leases, &count)) {
-				ncfg_dhcp_server_leases_free(leases, count);
+			if (ncfg_dhcp_server_leases_in_text(text, 0, &leases, &lease_count)) {
+				ncfg_dhcp_server_leases_free(leases, lease_count);
 			}
 		}
 	}
