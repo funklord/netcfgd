@@ -21,7 +21,10 @@
 #include "session/agree_monocypher.h"
 #include "session/hash_monocypher.h"
 #include "session/random_system.h"
+#include "state/scope.h"
 #include "trust/trust.h"
+
+#include "ncfg/scope.h"
 
 #include <errno.h>
 #include <pwd.h>
@@ -31,6 +34,20 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+/*
+ * **netcfgd's scope copy held to fuzznet's, in the daemon's own build** (0308,
+ * project.md 10.669). The language's table keeps `ncfg_scope_t` so that the
+ * compiler -- and everything that includes `ncfg/scope.h` -- needs no fuzznet
+ * header; this module is the one place both are visible in the program that
+ * ships, so it is where the build refuses a drift. `bridge/record_encode.c`
+ * holds the same assertion for the bridge.
+ */
+_Static_assert((int)NCFG_SCOPE_HOST_PRIVATE == (int)FZN_SCOPE_HOST_PRIVATE &&
+        (int)NCFG_SCOPE_HOST == (int)FZN_SCOPE_HOST &&
+        (int)NCFG_SCOPE_GROUP == (int)FZN_SCOPE_GROUP &&
+        (int)NCFG_SCOPE_ESTATE == (int)FZN_SCOPE_ESTATE,
+    "netcfgd's scope copy has drifted from fuzznet's state/scope.h");
 
 /* Everything the identity points into, in one allocation that outlives it:
  * `identity.agree_secret` is a pointer to `agree_secret`, and the signer the

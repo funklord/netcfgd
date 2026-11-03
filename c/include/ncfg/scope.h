@@ -16,12 +16,15 @@
  *   concept.
  *
  *   fuzznet carries it now, as `fzn_scope_t` in `state/scope.h`. **This copy
- *   stays, held to it**, decided 2026-11-02 (project.md 10.664): retyping the
- *   table onto fuzznet's type would put fuzznet on the daemon's build, which
- *   0269 keeps out of the process holding CAP_NET_ADMIN. `bridge/
- *   record_encode.c`, the one place both are visible, asserts at compile time
- *   that every value agrees, so a drift stops the bridge building rather than
- *   replicating a key under the wrong scope. What is netcfgd's is the
+ *   stays, held to it.** Its first reason went with 0269 -- fuzznet is linked
+ *   into the daemon now (0308) -- and the reason it keeps is narrower:
+ *   retyping onto `fzn_scope_t` would put fuzznet's include paths, and through
+ *   `state/scope.h` its record and commitment headers, on the compiler and on
+ *   everything that includes this file, where today only `src/node/` sees a
+ *   fuzznet header (project.md 10.669). So the four values are asserted equal
+ *   at compile time in `c/src/node/node.c`, in the program that ships, and in
+ *   `bridge/record_encode.c`: a drift stops the build rather than replicating
+ *   a key under the wrong scope. What is netcfgd's is the
  *   **table**, because which scope `prefix` belongs to is a fact about
  *   netcfgd's language that no other consumer can know.
  *

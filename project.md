@@ -12809,8 +12809,21 @@ so once; `NCFG_FUZZNET_SOCKET` still overrides it. `seen_test` puts a face
 file in a store after the recorder was made and the records arrive there;
 skipping the lookup turns that red.
 
-**Next, from 10.668's list:** the scope table retyped onto `fzn_scope_t`, and
-netcfgd running fuzznet's loop as the face (below).
+**The scope table keeps its copy, now held in the daemon's build**
+(2026-11-03), which is a different answer from 10.668's "retype it", and the
+reason is worth keeping. 0308 removed the copy's first reason, fuzznet kept off
+the daemon. But retyping `ncfg_scope_t` onto `fzn_scope_t` puts fuzznet's
+include paths -- and through `state/scope.h` its record and commitment
+headers -- on the compiler and on everything that includes `ncfg/scope.h`,
+where today only `c/src/node/` sees a fuzznet header and its flags. Four enum
+values do not buy that. So `c/src/node/node.c` asserts at compile time that
+every value agrees, in the program that ships, beside the bridge's existing
+assertion; swapping one value stops the build with the assertion's sentence.
+If the language ever needs fuzznet's scope *functions* (`fzn_scope_widens`),
+that is the time to retype, and the node module is where the seam would grow.
+
+**Next, from 10.668's list:** netcfgd running fuzznet's loop as the face
+(below).
 
 **And how netcfgd becomes a face that serves, answered by fuzznet** (inbox
 `20261102T2329Z`, its sec 831, built in its `f12ee4b`). Writing records
