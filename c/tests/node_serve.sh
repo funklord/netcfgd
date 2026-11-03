@@ -1,7 +1,9 @@
 #!/bin/sh
 # node_serve.sh -- netcfgd as its fuzznet store's face, inside fuzznet's loop
-# (project.md 10.676). Run by `make node-serve-test`, which builds with
-# NODE_SERVE=1 first; needs no privilege.
+# (project.md 10.676 to 10.684). Run by `make test` and `make node-serve-test`
+# against the program the build made; needs no privilege. The daemons are
+# given `--fuzznet-serve`, which 0311 retired and still accepts: serving is
+# what a daemon with a node does.
 #
 # On a scratch store and run directory, these, each with what makes it mean
 # something:

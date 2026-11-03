@@ -26,15 +26,17 @@ over a serial console on a machine with no network, who gets a readable
 language, errors that say what to write, and an example file that is compiled
 rather than trusted; the person who does not know networking, who uses the
 tray or a window and for whom joining a network is the whole interaction; and
-the person running many machines, for whom the same model is served over
-RESTCONF and a network-wide scope -- one wireless network across forty access
+the person running many machines, for whom the machines are one fuzznet
+estate -- every node doing what an operator authenticated to that estate asks
+-- and a network-wide scope -- one wireless network across forty access
 points -- is part of the language rather than a script around it. It is also
 meant to fit the device class it was designed for, an OpenWrt-sized router,
 with `ncfg plan` surviving into the smallest build. **Not there yet**, said
 once: the network-wide half -- keeping one configuration consistent across
-many machines and applying a change on all of them at once -- waits on
-fuzznet's record storage; fleet management over RESTCONF comes last; the
-interfaces are not frozen; and nothing here has been released or proven on
+many machines and applying a change on all of them at once -- is being built
+on fuzznet, which every netcfgd is a node of and serves; RESTCONF, for sites
+that want a standard northbound interface, comes last; the interfaces are not
+frozen; and nothing here has been released or proven on
 real hardware for long. [project.md](project.md) section 10 tracks exactly
 what has, and is worth reading before deploying this anywhere you care
 about.

@@ -218,6 +218,13 @@ FUZZNET_LIB   = fuzznet.a
 # wrong.
 FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 		-DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
+# **`FZN_LOG_PACK=0`: no zstd** (project.md 10.684). fuzznet packs its closed
+# log segments with libzstd wherever its probe finds it, and with the node loop
+# always linked (0311) that made netcfgd link `libzstd.so.1` -- a mandatory
+# library constraint 3 does not allow, found by `make linkage`. Packing logs is
+# fuzznet's convenience, not something the network daemon needs, so it is left
+# out here; netcfgd's own node module was already compiled without it.
+#
 # **Without `-g`, unless this build is a debug one.** fuzznet's own default is
 # `-Os -g`, and its debug sections rode into the daemon: the first link of the
 # node grew the installed program by 366 KB, of which about 21 KB was code
@@ -236,14 +243,13 @@ FUZZNET_SYSLIBS = $(shell nm $(FUZZNET_LIB) 2>/dev/null | grep -q ' U ZSTD_' && 
 # Only the node module includes fuzznet, so only it is given fuzznet's paths:
 # nothing else in this tree may reach a fuzznet header (`ncfg/node.h` names no
 # fuzznet type), and the flags stay out of every other object.
-NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS) \
-	      $(if $(NODE_SERVE),-DNCFG_NODE_SERVE)
-# **`NODE_SERVE=1` links fuzznet's node loop**, so the daemon can be its store's
-# face (`--fuzznet-serve`, project.md 10.676). Off by default because of what
-# it costs, measured: the installed program grows from 1,514,376 to 2,494,056
-# bytes, most of it the chat services `fzn_daemon_main` pulls in with it --
-# notes, files, stickers, groups -- and its own 19 MB of static storage. Whether
-# netcfgd pays that, or fuzznet's loop comes without them first, is open.
+NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS)
+# **fuzznet's node loop is always linked** (decision 0311, project.md 10.684):
+# fuzznet is netcfgd's store and its protocols, not an option. It was a build
+# option, `NODE_SERVE=1`, while what it cost was open: the installed program
+# grows by about 980 KB, most of it the consumer services `fzn_daemon_main`
+# calls -- notes, files, stickers, groups -- which fuzznet may yet make
+# optional (its sec 842). The memory it cost was mostly huge pages (10.679).
 NODE_SRCS   = $(filter src/node/%,$(SRCS))
 src/node/%.o: CFLAGS += $(NODE_CFLAGS)
 src/node/node.o: | $(FUZZNET_LIB)
@@ -271,7 +277,7 @@ $(FUZZNET_LIB): FORCE
 		}; \
 	fi
 	@CFLAGS='$(FUZZNET_CFLAGS)' $(MAKE) --no-print-directory -s -C $(FUZZNET) \
-		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) all
+		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) FZN_LOG_PACK=0 all
 	@if [ ! -e $@ ] || [ -n "$$(find $(FUZZNET_BUILD) -name '*.o' -newer $@ | head -1)" ]; then \
 		objects=$$(find $(FUZZNET_BUILD) -name '*.o' | sort | while read -r o; do \
 			nm "$$o" 2>/dev/null | grep -qE ' [TtWw] main$$' || echo "$$o"; \
@@ -312,7 +318,7 @@ $(PROGRAM_LINK): $(PROGRAM)
 # `cmp` rather than a plain write: an unchanged stamp keeps its timestamp and
 # nothing rebuilds.
 .build-flags: FORCE
-	@echo '$(CC) $(CFLAGS) node-serve=$(NODE_SERVE)' > $@.candidate
+	@echo '$(CC) $(CFLAGS)' > $@.candidate
 	@cmp -s $@.candidate $@ || mv $@.candidate $@
 	@rm -f $@.candidate
 
@@ -338,17 +344,15 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 		echo "== $$one"; \
 		./$$one || fail=1; \
 	done; \
+	echo "== tests/node_serve.sh"; \
+	sh tests/node_serve.sh || fail=1; \
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
-# netcfgd as its store's face, inside fuzznet's loop (project.md 10.676): the
-# program built with NODE_SERVE=1, then `tests/node_serve.sh` against it. Not in
-# `test` while serving is a build option, and not in a parallel `make check`
-# either: it rebuilds the node module under other flags, and a second make
-# building the same objects at once would be two writers of one file. A plain
-# build afterwards rebuilds them back, through `.build-flags`.
-node-serve-test:
-	$(MAKE) NODE_SERVE=1 $(PROGRAM) $(PROGRAM_LINK)
+# netcfgd in fuzznet's loop (project.md 10.676 to 10.684), against the program
+# this build made: `tests/node_serve.sh`, run by `test` as well. Its own target
+# too, for running it alone.
+node-serve-test: $(PROGRAM) $(PROGRAM_LINK)
 	sh tests/node_serve.sh
 
 tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags

@@ -16,9 +16,7 @@
 #include "chain/sign_monocypher.h"
 #include "claim/claim_file.h"
 #include "cli/cli.h"
-#ifdef NCFG_NODE_SERVE
 #include "node/daemon.h"
-#endif
 #include "node/identity.h"
 #include "persist/persist_file.h"
 #include "session/agree_monocypher.h"
@@ -369,7 +367,6 @@ void ncfg_node_close(ncfg_node_t *node)
  * Serving the store, inside fuzznet's loop (project.md 10.676)
  * ------------------------------------------------------------------------ */
 
-#ifdef NCFG_NODE_SERVE
 /*
  * The loop being served. **One serve per process**, as `fzn_daemon_main` is:
  * it keeps its state in statics, so a second would be a second node in one
@@ -504,25 +501,3 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 	ncfg_error_set(err, err_size, "fuzznet's loop ended with status %d", code);
 	return NCFG_NODE_SERVE_ENDED;
 }
-#else
-size_t ncfg_node_local(const char *line, char *reply, size_t cap)
-{
-	(void)line;
-	(void)reply;
-	(void)cap;
-	return 0u;
-}
-
-ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
-    size_t extra_count, char *const *restart_argv, const ncfg_node_loop_t *loop, char *err,
-    size_t err_size)
-{
-	(void)restart_argv;
-	(void)node;
-	(void)extra;
-	(void)extra_count;
-	(void)loop;
-	ncfg_error_set(err, err_size, "this build does not serve a fuzznet node (make NODE_SERVE=1)");
-	return NCFG_NODE_SERVE_ENDED;
-}
-#endif

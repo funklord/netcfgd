@@ -1079,4 +1079,18 @@ netcfgd
 # And UPnP and NAT-PMP (decision 0310): the language, miniupnpd as a
 # backend, the table it maps into and its own audit, `ncfg status`'s list of
 # mappings, and `translated` on a firewall rule, +17,376.
-total 1508944
+# And fuzznet's node loop, always linked (decision 0311): the holder,
+# 2026-11-03, "Fuzznet is to be our distributed store by default, it is not
+# optional." The daemon serves its store inside fuzznet's loop (project.md
+# 10.676) -- local socket, estate rounds and records -- which links
+# `fzn_daemon_main` and what it calls. +980,000 over the 1,519,208 the tree
+# measured with the loop a build option: about 197 KB is the daemon loop
+# itself, and most of the rest is fuzznet's consumer services that
+# `daemon.c` calls with no flag to leave them out -- notes, files, stickers,
+# groups -- which fuzznet records as possible build options (its sec 842).
+# When they are, this line comes down. Memory is a separate gate: serving
+# costs about 1.3 MB resident, not 13, once huge pages are refused
+# (10.679). Measured again once fuzznet was built without its log packing
+# (`FZN_LOG_PACK=0`), which had made the program link libzstd against
+# constraint 3: 2,447,392, so +928,184 in all.
+total 2447392

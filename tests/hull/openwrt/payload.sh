@@ -18,7 +18,8 @@
 #   - the fuzznet store is root's, `/root/.local/share/fuzznet`, named by the
 #     init script (10.677) -- procd's HOME=/ would otherwise put it at
 #     `//.local/share/fuzznet`, where a fuzznetd from root's shell never looks
-#     -- and the node's key is the same after procd respawns the daemon.
+#     -- and the node's key is the same after procd respawns the daemon;
+#   - and it serves that store, its socket in /run/netcfgd (0311).
 #
 # Always exits 0 and reports through /verdict/openwrt. BusyBox's `sleep`
 # takes whole seconds, which is why every wait here counts them.
@@ -66,6 +67,14 @@ key=$(sed -n 's/^key=//p' /run/netcfgd/node 2>/dev/null)
 mode=$(ls -ld /root/.local/share/fuzznet 2>/dev/null | cut -c1-10)
 say "fuzznet store: ${store:-none}, mode ${mode:-absent}, key ${key:-none}"
 [ "$store" = /root/.local/share/fuzznet ] && [ "$mode" = drwx------ ] && [ -n "$key" ] || failed=1
+
+# And it serves that store (decision 0311): fuzznet's socket in the run
+# directory, named by the store's `face` (10.683, 10.684).
+n=0
+until [ -S /run/netcfgd/fuzznet.sock ] || [ $n -gt 20 ]; do sleep 1; n=$((n + 1)); done
+face=$(cat /root/.local/share/fuzznet/face 2>/dev/null)
+say "serving: socket $([ -S /run/netcfgd/fuzznet.sock ] && echo there || echo absent), face ${face:-none}"
+[ -S /run/netcfgd/fuzznet.sock ] && [ "$face" = /run/netcfgd/fuzznet.sock ] || failed=1
 
 first=$(pidof netcfgd)
 kill -9 "$first"

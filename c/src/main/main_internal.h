@@ -183,8 +183,9 @@ typedef struct ncfg_main_options {
 	const char *socket;
 	/* `--fuzznet-dir`; NULL leaves it to the environment and `ncfg/node.h`. */
 	const char *fuzznet_dir;
-	/* `--fuzznet-serve`: be the store's face, inside fuzznet's loop (10.676),
-	 * and `--fuzznet-arg`, fuzznet's own node options passed to it as given. */
+	/* `--fuzznet-serve`, retired by 0311 and recorded only so that it is
+	 * accepted; and `--fuzznet-arg`, fuzznet's own node options passed to its
+	 * loop as given. */
 	int         fuzznet_serve;
 	const char *fuzznet_args[32];
 	size_t      fuzznet_arg_count;

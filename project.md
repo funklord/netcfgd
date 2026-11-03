@@ -16,7 +16,7 @@ This document is the working brief; `netcfgd-design.md` is the reference design 
 
 - **People who edit the config file**, by hand, possibly over a serial console on a machine with no network. What they need is that the language be readable, that the errors say what to do, and that the documentation be reachable from the machine itself — which is what `/etc/netcfgd/netcfgd.conf.example` is for, and why its examples are compiled rather than trusted.
 - **People who do not understand networking**, using the tray applet or a GUI — netcfgd's own, or NetworkManager's through the shim. They should never meet a permission wall, a tier, or a config file. Joining a network is the whole interaction, and anything they must know about netcfgd to do it is a defect.
-- **People administering fleets**, using the netcfgd tools across many machines. **Deferred, deliberately and currently** — §7 has multi-host management arriving at M9 because conforming to RESTCONF *is* the multi-host answer, and the holder has confirmed that stands: the first two cases have to work first, so that daily use can find what the tests cannot.
+- **People administering fleets**, using the netcfgd tools across many machines. **Settled in the simple case by the holder, 2026-11-03** ([0311](doc/decision/0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md)): the fleet is the fuzznet estate, and every node of one estate does what an authenticated operator of it asks. RESTCONF is no longer the multi-host answer; it stays at M9 as a northbound interface for sites that want one. Beyond the simple case -- partial authority, callers who are not estate operators -- is not settled. The first two groups still come first, so that daily use can find what the tests cannot.
 
 **The near-term bar is daily use.** Everything except fleet administration should work well enough for the tool to be somebody's actual network configuration, because that is the only thing that finds what §*What would prove it* is about. That is the ordering to read §10's open items with.
 
@@ -638,7 +638,7 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M6** | TUI | ~~`ncfg tui` including the interactive plan-preview pane~~ — done: four panes over the public socket only, 80x24, no colour required. Drawing and key decoding are ncurses behind a default-on cargo feature; with it off nothing links beyond libc ([0025](doc/decision/0025-the-audited-crate-is-the-libc-boundary-not-netlink.md)). |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). **Tier 1 is essentially there:** bus name, object tree, `ObjectManager` at `/org/freedesktop`, every device with its properties, `AccessPoint` objects with `RequestScan`, connection profiles with derived UUIDs, and activation -- all driven by a real `nmcli` in `tests/live/nm.sh`. The write path is in too: `nmcli connection add` writes a netcfgd `network` block, with the passphrase going to the secret provider and a `@secret:` reference into the block ([0030](doc/decision/0030-a-gui-is-an-editor-of-config-files.md)) — the files are `conf.d/nm-*.conf`, flat, because `conf.d` is not read recursively and making it so would be a core change justified only by an adapter. `GetSecrets` refuses, which is a security property rather than a gap ([0029](doc/decision/0029-a-profile-is-a-projection-and-secrets-do-not-travel.md)). The `AgentManager` secret bridge is in as well: an agent supplies a credential netcfgd lacks, it goes to the provider at 0600, and the block keeps its `@secret:` reference — inbound only, since `GetSecrets` still refuses ([0031](doc/decision/0031-the-secret-bridge-runs-one-way.md)). That closes tier 1. Tier 2 has started: `IP4Config`/`IP6Config` objects make a settings panel's Details tab show the addresses, gateway, routes and nameservers netcfgd actually applied ([0032](doc/decision/0032-the-details-panel-is-the-observation.md)). Static addressing round-trips too — a panel sees a profile's configured address and can write one back, with the default route moving between netcfgd's route list and NM's `gateway` field ([0033](doc/decision/0033-nm-splits-what-netcfgd-keeps-together.md)). Per-connection options round-trip too — metered, autoconnect priority and per-profile DNS, with an MTU named in the file as unexpressible rather than dropped ([0034](doc/decision/0034-libnm-validates-what-the-shim-projects.md)). **Tier 2 is done.** Tier 3 has started with the part that was a live defect: `Managed` now reads the document, and an unmanaged device reports `UNMANAGED` ([0035](doc/decision/0035-managed-false-means-it.md)) — which needed a core fix first, because `managed = false` did not actually stop the planner. **Tier 3 bounds the shim, not netcfgd** ([0036](doc/decision/0036-the-shim-is-not-the-roadmap.md)): VPN, modems and complete wifi are wanted in netcfgd and simply will not be projected through NM's interfaces. `AddConnection` creates wifi networks only. Each adapter is its own cargo workspace so its dependencies cannot reach the core, enforced by `make nm-containment` ([0027](doc/decision/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md)). A scan's security detail is lost at the socket, so the shim reads it from the document rather than growing the socket an adapter wanted ([0028](doc/decision/0028-the-scan-is-lossy-and-the-document-is-not.md)) -- which leaves `ncfg wifi scan`'s own lossiness as work with a local justification. |
 | **M8** | Desktop | GUI + tray applet; NM shim tier 2. **The shim half is done** (0032-0034). **The desktop half is in progress**: the GUI has a wifi tab, a tray applet, and adds a network itself (`8de3d003`, under the `wifi` tier); what keeps a person who does not understand networking from meeting a tier at all is the permission overhaul the holder has deferred (*Open: the permission system needs an overhaul*). The GUI is Qt Widgets, C++17, desktop and Android from one source, in the style of the sibling `fuzzypickles`/`hydra`/`beerssh` trees -- brief in [gui/project.md](gui/project.md). Remote access was planned as an agent terminating a remote protocol beside an unchanged daemon; **0308 and 0309 superseded that**: fuzznet is linked into the daemon, which speaks fuzznet to local and remote clients alike (10.668, 10.676), and [doc/remote-access-feasibility.md](doc/remote-access-feasibility.md) is the earlier reading. |
-| **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. |
+| **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. **No longer the fleet answer** ([0311](doc/decision/0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md)): the fleet is the fuzznet estate, an authenticated operator managing every node of it; this milestone is a northbound interface for sites that want one. |
 
 **The M4 freeze's four inert features are all closed**, after M6 rather than at M4 — the schema had to carry them before the freeze, the behaviour did not. Policy routing rules, `ipv6_token` and the ethtool offloads are netlink; access points are hostapd, configured by a generated file under `/run` ([0026](doc/decision/0026-an-access-point-is-a-file-hostapd-reads.md)). What is still recognised and not applied is the half of the `ethtool` block that needs a physical NIC to exercise, and `ncfg plan` names those fields individually.
 
@@ -662,7 +662,7 @@ not project.
 
 **And netcfgd shows who is connected.** `ncfg wifi clients` and a fifth TUI pane list the stations associated with an access point, read back over hostapd's control socket ([0040](doc/decision/0040-a-station-list-needs-a-station-list.md)). It is a live query rather than part of the observation, because there is no desired station list to reconcile against. The two halves are shown as one thing: a station that is on the deny list *and* connected is marked, which is 0039's restart gap made visible rather than silent. A station is named by the hostname in the lease netcfgd's own DHCP server gave it, where it has one (10.602); hostapd alone knows only addresses.
 
-**Consequence of M9 being last, stated plainly:** multi-host management arrives at the very end, because conforming to RESTCONF *is* the multi-host answer (design doc §11.1). That is a deliberate choice — this is a single-host tool first, and nothing before M9 should be shaped by fleet considerations.
+~~**Consequence of M9 being last, stated plainly:** multi-host management arrives at the very end, because conforming to RESTCONF *is* the multi-host answer (design doc §11.1).~~ **Superseded by [0311](doc/decision/0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md)**: multi-host management is the fuzznet estate, which netcfgd is a node of already (0308), with an authenticated operator in the simple case. M9 is still last, as a northbound interface.
 
 ---
 
@@ -12670,6 +12670,58 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.684 fuzznet is not optional: serving in the default build, and the estate is the fleet
+
+**The holder, 2026-11-03:** "Fleet management is settled within the simple
+case = every node belonging to the same estate should work with an operator
+authenticated. Fuzznet is to be our distributed store by default, it is not
+optional. Everything internal goes via its protocols, netcfgd is precisely
+why it has those 3 different models of communication." Recorded as
+[0311](doc/decision/0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md),
+which also names the three models (fuzznet's section 2): netcfgd is the root
+daemon judged by group, and the remote daemon an estate operator reaches.
+
+**Built:** fuzznet's loop is linked in every build, and a daemon with a node
+serves its store inside it (10.676 to 10.683): `NODE_SERVE=1`, its stub and
+the separate build are gone, `--fuzznet-serve` is accepted and does nothing,
+and `tests/node_serve.sh` runs in `make test`. A daemon with no node keeps its
+own loop. **The size decision is the holder's answer**: `size-budget.txt` is
+raised by 928,184 bytes to 2,447,392, with the reason; most of it is
+fuzznet's consumer services, which come down when fuzznet makes them build
+options (its sec 842). **And fuzznet is built without its log packing**
+(`FZN_LOG_PACK=0`): with the loop linked, the program linked `libzstd.so.1`,
+which `make linkage` refused under constraint 3 -- packing closed log segments
+is fuzznet's convenience, not something the network daemon needs, and leaving
+it out took the program from 2,499,208 to 2,447,392 bytes. Two gates were
+red on the way and are fixed in their own commits: `agree`, since 3813fcf3
+added `--fuzznet-arg` to the help; and `form_coverage`, since 10.670's
+`translated` was never read by the GUI's firewall dialog, whose Save would
+have deleted it. `make check` passes whole. Memory stays inside its gate: a serving daemon is
+about 1.3 MB more resident than one that does not serve, since 10.679, and
+the RSS gate measures one with no node.
+
+**What an operator may do on a node is the node's own** (the holder, the
+same day): "Each node can be granularly configured as to what permissions it
+has." So the fleet's simple case is not one estate-wide grant: an operator is
+authenticated by the estate, and what that operator may do on a machine is
+set in that machine's configuration, in detail. netcfgd's tiers (observe,
+wifi, admin; 0013, 0128) are the existing granularity, and the `remote` block
+is where a node already says which of them reach it from off the machine.
+**Next, not started:** answering estate operators through fuzznet's remote
+hook (`ext->remote`) under those tiers. It waits on two things fuzznet's
+framing decides -- what identifies an operator to a node (its admin
+capability, or another), and how a large answer such as status travels back
+to a remote caller, since `get status PATH` writes on the daemon's own
+machine.
+
+**What it changes for a machine**: a netcfgd on the default run directory
+has a node (10.669) and so now serves it -- `/run/netcfgd/fuzznet.sock`
+(10.683), the store's face unless a fuzznetd holds it, and the records read
+in-process (10.676). The hull rigs that start one on the default run
+directory pass under it: `hull-openwrt` -- which now also asserts the daemon
+under procd serves its store, the socket in `/run/netcfgd` and `face` naming
+it -- `hull-openrc`, `hull-sandbox` and `hull-upnp`.
 
 ## 10.683 Local callers are judged by netcfgd's group; nothing is kept for them
 

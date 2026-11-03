@@ -90,9 +90,7 @@ static const char usage_text[] =
     "  --fuzznet-dir PATH     this node's fuzznet store, or $" NCFG_FUZZNET_DIR_ENV ";\n"
     "                         default fuzznet's own, for a daemon on the default\n"
     "                         --run-dir only. Empty for none\n"
-    "  --fuzznet-serve        run inside fuzznet's loop, as the store's face or\n"
-    "                         beside the process that is (experimental)\n"
-    "  --fuzznet-arg ARG      one of fuzznet's own node options, for that loop\n"
+    "  --fuzznet-arg ARG      one of fuzznet's own node options, for its loop\n"
     "  --no-apply-on-start    observe and watch, but change nothing until asked\n"
     "  --poll-config          use mtime polling rather than inotify\n"
     "  --supported            what this build carries out, as JSON lines, asked\n"
@@ -387,6 +385,12 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
 				return 0;
 			}
 		} else if (strcmp(argument, "--fuzznet-serve") == 0) {
+			/*
+			 * **Accepted and retired** (decision 0311): a daemon with a
+			 * node serves it, always. It was the opt-in while serving was a
+			 * build option, and a script that still passes it is asking for
+			 * what now happens anyway.
+			 */
 			options->fuzznet_serve = 1;
 		} else if (strcmp(argument, "--fuzznet-arg") == 0) {
 			if (options->fuzznet_arg_count >= 32u) {
@@ -1013,7 +1017,10 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	char                 err[NCFG_ERROR_MAX];
 	ncfg_node_serve_t    served;
 
-	if (!node || !options->fuzznet_serve) {
+	/* Whenever there is a node (decision 0311): fuzznet is this daemon's
+	 * store and its protocols, not an option. A daemon with no node -- a
+	 * test, a second instance on another run directory -- has its own loop. */
+	if (!node) {
 		return 0;
 	}
 	memset(&driven, 0, sizeof(driven));
