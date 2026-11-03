@@ -79,6 +79,14 @@ ncfg_seen_t *ncfg_seen_new(const char *socket_path);
  * is not overridden: the daemon does not call this where one is given.
  */
 void ncfg_seen_use_store(ncfg_seen_t *seen, const char *dir);
+/*
+ * This process is now its store's face (project.md 10.676): the socket the
+ * `face` file names is served by the thread that would be blocked writing to
+ * it, so nothing is written or read through it -- until fuzznet takes a local
+ * request in-process. Said once in the log. `here` 0 undoes it, for a face
+ * whose loop has ended.
+ */
+void ncfg_seen_face_is_here(ncfg_seen_t *seen, int here);
 void ncfg_seen_free(ncfg_seen_t *seen);
 
 /*

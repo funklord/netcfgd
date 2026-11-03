@@ -1,0 +1,90 @@
+#!/bin/sh
+# node_serve.sh -- netcfgd as its fuzznet store's face, inside fuzznet's loop
+# (project.md 10.676). Run by `make node-serve-test`, which builds with
+# NODE_SERVE=1 first; needs no privilege.
+#
+# On a scratch store and run directory, these, each with what makes it mean
+# something:
+#   - fuzznet's own socket is served, and names itself in the store's `face`:
+#     fzn_daemon_main is running, so netcfgd's own loop is not;
+#   - a fuzznet client's `list record` and `add record` are answered by it;
+#   - `ncfg reload` is answered at once -- through the mailbox's wake byte,
+#     which only fuzznet's loop polls now. Without `ready` it waits for the
+#     five-second backstop (measured: 4797 ms against 5);
+#   - an edit to the configuration is compiled, through the inotify watch;
+#   - SIGTERM stops it with status 0, `face` and `<run>/node` gone.
+#
+# HOW IT STOPS: every wait is bounded (50 looks of 0.2 s), each client call is
+# under `timeout 10`, and the daemon under `timeout -k 5 60` -- the kill
+# because a daemon that never reads its stop byte ignores SIGTERM. The
+# directory is mktemp's, checked by shape, and removed at the end.
+here=$(cd "$(dirname "$0")/.." && pwd)
+N=$here/netcfgd
+C=$here/ncfg
+R=$(mktemp -d /tmp/ncs.XXXXXX) || exit 1
+case "$R" in /tmp/ncs.?*) ;; *) echo "node_serve: odd scratch $R"; exit 1;; esac
+failed=0
+check() { # $1 0 for ok, $2 what
+	if [ "$1" -eq 0 ]; then printf '%-72s ok\n' "$2"; else printf '%-72s FAILED\n' "$2"; failed=1; fi
+}
+ask() { # $1 socket, $2 line: one reply line from fuzznet's local socket
+	timeout 10 python3 -I -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(5); s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + "\n").encode()); out = b""
+while not out.endswith(b"\n"):
+    b = s.recv(4096)
+    if not b: break
+    out += b
+print(out.decode(errors="replace").strip())' "$1" "$2" 2>&1
+}
+conf() { # the configuration, $1 an extra stanza
+	printf 'global {\n\tcontrol {\n\t\tadmin = "any"\n\t}\n}\n%s' "$1" > "$R/conf/netcfgd.conf"
+}
+
+mkdir "$R/store" "$R/run" "$R/conf"
+conf ''
+timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/store" --fuzznet-serve --fuzznet-arg "--socket=$R/fz.sock" \
+	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/log" 2>&1 &
+pid=$!
+n=0
+until { [ -S "$R/fz.sock" ] && [ -S "$R/run/netcfgd.sock" ]; } || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+[ "$(cat "$R/store/face" 2>/dev/null)" = "$R/fz.sock" ]
+check $? "fuzznet's socket is served, and the store's face names it"
+[ "$(ask "$R/fz.sock" 'add record seen/test/1 hello')" = ok ]
+check $? "a fuzznet client's add record is answered ok"
+ask "$R/fz.sock" 'list record' | grep -q '^ok 0 1 0'
+check $? "and list record shows the one record"
+
+t0=$(date +%s%N)
+said=$(timeout 10 "$C" reload --run-dir "$R/run" 2>&1 | grep -v nftables | head -1)
+ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+echo "$said" | grep -q '^reloaded' && [ "$ms" -lt 2000 ]
+check $? "ncfg reload is answered through the daemon at once ($ms ms)"
+
+conf "$(printf 'device dummy7 {\n\tkind = "dummy"\n}\n')"
+n=0
+until grep -q dummy7 "$R/run/desired.json" 2>/dev/null || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+grep -q dummy7 "$R/run/desired.json" 2>/dev/null
+check $? "an edit to the configuration is compiled"
+
+kill -TERM $pid
+wait $pid
+code=$?
+[ $code -eq 0 ] && [ ! -e "$R/store/face" ] && [ ! -e "$R/run/node" ]
+check $? "SIGTERM stops it with status 0 ($code), face and <run>/node gone"
+
+if [ $failed -ne 0 ]; then
+	grep -v 'nftables\|supplicant\|previous configuration' "$R/log" | tail -12 | sed 's/^/  log: /'
+fi
+rm -rf "$R"
+[ $failed -eq 0 ] && echo "node_serve: all checks passed" || echo "node_serve: some checks FAILED"
+exit $failed

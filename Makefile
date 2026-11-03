@@ -261,7 +261,7 @@ nm-containment:
 # report a clean pass. Fixing the shared tool is not this tree's to do and is
 # raised where those tools are kept; what belongs here is the check below, and
 # it stands on its own -- nothing outside this repository is needed to run it.
-SHELL_SCRIPTS = helper/* tests/live/*.sh tool/*.sh tool/vm/*.sh \
+SHELL_SCRIPTS = helper/* tests/live/*.sh c/tests/*.sh tool/*.sh tool/vm/*.sh \
                 tool/vm/payload/*.sh packaging/probe/* packaging/hook/*
 
 shell:

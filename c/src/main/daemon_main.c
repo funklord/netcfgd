@@ -87,6 +87,9 @@ static const char usage_text[] =
     "  --fuzznet-dir PATH     this node's fuzznet store, or $" NCFG_FUZZNET_DIR_ENV ";\n"
     "                         default fuzznet's own, for a daemon on the default\n"
     "                         --run-dir only. Empty for none\n"
+    "  --fuzznet-serve        be the store's face and serve it, inside fuzznet's\n"
+    "                         loop, while no other process is (experimental)\n"
+    "  --fuzznet-arg ARG      one of fuzznet's own node options, for that loop\n"
     "  --no-apply-on-start    observe and watch, but change nothing until asked\n"
     "  --poll-config          use mtime polling rather than inotify\n"
     "  --supported            what this build carries out, as JSON lines, asked\n"
@@ -380,6 +383,19 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
 				*code = fail("--fuzznet-dir needs a value");
 				return 0;
 			}
+		} else if (strcmp(argument, "--fuzznet-serve") == 0) {
+			options->fuzznet_serve = 1;
+		} else if (strcmp(argument, "--fuzznet-arg") == 0) {
+			if (options->fuzznet_arg_count >= 32u) {
+				*code = fail("at most 32 --fuzznet-arg");
+				return 0;
+			}
+			if (!value_of(argc, argv, &at,
+			    &options->fuzznet_args[options->fuzznet_arg_count])) {
+				*code = fail("--fuzznet-arg needs a value");
+				return 0;
+			}
+			options->fuzznet_arg_count++;
 		} else if (strcmp(argument, "--no-apply-on-start") == 0) {
 			options->apply_on_start = 0;
 		} else if (strcmp(argument, "--poll-config") == 0) {
@@ -861,6 +877,95 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
 	return node;
 }
 
+
+/*
+ * The round, driven from fuzznet's loop (10.676): the three calls
+ * `ncfg_main_outside_*` make for any loop this daemon runs inside, over the
+ * run `start` built for its own.
+ */
+typedef struct {
+	const ncfg_main_run_t *run;
+	ncfg_main_outside_t    outside;
+	ncfg_seen_t           *seen;
+} node_driven_t;
+
+/* A record written to the face's socket from inside the face's loop would
+ * wait for an answer only that loop gives. */
+static void node_begin(void *context)
+{
+	node_driven_t *driven = context;
+
+	ncfg_seen_face_is_here(driven->seen, 1);
+	ncfg_log_emitf("node", NCFG_LOG_INFO, "serving this daemon's fuzznet store as its face");
+}
+
+static void node_end(void *context)
+{
+	node_driven_t *driven = context;
+
+	ncfg_seen_face_is_here(driven->seen, 0);
+}
+
+static size_t node_fds(void *context, int *out, size_t cap)
+{
+	node_driven_t *driven = context;
+
+	return ncfg_main_outside_fds(driven->run, out, cap);
+}
+
+static void node_ready(void *context, int fd)
+{
+	node_driven_t *driven = context;
+
+	ncfg_main_outside_ready(driven->run, &driven->outside, fd);
+}
+
+static int node_tick(void *context)
+{
+	node_driven_t           *driven = context;
+	ncfg_main_round_report_t report;
+
+	return ncfg_main_outside_tick(driven->run, &driven->outside, &report) && report.stopping;
+}
+
+/*
+ * Serve the node, if asked to and if this process can be its face: 1 where
+ * the daemon was served there and has been asked to stop, 0 where its own
+ * loop is to run -- because it was not asked, another process is the face,
+ * or fuzznet's loop ended by itself. Each of the last two said once.
+ */
+static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_main_run_t *run,
+    ncfg_seen_t *seen)
+{
+	static node_driven_t driven;
+	ncfg_node_loop_t     loop;
+	char                 err[NCFG_ERROR_MAX];
+	ncfg_node_serve_t    served;
+
+	if (!node || !options->fuzznet_serve) {
+		return 0;
+	}
+	memset(&driven, 0, sizeof(driven));
+	driven.run = run;
+	ncfg_main_outside_begin(run, &driven.outside);
+	driven.seen = seen;
+	loop.context = &driven;
+	loop.begin = node_begin;
+	loop.end = node_end;
+	loop.fds = node_fds;
+	loop.ready = node_ready;
+	loop.tick = node_tick;
+	err[0] = '\0';
+	served = ncfg_node_serve(node, options->fuzznet_args, options->fuzznet_arg_count, &loop,
+	    err, sizeof(err));
+	if (served == NCFG_NODE_SERVE_STOPPED) {
+		return 1;
+	}
+	ncfg_log_emitf("node", served == NCFG_NODE_SERVE_NOT_FACE ? NCFG_LOG_NOTE
+	    : NCFG_LOG_WARNING, "%s, so this daemon runs its own loop", err);
+	return 0;
+}
+
 static int start(const options_t *options)
 {
 	ncfg_main_where_t        where;
@@ -1327,7 +1432,7 @@ static int start(const options_t *options)
 	run.refresh = ncfg_main_watchers_refresh;
 	run.refresh_context = &watchers;
 	err[0] = '\0';
-	if (!ncfg_main_serve(&run, err, sizeof(err))) {
+	if (!serve_node(node, options, &run, loop.seen) && !ncfg_main_serve(&run, err, sizeof(err))) {
 		code = cannot("this daemon stopped watching its descriptors", err);
 	}
 

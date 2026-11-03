@@ -111,4 +111,42 @@ int ncfg_node_publish(ncfg_node_t *node, const char *run_dir, char *err, size_t 
 
 void ncfg_node_close(ncfg_node_t *node);
 
+/*
+ * SERVING THE STORE: netcfgd as its face, inside fuzznet's loop (project.md
+ * 10.676, the holder's "in-loop"). One loop owns the process's descriptors
+ * (fuzznet sec 831), so the daemon's own is not run: `loop` is asked for its
+ * descriptors each pass of the node's, told which are readable, and ticked
+ * after the pass. `tick` answers nonzero once the daemon is stopping.
+ */
+typedef struct {
+	void   *context;
+	/* Called once this process is to be the face, just before fuzznet's loop
+	 * starts, and `end` once that loop has ended by itself. Either may be NULL. */
+	void   (*begin)(void *context);
+	void   (*end)(void *context);
+	size_t (*fds)(void *context, int *out, size_t cap);
+	void   (*ready)(void *context, int fd);
+	int    (*tick)(void *context);
+} ncfg_node_loop_t;
+
+/* How a serve ended. */
+typedef enum {
+	/* Another process is the store's face, so nothing was served and the
+	 * caller runs its own loop: a follower's loop runs no extension yet
+	 * (10.676, fuzznet ask 6), and netcfgd will not stop watching the
+	 * network for the length of somebody else's fuzznetd. */
+	NCFG_NODE_SERVE_NOT_FACE,
+	/* `tick` asked to stop and the node's loop was left. */
+	NCFG_NODE_SERVE_STOPPED,
+	/* fuzznet's loop returned on its own -- refused to start, or an identity
+	 * reset -- and the caller carries on with its own loop. */
+	NCFG_NODE_SERVE_ENDED
+} ncfg_node_serve_t;
+
+/* `extra` are fuzznet's own node options, passed as given (`--fuzznet-arg`),
+ * after `--fuzznet-dir` naming this node's store. `err` says why where the
+ * answer is not STOPPED. */
+ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
+    size_t extra_count, const ncfg_node_loop_t *loop, char *err, size_t err_size);
+
 #endif /* NCFG_NODE_H */

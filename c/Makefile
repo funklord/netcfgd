@@ -162,7 +162,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE netcfgd-static
+.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE netcfgd-static node-serve-test
 
 # **The default goal is pinned, and it is not decoration.** A target added
 # above `all` becomes what a bare `make` here does -- which is how `syntax`,
@@ -236,7 +236,14 @@ FUZZNET_SYSLIBS = $(shell nm $(FUZZNET_LIB) 2>/dev/null | grep -q ' U ZSTD_' && 
 # Only the node module includes fuzznet, so only it is given fuzznet's paths:
 # nothing else in this tree may reach a fuzznet header (`ncfg/node.h` names no
 # fuzznet type), and the flags stay out of every other object.
-NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS)
+NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS) \
+	      $(if $(NODE_SERVE),-DNCFG_NODE_SERVE)
+# **`NODE_SERVE=1` links fuzznet's node loop**, so the daemon can be its store's
+# face (`--fuzznet-serve`, project.md 10.676). Off by default because of what
+# it costs, measured: the installed program grows from 1,514,376 to 2,494,056
+# bytes, most of it the chat services `fzn_daemon_main` pulls in with it --
+# notes, files, stickers, groups -- and its own 19 MB of static storage. Whether
+# netcfgd pays that, or fuzznet's loop comes without them first, is open.
 NODE_SRCS   = $(filter src/node/%,$(SRCS))
 src/node/%.o: CFLAGS += $(NODE_CFLAGS)
 src/node/node.o: | $(FUZZNET_LIB)
@@ -305,7 +312,7 @@ $(PROGRAM_LINK): $(PROGRAM)
 # `cmp` rather than a plain write: an unchanged stamp keeps its timestamp and
 # nothing rebuilds.
 .build-flags: FORCE
-	@echo '$(CC) $(CFLAGS)' > $@.candidate
+	@echo '$(CC) $(CFLAGS) node-serve=$(NODE_SERVE)' > $@.candidate
 	@cmp -s $@.candidate $@ || mv $@.candidate $@
 	@rm -f $@.candidate
 
@@ -333,6 +340,16 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	done; \
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
+
+# netcfgd as its store's face, inside fuzznet's loop (project.md 10.676): the
+# program built with NODE_SERVE=1, then `tests/node_serve.sh` against it. Not in
+# `test` while serving is a build option, and not in a parallel `make check`
+# either: it rebuilds the node module under other flags, and a second make
+# building the same objects at once would be two writers of one file. A plain
+# build afterwards rebuilds them back, through `.build-flags`.
+node-serve-test:
+	$(MAKE) NODE_SERVE=1 $(PROGRAM) $(PROGRAM_LINK)
+	sh tests/node_serve.sh
 
 tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@

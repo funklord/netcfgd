@@ -998,8 +998,8 @@ them because no test had ever carried those keys.
    **Linking and the identity are done (10.669)**, and the shared store is
    answered there: one store is one node, the claim's face writes. **How it
    becomes the face is decided (10.676)**: in fuzznet's loop, the round split
-   so either loop drives it; the move waits on the five things asked of
-   fuzznet there.
+   so either loop drives it, and serving the store built as `NODE_SERVE=1`;
+   by default it waits on the size (65 per cent) and the asks of fuzznet there.
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
@@ -12667,7 +12667,8 @@ and stops being named. Sabotaged: not marking a readiness taken fails one,
 not dropping the hung-up source fails another. The other 194 checks of the
 round are unchanged.
 
-**What the move waits on: asked of fuzznet in its inbox, `20261103T1211Z`.**
+**What the move waits on: asked of fuzznet in its inbox, `20261103T1211Z`**
+(6 and 7 added to the same message, after reading the follower).
 
 1. **Poll the extension's descriptors during a wait in turn** -- the
    holder's ask. A confirm window is a deadline the operator is racing, and
@@ -12686,17 +12687,62 @@ round are unchanged.
    leaves fuzznetd's.
 5. **A restart after a join re-executes the argv fuzznet parsed**, which
    for netcfgd is only the fuzznet options it passes on.
+6. **A follower's loop polls no extension descriptor and never ticks**
+   (`follower_main`): a netcfgd started beside a running fuzznetd would watch
+   nothing until that fuzznetd went.
+7. **Whose is the default socket** when a face and a follower both take it.
 
 And one to confirm: `ext_tick()` runs after every pass of the node's loop,
 not once a second, which the round collapse above relies on.
 
 **The pin is past `f12ee4b`** (at fuzznet `49b2312`, nine commits on; the
 installed program 1,514,376 bytes, inside `size-budget.txt`'s tolerance).
-**Next, as those land:** `c/src/node/`
-gains the extension -- `fds`/`ready`/`tick` over the three calls above, the
-stop byte ending the node's loop -- and the daemon keeps the claim it takes
-rather than giving it back (10.669); `seen.c` writes in-process when this
-process is the face.
+
+**Built, as a build option: the daemon serving its store, in fuzznet's
+loop.** `make NODE_SERVE=1` and `netcfgd --fuzznet-serve` (with
+`--fuzznet-arg` for fuzznet's own node options, passed as given) run
+`fzn_daemon_main` with the three calls above as its extension
+(`ncfg_node_serve` in `c/src/node/node.c`, the adapters in `daemon_main.c`).
+Three things in it are interim, each until one of the asks lands:
+
+- **Only as the face.** The claim is tried first; held by another process,
+  the daemon says so and runs its own loop, since a follower's loop runs no
+  extension (ask 6) and netcfgd must not stop watching the network for as
+  long as somebody's fuzznetd runs.
+- **The stop is a `longjmp` out of fuzznet's tick** (ask 4): the daemon's
+  own shutdown then runs as usual. fuzznet's `face` goes with its `atexit`;
+  its socket file is left, as a SIGTERM leaves fuzznetd's.
+- **Seen hosts are neither written nor read back while serving**
+  (`ncfg_seen_face_is_here`, ask 3): the face's socket is the face's own
+  thread, and said once in the log. Records written by fuzznet clients
+  through the socket are served, as any face serves them.
+
+And a join's restart re-executes only the fuzznet options (ask 5).
+
+**Why a build option, measured:** linking `fzn_daemon_main` grows the
+installed program from 1,518,760 bytes to 2,494,056, 65 per cent. Most of it
+is the chat services `node/daemon.c` calls and no feature flag leaves out --
+`notes.o`, `files.o`, `stickers.o`, `groups.o`, `shelf.o` among the largest
+after `daemon.o`'s own 197 KB -- and `daemon.o` declares 19 MB of static
+storage, which the RSS gate has never been asked about. **Whether netcfgd
+pays that, or fuzznet's loop comes apart from its consumer services first,
+is the holder's** (asked of fuzznet too, as a build it might offer). Until
+then the default build carries a stub that says so.
+
+Checked: `make node-serve-test` (`c/tests/node_serve.sh`, six checks, no
+privilege): fuzznet's socket served and named in `face`; a fuzznet client's
+`add record` and `list record` answered; `ncfg reload` through the daemon in
+8 ms; a configuration edit compiled; SIGTERM ends it with 0, `face` and
+`<run>/node` gone. Sabotaged -- `ready` doing nothing -- the reload took
+4826 ms (the backstop's tick), the edit was never compiled and SIGTERM was
+not heard (status 137, under the script's `timeout -k`): three red. Not in
+`make test` or `check` while it is a build option, since it rebuilds the
+node module under other flags.
+
+**Next, as the asks land:** the claim kept rather than tried (10.669), a
+follower's loop served as well, `seen.c` in-process, the stop returned
+rather than jumped -- and then serving by default, once the size is
+decided.
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 

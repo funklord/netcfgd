@@ -16,6 +16,9 @@
 #include "chain/sign_monocypher.h"
 #include "claim/claim_file.h"
 #include "cli/cli.h"
+#ifdef NCFG_NODE_SERVE
+#include "node/daemon.h"
+#endif
 #include "node/identity.h"
 #include "persist/persist_file.h"
 #include "session/agree_monocypher.h"
@@ -27,6 +30,7 @@
 #include "ncfg/scope.h"
 
 #include <errno.h>
+#include <setjmp.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -361,3 +365,134 @@ void ncfg_node_close(ncfg_node_t *node)
 	}
 	wipe(node);
 }
+
+/* ------------------------------------------------------------------------ *
+ * Serving the store, inside fuzznet's loop (project.md 10.676)
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The loop being served, and where a stop goes. **One serve per process**, as
+ * `fzn_daemon_main` is: it keeps its state in statics, so a second would be a
+ * second node in one address space.
+ *
+ * **The stop is a `longjmp` out of fuzznet's loop**, until fuzznet gives an
+ * extension a way to end it (10.676, ask 4): `fzn_daemon_main` serves until
+ * the process is signalled, and netcfgd stops on a byte and then does its own
+ * shutdown -- holds, the servers joined, `<run>/node` removed -- which a
+ * signal would skip. Jumping from the tick abandons fuzznet's frames with
+ * nothing of theirs half-written, since the tick runs between steps of its
+ * loop, and the process exits shortly after; fuzznet's `face` goes with its
+ * `atexit`, and its socket file is left as a SIGTERM leaves fuzznetd's.
+ */
+#ifdef NCFG_NODE_SERVE
+static const ncfg_node_loop_t *serving;
+static jmp_buf                 serve_stop;
+
+static size_t serve_fds(void *ctx, int *out, size_t cap)
+{
+	(void)ctx;
+	return serving->fds(serving->context, out, cap);
+}
+
+static void serve_ready(void *ctx, int fd)
+{
+	(void)ctx;
+	serving->ready(serving->context, fd);
+}
+
+static void serve_tick(void *ctx, uint64_t now)
+{
+	(void)ctx;
+	(void)now;
+	if (serving->tick(serving->context)) {
+		longjmp(serve_stop, 1);
+	}
+}
+
+/* Whether the claim is free this moment: taken and given straight back, since
+ * `fzn_daemon_main` takes it on a descriptor of its own and a flock conflicts
+ * between two of them even in one process. */
+static int claim_free(const char *dir, char *err, size_t err_size)
+{
+	fzn_claim_file_t claim_file;
+	fzn_claim_ops_t  claim_ops;
+	fzn_claim_t      claim;
+	fzn_claim_err_t  claimed;
+	char             claim_path[NCFG_NODE_DIR_MAX + 8u];
+
+	memset(&claim_file, 0, sizeof(claim_file));
+	claim_file.fd = -1;
+	(void)snprintf(claim_path, sizeof(claim_path), "%s/claim", dir);
+	if (fzn_claim_file_open(&claim_file, claim_path, &claim_ops) != FZN_CLAIM_OK ||
+	    fzn_claim_init(&claim, &claim_ops) != FZN_CLAIM_OK) {
+		ncfg_error_set(err, err_size, "the claim at %s would not open", claim_path);
+		(void)fzn_claim_file_close(&claim_file);
+		return 0;
+	}
+	claimed = fzn_claim_take(&claim);
+	if (claimed == FZN_CLAIM_OK) {
+		(void)fzn_claim_release(&claim);
+	} else {
+		ncfg_error_set(err, err_size, "another process is the face of %s", dir);
+	}
+	(void)fzn_claim_file_close(&claim_file);
+	return claimed == FZN_CLAIM_OK;
+}
+
+ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
+    size_t extra_count, const ncfg_node_loop_t *loop, char *err, size_t err_size)
+{
+	static fzn_daemon_ext_t ext;
+	static char             dir_arg[NCFG_NODE_DIR_MAX + 16u];
+	static char            *argv[3u + 32u + 1u];
+	int                     argc = 0;
+	int                     code;
+	size_t                  at;
+
+	if (serving || extra_count > 32u) {
+		ncfg_error_set(err, err_size, serving ? "this process is already serving a node"
+		    : "more than 32 fuzznet options");
+		return NCFG_NODE_SERVE_ENDED;
+	}
+	if (!claim_free(node->dir, err, err_size)) {
+		return NCFG_NODE_SERVE_NOT_FACE;
+	}
+	(void)snprintf(dir_arg, sizeof(dir_arg), "--fuzznet-dir=%s", node->dir);
+	argv[argc++] = (char *)"netcfgd";
+	argv[argc++] = dir_arg;
+	for (at = 0; at < extra_count; at++) {
+		argv[argc++] = (char *)extra[at];
+	}
+	argv[argc] = NULL;
+
+	memset(&ext, 0, sizeof(ext));
+	ext.fds = serve_fds;
+	ext.ready = serve_ready;
+	ext.tick = serve_tick;
+	serving = loop;
+	if (loop->begin) {
+		loop->begin(loop->context);
+	}
+	if (setjmp(serve_stop) != 0) {
+		return NCFG_NODE_SERVE_STOPPED;
+	}
+	code = fzn_daemon_main(argc, argv, &ext);
+	serving = NULL;
+	if (loop->end) {
+		loop->end(loop->context);
+	}
+	ncfg_error_set(err, err_size, "fuzznet's loop ended with status %d", code);
+	return NCFG_NODE_SERVE_ENDED;
+}
+#else
+ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
+    size_t extra_count, const ncfg_node_loop_t *loop, char *err, size_t err_size)
+{
+	(void)node;
+	(void)extra;
+	(void)extra_count;
+	(void)loop;
+	ncfg_error_set(err, err_size, "this build does not serve a fuzznet node (make NODE_SERVE=1)");
+	return NCFG_NODE_SERVE_ENDED;
+}
+#endif

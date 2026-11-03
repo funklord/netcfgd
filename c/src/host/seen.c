@@ -53,6 +53,8 @@ struct ncfg_seen {
 	int      listing;      /* a listing is under way */
 	uint64_t next_listing; /* when the next may begin */
 	int      said_unread;  /* the line saying a listing stopped is out */
+	/* This process is the face, so the face's socket is its own (10.676). */
+	int      face_is_here;
 };
 
 static void free_list(char **list, size_t count)
@@ -125,6 +127,21 @@ static int face_socket(const char *store, char *out, size_t out_size)
 	}
 	out[length] = '\0';
 	return length > 0u && out[0] == '/';
+}
+
+void ncfg_seen_face_is_here(ncfg_seen_t *seen, int here)
+{
+	if (!seen || seen->face_is_here == !!here) {
+		return;
+	}
+	seen->face_is_here = !!here;
+	if (!here) {
+		return;
+	}
+	ncfg_log_emitf("seen", NCFG_LOG_NOTE,
+	    "this daemon is its fuzznet store's face, and fuzznet does not yet take a record "
+	    "in-process, so stations seen are neither written nor read back until it does "
+	    "(project.md 10.676)");
 }
 
 void ncfg_seen_free(ncfg_seen_t *seen)
@@ -457,7 +474,7 @@ size_t ncfg_seen_record(ncfg_seen_t *seen, const ncfg_observed_t *observed, uint
 	size_t one;
 	int    stop = 0;
 
-	if (!seen || !observed || now < seen->silent_until) {
+	if (!seen || !observed || now < seen->silent_until || seen->face_is_here) {
 		return 0;
 	}
 	for (at = 0; at < observed->backend_count && !stop; at++) {
@@ -634,7 +651,7 @@ void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now)
 	char     why[NCFG_ERROR_MAX];
 	unsigned page;
 
-	if (!seen) {
+	if (!seen || seen->face_is_here) {
 		return;
 	}
 	if (!seen->listing) {
