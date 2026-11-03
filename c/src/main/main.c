@@ -19,6 +19,8 @@
 #include "ncfg/log.h"
 #include "ncfg/cli.h"
 
+#include <sys/prctl.h>
+
 int main(int argc, char **argv)
 {
 	/*
@@ -28,6 +30,19 @@ int main(int argc, char **argv)
 	 * that refuses.
 	 */
 	const char *called_as = argc > 0 ? argv[0] : "";
+
+	/*
+	 * **No transparent huge pages, before anything else touches memory.** A
+	 * kernel set to `always` backs any 2 MB-aligned stretch of anonymous
+	 * memory with a huge page on its first write, so a large static that is
+	 * mostly never touched -- fuzznet's node keeps about 32 MB of it -- is
+	 * resident 2 MB at a time. Measured with the serve build (project.md
+	 * 10.679): 16,760 kB resident, 6,848 kB once `fzn_daemon_main` refused
+	 * them itself, and fuzznet's own measurement says the page faulted before
+	 * that call is most of the rest. Here it is first. Ignored where the
+	 * kernel has no such setting: the process runs as it would have.
+	 */
+	(void)prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
 
 	switch (ncfg_main_program_for(called_as)) {
 	case NCFG_MAIN_PROGRAM_CLIENT:

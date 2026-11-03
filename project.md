@@ -12671,6 +12671,34 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.679 Serving's memory was mostly huge pages: refused at the top of `main`
+
+**fuzznet's answer to the memory half of request 8** (its `e49d6fb`, sec
+842): of fuzznetd's 18,720 kB resident on its machine, 14,336 kB were
+transparent huge pages. With THP set to `always`, a 2 MB-aligned stretch of
+anonymous memory is backed by a huge page on its first write, and the node's
+roughly 32 MB of static storage is mostly cold, so it was resident 2 MB at a
+time. fuzznet now refuses them in `fzn_daemon_main`, and suggested netcfgd do
+it first in its own `main`, before anything is faulted.
+
+**Measured here, THP `always`, the serve build on an empty scratch store
+three seconds after start:** 16,760 kB resident before fuzznet's change
+(10.676), 6,848 kB with it, and **4,664 and 4,924 kB** in two runs with
+`prctl(PR_SET_THP_DISABLE)` as the first statement of `main` in
+`c/src/main/main.c`. The daemon not serving is about 3.5 MB either way, and
+the RSS gate is green on the default build. So 10.676's figure was this,
+mostly; what serving costs in memory is about 1.3 MB, not 13.
+
+**Every program in the multi-call binary refuses them**, `ncfg` included,
+because the call is first in `main` and costs nothing where the kernel has
+no such setting. Whether a router's kernel is `always` is per build -- OpenWrt
+leaves THP off in most targets -- which is the other reason not to scope it.
+
+**What is not answered:** the program's size, 1,518,800 bytes default against
+2,494,336 serving, and fuzznet's consumer services as build options, which
+fuzznet records in sec 842 and has not started. The holder's size decision
+waits on that half.
+
 ## 10.678 The backstop was switched off by anything asked more often than it
 
 **Found** (2026-11-03) while writing 10.676's follower phase: a daemon asked
