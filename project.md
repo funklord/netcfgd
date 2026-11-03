@@ -1070,8 +1070,42 @@ cannot; there is no such protocol), but whether the controller's API can tell
 netcfgd anything the radio cannot see for itself -- which APs belong to one
 network, which band and channel each is on, which are about to be taken down for
 an upgrade. That is a roaming *policy* input, and 0239's `network_for` and the
-roam watcher are where it would land. Worth an hour of reading their API before
-anybody decides it is impossible.
+roam watcher are where it would land.
+
+**Read, 2026-11-03 (about an hour, no controller to try it on):** the
+controller can tell netcfgd three things the radio cannot, and all three
+are in the API people already use:
+
+- **Which BSSIDs are one network, and on which radio:** each AP's
+  `vap_table` in `api/s/{site}/stat/device` maps BSSID to ESSID and radio,
+  and `radio_table_stats` gives channel, width, TX power, client count and
+  airtime per radio. A station sees only what it has scanned; the
+  controller sees every AP of the site, including ones out of range.
+- **An AP about to go away:** firmware upgrades are a controller command
+  (`cmd/devmgr` `upgrade`), and the controller announces them as events
+  (`EVT_AP_Upgraded` and the AP's disconnect) on a WebSocket,
+  `wss/s/{site}/events`, the same stream that carries `EVT_WU_Roam`. A
+  roam policy could leave an AP the controller is upgrading before it
+  drops, which no radio can know in advance.
+- **Load:** per-radio client count and airtime, which 802.11k's neighbour
+  report carries only if the AP fills it in.
+
+What stands against it: **none of this is Ubiquiti's documented
+interface.** The documented one -- the Integration API,
+`/proxy/network/integration/v1` with an `X-API-KEY`, Network 9.x and
+later -- lists sites, devices and clients and their actions, and the
+community references do not show radio tables or the event stream in it.
+The rich API is the controller's own web UI's: cookie login
+(`/api/auth/login` on UniFi OS consoles), field names that change between
+controller versions, and no statement of which account role may read it.
+So it is possible, and it would be an optional input netcfgd polls or
+subscribes to with an operator's credentials, against an interface its
+vendor may change. Nothing here is a protocol a controller uses to hand a
+station over; that still happens between the station and the APs. Sources:
+the community API reference at ubntwiki.com
+(`products/software/UniFi-controller/api`), Art of WiFi's notes on the two
+APIs, and the event names as two client libraries use them.
+**Whether that is worth building is the holder's.**
 
 **Three things open that a worker should not settle alone.**
 
