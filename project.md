@@ -12632,6 +12632,59 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.672 procd runs netcfgd, and an edit during a start was lost
+
+**`packaging/procd/netcfgd` has run for the first time** (2026-11-03), 10.183
+having said procd "needs OpenWrt and stays out of reach". It no longer does:
+hull boots an image's own init as PID 1 (its `(init ...)`), so `make
+hull-openwrt` boots the stock OpenWrt 24.10.4 root filesystem under procd,
+on this host's kernel, and installs netcfgd as a package would. The routers
+expected next run OpenWrt, so this is the path that meets them first.
+
+- **What passed**: procd starts it from the shipped script and lists it
+  running, and the address the document asks for appears on a device netcfgd
+  made; killed with `-9`, procd starts another (`respawn`, the script's whole
+  supervision policy); an edit to the file alone is applied by the inotify
+  watch; `/etc/init.d/netcfgd reload` applies one through `ncfg reload`; and
+  `stop` takes the process away and leaves the address, as a stop holds
+  (0134). Its stdout and stderr reach `logread`, as `procd_set_param stdout`
+  asks.
+- **netcfgd is linked statically for it** (`make -C c netcfgd-static`, not
+  in `all`): OpenWrt's libc is musl. glibc's account and address lookups
+  need its NSS modules at run time and answer nothing without them, which
+  every caller here already takes as "none" -- the DHCP server's `nobody`,
+  the node's home directory. **The node's store lands at `//.local/share/
+  fuzznet`** under procd, whose services run with `HOME=/`: on a router that
+  is the root of the overlay. Not wrong, and not where an OpenWrt package
+  would put state either; a package wants `--fuzznet-dir` or a default for
+  that case, and it is recorded rather than chosen.
+- **The guest has none of the kernel's modules**, so the rig hands it the
+  host's own dummy module; nf_tables is absent too, and the observation's
+  note that no netfilter socket opens **repeats on every pass** -- a line
+  every few seconds in `logread`. On a real OpenWrt build nf_tables is in, so
+  it is a rig artifact, but a kernel without it would fill a router's log.
+
+**The fault it found: an edit made while the daemon starts was lost.** The
+daemon compiled its configuration long before it opened the watch that
+catches every later edit, and an edit landing between the two raised no
+event, so it was applied by nobody until the next one. Under procd that
+window is every respawn. **Measured with the build from before the fix as
+the control**, three trials of killing the daemon and editing the file the
+instant procd's new pid appears: before, every edit was lost -- the address
+each time one edit behind -- and the daemon never said a word; after, each
+was applied within one to three seconds and the daemon said three times
+that the configuration had changed while it was starting.
+
+**The fix** takes the polling watcher's fingerprint of the configuration
+directories (`ncfg_watch_fingerprint_of`, the mtimes of everything in them)
+just before the first compile and again once the watch is open, and compiles
+again where they differ. The writability probe, which creates and unlinks a
+file in the configuration directory, moved to before the first fingerprint:
+between the two it would have made every start look like an edit, which is
+the comment's own warning about writing after the watch, met from the other
+side. `watch_test` checks the fingerprint is stable over an unchanged tree
+and differs once a file is written.
+
 ## 10.671 UPnP and NAT-PMP: miniupnpd, in a table netcfgd makes (0310)
 
 **Built** (2026-11-03): 10.667's UPnP plan, all five steps.

@@ -162,7 +162,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE
+.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE netcfgd-static
 
 # **The default goal is pinned, and it is not decoration.** A target added
 # above `all` becomes what a bare `make` here does -- which is how `syntax`,
@@ -279,6 +279,16 @@ $(FUZZNET_LIB): FORCE
 # it are listed before it or the linker has already walked past what it wanted.
 $(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
 	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+
+# The program linked statically, for a system whose libc is not this one --
+# OpenWrt's is musl (`make hull-openwrt`, project.md 10.672). Not in `all`: it
+# is a test artifact until a package wants it. glibc warns that the account
+# and address lookups need its NSS modules at run time; without them they
+# answer nothing, which every caller here already takes as "none".
+netcfgd-static: $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
+	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) -static $(LDFLAGS) \
+		$(FUZZNET_SYSLIBS) -o $@ 2>&1 | grep -v 'statically linked applications requires' || true
+	@test -x $@
 
 # The second name, made rather than installed -- see the header.
 $(PROGRAM_LINK): $(PROGRAM)
@@ -513,7 +523,7 @@ fuzz/%_fuzz: fuzz/%.c fuzz/fuzz_libfuzzer.c fuzz/fuzz_text.c $(FUZZ_LIB)
 clean:
 	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) $(EXAMPLES) \
 	    $(DEPS) $(FUZZ_REPLAYS) $(addsuffix .d,$(FUZZ_REPLAYS)) $(FUZZ_PROGRAMS) \
-	    .build-flags $(FUZZNET_LIB)
+	    .build-flags $(FUZZNET_LIB) netcfgd-static
 	@# Two directories cleared wholesale, and only because this build made
 	@# it: every object under it is one of ours, and the guard is the one
 	@# `build-and-commit.md` asks for -- non-empty, relative, and not a path

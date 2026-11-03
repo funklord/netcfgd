@@ -47,6 +47,7 @@ c/ncfg_json.o
 # `make -C c clean` removes it after checking its name.
 c/fuzznet-build/
 c/fuzznet.a
+c/netcfgd-static
 # The C fuzz targets' two builds. **The targets and the corpus are tracked and
 # these are not**, which is the same split the Rust block at the top of this
 # file makes: a target is source, an input somebody chose to keep is source,

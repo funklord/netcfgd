@@ -2606,7 +2606,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
       hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
       hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac \
-      hull-upnp
+      hull-upnp hull-openwrt
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -3014,6 +3014,33 @@ hull-upnp:
 	sed 's/^/upnp: /' tests/hull/upnp/verdict/upnp; \
 	grep -q '^VERDICT ok' tests/hull/upnp/verdict/upnp
 
+# netcfgd under OpenWrt's procd (10.672): the stock OpenWrt root filesystem
+# booted with its own init as PID 1, the shipped `packaging/procd/netcfgd`
+# starting, respawning, reloading and stopping a statically linked daemon,
+# and an edit made as procd respawns it applied. The guest runs this host's
+# kernel with none of its modules, so it is handed the host's dummy module.
+hull-openwrt:
+	@$(MAKE) --no-print-directory -C c netcfgd-static
+	@cp c/netcfgd-static tests/hull/openwrt/netcfgd
+	@module=$$(find /lib/modules/$$(uname -r) -name 'dummy.ko*' | head -1); \
+	case "$$module" in \
+	"") echo "openwrt: this kernel has no dummy module to hand the guest" >&2; exit 1 ;; \
+	*.xz) xz -dc "$$module" > tests/hull/openwrt/dummy.ko ;; \
+	*.zst) zstd -qdc "$$module" > tests/hull/openwrt/dummy.ko ;; \
+	*) cp "$$module" tests/hull/openwrt/dummy.ko ;; \
+	esac
+	@$(call hull_says,netcfgd/openwrt)
+	@$(call hull_image,openwrt)
+	@rm -f tests/hull/openwrt/verdict/openwrt
+	@mkdir -p tests/hull/openwrt/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openwrt/hull.conf || true
+	@if [ ! -f tests/hull/openwrt/verdict/openwrt ]; then \
+		echo "openwrt: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/openwrt: /' tests/hull/openwrt/verdict/openwrt; \
+	grep -q '^VERDICT ok' tests/hull/openwrt/verdict/openwrt
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -3151,7 +3178,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one
