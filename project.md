@@ -12951,8 +12951,24 @@ name)`, from `tick`, reaches every `get events` subscriber, which is what
 the program's size and the consumer services as build options are recorded
 there and not started.
 
+**0309's first verb waits on two things** (found 2026-11-03, starting it):
+
+- **The caller's credentials** -- fuzznet's to give, asked as request 10
+  (its inbox `20261103T1510Z`). 0309 keeps the control tiers (0013, 0092,
+  0128), which name users and groups, and `ext->local` is handed only an
+  `fzn_origin_t`; and `fzn_daemon_main` admits same-user callers alone by
+  default, so a desktop's GUI user, let in today by `observe =
+  "group:netcfgd"`, would not reach netcfgd over fuzznet at all.
+- **How a root daemon writes a document to a path the client names** --
+  netcfgd's to decide, once the caller's uid is known: `get status PATH`
+  from a caller allowed only to observe must not be a way to make root
+  write anywhere, a symlink in `/tmp` being enough. The likely shape is a
+  path under a directory the caller owns, opened `O_NOFOLLOW` and checked
+  against the peer's uid; asked of fuzznet whether its own document verbs
+  already have a rule to share.
+
 **Next:** serving by default, once the size is decided (the holder's, after
-fuzznet's request 8), and 0309 on the framing above.
+fuzznet's request 8), and 0309 once request 10 is answered.
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 
