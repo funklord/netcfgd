@@ -12671,6 +12671,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.680 A document for a caller goes only where the caller could have put it
+
+**Decided from 0309 and the tiers, and built ahead of the verb that uses it.**
+fuzznet's framing answers a document by writing it to a path the client names
+(sec 843), and netcfgd runs as root for callers who may hold only `observe`.
+Writing wherever they ask would let any of them make root create or overwrite
+any file -- a symlink left in `/tmp` is enough. So
+`ncfg_caller_file_create` (`c/src/sys/caller_file.c`) holds the path to one
+rule: absolute; its directory owned by the caller and writable by nobody
+else, so the caller could have made the file itself and nobody else can swap
+the name between check and open; the file new, created `O_EXCL | O_NOFOLLOW`
+relative to the directory's own descriptor, so what was checked is what is
+written into; 0600 and given to the caller. Root as the caller is held to it
+too. A write that fails part way removes what it made.
+
+**Rejected:** writing into a directory netcfgd owns and answering with the
+path -- fuzznet's verbs name the path the client chose, and a second
+convention for one daemon is the divergence 0309 exists to remove; and
+opening as the caller with `setfsuid` around the open -- it is per thread
+and would make the kernel check the caller may create the file, but alone it
+still writes into a directory others may write, where a name can be swapped
+under the open; the directory's ownership and mode are the rule either way,
+and with them the credential switch adds nothing.
+
+Not called yet: the verb waits on the caller's uid, fuzznet's request 10.
+Checked: `caller_file_test`, 12 checks -- written in the caller's directory,
+0600 and theirs; an existing file, a symlink in the file's place, a relative
+path, a directory, a trailing slash, a directory not the caller's, one others
+may write, and one not there are each refused with nothing written. Dropping
+`O_EXCL | O_NOFOLLOW`, the owner check or the mode check turns 3, 2 and 2 red.
+
 ## 10.679 Serving's memory was mostly huge pages: refused at the top of `main`
 
 **fuzznet's answer to the memory half of request 8** (its `e49d6fb`, sec
@@ -12959,13 +12990,8 @@ there and not started.
   `fzn_origin_t`; and `fzn_daemon_main` admits same-user callers alone by
   default, so a desktop's GUI user, let in today by `observe =
   "group:netcfgd"`, would not reach netcfgd over fuzznet at all.
-- **How a root daemon writes a document to a path the client names** --
-  netcfgd's to decide, once the caller's uid is known: `get status PATH`
-  from a caller allowed only to observe must not be a way to make root
-  write anywhere, a symlink in `/tmp` being enough. The likely shape is a
-  path under a directory the caller owns, opened `O_NOFOLLOW` and checked
-  against the peer's uid; asked of fuzznet whether its own document verbs
-  already have a rule to share.
+- ~~How a root daemon writes a document to a path the client names~~ --
+  **decided and built, 10.680**, given the caller's uid however it arrives.
 
 **Next:** serving by default, once the size is decided (the holder's, after
 fuzznet's request 8), and 0309 once request 10 is answered.
