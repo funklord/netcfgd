@@ -12671,6 +12671,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.697 The remote safety path, live: a window armed, confirmed, and left to revert
+
+0312 refuses an operator's apply without a confirm window, because across
+the estate a change that cuts the operator off has no other way back. That
+rule had been checked at the gate (`ask_test`) but never through the whole
+path. `node_fleet.sh` now does it in its third start of A, with A's remote
+`admin` tier open. Through B:
+
+- `apply --at A --confirm-within 60` arms a window on A (`commit.arm`);
+- `confirm --at A` confirms it;
+- a second `confirm` is A's own `no confirm window is open`;
+- `apply --at A --confirm-within 3`, left alone, is reverted by A
+  (`revert: undid 1 of 1 applied`), and then has nothing to confirm.
+
+The last waits on A's log, up to 30 seconds, rather than sleeping. A's loop
+closes the window, and how soon depends on A's tick, which a fixed sleep
+would only be guessing. An earlier draft slept 6 seconds and passed because
+the tick happened to fall inside it. A's configuration manages nothing (`lo`,
+unmanaged), so the applies need no privilege, and the property under test is
+the window, not any change it covers.
+
 ## 10.696 A refused `seen` record is asked again a minute on, and said once
 
 Found by deriving a lens from 10.695's bug, a limit taken from the wrong

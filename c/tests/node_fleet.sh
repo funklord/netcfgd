@@ -17,7 +17,9 @@
 #   - a host that is no member is refused rather than waited on for ever;
 #   - with A's `remote` observe tier closed, A denies it and names the tier;
 #   - and with its admin tier open, a configuration longer than one line,
-#     put through B, goes in pieces and lands in A's conf.d whole;
+#     put through B, goes in pieces and lands in A's conf.d whole; and an
+#     apply with a window, confirmed from B, then finds no second window,
+#     and a window nobody confirms reverts by itself;
 #   - and a key that is not one is refused before anything is asked.
 #
 # HOW IT STOPS: every wait is bounded (socket waits by a count of 0.5 s
@@ -211,11 +213,35 @@ done
 	[ "$(grep -c padding "$R/conf/conf.d/big.conf")" = 40 ] && [ -z "$(ls -A "$R/bconf")" ]
 check $? "a $(wc -c < "$R/big.conf")-byte config put --at A goes in pieces and lands in A's conf.d whole"
 
+# The remote safety path (0312): an apply from another host carries a window,
+# and is confirmed from there. A's configuration changes nothing here (lo,
+# unmanaged), so the apply has no actions to need privilege for.
+XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" apply --at "$host" --confirm-within 60 \
+	> "$R/apply.out" 2>&1
+check $? "apply --at A --confirm-within arms a window on A ($(head -c 50 "$R/apply.out"))"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" confirm --at "$host" > "$R/confirm.out" 2>&1
+grep -q 'confirmed' "$R/confirm.out"
+check $? "  confirm --at A confirms it"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" confirm --at "$host" > "$R/confirm2.out" 2>&1
+[ $? -ne 0 ] && grep -q 'no confirm window' "$R/confirm2.out"
+check $? "  and a second confirm finds no window ($(head -c 60 "$R/confirm2.out"))"
+# And one nobody confirms undoes itself: what stops an operator who cut
+# themselves off from being cut off for good.
+XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" apply --at "$host" --confirm-within 3 \
+	> "$R/apply2.out" 2>&1
+# Waited for by what A says, not by a sleep: the window is A's loop to close,
+# and how soon it does is A's tick, which a fixed sleep would be guessing.
+deadline=$(( $(date +%s) + 30 ))
+until grep -qi 'revert' "$R/a3.log" || [ "$(date +%s)" -ge $deadline ]; do sleep 0.5; done
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" confirm --at "$host" > "$R/confirm3.out" 2>&1
+[ $? -ne 0 ] && grep -qi 'revert' "$R/a3.log"
+check $? "  and a window nobody confirms reverts by itself ($(grep -i revert "$R/a3.log" | tail -1 | cut -c1-50))"
+
 ! grep -q 'runtime error\|Sanitizer' "$R/a.log" "$R/a2.log" "$R/a3.log"
 check $? "netcfgd's log carries no sanitizer report"
 
 if [ $failed -ne 0 ]; then
-	for f in a.log b.log root.out a3.log big.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
+	for f in a.log b.log root.out a3.log big.out apply.out confirm.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
 	echo "node_fleet: some checks FAILED"
 	exit 1
 fi
