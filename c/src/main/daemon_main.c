@@ -898,17 +898,63 @@ typedef struct {
 	 * control socket's servers hold, read here on the loop's own thread. */
 	const ncfg_main_policy_t *policy;
 	ncfg_authz_roots_t        roots;
+	/* Whether the `status` permit has been put in step with `observe`. */
+	int                       permitted;
 } node_driven_t;
 
 /*
- * 0309's first verb, on fuzznet's framing (its sec 843): `get status PATH`
- * writes the observation -- what the control socket's `status` answers -- to
- * PATH and answers `ok LENGTH`. Judged by netcfgd's own tiers against the
- * caller fuzznet read (`observe`, as on the socket), and written only where
- * that caller could have put it (`ncfg_caller_file_create`, 10.680), because
- * this daemon is root and the caller need not be. Answered on the loop's
- * thread between steps of fuzznet's loop, where the state is whole.
+ * fuzznet's `local/permit/status` in step with the `observe` tier (10.688):
+ * without it, fuzznet calls the procedure for the node's own user alone, so
+ * the GUI's users in netcfgd's group could not ask. `status` is netcfgd's
+ * subject, so this setting follows netcfgd's configuration: written where
+ * it differs, cleared where the tier is root's. Asked in-process on the
+ * loop's first pass, because `fzn_daemon_local` answers only inside it.
  */
+static void node_permit(const ncfg_principal_t *observe)
+{
+	static const char key[] = "host local/permit/status";
+	char              grant[96];
+	char              line[160];
+	char              said[1100];
+	int               want = ncfg_main_node_permit(observe, grant, sizeof(grant));
+	size_t            n;
+
+	if (want < 0) {
+		ncfg_log_emitf("node", NCFG_LOG_INFO,
+		    "fuzznet's permit for `status` is left alone: the observe tier is open to %s, "
+		    "and a grant names a user or a group",
+		    observe && observe->kind == NCFG_PRINCIPAL_ANY ? "any user" : "a name it cannot carry");
+		return;
+	}
+	(void)snprintf(line, sizeof(line), "get setting %s", key);
+	n = ncfg_node_local(line, said, sizeof(said) - 1u);
+	said[n] = '\0';
+	if (want == 0) {
+		if (strncmp(said, "ok ", 3) != 0 || strncmp(said, "ok absent", 9) == 0) {
+			return; /* none to clear: an absent setting answers `ok absent` */
+		}
+		(void)snprintf(line, sizeof(line), "remove setting %s", key);
+	} else {
+		const char *value = strchr(said + (n > 3u ? 3u : n), ' ');
+		size_t      length = strlen(grant);
+
+		if (strncmp(said, "ok ", 3) == 0 && value && strncmp(value + 1, grant, length) == 0 &&
+		    (value[1 + length] == '\n' || value[1 + length] == '\0')) {
+			return; /* in step already */
+		}
+		(void)snprintf(line, sizeof(line), "set setting %s %s", key, grant);
+	}
+	n = ncfg_node_local(line, said, sizeof(said) - 1u);
+	said[n] = '\0';
+	if (strncmp(said, "ok", 2) == 0) {
+		ncfg_log_emitf("node", NCFG_LOG_INFO, "fuzznet's permit for `status`: %s",
+		    want ? grant : "cleared, the observe tier being root's");
+	} else {
+		ncfg_log_emitf("node", NCFG_LOG_WARNING,
+		    "fuzznet's permit for `status` could not be set: %.200s", n ? said : "no answer");
+	}
+}
+
 /* An operator of the estate, over fuzznet's remote hop (`daemon_node.c`). */
 static size_t node_remote(void *context, const uint8_t key[NCFG_NODE_KEY_LEN], int contact,
     const char *body, size_t length, char *reply, size_t cap)
@@ -922,6 +968,36 @@ static size_t node_remote(void *context, const uint8_t key[NCFG_NODE_KEY_LEN], i
 	    contact, body, length, reply, cap);
 }
 
+/*
+ * A call of one of netcfgd's procedures through fuzznet (`call status
+ * [FROM]`, 10.688): a caller on this machine judged by netcfgd's tiers as on
+ * the socket, an operator of the estate by the `remote` block, the page as
+ * `get status [FROM]` answers it over the remote type.
+ */
+static size_t node_call(void *context, const char *name, const uint8_t *key,
+    const ncfg_peer_t *peer, const char *args, size_t length, char *answer, size_t cap,
+    size_t escaped_cap)
+{
+	node_driven_t *driven = context;
+
+	if (strcmp(name, NCFG_NODE_PROCEDURE_STATUS) != 0 || (!key && !peer)) {
+		return 0u;
+	}
+	return ncfg_main_node_status(driven->policy,
+	    driven->run->loop && driven->run->loop->state ? driven->run->loop->state->observed
+	                                                  : NULL,
+	    key ? NULL : peer, args, length, answer, cap, escaped_cap);
+}
+
+/*
+ * 0309's first verb, on fuzznet's framing (its sec 843): `get status PATH`
+ * writes the observation -- what the control socket's `status` answers -- to
+ * PATH and answers `ok LENGTH`. Judged by netcfgd's own tiers against the
+ * caller fuzznet read (`observe`, as on the socket), and written only where
+ * that caller could have put it (`ncfg_caller_file_create`, 10.680), because
+ * this daemon is root and the caller need not be. Answered on the loop's
+ * thread between steps of fuzznet's loop, where the state is whole.
+ */
 static size_t node_answer(void *context, const ncfg_peer_t *peer, const char *line,
     char *reply, size_t cap)
 {
@@ -1000,6 +1076,10 @@ static int node_tick(void *context)
 	node_driven_t           *driven = context;
 	ncfg_main_round_report_t report;
 
+	if (!driven->permitted) {
+		driven->permitted = 1;
+		node_permit(driven->policy ? &driven->policy->control.observe : NULL);
+	}
 	return ncfg_main_outside_tick(driven->run, &driven->outside, &report) && report.stopping;
 }
 
@@ -1050,6 +1130,7 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	loop.tick = node_tick;
 	loop.local = node_answer;
 	loop.remote = node_remote;
+	loop.call = node_call;
 	for (at = 0; at < options->fuzznet_arg_count && arg_count < 32u; at++) {
 		if (strncmp(options->fuzznet_args[at], "--socket", 8u) == 0) {
 			named = 1;

@@ -17,6 +17,7 @@
 #include "claim/claim_file.h"
 #include "cli/cli.h"
 #include "node/daemon.h"
+#include "local/vocabulary.h"
 #include "node/identity.h"
 #include "node/types.h"
 #include "persist/persist_file.h"
@@ -397,6 +398,25 @@ static void serve_ready(void *ctx, int fd)
 	serving->ready(serving->context, fd);
 }
 
+/* fuzznet's caller as netcfgd's, which is what the tiers judge. */
+static void peer_of(const fzn_peer_t *from, ncfg_peer_t *peer)
+{
+	memset(peer, 0, sizeof(*peer));
+	peer->pid = (pid_t)from->pid;
+	peer->uid = (uid_t)from->uid;
+	peer->gid = (gid_t)from->primary_gid;
+	peer->groups_known = from->groups_known;
+	if (from->groups_known) {
+		size_t at;
+
+		peer->group_total = from->group_count;
+		for (at = 0; at < from->group_count && at < NCFG_PEER_GROUPS_MAX; at++) {
+			peer->groups[at] = (gid_t)from->groups[at];
+		}
+		peer->group_count = at;
+	}
+}
+
 /* A request fuzznet declined, with its caller, as netcfgd's own types: the
  * peer as `ncfg_peer_t`, which is what the tiers judge, and the line as text.
  * A remote origin is not answered here: 0128 decides what a remote caller may
@@ -412,20 +432,7 @@ static size_t serve_local_from(void *ctx, fzn_origin_t origin, const fzn_peer_t 
 	if (!serving->local || !from || !request || origin == FZN_ORIGIN_REMOTE) {
 		return 0u;
 	}
-	memset(&peer, 0, sizeof(peer));
-	peer.pid = (pid_t)from->pid;
-	peer.uid = (uid_t)from->uid;
-	peer.gid = (gid_t)from->primary_gid;
-	peer.groups_known = from->groups_known;
-	if (from->groups_known) {
-		size_t at;
-
-		peer.group_total = from->group_count;
-		for (at = 0; at < from->group_count && at < NCFG_PEER_GROUPS_MAX; at++) {
-			peer.groups[at] = (gid_t)from->groups[at];
-		}
-		peer.group_count = at;
-	}
+	peer_of(from, &peer);
 	length = request->verb_len + (request->arg_len ? 1u + request->arg_len : 0u);
 	if (length >= sizeof(line)) {
 		return 0u;
@@ -461,6 +468,32 @@ static size_t serve_remote(void *ctx, const uint8_t sender[FZN_PUBKEY_LEN], int 
 	reply[1] = NCFG_NODE_TYPE_ANSWER;
 	return n + 2u;
 }
+
+/* A call of `status` (fuzznet's sec 853): the arguments as text, the caller
+ * as netcfgd's. fuzznet calls it only for an estate member or for a local
+ * caller this node's permits let call. */
+static size_t serve_status(void *ctx, const uint8_t *caller, const fzn_peer_t *from,
+    const uint8_t *args, size_t args_len, uint8_t *answer, size_t cap)
+{
+	ncfg_peer_t peer;
+
+	(void)ctx;
+	if (!serving || !serving->call || (!caller && !from)) {
+		return 0u;
+	}
+	if (!caller) {
+		peer_of(from, &peer);
+	}
+	/* `ok `, the escaped answer and a newline in one of fuzznet's replies:
+	 * the bound its `call_said` holds an answer to, whoever asked. */
+	return serving->call(serving->context, NCFG_NODE_PROCEDURE_STATUS, caller,
+	    caller ? NULL : &peer, (const char *)args, args_len, (char *)answer, cap,
+	    FZN_REPLY_MAX - 5u);
+}
+
+static const fzn_daemon_procedure_t procedures[] = {
+	{ NCFG_NODE_PROCEDURE_STATUS, serve_status },
+};
 
 static void serve_tick(void *ctx, uint64_t now)
 {
@@ -515,6 +548,8 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 	ext.tick = serve_tick;
 	ext.local_from = serve_local_from;
 	ext.remote = serve_remote;
+	ext.procedures = procedures;
+	ext.n_procedures = sizeof(procedures) / sizeof(procedures[0]);
 	/* A join's restart, or a follower's on taking the claim, executes the
 	 * daemon's own command line rather than the fuzznet options above. */
 	ext.restart_argv = restart_argv;

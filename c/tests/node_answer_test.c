@@ -125,6 +125,50 @@ int main(void)
 	    "  and in many where the reply is small, put back together exactly");
 	ncfg_buf_free(&joined);
 
+	/* As a procedure (10.688): every page fits once escaped -- a small bound
+	 * here, so there are many; node_serve.sh asks fuzznet's own -- and the
+	 * pages still join to the socket's status. */
+	count = 0;
+	{
+		size_t from = 0;
+		size_t worst = 0;
+		int    fine = 1;
+
+		ncfg_buf_init(&joined, NCFG_PROTO_MAX_LINE);
+		while (fine && from < whole.length) {
+			char          offset[32];
+			unsigned long t;
+			unsigned long f;
+			unsigned long c;
+			int           used = 0;
+			size_t        escaped = 0;
+			size_t        at;
+
+			(void)snprintf(offset, sizeof(offset), "%zu", from);
+			n = ncfg_main_node_status(&policy, &observed, NULL, offset, strlen(offset), reply,
+			    sizeof(reply) - 1u, 120u);
+			reply[n] = '\0';
+			for (at = 0; at < n; at++) {
+				unsigned char b = (unsigned char)reply[at];
+
+				escaped += b <= ' ' || b == '%' || b == ',' || b == 0x7fu ? 3u : 1u;
+			}
+			worst = escaped > worst ? escaped : worst;
+			fine = n > 0 && escaped <= 120u && ++count < 100000u &&
+			    sscanf(reply, "ok %lu %lu %lu\n%n", &t, &f, &c, &used) == 3 && f == from &&
+			    c > 0 && (size_t)used + c == n;
+			if (fine) {
+				ncfg_buf_add(&joined, reply + used, c);
+				from += c;
+			}
+		}
+		check(fine && joined.length == whole.length &&
+		        memcmp(joined.data, whole.data, whole.length) == 0 &&
+		        count > 3u && worst > 100u,
+		    "as a procedure, each page fits its bound escaped, and they join");
+		ncfg_buf_free(&joined);
+	}
+
 	n = ask(&policy, &observed, 0, "get status 99999999", reply, sizeof(reply));
 	check(n > 0 && strstr(reply, " 0\n") != NULL,
 	    "an offset past the end is an empty page, not an error");
@@ -137,6 +181,34 @@ int main(void)
 	n = ask(&policy, NULL, 0, "get status", reply, sizeof(reply));
 	check(n > 0 && strncmp(reply, "error ", 6) == 0,
 	    "a daemon with no observation says so rather than answering empty");
+
+	/* fuzznet's grant from the observe tier (10.688). */
+	{
+		ncfg_principal_t who;
+		char             grant[96];
+
+		memset(&who, 0, sizeof(who));
+		who.kind = NCFG_PRINCIPAL_GROUP;
+		who.name = (char *)"netcfgd";
+		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "group:netcfgd=x") == 0,
+		    "observe = group:netcfgd grants that group fuzznet's call");
+		who.kind = NCFG_PRINCIPAL_USER;
+		who.name = (char *)"alice";
+		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "user:alice=x") == 0,
+		    "  a user, that user");
+		who.name = (char *)"al ice";
+		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == -1 && grant[0] == '\0',
+		    "  a name fuzznet's grant cannot carry is no grant, not a broken setting");
+		who.kind = NCFG_PRINCIPAL_ROOT;
+		who.name = NULL;
+		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 0,
+		    "  root's needs none: fuzznet serves the node's own user");
+		who.kind = NCFG_PRINCIPAL_ANY;
+		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == -1,
+		    "  and `any` is none a grant can say");
+	}
 
 	ncfg_buf_free(&whole);
 	if (failures) {

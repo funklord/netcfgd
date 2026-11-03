@@ -118,6 +118,17 @@ said=$(ask "$R/fz.sock" "get status /tmp/netcfgd-node-serve-$$.json")
 echo "$said" | grep -q "^error .*not the caller's" && [ ! -e "/tmp/netcfgd-node-serve-$$.json" ]
 check $? "  and not into a directory that is not the caller's"
 
+# The same status as a fuzznet procedure (its sec 853, 10.688): `call status
+# FROM` answers `ok` and the page escaped, `ok TOTAL FROM COUNT` and the
+# bytes. This caller is the node's own user, so fuzznet lets it call.
+said=$(ask "$R/fz.sock" "call status 0")
+echo "$said" > "$R/out/call.txt"
+echo "$said" | grep -q '^ok ok%20[0-9][0-9]*%200%20[0-9]'
+check $? "call status 0 answers the status's first page ($(echo "$said" | cut -c1-24))"
+said=$(ask "$R/fz.sock" "call status x")
+echo "$said" | grep -q '^ok malformed'
+check $? "  and an offset that is not one is malformed ($(echo "$said" | cut -c1-24))"
+
 kill -TERM $pid
 wait $pid
 code=$?
@@ -128,6 +139,29 @@ check $? "SIGTERM stops it with status 0 ($code); face, socket, <run>/node gone"
 # removed below, so a report would otherwise go unread.
 ! grep -q 'runtime error\|Sanitizer' "$R/log"
 check $? "the daemon's log carries no sanitizer report"
+
+# ---- the observe tier open to a group: fuzznet's permit follows it ----
+# (10.688) Without the grant fuzznet calls `status` for the node's own user
+# alone; with it, a GUI user in netcfgd's group may. The group here is this
+# user's own, since a second user needs privilege this test does not have.
+g=$(id -gn)
+printf 'global {\n\tcontrol {\n\t\tobserve = "group:%s"\n\t\tadmin = "any"\n\t}\n}\n' "$g" \
+	> "$R/conf/netcfgd.conf"
+timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/store" --fuzznet-arg "--socket=$R/fz.sock" \
+	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/log4" 2>&1 &
+pid=$!
+n=0
+until grep -q "permit for .status." "$R/log4" 2>/dev/null || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+said=$(ask "$R/fz.sock" "get setting host local/permit/status")
+echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
+check $? "observe = group:NAME grants that group fuzznet's call of status ($said)"
+kill -TERM $pid
+wait $pid
 
 # ---- the observe tier closed: the same verb denied ----
 # A daemon of its own, because the control policy is read once at start (the
@@ -146,6 +180,9 @@ until [ -S "$R/fz.sock" ] || [ $n -gt 50 ]; do sleep 0.2; n=$((n + 1)); done
 said=$(ask "$R/fz.sock" "get status $R/out/denied.json")
 echo "$said" | grep -q '^denied .*observe' && [ ! -e "$R/out/denied.json" ]
 check $? "  and is denied where the observe tier is not the caller's ($said)"
+said=$(ask "$R/fz.sock" "get setting host local/permit/status")
+echo "$said" | grep -q '^ok absent$'
+check $? "  and the status permit is cleared, the tier being root's ($said)"
 kill -TERM $pid
 wait $pid
 conf ''

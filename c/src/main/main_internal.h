@@ -46,6 +46,7 @@
 #ifndef NCFG_MAIN_INTERNAL_H
 #define NCFG_MAIN_INTERNAL_H
 
+#include "ncfg/daemon.h"
 #include "ncfg/document.h"
 #include "ncfg/observed.h"
 
@@ -334,6 +335,19 @@ typedef struct {
  */
 size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
     int contact, const char *request, size_t length, char *reply, size_t cap);
+/* The status procedure's page (`call status [FROM]`, fuzznet sec 853):
+ * `local` the caller's peer on this machine, or NULL for an operator of the
+ * estate. `escaped_cap`, where not 0, bounds the page as fuzznet escapes it. */
+size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
+    const ncfg_peer_t *local, const char *args, size_t length, char *reply, size_t cap,
+    size_t escaped_cap);
+/*
+ * fuzznet's grant for the `status` procedure (its sec 852, 10.688) from the
+ * `observe` tier: 1 with `KIND:NAME=x` in `out`; 0 where the tier is root's,
+ * the node's own user, who needs none; -1 where no grant can say it -- `any`,
+ * or a name fuzznet's grants cannot carry.
+ */
+int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t size);
 
 int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *out, char *err,
     size_t err_size);

@@ -53,20 +53,123 @@ static size_t say(char *reply, size_t cap, const char *word, const char *sentenc
 	return wrote > 0 && (size_t)wrote < cap ? (size_t)wrote : 0u;
 }
 
-size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
-    int contact, const char *request, size_t length, char *reply, size_t cap)
+/*
+ * The length of `text` as fuzznet's local grammar escapes it (its sec 668): a
+ * byte up to a space, a `%`, a comma or DEL takes three.
+ */
+static size_t escaped_length(const char *text, size_t length)
 {
-	static const char    verb[] = "get status";
+	size_t at;
+	size_t total = 0;
+
+	for (at = 0; at < length; at++) {
+		unsigned char c = (unsigned char)text[at];
+
+		total += c <= ' ' || c == '%' || c == ',' || c == 0x7fu ? 3u : 1u;
+	}
+	return total;
+}
+
+/*
+ * The status, one page of it, for a caller already identified: `local` the
+ * peer of a caller on this machine, judged by the control tiers as the socket
+ * judges one; NULL for an operator of the estate, judged by the `remote`
+ * block. `args` is the offset, or nothing. Where `escaped_cap` is not 0 the
+ * page is also no longer than that once escaped, which is how fuzznet hands a
+ * procedure's answer to a local client.
+ */
+size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
+    const ncfg_peer_t *local, const char *args, size_t length, char *reply, size_t cap,
+    size_t escaped_cap)
+{
 	ncfg_proto_request_t asked;
 	ncfg_authz_roots_t   roots = ncfg_authz_roots_default();
 	ncfg_buf_t           status;
-	char                 line[128];
+	char                 line[64];
 	char                 err[NCFG_ERROR_MAX];
-	const char          *rest;
+	const char          *rest = line;
 	unsigned long        from = 0;
 	size_t               header;
 	size_t               count;
 	int                  wrote;
+	int                  allowed;
+
+	if (!policy || !reply || cap == 0u) {
+		return 0u;
+	}
+	if (!line_of(args ? args : "", args ? length : 0u, line, sizeof(line))) {
+		return say(reply, cap, "malformed", "`status` takes an offset, or nothing");
+	}
+	while (*rest == ' ') {
+		rest++;
+	}
+	if (*rest) {
+		char *end = NULL;
+
+		if (*rest < '0' || *rest > '9') {
+			return say(reply, cap, "malformed", "`status` takes an offset, or nothing");
+		}
+		from = strtoul(rest, &end, 10);
+		if (!end || *end != '\0') {
+			return say(reply, cap, "malformed", "`status` takes an offset, or nothing");
+		}
+	}
+	memset(&asked, 0, sizeof(asked));
+	asked.kind = NCFG_PROTO_REQ_STATUS;
+	err[0] = '\0';
+	allowed = local ? ncfg_authz_permitted(&roots, &policy->control, &policy->remote,
+	                      NCFG_ARRIVED_LOCAL, local, &asked, err, sizeof(err))
+	                : ncfg_authz_check(&roots, &policy->control, &policy->remote,
+	                      NCFG_ARRIVED_REMOTE, NULL, &asked, err, sizeof(err));
+	if (!allowed) {
+		return say(reply, cap, "denied", err);
+	}
+	ncfg_buf_init(&status, NCFG_PROTO_MAX_LINE);
+	if (!observed || !ncfg_daemon_status_encode(observed, &status, err, sizeof(err))) {
+		ncfg_buf_free(&status);
+		return say(reply, cap, "error", err[0] ? err : "there is no observation to answer with");
+	}
+	if (from > status.length) {
+		from = status.length;
+	}
+	/* The header at its longest, so the page is sized before it is written. */
+	wrote = snprintf(reply, cap, "ok %zu %lu %zu\n", status.length, from, status.length);
+	if (wrote <= 0 || (size_t)wrote >= cap ||
+	    (escaped_cap && escaped_length(reply, (size_t)wrote) >= escaped_cap)) {
+		ncfg_buf_free(&status);
+		return 0u;
+	}
+	count = status.length - (size_t)from;
+	if (count > cap - (size_t)wrote) {
+		count = cap - (size_t)wrote;
+	}
+	if (escaped_cap) {
+		size_t room = escaped_cap - escaped_length(reply, (size_t)wrote);
+		size_t take = 0;
+
+		while (take < count) {
+			size_t one = escaped_length(status.data + from + take, 1u);
+
+			if (one > room) {
+				break;
+			}
+			room -= one;
+			take++;
+		}
+		count = take;
+	}
+	wrote = snprintf(reply, cap, "ok %zu %lu %zu\n", status.length, from, count);
+	header = (size_t)wrote;
+	memcpy(reply + header, status.data + from, count);
+	ncfg_buf_free(&status);
+	return header + count;
+}
+
+size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
+    int contact, const char *request, size_t length, char *reply, size_t cap)
+{
+	static const char verb[] = "get status";
+	char              line[128];
 
 	if (!policy || !request || !reply || cap == 0u) {
 		return 0u;
@@ -85,49 +188,43 @@ size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observ
 		return say(reply, cap, "denied",
 		    "a contact is not an operator of this estate, so this node answers it nothing");
 	}
-	rest = line + sizeof(verb) - 1u;
-	while (*rest == ' ') {
-		rest++;
-	}
-	if (*rest) {
-		char *end = NULL;
+	return ncfg_main_node_status(policy, observed, NULL, line + sizeof(verb) - 1u,
+	    strlen(line + sizeof(verb) - 1u), reply, cap, 0u);
+}
 
-		if (*rest < '0' || *rest > '9') {
-			return say(reply, cap, "malformed", "`get status` takes an offset, or nothing");
+int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t size)
+{
+	const char *at;
+	int         wrote;
+
+	if (!observe || !out || size == 0u) {
+		return -1;
+	}
+	out[0] = '\0';
+	if (observe->kind == NCFG_PRINCIPAL_ROOT) {
+		return 0; /* the node's own user, whom fuzznet serves without a grant */
+	}
+	if (observe->kind != NCFG_PRINCIPAL_USER && observe->kind != NCFG_PRINCIPAL_GROUP) {
+		return -1; /* `any`: a grant names a user or a group, and nothing else */
+	}
+	if (!observe->name || !observe->name[0]) {
+		return -1;
+	}
+	/* fuzznet's grant takes a name of these bytes only (its `permit.c`), and a
+	 * grant it cannot parse would refuse the whole setting. */
+	for (at = observe->name; *at; at++) {
+		char c = *at;
+
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		        c == '-' || c == '_' || c == '.')) {
+			return -1;
 		}
-		from = strtoul(rest, &end, 10);
-		if (!end || *end != '\0') {
-			return say(reply, cap, "malformed", "`get status` takes an offset, or nothing");
-		}
 	}
-	memset(&asked, 0, sizeof(asked));
-	asked.kind = NCFG_PROTO_REQ_STATUS;
-	err[0] = '\0';
-	if (!ncfg_authz_check(&roots, &policy->control, &policy->remote, NCFG_ARRIVED_REMOTE, NULL,
-	        &asked, err, sizeof(err))) {
-		return say(reply, cap, "denied", err);
+	wrote = snprintf(out, size, "%s:%s=x",
+	    observe->kind == NCFG_PRINCIPAL_GROUP ? "group" : "user", observe->name);
+	if (wrote <= 0 || (size_t)wrote >= size || (size_t)(at - observe->name) >= 64u) {
+		out[0] = '\0';
+		return -1;
 	}
-	ncfg_buf_init(&status, NCFG_PROTO_MAX_LINE);
-	if (!observed || !ncfg_daemon_status_encode(observed, &status, err, sizeof(err))) {
-		ncfg_buf_free(&status);
-		return say(reply, cap, "error", err[0] ? err : "there is no observation to answer with");
-	}
-	if (from > status.length) {
-		from = status.length;
-	}
-	/* The header at its longest, so the page is sized before it is written. */
-	wrote = snprintf(reply, cap, "ok %zu %lu %zu\n", status.length, from, status.length);
-	if (wrote <= 0 || (size_t)wrote >= cap) {
-		ncfg_buf_free(&status);
-		return 0u;
-	}
-	count = status.length - (size_t)from;
-	if (count > cap - (size_t)wrote) {
-		count = cap - (size_t)wrote;
-	}
-	wrote = snprintf(reply, cap, "ok %zu %lu %zu\n", status.length, from, count);
-	header = (size_t)wrote;
-	memcpy(reply + header, status.data + from, count);
-	ncfg_buf_free(&status);
-	return header + count;
+	return 1;
 }

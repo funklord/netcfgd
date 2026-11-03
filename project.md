@@ -12671,6 +12671,79 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.688 `status` is a fuzznet procedure: `call status [FROM]`
+
+fuzznet's answer to 10.685's ask (its inbox message 20261103T1938Z, its secs
+852 to 855) is generic rather than netcfgd's: there is no send verb for raw
+extension types, because those are bytes fuzznet cannot judge. Instead:
+
+- **local permits** (its 852): a host setting `local/permit/SUBJECT` such as
+  `group:netcfgd=r user:#1001=x`, where `x` is call. A caller the node would
+  otherwise deny is served as the node's own user, and nothing is stored for it;
+- **procedures** (its 853): `call NAME [at HOSTHEX] [ARGS]`. A daemon
+  registers them on its extension, and a procedure is called only for an
+  estate member, or for a local caller that is the node's own user or that a
+  permit grants `x`. The answer is at most 4096 bytes;
+- **a follower's procedures are forwarded by the face** (its 51d6c0b), through
+  `procedure/NAME` sockets in the store. A forwarded local caller arrives with
+  its uid and primary gid but **no group list**;
+- **lists** (its 854 and 855): records under `list/NAME/`, one key per member,
+  `add/remove/get/list listed`, and a records rule may keep by a list.
+
+Types 128 and 129 are listed in fuzznet's `node/types.h` as netcfgd's, so the
+remote hook of 10.685 keeps working for peers that speak it.
+
+**netcfgd registers one procedure, `status`**, which pages the status as
+`get status [FROM]` does (`ok TOTAL FROM COUNT`, a newline, the bytes). One
+function in `daemon_node.c` serves both the remote type and the procedure:
+
+- a remote caller is judged by the `remote` block;
+- a local caller is judged by netcfgd's control tiers against the peer fuzznet
+  read, as on the socket. A forwarded caller has no group list, which denies
+  any tier opened by group (`groups_known` 0, 10.683). That is the safe
+  direction, and fuzznet has already judged that caller.
+
+**Found while testing: a full answer never reaches a local client.** fuzznet
+hands a local client the answer escaped (`%XX` for a space, `%`, a comma, a
+control byte or DEL), in one reply line of `FZN_REPLY_MAX`, which is 1024
+bytes. A status page is JSON, full of spaces and quotes, so a 4096-byte answer
+escaped is several times that, and fuzznet answered `error the answer is
+longer than one reply`. So the procedure sizes each page so that, escaped,
+the header and the bytes fit `FZN_REPLY_MAX - 5`. Against a 13 KB status
+the first page is 906 bytes.
+
+That bound holds for a remote call too, because host B gives its own local
+client the answer the same way. The mismatch between the 4096-byte answer
+fuzznet allows and the roughly 1019 bytes a local client can receive is
+fuzznet's own, and has been sent to it rather than worked around further.
+
+- `node_answer_test` pages at a small escaped bound and joins the pages back
+  to the socket's status byte for byte. With the sizing disabled it fails.
+- `node_serve.sh` asks `call status 0` of a live daemon (`ok ok%2013041%200%20906...`)
+  and checks that a bad offset is malformed.
+
+**fuzznet's permit follows the `observe` tier.** Without a grant, fuzznet
+calls a procedure only for the node's own user, so a GUI user in netcfgd's
+group could not call `status`. `status` is netcfgd's subject, so
+`local/permit/status` follows netcfgd's configuration. On the loop's first
+pass the daemon:
+
+- writes `group:NAME=x` for `observe = "group:NAME"`, or `user:NAME=x` for a
+  user, only where the setting differs;
+- clears it where the tier is root's, since the node's own user needs none;
+- leaves it alone, and says so, for `any`, which no grant can express (a
+  grant names a user or a group), and for a name fuzznet's grant cannot
+  carry. A setting fuzznet cannot parse would refuse every grant in it.
+
+It is `x` alone, the call: `r` would also serve that caller fuzznet's read
+verbs on the subject as the node's own user (its `permit_judge`), which is
+more than the tier opens.
+`node_serve.sh` reads the setting back from a live daemon, and it is cleared
+again by the closed-tier phase.
+
+**Not done yet:** moving the `seen` records onto a fuzznet list; and `any`,
+which wants a grant to every local user if fuzznet offers one.
+
 ## 10.687 One radio meshes and runs an access point: the `mesh_point` device
 
 10.588's open item, and the usual shape of a mesh router: one radio for both

@@ -149,7 +149,27 @@ typedef struct {
 	 */
 	size_t (*remote)(void *context, const uint8_t key[NCFG_NODE_KEY_LEN], int contact,
 	    const char *body, size_t length, char *reply, size_t cap);
+	/*
+	 * A call of one of netcfgd's procedures (fuzznet's `call NAME`, its sec
+	 * 853), each named in `NCFG_NODE_PROCEDURES`: `key` the calling host, an
+	 * estate member's, or NULL for a caller on this machine, whose
+	 * credentials are `peer` -- with no group list where a face forwarded
+	 * the call, having judged the caller already. The answer's length, at
+	 * most `cap` and at most `escaped_cap` once escaped -- fuzznet hands it
+	 * to a local client escaped, in one reply line (its `FZN_REPLY_MAX`) --
+	 * or 0 for one that failed. NULL answers none.
+	 */
+	size_t (*call)(void *context, const char *name, const uint8_t *key,
+	    const ncfg_peer_t *peer, const char *args, size_t length, char *answer, size_t cap,
+	    size_t escaped_cap);
 } ncfg_node_loop_t;
+
+/*
+ * The procedures netcfgd offers its estate and its machine through fuzznet:
+ * `status [FROM]`, the status a page at a time, as the remote type's
+ * `get status [FROM]` answers it (10.688).
+ */
+#define NCFG_NODE_PROCEDURE_STATUS "status"
 
 /*
  * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to
