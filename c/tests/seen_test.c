@@ -32,9 +32,16 @@ static void check(int condition, const char *what)
 
 static pid_t server;
 
-/* Listen at `path`, answer `answer` to at most `count` requests, logging each
- * request line to `log`. */
-static void serve(const char *path, const char *log, const char *answer, int count)
+/* What a fuzznetd answers a request no handler serves -- one started without
+ * a record store -- which is its status line (`fzn_node_status_line`),
+ * copied from a real one. */
+#define STATUS_LINE "ok served granted: this kind requires no capability origin 1 fuzznet 0.1.0\n"
+
+/* Listen at `path`, answer at most `count` requests, logging each request
+ * line to `log`: the n-th with `answers[n]`, and every one past the last
+ * with the last. */
+static void serve_each(const char *path, const char *log, const char *const *answers,
+    int answer_count, int count)
 {
 	struct sockaddr_un address;
 	int                listener = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -69,12 +76,22 @@ static void serve(const char *path, const char *log, const char *answer, int cou
 				fputs(line, out);
 				fclose(out);
 			}
-			(void)write(fd, answer, strlen(answer));
+			{
+				const char *answer =
+				    answers[taken < answer_count ? taken : answer_count - 1];
+
+				(void)write(fd, answer, strlen(answer));
+			}
 			close(fd);
 		}
 		_exit(0);
 	}
 	close(listener);
+}
+
+static void serve(const char *path, const char *log, const char *answer, int count)
+{
+	serve_each(path, log, &answer, 1, count);
 }
 
 static void stop_serving(void)
@@ -216,6 +233,18 @@ static void nobody_listening(const char *run)
 	    "  and is asked again next pass, since nothing was kept");
 	stop_serving();
 	ncfg_seen_free(seen);
+
+	/* A fuzznetd with no record store serves no `add record`, and answers
+	 * with its status line: `ok`, then words. That is not a record kept. */
+	(void)snprintf(socket_path, sizeof(socket_path), "%s/storeless.sock", run);
+	(void)snprintf(log, sizeof(log), "%s/storeless", run);
+	serve(socket_path, log, STATUS_LINE, 6);
+	seen = ncfg_seen_new(socket_path);
+	check(ncfg_seen_record(seen, &observed, now) == 0u &&
+	        ncfg_seen_record(seen, &observed, now + 1u) == 0u && lines_in(log) == 6,
+	    "a fuzznetd's status line, which begins `ok`, keeps nothing and is asked again");
+	stop_serving();
+	ncfg_seen_free(seen);
 }
 
 /*
@@ -257,6 +286,112 @@ static void through_the_store_s_face(const char *run)
 	ncfg_seen_free(seen);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Reading it back (10.674)
+ * ------------------------------------------------------------------------ */
+
+#define HOST_A "4444444444444444444444444444444444444444444444444444444444444444"
+#define HOST_B "5555555555555555555555555555555555555555555555555555555555555555"
+
+static void a_listing_parsed(void)
+{
+	char  *found[8] = { 0 };
+	size_t count = 0;
+	size_t at;
+	int    more = 0;
+	long   shown;
+
+	shown = ncfg_seen_parse_listing("ok 0 5 1"
+	    " " HOST_A ",seen/ap0/aa-bb-cc-00-00-02,1793500000000,station"
+	    " " HOST_B ",seen/wlan0/02-00-00-00-00-01,1793500001000,lease%2010.0.0.2%20nas"
+	    " " HOST_A ",seen/ap1/aa-bb-cc-00-00-02,1793500002000,station"
+	    " " HOST_A ",dns/name,1793500003000,x"
+	    " " HOST_A ",seen/ap0/AA-BB-CC-00-00-03,1793500004000,station",
+	    found, &count, 8u, &more);
+	check(shown == 5 && more,
+	    "a listing says how many it shows and whether there is more, as its head says");
+	check(count == 2u && strcmp(found[0], "02:00:00:00:00:01") == 0 &&
+	        strcmp(found[1], "aa:bb:cc:00:00:02") == 0,
+	    "  its seen/ keys give the stations once each, sorted, spelt as hostapd spells "
+	    "them; another key and a MAC out of shape give none");
+	shown = ncfg_seen_parse_listing("denied this caller may not list records", found,
+	    &count, 8u, &more);
+	check(shown < 0 && count == 2u, "a refusal is no listing, and adds nobody");
+	shown = ncfg_seen_parse_listing(
+	    "ok served granted: this kind requires no capability origin 1 fuzznet 0.1.0", found,
+	    &count, 8u, &more);
+	check(shown < 0 && count == 2u,
+	    "  nor is the status line of a fuzznetd that serves no records");
+	for (at = 0; at < count; at++) {
+		free(found[at]);
+	}
+}
+
+static void read_back(const char *run)
+{
+	static const char *const two_pages[] = {
+		"ok 0 2 1 " HOST_A ",seen/ap0/02-00-00-00-00-03,1,station "
+		    HOST_B ",seen/ap0/aa-bb-cc-00-00-09,2,lease%2010.0.0.2\n",
+		"ok 2 1 0 " HOST_A ",seen/wlan1/02-00-00-00-00-03,3,station\n",
+	};
+	static const char *const never_ends =
+	    "ok 0 1 1 " HOST_A ",seen/ap0/02-00-00-00-00-07,1,station\n";
+	char         sock[600];
+	char         log[600];
+	char         store[600];
+	char         face[700];
+	char        *heard;
+	char *const *listed;
+	size_t       count = 7;
+	ncfg_seen_t *seen;
+
+	(void)snprintf(sock, sizeof(sock), "%s/read.sock", run);
+	(void)snprintf(log, sizeof(log), "%s/read.log", run);
+	(void)snprintf(store, sizeof(store), "%s/read-store", run);
+	(void)snprintf(face, sizeof(face), "%s/face", store);
+	testdir_mkdirp(store);
+	(void)testdir_write(face, sock, strlen(sock));
+	seen = ncfg_seen_new("/nonexistent/fuzznetd.sock");
+	ncfg_seen_use_store(seen, store);
+	check(ncfg_seen_stations(seen, &count) == NULL && count == 0u,
+	    "before any reading, no stations");
+
+	serve_each(sock, log, two_pages, 2, 2);
+	ncfg_seen_read(seen, 1000u);
+	stop_serving();
+	listed = ncfg_seen_stations(seen, &count);
+	check(count == 2u && listed && strcmp(listed[0], "02:00:00:00:00:03") == 0 &&
+	        strcmp(listed[1], "aa:bb:cc:00:00:09") == 0,
+	    "two pages read in one pass are one set, every host's, each station once");
+	heard = testdir_read(log, NULL);
+	check(heard && strcmp(heard, "list record 0\nlist record 2\n") == 0,
+	    "  asked of the store's face from 0, then from where the first page ended");
+	free(heard);
+
+	ncfg_seen_read(seen, 1000u + NCFG_SEEN_READ_SECONDS - 1u);
+	check(lines_in(log) == 2, "a finished reading is not asked again before its time");
+
+	(void)unlink(face);
+	ncfg_seen_read(seen, 1000u + NCFG_SEEN_READ_SECONDS);
+	(void)ncfg_seen_stations(seen, &count);
+	check(count == 2u, "with no face, the last whole reading stands");
+
+	/* A listing that always says there is more is a pass's worth of pages
+	 * and no more, and is no set until it ends. */
+	ncfg_seen_free(seen);
+	(void)unlink(log);
+	(void)testdir_write(face, sock, strlen(sock));
+	seen = ncfg_seen_new("/nonexistent/fuzznetd.sock");
+	ncfg_seen_use_store(seen, store);
+	serve(sock, log, never_ends, (int)NCFG_SEEN_READ_PAGES + 4);
+	ncfg_seen_read(seen, 5000u);
+	(void)ncfg_seen_stations(seen, &count);
+	check(lines_in(log) == (int)NCFG_SEEN_READ_PAGES && count == 0u,
+	    "a listing that never ends costs a pass its bound in pages, and sets nothing");
+	stop_serving();
+	ncfg_seen_free(seen);
+}
+
 int main(void)
 {
 	const char *run = testdir_make("seen");
@@ -265,6 +400,8 @@ int main(void)
 	what_is_written_and_when(run);
 	nobody_listening(run);
 	through_the_store_s_face(run);
+	a_listing_parsed();
+	read_back(run);
 	if (failures) {
 		printf("\nseen_test: %d check(s) FAILED\n", failures);
 		return 1;

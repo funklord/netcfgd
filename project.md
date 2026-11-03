@@ -12632,6 +12632,62 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.674 An allow list's prefix: the stations ever seen with it
+
+10.667's third step, **reading seen back**: `allow = ["aa:bb:cc:*"]`
+compiles now, and lets in the stations fuzznet's records say were ever seen
+with that prefix -- by this host or by any host whose records the store
+holds, so a device met at one access point of an estate is let in at the
+others. A deny list's prefix expands as it did, with the records as a third
+source.
+
+- **Not blocked on the face question** (10.669), which the first reading of
+  this step assumed: fuzznet's record store lets any process read and only
+  writing needs the claim, and the read goes where the writes already go --
+  `list record` on the socket the store's `face` names. It moves in-process
+  with the writes when netcfgd runs the node loop.
+- **Bounded per pass, and never a partial set** (`ncfg_seen_read`). A reply
+  holds about eight records, so a pass asks at most 32 pages and the next
+  carries on; the stations replace the previous set only when a listing
+  ends, a new listing starts a minute after one ended, and a listing that
+  stops (no face, a refusal) leaves the last whole set standing and says so
+  once.
+- **Stamped on every observation the daemon takes**, as `seen_stations`,
+  the way the regdom setter is: the pass, an apply, the drift checks and
+  the `ncfg plan` answer all expand against one set. An in-process `ncfg
+  plan` takes it from the daemon's status with the regdom setter, which is
+  now asked for whenever a daemon is there rather than only with a country
+  observed.
+- **A list only grows from what hostapd holds.** An entry hostapd already
+  accepts that a prefix covers stays, so a failed reading, or a record
+  fuzznet's retention lets go, never shuts out a station already allowed. A
+  hostapd restart starts again from the written list and what is seen.
+- **What it does not do**: admit a device never seen anywhere. That is what
+  an allow list is for -- a new device with the prefix is refused until
+  some host of the estate has recorded it, which is a deny-by-default
+  reading of "every station of this make". An operator who wants every
+  device of a manufacturer, seen or not, has no form for it, because
+  hostapd holds exact addresses.
+
+Tested in `seen_test` against a stand-in that answers page by page (two
+pages joined into one set, the bound, the last set standing with no face),
+in `plan_access_point_test` (seen and covered is added, seen and not covered
+is not, held and covered stays, and with no records nothing moves either
+way), and end to end against a real fuzznetd: records added through its own
+socket appear as `seen_stations` in the observation netcfgd publishes.
+
+**What the first run against a real fuzznetd found, in the recorder of
+10.666**, which had never met one. A fuzznetd that does not serve records
+answers every `add record` with its status line, `ok served granted ...`,
+and the recorder took any reply beginning `ok` as a record kept -- so a
+store-less fuzznetd was reported as recording everything while nothing was
+kept. A kept record is answered `ok` alone, and that is what is taken now;
+`seen_test` has the status line as a case, and with the old test put back
+it fails. The listing already refused it. What makes a fuzznetd serve
+records is a capability (`--fuzznet-service` and `--fuzznet-product`, as
+fuzznet's `tool/live_trim.py` starts one); a bare `--socket` fuzznetd
+answers with the status line, which is how this was met.
+
 ## 10.673 The global tab turns UPnP on, after saying what it costs
 
 10.671 built UPnP for the document and `ncfg`, and a GUI user -- the person
@@ -13071,10 +13127,8 @@ lease's name changes, two rewritten a day on, nothing and no failure with no
 fuzznetd and no retry within the minute, a refusal kept for the next pass.
 **Not run against a real fuzznetd**, which would need one running as root.
 
-**What this does not do yet**: read the records back. An allow list's prefix
-is still refused at compile time (10.591), because expanding it needs the
-resolver to ask fuzznetd for the stations seen with that prefix -- the next
-step, now that there is something to read.
+**Read back since 10.674**: the daemon lists the records from the same face
+and an allow list's prefix expands against them.
 
 ## 10.665 A confirm window pauses while the machine sleeps
 
@@ -15988,10 +16042,10 @@ oscillating: a denied station is disassociated, is not associated on the next
 pass, and a set drawn from the associated alone would release it to come
 straight back.
 
-**On an allow list a prefix is refused at compile time**, written or reached
-through a list: a station an allow list refuses never associates, so there is
-nothing to expand against. That changes when *seen* persists (fuzznet's
-record half, above), and not before.
+**On an allow list a prefix expands against the stations ever seen**
+(10.674), since *seen* now persists in fuzznet's records: a station an allow
+list refuses never associates, so the associated stations are no source for
+it. Until 2026-11-03 it was refused at compile time for that reason.
 
 **What a deny prefix costs**: a matching station associates and is denied
 within a pass of the reconcile loop, and after a hostapd restart the window

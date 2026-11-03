@@ -1782,13 +1782,20 @@ static void host_list_cases(void)
 		    "  and the list names what its prefixes cover, and nothing else");
 		ncfg_document_free(document);
 	}
-	/* hostapd cannot hold a prefix and a refused station is never seen, so
-	 * there is nothing to expand an allowed prefix against. */
-	refuses(AP_OPEN "\taccess_control { allow = [\"aa:bb:cc:*\"] }\n}\n",
-	    "works on a deny list only", "a prefix on an allow list is refused");
-	refuses(AP_OPEN "\taccess_control { allow = [\"@host_list:vendors\"] }\n}\n"
+	/* An allow list's prefix expands against the stations fuzznet's records
+	 * say were ever seen (10.674), so it compiles as a deny list's does --
+	 * written, and reached through a list. */
+	document = compiles(AP_OPEN "\taccess_control { allow = [\"aa:bb:cc:*\", "
+	    "\"@host_list:vendors\"] }\n}\n"
 	    "host_list \"vendors\" { mac = [\"de:ad:be:*\"] }\n",
-	    "holds the prefix", "and so is one reached through a list an allow names");
+	    "a prefix on an allow list, written and through a list");
+	if (document) {
+		acl = document->access_points[0].access_control;
+		check(acl && acl->policy == NCFG_ACL_POLICY_ALLOW && acl->prefix_count == 2 &&
+		    acl->station_count == 0,
+		    "  both prefixes are kept for the planner, and nothing is a station");
+		ncfg_document_free(document);
+	}
 	refuses("host_list \"vendors\" { mac = [\"aa:bb:*\"] }\n", "three octets and a star",
 	    "a prefix shorter than the manufacturer's part is refused by name");
 	refuses("host_list \"vendors\" { mac = [\"aa:bb:cc:dd:*\"] }\n",

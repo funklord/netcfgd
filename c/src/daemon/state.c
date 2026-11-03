@@ -80,6 +80,42 @@ int ncfg_daemon_state_init(ncfg_daemon_state_t *state, const char *factory_dir,
 	return 1;
 }
 
+static void free_stations(char **stations, size_t count)
+{
+	size_t at;
+
+	for (at = 0; at < count; at++) {
+		free(stations[at]);
+	}
+	free(stations);
+}
+
+/* A copy of `count` strings, or NULL; `*ok` is 0 only on out of memory. */
+static char **copy_stations(char *const *stations, size_t count, int *ok)
+{
+	char **copy;
+	size_t at;
+
+	*ok = 1;
+	if (!count) {
+		return NULL;
+	}
+	copy = calloc(count, sizeof(*copy));
+	if (!copy) {
+		*ok = 0;
+		return NULL;
+	}
+	for (at = 0; at < count; at++) {
+		copy[at] = duplicate(stations[at]);
+		if (!copy[at]) {
+			free_stations(copy, at);
+			*ok = 0;
+			return NULL;
+		}
+	}
+	return copy;
+}
+
 void ncfg_daemon_state_free(ncfg_daemon_state_t *state)
 {
 	if (!state) {
@@ -92,6 +128,7 @@ void ncfg_daemon_state_free(ncfg_daemon_state_t *state)
 	free(state->diagnostics);
 	free(state->rejected);
 	ncfg_observed_free(state->observed);
+	free_stations(state->seen_stations, state->seen_station_count);
 	memset(state, 0, sizeof(*state));
 }
 
@@ -361,6 +398,41 @@ static void stamp_regdom(const ncfg_daemon_state_t *state, ncfg_observed_t *obse
 	observed->regdom_set_by = duplicate(ncfg_regdom_setter_name(state->regdom_heard.set_by));
 }
 
+/* The set read back, onto an observation. Out of memory leaves it without,
+ * which plans as a machine with no records: an allow list keeps what
+ * hostapd holds and adds nobody. */
+static void stamp_seen(const ncfg_daemon_state_t *state, ncfg_observed_t *observed)
+{
+	int ok;
+
+	free_stations(observed->seen_stations, observed->seen_station_count);
+	observed->seen_stations = copy_stations(state->seen_stations, state->seen_station_count,
+	    &ok);
+	observed->seen_station_count = observed->seen_stations ? state->seen_station_count : 0u;
+}
+
+int ncfg_daemon_state_heard_seen(ncfg_daemon_state_t *state, char *const *stations,
+    size_t count)
+{
+	char **copy;
+	int    ok;
+
+	if (!state) {
+		return 0;
+	}
+	copy = copy_stations(stations, count, &ok);
+	if (!ok) {
+		return 0;
+	}
+	free_stations(state->seen_stations, state->seen_station_count);
+	state->seen_stations = copy;
+	state->seen_station_count = copy ? count : 0u;
+	if (state->observed) {
+		stamp_seen(state, state->observed);
+	}
+	return 1;
+}
+
 int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *err,
     size_t err_size)
 {
@@ -390,6 +462,7 @@ int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *er
 		*moved = links_moved(state->observed, fresh);
 	}
 	stamp_regdom(state, fresh);
+	stamp_seen(state, fresh);
 	ncfg_observed_free(state->observed);
 	state->observed = fresh;
 	return 1;

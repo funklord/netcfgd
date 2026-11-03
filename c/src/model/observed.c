@@ -1537,7 +1537,10 @@ static const ncfg_field_t observed_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_t, port_forward_count) },
 	{ .name = "port_forwards_unread", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_t, port_forwards_unread),
-	    .count_offset = offsetof(ncfg_observed_t, port_forward_unread_count) }
+	    .count_offset = offsetof(ncfg_observed_t, port_forward_unread_count) },
+	{ .name = "seen_stations", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_t, seen_stations),
+	    .count_offset = offsetof(ncfg_observed_t, seen_station_count) }
 };
 static const ncfg_type_t observed_type = TYPE("observation", observed_fields);
 /* The same members under a status answer's envelope, whose `response` the

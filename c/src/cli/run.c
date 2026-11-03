@@ -1163,7 +1163,10 @@ static void warn_about_disabled_networks(const ncfg_document_t *document,
 }
 
 /*
- * Who set the regulatory domain, from a daemon that heard it.
+ * What only the daemon knows, from a daemon that is there: who set the
+ * regulatory domain, and the stations read back from fuzznet's records
+ * (10.674), which `ncfg plan` needs to plan an allow list's prefix the way
+ * the daemon will.
  *
  * **Only that, and not the daemon's whole observation**, which is what this
  * first did and what `tests/live/qdisc.sh` refused: the daemon re-observes on
@@ -1179,7 +1182,7 @@ static void warn_about_disabled_networks(const ncfg_document_t *document,
  * Quietly: a daemon that is not there, refuses this caller's tier or answers
  * something unreadable costs the listing that one fact and nothing else.
  */
-static void take_regdom_setter(const ncfg_cli_options_t *options, ncfg_observed_t *observed)
+static void take_from_daemon(const ncfg_cli_options_t *options, ncfg_observed_t *observed)
 {
 	ncfg_proto_request_t request;
 	ncfg_proto_message_t message;
@@ -1188,7 +1191,7 @@ static void take_regdom_setter(const ncfg_cli_options_t *options, ncfg_observed_
 	char                 ignored[NCFG_ERROR_MAX];
 	int                  absent = 0;
 
-	if (!observed->regdom || !socket_for(options, path, sizeof(path))) {
+	if (!socket_for(options, path, sizeof(path))) {
 		return;
 	}
 	memset(&request, 0, sizeof(request));
@@ -1202,6 +1205,7 @@ static void take_regdom_setter(const ncfg_cli_options_t *options, ncfg_observed_
 		    message.u.response.u.payload.object, ignored, sizeof(ignored));
 		if (theirs) {
 			ncfg_cli_take_regdom_setter(observed, theirs);
+			ncfg_cli_take_seen(observed, theirs);
 			ncfg_observed_free(theirs);
 		}
 	}
@@ -1221,7 +1225,7 @@ static int command_status(const ncfg_cli_options_t *options)
 		ncfg_document_free(document);
 		return fail(err);
 	}
-	take_regdom_setter(options, observed);
+	take_from_daemon(options, observed);
 	/* As every path that observes does: answering "why is it like this?" from
 	 * a file is the product. A `/run` that will not take it is not a failure
 	 * of the command -- the listing the operator asked for is on stdout. */
@@ -1398,6 +1402,7 @@ static int command_plan(const ncfg_cli_options_t *options)
 		ncfg_document_free(document);
 		return fail(err);
 	}
+	take_from_daemon(options, observed);
 	/* Even a plan writes what it decided and what it saw. */
 	(void)ncfg_state_write_desired(run_dir, document, err, sizeof(err));
 	(void)ncfg_state_write_observed(run_dir, observed, err, sizeof(err));

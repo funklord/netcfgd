@@ -1472,6 +1472,16 @@ typedef struct {
 	size_t                        port_forward_count;
 	char                        **port_forwards_unread;
 	size_t                        port_forward_unread_count;
+	/*
+	 * The stations ever recorded as seen, by this host or any whose records
+	 * its fuzznet store holds, lowercase with colons and sorted (10.674): what
+	 * an allow list's prefix expands against. Not a kernel read: the daemon
+	 * reads them back from fuzznet's records (`ncfg_seen_read`) and stamps
+	 * them on every observation it takes, so every plan it builds sees the
+	 * same set. Omitted when empty, which is every machine with no fuzznetd.
+	 */
+	char                        **seen_stations;
+	size_t                        seen_station_count;
 } ncfg_observed_t;
 
 /* One port forward rule as the decoder read it (0298, 0299). `protocol` is

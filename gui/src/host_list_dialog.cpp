@@ -48,8 +48,9 @@ ncfg_host_list_dialog::ncfg_host_list_dialog(ncfg_connection *connection,
 	members->setPlaceholderText(QStringLiteral(
 	    "One station per line: 00:11:22:33:44:55, or aa:bb:cc:* for a manufacturer"));
 	members->setToolTip(QStringLiteral(
-	    "A manufacturer prefix is taken where the list is used to deny or in a firewall "
-	    "rule; an access point's allow list needs exact addresses."));
+	    "A manufacturer prefix is taken everywhere. On an access point's allow list it "
+	    "lets in the stations with that prefix that were ever seen, here or elsewhere "
+	    "in the estate; one never seen stays out."));
 	form->addRow(QStringLiteral("stations"), members);
 	layout->addLayout(form);
 

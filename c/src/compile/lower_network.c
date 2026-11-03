@@ -759,7 +759,6 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 {
 	int         policy = -1;
 	size_t      at;
-	ncfg_span_t prefix_span = block->span;
 
 	memset(out, 0, sizeof(*out));
 	for (at = 0; at < block->items.count; at++) {
@@ -828,8 +827,6 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 					ncfg_diag(ctx, words.at[i].span, "%s", why);
 					continue;
 				}
-				/* Refused on an allow list once the side is known, below. */
-				prefix_span = words.at[i].span;
 				(void)ncfg_push_string(ctx, &out->written, &out->written_count, prefix);
 				(void)ncfg_push_string(ctx, &out->prefixes, &out->prefix_count, prefix);
 				continue;
@@ -843,11 +840,6 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 			(void)ncfg_push_string_owned(ctx, &out->stations, &out->station_count, station);
 		}
 		ncfg_words_free(&words);
-	}
-
-	if (policy == NCFG_ACL_POLICY_ALLOW && out->prefix_count) {
-		ncfg_diag(ctx, prefix_span, "%s", NCFG_ALLOW_PREFIX_REFUSAL);
-		goto refused;
 	}
 
 	/* What was written is kept only beside a list: without one it is the

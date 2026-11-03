@@ -380,6 +380,11 @@ void ncfg_cli_print_upnp(const char *run_dir);
  */
 void ncfg_cli_take_regdom_setter(ncfg_observed_t *mine, const ncfg_observed_t *theirs);
 
+/* The stations the daemon read back from fuzznet's records (10.674), copied
+ * into an observation of this process's own, where it has none: an in-process
+ * `ncfg plan` expands an allow list's prefix against the same set. */
+void ncfg_cli_take_seen(ncfg_observed_t *mine, const ncfg_observed_t *theirs);
+
 /*
  * `ncfg plan`: the actions, then everything that is not an action.
  *

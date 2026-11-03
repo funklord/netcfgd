@@ -425,13 +425,6 @@ int ncfg_lower_mesh(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block, ncf
 #define NCFG_HOST_LIST_NAME_MAX 64
 int ncfg_is_host_list_name(const char *name);
 
-/* Why a prefix cannot be allowed, said once for the two places that refuse it
- * -- written in an `allow`, and reached through a list one names. */
-#define NCFG_ALLOW_PREFIX_REFUSAL \
-	"an OUI prefix works on a deny list only: hostapd holds exact addresses, so " \
-	"netcfgd expands a prefix into the stations it has seen match it, and a " \
-	"station an allow list refuses is never seen; list the addresses to allow"
-
 /* `dns_record "nas.home.lan" { ... }` (0303). 0, with a diagnostic, for one
  * `ncfg_dns_record_check` refuses. */
 int ncfg_lower_dns_record(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,

@@ -723,6 +723,53 @@ static void a_prefix_on_a_deny_list_is_the_stations_seen_with_it(void)
 }
 
 /*
+ * An OUI prefix on an allow list, expanded against the stations fuzznet's
+ * records say were ever seen (10.674) -- the only source an allow list has,
+ * since a station it refuses never associates. Four cases: a seen station the
+ * prefix covers is allowed; a seen one it does not cover is not; one hostapd
+ * already accepts that it covers stays although no record names it now (a
+ * failed reading, or one retention let go, never shuts a station out); and
+ * the document's own station is held as it was.
+ */
+static void a_prefix_on_an_allow_list_is_the_stations_ever_seen_with_it(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	const char      *running =
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)
+	    ",\"access_control\":{\"policy\":{\"set\":\"allow\"},\"denied\":[],"
+	    "\"accepted\":[\"02:00:00:00:00:01\",\"aa:bb:cc:00:00:05\"],\"associated\":[]}");
+	char             with_seen[4096];
+	ncfg_plan_t     *plan;
+
+	(void)snprintf(with_seen, sizeof(with_seen),
+	    "%s,\"seen_stations\":[\"aa:bb:cc:00:00:07\",\"de:ad:be:00:00:01\"]", running);
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"allow\","
+	    "\"stations\":[\"02:00:00:00:00:01\"],\"prefixes\":[\"aa:bb:cc:*\"]}"),
+	    with_seen, &document, &observed);
+	check(plan && acl_op_for(plan, "access_control.add", "aa:bb:cc:00:00:07"),
+	    "a station ever seen that an allow prefix covers is allowed");
+	check(plan && !acl_op_for(plan, "access_control.add", "de:ad:be:00:00:01"),
+	    "and one seen that it does not cover is not");
+	check(plan && !acl_op_for(plan, "access_control.del", "aa:bb:cc:00:00:05"),
+	    "and one already allowed that it covers stays, though no record names it now");
+	check(plan && planfix_count(plan, "access_control.add") == 1u &&
+	    planfix_count(plan, "access_control.del") == 0u && !planfix_action(plan, "backend.stop"),
+	    "and that is the whole of the change, without a restart");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"allow\","
+	    "\"stations\":[\"02:00:00:00:00:01\"],\"prefixes\":[\"aa:bb:cc:*\"]}"),
+	    running, &document, &observed);
+	check(plan && planfix_count(plan, "access_control.add") == 0u &&
+	    planfix_count(plan, "access_control.del") == 0u,
+	    "with no records read, nobody is added and nobody taken away");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * Before the station lists, because a restart makes them moot: the access
  * point comes back with the whole configuration rebuilt, and converging a list
  * on a hostapd that is about to be replaced is work that fails or is undone.
@@ -1615,6 +1662,7 @@ int main(void)
 	a_policy_that_moved_restarts_rather_than_being_half_applied();
 	a_restarted_access_point_has_its_station_lists_left_alone();
 	a_prefix_on_a_deny_list_is_the_stations_seen_with_it();
+	a_prefix_on_an_allow_list_is_the_stations_ever_seen_with_it();
 	only_the_first_access_point_on_a_radio_is_restarted();
 	an_access_point_that_has_to_listen_first_is_said();
 	an_access_point_with_no_address_is_said();

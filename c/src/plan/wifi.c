@@ -681,25 +681,33 @@ static void converge_list(ncfg_builder_t *builder, const char *device, int list,
 }
 
 /*
- * What a deny list should hold once its prefixes are expanded (10.591).
+ * What a list should hold once its prefixes are expanded (10.591, 10.674).
  *
  * hostapd holds exact addresses -- it drops a mask without a word, measured --
- * so `aa:bb:cc:*` becomes the stations seen with that prefix. Two sources, and
- * the second is what keeps this from oscillating: a denied station is
- * disassociated, so it is not associated on the next pass, and a set drawn from
- * the associated stations alone would release it to come straight back. So an
- * entry hostapd already holds that a prefix covers stays, alongside every
- * station associated now that one covers. The document's own stations come
- * first and are kept whatever is seen.
+ * so `aa:bb:cc:*` becomes the stations seen with that prefix. Three sources.
+ * An entry hostapd already holds that a prefix covers stays, which is what
+ * keeps a deny list from oscillating: a denied station is disassociated, so it
+ * is not associated on the next pass, and a set drawn from the associated
+ * stations alone would release it to come straight back. Every station
+ * associated now that a prefix covers. And every station fuzznet's records say
+ * was ever seen that one covers (`seen`), which is the only source an allow
+ * list has -- a station it refuses never associates -- and is how a device
+ * seen at another access point in the estate is let in at this one. The
+ * document's own stations come first and are kept whatever is seen.
+ *
+ * **A set only grows from what hostapd holds**, so a reading of the records
+ * that fails, or a record fuzznet's retention lets go, never shuts out a
+ * station already allowed; a hostapd restart starts from the written list
+ * and what is seen.
  *
  * Returns a set the caller frees (the strings are borrowed), or NULL with a
  * zero count when there is nothing to hold; `*failed` on out of memory.
  */
 static char **expand_prefixes(const ncfg_access_control_t *wanted,
     const ncfg_observed_access_control_t *live, char *const *held, size_t held_count,
-    size_t *count, int *failed)
+    char *const *seen, size_t seen_count, size_t *count, int *failed)
 {
-	size_t  room = wanted->station_count + held_count + live->associated_count;
+	size_t  room = wanted->station_count + held_count + live->associated_count + seen_count;
 	char  **set;
 	size_t  at;
 
@@ -726,6 +734,11 @@ static char **expand_prefixes(const ncfg_access_control_t *wanted,
 		if (ncfg_access_control_names(wanted, live->associated[at]) &&
 		    !lists(set, *count, live->associated[at])) {
 			set[(*count)++] = live->associated[at];
+		}
+	}
+	for (at = 0; at < seen_count; at++) {
+		if (ncfg_access_control_names(wanted, seen[at]) && !lists(set, *count, seen[at])) {
+			set[(*count)++] = seen[at];
 		}
 	}
 	return set;
@@ -828,14 +841,14 @@ void ncfg_plan_access_control(ncfg_builder_t *builder)
 				    both[i], &live_count);
 				int          mine = has_policy && policy == both[i];
 
-				/* A prefix is only ever on a deny list -- the compiler refuses
-				 * one on an allow list -- and is expanded here, against what
-				 * this observation saw. */
-				if (mine && wanted && wanted->prefix_count && both[i] == NCFG_ACL_POLICY_DENY) {
+				/* A prefix on either list is expanded here, against what this
+				 * observation saw and the records it carries. */
+				if (mine && wanted && wanted->prefix_count) {
 					size_t  want_count = 0;
 					int     failed = 0;
 					char  **want = expand_prefixes(wanted, live, held, live_count,
-					    &want_count, &failed);
+					    builder->observed->seen_stations,
+					    builder->observed->seen_station_count, &want_count, &failed);
 
 					if (failed) {
 						builder->plan->failed = 1;

@@ -1110,13 +1110,15 @@
 #	mac = ["00:11:22:33:44:01", "00:11:22:33:44:02"]
 #}
 
-# A deny list, or a list it names, can also hold an OUI prefix -- the
+# A list, or a list it names, can also hold an OUI prefix -- the
 # manufacturer's three octets and a star. hostapd itself holds only exact
-# addresses (it drops a mask without saying so), so netcfgd denies each station
-# it sees associated with that prefix, within a pass of the reconcile loop, and
-# keeps it denied while hostapd runs. An allow list cannot take one: a station
-# it refuses never associates, so there is nothing to see. List the addresses
-# to allow instead.
+# addresses (it drops a mask without saying so), so netcfgd expands it. On a
+# deny list it denies each station it sees associated with that prefix, within
+# a pass of the reconcile loop, and keeps it denied while hostapd runs. On an
+# allow list it allows the stations with that prefix that the fuzznet records
+# say were ever seen, here or by another host of the estate: a station the
+# list refuses never associates, so one never seen anywhere stays out. With no
+# fuzznetd there are no records, and only the addresses written are allowed.
 
 #access_point "Shop" {
 #	device = "wlan2"

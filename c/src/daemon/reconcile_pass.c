@@ -1343,6 +1343,18 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 
 	report->looked = 1;
 	reobserve(loop, report);
+	/* The stations seen before, read back from fuzznet's records (10.674)
+	 * and stamped on before anything plans, so an allow list's prefix
+	 * expands against them. Bounded per pass; the last whole reading
+	 * stands between. */
+	if (loop->seen) {
+		size_t       known = 0;
+		char *const *stations;
+
+		ncfg_seen_read(loop->seen, now_of(&loop->world));
+		stations = ncfg_seen_stations(loop->seen, &known);
+		(void)ncfg_daemon_state_heard_seen(loop->state, stations, known);
+	}
 
 	if (!loop->state->desired || !loop->state->observed) {
 		/* Nothing to compare the machine against. The observation above is

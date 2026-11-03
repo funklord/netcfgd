@@ -51,6 +51,13 @@
 /* The most hosts remembered between passes; the oldest goes first. */
 #define NCFG_SEEN_HELD_MAX 4096u
 
+/* Reading seen back: pages of `list record` asked in one pass, how long a
+ * finished listing stands before the next begins, and the most stations
+ * kept. A page is one connection and holds about eight records. */
+#define NCFG_SEEN_READ_PAGES 32u
+#define NCFG_SEEN_READ_SECONDS 60u
+#define NCFG_SEEN_STATIONS_MAX 4096u
+
 typedef struct ncfg_seen ncfg_seen_t;
 
 /* A recorder writing to `socket_path`, or to fuzznetd's own default for this
@@ -84,5 +91,35 @@ size_t ncfg_seen_record(ncfg_seen_t *seen, const ncfg_observed_t *observed, uint
 /* `seen/<interface>/<mac>`, or 0 where either cannot be written in fuzznet's
  * key grammar (a-z 0-9 . _ / -, at most 64 bytes). */
 int ncfg_seen_key(const char *interface, const char *mac, char *out, size_t out_size);
+
+/*
+ * READING IT BACK (10.667, 10.674): the stations ever recorded as seen, by
+ * any host whose records this store holds, for an allow list's prefix to
+ * expand against. Asked of the same face the records are written to, with
+ * fuzznet's `list record`, every host's records.
+ *
+ * **Bounded per pass, and never a partial answer.** A listing is paged --
+ * a reply holds about eight records -- so at most NCFG_SEEN_READ_PAGES are
+ * asked in one pass and the next pass carries on from there. The stations
+ * a listing finds replace the previous set only once it has finished, so
+ * a set is always one whole listing, and a read that stops partway (no
+ * face, a refusal) leaves the last whole one standing. A new listing
+ * starts NCFG_SEEN_READ_SECONDS after one finished.
+ *
+ * Only keys `seen/<interface>/<mac>` are read, and the MAC is given back
+ * as the kernel and hostapd spell it, lowercase with colons.
+ */
+void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now);
+
+/* The stations the last whole listing found, sorted, borrowed until the
+ * next `ncfg_seen_read`; NULL with a zero count before one has finished. */
+char *const *ncfg_seen_stations(const ncfg_seen_t *seen, size_t *count);
+
+/* The listing parsed: each MAC a `seen/` key names, added to `out` (sorted
+ * and unique, at most `room`). Returns the records the reply says it shows,
+ * or -1 where it is not `ok FROM SHOWN MORE ...`; `*more` from it. Public
+ * so a test can hand it a reply without a fuzznetd. */
+long ncfg_seen_parse_listing(const char *reply, char **out, size_t *count, size_t room,
+    int *more);
 
 #endif /* NCFG_SEEN_H */

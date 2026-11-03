@@ -965,6 +965,10 @@ typedef struct {
 	 */
 	ncfg_regdom_change_t    regdom_heard;
 	int                     has_regdom_heard;
+	/* The stations last read back from fuzznet's records (10.674), owned,
+	 * stamped on every observation as `seen_stations`. */
+	char                  **seen_stations;
+	size_t                  seen_station_count;
 } ncfg_daemon_state_t;
 
 /*
@@ -1043,6 +1047,17 @@ int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *er
  */
 void ncfg_daemon_state_heard_regdom(ncfg_daemon_state_t *state,
     const ncfg_regdom_change_t *change);
+
+/*
+ * The stations read back from fuzznet's records (`ncfg_seen_read`), copied.
+ * Stamped on the current observation now and on every later one in
+ * `ncfg_daemon_state_reobserve`, so each plan the daemon builds -- the
+ * pass's, an apply's, the one `ncfg plan` is answered with -- expands an
+ * allow list's prefix against the same set. 0 on out of memory, the previous
+ * set standing.
+ */
+int ncfg_daemon_state_heard_seen(ncfg_daemon_state_t *state, char *const *stations,
+    size_t count);
 
 /*
  * The identity of a document, as 64 hex digits plus a NUL.

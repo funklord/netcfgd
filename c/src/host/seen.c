@@ -44,7 +44,26 @@ struct ncfg_seen {
 	size_t   held_count;
 	uint64_t silent_until; /* fuzznetd did not answer; not asked before then */
 	int      said_silent;  /* the line saying so has been written */
+	/* Reading back: the last whole listing, and the one under way. */
+	char   **known;
+	size_t   known_count;
+	char   **reading;
+	size_t   reading_count;
+	size_t   cursor;       /* the FROM the next page is asked from */
+	int      listing;      /* a listing is under way */
+	uint64_t next_listing; /* when the next may begin */
+	int      said_unread;  /* the line saying a listing stopped is out */
 };
+
+static void free_list(char **list, size_t count)
+{
+	size_t at;
+
+	for (at = 0; at < count; at++) {
+		free(list[at]);
+	}
+	free(list);
+}
 
 ncfg_seen_t *ncfg_seen_new(const char *socket_path)
 {
@@ -114,6 +133,8 @@ void ncfg_seen_free(ncfg_seen_t *seen)
 		return;
 	}
 	free(seen->held);
+	free_list(seen->known, seen->known_count);
+	free_list(seen->reading, seen->reading_count);
 	free(seen);
 }
 
@@ -175,40 +196,74 @@ static int escape_value(const char *value, char *out, size_t out_size)
 	return 1;
 }
 
-/* One record, one connection. 1 where fuzznetd said `ok`; 0 with `*silent`
- * set where nobody answered, which is the absence the header describes. */
-static int add_record(const char *socket_path, const char *key, const char *value,
+/*
+ * One line of the socket into `out`, from `buffer` (which holds `*have`
+ * bytes read already, kept for the next line). 1 with the line, its newline
+ * taken off; 0 where none came within the wait, or it did not fit.
+ */
+static int read_line(int fd, char *buffer, size_t buffer_size, size_t *have, char *out,
+    size_t out_size)
+{
+	struct pollfd wait;
+	char         *end;
+
+	while (!(end = memchr(buffer, '\n', *have))) {
+		ssize_t n;
+
+		if (*have + 1u >= buffer_size) {
+			return 0;
+		}
+		wait.fd = fd;
+		wait.events = POLLIN;
+		if (poll(&wait, 1, SEEN_WAIT_MS) <= 0) {
+			return 0;
+		}
+		n = recv(fd, buffer + *have, buffer_size - 1u - *have, 0);
+		if (n <= 0) {
+			if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+				continue;
+			}
+			return 0;
+		}
+		*have += (size_t)n;
+	}
+	{
+		const size_t length = (size_t)(end - buffer);
+
+		if (length >= out_size) {
+			return 0;
+		}
+		memcpy(out, buffer, length);
+		out[length] = '\0';
+		*have -= length + 1u;
+		memmove(buffer, end + 1, *have);
+	}
+	return 1;
+}
+
+/*
+ * One line asked, one line back, one connection. 1 with the reply in `reply`
+ * (its newline taken off); 0 with `*silent` set where nobody answered, which
+ * is the absence the header describes, and a sentence in `why` either way.
+ */
+static int ask(const char *socket_path, const char *line, char *reply, size_t reply_size,
     int *silent, char *why, size_t why_size)
 {
 	struct sockaddr_un address;
 	struct pollfd      wait;
-	char               escaped[NCFG_SEEN_VALUE_MAX * 3u + 1u];
-	char               line[NCFG_SEEN_KEY_MAX + sizeof(escaped) + 32u];
-	char               reply[256];
-	size_t             length;
+	char               buffer[4096];
+	size_t             length = strlen(line);
 	size_t             sent = 0;
-	size_t             got = 0;
+	size_t             have = 0;
 	int                fd;
-	int                wrote;
 
 	*silent = 1;
 	why[0] = '\0';
+	reply[0] = '\0';
 	if (!socket_path[0] || strlen(socket_path) >= sizeof(address.sun_path)) {
 		(void)snprintf(why, why_size, "no fuzznetd socket path fits");
 		return 0;
 	}
-	if (!escape_value(value, escaped, sizeof(escaped))) {
-		*silent = 0;
-		(void)snprintf(why, why_size, "the value for %s is too long to write", key);
-		return 0;
-	}
-	wrote = snprintf(line, sizeof(line), "add record %s %s\n", key, escaped);
-	if (wrote < 0 || (size_t)wrote >= sizeof(line)) {
-		*silent = 0;
-		(void)snprintf(why, why_size, "the record for %s is too long to send", key);
-		return 0;
-	}
-	length = (size_t)wrote;
 	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 	if (fd < 0) {
 		(void)snprintf(why, why_size, "no socket: %s", strerror(errno));
@@ -246,34 +301,54 @@ static int add_record(const char *socket_path, const char *key, const char *valu
 			sent += (size_t)n;
 		}
 	}
-	while (got + 1u < sizeof(reply) && !memchr(reply, '\n', got)) {
-		ssize_t n;
-
-		wait.fd = fd;
-		wait.events = POLLIN;
-		if (poll(&wait, 1, SEEN_WAIT_MS) <= 0) {
-			break;
-		}
-		n = recv(fd, reply + got, sizeof(reply) - 1u - got, 0);
-		if (n <= 0) {
-			if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
-				continue;
-			}
-			break;
-		}
-		got += (size_t)n;
-	}
-	(void)close(fd);
-	reply[got] = '\0';
-	if (!memchr(reply, '\n', got)) {
+	if (!read_line(fd, buffer, sizeof(buffer), &have, reply, reply_size)) {
 		(void)snprintf(why, why_size, "fuzznetd at %s gave no answer", socket_path);
+		reply[0] = '\0';
+		(void)close(fd);
 		return 0;
 	}
+	(void)close(fd);
 	*silent = 0;
-	if (strncmp(reply, "ok", 2u) == 0 && (reply[2] == '\n' || reply[2] == ' ')) {
+	return 1;
+}
+
+/* One record, one connection. 1 where fuzznetd said `ok`; 0 with `*silent`
+ * set where nobody answered, which is the absence the header describes. */
+static int add_record(const char *socket_path, const char *key, const char *value,
+    int *silent, char *why, size_t why_size)
+{
+	char escaped[NCFG_SEEN_VALUE_MAX * 3u + 1u];
+	char line[NCFG_SEEN_KEY_MAX + sizeof(escaped) + 32u];
+	char reply[256];
+	int  wrote;
+
+	*silent = 1;
+	if (!escape_value(value, escaped, sizeof(escaped))) {
+		*silent = 0;
+		(void)snprintf(why, why_size, "the value for %s is too long to write", key);
+		return 0;
+	}
+	wrote = snprintf(line, sizeof(line), "add record %s %s\n", key, escaped);
+	if (wrote < 0 || (size_t)wrote >= sizeof(line)) {
+		*silent = 0;
+		(void)snprintf(why, why_size, "the record for %s is too long to send", key);
+		return 0;
+	}
+	if (!ask(socket_path, line, reply, sizeof(reply), silent, why, why_size)) {
+		return 0;
+	}
+	/*
+	 * **`ok` alone, and nothing after it.** A record kept is answered `ok`
+	 * and nothing more. A request no handler serves -- a fuzznetd started
+	 * without a record store -- is answered with the node's status line,
+	 * `ok served granted ...`, which is fuzznet saying it is there and
+	 * nothing about the record. Read as success it reported records kept
+	 * that went nowhere; found by the first run against a real fuzznetd
+	 * (10.674).
+	 */
+	if (strcmp(reply, "ok") == 0) {
 		return 1;
 	}
-	reply[strcspn(reply, "\n")] = '\0';
 	(void)snprintf(why, why_size, "fuzznetd refused %s: %s", key, reply);
 	return 0;
 }
@@ -409,4 +484,217 @@ size_t ncfg_seen_record(ncfg_seen_t *seen, const ncfg_observed_t *observed, uint
 		}
 	}
 	return written;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Reading it back
+ * ------------------------------------------------------------------------ */
+
+/* `aa-bb-cc-dd-ee-ff` as the key spells it, into `out` as `aa:bb:...`.
+ * 0 for anything not six pairs of lowercase hex. */
+static int mac_of_key_part(const char *part, size_t length, char out[18])
+{
+	size_t at;
+
+	if (length != 17u) {
+		return 0;
+	}
+	for (at = 0; at < 17u; at++) {
+		const char c = part[at];
+
+		if (at % 3u == 2u) {
+			if (c != '-') {
+				return 0;
+			}
+			out[at] = ':';
+		} else if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			out[at] = c;
+		} else {
+			return 0;
+		}
+	}
+	out[17] = '\0';
+	return 1;
+}
+
+/* Into the sorted, unique list. 0 on out of memory; a full list or a MAC
+ * already held is not a failure. */
+static int add_station(char **list, size_t *count, size_t room, const char *mac)
+{
+	size_t low = 0;
+	size_t high = *count;
+	char  *copy;
+
+	while (low < high) {
+		const size_t middle = low + (high - low) / 2u;
+		const int    order = strcmp(list[middle], mac);
+
+		if (order == 0) {
+			return 1;
+		}
+		if (order < 0) {
+			low = middle + 1u;
+		} else {
+			high = middle;
+		}
+	}
+	if (*count >= room) {
+		return 1;
+	}
+	copy = strdup(mac);
+	if (!copy) {
+		return 0;
+	}
+	memmove(&list[low + 1u], &list[low], (*count - low) * sizeof(*list));
+	list[low] = copy;
+	(*count)++;
+	return 1;
+}
+
+long ncfg_seen_parse_listing(const char *reply, char **out, size_t *count, size_t room,
+    int *more)
+{
+	unsigned long from = 0;
+	unsigned long shown = 0;
+	int           flag = 0;
+	int           used = 0;
+	const char   *at;
+	long          listed = 0;
+
+	*more = 0;
+	if (!reply || strncmp(reply, "ok ", 3u) != 0 ||
+	    sscanf(reply + 3, "%lu %lu %d%n", &from, &shown, &flag, &used) != 3) {
+		return -1;
+	}
+	(void)from;
+	*more = flag != 0;
+	at = reply + 3 + used;
+	/* Each record: ` HOST,KEY,MS,VALUE`, the value escaped so it holds no
+	 * space or comma. */
+	while (*at == ' ') {
+		const char *item = ++at;
+		const char *end = item + strcspn(item, " ");
+		const char *key = memchr(item, ',', (size_t)(end - item));
+		const char *key_end;
+		char        mac[18];
+
+		at = end;
+		listed++;
+		if (!key) {
+			continue;
+		}
+		key++;
+		key_end = memchr(key, ',', (size_t)(end - key));
+		if (!key_end || (size_t)(key_end - key) < 5u || strncmp(key, "seen/", 5u) != 0) {
+			continue;
+		}
+		/* `seen/<interface>/<mac>`: the MAC is after the last slash. */
+		{
+			const char *slash = key_end;
+
+			while (slash > key + 5 && slash[-1] != '/') {
+				slash--;
+			}
+			if (slash == key + 5 ||
+			    !mac_of_key_part(slash, (size_t)(key_end - slash), mac)) {
+				continue;
+			}
+		}
+		if (!add_station(out, count, room, mac)) {
+			return -1;
+		}
+	}
+	/* The count is the reply's own, which is what FROM counts in; the
+	 * records walked are only what this side could split. */
+	(void)listed;
+	return (long)shown;
+}
+
+/* A listing stopped partway: said once until one finishes, and the last
+ * whole set stands. */
+static void listing_stopped(ncfg_seen_t *seen, uint64_t now, const char *why)
+{
+	free_list(seen->reading, seen->reading_count);
+	seen->reading = NULL;
+	seen->reading_count = 0;
+	seen->listing = 0;
+	seen->next_listing = now + NCFG_SEEN_RETRY_SECONDS;
+	if (!seen->said_unread) {
+		ncfg_log_emitf("seen", NCFG_LOG_NOTE,
+		    "the hosts seen before are not being read back (%s); %zu from the last "
+		    "whole reading stand", why, seen->known_count);
+		seen->said_unread = 1;
+	}
+}
+
+void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now)
+{
+	char     line[64];
+	char     reply[2048];
+	char     why[NCFG_ERROR_MAX];
+	unsigned page;
+
+	if (!seen) {
+		return;
+	}
+	if (!seen->listing) {
+		if (now < seen->next_listing) {
+			return;
+		}
+		seen->reading = calloc(NCFG_SEEN_STATIONS_MAX, sizeof(*seen->reading));
+		if (!seen->reading) {
+			return;
+		}
+		seen->reading_count = 0;
+		seen->cursor = 0;
+		seen->listing = 1;
+	}
+	for (page = 0; page < NCFG_SEEN_READ_PAGES; page++) {
+		long listed;
+		int  silent = 0;
+		int  more = 0;
+
+		if (seen->store[0] && !face_socket(seen->store, seen->socket_path,
+		        sizeof(seen->socket_path))) {
+			listing_stopped(seen, now, "no process serves the fuzznet store");
+			return;
+		}
+		(void)snprintf(line, sizeof(line), "list record %zu\n", seen->cursor);
+		if (!ask(seen->socket_path, line, reply, sizeof(reply), &silent, why,
+		        sizeof(why))) {
+			listing_stopped(seen, now, why);
+			return;
+		}
+		listed = ncfg_seen_parse_listing(reply, seen->reading, &seen->reading_count,
+		    NCFG_SEEN_STATIONS_MAX, &more);
+		if (listed < 0) {
+			(void)snprintf(why, sizeof(why), "fuzznetd answered `%.80s`", reply);
+			listing_stopped(seen, now, why);
+			return;
+		}
+		seen->cursor += (size_t)listed;
+		/* A page that lists nothing and says there is more would be asked
+		 * again for ever; it is taken as the end. */
+		if (!more || listed == 0) {
+			free_list(seen->known, seen->known_count);
+			seen->known = seen->reading;
+			seen->known_count = seen->reading_count;
+			seen->reading = NULL;
+			seen->reading_count = 0;
+			seen->listing = 0;
+			seen->next_listing = now + NCFG_SEEN_READ_SECONDS;
+			if (seen->said_unread) {
+				ncfg_log_emitf("seen", NCFG_LOG_NOTE,
+				    "the hosts seen before are read back again: %zu", seen->known_count);
+				seen->said_unread = 0;
+			}
+			return;
+		}
+	}
+}
+
+char *const *ncfg_seen_stations(const ncfg_seen_t *seen, size_t *count)
+{
+	*count = seen ? seen->known_count : 0u;
+	return seen && seen->known_count ? seen->known : NULL;
 }

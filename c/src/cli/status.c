@@ -636,6 +636,32 @@ void ncfg_cli_take_regdom_setter(ncfg_observed_t *mine, const ncfg_observed_t *t
 	mine->regdom_set_by = strdup(theirs->regdom_set_by);
 }
 
+void ncfg_cli_take_seen(ncfg_observed_t *mine, const ncfg_observed_t *theirs)
+{
+	char **copy;
+	size_t at;
+
+	if (!mine || !theirs || mine->seen_station_count || !theirs->seen_station_count) {
+		return;
+	}
+	copy = calloc(theirs->seen_station_count, sizeof(*copy));
+	if (!copy) {
+		return;
+	}
+	for (at = 0; at < theirs->seen_station_count; at++) {
+		copy[at] = strdup(theirs->seen_stations[at]);
+		if (!copy[at]) {
+			while (at) {
+				free(copy[--at]);
+			}
+			free(copy);
+			return;
+		}
+	}
+	mine->seen_stations = copy;
+	mine->seen_station_count = theirs->seen_station_count;
+}
+
 void ncfg_cli_print_status(const ncfg_observed_t *observed)
 {
 	size_t at;
