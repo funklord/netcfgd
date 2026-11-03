@@ -23,6 +23,7 @@
 #include "ncfg/dhcp_server.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/supplicant.h"
+#include "ncfg/upnp.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -150,6 +151,35 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 
 			if (ncfg_dhcp_server_leases_in_text(text, 0, &leases, &lease_count)) {
 				ncfg_dhcp_server_leases_free(leases, lease_count);
+			}
+		}
+		/*
+		 * miniupnpd's lease file (10.675), whose descriptions are whatever a
+		 * device on the LAN asked a port mapping to be called. What the
+		 * header promises is checked: within the bound, every port a port,
+		 * nothing NULL, and no description carrying a line break into
+		 * `ncfg status` (10.681).
+		 */
+		{
+			ncfg_observed_mapping_t *mappings = NULL;
+			size_t                   mapping_count = 0;
+			size_t                   one;
+
+			if (ncfg_upnp_mappings_in_text(text, &mappings, &mapping_count)) {
+				if (mapping_count > NCFG_UPNP_MAPPINGS_MAX) {
+					abort();
+				}
+				for (one = 0; one < mapping_count; one++) {
+					const ncfg_observed_mapping_t *m = &mappings[one];
+
+					if (!m->protocol || !m->address || !m->description ||
+					    m->external_port < 1 || m->external_port > 65535 ||
+					    m->internal_port < 1 || m->internal_port > 65535 ||
+					    strchr(m->description, '\n') != NULL) {
+						abort();
+					}
+				}
+				ncfg_upnp_mappings_free(mappings, mapping_count);
 			}
 		}
 	}

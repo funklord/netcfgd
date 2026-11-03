@@ -12704,6 +12704,15 @@ The fuzz tree now compiles `src/node/` with `NODE_CFLAGS` and links fuzznet's
 archive, and all ten programs build. A shadowed `count` in `backend_ipc.c`
 that clang's `-Wshadow` found on the way is renamed.
 
+**The next lens, a parser of text somebody outside chose with no target:**
+miniupnpd's lease file, whose descriptions are what any LAN device asked its
+mapping to be called (10.675). It is driven by `backend_ipc` now, beside the
+DHCP leases, asserting its bound, its port ranges and that no description
+carries a line break into `ncfg status`: 1.36 million runs in three minutes,
+nothing found. Its `%u` ports take a minus too and the range refuses the
+wrap; its `%llu` expiry has no bound, so `-1` would read as a far-future
+expiry, which is cosmetic and left.
+
 ## 10.680 A document for a caller goes only where the caller could have put it
 
 **Decided from 0309 and the tiers, and built ahead of the verb that uses it.**
