@@ -986,22 +986,34 @@ them because no test had ever carried those keys.
 
 **What to pick up next, in order.**
 
-0. **Link fuzznet into netcfgd and make it the one protocol** (holder,
-   2026-11-02; decisions 0308 and 0309; the steps and what this session built
-   on the old premise are in 10.668). The order: link fuzznet into the
-   daemon; give it a node identity and store -- shared with a fuzznetd
-   running beside it under locks, which waits on fuzznet's answer to inbox
-   `20261102T2330Z`; carry the local `ncfg`/GUI socket over fuzznet with
-   netcfgd's requests as extensions; move 10.666's seen-hosts recorder onto
-   the records API in-process; retype `scope.h` onto `fzn_scope_t`. Then
-   10.667's UPnP/NAT-PMP (with its warning) and reading seen hosts back.
-   **Linking and the identity are done (10.669)**, and the shared store is
-   answered there: one store is one node, the claim's face writes. **How it
-   becomes the face is decided (10.676)**: in fuzznet's loop, the round split
-   so either loop drives it, and serving the store built as `NODE_SERVE=1`,
-   on fuzznet's stop, in-process request and restart (its sec 835); by
-   default it waits on the size (65 per cent), which the holder decides after
-   fuzznet's answer to request 8.
+0. **fuzznet is the store and the protocol, and the estate is the fleet**
+   (0308, 0309, 0311, 0312). Rewritten 2026-11-03, when the earlier steps
+   here had all landed:
+   - fuzznet is linked in, and a daemon with a node serves its store in
+     fuzznet's loop by default (10.676, 10.684). `scope.h` stays a copy,
+     held equal at compile time, for the include-path reason it records.
+   - The seen recorder writes and reads in-process (10.674, 10.696), and
+     UPnP is 0310's.
+   - **The whole control vocabulary is one fuzznet procedure, `ask`** (0312,
+     10.693), judged by the same gate as the socket. A caller on this machine
+     is judged by its tiers and fuzznet's permit (10.688), and an operator of
+     the estate by the node's `remote` block. A request longer than a line
+     goes in pieces (10.695).
+   - **The operator's side exists**: `ncfg nodes` (10.692), `status --at`
+     (10.691), and `--at HOST` for every socket verb (10.694), with nothing
+     falling back to this machine. A remote apply carries a window, which is
+     shown live to arm, confirm and revert (10.697). The GUI and the shim
+     read the status over fuzznet first (10.690).
+
+   **What is left**, in the order the aims give it:
+   - **the GUI's other verbs over `ask`**. Only its status crosses fuzznet so
+     far, and a node selector in the GUI would make the fleet a desktop
+     thing rather than a shell one;
+   - **events across the estate**. `monitor` is a stream and is not carried
+     (0312). fuzznet's `get events` is the estate's stream, and netcfgd
+     publishing into it is unbuilt;
+   - **beyond the simple case** (partial authority, callers who are not
+     operators), which is the holder's, as 0311 left it.
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
    almost nothing on it has moved: no real radio, no day of somebody depending
