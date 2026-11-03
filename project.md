@@ -12896,9 +12896,18 @@ cause was the backstop being switched off by the test's own `status`
 polling, a fault in both loops (10.678). The phase now relies on the
 backstop for the read-back, which checks that fix on the follower path.
 
+**Ask 7, measured from here** (2026-11-03, fuzznet `7d85b54`; sent to
+its inbox as `20261103T1430Z`): with a fuzznetd the face on the default
+socket, a netcfgd on the same store given no `--socket` cannot listen there,
+`fzn_daemon_main` returns 1, and netcfgd runs its own loop -- the network
+configured and `ncfg` answered, but outside fuzznet's loop and never taking
+the face. The face's socket is untouched. Distinct sockets work. That is the
+router case, both under procd and neither told a socket, so until fuzznet
+answers, `--fuzznet-serve` beside a fuzznetd wants `--fuzznet-arg
+--socket=PATH`.
+
 **Next:** serving by default, once the size is decided (ask 8, then the
-holder's), and ask 7, whose answer says whether a follower and a face may
-both be left on the default socket.
+holder's), and the socket a second process on one store takes (ask 7).
 
 ## 10.675 The ports UPnP opened are in the observation, and on the global tab
 
