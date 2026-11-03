@@ -1006,9 +1006,9 @@ them because no test had ever carried those keys.
      read the status over fuzznet first (10.690).
 
    **What is left**, in the order the aims give it:
-   - **a node menu in the GUI**. Its verbs reach another node with `--at`
-     (10.698), and choosing the node inside the window would make the fleet
-     a desktop thing rather than a shell one;
+   - **the fleet in the GUI is a box** (10.698, 10.699): the window moves
+     between this machine and the estate's nodes, refreshing a node on a
+     timer for want of a stream;
    - **events across the estate**. `monitor` is a stream and is not carried
      (0312). fuzznet's `get events` is the estate's stream, and netcfgd
      publishing into it is unbuilt;
@@ -12682,6 +12682,46 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.699 The window moves between nodes: the node box
+
+10.698's open half. The toolbar's node box lists this machine first, then
+the estate's other members as this user's fuzznetd lists them (`list peer`,
+10.692), by whole key, as `where()` names them. A user with no fuzznetd sees
+this machine alone. Choosing one reopens the connection on it, the line above
+the tabs follows, and the 15-second refresh starts for a node and stops for
+this machine. The events tab already stops a stream of this machine's when a
+node is shown (10.698).
+
+- **A choice that cannot be reached puts the window back where it was**,
+  connection and box alike, and says why in the status bar, rather than
+  leaving a window unconnected that looks as if it moved.
+- **The tray is this machine's, on a connection of its own.** It had sat in
+  this machine's panel on the window's connection, so once the window could
+  move to a router, the panel would have shown the router's state as this
+  laptop's. Its menu, which joins and leaves networks and sets a profile,
+  would have acted on the router's radio. `main` now opens a second
+  connection for it on this machine's socket, whatever the window shows,
+  before the window so that it outlives the tray, and the tray reopens it
+  itself, since the window's refresh reopens only the window's. **This is
+  checked by reading `main.cpp`, not by a probe**: a probe handing a tray a
+  separate connection would only show that the tray keeps the pointer it was
+  given.
+- **Found by the probe, before anybody started it: the window crashed on
+  every start.** The constructor builds the toolbar, node box included,
+  before the timer further down, and following the node from the toolbar
+  touched a timer not yet made. It is followed once the timer exists.
+
+The probe `node_menu` builds the whole window offscreen, taking every source
+but `main.cpp` with qmake's `files()` rather than a second copy of gui.pro's
+list. It checks that:
+
+- the box shows this machine and the node the window was opened on;
+- the window refreshes on its timer;
+- a choice of an unreachable "this machine" puts window and box back on the
+  node.
+
+Removing the put-back fails it, leaving the connection on no node at all.
 
 ## 10.698 The GUI on another node: `netcfgd-gui --at KEY`
 

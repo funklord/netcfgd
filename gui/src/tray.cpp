@@ -134,6 +134,11 @@ ncfg_tray::ncfg_tray(ncfg_connection *connection, QObject *parent)
 
 void ncfg_tray::refresh()
 {
+	/* **Its own connection, so it reopens its own** (10.699): the window's
+	 * refresh reopens the window's, which may be another node's, and the
+	 * tray is always this machine's. */
+	connection->reopen_if_broken();
+
 	/* Before the link check, and unconditionally: a daemon that refuses
 	 * `links` refuses `profiles` too, and the submenu then carries the same
 	 * sentence rather than being silently empty. */

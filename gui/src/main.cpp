@@ -248,12 +248,29 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * **The tray is this machine's, on a connection of its own** (10.699).
+	 * It sat in this machine's panel on the window's connection, and the
+	 * window can move to another node: then the panel showed a router's
+	 * state as this laptop's, and its menu -- join a network, leave one, set
+	 * a profile -- acted on the router's radio. So it holds its own,
+	 * opened on this machine's socket whatever the window is shown on; one
+	 * that cannot be reached shows that, as a tray with no daemon does.
+	 * Made before the window, so it outlives the tray the window owns.
+	 */
+	ncfg_connection here;
+	if (parser.isSet(at_option)) {
+		(void)here.open(parser.value(socket_option), nullptr);
+	} else {
+		(void)here.open(connection.where(), nullptr);
+	}
+
 	ncfg_main_window window(&connection);
 
 	/* Returns nullptr where the desktop has no status-notifier host, which is
 	 * ordinary rather than an error: the window then behaves exactly as it did
 	 * before this existed. */
-	ncfg_tray *tray = ncfg_tray::create(&connection, &window);
+	ncfg_tray *tray = ncfg_tray::create(&here, &window);
 	const bool wanted_tray = parser.isSet(tray_option) || login;
 	if (tray) {
 		window.attach_tray(tray);

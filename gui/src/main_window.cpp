@@ -3,6 +3,12 @@
  */
 #include "main_window.h"
 
+/* C, as `ncfg_connection.h` includes `ncfg_client.h`: the client library's
+ * headers carry no guards of their own. */
+extern "C" {
+#include "ncfg_fuzznet.h"
+}
+
 #include "access_view.h"
 #include "dns_view.h"
 #include "apply_dialog.h"
@@ -31,6 +37,8 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QComboBox>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QPushButton>
 #include <QStatusBar>
@@ -220,6 +228,38 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	setCentralWidget(central);
 
 	auto *tools = addToolBar(QStringLiteral("main"));
+	/* **Which node, chosen here** (10.699): this machine first, then the
+	 * estate's other members as this user's fuzznetd lists them -- by whole
+	 * key, as `where()` names them, since that is what tells them apart. A
+	 * user with no fuzznetd sees this machine alone. */
+	nodes = new QComboBox(tools);
+	nodes->setObjectName(QStringLiteral("nodes"));
+	nodes->addItem(QStringLiteral("this machine"), QString());
+	{
+		static char keys[256][NCFG_FUZZNET_KEY_TEXT];
+		char        socket[1100];
+		char        ignored[NCFG_ERROR_MAX];
+		size_t      count = 0;
+
+		if (ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
+		    ncfg_fuzznet_members(socket, keys, 256u, &count, ignored, sizeof(ignored))) {
+			for (size_t at = 0; at < count; at++) {
+				nodes->addItem(QString::fromUtf8(keys[at]), QString::fromUtf8(keys[at]));
+			}
+		}
+	}
+	if (!connection->node().isEmpty()) {
+		int shown = nodes->findData(connection->node());
+
+		if (shown < 0) {
+			nodes->addItem(connection->node(), connection->node());
+			shown = nodes->count() - 1;
+		}
+		nodes->setCurrentIndex(shown);
+	}
+	connect(nodes, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+	        &ncfg_main_window::node_chosen);
+	tools->addWidget(nodes);
 	auto *refresh_button = new QPushButton(QStringLiteral("Refresh"), tools);
 	connect(refresh_button, &QPushButton::clicked, this, &ncfg_main_window::refresh);
 	tools->addWidget(refresh_button);
@@ -265,13 +305,15 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	/* **Another node has no event stream** (0312, 10.698), so nothing would
 	 * tell the views it moved: they are refreshed on a timer instead, often
 	 * enough to follow a change made from this window, seldom enough that a
-	 * call across the estate each time is not a load on the node. */
-	if (!connection->node().isEmpty()) {
-		auto *poll = new QTimer(this);
-		poll->setInterval(15000);
-		connect(poll, &QTimer::timeout, this, &ncfg_main_window::refresh);
-		poll->start();
-	}
+	 * call across the estate each time is not a load on the node. Started
+	 * and stopped as the window moves between nodes (`follow_node`). */
+	poll = new QTimer(this);
+	poll->setInterval(15000);
+	connect(poll, &QTimer::timeout, this, &ncfg_main_window::refresh);
+	home_socket = connection->node().isEmpty() ? connection->where() : QString();
+	/* Here, after the timer exists: the node box above is built first, and
+	 * following the node from there touched a timer not yet made. */
+	follow_node();
 
 	status = new QLabel(this);
 	statusBar()->addWidget(status);
@@ -322,6 +364,41 @@ void ncfg_main_window::closeEvent(QCloseEvent *event)
 		return;
 	}
 	QMainWindow::closeEvent(event);
+}
+
+void ncfg_main_window::follow_node()
+{
+	if (connection->node().isEmpty()) {
+		poll->stop();
+	} else if (!poll->isActive()) {
+		poll->start();
+	}
+}
+
+void ncfg_main_window::node_chosen(int index)
+{
+	const QString key = nodes->itemData(index).toString();
+	const QString was_node = connection->node();
+	const QString was_socket = was_node.isEmpty() ? connection->where() : QString();
+	QString       error;
+	bool          opened = key.isEmpty() ? connection->open(home_socket, &error)
+	                                     : connection->open_at(key, &error);
+
+	/* **Back to where it was, on a failure**, rather than a window left
+	 * unconnected that still looks as if it moved. */
+	if (!opened) {
+		note(QStringLiteral("could not reach %1: %2")
+		         .arg(key.isEmpty() ? QStringLiteral("this machine") : key, error));
+		if (was_node.isEmpty()) {
+			(void)connection->open(was_socket, nullptr);
+		} else {
+			(void)connection->open_at(was_node, nullptr);
+		}
+		const QSignalBlocker quiet(nodes);
+		nodes->setCurrentIndex(qMax(0, nodes->findData(was_node)));
+	}
+	follow_node();
+	refresh();
 }
 
 void ncfg_main_window::refresh()

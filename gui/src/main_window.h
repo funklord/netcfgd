@@ -90,6 +90,8 @@ private:
 
 private slots:
 	void note(const QString &summary);
+	/* Another node chosen in the toolbar's node box, or this machine (10.699). */
+	void node_chosen(int index);
 	void tab_changed();
 
 	/* An event says the machine moved. Restarts the settle timer rather than
@@ -104,6 +106,13 @@ private:
 	 * unless something arrived, which is the difference between this and
 	 * asking the daemon on a schedule. */
 	QTimer            *settle;
+	/* The node box, and the 15-second refresh a node needs for want of an
+	 * event stream; the socket this machine's daemon was reached on, to go
+	 * back to (10.699). */
+	class QComboBox   *nodes;
+	QTimer            *poll;
+	QString            home_socket;
+	void               follow_node();
 	QTabWidget        *tabs;
 	/* The three groups. Thirteen tabs in one row is a list to read rather
 	 * than a place to look, and the grouping is the question an operator
