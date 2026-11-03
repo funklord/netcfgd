@@ -69,6 +69,17 @@ fail=0
 ok() { echo "    ok   $1"; }
 bad() { echo "    FAIL $1"; fail=$((fail + 1)); }
 
+# The fuzznet store the daemon opened, as `<run>/node` names it, after
+# waiting for the file. Root's own (project.md 10.677): the LSB script names
+# it, because a script run at boot inherits init's HOME=/; openrc-run clears
+# the environment, so there the daemon's own default finds root's home.
+node_store() {
+	n=0
+	while [ ! -s /run/netcfgd/node ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+	sed -n 's/^store=//p' /run/netcfgd/node 2>/dev/null
+}
+root_store="$(awk -F: '$1 == "root" { print $6; exit }' /etc/passwd)/.local/share/fuzznet"
+
 check() {
 	if [ "$2" = "$3" ]; then
 		ok "$1"
@@ -163,7 +174,10 @@ install -m 0755 packaging/sysvinit/netcfgd /etc/init.d/netcfgd
 # broken" from "the daemon did not start".
 sh -n /etc/init.d/netcfgd && ok "the script parses" || bad "the script parses"
 
-/etc/init.d/netcfgd start > /tmp/sysv.start 2>&1
+# HOME=/ because that is what a script run at boot has: the kernel starts
+# init with it, and this payload's own shell has root's, which would make the
+# store check below pass whatever the script did (measured: it did).
+env HOME=/ /etc/init.d/netcfgd start > /tmp/sysv.start 2>&1
 sed 's/^/      /' /tmp/sysv.start
 if wait_for running; then
 	ok "start brought the daemon up, with a pidfile pointing at it"
@@ -174,6 +188,7 @@ fi
 # The directory its own comment promises, and promises not to remove on stop.
 check "and made the runtime directory" \
 	"$([ -d /run/netcfgd ] && echo yes || echo no)" "yes"
+check "and its fuzznet store is root's, named by the script" "$(node_store)" "$root_store"
 /etc/init.d/netcfgd status > /tmp/sysv.status 2>&1
 check "status agrees it is running" "$?" "0"
 sed 's/^/      /' /tmp/sysv.status
@@ -241,7 +256,8 @@ if [ -x /sbin/openrc-run ] || [ -x /usr/sbin/openrc-run ]; then
 	rm -rf /run/netcfgd
 	install -m 0755 packaging/openrc/netcfgd /etc/init.d/netcfgd
 	sh -n /etc/init.d/netcfgd && ok "the script parses" || bad "the script parses"
-	/etc/init.d/netcfgd start > /tmp/rc.start 2>&1
+	# HOME=/ as at boot, as above; openrc-run is what clears it here.
+	env HOME=/ /etc/init.d/netcfgd start > /tmp/rc.start 2>&1
 	sed 's/^/      /' /tmp/rc.start
 	if wait_for running; then
 		ok "start brought the daemon up, with a pidfile pointing at it"
@@ -253,6 +269,8 @@ if [ -x /sbin/openrc-run ] || [ -x /usr/sbin/openrc-run ]; then
 	# what the LSB script does with `mkdir`: the same promise by another route.
 	check "and \`start_pre\` made the runtime directory" \
 		"$([ -d /run/netcfgd ] && echo yes || echo no)" "yes"
+	check "and its fuzznet store is root's, by the daemon's own default" \
+		"$(node_store)" "$root_store"
 	check "status agrees it is running" \
 		"$(/etc/init.d/netcfgd status 2>&1 | grep -c 'status: started')" "1"
 	/etc/init.d/netcfgd stop > /tmp/rc.stop 2>&1

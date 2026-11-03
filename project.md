@@ -12689,6 +12689,23 @@ because netcfgd never makes a store it is named: a mistyped one is refused
 rather than becoming a second node (10.669). A fuzznetd packaged for OpenWrt
 under procd would want the same `--fuzznet-dir`; that is fuzznet's packaging.
 
+**The same shape under sysvinit, measured, and not under OpenRC.** The
+kernel starts init with `HOME=/`, and a script run at boot inherits it:
+`start-stop-daemon` passes it on, and the LSB script's daemon opened
+`//.local/share/fuzznet` (`hull-openrc`, the script started with `HOME=/` as
+at boot). So `packaging/sysvinit/netcfgd` names the store the same way.
+`openrc-run` clears the environment, and the OpenRC script's daemon found
+root's home by its own default with `HOME=/` set, so it is left as it is.
+systemd starts a root service with no `HOME`, which is the default's case.
+**The rig had been unable to see this**: its payload starts the scripts from
+a shell holding root's `HOME`, so the first version of the check passed with
+the old script. It now starts both with `HOME=/`, and the old LSB script
+fails it.
+
+Once in five `hull-openrc` runs today the OpenRC half did not run at all --
+"cannot start netcfgd as localmount would not start", the rig's inert
+stand-in -- and the next run passed; recorded, not explained.
+
 Checked: `make hull-openwrt` asserts `<run>/node` names
 `/root/.local/share/fuzznet`, the directory is `drwx------`, and the node's
 key is the same after procd respawns the daemon -- the identity kept, not

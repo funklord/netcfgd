@@ -55,11 +55,24 @@ fi
 # daemon unable to put those back (0135).
 RUN_DIR=/run/netcfgd
 
+# The fuzznet store, named, for the reason the procd script gives (project.md
+# 10.677): a script run at boot inherits init's environment, and the kernel
+# starts init with HOME=/, so the default would be //.local/share/fuzznet -- a
+# node of its own, where a fuzznetd run from root's shell never looks. Root's
+# home from the password database is where it does. Made here because netcfgd
+# never makes a store it is named.
+fuzznet_store() {
+	home=$(awk -F: '$1 == "root" { print $6; exit }' /etc/passwd)
+	echo "${home:-/root}/.local/share/fuzznet"
+}
+
 start() {
 	log_daemon_msg "Starting $DESC" "$NAME"
 	mkdir -p "$RUN_DIR"
+	store=$(fuzznet_store)
+	mkdir -p "$store" && chmod 700 "$store"
 	start-stop-daemon --start --quiet --background --make-pidfile \
-		--pidfile "$PIDFILE" --exec "$DAEMON" -- "$@"
+		--pidfile "$PIDFILE" --exec "$DAEMON" -- --fuzznet-dir "$store" "$@"
 	log_end_msg $?
 }
 
