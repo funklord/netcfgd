@@ -17,7 +17,8 @@
 #     `ncfg status --json` -- over the socket it would be this process asking
 #     its own blocked loop;
 #   - SIGTERM stops it with status 0, through `fzn_daemon_stop`: `face`,
-#     fuzznet's socket and `<run>/node` all gone.
+#     fuzznet's socket and `<run>/node` all gone;
+#   - and its log carries no sanitizer report, for a `SANITIZE=1` run.
 #
 # HOW IT STOPS: every wait is bounded (50 looks of 0.2 s), each client call is
 # under `timeout 10`, and the daemon under `timeout -k 5 60` -- the kill
@@ -102,6 +103,11 @@ wait $pid
 code=$?
 [ $code -eq 0 ] && [ ! -e "$R/store/face" ] && [ ! -e "$R/run/node" ] && [ ! -e "$R/fz.sock" ]
 check $? "SIGTERM stops it with status 0 ($code); face, socket, <run>/node gone"
+
+# Under `make SANITIZE=1 node-serve-test`: UBSan only prints, and the log is
+# removed below, so a report would otherwise go unread.
+! grep -q 'runtime error\|Sanitizer' "$R/log"
+check $? "the daemon's log carries no sanitizer report"
 
 if [ $failed -ne 0 ]; then
 	grep -v 'nftables\|supplicant\|previous configuration' "$R/log" | tail -12 | sed 's/^/  log: /'
