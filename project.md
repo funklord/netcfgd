@@ -8720,7 +8720,8 @@ script fails the phase. That list is built from `document.interfaces`, which
 is complete for as long as only interface hooks are ever run -- and is the
 same list that would need to grow if network hooks ever do.
 
-**Still open in the C port, re-read 2026-10-27.** No pass emits a `hook.run`
+~~**Still open in the C port, re-read 2026-10-27.**~~ **Closed 2026-10-28,
+below: every phase of a network's hooks runs.** No pass emitted a `hook.run`
 for a network; `c/src/plan/wifi.c` warns instead, and the script mode goes on
 the open in `c/src/host/hooks.c`. One reader had it wrong:
 `c/src/daemon/patience.c` said a network's hooks "run when it is joined" and
@@ -12682,6 +12683,27 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.705 The events reader is fuzzed, and reads numbers as digits only
+
+`ncfg_fuzznet_events_at` read another host's events inline, after its socket
+call, where no fuzzer could reach. Its parsing is now
+`ncfg_fuzznet_events_read`, given the unescaped text, and the new fuzz target
+`events_list` holds it to its invariants: every subject kept is lower-case
+letters and hyphens, NUL-ended inside its slot, and never more of them than
+room.
+
+- 25.7 million runs, clean. With the character check removed, the fuzzer
+  finds a subject that would forge a printed line within seconds.
+- **Two things the split tightened.** FIRST was read with a bare `strtoul`,
+  which takes a sign or a space, so a hostile node's `-1` became a huge
+  FIRST: only a false gap, but the page reader is digits only and this is
+  now too. And text left after the last event is refused rather than
+  ignored.
+- The lens from that bug found nothing further. The members reader also
+  uses `strtoul`, on this user's own fuzznetd's `list peer`, but a sign
+  wraps its total past the 1,000,000 cap and is refused, and its FROM is
+  checked against the one asked.
 
 ## 10.704 The GUI and TUI follow another node by its events cursor
 

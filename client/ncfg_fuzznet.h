@@ -177,6 +177,15 @@ int ncfg_fuzznet_events_at(const char *socket, const char *host, size_t from, si
     size_t *first, char (*subjects)[NCFG_FUZZNET_SUBJECT_TEXT], size_t cap, size_t *count,
     char *err, size_t err_size);
 
+/*
+ * The `NEXT FIRST [SUBJECT NAME]...` that `events` answers, already
+ * unescaped, read on its own (10.705) so a fuzzer can reach it: it is another
+ * host's text. As `ncfg_fuzznet_events_at` returns it.
+ */
+int ncfg_fuzznet_events_read(const char *text, size_t length, size_t *next, size_t *first,
+    char (*subjects)[NCFG_FUZZNET_SUBJECT_TEXT], size_t cap, size_t *count, char *err,
+    size_t err_size);
+
 /* A host's key in hex, and its NUL. */
 #define NCFG_FUZZNET_KEY_TEXT 65u
 

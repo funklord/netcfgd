@@ -510,7 +510,7 @@ syntax-tests:
 #   same build with a different destination.
 FUZZ_TARGETS   = config_parse document_json netlink_wire backend_ipc socket_message \
 		 observed_json kernel_bytes values block_list seen_listing status_page \
-		 ask_args
+		 ask_args events_list
 FUZZ_REPLAYS   = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
 FUZZ_PROGRAMS  = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
 FUZZ_BUILD_DIR ?= fuzz/build
