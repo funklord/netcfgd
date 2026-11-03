@@ -947,6 +947,15 @@ int ncfg_observe_wds_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *ob
     char *err, size_t err_size);
 
 /*
+ * Each mesh point's peers with an established link, into its link's
+ * `mesh_peers` (10.686): one `GET_INTERFACE` dump for which interfaces are mesh
+ * points, and one `GET_STATION` dump of each. Asked only where there is a
+ * radio; a kernel that will not say leaves them empty with a note.
+ */
+int ncfg_observe_mesh_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
+/*
  * Whether each radio has 802.11n, into its link's `high_throughput` (10.596):
  * a `GET_INTERFACE` dump for which radio each interface is on, and a split
  * `GET_WIPHY` dump for what each radio can do -- asked only where there is a

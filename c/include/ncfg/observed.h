@@ -590,6 +590,11 @@ typedef struct {
 	/* A station radio in four-address (WDS) mode, which is what lets it be a
 	 * bridge member (10.587 item 4). Asked of nl80211, and only of radios. */
 	int     wds;
+	/* A mesh point's peers with an established link (`mesh plink ESTAB`),
+	 * as MACs in the kernel's spelling (project.md 10.686). Asked of nl80211,
+	 * and only of mesh points; empty elsewhere and where it was not answered. */
+	char  **mesh_peers;
+	size_t  mesh_peer_count;
 	/* A radio with 802.11n (HT) in some band, which is what decides whether
 	 * an access point on it is given `ieee80211n=1` (10.596). Asked of
 	 * nl80211, and only of radios. **Absent where it was not answered**, which

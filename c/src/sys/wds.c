@@ -73,6 +73,16 @@ int ncfg_wds_interface_parse(const void *payload, size_t length, ncfg_wds_interf
 		}
 		out->has_wiphy = 1;
 	}
+	step = ncfg_wire_attrs_find(&attrs, NL80211_ATTR_IFTYPE, &attr, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step == NCFG_WIRE_OK) {
+		if (!ncfg_wire_attr_u32(&attr, &out->iftype, err, err_size)) {
+			return 0;
+		}
+		out->has_iftype = 1;
+	}
 	step = ncfg_wire_attrs_find(&attrs, NL80211_ATTR_4ADDR, &attr, err, err_size);
 	if (step == NCFG_WIRE_BAD) {
 		return 0;

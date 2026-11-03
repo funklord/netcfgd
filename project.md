@@ -12671,6 +12671,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.686 `ncfg status` says who a mesh node is meshed with
+
+10.588's open item: netcfgd joined an 802.11s mesh and nothing it reported
+named the peers, where `iw dev wlan0 station dump` does. The kernel keeps them
+as stations of the mesh interface with their peer link's state, so
+`ncfg_observe_mesh_from` (`c/src/observe/mesh.c`), in the same generic netlink
+round as four-address mode, asks one `GET_INTERFACE` dump which interfaces
+are mesh points (the interface parser now reads `NL80211_ATTR_IFTYPE`) and
+one `GET_STATION` dump of each (`c/src/sys/mesh_peer.c`), and keeps the peers
+whose `NL80211_STA_INFO_PLINK_STATE` is established. They land in the link's
+`mesh_peers`, omitted when empty -- a field added, a minor bump of the
+observation (0020) -- and `ncfg status` prints `mesh peer MAC` under the link.
+Something to show, not something the planner decides from; a kernel that
+will not say leaves the list empty with a note.
+
+Checked: `hull-mesh`, two hwsim radios, netcfgd's node against a bare
+wpa_supplicant -- `ncfg status` names the peer `iw` shows established, once.
+With the observation's call removed, the same rig is bad. `kernel_bytes` now
+drives the interface and station parsers: 5.7 million runs in three minutes,
+nothing found.
+
 ## 10.685 An estate operator asks a node over fuzznet: `get status`, paged
 
 **Built** (the holder: "you are getting bogged down in details pretending they
@@ -16852,9 +16873,9 @@ which is how the driver came to ask about meshes. Unit tests in
 sabotaged red once).
 
 **Not built**: a mesh and a station or access point on one radio at once
-(which needs a second virtual interface on the phy), mesh gating to a wired
-LAN beyond bridging the mesh interface, and `ncfg status` saying who the
-peers are.
+(which needs a second virtual interface on the phy), and mesh gating to a
+wired LAN beyond bridging the mesh interface. ~~`ncfg status` saying who the
+peers are~~ -- **built, 10.686.**
 
 **Found on the way: the example gate could not see two of the language's ten
 blocks.** It read the block heads out of the Rust's lowering, which has eight;

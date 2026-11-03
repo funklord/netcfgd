@@ -14,6 +14,8 @@
 #   - traffic crosses: a UDP echo from 10.20.0.1 to 10.20.0.2 comes back. The
 #     same echo is tried before the apply and must fail, which is what shows
 #     the probe can tell a mesh from no mesh;
+#   - `ncfg status` names that peer under wlan0 (10.686), read from the
+#     kernel's station dump as `iw` reads it;
 #   - a second `ncfg plan` has nothing to do, which is the apply's record and
 #     the observation's digest agreeing -- the two sides of 10.588's one
 #     fingerprint question.
@@ -134,6 +136,11 @@ say "wlan0: type ${iftype:-?}; peer link to $peer_mac: ${link:-none}"
 after=$(python3 "$work/echo.py" send 2>/dev/null)
 say "after the apply, the echo: ${after:-nothing}"
 
+# 10.686: netcfgd says who the node is meshed with, as `iw` does.
+"$build/ncfg" status > "$work/status.log" 2>&1
+shown=$(grep -c "^    mesh peer $peer_mac\$" "$work/status.log")
+say "ncfg status names the peer: $shown time(s)"
+
 "$build/ncfg" plan > "$work/plan.log" 2>&1
 again=$(grep -c '^nothing to do' "$work/plan.log")
 say "a second plan: $(head -1 "$work/plan.log")"
@@ -146,6 +153,7 @@ failed=0
 [ "$iftype" = "mesh point" ] || { say "  wlan0 is not a mesh point"; failed=1; }
 [ "$link" = ESTAB ] || { say "  no established peer link to $peer_mac"; failed=1; }
 [ "$after" = echoed ] || { say "  no traffic crossed the mesh"; failed=1; }
+[ "$shown" -eq 1 ] || { say "  ncfg status did not name the mesh peer"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the second plan was not empty: the record and the observation disagree"; failed=1; }
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -12 >> "$out"

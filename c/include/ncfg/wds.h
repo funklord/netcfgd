@@ -39,6 +39,10 @@ typedef struct {
 	 * capabilities are keyed by; `has_wiphy` 0 where the reply did not say. */
 	int      has_wiphy;
 	uint32_t wiphy;
+	/* `NL80211_ATTR_IFTYPE`: a mesh point is the one asked for its peers
+	 * (`mesh_peer.h`); `has_iftype` 0 where the reply did not say. */
+	int      has_iftype;
+	uint32_t iftype;
 } ncfg_wds_interface_t;
 
 /* A dump of every wireless interface, to a family resolved. */

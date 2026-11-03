@@ -15,7 +15,8 @@
  *     fib rule  a routing-rule dump record
  *     genl      a family's groups, which is how every generic-netlink family
  *               gets found
- *     nl80211   the regulatory domain's country, which `ncfg status` prints
+ *     nl80211   the regulatory domain's country, which `ncfg status` prints,
+ *               an interface's type, and a mesh point's stations
  *
  *   All of them read a length from the bytes and trust it to bound a read,
  *   which is the one sentence this target exists for.
@@ -29,6 +30,7 @@
 #include "fuzz.h"
 
 #include "ncfg/devlink.h"
+#include "ncfg/mesh_peer.h"
 #include "ncfg/regdom.h"
 #include "ncfg/base.h"
 #include "ncfg/rule.h"
@@ -36,6 +38,7 @@
 #include "ncfg/nft.h"
 #include "ncfg/rfkill.h"
 #include "ncfg/watch.h"
+#include "ncfg/wds.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -119,6 +122,21 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		ncfg_devlink_port_t port;
 
 		(void)ncfg_devlink_port_parse(data, length, &port, err, sizeof(err));
+	}
+
+	/* One interface out of nl80211's dump -- its type and four-address mode
+	 * -- and one station of a mesh point, whose peer link state sits in a nest
+	 * (10.686). The station's address must come back terminated, and its
+	 * state is only claimed where a byte was read for it. */
+	{
+		ncfg_wds_interface_t wireless;
+		ncfg_mesh_peer_t     peer;
+
+		(void)ncfg_wds_interface_parse(data, length, &wireless, err, sizeof(err));
+		if (ncfg_mesh_peer_parse(data, length, &peer, err, sizeof(err)) &&
+		    memchr(peer.mac, '\0', sizeof(peer.mac)) == NULL) {
+			abort(); /* an address handed back without its end */
+		}
 	}
 	return 0;
 }

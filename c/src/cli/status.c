@@ -691,6 +691,11 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 			}
 			ncfg_out_writef("    vlan %lld%s\n", (long long)vlan->vid, flags);
 		}
+		/* A mesh point's peers with an established link (10.686), which
+		 * nothing else here says and `iw` would. */
+		for (one = 0; one < link->mesh_peer_count; one++) {
+			ncfg_out_writef("    mesh peer %s\n", link->mesh_peers[one]);
+		}
 		print_link_settings(link, observed);
 		print_report(observed, link->name);
 		for (one = 0; one < observed->route_count; one++) {

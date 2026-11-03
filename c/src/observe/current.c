@@ -336,6 +336,7 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	    !ncfg_observe_regdom_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_ports_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_wds_from(genl, observed, err, err_size) ||
+	    !ncfg_observe_mesh_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_high_throughput_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_wireguard_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_wireguard_currency(observed, run_dir, secrets, desired, err,
