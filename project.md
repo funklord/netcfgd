@@ -12686,6 +12686,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.715 `make check` was measuring clang's fuzznet in a fresh tree
+
+The `size` gate failed by 232 bytes at 2,454,928, while the same commit built
+to 2,390,328 in the working tree. **The budget was not the fault, and raising
+it would have hidden a wrong binary.**
+
+The `clang` gate runs `make -C c syntax CC=clang`, and `syntax` needs the
+fuzznet archive, so in a fresh tree it built fuzznet with clang. `.build-flags`
+stamps this directory's objects and not fuzznet's, and fuzznet's Makefile does
+not rebuild for a changed compiler. So every later gate linked clang's objects,
+about 64 KB larger: `size`, and the suites too, ran a program no package
+contains. A working tree escapes by having built with cc first, which is why
+only scratch worktrees showed it, and it stayed under the ceiling until this
+week's code.
+
+It was read off the objects: `.comment` says clang. The first guess, `DEBUG=1`,
+came from `accept_share` being present, a static function `-Os` inlines away,
+and it was wrong.
+
+`$(FUZZNET_LIB)` now keeps `.built-with` beside the objects, the compiler and
+flags, and removes the objects when they differ. Run in that order, clang then
+a plain build: rebuilt with GCC, 2,360,624 bytes. A build with nothing to do
+leaves the archive untouched. A `make check` in a fresh tree pays for fuzznet
+twice, about a minute. **`size-budget.txt` is unchanged.**
+
 ## 10.714 The GUI builds for Android, and says what it cannot do yet
 
 "Remote access on android is the same client" (10.664). `make -C gui android`

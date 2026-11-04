@@ -300,6 +300,19 @@ $(FUZZNET_LIB): FORCE
 			exit 1; \
 		}; \
 	fi
+	@# **What these objects were built with, kept beside them** (10.715).
+	@# `.build-flags` covers this directory's objects and not fuzznet's, whose
+	@# Makefile does not rebuild for a changed compiler. So `make clang`, whose
+	@# `syntax` needs this archive, left clang objects in a fresh tree, and
+	@# every later gate linked them: `size` was measuring 64 KB nobody ships.
+	@# The objects go rather than the directory: `find` here reaches only what
+	@# fuzznet's build wrote.
+	@want='$(CC) $(FUZZNET_CFLAGS)'; \
+	if [ -d $(FUZZNET_BUILD) ] && [ "$$(cat $(FUZZNET_BUILD)/.built-with 2>/dev/null)" != "$$want" ]; then \
+		echo "c: fuzznet was built otherwise; building it with $$want"; \
+		find $(FUZZNET_BUILD) -name '*.o' -exec rm -f {} +; \
+	fi; \
+	mkdir -p $(FUZZNET_BUILD) && printf '%s\n' "$$want" > $(FUZZNET_BUILD)/.built-with
 	@CFLAGS='$(FUZZNET_CFLAGS)' $(MAKE) --no-print-directory -s -C $(FUZZNET) \
 		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) FZN_LOG_PACK=0 \
 		FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 all
