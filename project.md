@@ -12684,6 +12684,49 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.708 Propagation, built and not yet working live: on branch `wip/do-propagation`
+
+Folded 2026-11-04 on the holder's word, mid-item. The design is in 10.707: a
+`do` procedure beside `ask` that answers `ok` only where the daemon carried
+the request out, so fuzznet's `call do at estate` reports a refusing node as
+`failed` rather than `ok`. `ncfg VERB --at estate|group=NAME` prints the
+per-host table and exits 0 only where every host carried it out. Reads are
+refused across many hosts, and `apply` needs a window.
+
+**What holds:**
+
+- `ask_test`: `do` answers `ok` for a carried request, and nothing for one
+  refused by the remote tier, an operator's apply without a window, or an
+  error answer. Counting any answer as carried fails the last check.
+- `node_fleet.sh`: `status --at estate` is refused before anything is asked.
+
+**What does not, and is the next step:**
+
+- With A's remote `admin` tier **open**, `reload --at estate` through B still
+  reports A as `failed`, the same as with it closed. So the closed-tier check
+  passed for the wrong reason, and every host reads `failed` whatever its
+  tiers.
+- The table also lists a second host, `777b4b8339ab6b39 unknown`, in a
+  two-host estate where B is skipped as the caller. Unexplained. It may be a
+  host fuzznet counts that netcfgd does not serve, or the root's own entry.
+
+The places to look first: what `do`'s arguments look like as fuzznet hands
+them on a propagated call (a leading space, or the name), and whether the
+staged or plain path is taken. The live output is in `node_fleet.sh`'s
+failure dump (`estate1.out`, `estate2.out`).
+
+**The code is on `wip/do-propagation`, not master**: master keeps nothing that
+fails its own live test.
+
+**Item 2 is unblocked.** fuzznet built the getter netcfgd asked for, in
+513562d (its sec 877; inbox 20261104T0114Z): `fzn_daemon_setting_here(key,
+key_len, value, cap, &len)`. It reads the node's own store: the host's cell,
+else its first group's, else the estate's, with a value sealed to the host
+opened. It answers 1 for a value; 0 for none, in a follower, or where the
+value exceeds `cap`; and -1 where the value is sealed to a key the host
+lacks. It only reads, so it is safe from tick, from `ready` and inside a
+procedure. Using it needs the pin moved past 513562d.
+
 ## 10.707 fuzznet built the coordination netcfgd left to it: staged commit, propagation, sealed values
 
 fuzznet's message `20261104T0010Z`: on the holder's word it built the pieces
