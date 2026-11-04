@@ -398,6 +398,40 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 		return answered;
 	}
 
+	/* **This machine's daemon over fuzznet** (0309, 10.712), and the control
+	 * socket only where the request cannot have run: see
+	 * `ncfg_fuzznet_ask_here`. A failure that may have run stops here, since
+	 * the socket would run it again. */
+	time_t now = time(NULL);
+	char   run_dir[sizeof(client->path)];
+	if (now >= client->fuzznet_after &&
+	    ncfg_fuzznet_run_dir_of(client->path, run_dir, sizeof(run_dir))) {
+		char  *answer = NULL;
+		size_t answer_length = 0;
+		int    nothing_ran = 0;
+		char   why[NCFG_ERROR_MAX];
+
+		if (ncfg_fuzznet_ask_here(run_dir, request, &answer, &answer_length, &nothing_ran, why,
+		        sizeof(why))) {
+			char parse_failed[NCFG_ERROR_MAX];
+			ncfg_json_doc_t *answered = ncfg_json_parse(answer, answer_length, parse_failed,
+			                            sizeof(parse_failed));
+
+			free(answer);
+			if (!answered) {
+				set_error(err, err_size, "netcfgd sent something this cannot read: %s",
+				    parse_failed);
+			}
+			return answered;
+		}
+		if (!nothing_ran) {
+			set_error(err, err_size, "%s", why);
+			client->broken = 1;
+			return NULL;
+		}
+		client->fuzznet_after = now + 60;
+	}
+
 	size_t length = strlen(request);
 	if (!write_all(client->fd, request, length) || !write_all(client->fd, "\n", 1)) {
 		set_error(err, err_size, "cannot send to netcfgd: %s", strerror(errno));
@@ -447,7 +481,6 @@ ncfg_json_doc_t *ncfg_client_status(ncfg_client_t *client, char *err, size_t err
 {
 	char        run_dir[sizeof(client->path)];
 	char        ignored[NCFG_ERROR_MAX];
-	const char *slash;
 	char       *json = NULL;
 	size_t      length = 0;
 	time_t      now = time(NULL);
@@ -456,12 +489,9 @@ ncfg_json_doc_t *ncfg_client_status(ncfg_client_t *client, char *err, size_t err
 	 * says its directory is a run directory: one somewhere else -- a test's
 	 * in /tmp -- would send this asking /tmp for a stranger's fuzznet. */
 	if (client && !client->at[0] && now >= client->fuzznet_after &&
-	    (slash = strrchr(client->path, '/')) &&
-	    slash != client->path && strcmp(slash, "/netcfgd.sock") == 0) {
+	    ncfg_fuzznet_run_dir_of(client->path, run_dir, sizeof(run_dir))) {
 		ncfg_json_doc_t *doc = NULL;
 
-		memcpy(run_dir, client->path, (size_t)(slash - client->path));
-		run_dir[slash - client->path] = '\0';
 		if (ncfg_fuzznet_status(run_dir, &json, &length, ignored, sizeof(ignored))) {
 			doc = ncfg_json_parse(json, length, ignored, sizeof(ignored));
 		}

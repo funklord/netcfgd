@@ -83,6 +83,28 @@ int ncfg_fuzznet_face(const char *store, char *out, size_t out_size);
  */
 int ncfg_fuzznet_daemon_socket(const char *run_dir, char *out, size_t out_size);
 
+/*
+ * The run directory a control socket's path says it is in, into `out`: 1 only
+ * for one named `<run>/netcfgd.sock`, as a daemon names its own. A socket
+ * elsewhere, a test's in /tmp, says nothing, and treating its directory as a
+ * run directory would ask a stranger's fuzznet (10.690).
+ */
+int ncfg_fuzznet_run_dir_of(const char *socket_path, char *out, size_t out_size);
+
+/*
+ * A control request asked of the daemon on this machine over fuzznet, `call
+ * ask` on its node's socket (0309, 10.712), the answer as its socket would
+ * have written it. 1 with `*out` malloc'd.
+ *
+ * **0 with `*nothing_ran` set is the only failure a caller may retry on the
+ * control socket**: no node, nobody listening, or fuzznet itself refusing the
+ * call, so the daemon cannot have seen the request. Clear means it may have,
+ * and sending an `apply` a second time would arm a second window. That failure
+ * is the caller's to report.
+ */
+int ncfg_fuzznet_ask_here(const char *run_dir, const char *request, char **out, size_t *length,
+    int *nothing_ran, char *err, size_t err_size);
+
 /* A whole status this large is refused rather than gathered. */
 #define NCFG_STATUS_PAGE_TOTAL_MAX (64u * 1024u * 1024u)
 

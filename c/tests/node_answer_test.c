@@ -209,6 +209,43 @@ int main(void)
 		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == -1,
 		    "  and `any` is none a grant can say");
 	}
+	{
+		/* `ask` admits a holder of any tier: each said once, root's left out. */
+		ncfg_principal_t               group = { 0 };
+		ncfg_principal_t               alice = { 0 };
+		ncfg_principal_t               longer = { 0 };
+		ncfg_principal_t               root = { 0 };
+		ncfg_principal_t               any = { 0 };
+		const ncfg_principal_t *const  usual[] = { &group, &group, &root };
+		const ncfg_principal_t *const  three[] = { &group, &alice, &root };
+		const ncfg_principal_t *const  prefix[] = { &longer, &group };
+		const ncfg_principal_t *const  roots[] = { &root, &root, &root };
+		const ncfg_principal_t *const  open[] = { &group, &any, &root };
+		char                           grant[320];
+
+		group.kind = NCFG_PRINCIPAL_GROUP;
+		group.name = (char *)"netcfgd";
+		alice.kind = NCFG_PRINCIPAL_USER;
+		alice.name = (char *)"alice";
+		longer.kind = NCFG_PRINCIPAL_GROUP;
+		longer.name = (char *)"netcfgd2";
+		root.kind = NCFG_PRINCIPAL_ROOT;
+		any.kind = NCFG_PRINCIPAL_ANY;
+		check(ncfg_main_node_permit_any_of(usual, 3u, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "group:netcfgd=x") == 0,
+		    "the usual tiers grant ask to the group once, and leave root out");
+		check(ncfg_main_node_permit_any_of(three, 3u, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "group:netcfgd=x user:alice=x") == 0,
+		    "  two holders are two grants");
+		check(ncfg_main_node_permit_any_of(prefix, 2u, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "group:netcfgd2=x group:netcfgd=x") == 0,
+		    "  and a name that starts another is its own");
+		check(ncfg_main_node_permit_any_of(roots, 3u, grant, sizeof(grant)) == 0,
+		    "  every tier root's needs none");
+		check(ncfg_main_node_permit_any_of(open, 3u, grant, sizeof(grant)) == -1 &&
+		        grant[0] == '\0',
+		    "  and a tier open to anybody is none a grant can say");
+	}
 
 	ncfg_buf_free(&whole);
 	if (failures) {

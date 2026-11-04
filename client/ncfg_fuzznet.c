@@ -184,8 +184,9 @@ static int send_within(int fd, const char *path, const char *bytes, size_t lengt
 	return 1;
 }
 
-int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t reply_size,
-    int wait_ms, int *silent, char *why, size_t why_size)
+/* `ncfg_fuzznet_ask`, and `*sent` set once any of the line may have gone. */
+static int ask_noting_sent(const char *path, const char *line, char *reply, size_t reply_size,
+    int wait_ms, int *silent, int *sent, char *why, size_t why_size)
 {
 	struct sockaddr_un address;
 	char               buffer[4096];
@@ -225,6 +226,9 @@ int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t rep
 		*silent = 0;
 		return 0;
 	}
+	if (sent) {
+		*sent = 1;
+	}
 	if (!send_within(fd, path, line, length, wait_ms, why, why_size) ||
 	    ((length == 0u || line[length - 1u] != '\n') &&
 	        !send_within(fd, path, "\n", 1u, wait_ms, why, why_size))) {
@@ -240,6 +244,12 @@ int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t rep
 	(void)close(fd);
 	*silent = 0;
 	return 1;
+}
+
+int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t reply_size,
+    int wait_ms, int *silent, char *why, size_t why_size)
+{
+	return ask_noting_sent(path, line, reply, reply_size, wait_ms, silent, NULL, why, why_size);
 }
 
 /*
@@ -485,6 +495,8 @@ typedef struct {
 	const char *host;
 	const char *request; /* for `ask`; NULL asks `status` */
 	char        staged[18]; /* `@DIGEST` once it went in pieces, else "" */
+	int         wait_ms;    /* for `ask` on this machine; else fuzznet's round */
+	int         ran_maybe;  /* the request may have reached the daemon */
 } asked_t;
 
 /* One page over fuzznet: `call status [at HOST] FROM` on the socket in
@@ -500,8 +512,10 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	long           n;
 
 	if (asked->request) {
-		int wrote = snprintf(line, sizeof(line), "call ask at %s %zu %s", asked->host, from,
-		    asked->staged[0] ? asked->staged : asked->request);
+		const char *request = asked->staged[0] ? asked->staged : asked->request;
+		int wrote = asked->host
+		    ? snprintf(line, sizeof(line), "call ask at %s %zu %s", asked->host, from, request)
+		    : snprintf(line, sizeof(line), "call ask %zu %s", from, request);
 
 		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
 			say(err, err_size, "the request is too long for one fuzznet line: %zu bytes",
@@ -513,8 +527,19 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	} else {
 		(void)snprintf(line, sizeof(line), "call status %zu", from);
 	}
-	if (!ncfg_fuzznet_ask(asked->path, line, reply, sizeof(reply), asked->host ? 8000 : 2000,
-	        &silent, err, err_size)) {
+	if (asked->wait_ms) {
+		int sent = 0;
+
+		if (!ask_noting_sent(asked->path, line, reply, sizeof(reply), asked->wait_ms, &silent,
+		        &sent, err, err_size)) {
+			((asked_t *)context)->ran_maybe |= sent;
+			return 0;
+		}
+		/* fuzznet's own `ok` or its refusal of the call: the first means the
+		 * daemon has it, the second that nothing behind fuzznet saw it. */
+		((asked_t *)context)->ran_maybe |= strncmp(reply, "ok ", 3) == 0;
+	} else if (!ncfg_fuzznet_ask(asked->path, line, reply, sizeof(reply),
+	               asked->host ? 8000 : 2000, &silent, err, err_size)) {
 		return 0;
 	}
 	if (strncmp(reply, "ok ", 3) != 0) {
@@ -583,9 +608,9 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 		say(err, err_size, "a host is its key, 64 lower-case hex digits");
 		return 0;
 	}
+	memset(&asked, 0, sizeof(asked));
 	asked.path = socket;
 	asked.host = host;
-	asked.request = NULL;
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
 
@@ -607,8 +632,11 @@ static int send_in_pieces(const char *socket, const char *host, const char *requ
 		char   reply[256];
 		size_t piece = total - offset < ASK_PIECE ? total - offset : ASK_PIECE;
 		int    silent = 0;
-		int    wrote = snprintf(line, sizeof(line), "call askpart at %s %zu %zu %016llx %.*s",
-		    host, total, offset, (unsigned long long)digest, (int)piece, request + offset);
+		int    wrote = host
+		    ? snprintf(line, sizeof(line), "call askpart at %s %zu %zu %016llx %.*s", host,
+		          total, offset, (unsigned long long)digest, (int)piece, request + offset)
+		    : snprintf(line, sizeof(line), "call askpart %zu %zu %016llx %.*s", total, offset,
+		          (unsigned long long)digest, (int)piece, request + offset);
 
 		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
 			say(err, err_size, "a piece of the request does not fit a line");
@@ -620,8 +648,8 @@ static int send_in_pieces(const char *socket, const char *host, const char *requ
 		}
 		/* fuzznet's `ok`, then the node's escaped `ok%20HAVE%20TOTAL` -- or,
 		 * staged at many hosts, propagation's own `ok TOTAL ANSWERED`. */
-		if (ncfg_fuzznet_target_is_many(host) ? strncmp(reply, "ok ", 3) != 0
-		                                      : strncmp(reply, "ok ok%20", 8) != 0) {
+		if (host && ncfg_fuzznet_target_is_many(host) ? strncmp(reply, "ok ", 3) != 0
+		                                              : strncmp(reply, "ok ok%20", 8) != 0) {
 			say(err, err_size, "sending the request in pieces: %.160s", reply);
 			return 0;
 		}
@@ -652,10 +680,10 @@ int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *reques
 		say(err, err_size, "a request is one line");
 		return 0;
 	}
+	memset(&asked, 0, sizeof(asked));
 	asked.path = socket;
 	asked.host = host;
 	asked.request = request;
-	asked.staged[0] = '\0';
 	if (strlen(request) > ASK_PIECE) {
 		if (!send_in_pieces(socket, host, request, err, err_size)) {
 			return 0;
@@ -664,6 +692,58 @@ int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *reques
 		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
 	}
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
+}
+
+int ncfg_fuzznet_run_dir_of(const char *socket_path, char *out, size_t out_size)
+{
+	const char *slash = socket_path ? strrchr(socket_path, '/') : NULL;
+
+	if (!slash || slash == socket_path || strcmp(slash, "/netcfgd.sock") != 0 ||
+	    (size_t)(slash - socket_path) >= out_size) {
+		return 0;
+	}
+	memcpy(out, socket_path, (size_t)(slash - socket_path));
+	out[slash - socket_path] = '\0';
+	return 1;
+}
+
+/* A request can take as long as an apply does; the control socket waits as
+ * long, for the same daemon. */
+#define ASK_HERE_WAIT_MS 300000
+
+int ncfg_fuzznet_ask_here(const char *run_dir, const char *request, char **out, size_t *length,
+    int *nothing_ran, char *err, size_t err_size)
+{
+	char    socket[1100];
+	asked_t asked;
+	int     joined;
+
+	*nothing_ran = 1;
+	if (!ncfg_fuzznet_daemon_socket(run_dir, socket, sizeof(socket))) {
+		say(err, err_size, "this daemon serves no fuzznet node");
+		return 0;
+	}
+	if (!request || strchr(request, '\n')) {
+		*nothing_ran = 0;
+		say(err, err_size, "a request is one line");
+		return 0;
+	}
+	memset(&asked, 0, sizeof(asked));
+	asked.path = socket;
+	asked.request = request;
+	asked.wait_ms = ASK_HERE_WAIT_MS;
+	if (strlen(request) > ASK_PIECE) {
+		/* A piece is not the request: until the whole of it is asked for
+		 * below, nothing has run, so a failure here is still a fallback. */
+		if (!send_in_pieces(socket, NULL, request, err, err_size)) {
+			return 0;
+		}
+		(void)snprintf(asked.staged, sizeof(asked.staged), "@%016llx",
+		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
+	}
+	joined = ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
+	*nothing_ran = !joined && !asked.ran_maybe;
+	return joined;
 }
 
 /* A key of 64 lower-case hex digits at `text`, ending at `end`. */

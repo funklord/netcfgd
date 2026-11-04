@@ -908,27 +908,26 @@ typedef struct {
 } node_driven_t;
 
 /*
- * fuzznet's `local/permit/status` in step with the `observe` tier (10.688):
- * without it, fuzznet calls the procedure for the node's own user alone, so
- * the GUI's users in netcfgd's group could not ask. `status` is netcfgd's
- * subject, so this setting follows netcfgd's configuration: written where
- * it differs, cleared where the tier is root's. Asked in-process on the
- * loop's first pass, because `fzn_daemon_local` answers only inside it.
+ * fuzznet's `local/permit/SUBJECT` in step with netcfgd's tiers (10.688,
+ * 10.712): without it, fuzznet calls a procedure for the node's own user
+ * alone, so the GUI's users in netcfgd's group could not ask. These subjects
+ * are netcfgd's, so the setting follows netcfgd's configuration: written where
+ * it differs, cleared where the tiers are root's. `want` and `grant` are what
+ * `ncfg_main_node_permit` said. Asked in-process on the loop's first pass,
+ * because `fzn_daemon_local` answers only inside it.
  */
-static void node_permit(const ncfg_principal_t *observe)
+static void node_permit(const char *subject, int want, const char *grant)
 {
-	static const char key[] = "host local/permit/status";
-	char              grant[96];
-	char              line[160];
-	char              said[1100];
-	int               want = ncfg_main_node_permit(observe, grant, sizeof(grant));
-	size_t            n;
+	char   key[64];
+	char   line[420];
+	char   said[1100];
+	size_t n;
 
+	(void)snprintf(key, sizeof(key), "host local/permit/%s", subject);
 	if (want < 0) {
 		ncfg_log_emitf("node", NCFG_LOG_INFO,
-		    "fuzznet's permit for `status` is left alone: the observe tier is open to %s, "
-		    "and a grant names a user or a group",
-		    observe && observe->kind == NCFG_PRINCIPAL_ANY ? "any user" : "a name it cannot carry");
+		    "fuzznet's permit for `%s` is left alone: a tier is open to any user, or to a "
+		    "name a grant cannot carry", subject);
 		return;
 	}
 	(void)snprintf(line, sizeof(line), "get setting %s", key);
@@ -952,12 +951,34 @@ static void node_permit(const ncfg_principal_t *observe)
 	n = ncfg_node_local(line, said, sizeof(said) - 1u);
 	said[n] = '\0';
 	if (strncmp(said, "ok", 2) == 0) {
-		ncfg_log_emitf("node", NCFG_LOG_INFO, "fuzznet's permit for `status`: %s",
-		    want ? grant : "cleared, the observe tier being root's");
+		ncfg_log_emitf("node", NCFG_LOG_INFO, "fuzznet's permit for `%s`: %s", subject,
+		    want ? grant : "cleared, the tiers being root's");
 	} else {
 		ncfg_log_emitf("node", NCFG_LOG_WARNING,
-		    "fuzznet's permit for `status` could not be set: %.200s", n ? said : "no answer");
+		    "fuzznet's permit for `%s` could not be set: %.200s", subject,
+		    n ? said : "no answer");
 	}
+}
+
+/* `status` follows `observe`; `ask` and its pieces admit every tier's holder,
+ * and netcfgd's gate judges each request behind them. */
+static void node_permits(const ncfg_main_policy_t *policy)
+{
+	const ncfg_principal_t *tiers[3];
+	char                    grant[320];
+	int                     want;
+
+	want = ncfg_main_node_permit(policy ? &policy->control.observe : NULL, grant, sizeof(grant));
+	node_permit("status", want, grant);
+	if (!policy) {
+		return;
+	}
+	tiers[0] = &policy->control.observe;
+	tiers[1] = &policy->control.wifi;
+	tiers[2] = &policy->control.admin;
+	want = ncfg_main_node_permit_any_of(tiers, 3u, grant, sizeof(grant));
+	node_permit("ask", want, grant);
+	node_permit("askpart", want, grant);
 }
 
 /* An operator of the estate, over fuzznet's remote hop (`daemon_node.c`). */
@@ -1102,7 +1123,7 @@ static int node_tick(void *context)
 
 	if (!driven->permitted) {
 		driven->permitted = 1;
-		node_permit(driven->policy ? &driven->policy->control.observe : NULL);
+		node_permits(driven->policy);
 	}
 	/* **netcfgd's events into fuzznet's** (10.703), from the tick, which is
 	 * the one place fuzznet takes them: for another host reading `events`

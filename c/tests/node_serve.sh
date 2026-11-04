@@ -112,6 +112,26 @@ check $? "the station that fuzznetd recorded is read back in-process, in ncfg st
 mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
 check $? "  and over fuzznet's call status, with the control socket out of the way"
+# Every request now (0309, 10.712), and not only `status`: with no control
+# socket to reach, these can only have come through `call ask`. A request past
+# one line goes in pieces.
+timeout 10 "$C" plan --run-dir "$R/run" > "$R/plan.out" 2>&1
+check $? "ncfg plan answers over fuzznet's call ask, the socket out of the way"
+timeout 10 "$C" reload --run-dir "$R/run" > "$R/reload.out" 2>&1
+check $? "  and so does a change, ncfg reload ($(head -c 40 "$R/reload.out"))"
+{
+	printf 'device lo {\n\tmanaged = false\n}\n'
+	i=0
+	while [ $i -lt 40 ]; do
+		printf '# padding line %02d, so that this drop-in is longer than a line\n' $i
+		i=$((i + 1))
+	done
+} > "$R/big.conf"
+timeout 20 "$C" config put --run-dir "$R/run" --config-dir "$R/conf" big "$R/big.conf" \
+	> "$R/big.out" 2>&1
+[ "$(grep -c padding "$R/conf/conf.d/big.conf" 2>/dev/null)" = 40 ]
+check $? "  and a request longer than a line, in pieces ($(head -c 40 "$R/big.out"))"
+rm -f -- "$R/conf/conf.d/big.conf"
 mv "$R/run/hidden.sock" "$R/run/netcfgd.sock"
 
 # 0309's first verb (10.682): the observation written where the caller says,
@@ -153,21 +173,29 @@ check $? "the daemon's log carries no sanitizer report"
 # alone; with it, a GUI user in netcfgd's group may. The group here is this
 # user's own, since a second user needs privilege this test does not have.
 g=$(id -gn)
-printf 'global {\n\tcontrol {\n\t\tobserve = "group:%s"\n\t\tadmin = "any"\n\t}\n}\n' "$g" \
-	> "$R/conf/netcfgd.conf"
+printf 'global {\n\tcontrol {\n\t\tobserve = "group:%s"\n\t\twifi = "group:%s"\n\t\tadmin = "root"\n\t}\n}\n' \
+	"$g" "$g" > "$R/conf/netcfgd.conf"
 timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
 	--fuzznet-dir "$R/store" --fuzznet-arg "--socket=$R/fz.sock" \
 	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
 	--fuzznet-arg --fuzznet-product=1 > "$R/log4" 2>&1 &
 pid=$!
 n=0
-until grep -q "permit for .status." "$R/log4" 2>/dev/null || [ $n -gt 50 ]; do
+until grep -q "permit for .askpart." "$R/log4" 2>/dev/null || [ $n -gt 50 ]; do
 	sleep 0.2
 	n=$((n + 1))
 done
 said=$(ask "$R/fz.sock" "get setting host local/permit/status")
 echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
 check $? "observe = group:NAME grants that group fuzznet's call of status ($said)"
+# `ask` admits a holder of any tier, netcfgd's gate judging each request behind
+# it (10.712), or a GUI user of a root daemon would stay on the old socket.
+said=$(ask "$R/fz.sock" "get setting host local/permit/ask")
+echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
+check $? "  and of ask, each grant once, the admin tier being root's ($said)"
+said=$(ask "$R/fz.sock" "get setting host local/permit/askpart")
+echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
+check $? "  and of askpart ($said)"
 kill -TERM $pid
 wait $pid
 

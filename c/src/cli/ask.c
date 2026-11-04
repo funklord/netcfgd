@@ -373,6 +373,7 @@ static int ask_noting(const char *socket_path, const ncfg_proto_request_t *reque
 	ncfg_buf_t          line;
 	const char         *answer = NULL;
 	size_t              length = 0;
+	char                run_dir[NCFG_CLI_TEXT_MAX];
 	int                 fd;
 	int                 read_it;
 
@@ -383,6 +384,35 @@ static int ask_noting(const char *socket_path, const ncfg_proto_request_t *reque
 	if (!ncfg_proto_request_write(request, &line, err, err_size)) {
 		ncfg_buf_free(&line);
 		return 0;
+	}
+	/*
+	 * **This machine's daemon over fuzznet** (0309, 10.712), and the control
+	 * socket only where the request cannot have run: a failure that may have
+	 * stops here, since the socket would run it a second time.
+	 */
+	if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+		char  *reply = NULL;
+		size_t reply_length = 0;
+		int    nothing_ran = 0;
+		size_t whole = line.length;
+		char   why[NCFG_ERROR_MAX];
+
+		while (whole && line.data[whole - 1u] == '\n') {
+			line.data[--whole] = '\0';
+		}
+		if (ncfg_fuzznet_ask_here(run_dir, ncfg_buf_text(&line), &reply, &reply_length,
+		        &nothing_ran, why, sizeof(why))) {
+			ncfg_buf_free(&line);
+			read_it = ncfg_proto_response_read(reply, reply_length, out, err, err_size);
+			free(reply);
+			return read_it;
+		}
+		if (!nothing_ran) {
+			ncfg_buf_free(&line);
+			ncfg_error_set(err, err_size, "%s", why);
+			return 0;
+		}
+		line.data[whole] = '\n';
 	}
 	fd = connect_to(socket_path, absent, err, err_size);
 	if (fd < 0) {

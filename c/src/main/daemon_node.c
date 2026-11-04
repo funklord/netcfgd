@@ -238,3 +238,45 @@ int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t siz
 	}
 	return 1;
 }
+
+int ncfg_main_node_permit_any_of(const ncfg_principal_t *const *tiers, size_t count, char *out,
+    size_t size)
+{
+	size_t used = 0;
+	size_t at;
+
+	if (!tiers || !out || size == 0u) {
+		return -1;
+	}
+	out[0] = '\0';
+	for (at = 0; at < count; at++) {
+		char   grant[96];
+		size_t length;
+		int    want = ncfg_main_node_permit(tiers[at], grant, sizeof(grant));
+		char  *seen;
+
+		if (want < 0) {
+			out[0] = '\0';
+			return -1;
+		}
+		if (want == 0) {
+			continue;
+		}
+		length = strlen(grant);
+		/* A whole grant already here, not one that merely starts the same. */
+		for (seen = out; (seen = strstr(seen, grant)) != NULL; seen += length) {
+			if ((seen == out || seen[-1] == ' ') && (seen[length] == ' ' || !seen[length])) {
+				break;
+			}
+		}
+		if (seen) {
+			continue;
+		}
+		if (used + length + 2u > size) {
+			out[0] = '\0';
+			return -1;
+		}
+		used += (size_t)snprintf(out + used, size - used, "%s%s", used ? " " : "", grant);
+	}
+	return used ? 1 : 0;
+}

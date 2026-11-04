@@ -583,6 +583,157 @@ static void status_over_fuzznet_first(void)
 	rmdir(dir);
 }
 
+/* One whole page of `json`, escaped as fuzznet escapes an answer. */
+static void fake_page(int fd, const char *json)
+{
+	char   page[512];
+	char   escaped[1400];
+	size_t total = strlen(json);
+	size_t w = 3;
+	size_t i;
+	int    wrote = snprintf(page, sizeof(page), "ok %zu 0 %zu %016llx\n", total, total,
+	                        (unsigned long long)ncfg_status_page_digest(json, total));
+
+	memcpy(page + wrote, json, total);
+	memcpy(escaped, "ok ", 3u);
+	for (i = 0; i < (size_t)wrote + total; i++) {
+		unsigned char c = (unsigned char)page[i];
+
+		if (c <= ' ' || c == '%' || c == ',' || c == 0x7f) {
+			w += (size_t)snprintf(escaped + w, sizeof(escaped) - w, "%%%02x", c);
+		} else {
+			escaped[w++] = (char)c;
+		}
+	}
+	escaped[w++] = '\n';
+	(void)!write(fd, escaped, w);
+}
+
+/*
+ * A request over fuzznet is never sent twice (0309, 10.712). Taken as `call
+ * ask 0 REQUEST` where fuzznet answers; **where it was sent and nothing came
+ * back it is an error and the control socket hears nothing**, since the daemon
+ * may have run it and an `apply` asked again arms a second window; and only
+ * where fuzznet itself refused the call, so that nothing behind it saw the
+ * request, does it go to the control socket.
+ *
+ * HOW IT STOPS: each fake serves a fixed count of connections under `alarm(10)`
+ * and exits, the control fake with the count of lines it read as its status.
+ */
+static void a_request_is_not_sent_twice(void)
+{
+	char dir[] = "/tmp/ncfg-client-ask.XXXXXX";
+	char control[96];
+	char fuzznet[96];
+	char err[NCFG_ERROR_MAX];
+	pid_t control_child;
+	pid_t fuzznet_child;
+	int control_listener;
+	int fuzznet_listener;
+	int status = 0;
+
+	if (!mkdtemp(dir)) {
+		ok("a directory for the ask test", 0, strerror(errno));
+		return;
+	}
+	snprintf(control, sizeof(control), "%s/netcfgd.sock", dir);
+	snprintf(fuzznet, sizeof(fuzznet), "%s/fuzznet.sock", dir);
+	control_listener = listen_at(control);
+	fuzznet_listener = listen_at(fuzznet);
+	if (control_listener < 0 || fuzznet_listener < 0) {
+		ok("the two fake sockets listen", 0, strerror(errno));
+		return;
+	}
+	fuzznet_child = fork();
+	if (fuzznet_child == 0) {
+		char line[256];
+		int  wanted = 0;
+		int  at;
+
+		close(control_listener);
+		alarm(10);
+		for (at = 0; at < 3; at++) {
+			int fd = accept(fuzznet_listener, NULL, NULL);
+
+			if (fd < 0) {
+				_exit(1);
+			}
+			(void)read_request(fd, line, sizeof(line));
+			if (at == 0) {
+				wanted = strncmp(line, "call ask 0 {\"request\":\"plan\"}", 29u) == 0;
+				fake_page(fd, "{\"response\":\"plan\",\"said_by\":\"fuzznet\"}");
+			} else if (at == 2) {
+				(void)!write(fd, "error no procedure ask here\n", 28u);
+			}
+			close(fd); /* the second: taken, and never answered */
+		}
+		_exit(wanted ? 0 : 2);
+	}
+	control_child = fork();
+	if (control_child == 0) {
+		static const char answer[] = "{\"response\":\"plan\",\"said_by\":\"control\"}\n";
+		char line[256];
+		int  lines = 0;
+		int  clients;
+
+		close(fuzznet_listener);
+		alarm(10);
+		for (clients = 0; clients < 2; clients++) {
+			int fd = accept(control_listener, NULL, NULL);
+
+			while (fd >= 0 && read_request(fd, line, sizeof(line)) > 0) {
+				lines++;
+				(void)!write(fd, answer, strlen(answer));
+			}
+			close(fd);
+		}
+		_exit(lines);
+	}
+	close(control_listener);
+	close(fuzznet_listener);
+
+	ncfg_client_t *client = ncfg_client_open(control, err, sizeof(err));
+	ncfg_json_doc_t *plan = client ? ncfg_client_plan(client, err, sizeof(err)) : NULL;
+	size_t length = 0;
+	const char *said = plan ? ncfg_json_string(plan, ncfg_json_member(plan, ncfg_json_root(plan),
+	                              "said_by"), &length) : NULL;
+	ok("a request goes over fuzznet where it answers",
+	   said && length == 7u && memcmp(said, "fuzznet", 7u) == 0, err);
+	if (plan) {
+		ncfg_json_free(plan);
+	}
+	plan = client ? ncfg_client_plan(client, err, sizeof(err)) : NULL;
+	ok("sent and unanswered is an error, not a second try on the socket", plan == NULL, err);
+	ok("  and marks the client broken", client && ncfg_client_broken(client), "");
+	if (plan) {
+		ncfg_json_free(plan);
+	}
+	if (client) {
+		ncfg_client_close(client);
+	}
+	client = ncfg_client_open(control, err, sizeof(err));
+	plan = client ? ncfg_client_plan(client, err, sizeof(err)) : NULL;
+	said = plan ? ncfg_json_string(plan, ncfg_json_member(plan, ncfg_json_root(plan), "said_by"),
+	                               &length) : NULL;
+	ok("fuzznet refusing the call sends it to the control socket",
+	   said && length == 7u && memcmp(said, "control", 7u) == 0, err);
+	if (plan) {
+		ncfg_json_free(plan);
+	}
+	if (client) {
+		ncfg_client_close(client);
+	}
+	waitpid(fuzznet_child, &status, 0);
+	ok("the fake fuzznet read `call ask 0 REQUEST`",
+	   WIFEXITED(status) && WEXITSTATUS(status) == 0, "");
+	waitpid(control_child, &status, 0);
+	ok("the control socket heard the one request, and only that",
+	   WIFEXITED(status) && WEXITSTATUS(status) == 1, "");
+	unlink(control);
+	unlink(fuzznet);
+	rmdir(dir);
+}
+
 /*
  * A client of another node (10.698): with this user's fuzznetd faked at
  * `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, a request goes as `call ask at
@@ -3162,6 +3313,7 @@ int main(int argc, char **argv)
 	a_member_can_be_asked_its_own_name();
 	a_refusal_is_not_a_dead_socket();
 	status_over_fuzznet_first();
+	a_request_is_not_sent_twice();
 	a_client_of_another_node();
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();

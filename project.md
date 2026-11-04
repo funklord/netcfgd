@@ -1014,6 +1014,8 @@ them because no test had ever carried those keys.
    - ~~events across the estate~~ -- **built** (10.703, 10.704): netcfgd
      publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
      from a cursor, and the GUI and TUI follow a node by it;
+   - **the control socket has not gone** (0309): requests go over fuzznet,
+     and 10.712 lists what still holds it;
    - **beyond the simple case** (partial authority, callers who are not
      operators), which is the holder's, as 0311 left it.
 
@@ -12685,6 +12687,62 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.712 Local requests go over fuzznet: `call ask` first, the control socket behind it
+
+0309 says `ncfg` and the GUI speak fuzznet to the daemon, and only `status`
+did. Every request from `ncfg` and from `client/`, so the GUI, the trays and
+the NM shim, now goes as `call ask` on the daemon's fuzznet socket, in pieces
+past one line. The control socket stays behind it, for a daemon with no node
+and for what is listed below. Nothing above the transport changed: the same
+line, judged by the same gate, answered by the same dispatcher (0312).
+
+**A request is never sent twice.** `ncfg_fuzznet_ask_here` says whether the
+daemon can have seen it. It falls back only where nothing can have run: no
+node, nobody listening, or fuzznet refusing the call. Pieces count as nothing
+run, since a staged request runs only when asked for whole. Sent and unanswered
+is an error, and the client is marked broken. The obvious fallback, "fuzznet
+did not answer, so try the socket", would have run an `apply` twice and armed a
+second window.
+
+**`ask` is granted to every tier's holder.** fuzznet calls a procedure for the
+node's own user unless `local/permit/NAME` grants it, so a GUI user of a root
+daemon would have been refused and fallen back: this change would have done
+nothing on the machines it is for. `ask` and `askpart` are now granted to
+`observe`, `wifi` and `admin`, each named once and root left out. That widens
+nothing, because netcfgd's own gate judges each request behind the procedure.
+
+**The wait is five minutes**, as long as an apply can take, against the two
+seconds `status` gets.
+
+**Open, so newline-delimited JSON has not gone yet:**
+
+- **`monitor` is a stream**, and 0312 does not carry one. The GUI, trays and
+  `ncfg monitor` follow this machine on the socket. The events cursor of 10.703
+  is the likely replacement, at a cost in latency nobody has measured.
+- **A tier of `any` has no grant**: fuzznet's grammar names a user or a group
+  (`node/permit.h`). Under `observe = "any"`, somebody other than the node's
+  user stays on the socket. Signalled to fuzznet (inbox 20261104T2251Z).
+- **The client still connects to the control socket on open**, so with that
+  socket gone `ncfg_client_open` fails while `ncfg` works. It is the last step
+  of retiring the socket, after the two above.
+- **raidcfgd reads the JSON socket**, told in `20261102T2345Z`; the socket
+  cannot go until it has moved.
+
+**Verified:**
+
+- `client_test`, against fakes: taken over fuzznet, `call ask 0 REQUEST`
+  on the wire, sent-and-unanswered an error, and the control socket hearing
+  only the one request fuzznet refused. Sabotaged by retrying after a send: three
+  checks fail.
+- `node_serve.sh`, against a real daemon with its control socket renamed away:
+  `plan`, `reload`, and a `config put` long enough for pieces all answer, so
+  they can only have come through `ask`. The grants are read back.
+- `node_answer_test`: each grant once, root's left out, a name that starts
+  another kept apart, and `any` refused.
+- `node_fleet.sh`; and live, now on this path: `c_daemon_answers`, `confirm`,
+  `config_arrives`, `apply_race`, `remote_tiers`, `control_exposure`, `profile`.
+  `make live` as a whole has not been run on it.
 
 ## 10.711 An operator's group verbs: `ncfg nodes member`, `ncfg secret seal`
 
