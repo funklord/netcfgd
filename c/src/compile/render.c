@@ -284,7 +284,7 @@ void ncfg_render_quote(ncfg_buf_t *out, const char *value)
 void ncfg_render_quote_secret(ncfg_buf_t *out, const ncfg_secret_ref_t *reference)
 {
 	static const char *const prefixes[] = { "@secret:", "@secret:keyring:", "@secret:pass:",
-		"@secret:exec:" };
+		"@secret:exec:", "@secret:estate:" };
 	const char *prefix = ncfg_render_word(prefixes, NCFG_COUNT_OF(prefixes),
 	    reference->provider);
 

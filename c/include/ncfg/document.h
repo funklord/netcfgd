@@ -133,7 +133,10 @@ typedef enum {
 	NCFG_SECRET_PROVIDER_FILE,
 	NCFG_SECRET_PROVIDER_KEYRING,
 	NCFG_SECRET_PROVIDER_PASS,
-	NCFG_SECRET_PROVIDER_EXEC
+	NCFG_SECRET_PROVIDER_EXEC,
+	/* A value the estate holds for this host (10.709): a setting in fuzznet,
+	 * sealed to a group's members where it is a group's secret. */
+	NCFG_SECRET_PROVIDER_ESTATE
 } ncfg_secret_provider_t;
 
 /*

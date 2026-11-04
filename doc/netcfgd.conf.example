@@ -2182,6 +2182,14 @@
 # `rm`. `@secret:provider:NAME` names a provider other than the default,
 # where one is configured.
 #
+# `@secret:estate:KEY` is the one whose value is not on this machine's disk as
+# a file: it is the fuzznet setting KEY in force for this host, set by an
+# operator of the estate, and it needs a daemon serving a node. A value every
+# access point of a zone must share, a `roaming_key` say, is set once for the
+# group by `set sealed group=NAME KEY VALUE`, and only the group's members can
+# open it. A member is a host an operator named, with
+# `set setting host=HOSTKEY group/member NAME`.
+#
 # This holds for every credential netcfgd knows: wifi passphrases, 802.1X
 # passwords and private keys, WireGuard private keys, PPPoE and VPN logins.
 # The desired-state document that `ncfg show` prints and /run/netcfgd holds

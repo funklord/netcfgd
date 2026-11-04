@@ -2022,6 +2022,9 @@ static void a_pppoe_session_round_trips(void)
 	round_trips("device ppp0 {\n\tpppoe {\n\t\tparent = \"e0\"\n\t\tusername = \"u\"\n"
 	    "\t\tpassword = \"@secret:p\"\n\t}\n}\n", "a pppoe session round trips");
 	round_trips(full, "and so does one naming a service, a concentrator and another store");
+	round_trips("device ppp0 {\n\tpppoe {\n\t\tparent = \"e0\"\n\t\tusername = \"u\"\n"
+	    "\t\tpassword = \"@secret:estate:zone/isp\"\n\t}\n}\n",
+	    "and so does one the estate holds, under its own prefix");
 
 	bare = rendering_of("device ppp0 {\n\tpppoe {\n\t\tparent = \"e0\"\n"
 	    "\t\tusername = \"u\"\n\t\tpassword = \"@secret:p\"\n\t}\n}\n");

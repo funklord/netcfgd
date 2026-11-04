@@ -344,7 +344,7 @@
         "parent": "eth0",
         "username": "alice",
         "password": {
-          "provider": "file",
+          "provider": "estate",
           "name": "dsl"
         },
         "service": "internet",

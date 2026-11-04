@@ -3578,6 +3578,10 @@ live:
 	@# CAP_NET_ADMIN. `wg` is not needed here: the independent reader is the
 	@# Rust ncfg, observing the same kernel through its own code.
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/c_wireguard.sh"
+	@# The same module again, keyed by a value sealed through the estate: the
+	@# one secret provider whose reader is fuzznet's, so only a served node
+	@# can say it answers. `wg` is the reader. 10.709.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/c_estate_secret.sh"
 	@# The only python test. A TUI needs a pty to say anything about, and
 	@# script(1) cannot drive input reliably; see the file's own header.
 	@if command -v python3 >/dev/null 2>&1; then \

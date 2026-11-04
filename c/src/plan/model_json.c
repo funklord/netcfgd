@@ -40,7 +40,8 @@
  * compiled a block whose feature was silently missing, so there are no tables
  * here that could be asked for instead.
  */
-static const char *const secret_provider_words[] = { "file", "keyring", "pass", "exec" };
+static const char *const secret_provider_words[] = { "file", "keyring", "pass", "exec",
+	                                             "estate" };
 static const char *const route_scope_words[] = { "global", "link", "host" };
 static const char *const dnssec_words[] = { "no", "allow", "yes" };
 static const char *const dns_transport_words[] = { "plain", "tls", "https" };

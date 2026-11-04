@@ -120,6 +120,12 @@ static void note(references_t *refs, const char *what, const ncfg_secret_ref_t *
 	if (refs->failed || !reference || !reference->name) {
 		return;
 	}
+	/* Held by the estate rather than under `secrets/`, so it is neither
+	 * stored here nor "referenced and not stored": this walk's whole subject
+	 * is that directory. */
+	if (reference->provider == NCFG_SECRET_PROVIDER_ESTATE) {
+		return;
+	}
 	entry = entry_for(refs, reference->name);
 	if (!entry || !what || !what[0]) {
 		return;

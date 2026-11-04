@@ -85,7 +85,8 @@ static const ncfg_enum_t dns_mode_set =
  * The sets this module owns
  * ------------------------------------------------------------------------ */
 
-static const char *const secret_provider_words[] = { "file", "keyring", "pass", "exec" };
+static const char *const secret_provider_words[] = { "file", "keyring", "pass", "exec",
+	                                             "estate" };
 static const ncfg_enum_t secret_provider_set = WORD_SET("secret provider", secret_provider_words);
 
 static const char *const hostname_mode_words[] = { "none", "send", "send_fqdn" };

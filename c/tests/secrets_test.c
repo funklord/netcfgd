@@ -309,6 +309,73 @@ static void the_other_providers(const char *work_dir)
 	    "the keyring says it is not implemented and names no milestone it will not meet");
 }
 
+/*
+ * The `estate` provider's reader, standing in for fuzznet: the node installs
+ * the real one while it serves, and `node_fleet.sh` carries that end to end.
+ */
+static int   estate_answer;
+static char  estate_asked[64];
+
+static int estate_stand_in(const char *key, char *value, size_t cap, size_t *length)
+{
+	(void)snprintf(estate_asked, sizeof(estate_asked), "%s", key);
+	if (estate_answer == 1) {
+		*length = strlen(CANARY);
+		if (*length > cap) {
+			return 0;
+		}
+		memcpy(value, CANARY, *length);
+	}
+	return estate_answer;
+}
+
+/*
+ * Three different failures, and they want three different remedies. What must
+ * not happen is the file provider's answer: NOT_FOUND tells a person to run
+ * `ncfg secret set`, and a file under `secrets/` would not be read here.
+ */
+static void the_estate_provider(const char *config_dir)
+{
+	ncfg_secret_resolver_t resolver = { 0 };
+	ncfg_secret_ref_t      reference = { NCFG_SECRET_PROVIDER_ESTATE, (char *)"zone/roaming" };
+	ncfg_secret_error_t    why = NCFG_SECRET_OK;
+	ncfg_secret_t         *secret;
+	char                   message[NCFG_ERROR_MAX] = "";
+
+	resolver.secrets_dir = config_dir;
+	check(!ncfg_secret_resolve(&resolver, &reference, &why, message, sizeof(message)) &&
+	    why == NCFG_SECRET_UNSUPPORTED && strstr(kept(message), "serves none"),
+	    "a process serving no node refuses an estate secret and says why");
+
+	ncfg_secret_estate_install(estate_stand_in);
+	estate_answer = 1;
+	secret = ncfg_secret_resolve(&resolver, &reference, &why, message, sizeof(message));
+	check(secret && strcmp(ncfg_secret_expose(secret), CANARY) == 0,
+	    "a value the estate holds for this host resolves");
+	check(strcmp(estate_asked, "zone/roaming") == 0, "under the key the reference names");
+	ncfg_secret_free(secret);
+
+	estate_answer = 0;
+	message[0] = '\0';
+	check(!ncfg_secret_resolve(&resolver, &reference, &why, message, sizeof(message)) &&
+	    why == NCFG_SECRET_FAILED && strstr(kept(message), "no value here") &&
+	    !strstr(kept(message), "secret set"),
+	    "none set here is not the file provider's not-found, and sends nobody to `secret set`");
+
+	estate_answer = -1;
+	message[0] = '\0';
+	check(!ncfg_secret_resolve(&resolver, &reference, &why, message, sizeof(message)) &&
+	    why == NCFG_SECRET_FAILED && strstr(kept(message), "sealed to a key this host lacks") &&
+	    strstr(kept(message), "group/member"),
+	    "sealed to another key says so, and names what an operator does about it");
+
+	ncfg_secret_estate_install(NULL);
+	message[0] = '\0';
+	check(!ncfg_secret_resolve(&resolver, &reference, &why, message, sizeof(message)) &&
+	    why == NCFG_SECRET_UNSUPPORTED,
+	    "and the reader goes with the node");
+}
+
 static void the_first_line_rule(void)
 {
 	char message[NCFG_ERROR_MAX] = "";
@@ -458,7 +525,7 @@ static ncfg_document_t *every_shape(void)
 	document->devices = calloc(3u, sizeof(*document->devices));
 	document->interfaces = calloc(1u, sizeof(*document->interfaces));
 	document->networks = calloc(2u, sizeof(*document->networks));
-	document->access_points = calloc(1u, sizeof(*document->access_points));
+	document->access_points = calloc(2u, sizeof(*document->access_points));
 	if (!document->devices || !document->interfaces || !document->networks ||
 	    !document->access_points) {
 		printf("out of memory building the fixture\n");
@@ -467,7 +534,7 @@ static ncfg_document_t *every_shape(void)
 	document->device_count = 3u;
 	document->interface_count = 1u;
 	document->network_count = 2u;
-	document->access_point_count = 1u;
+	document->access_point_count = 2u;
 
 	/* A WireGuard key belongs to the thing being created (0155), and a peer
 	 * may have a preshared one. */
@@ -536,6 +603,12 @@ static ncfg_document_t *every_shape(void)
 	access_point->security.kind = NCFG_SECURITY_PSK;
 	access_point->security.psk.passphrase.provider = NCFG_SECRET_PROVIDER_FILE;
 	access_point->security.psk.passphrase.name = own("guest-psk");
+
+	access_point = &document->access_points[1];
+	access_point->id = own("Roaming");
+	access_point->security.kind = NCFG_SECURITY_PSK;
+	access_point->security.psk.passphrase.provider = NCFG_SECRET_PROVIDER_ESTATE;
+	access_point->security.psk.passphrase.name = own("zone/roaming");
 	return document;
 }
 
@@ -618,6 +691,11 @@ static void a_credential_in_every_shape_is_found(const char *config_dir)
 			check(!entries[i].stored, "and a referenced one with no file is not stored");
 		}
 	}
+	/* Held by the estate, so neither stored under `secrets/` nor missing from
+	 * it, and a line saying "referenced, not stored" would send somebody to
+	 * store a copy of it there. */
+	check(!entry_says(entries, count, "zone/roaming", NULL),
+	    "a value the estate holds is no entry in this directory's list");
 	for (i = 1; i < count; i++) {
 		all = all && strcmp(entries[i - 1u].name, entries[i].name) < 0;
 	}
@@ -694,6 +772,7 @@ int main(void)
 	the_store_writes_tightly_and_never_reads_back(config_dir);
 	the_file_provider(config_dir);
 	the_other_providers(work_dir);
+	the_estate_provider(config_dir);
 	the_first_line_rule();
 	a_stored_certificate_is_written_where_the_supplicant_can_read_it(work_dir);
 	a_credential_in_every_shape_is_found(config_dir);

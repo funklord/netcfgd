@@ -12684,6 +12684,73 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.709 Sealed group values as secrets: `@secret:estate:KEY`, built and live-tested
+
+A fifth secret provider. `@secret:estate:KEY` is the fuzznet setting KEY in
+force for this host: its own cell, else its group's, else the estate's, and a
+value sealed to the host is opened. So a roaming key or mesh password an
+operator sets once with `set sealed group=NAME KEY VALUE` reaches each access
+point of the zone, and no other host can read it. `fuzznet` is pinned at
+15b3b4f.
+
+**A hook in the module, not the field 10.708 proposed.** That entry put a
+function on `ncfg_secret_resolver_t`. There are five resolver sites, each
+building its own resolver, and a site forgotten would read as a host with no
+node. `ncfg_secret_estate_install` is one process-wide reader instead, which
+`node.c` installs for the length of `fzn_daemon_main`. `secrets.c` still links
+no fuzznet. It is safe because every resolution in the daemon runs on the
+loop's thread, through the mailbox, and fuzznet's getter is safe there.
+Moving a resolution onto another thread would break that.
+
+**Three failures, and none of them is `NOT_FOUND`**, whose sentence sends a
+person to `ncfg secret set`:
+
+- no node in this process: `UNSUPPORTED`, saying so;
+- none set here: `FAILED`, saying an operator of the estate sets it;
+- sealed to a key this host lacks: `FAILED`, naming `group/member`.
+
+`ncfg secret list` skips these references, since its subject is the `secrets/`
+directory and "referenced, not stored" would ask for a copy on disk. The
+compiler refuses a KEY outside fuzznet's key grammar at the line that wrote
+it. `@secret:estate:` is no privilege question beside `@secret:exec:`: it runs
+nothing, and it reads what this host could read anyway.
+
+**A member is a host an admin named, since fuzznet sec 879** (15b3b4f, inbox
+20261104T2221Z). `set sealed` and the minute's reseal reach a host only when
+its `group/member` is in force at an admin's or a root's rank and it stands. So
+a new access point gets a roaming key when an operator says `set setting
+host=KEY group/member zone1`, not when it says so itself, and the refusal
+above names that verb. Its own word still places it for the group's plain
+values. Nothing here sets `group/member` or calls `set sealed` yet: both are
+an operator's verbs on fuzznet's socket, with no `ncfg` or GUI form. Sec 880 is
+coming: copies held by other root and admin hosts, so a later member is served
+once the sealer has gone.
+
+**Open: beside a fuzznetd, netcfgd is a follower, and a follower reads no
+setting.** The getter answers 0 there, so an estate secret reads as "no value
+here" on exactly the machines the holder wants running both.
+`fzn_daemon_local` would ask the face, and it is refused from `tick` and a
+procedure, which is where an apply runs. The sentence names this case.
+Signalled to fuzznet (inbox 20261104T2229Z); the fix is theirs.
+
+**The Rust does not know this provider.** It is retired, and only C reads the
+witness now: `doc/schema/document.json` carries `estate` on the PPPoE password,
+and `frozen.rs` builds its own document. `NCFG_SCHEMA_MINOR` stays 1, as it
+has for every variant since it was written.
+
+**Verified:**
+
+- `secrets_test`: the stand-in reader's value and key, all three failures, the
+  reader leaving with the node, and the walk skipping the reference. Sabotaged
+  twice: with the walk's skip off, and with the -1 arm off, each fails. The walk
+  check passed vacuously at first, the fixture's count being 1; it is 2 now.
+- `lower_test`, `render_test`, `document_test`: the key grammar, the round
+  trip, the witness.
+- `tests/live/c_estate_secret.sh`, in a namespace against fuzznet's real
+  reader: an apply with nothing set refuses and says so. After `set sealed`,
+  the store holds a box, the same apply carries, and `wg` reads back the public
+  key of the sealed private key. The key is in no log and no output.
+
 ## 10.708 Propagation: `ncfg VERB --at estate|group=NAME`, built and live-tested
 
 The design is in 10.707. A `do` procedure beside `ask` answers `ok` only
@@ -12718,30 +12785,8 @@ tier.
   B listed as serving no netcfgd. `status --at estate` is refused before
   anything is asked.
 
-**Item 2 is unblocked.** fuzznet built the getter netcfgd asked for, in
-513562d (its sec 877; inbox 20261104T0114Z): `fzn_daemon_setting_here(key,
-key_len, value, cap, &len)`. It reads the node's own store: the host's cell,
-else its first group's, else the estate's, with a value sealed to the host
-opened. It answers 1 for a value; 0 for none, in a follower, or where the
-value exceeds `cap`; and -1 where the value is sealed to a key the host
-lacks. It only reads, so it is safe from tick, from `ready` and inside a
-procedure. Using it needs the pin moved past 513562d.
-
-**The shape of item 2, measured 2026-11-04 and not started.** It is a fifth
-secret provider, `@secret:estate:KEY`, alongside file, exec, pass and
-keyring. The provider word is spelled in five places, and each one changes:
-
-- `crates/netcfgd-compile/src/lower.rs` and `crates/netcfgd-secret`;
-- `c/src/compile/lower_value.c`;
-- the document writers `c/src/model/document.c` and `c/src/plan/model_json.c`;
-- the schema witness `doc/schema/document.json`.
-
-Resolution cannot live in `c/src/host/secrets.c`, which links no fuzznet. It
-goes through a function the daemon sets on `ncfg_secret_resolver_t` when it
-serves a node, which calls `fzn_daemon_setting_here`. Without a node, the
-provider is refused with that reason. A return of -1, a value sealed to a
-key this host lacks, is `NCFG_SECRET_FAILED` and not `NOT_FOUND`: `ncfg
-secret set` is the wrong remedy for it.
+**Item 2 is built: 10.709.** fuzznet's getter is `fzn_daemon_setting_here`
+(its sec 877, 513562d).
 
 ## 10.707 fuzznet built the coordination netcfgd left to it: staged commit, propagation, sealed values
 
@@ -12791,15 +12836,9 @@ this host lacks, and netcfgd does not call it.
   on itself first, where it is named, and lists it. An operator's own
   plain fuzznetd serves no `do` and is listed `unknown`, so `ncfg` counts
   such hosts apart, as serving no netcfgd, rather than as failures (10.708).
-- **Sealed values as secrets are parked on fuzznet.** `@secret:estate:KEY`
-  would be resolved through `fzn_node_settings_here`. But the settings
-  store is the daemon's static, with no accessor. `fzn_daemon_local` is
-  refused inside a procedure and inside `ready`, so an `apply --at` (inside
-  `ask`) could not resolve one, which is the case zone secrets exist for,
-  and a socket from inside the loop would wait on the loop. Asked of fuzznet
-  2026-11-04: an in-process getter callable from tick, ready and a procedure.
-  The provider is a variant added to the document model, which 0020 makes a
-  minor bump, with the witness carrying it.
+- **Sealed values as secrets are built: 10.709.** They waited on a getter
+  that works inside a procedure, since `fzn_daemon_local` is refused there.
+  fuzznet's `fzn_daemon_setting_here` is that getter.
 
 ## 10.706 The rss band re-derived again: four runs in ten failed it unchanged
 

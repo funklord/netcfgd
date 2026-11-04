@@ -157,12 +157,23 @@ typedef struct {
 } ncfg_secret_resolver_t;
 
 /*
+ * The reader behind the `estate` provider: 1 with the value in `value` and
+ * its length in `*length`, 0 for none set here, -1 for one sealed to a key
+ * this host lacks. Installed by the node while it serves, because this module
+ * links no fuzznet; NULL takes it away. **Called on the loop's thread**, which
+ * is where every apply and every request runs (the mailbox), and which is what
+ * makes fuzznet's reader safe to call.
+ */
+typedef int (*ncfg_secret_estate_fn)(const char *key, char *value, size_t cap, size_t *length);
+void ncfg_secret_estate_install(ncfg_secret_estate_fn reader);
+
+/*
  * Resolve a reference to the material it names.
  *
  * Returns the secret, or NULL with the kind in `*why` (which may be NULL) and
  * a sentence in `err` that discloses nothing.
  *
- * The four providers:
+ * The five providers:
  *   `file`    a 0600 file under `secrets_dir`, refused if anybody else can
  *             read it, with one trailing newline stripped -- that is what an
  *             editor or `echo` leaves behind, and a passphrase that silently
@@ -175,6 +186,12 @@ typedef struct {
  *   `keyring` refused, with the reason: `request_key(2)` and `keyctl(2)` have
  *             no libc wrapper, and neither widening the syscall surface nor
  *             depending on the `keyctl` tool has been chosen.
+ *   `estate`  the value in force here for a fuzznet setting key, through the
+ *             reader the node installs (`ncfg_secret_estate_install`): this
+ *             host's own, else its group's, else the estate's, one sealed to
+ *             a group opened only on a member. Refused in a process serving
+ *             no node, and "none set" is not NOT_FOUND, since `ncfg secret
+ *             set` is the wrong remedy for it.
  */
 ncfg_secret_t *ncfg_secret_resolve(const ncfg_secret_resolver_t *resolver,
     const ncfg_secret_ref_t *reference, ncfg_secret_error_t *why, char *err, size_t err_size);

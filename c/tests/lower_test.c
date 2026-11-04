@@ -954,6 +954,12 @@ static void network_cases(void)
 	    "must be a secret reference", "an inline passphrase is refused");
 	refuses("network \"Cafe\" { wifi { psk = \"@secret:wombat:name\" } }\n",
 	    "is not a secret provider", "an unknown secret provider is refused");
+	/* fuzznet's own key grammar, said at the line rather than at an apply. */
+	refuses("network \"Cafe\" { wifi { psk = \"@secret:estate:Zone One\" } }\n",
+	    "is not a fuzznet setting key", "an estate key fuzznet would refuse is refused here");
+	refuses("network \"Cafe\" { wifi { psk = \"@secret:estate:"
+	    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" } }\n",
+	    "is not a fuzznet setting key", "and so is one past its 64 bytes");
 
 	refuses("network \"Cafe\" { wifi { psk = \"@secret:c\"; open = true } }\n",
 	    "one kind of security", "a network has one kind of security");

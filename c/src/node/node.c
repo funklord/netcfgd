@@ -12,6 +12,7 @@
 #include "ncfg/node.h"
 
 #include "ncfg/base.h"
+#include "ncfg/secrets.h"
 
 #include "chain/sign_monocypher.h"
 #include "claim/claim_file.h"
@@ -583,6 +584,13 @@ size_t ncfg_node_local(const char *line, char *reply, size_t cap)
 	return fzn_daemon_local(line, reply, cap);
 }
 
+/* The `estate` secret provider's reader, while this process serves (10.709). */
+static int estate_read(const char *key, char *value, size_t cap, size_t *length)
+{
+	return fzn_daemon_setting_here((const uint8_t *)key, strlen(key), (uint8_t *)value, cap,
+	    length);
+}
+
 ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
     size_t extra_count, char *const *restart_argv, const ncfg_node_loop_t *loop, char *err,
     size_t err_size)
@@ -627,7 +635,9 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
 	if (loop->begin) {
 		loop->begin(loop->context);
 	}
+	ncfg_secret_estate_install(estate_read);
 	code = fzn_daemon_main(argc, argv, &ext);
+	ncfg_secret_estate_install(NULL);
 	serving = NULL;
 	if (loop->end) {
 		loop->end(loop->context);

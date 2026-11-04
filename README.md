@@ -109,8 +109,9 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   withholds that link's routes as an unplugged cable would, so the working
   wifi takes over.
 - **Secrets never sit in the configuration.** A passphrase is a reference,
-  resolved from a file, the kernel keyring, `pass` or a program you name, and
-  it stays out of `/run` and off any wire.
+  resolved from a file, the kernel keyring, `pass`, a program you name or a
+  value sealed to this host by the estate, and it stays out of `/run` and off
+  any wire in the clear.
 - **The desktop keeps working.** A NetworkManager shim lets `nmcli`,
   `nm-applet` and `plasma-nm` talk to netcfgd, beside its own command line,
   full-screen text interface, and Qt window with a tray icon that joins saved
@@ -440,8 +441,8 @@ grantable to a user, a group, anyone or root, and set separately for the local
 socket and for remote connections.
 
 **Secrets never enter the desired-state document.** It holds only a reference,
-resolved from a file, the kernel keyring, `pass` or a program you name. That
-holds for `/run` state and for anything sent over a wire, and the shim refuses
+resolved from a file, the kernel keyring, `pass`, a program you name or a value
+the estate seals to the hosts of a group. That holds for `/run` state and for anything sent over a wire, and the shim refuses
 to hand a credential back out.
 
 ---

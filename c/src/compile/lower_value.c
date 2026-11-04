@@ -393,9 +393,22 @@ int ncfg_as_secret(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value, ncfg_se
 			provider = NCFG_SECRET_PROVIDER_KEYRING;
 		} else if (strcmp(word, "pass") == 0) {
 			provider = NCFG_SECRET_PROVIDER_PASS;
+		} else if (strcmp(word, "estate") == 0) {
+			provider = NCFG_SECRET_PROVIDER_ESTATE;
+			/* fuzznet's key grammar, here so a name it would refuse is said
+			 * at the line that wrote it rather than at an apply. */
+			if (strlen(name) > 64u || strspn(name, "abcdefghijklmnopqrstuvwxyz0123456789._/-") !=
+			    strlen(name)) {
+				ncfg_diag(ctx, value->span,
+				    "`%s` is not a fuzznet setting key: a-z 0-9 . _ / -, at most 64 "
+				    "bytes", name);
+				free(text);
+				return 0;
+			}
 		} else {
 			ncfg_diag(ctx, value->span,
-			    "`%s` is not a secret provider: one of file, exec, keyring, pass", word);
+			    "`%s` is not a secret provider: one of file, exec, keyring, pass, estate",
+			    word);
 			free(text);
 			return 0;
 		}

@@ -465,6 +465,58 @@ static ncfg_secret_t *read_pass(const char *name, ncfg_secret_error_t *why, char
 	return first;
 }
 
+static ncfg_secret_estate_fn estate_reader;
+
+void ncfg_secret_estate_install(ncfg_secret_estate_fn reader)
+{
+	estate_reader = reader;
+}
+
+/* Past fuzznet's own bounds, since a value longer than the buffer reads as none
+ * and would be told as "not set". */
+#define ESTATE_VALUE_MAX 1024u
+
+static ncfg_secret_t *read_estate(const char *name, ncfg_secret_error_t *why, char *err,
+    size_t err_size)
+{
+	char           value[ESTATE_VALUE_MAX];
+	size_t         length = 0;
+	ncfg_secret_t *secret;
+	int            answer;
+
+	if (!estate_reader) {
+		fail(why, NCFG_SECRET_UNSUPPORTED);
+		ncfg_error_set(err, err_size,
+		    "secret `%s` is held by the estate, and only a daemon serving a fuzznet node "
+		    "can read one: this process serves none", name);
+		return NULL;
+	}
+	answer = estate_reader(name, value, sizeof(value), &length);
+	if (answer < 0) {
+		fail(why, NCFG_SECRET_FAILED);
+		ncfg_error_set(err, err_size,
+		    "secret `%s` is sealed to a key this host lacks: an operator names it a member "
+		    "with `set setting host=KEY group/member GROUP`", name);
+		return NULL;
+	}
+	if (answer == 0) {
+		/* Not NOT_FOUND, whose remedy is `ncfg secret set`: this is a value an
+		 * operator sets across the estate, not a file here. */
+		fail(why, NCFG_SECRET_FAILED);
+		ncfg_error_set(err, err_size,
+		    "secret `%s` has no value here: an operator of the estate sets it, and a node "
+		    "following a fuzznetd holds no settings of its own", name);
+		return NULL;
+	}
+	secret = secret_new(value, length);
+	wipe(value, sizeof(value));
+	if (!secret) {
+		fail(why, NCFG_SECRET_FAILED);
+		ncfg_error_set(err, err_size, "secret `%s`: out of memory", name);
+	}
+	return secret;
+}
+
 ncfg_secret_t *ncfg_secret_resolve(const ncfg_secret_resolver_t *resolver,
     const ncfg_secret_ref_t *reference, ncfg_secret_error_t *why, char *err, size_t err_size)
 {
@@ -481,6 +533,8 @@ ncfg_secret_t *ncfg_secret_resolve(const ncfg_secret_resolver_t *resolver,
 		return run_command(reference->name, why, err, err_size);
 	case NCFG_SECRET_PROVIDER_PASS:
 		return read_pass(reference->name, why, err, err_size);
+	case NCFG_SECRET_PROVIDER_ESTATE:
+		return read_estate(reference->name, why, err, err_size);
 	case NCFG_SECRET_PROVIDER_KEYRING:
 		fail(why, NCFG_SECRET_UNSUPPORTED);
 		/*
