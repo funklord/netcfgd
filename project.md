@@ -1008,9 +1008,7 @@ them because no test had ever carried those keys.
    **What is left**, in the order the aims give it:
    - ~~the fleet in the GUI is a box~~ -- **built** (10.698, 10.699, 10.710):
      the window moves between this machine and the estate's nodes, and a
-     `fleet` tab shows them all at once;
-   - **an operator's verbs for a group have no window yet**: `ncfg nodes
-     member` and `ncfg secret seal` are the command line's (10.711);
+     `fleet` tab shows them all at once and acts on them (10.713);
    - ~~events across the estate~~ -- **built** (10.703, 10.704): netcfgd
      publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
      from a cursor, and the GUI and TUI follow a node by it;
@@ -12687,6 +12685,28 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.713 The `fleet` tab acts: reload all, add to a group, seal a value
+
+10.710 only looked. Three buttons now do what an operator does to many nodes:
+`ncfg reload --at estate`, `ncfg nodes member`, and `ncfg secret seal`. They
+are `ncfg`'s own verbs, run as child processes as the tab's reads are, so what
+each refuses and prints stays in one place and the window never waits. The
+last line of the answer sits under the table until the next action, which for
+a reload is its count of nodes.
+
+**The sealed value goes to the child's standard input.** On a command line any
+user of the machine could read it in `/proc`. The probe sabotaged to pass it as
+an argument fails. One action runs at a time, killed at two minutes, since
+`--at estate` waits on every host's round.
+
+Rejected: a push of one configuration to every node from here. `config put
+--at estate` exists, but which file goes to which group is a design the window
+does not have, and `beyond the simple case` is the holder's (0311).
+
+**Verified:** `gui/tests/fleet_tab`, against the stand-in: each verb's argv,
+the value on stdin and off argv, a refusal in `ncfg`'s words, and one action at
+a time. The modal dialogs themselves are unexercised, offscreen or on a desktop.
 
 ## 10.712 Local requests go over fuzznet: `call ask` first, the control socket behind it
 

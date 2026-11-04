@@ -86,6 +86,14 @@ int main(int argc, char **argv)
 	setenv("FLEET_MODE", "up", 1);
 	check(script.open(QIODevice::WriteOnly), "the stand-in ncfg is written");
 	script.write("#!/bin/sh\n"
+	             "case \"$1\" in\n"
+	             "reload|nodes|secret)\n"
+	             "  echo \"$*\" >> \"$FLEET_LOG.acts\"\n"
+	             "  [ \"$1\" = secret ] && cat >> \"$FLEET_LOG.input\"\n"
+	             "  [ \"$FLEET_MODE\" = refuse ] && { echo 'ncfg: group has no members' >&2; "
+	             "exit 1; }\n"
+	             "  echo 'first line'; echo '1 of 1 netcfgd node(s) carried it out'; exit 0;;\n"
+	             "esac\n"
 	             "echo + >> \"$FLEET_LOG\"\n"
 	             "case \"$3\" in\n"
 	             "aa*) [ \"$FLEET_MODE\" = up ] || { echo 'cannot reach it' >&2; "
@@ -150,6 +158,58 @@ int main(int argc, char **argv)
 		open->click();
 	}
 	check(seen == QStringList { refuses }, "Open asks for the selected node, by its whole key");
+
+	/* What an operator does to many: `ncfg`'s verbs, the value off the argv. */
+	{
+		const QString secret = QStringLiteral("hunter2-never-on-argv");
+		bool          worked = false;
+		QString       said;
+		QEventLoop    loop;
+		QTimer        limit;
+
+		limit.setSingleShot(true);
+		QObject::connect(&limit, &QTimer::timeout, &loop, &QEventLoop::quit);
+		QObject::connect(&view, &ncfg_fleet_view::acted, &loop,
+		                 [&](bool ok, const QString &text) {
+			worked = ok;
+			said = text;
+			loop.quit();
+		});
+		auto wait = [&]() {
+			limit.start(10000);
+			loop.exec();
+		};
+		check(view.reload_all(), "reload all starts");
+		check(!view.reload_all(), "  and a second waits for it");
+		wait();
+		check(worked && said.startsWith(QStringLiteral("1 of 1")),
+		      "  and says how many nodes carried it out, its last line", said);
+		QLabel *note = view.findChild<QLabel *>(QStringLiteral("fleet_note"));
+		check(note && note->text().contains(QStringLiteral("1 of 1")),
+		      "  under the table", note ? note->text() : QString());
+		check(view.add_member(up, QStringLiteral("zone1")), "add to group starts");
+		wait();
+		check(view.seal(QStringLiteral("zone1"), QStringLiteral("wg/key"), secret),
+		      "seal starts");
+		wait();
+		setenv("FLEET_MODE", "refuse", 1);
+		check(view.seal(QStringLiteral("zone1"), QStringLiteral("wg/key"), secret),
+		      "a refused seal starts");
+		wait();
+		check(!worked && said.contains(QStringLiteral("no members")),
+		      "  and reads as a failure, in ncfg's own words", said);
+		setenv("FLEET_MODE", "up", 1);
+		QFile acts(log + QStringLiteral(".acts"));
+		QFile input(log + QStringLiteral(".input"));
+		const QByteArray asked = acts.open(QIODevice::ReadOnly) ? acts.readAll() : QByteArray();
+		const QByteArray given = input.open(QIODevice::ReadOnly) ? input.readAll() : QByteArray();
+		check(asked.contains("reload --at estate") &&
+		          asked.contains(("nodes member " + up + " zone1").toUtf8()) &&
+		          asked.contains("secret seal zone1 wg/key"),
+		      "each is ncfg's own verb", QString::fromUtf8(asked));
+		check(given.startsWith(secret.toUtf8() + '\n'), "the value goes to standard input");
+		check(!asked.contains(secret.toUtf8()), "  and is on no command line");
+	}
 
 	/* A wide estate, one answer slow: never more than four asked at once. */
 	members.clear();

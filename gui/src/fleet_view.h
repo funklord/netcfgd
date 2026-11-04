@@ -17,6 +17,12 @@
  * window costs the estate nothing until somebody turns to this tab. A row
  * keeps the name a node last gave when it stops answering, since "router-3 has
  * no answer" is the sentence wanted, and a key alone cannot say it.
+ *
+ * **And what an operator does to many at once** (10.713): reload them all, name
+ * a node a member of a group, seal a value to a group. These are `ncfg`'s own
+ * verbs, so what they refuse and what they print is theirs. A sealed value goes
+ * to the child's standard input and is never on a command line, where any user
+ * of the machine could read it.
  */
 #ifndef NCFG_FLEET_VIEW_H
 #define NCFG_FLEET_VIEW_H
@@ -55,6 +61,11 @@ public:
 	/* How long one node is waited for. A probe shortens it. */
 	void set_wait(int milliseconds);
 
+	/* What the buttons do once they have asked. False while another runs. */
+	bool reload_all();
+	bool add_member(const QString &key, const QString &group);
+	bool seal(const QString &group, const QString &key, const QString &value);
+
 public slots:
 	/* One round, unless one is still going: a slow node must not stack up
 	 * rounds behind it. */
@@ -66,6 +77,8 @@ signals:
 	void opened(const QString &key);
 	/* A round has every answer in. */
 	void finished_round();
+	/* An action has ended, `said` being what the operator is shown. */
+	void acted(bool worked, const QString &said);
 
 protected:
 	void showEvent(QShowEvent *event) override;
@@ -76,6 +89,10 @@ private:
 	void answered(const QString &key, int code, const QByteArray &out, const QByteArray &err);
 	void draw();
 	void open_selected();
+	void ask_reload();
+	void ask_member();
+	void ask_seal();
+	bool act(const QStringList &arguments, const QByteArray &input);
 
 	std::function<QStringList()>  members;
 	ncfg_table_view              *table;
@@ -83,6 +100,9 @@ private:
 	QStringList                   keys;
 	QStringList                   waiting;
 	QHash<QString, ncfg_fleet_row> rows;
+	/* What the last action said, under the table until the next. */
+	QString                       action_said;
+	bool                          acting = false;
 	int                           asking = 0;
 	int                           wait = 35000;
 };

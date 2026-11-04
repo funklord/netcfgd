@@ -5,9 +5,15 @@
 
 #include "table_view.h"
 
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
 #include <QShowEvent>
@@ -19,6 +25,8 @@
  * asks while it is in front. */
 static const int MOST_AT_ONCE = 4;
 static const int ROUND_EVERY = 60000;
+/* `reload --at estate` waits on every host's round. */
+static const int ACTION_WAIT = 120000;
 /* The last column, where `open_selected` reads the whole key back. */
 static const int KEY_COLUMN = 6;
 
@@ -36,6 +44,22 @@ ncfg_fleet_view::ncfg_fleet_view(std::function<QStringList()> members, QWidget *
 	open_button->setToolTip(QStringLiteral("Move this window to the selected node."));
 	connect(open_button, &QPushButton::clicked, this, &ncfg_fleet_view::open_selected);
 	table->add_control(open_button);
+	auto *reload_button = new QPushButton(QStringLiteral("Reload all..."), this);
+	reload_button->setToolTip(QStringLiteral(
+	    "Have every node re-read its configuration. A node's own `remote` block decides."));
+	connect(reload_button, &QPushButton::clicked, this, &ncfg_fleet_view::ask_reload);
+	table->add_control(reload_button);
+	auto *member_button = new QPushButton(QStringLiteral("Add to group..."), this);
+	member_button->setToolTip(QStringLiteral(
+	    "Say the selected node is in a group, so that what is sealed to the group reaches it."));
+	connect(member_button, &QPushButton::clicked, this, &ncfg_fleet_view::ask_member);
+	table->add_control(member_button);
+	auto *seal_button = new QPushButton(QStringLiteral("Seal a value..."), this);
+	seal_button->setToolTip(QStringLiteral(
+	    "A value only a group's members can read, which a configuration names as "
+	    "@secret:estate:KEY."));
+	connect(seal_button, &QPushButton::clicked, this, &ncfg_fleet_view::ask_seal);
+	table->add_control(seal_button);
 	if (auto *cells = table->findChild<QTableWidget *>()) {
 		connect(cells, &QTableWidget::cellDoubleClicked, this,
 		        [this](int, int) { open_selected(); });
@@ -204,11 +228,135 @@ void ncfg_fleet_view::draw()
 	const QString summary = keys.isEmpty()
 	    ? QStringLiteral("no other nodes in the estate")
 	    : QStringLiteral("%1 of %2 nodes answering").arg(answering).arg(keys.size());
-	table->set_note(QStringLiteral(
+	QString note = QStringLiteral(
 	    "%1. Each node is asked through this user's fuzznetd and judged by its own `remote` "
 	    "block, once a minute while this tab is in front. A double click moves the window "
-	    "there.").arg(summary));
+	    "there.").arg(summary);
+	if (!action_said.isEmpty()) {
+		note += QLatin1Char('\n') + action_said;
+	}
+	table->set_note(note);
 	emit reported(summary);
+}
+
+bool ncfg_fleet_view::act(const QStringList &arguments, const QByteArray &input)
+{
+	if (acting) {
+		return false;
+	}
+	acting = true;
+	auto *process = new QProcess(this);
+	auto *limit = new QTimer(process);
+
+	limit->setSingleShot(true);
+	limit->setInterval(ACTION_WAIT);
+	connect(limit, &QTimer::timeout, process, &QProcess::kill);
+	auto ended = [this, process](bool worked, const QString &said) {
+		process->deleteLater();
+		acting = false;
+		action_said = said;
+		draw();
+		emit acted(worked, said);
+	};
+	connect(process, &QProcess::finished, this, [process, ended](int code,
+	                                                             QProcess::ExitStatus how) {
+		const QString out = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+		const QString err = QString::fromUtf8(process->readAllStandardError()).trimmed();
+		const bool    worked = how == QProcess::NormalExit && code == 0;
+
+		/* The last line: `reload --at estate` ends on its count of nodes. */
+		const QString said = worked ? out : (err.isEmpty() ? out : err);
+		ended(worked, said.isEmpty() ? QStringLiteral("no answer")
+		                             : said.section(QLatin1Char('\n'), -1));
+	});
+	connect(process, &QProcess::errorOccurred, this, [ended](QProcess::ProcessError what) {
+		if (what == QProcess::FailedToStart) {
+			ended(false, QStringLiteral("`ncfg` could not be run"));
+		}
+	});
+	process->start(QStringLiteral("ncfg"), arguments);
+	/* Written and closed at once: `ncfg` reads to the end of its input, and
+	 * nothing of it stays here past this call. */
+	if (!input.isEmpty()) {
+		process->write(input);
+	}
+	process->closeWriteChannel();
+	limit->start();
+	return true;
+}
+
+bool ncfg_fleet_view::reload_all()
+{
+	const QStringList arguments { QStringLiteral("reload"), QStringLiteral("--at"),
+		QStringLiteral("estate") };
+
+	return act(arguments, QByteArray());
+}
+
+bool ncfg_fleet_view::add_member(const QString &key, const QString &group)
+{
+	return act(QStringList { QStringLiteral("nodes"), QStringLiteral("member"), key, group },
+	           QByteArray());
+}
+
+bool ncfg_fleet_view::seal(const QString &group, const QString &key, const QString &value)
+{
+	const QStringList arguments { QStringLiteral("secret"), QStringLiteral("seal"), group, key };
+	QByteArray        input = value.toUtf8() + '\n';
+	const bool        started = act(arguments, input);
+
+	input.fill('\0');
+	return started;
+}
+
+void ncfg_fleet_view::ask_reload()
+{
+	if (QMessageBox::question(this, QStringLiteral("Reload all"),
+	        QStringLiteral("Have every node of the estate re-read its configuration?")) ==
+	    QMessageBox::Yes) {
+		(void)reload_all();
+	}
+}
+
+void ncfg_fleet_view::ask_member()
+{
+	const QString key = table->selected_cell(KEY_COLUMN);
+	bool          given = false;
+
+	if (key.isEmpty()) {
+		action_said = QStringLiteral("Select a node first.");
+		draw();
+		return;
+	}
+	const QString group = QInputDialog::getText(this, QStringLiteral("Add to group"),
+	    QStringLiteral("Group:"), QLineEdit::Normal, QString(), &given);
+	if (given && !group.isEmpty()) {
+		(void)add_member(key, group);
+	}
+}
+
+void ncfg_fleet_view::ask_seal()
+{
+	QDialog dialog(this);
+	auto   *form = new QFormLayout(&dialog);
+	auto   *group = new QLineEdit(&dialog);
+	auto   *key = new QLineEdit(&dialog);
+	auto   *value = new QLineEdit(&dialog);
+	auto   *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+	                                       &dialog);
+
+	dialog.setWindowTitle(QStringLiteral("Seal a value"));
+	value->setEchoMode(QLineEdit::Password);
+	form->addRow(QStringLiteral("Group:"), group);
+	form->addRow(QStringLiteral("Key:"), key);
+	form->addRow(QStringLiteral("Value:"), value);
+	form->addRow(buttons);
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	if (dialog.exec() == QDialog::Accepted) {
+		(void)seal(group->text(), key->text(), value->text());
+	}
+	value->clear();
 }
 
 void ncfg_fleet_view::open_selected()
