@@ -1006,9 +1006,11 @@ them because no test had ever carried those keys.
      read the status over fuzznet first (10.690).
 
    **What is left**, in the order the aims give it:
-   - **the fleet in the GUI is a box** (10.698, 10.699): the window moves
-     between this machine and the estate's nodes, refreshing a node on a
-     timer for want of a stream;
+   - ~~the fleet in the GUI is a box~~ -- **built** (10.698, 10.699, 10.710):
+     the window moves between this machine and the estate's nodes, and a
+     `fleet` tab shows them all at once;
+   - **an operator's verbs for a group have no form here**: `set sealed` and
+     `group/member` are spoken to fuzznet's socket by hand (10.709);
    - ~~events across the estate~~ -- **built** (10.703, 10.704): netcfgd
      publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
      from a cursor, and the GUI and TUI follow a node by it;
@@ -12683,6 +12685,39 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.710 The `fleet` tab: every node at once
+
+The node box visits one node at a time, so somebody minding ten routers had
+to go to ten to learn which one was down. A `fleet` tab lists the estate's
+nodes: the name a node gives itself, whether it answers, its connectivity
+rung, its primary link and its links up. A double click or Open moves the
+window there. It is only built where the estate has other members, because
+somebody with one machine is who this window is for.
+
+**Child `ncfg status --at KEY --json` processes, not `ncfg_connection`.** That
+class waits on the window's thread, so one node off the air would freeze the
+window for the length of the call, once per node. A child is waited for
+without blocking and killed at 35 seconds. A thread in the client could not be
+killed. Rejected for the same reason: moving the existing connection through
+the nodes in turn.
+
+- **At most four at once, and only while the tab is in front**, once a minute.
+  A round in progress is not stacked behind by another.
+- **Three rows that must not read alike**: `answering`, `refused:` for a node
+  that is there and said no, and `no answer` for one that is not. The tab
+  tells the second by `denied` on standard error, a string only the real
+  program can vouch for, so `node_fleet.sh` asserts it with A's tier closed.
+- **A node that stops answering keeps its name** and the time it last did,
+  since "router-3, no answer" is the sentence wanted. `status --at estate` is
+  no shortcut: it is refused, a `call` at many hosts bringing back only
+  whether each one carried it out (10.708).
+
+**Verified:** `gui/tests/fleet_tab`, against a stand-in `ncfg` on PATH: the
+three states, a hung node killed by the view's own wait, the name kept, ten
+nodes never more than four at once, a member leaving, no tab without an
+estate, and Open. Sabotaged three ways: no cap, the name dropped, and no kill.
+Each fails its check. `make hull` and a real desktop have not seen the tab.
 
 ## 10.709 Sealed group values as secrets: `@secret:estate:KEY`, built and live-tested
 

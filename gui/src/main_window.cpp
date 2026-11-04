@@ -17,6 +17,7 @@ extern "C" {
 #include "global_view.h"
 #include "modems_view.h"
 #include "stations_view.h"
+#include "fleet_view.h"
 #include "leases_view.h"
 #include "config_view.h"
 #include "secrets_view.h"
@@ -235,18 +236,8 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	nodes = new QComboBox(tools);
 	nodes->setObjectName(QStringLiteral("nodes"));
 	nodes->addItem(QStringLiteral("this machine"), QString());
-	{
-		static char keys[256][NCFG_FUZZNET_KEY_TEXT];
-		char        socket[1100];
-		char        ignored[NCFG_ERROR_MAX];
-		size_t      count = 0;
-
-		if (ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
-		    ncfg_fuzznet_members(socket, keys, 256u, &count, ignored, sizeof(ignored))) {
-			for (size_t at = 0; at < count; at++) {
-				nodes->addItem(QString::fromUtf8(keys[at]), QString::fromUtf8(keys[at]));
-			}
-		}
+	for (const QString &key : estate_members()) {
+		nodes->addItem(key, key);
 	}
 	if (!connection->node().isEmpty()) {
 		int shown = nodes->findData(connection->node());
@@ -259,6 +250,33 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	}
 	connect(nodes, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
 	        &ncfg_main_window::node_chosen);
+	/* **Only where there is a fleet** (10.710): somebody with one machine and
+	 * no estate is the person this window is for, and an empty tab about
+	 * nodes would be one more thing to not understand. */
+	if (nodes->count() > 1) {
+		fleet = new ncfg_fleet_view([this]() {
+			const QStringList found = estate_members();
+
+			for (const QString &key : found) {
+				if (nodes->findData(key) < 0) {
+					nodes->addItem(key, key);
+				}
+			}
+			return found;
+		}, tabs);
+		connect(fleet, &ncfg_fleet_view::reported, this, &ncfg_main_window::note);
+		connect(fleet, &ncfg_fleet_view::opened, this, [this](const QString &key) {
+			const int index = nodes->findData(key);
+
+			if (index >= 0) {
+				nodes->setCurrentIndex(index);
+				if (this->connection->node() == key) {
+					tabs->setCurrentWidget(machine);
+				}
+			}
+		});
+		tabs->addTab(fleet, QStringLiteral("fleet"));
+	}
 	tools->addWidget(nodes);
 	auto *refresh_button = new QPushButton(QStringLiteral("Refresh"), tools);
 	connect(refresh_button, &QPushButton::clicked, this, &ncfg_main_window::refresh);
@@ -364,6 +382,25 @@ void ncfg_main_window::closeEvent(QCloseEvent *event)
 		return;
 	}
 	QMainWindow::closeEvent(event);
+}
+
+/* The estate's other members, as this user's fuzznetd lists them; none for a
+ * user with no fuzznetd. */
+QStringList ncfg_main_window::estate_members()
+{
+	static char keys[256][NCFG_FUZZNET_KEY_TEXT];
+	char        socket[1100];
+	char        ignored[NCFG_ERROR_MAX];
+	size_t      count = 0;
+	QStringList found;
+
+	if (ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
+	    ncfg_fuzznet_members(socket, keys, 256u, &count, ignored, sizeof(ignored))) {
+		for (size_t at = 0; at < count; at++) {
+			found << QString::fromUtf8(keys[at]);
+		}
+	}
+	return found;
 }
 
 void ncfg_main_window::poll_node()
@@ -476,6 +513,8 @@ void ncfg_main_window::refresh()
 		stations->refresh();
 	} else if (current == leases) {
 		leases->refresh();
+	} else if (fleet && current == fleet) {
+		fleet->refresh();
 	} else if (current == modems) {
 		modems->refresh();
 	} else if (current == global) {

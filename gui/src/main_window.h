@@ -21,6 +21,7 @@
 #include <QHash>
 #include <QMainWindow>
 #include <QString>
+#include <QStringList>
 
 class QLabel;
 class QTabWidget;
@@ -120,6 +121,9 @@ private:
 	 * event stream; the socket this machine's daemon was reached on, to go
 	 * back to (10.699). */
 	class QComboBox   *nodes;
+	/* Every node at once, where there are any (10.710); null otherwise. */
+	class ncfg_fleet_view *fleet = nullptr;
+	static QStringList estate_members();
 	QTimer            *poll;
 	QString            home_socket;
 	void               follow_node();

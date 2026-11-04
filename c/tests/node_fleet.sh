@@ -216,6 +216,12 @@ while [ "$(date +%s)" -lt $deadline ]; do
 done
 echo "$said" | grep -q 'denied.*observe'
 check $? "with A's remote observe tier closed, A denies it, naming the tier"
+# The GUI's fleet tab (10.710) tells a refusal from a dead node by exactly this
+# command's first line of standard error; its probe has only a stand-in.
+XDG_RUNTIME_DIR=$R/xdg timeout 30 "$C" status --at "$host" --json 2> "$R/denied.err" > "$R/denied.out"
+code=$?
+[ $code -ne 0 ] && head -1 "$R/denied.err" | grep -q 'denied' && [ ! -s "$R/denied.out" ]
+check $? "  status --at A --json says so on the first line of stderr ($(head -c 50 "$R/denied.err"))"
 
 # Propagation (10.708): `reload --at estate` through B is fuzznet's `call do
 # at estate`, and A, its remote admin tier closed, is reported as failed --
