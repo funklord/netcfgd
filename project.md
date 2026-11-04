@@ -12684,6 +12684,63 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.707 fuzznet built the coordination netcfgd left to it: staged commit, propagation, sealed values
+
+fuzznet's message `20261104T0010Z`: on the holder's word it built the pieces
+10.567 left to it. The pin moves to fuzznet `e6c72acf`. `node_serve.sh` and
+`node_fleet.sh` pass on it, and the program is 2,381,336 bytes, inside the
+budget. `fzn_node_settings_here` now returns -1 for a value sealed to a key
+this host lacks, and netcfgd does not call it.
+
+- **A staged commit** (its `5ac9528`, sec 873): `set staged SECONDS SCOPE KEY
+  VALUE` answers a token, and `add confirm TOKEN` keeps the value. The revert
+  is signed at staging and held by every host, so a change that cuts the
+  operator off is undone by the hosts it changed. **netcfgd's use: none yet,
+  and that is deliberate.** Its configuration is files that a node's daemon
+  applies, and each node already has its own commit-confirm window (M2,
+  0312), which propagation (next) arms on many nodes at once. A staged
+  *setting* would matter for configuration held in fuzznet's settings,
+  which netcfgd does not hold.
+- **Command propagation** (its `e904cf9`, sec 872): `call NAME at estate` and
+  `at group=NAME` run a procedure on every reachable named host, and answer
+  per host with ok, unknown, denied, failed or silent. netcfgd's `ask`
+  (0312) is a procedure, so this is `ncfg --at estate` for the verbs that
+  change something (go item 3).
+- **Sealed group values** (its secs 874 and 875): `set sealed group=NAME KEY
+  VALUE`, up to 76 bytes, sealed to each member's prekey, and resealed to a
+  member that joins later. This is the secrets path 10.567 waited on for a
+  zone's mesh password or roaming key (go item 2).
+
+**What netcfgd builds on each, and the finding that shapes the first**
+(2026-11-04, designed and not yet built):
+
+- **Propagation needs a procedure of its own, not `ask`.** fuzznet's answer
+  to `call NAME at estate` is `ok TOTAL ANSWERED KEY16:STATUS ...`, where a
+  host's `ok` means only that the procedure returned bytes, and each host's
+  answer itself is not carried. `ask` answers a refusal as a page, the
+  socket's error document, which is right for one host and its pages. So
+  `ask` propagated would show `ok` for a node that refused, which is the one
+  result an operator must never misread. The design is a second procedure,
+  `do REQUEST` (or `@DIGEST`, staged with `askpart` at the same target),
+  behind the same gate. It answers `ok` only where the daemon carried the
+  request out, and nothing where it refused or failed, so fuzznet reports
+  the host as `failed`. `ncfg` then prints the per-host table, and the
+  reason for a failed host is one `--at HOST` away. Only commands that
+  change something are propagated, since their answers would be discarded:
+  reload, `apply --confirm-within`, confirm, revert, config, secret and
+  profile. **The calling host is not among them**, because fuzznet skips its
+  own key (`routing_self`), and `ncfg` says so rather than letting "every
+  node" include it.
+- **Sealed values as secrets are parked on fuzznet.** `@secret:estate:KEY`
+  would be resolved through `fzn_node_settings_here`. But the settings
+  store is the daemon's static, with no accessor. `fzn_daemon_local` is
+  refused inside a procedure and inside `ready`, so an `apply --at` (inside
+  `ask`) could not resolve one, which is the case zone secrets exist for,
+  and a socket from inside the loop would wait on the loop. Asked of fuzznet
+  2026-11-04: an in-process getter callable from tick, ready and a procedure.
+  The provider is a variant added to the document model, which 0020 makes a
+  minor bump, with the witness carrying it.
+
 ## 10.706 The rss band re-derived again: four runs in ten failed it unchanged
 
 The `rss` gate failed this session's last full check at 3352 KB against 3328,
@@ -19558,9 +19615,12 @@ specific error"*.
    until fuzznet carries it, and `08f8cbe8` recorded fuzznet's signal on the
    day the file landed. What stays netcfgd's is the table: which key has which
    scope, and the registry gate that fails on an unclassified one.
-2. **Commit-confirm with a revert window is genuinely absent from fuzznet**,
+2. ~~**Commit-confirm with a revert window is genuinely absent from fuzznet**,
    measured as zero occurrences of the concept in its headers and confirmed by
-   its own reply. This tree's `confirm.c` is the only implementation in the
+   its own reply.~~ **Built in fuzznet since, on the holder's word** (its
+   `5ac9528`, sec 873; 10.707): `set staged SECONDS SCOPE KEY VALUE`, then `add
+   confirm TOKEN`, with a revert every host holds and applies itself. The text
+   below is what was true before it. This tree's `confirm.c` is the only implementation in the
    workspace, and fuzznet's reply accepts that it would fall on its side of
    the line if the holder wants a staged-commit token.
 3. **Standing splits, and the split is the useful part.** fuzznet computes
@@ -19585,11 +19645,13 @@ specific error"*.
    estate (`get setting here KEY`). **What it does not do yet** is keep a
    group's value from the estate's other hosts. Every host holds the bytes
    and only members resolve them, so a zone's mesh password or roaming key
-   would reach non-members. Sealing values to a group's members is recorded
-   in fuzznet as the holder's question. netcfgd's use of group scope waits on
-   it, for exactly those values.
+   would reach non-members. ~~Sealing values to a group's members is recorded
+   in fuzznet as the holder's question.~~ **Built since, on the holder's word**
+   (fuzznet secs 874 and 875; 10.707): `set sealed group=NAME KEY VALUE` seals
+   to each member's prekey, and a later member receives it within a minute.
 
-The fifth, command propagation, neither tree has.
+~~The fifth, command propagation, neither tree has.~~ **fuzznet has it now**
+(its `e904cf9`, sec 872; 10.707): `call NAME at estate` and `at group=NAME`.
 
 ### The finding that is actually netcfgd's, and it is a stale pin
 
