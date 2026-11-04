@@ -496,7 +496,7 @@ static ncfg_secret_t *read_estate(const char *name, ncfg_secret_error_t *why, ch
 		fail(why, NCFG_SECRET_FAILED);
 		ncfg_error_set(err, err_size,
 		    "secret `%s` is sealed to a key this host lacks: an operator names it a member "
-		    "with `set setting host=KEY group/member GROUP`", name);
+		    "with `ncfg nodes member HOST GROUP`, and seals it again", name);
 		return NULL;
 	}
 	if (answer == 0) {

@@ -2186,9 +2186,10 @@
 # a file: it is the fuzznet setting KEY in force for this host, set by an
 # operator of the estate, and it needs a daemon serving a node. A value every
 # access point of a zone must share, a `roaming_key` say, is set once for the
-# group by `set sealed group=NAME KEY VALUE`, and only the group's members can
-# open it. A member is a host an operator named, with
-# `set setting host=HOSTKEY group/member NAME`.
+# group, and only the hosts an operator named as its members can open it:
+#
+#   ncfg nodes member HOST zone1
+#   ncfg secret seal zone1 KEY
 #
 # This holds for every credential netcfgd knows: wifi passphrases, 802.1X
 # passwords and private keys, WireGuard private keys, PPPoE and VPN logins.

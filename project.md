@@ -1009,8 +1009,8 @@ them because no test had ever carried those keys.
    - ~~the fleet in the GUI is a box~~ -- **built** (10.698, 10.699, 10.710):
      the window moves between this machine and the estate's nodes, and a
      `fleet` tab shows them all at once;
-   - **an operator's verbs for a group have no form here**: `set sealed` and
-     `group/member` are spoken to fuzznet's socket by hand (10.709);
+   - **an operator's verbs for a group have no window yet**: `ncfg nodes
+     member` and `ncfg secret seal` are the command line's (10.711);
    - ~~events across the estate~~ -- **built** (10.703, 10.704): netcfgd
      publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
      from a cursor, and the GUI and TUI follow a node by it;
@@ -12686,6 +12686,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.711 An operator's group verbs: `ncfg nodes member`, `ncfg secret seal`
+
+10.709 left both as lines typed at fuzznet's socket, with a passphrase in the
+line. `ncfg nodes member HOST GROUP` is `set setting host=HOST group/member
+GROUP`. `ncfg secret seal GROUP KEY` is `set sealed`, on this user's own
+fuzznetd, since it writes other hosts' cells.
+
+- **The value is read as `secret set` reads one**, with the echo off or from
+  standard input, and never from the command line. Every copy is wiped, the
+  escaped form and the request line among them.
+- **Sealing to nobody is a failure, not `ok 0 0`.** fuzznet keeps a copy for a
+  later member, but every host's configuration would read the key as unset, so
+  the sentence names `ncfg nodes member`.
+- **`--at` is refused on `seal`**: it speaks for a group, and `--at` means one
+  node. `secret` otherwise takes `--at`, so this is the one verb under it that
+  does not.
+- **Under `nodes` and `secret`, and no `group` word.** `nodes` is where a host
+  is named and `secret` where a value is given. A group has nothing of its own
+  here to list.
+
+**Verified:** `tests/live/c_estate_secret.sh` runs both through the socket
+`ncfg` finds for this user: sealing to an empty group refuses, naming a member
+works, a bad group is refused, sealing reports one member, the apply carries,
+and `wg` reads the key's public half back.
+
 ## 10.710 The `fleet` tab: every node at once
 
 The node box visits one node at a time, so somebody minding ten routers had
@@ -12742,7 +12767,7 @@ person to `ncfg secret set`:
 
 - no node in this process: `UNSUPPORTED`, saying so;
 - none set here: `FAILED`, saying an operator of the estate sets it;
-- sealed to a key this host lacks: `FAILED`, naming `group/member`.
+- sealed to a key this host lacks: `FAILED`, naming `ncfg nodes member`.
 
 `ncfg secret list` skips these references, since its subject is the `secrets/`
 directory and "referenced, not stored" would ask for a copy on disk. The
@@ -12756,8 +12781,7 @@ its `group/member` is in force at an admin's or a root's rank and it stands. So
 a new access point gets a roaming key when an operator says `set setting
 host=KEY group/member zone1`, not when it says so itself, and the refusal
 above names that verb. Its own word still places it for the group's plain
-values. Nothing here sets `group/member` or calls `set sealed` yet: both are
-an operator's verbs on fuzznet's socket, with no `ncfg` or GUI form. Sec 880 is
+values. `ncfg nodes member` and `ncfg secret seal` say both (10.711). Sec 880 is
 coming: copies held by other root and admin hosts, so a later member is served
 once the sealer has gone.
 

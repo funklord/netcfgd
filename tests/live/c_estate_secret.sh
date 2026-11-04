@@ -11,8 +11,10 @@
 # kernel: the public key it derives is the proof, and the private key is never
 # printed. A namespace is what makes that askable.
 #
-# Checked: an apply before anything is set refuses and says so; the same apply
-# after an operator seals the key to a group this host is in carries it.
+# Checked: an apply before anything is set refuses and says so; sealing to a
+# group nobody is in says so; the same apply after `ncfg nodes member` and
+# `ncfg secret seal` carries it. Both are spoken to the socket `ncfg` finds for
+# this user, under a scratch XDG_RUNTIME_DIR, as an operator's would be.
 #
 # HOW IT STOPS: the daemon runs under `timeout -k 5 60` and is killed by pid on
 # every path; each client call is under `timeout`; the socket wait is a count
@@ -64,10 +66,13 @@ while not out.endswith(b"\n"):
     b = s.recv(4096)
     if not b: break
     out += b
-print(out.decode(errors="replace").strip())' "$R/a.sock" "$1" 2>&1
+print(out.decode(errors="replace").strip())' "$S" "$1" 2>&1
 }
 
-mkdir "$R/a" "$R/run" "$R/conf"
+mkdir "$R/a" "$R/run" "$R/conf" "$R/xdg" "$R/xdg/fuzznet"
+chmod 700 "$R/xdg" "$R/xdg/fuzznet"
+export XDG_RUNTIME_DIR="$R/xdg"
+S=$R/xdg/fuzznet/fuzznetd.sock
 cat > "$R/conf/netcfgd.conf" <<CONF
 device wg0 {
 	wireguard {
@@ -83,13 +88,13 @@ check $? "the store is made the root of an estate"
 
 export NCFG_RUN_DIR="$R/run" NCFG_CONFIG_DIR="$R/conf"
 timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
-	--fuzznet-dir "$R/a" --fuzznet-arg "--socket=$R/a.sock" --fuzznet-arg --no-log-file \
+	--fuzznet-dir "$R/a" --fuzznet-arg "--socket=$S" --fuzznet-arg --no-log-file \
 	--fuzznet-arg --udp-port=$((33900 + $$ % 90)) --fuzznet-arg --fuzznet-service=1 \
 	--fuzznet-arg --fuzznet-product=1 > "$R/a.log" 2>&1 &
 daemon=$!
 n=0
-until [ -S "$R/a.sock" ] || [ $n -gt 40 ]; do sleep 0.5; n=$((n + 1)); done
-[ -S "$R/a.sock" ]
+until [ -S "$S" ] || [ $n -gt 40 ]; do sleep 0.5; n=$((n + 1)); done
+[ -S "$S" ]
 check $? "netcfgd serves the node"
 
 timeout 20 "$C" apply > "$R/apply1.out" 2>&1
@@ -98,10 +103,19 @@ code=$?
 check $? "an apply with nothing set refuses, and says the value is the estate's ($(head -c 70 "$R/apply1.out"))"
 
 key=$(wg genkey)
-said=$(ask "set setting host group/member zone1")
-check "$([ "${said%% *}" = ok ]; echo $?)" "this host is in zone1 ($said)"
-said=$(ask "set sealed group=zone1 wg/key $key")
-check "$([ "${said%% *}" = ok ]; echo $?)" "an operator seals the key to zone1 ($said)"
+said=$(printf '%s\n' "$key" | timeout 20 "$C" secret seal zone1 wg/key 2>&1)
+code=$?
+[ $code -ne 0 ] && echo "$said" | grep -q 'no members'
+check $? "sealing to a group nobody is in says so ($(echo "$said" | head -c 50))"
+host=$(ask 'get prekey' | sed -n 's/^ok \(.*\)$/\1/p' | cut -c5-68)
+timeout 20 "$C" nodes member "$host" zone1 > "$R/member.out" 2>&1
+check $? "ncfg nodes member says this host is in zone1 ($(head -c 40 "$R/member.out"))"
+timeout 20 "$C" nodes member "$host" 'Zone One' > /dev/null 2>&1
+check "$([ $? -ne 0 ]; echo $?)" "  and refuses a group fuzznet's grammar would"
+printf '%s\n' "$key" | timeout 20 "$C" secret seal zone1 wg/key > "$R/seal.out" 2>&1
+check $? "ncfg secret seal seals the key to zone1 ($(head -c 44 "$R/seal.out"))"
+grep -q 'to 1 member' "$R/seal.out"
+check $? "  to one member"
 stored=$(ask "get setting host wg/key")
 case "$stored" in *"$key"*) check 1 "the store holds a box, not the key";;
 *box:*) check 0 "the store holds a box, not the key";;
@@ -113,7 +127,7 @@ want=$(printf '%s\n' "$key" | wg pubkey)
 got=$(wg show wg0 public-key 2>&1)
 [ -n "$want" ] && [ "$want" = "$got" ]
 check $? "the kernel derives the public key of the sealed private key"
-! grep -qF "$key" "$R/a.log" "$R/apply1.out" "$R/apply2.out"
+! grep -qF "$key" "$R/a.log" "$R/apply1.out" "$R/apply2.out" "$R/seal.out"
 check $? "the key is in no log and no output"
 
 if [ $failed -ne 0 ]; then

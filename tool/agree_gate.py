@@ -491,6 +491,12 @@ REQUIRED_DIFFERENCES = {
 		("rust", "would remove <config>/netcfgd.conf"),
 		("c", "takes no arguments and got"),
 	],
+	# `secret seal` is the C's alone (10.711), so the sentence listing what
+	# there is differs by that word.
+	"secret set and rm": [
+		("rust", "there is one: set"),
+		("c", "there are two: set, seal"),
+	],
 }
 
 # **Verbs the Rust will never have**, by the whole line each adds to the C's
@@ -513,11 +519,16 @@ AT_USAGE = ("  --at HOST                another node of this estate, HOST its ke
 	    "                           config, secret, profile, tui and monitor\n")
 # And `ncfg nodes`, 10.692: the estate's members, for `--at`, the same reason.
 NODES_USAGE = ("  ncfg nodes [--json]      the other nodes of your estate, by key, for\n"
-	       "                           `status --at`\n")
+	       "                           `status --at`\n"
+	       "  ncfg nodes member HOST GROUP  say HOST is in GROUP, for what is sealed to it\n"
+	       "  ncfg secret seal GROUP KEY  a value for GROUP's members, read from standard\n"
+	       "                           input: `@secret:estate:KEY` in a configuration\n")
 C_ONLY_LINES = {
 	# Both spellings of asking for the usage.
 	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE],
 	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE],
+	# And `secret seal`, in the sentence asking for a subcommand.
+	"secret": [", seal"],
 }
 
 

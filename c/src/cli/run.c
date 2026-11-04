@@ -1386,7 +1386,42 @@ static int command_status_at(const ncfg_cli_options_t *options)
  * only netcfgd's -- which of them answers `status` is each node's to say,
  * and asking all of them would turn a listing into a fleet-wide wait.
  */
-static int command_nodes(const ncfg_cli_options_t *options)
+/*
+ * `ncfg nodes member HOST GROUP` (10.711): an operator's word that HOST is in
+ * GROUP, which is what a sealed value reaches it by. A host may say so of
+ * itself and be placed for the group's plain values; only this reaches sealed
+ * ones (fuzznet sec 879), so it is here and not left to the host.
+ */
+static int command_nodes_member(const char *socket, const char **rest, size_t count)
+{
+	char line[NCFG_FUZZNET_REQUEST_MAX];
+	char reply[256];
+	char why[NCFG_ERROR_MAX];
+	int  silent = 0;
+
+	if (count != 2u) {
+		return fail("`ncfg nodes member` takes a host's key and a group");
+	}
+	if (strlen(rest[0]) != 64u || strspn(rest[0], "0123456789abcdef") != 64u) {
+		return fail("a host is its key: 64 lower-case hex digits, as `ncfg nodes` lists them");
+	}
+	if (rest[1][0] == '\0' || strlen(rest[1]) > 48u ||
+	    strspn(rest[1], "abcdefghijklmnopqrstuvwxyz0123456789._/-") != strlen(rest[1])) {
+		return fail("a group is a-z 0-9 . _ / -, at most 48 bytes");
+	}
+	(void)snprintf(line, sizeof(line), "set setting host=%s group/member %s", rest[0], rest[1]);
+	why[0] = '\0';
+	if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 5000, &silent, why, sizeof(why))) {
+		return fail(why[0] ? why : "this user's fuzznetd did not answer");
+	}
+	if (strcmp(reply, "ok") != 0 && strncmp(reply, "ok ", 3u) != 0) {
+		return fail(reply);
+	}
+	ncfg_out_writef("%.16s is in %s\n", rest[0], rest[1]);
+	return NCFG_CLI_EXIT_OK;
+}
+
+static int command_nodes(const ncfg_cli_options_t *options, const char **positional, size_t count_of)
 {
 	static char keys[4096][NCFG_FUZZNET_KEY_TEXT];
 	char        socket[1100];
@@ -1396,6 +1431,12 @@ static int command_nodes(const ncfg_cli_options_t *options)
 
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
 		return fail("this user's fuzznetd socket path does not fit");
+	}
+	if (count_of > 0u) {
+		if (strcmp(positional[0], "member") == 0) {
+			return command_nodes_member(socket, positional + 1, count_of - 1u);
+		}
+		return fail("`ncfg nodes` lists them, and has one subcommand: member");
 	}
 	err[0] = '\0';
 	if (!ncfg_fuzznet_members(socket, keys, sizeof(keys) / sizeof(keys[0]), &count, err,
@@ -2580,7 +2621,7 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 		return command_status(options);
 	}
 	if (strcmp(command, "nodes") == 0) {
-		return command_nodes(options);
+		return command_nodes(options, positional, count);
 	}
 	if (strcmp(command, "plan") == 0) {
 		return command_plan(options);

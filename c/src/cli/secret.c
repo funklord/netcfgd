@@ -56,6 +56,8 @@
 #include "ncfg/log.h"
 #include "ncfg/secrets.h"
 
+#include "ncfg_fuzznet.h"
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -478,23 +480,132 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 	return report(path, name, replacing, 0, options, err, err_size);
 }
 
+/* fuzznet's setting-key grammar, as the compiler holds a reference to it. */
+static int estate_word(const char *word, size_t most)
+{
+	size_t length = strlen(word);
+
+	return length > 0u && length <= most &&
+	    strspn(word, "abcdefghijklmnopqrstuvwxyz0123456789._/-") == length;
+}
+
+/* The longest value fuzznet seals: a setting's bytes less the hex and the box. */
+#define SEALED_VALUE_MAX 76u
+
+/*
+ * `ncfg secret seal GROUP KEY` (10.711): a value for every member of a group,
+ * which a configuration names as `@secret:estate:KEY`. On this user's own
+ * fuzznetd, since sealing is a root's or an admin's and writes other hosts'
+ * cells. The value comes as `set`'s does, off the command line, and reaches
+ * that socket once.
+ */
+static int seal(const char **rest, size_t count, const ncfg_cli_options_t *options, char *err,
+    size_t err_size)
+{
+	char          socket_path[1100];
+	char          escaped[SEALED_VALUE_MAX * 3u + 1u];
+	char          line[NCFG_FUZZNET_REQUEST_MAX];
+	char          reply[256];
+	char          why[NCFG_ERROR_MAX];
+	char         *value = NULL;
+	unsigned long sealed = 0;
+	unsigned long missing = 0;
+	int           silent = 0;
+	int           length;
+	int           answered;
+
+	if (count != 2u) {
+		ncfg_error_set(err, err_size, "`ncfg secret seal` takes a group and a key");
+		return 0;
+	}
+	if (ncfg_cli_asking_elsewhere()) {
+		ncfg_error_set(err, err_size,
+		    "`secret seal` speaks to the whole group through your own fuzznetd, so `--at` "
+		    "has no node to mean");
+		return 0;
+	}
+	if (!estate_word(rest[0], 48u) || !estate_word(rest[1], 48u)) {
+		ncfg_error_set(err, err_size,
+		    "a group and a key are a-z 0-9 . _ / -, and together at most 56 bytes");
+		return 0;
+	}
+	if (!ncfg_fuzznet_user_socket(socket_path, sizeof(socket_path))) {
+		ncfg_error_set(err, err_size, "this user's fuzznetd socket path does not fit");
+		return 0;
+	}
+	if (!ncfg_cli_read_secret("value to seal", &value, err, err_size)) {
+		return 0;
+	}
+	if (value[0] == '\0' || strlen(value) > SEALED_VALUE_MAX) {
+		forget(value);
+		ncfg_error_set(err, err_size, "a sealed value is 1 to %u bytes",
+		    (unsigned)SEALED_VALUE_MAX);
+		return 0;
+	}
+	length = ncfg_fuzznet_escape(value, escaped, sizeof(escaped))
+	    ? snprintf(line, sizeof(line), "set sealed group=%s %s %s", rest[0], rest[1], escaped)
+	    : -1;
+	forget(value);
+	if (length < 0 || (size_t)length >= sizeof(line)) {
+		explicit_bzero(escaped, sizeof(escaped));
+		explicit_bzero(line, sizeof(line));
+		ncfg_error_set(err, err_size, "that value does not fit in a request to fuzznet");
+		return 0;
+	}
+	why[0] = '\0';
+	answered = ncfg_fuzznet_ask(socket_path, line, reply, sizeof(reply), 5000, &silent, why,
+	    sizeof(why));
+	explicit_bzero(escaped, sizeof(escaped));
+	explicit_bzero(line, sizeof(line));
+	if (!answered) {
+		ncfg_error_set(err, err_size, "%s", why[0] ? why : "this user's fuzznetd did not answer");
+		return 0;
+	}
+	if (sscanf(reply, "ok %lu %lu", &sealed, &missing) != 2) {
+		ncfg_error_set(err, err_size, "fuzznet refused: %s", reply);
+		return 0;
+	}
+	/* Nothing sealed is not done: the value is kept only for a later member,
+	 * and the configuration on every host would read it as not set. */
+	if (sealed == 0u && missing == 0u) {
+		ncfg_error_set(err, err_size,
+		    "group `%s` has no members to seal to. Name them with `ncfg nodes member HOST "
+		    "%s`, and fuzznet seals it to them within a minute", rest[0], rest[0]);
+		return 0;
+	}
+	if (options->json) {
+		ncfg_out_writef("{\"group\":\"%s\",\"key\":\"%s\",\"sealed\":%lu,\"missing\":%lu}\n",
+		    rest[0], rest[1], sealed, missing);
+		return 1;
+	}
+	ncfg_out_writef("sealed `%s` to %lu member(s) of %s\n", rest[1], sealed, rest[0]);
+	if (missing) {
+		ncfg_out_writef("%lu member(s) could not be sealed to: this node holds no prekey for "
+		    "them yet\n", missing);
+	}
+	return 1;
+}
+
 /*
  * `ncfg secret SUBCOMMAND`.
  *
- * One subcommand, and the shape is deliberate: `set` writes a file that the
- * `file` provider reads, and there is no `get` -- the whole point of a secret
- * reference is that the value travels to the backend that needs it and nowhere
- * else. Decision 0075.
+ * `set` writes a file that the `file` provider reads, `seal` gives a group of
+ * the estate a value the `estate` provider reads, and there is no `get` -- the
+ * whole point of a secret reference is that the value travels to the backend
+ * that needs it and nowhere else. Decision 0075.
  */
 int ncfg_cli_secret(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
 	if (count == 0) {
-		ncfg_error_set(err, err_size, "`ncfg secret` needs a subcommand: set");
+		ncfg_error_set(err, err_size, "`ncfg secret` needs a subcommand: set, seal");
 		return 0;
 	}
 	if (strcmp(positional[0], "set") == 0) {
 		return set(positional + 1, count - 1, options, err, err_size);
+	}
+	if (strcmp(positional[0], "seal") == 0) {
+		return seal(positional + 1, count - 1, options, err, err_size);
 	}
 	if (strcmp(positional[0], "get") == 0 || strcmp(positional[0], "show") == 0 ||
 	    strcmp(positional[0], "print") == 0) {
@@ -505,7 +616,7 @@ int ncfg_cli_secret(const ncfg_cli_options_t *options, const char **positional, 
 		    "the kernel has it too", positional[0]);
 		return 0;
 	}
-	ncfg_error_set(err, err_size, "unknown `ncfg secret` subcommand `%.*s`; there is one: set",
+	ncfg_error_set(err, err_size, "unknown `ncfg secret` subcommand `%.*s`; there are two: set, seal",
 	    (int)NCFG_CLI_TEXT_MAX, positional[0]);
 	return 0;
 }

@@ -758,7 +758,7 @@ static void there_is_no_way_to_read_one_back(void)
 	err[0] = '\0';
 	check(!ncfg_cli_secret(&options, positional, 1u, err, sizeof(err)),
 	    "and a subcommand this port does not have is named");
-	check(strstr(err, "there is one: set") != NULL, "saying what there is");
+	check(strstr(err, "there are two: set, seal") != NULL, "saying what there is");
 	detail("said", err);
 
 	err[0] = '\0';
