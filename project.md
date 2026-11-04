@@ -13495,6 +13495,15 @@ netcfgd makes on that radio's phy, the `mesh` block names `mesh0`, and an
 
 - **A kind, `mesh_point`, with a `parent`** -- model, language, renderer,
   plan encoding, the socket document's kinds table (6.4, now sixteen).
+  **Not the document witness, which 0020 requires**, and that was this
+  session's slip: `doc/schema/document.json` claims every kind and lacked
+  this one, so the round trip never read it. It is carried since
+  2026-11-04, as `k-mesh` in name order, and `document_test` fails when
+  `mesh_point`'s member is renamed, which it could not before. A variant
+  added is a minor bump under 0020: an older reader refuses only a document
+  that uses it. The retired Rust's `frozen.rs` round-trips a document it
+  builds itself and never reads the file, so it neither guards this nor
+  breaks on it.
 - **Made over nl80211, not rtnetlink**: `NL80211_CMD_NEW_INTERFACE` with the
   parent's index standing for its phy and type mesh point, as `iw dev wlan2
   interface add mesh0 type mp` sends it; taken away with

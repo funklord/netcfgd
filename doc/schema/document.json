@@ -234,6 +234,38 @@
       "declared": true
     },
     {
+      "name": "k-mesh",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1400,
+      "mac": "02:00:00:00:00:01",
+      "kind": {
+        "kind": "mesh_point",
+        "parent": "wlan0"
+      },
+      "master": "br0",
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000,
+        "ingress_bandwidth_bits": 50000000,
+        "ingress": true
+      },
+      "ingress_redirect": "ifb-eth0",
+      "bridge_vlans": [
+        {
+          "vid": 10,
+          "pvid": true,
+          "untagged": true
+        },
+        {
+          "vid": 20,
+          "pvid": false,
+          "untagged": false
+        }
+      ],
+      "declared": true
+    },
+    {
       "name": "k-openvpn",
       "managed": true,
       "on_unmanage": "leave",
