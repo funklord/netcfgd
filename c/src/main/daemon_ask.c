@@ -58,8 +58,16 @@ static void slot_clear(ncfg_main_ask_slot_t *slot)
 	memset(slot, 0, sizeof(*slot));
 }
 
+/*
+ * **Wiped**: a staged request can carry a secret, a long `secret_put` or a
+ * network with its passphrase, and every local client sends through here now
+ * (10.712), so this is not only an operator's rare long line.
+ */
 static void part_clear(ncfg_main_ask_part_t *part)
 {
+	if (part->bytes) {
+		explicit_bzero(part->bytes, part->total);
+	}
 	free(part->bytes);
 	memset(part, 0, sizeof(*part));
 }
@@ -462,6 +470,9 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	memset(&message, 0, sizeof(message));
 	if (!ncfg_proto_request_read(line, length, &message, err, sizeof(err))) {
 		ncfg_proto_message_free(&message);
+		if (staged) {
+			part_clear(staged); /* asked once, whatever became of it */
+		}
 		return refused(err, reply, cap, escaped_cap);
 	}
 	/* **Only a read is made again for a page.** Anything else -- even a change
@@ -469,6 +480,9 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	 * when run again, and a page is no reason for that. */
 	if (from > 0u && ncfg_tier_of(message.u.request.kind) != NCFG_TIER_OBSERVE) {
 		ncfg_proto_message_free(&message);
+		if (staged) {
+			part_clear(staged);
+		}
 		return refused("that answer is no longer kept, and the request changes the machine, "
 		               "so it is not run again to make another; ask from 0 for a new one",
 		    reply, cap, escaped_cap);
@@ -478,6 +492,9 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	if (!answer(ask, &message.u.request, key ? NULL : peer, arrival, &out, err, sizeof(err))) {
 		ncfg_buf_free(&out);
 		ncfg_proto_message_free(&message);
+		if (staged) {
+			part_clear(staged);
+		}
 		return refused(err[0] ? err : "the request was not answered", reply, cap, escaped_cap);
 	}
 	ncfg_proto_message_free(&message);
@@ -562,6 +579,9 @@ size_t ncfg_main_do(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t 
 	memset(&message, 0, sizeof(message));
 	if (!ncfg_proto_request_read(args, length, &message, err, sizeof(err))) {
 		ncfg_proto_message_free(&message);
+		if (staged) {
+			part_clear(staged);
+		}
 		return 0u;
 	}
 	ncfg_buf_init(&out, NCFG_PROTO_MAX_LINE * 64u);

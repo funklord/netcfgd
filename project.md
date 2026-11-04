@@ -12735,6 +12735,12 @@ nothing, because netcfgd's own gate judges each request behind the procedure.
 **The wait is five minutes**, as long as an apply can take, against the two
 seconds `status` gets.
 
+**Staged pieces are wiped, and go when refused.** Every local client now
+stages through `askpart`, so a long `secret_put` or a network with its
+passphrase sits there. `part_clear` freed the bytes unwiped, and a request the
+reader or the gate refused stayed staged for its minute. The refusal is tested
+in `ask_test`. The wipe is by reading only: no test can see freed memory.
+
 **Open, so newline-delimited JSON has not gone yet:**
 
 - **`monitor` is a stream**, and 0312 does not carry one. The GUI, trays and

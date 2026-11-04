@@ -294,6 +294,25 @@ int main(void)
 		check(runs == 1u && strstr(said, "staged") != NULL,
 		    "  and once run it is staged no longer");
 
+		/* Refused rather than run, it goes all the same: what was staged may
+		 * carry a secret, and it has no reason to wait for an expiry. */
+		{
+			static const char junk[] = "{\"request\":\"no-such-request\"}";
+
+			(void)snprintf(args, sizeof(args), "@%016llx",
+			    (unsigned long long)ncfg_status_page_digest(junk, strlen(junk)));
+			(void)snprintf(piece_args, sizeof(piece_args), "%zu 0 %s %s", strlen(junk),
+			    args + 1, junk);
+			n = ncfg_main_ask_part(&ask, NULL, &root, piece_args, strlen(piece_args), reply,
+			    sizeof(reply), 100002u);
+			reply[n < sizeof(reply) ? n : 0] = '\0';
+			check(strncmp(reply, "ok ", 3) == 0, "a request the reader refuses is staged");
+			said = once(&ask, NULL, &root, args, 100003u);
+			check(strstr(said, "staged") == NULL, "  and asked for, is refused for itself");
+			said = once(&ask, NULL, &root, args, 100004u);
+			check(strstr(said, "staged") != NULL, "  and is staged no longer");
+		}
+
 		/* Joined pieces that are not the request their digest names. */
 		(void)snprintf(piece_args, sizeof(piece_args), "%zu 0 0000000000000001 %.600s", total,
 		    big);
