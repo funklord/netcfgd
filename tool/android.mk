@@ -691,6 +691,33 @@ android-play-check:
 	echo "play: $$aab passes what this can read; the listing and the"; \
 	echo "play:   declarations are the console's, and are not checked here."
 
+# The APK Gradle leaves in the build tree, removed before each build. AGP
+# reopens an APK already on disk instead of writing a new one: it deletes
+# the old app library, appends the grown one, and zipflinger fills the hole
+# it cannot reuse with nameless free-space entries. Measured in beerssh
+# 2026-09-04: 111 such entries, 6,954,823 bytes, 14.9% of a 46.6 MB APK;
+# deleting the file first gave 39,692,128 bytes with none, reproduced on a
+# second build with a larger library. Re-measured 2026-11-05: its current
+# APKs carry 17.0% and 17.6%. Wire it in ahead of the androiddeployqt step:
+#
+#   android: android-fresh ...
+#
+# Named exactly, and refused with an empty ANDROID_BUILD_DIR, which would
+# otherwise name a path under the filesystem root.
+ANDROID_GRADLE_APKS = \
+	$(ANDROID_BUILD_DIR)/android-build/build/outputs/apk/debug/android-build-debug.apk \
+	$(ANDROID_BUILD_DIR)/android-build/build/outputs/apk/release/android-build-release.apk \
+	$(ANDROID_BUILD_DIR)/android-build/build/outputs/apk/release/android-build-release-unsigned.apk
+
+android-fresh:
+	@if [ -z "$(ANDROID_BUILD_DIR)" ]; then \
+		echo "android-fresh: ANDROID_BUILD_DIR is empty; removing nothing" >&2; \
+		exit 1; \
+	fi
+	@for f in $(ANDROID_GRADLE_APKS); do \
+		if [ -e "$$f" ]; then rm -f "$$f" && echo "android-fresh: removed $$f"; fi; \
+	done
+
 android-install: android
 	$(if $(ANDROID_ARTIFACT_CHECK),@$(MAKE) --no-print-directory $(ANDROID_ARTIFACT_CHECK))
 	$(ANDROID_ADB) install -r $(ANDROID_ARTIFACT)
@@ -1009,4 +1036,4 @@ android-store-screenshots:
 		STORE_READY_TIMEOUT=$(STORE_EMULATOR_READY_TIMEOUT); \
 	rc=$$?; exit $$rc
 
-.PHONY: android-check android-play-check android-screenshots android-store-screenshots android-install android-run android-log android-uninstall
+.PHONY: android-check android-fresh android-play-check android-screenshots android-store-screenshots android-install android-run android-log android-uninstall
