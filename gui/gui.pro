@@ -33,11 +33,27 @@ CLIENT_DIR = $$PWD/../client
 CLIENT_LIB = $$CLIENT_DIR/libncfg_client.a
 
 INCLUDEPATH += $$CLIENT_DIR
-LIBS += $$CLIENT_LIB
 
-# qmake will not build it -- PRE_TARGETDEPS only requires it to exist, and
-# gui/Makefile is what builds it first.
-PRE_TARGETDEPS += $$CLIENT_LIB
+android {
+	# The same three sources, compiled by the kit rather than linked from an
+	# archive: `libncfg_client.a` is this machine's architecture, and a second
+	# archive per ABI would be a build for qmake to do anyway (10.714).
+	QMAKE_CFLAGS += -std=c11 -D_DEFAULT_SOURCE
+	SOURCES += $$CLIENT_DIR/ncfg_json.c $$CLIENT_DIR/ncfg_client.c $$CLIENT_DIR/ncfg_fuzznet.c
+	ANDROID_VERSION_NAME = $$NETCFGD_VERSION
+	ANDROID_VERSION_CODE = $$NETCFGD_VERSION_CODE
+	# Its own manifest, or the app is Qt's org.qtproject.example and collides
+	# with every other project that left the default.
+	ANDROID_PACKAGE_SOURCE_DIR = $$PWD/android
+	ANDROID_MIN_SDK_VERSION = 26
+	ANDROID_TARGET_SDK_VERSION = 36
+} else {
+	LIBS += $$CLIENT_LIB
+
+	# qmake will not build it -- PRE_TARGETDEPS only requires it to exist, and
+	# gui/Makefile is what builds it first.
+	PRE_TARGETDEPS += $$CLIENT_LIB
+}
 
 # =============================================================================
 # qtty -- the same widgets, rendered on a character-cell terminal.
@@ -69,7 +85,9 @@ PRE_TARGETDEPS += $$CLIENT_LIB
 # against netcfgd wants -- but the default is the pinned one, so an ordinary
 # build is reproducible rather than dependent on whatever is next door.
 isEmpty(QTTY_ROOT): QTTY_ROOT = $$PWD/../qtty
-exists($$QTTY_ROOT/qtty.pri) {
+android {
+	# A phone has no terminal to draw on, and libqtty.a is this machine's.
+} else:exists($$QTTY_ROOT/qtty.pri) {
 	isEmpty(QTTY_LIB_DIR): QTTY_LIB_DIR = $$QTTY_ROOT/build/lib
 	exists($$QTTY_LIB_DIR/libqtty.a) {
 		include($$QTTY_ROOT/qtty.pri)

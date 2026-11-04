@@ -526,6 +526,7 @@ to decide, not this tree's.
 2. **`wire/` plus `agent/`, LAN first**, with the fuzzing standard from the
    first commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.
+   **It builds and starts** (project.md 10.714), and reaches no host yet.
 4. **Beyond a LAN, which is wanted** (2026-08-08). This read "if it is ever
    wanted" and is not an *if* any more. It stays last because the staging is
    right, but it is a destination rather than a maybe -- so item 2 must not

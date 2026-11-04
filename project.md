@@ -12686,6 +12686,43 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.714 The GUI builds for Android, and says what it cannot do yet
+
+"Remote access on android is the same client" (10.664). `make -C gui android`
+builds `gui/` unchanged as `se.vibes.netcfgd`, with `tool/android.mk`'s
+vocabulary, and it starts on an emulator. **It does nothing useful yet**: a
+phone runs no netcfgd and has no node, so the first screen says so, and that is
+all this step claims.
+
+- **Here and not in the root Makefile**, since `gui/` is where the window is
+  built. A bare `make` is still `all`, asked of make.
+- **`client/` is compiled into the app**, three C sources, rather than a second
+  archive per ABI.
+- **Its own manifest**: without one the app was
+  `org.qtproject.example.netcfgd_gui`. Its permissions are `INTERNET` and
+  `ACCESS_NETWORK_STATE`, where Qt's marker would have asked for external
+  storage.
+- **The dialog is its own on Android.** The C layer's sentence names
+  `systemctl`.
+
+**What it needs next, in order:**
+
+1. A node on the phone. fuzzypickles ships fuzznetd as `libfuzznetd.so`, and
+   started with `XDG_RUNTIME_DIR` in the app's directory,
+   `ncfg_fuzznet_user_socket` would find it with no change here.
+2. Joining an estate: `add join CARD HOST PORT` exists, so what is missing is a
+   screen. **How the first pairing should feel is listed in gui/project.md
+   section 9 to raise**, and how a phone finds a host with it.
+3. **The fleet tab's child processes do not exist on a phone**: there is no
+   `ncfg` to run (10.710, 10.713), so that tab reports it could not start. It
+   needs its reads moved onto a thread with `ncfg_client_open_at`.
+4. A window laid out for a phone. Forty tabs are a desktop's.
+
+**Verified**, on `Galaxy_Nexus_API_33` (x86_64, API 33): installed, running as
+the resumed activity, the dialog seen in a screenshot, the version, the
+targetSdk of 36 and the two permissions read from `dumpsys`, no external
+storage. Not built for arm64, and not run on a phone.
+
 ## 10.713 The `fleet` tab acts: reload all, add to a group, seal a value
 
 10.710 only looked. Three buttons now do what an operator does to many nodes:

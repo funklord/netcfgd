@@ -240,6 +240,13 @@ int main(int argc, char **argv)
 	 * message is about to act on it. Cancel is what closing the dialog does,
 	 * so there is no way to dismiss it into a window that would lie. */
 	while (!login && !open_it(&error)) {
+#ifdef Q_OS_ANDROID
+		/* The C layer's sentence names `systemctl`, and a phone runs no netcfgd
+		 * to start: it reaches one on another host, which this build cannot
+		 * yet (10.714). Said plainly rather than as a daemon that is down. */
+		error = QStringLiteral("netcfgd runs on the machine it configures, and a phone is not "
+		                       "one. This build cannot reach another host yet.");
+#endif
 		QMessageBox box(QMessageBox::Critical, QStringLiteral("netcfgd"), error,
 		            QMessageBox::Retry | QMessageBox::Cancel);
 		box.setDefaultButton(QMessageBox::Retry);

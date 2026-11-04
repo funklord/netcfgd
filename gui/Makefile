@@ -15,6 +15,9 @@
 #   make            -- build build/netcfgd-gui
 #   make run        -- build and run it
 #   make clean      -- the build directory and the client library's objects
+#   make android    -- the same client as an APK, with the rest of
+#                      tool/android.mk's vocabulary. Needs a Qt-for-Android
+#                      kit and an NDK; ANDROID_ABI=x86_64 for an emulator.
 #
 # BUILD FLAGS
 #   DEBUG and SANITIZE are threaded into the client library, which is where the
@@ -162,3 +165,37 @@ clean:
 	esac
 	rm -rf $(BUILD_DIR) tests/$(BUILD_DIR) tests/live/$(BUILD_DIR)
 	$(MAKE) -C $(CLIENT_DIR) clean
+
+# ------------------------------------------------------------------- Android
+#
+# The same client as an APK (project.md 10.714). Here and not in the root
+# Makefile, since this is where the window is built, and below `all` because an
+# `include` is where make first sees a target: above it, a bare `make` would be
+# the Android preflight.
+VERSION := $(shell cat ../VERSION)
+APP_ID = se.vibes.netcfgd
+ANDROID_PROGRAM = netcfgd-gui
+ANDROID_BUILD_DIR ?= build-android-$(ANDROID_ABI)
+ANDROID_ARTIFACT = $(ANDROID_BUILD_DIR)/$(ANDROID_PROGRAM)-$(VERSION)-$(ANDROID_ABI).apk
+
+include ../tool/android.mk
+
+.PHONY: android android-build
+
+$(ANDROID_BUILD_DIR)/Makefile: android-check gui.pro
+	mkdir -p $(ANDROID_BUILD_DIR)
+	cd $(ANDROID_BUILD_DIR) && $(QT_ANDROID_ROOT)/bin/qmake ../gui.pro \
+	        NETCFGD_VERSION=$(VERSION) NETCFGD_VERSION_CODE=$(ANDROID_VERSION_CODE)
+
+android android-build: $(ANDROID_BUILD_DIR)/Makefile
+	$(MAKE) -C $(ANDROID_BUILD_DIR) apk
+	@src=$$(find $(ANDROID_BUILD_DIR)/android-build/build/outputs/apk -name '*.apk' -print -quit); \
+	if [ -z "$$src" ]; then echo "android: no .apk was produced" >&2; exit 1; fi; \
+	cp "$$src" $(ANDROID_ARTIFACT); \
+	echo "android: $(ANDROID_ARTIFACT)  ($$(du -h $(ANDROID_ARTIFACT) | cut -f1))"
+	@abis=$$(unzip -Z1 $(ANDROID_ARTIFACT) 'lib/*' | cut -d/ -f2 | sort -u | tr '\n' ' ' | sed 's/ *$$//'); \
+	if [ "$$abis" != "$(ANDROID_ABI)" ]; then \
+		echo "android: named $(ANDROID_ABI), carries $$abis" >&2; exit 1; \
+	fi; \
+	echo "android: carries $$abis, which is what the name says"
+	$(call android_verify_signature,$(ANDROID_ARTIFACT))
