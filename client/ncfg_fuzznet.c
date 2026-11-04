@@ -618,8 +618,10 @@ static int send_in_pieces(const char *socket, const char *host, const char *requ
 		        err_size)) {
 			return 0;
 		}
-		/* fuzznet's `ok`, then the node's escaped `ok%20HAVE%20TOTAL`. */
-		if (strncmp(reply, "ok ok%20", 8) != 0) {
+		/* fuzznet's `ok`, then the node's escaped `ok%20HAVE%20TOTAL` -- or,
+		 * staged at many hosts, propagation's own `ok TOTAL ANSWERED`. */
+		if (ncfg_fuzznet_target_is_many(host) ? strncmp(reply, "ok ", 3) != 0
+		                                      : strncmp(reply, "ok ok%20", 8) != 0) {
 			say(err, err_size, "sending the request in pieces: %.160s", reply);
 			return 0;
 		}
@@ -890,6 +892,67 @@ int ncfg_fuzznet_events_read(const char *text, size_t length, size_t *next, size
 	if (*count > cap) {
 		*count = cap;
 		*first = *next;
+	}
+	return 1;
+}
+
+int ncfg_fuzznet_target_is_many(const char *target)
+{
+	size_t at;
+
+	if (!target) {
+		return 0;
+	}
+	if (strcmp(target, "estate") == 0) {
+		return 1;
+	}
+	if (strncmp(target, "group=", 6) != 0 || target[6] == '\0' || strlen(target + 6) > 32u) {
+		return 0;
+	}
+	for (at = 6; target[at]; at++) {
+		char c = target[at];
+
+		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' ||
+		        c == '-')) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+int ncfg_fuzznet_do_many(const char *socket, const char *target, const char *request,
+    char *rows, size_t rows_size, char *err, size_t err_size)
+{
+	char line[NCFG_FUZZNET_REQUEST_MAX];
+	char named[18];
+	int  silent = 0;
+	int  wrote;
+
+	if (!socket || !rows || rows_size == 0u || !request || strchr(request, '\n') ||
+	    !ncfg_fuzznet_target_is_many(target)) {
+		say(err, err_size, "propagation takes `estate` or `group=NAME`, and one request line");
+		return 0;
+	}
+	named[0] = '\0';
+	/* Long, so staged at every host first, as `--at HOST` stages at one. */
+	if (strlen(request) > ASK_PIECE) {
+		if (!send_in_pieces(socket, target, request, err, err_size)) {
+			return 0;
+		}
+		(void)snprintf(named, sizeof(named), "@%016llx",
+		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
+	}
+	wrote = snprintf(line, sizeof(line), "call do at %s %s", target, named[0] ? named : request);
+	if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
+		say(err, err_size, "the request does not fit one fuzznet line");
+		return 0;
+	}
+	if (!ncfg_fuzznet_ask(socket, line, rows, rows_size, 60000, &silent, err, err_size)) {
+		return 0;
+	}
+	if (strncmp(rows, "ok ", 3) != 0) {
+		say(err, err_size, "fuzznet answered %.160s", rows);
+		return 0;
 	}
 	return 1;
 }

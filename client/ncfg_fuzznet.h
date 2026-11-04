@@ -186,6 +186,23 @@ int ncfg_fuzznet_events_read(const char *text, size_t length, size_t *next, size
     char (*subjects)[NCFG_FUZZNET_SUBJECT_TEXT], size_t cap, size_t *count, char *err,
     size_t err_size);
 
+/*
+ * Whether `target` names many hosts rather than one (10.708): `estate`, or
+ * `group=NAME` with NAME of 1..32 of a-z 0-9 `._-`, as fuzznet names a group.
+ */
+int ncfg_fuzznet_target_is_many(const char *target);
+
+/*
+ * A request carried out on many hosts (10.708): fuzznet's propagation, `call
+ * do at TARGET REQUEST` (its sec 872), a request longer than a line staged
+ * with `askpart` at the same target first. Its answer, `ok TOTAL ANSWERED`
+ * and a `KEY16:STATUS` for each host -- ok, unknown, denied, failed or
+ * silent, and `+N` for rows that did not fit -- into `rows`. 1, or 0 with a
+ * sentence. **This host is not among them**: fuzznet does not call its own.
+ */
+int ncfg_fuzznet_do_many(const char *socket, const char *target, const char *request,
+    char *rows, size_t rows_size, char *err, size_t err_size);
+
 /* A host's key in hex, and its NUL. */
 #define NCFG_FUZZNET_KEY_TEXT 65u
 

@@ -416,6 +416,14 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 size_t ncfg_main_ask_part(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
     const char *args, size_t length, char *reply, size_t cap, uint64_t now_ms);
 
+/*
+ * `do REQUEST` or `do @DIGEST` (10.708): the request carried out, answered
+ * `ok` (3 bytes) only where the daemon did so and 0 where it refused or
+ * failed, for fuzznet's propagation, which reports each host by that alone.
+ */
+size_t ncfg_main_do(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *args, size_t length, char *reply, size_t cap, uint64_t now_ms);
+
 /* Every answer it keeps, and every request part-way in, let go. */
 void ncfg_main_ask_free(ncfg_main_ask_t *ask);
 

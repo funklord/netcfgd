@@ -514,3 +514,74 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	}
 	return n;
 }
+
+/*
+ * `do REQUEST` or `do @DIGEST` (10.708): the request carried out, for
+ * fuzznet's propagation (`call do at estate`, its sec 872), which reports
+ * each host only as ok, failed and the rest and carries no answer. So the
+ * answer here is `ok` where the daemon carried the request out and nothing
+ * where it refused or failed -- which fuzznet reports as `failed` -- rather
+ * than `ask`'s page, which is a page for a refusal too and would read `ok`.
+ * The same gate as `ask`: the reader, `ncfg_authz_permitted`, an operator's
+ * apply needing a window.
+ */
+size_t ncfg_main_do(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
+    const char *args, size_t length, char *reply, size_t cap, uint64_t now_ms)
+{
+	ncfg_proto_message_t  message;
+	ncfg_proto_message_t  answered;
+	ncfg_main_ask_part_t *staged = NULL;
+	ncfg_buf_t            out;
+	char                  err[NCFG_ERROR_MAX];
+	int                   carried = 0;
+	ncfg_arrival_t        arrival = key ? NCFG_ARRIVED_REMOTE : NCFG_ARRIVED_LOCAL;
+
+	if (!ask || !args || !reply || cap < 3u || (!key && !peer)) {
+		return 0u;
+	}
+	if (length == 17u && args[0] == '@') {
+		uint64_t named = 0;
+		size_t   digit;
+
+		for (digit = 1; digit < 17u; digit++) {
+			char c = args[digit];
+			int  v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+
+			if (v < 0) {
+				return 0u;
+			}
+			named = (named << 4) | (uint64_t)v;
+		}
+		staged = part_of(ask, key, peer, named, now_ms);
+		if (!staged || staged->have != staged->total) {
+			return 0u;
+		}
+		args = staged->bytes;
+		length = staged->total;
+	}
+	memset(&message, 0, sizeof(message));
+	if (!ncfg_proto_request_read(args, length, &message, err, sizeof(err))) {
+		ncfg_proto_message_free(&message);
+		return 0u;
+	}
+	ncfg_buf_init(&out, NCFG_PROTO_MAX_LINE * 64u);
+	err[0] = '\0';
+	if (answer(ask, &message.u.request, key ? NULL : peer, arrival, &out, err, sizeof(err)) &&
+	    !ncfg_buf_failed(&out)) {
+		memset(&answered, 0, sizeof(answered));
+		carried = ncfg_proto_response_read(out.data, out.length, &answered, err, sizeof(err)) &&
+		    answered.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
+		    answered.u.response.kind != NCFG_PROTO_RESP_ERROR;
+		ncfg_proto_message_free(&answered);
+	}
+	ncfg_buf_free(&out);
+	ncfg_proto_message_free(&message);
+	if (staged) {
+		part_clear(staged); /* run, or refused: a staged request is asked once */
+	}
+	if (!carried) {
+		return 0u;
+	}
+	memcpy(reply, "ok\n", 3u);
+	return 3u;
+}

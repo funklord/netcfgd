@@ -989,6 +989,11 @@ static size_t node_call(void *context, const char *name, const uint8_t *key,
 	if (!key && !peer) {
 		return 0u;
 	}
+	if (strcmp(name, NCFG_NODE_PROCEDURE_DO) == 0) {
+		(void)clock_gettime(CLOCK_MONOTONIC, &now);
+		return ncfg_main_do(&driven->ask, key, key ? NULL : peer, args, length, answer, cap,
+		    (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
+	}
 	if (strcmp(name, NCFG_NODE_PROCEDURE_ASK_PART) == 0) {
 		(void)clock_gettime(CLOCK_MONOTONIC, &now);
 		return ncfg_main_ask_part(&driven->ask, key, key ? NULL : peer, args, length, answer,

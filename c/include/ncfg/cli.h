@@ -601,6 +601,13 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
 void ncfg_cli_ask_through(const char *host);
 /* Whether requests go to another node, so nothing may fall back to this one. */
 int ncfg_cli_asking_elsewhere(void);
+/*
+ * fuzznet's answer to a propagated call, `ok TOTAL ANSWERED KEY16:STATUS...`
+ * (10.708), as one line a host and a sentence saying how many carried it and
+ * that this host is not among them. 1 where every host reached carried it --
+ * none failed, none silent, none cut off, and at least one reached -- else 0.
+ */
+int ncfg_cli_print_propagated(const char *rows);
 /* That node's key, or NULL for this machine. */
 const char *ncfg_cli_asking_host(void);
 

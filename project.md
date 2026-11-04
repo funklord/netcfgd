@@ -12684,39 +12684,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.708 Propagation, built and not yet working live: on branch `wip/do-propagation`
+## 10.708 Propagation: `ncfg VERB --at estate|group=NAME`, built and live-tested
 
-Folded 2026-11-04 on the holder's word, mid-item. The design is in 10.707: a
-`do` procedure beside `ask` that answers `ok` only where the daemon carried
-the request out, so fuzznet's `call do at estate` reports a refusing node as
-`failed` rather than `ok`. `ncfg VERB --at estate|group=NAME` prints the
-per-host table and exits 0 only where every host carried it out. Reads are
-refused across many hosts, and `apply` needs a window.
+The design is in 10.707. A `do` procedure beside `ask` answers `ok` only
+where the daemon carried the request out, so fuzznet's `call do at estate`
+reports a refusing node as `failed` rather than `ok`. `ncfg VERB --at
+estate|group=NAME` prints one row per host and a line of the form `C of N
+netcfgd node(s) carried it out (A of T host(s) answered, U serving no
+netcfgd)`. It exits 0 only where every netcfgd node carried the request out.
+Reads are refused across many hosts, and `apply` needs a window.
 
-**What holds:**
+**A host answering `unknown` serves no netcfgd, and is not a failure.**
+fuzznet includes the calling host. An operator's own fuzznetd, B in the
+fleet test, has no `do`, so it is always listed `unknown`. Counting it as a
+failure would make every propagated command from an operator's machine
+exit 1.
 
-- `ask_test`: `do` answers `ok` for a carried request, and nothing for one
-  refused by the remote tier, an operator's apply without a window, or an
-  error answer. Counting any answer as carried fails the last check.
-- `node_fleet.sh`: `status --at estate` is refused before anything is asked.
+**The live failure first recorded here was the test, not the code.** It
+was found with a debug print on `do`'s refusal. The open-tier check ran
+after the test's revert, and A refused the reload correctly:
+"this configuration was reverted away from and has not changed since; edit
+it to try again". The check now runs before the revert. The closed-tier and
+open-tier checks send the same request, so the two now differ only in the
+tier.
 
-**What does not, and is the next step:**
+**Verified:**
 
-- With A's remote `admin` tier **open**, `reload --at estate` through B still
-  reports A as `failed`, the same as with it closed. So the closed-tier check
-  passed for the wrong reason, and every host reads `failed` whatever its
-  tiers.
-- The table also lists a second host, `777b4b8339ab6b39 unknown`, in a
-  two-host estate where B is skipped as the caller. Unexplained. It may be a
-  host fuzznet counts that netcfgd does not serve, or the root's own entry.
-
-The places to look first: what `do`'s arguments look like as fuzznet hands
-them on a propagated call (a leading space, or the name), and whether the
-staged or plain path is taken. The live output is in `node_fleet.sh`'s
-failure dump (`estate1.out`, `estate2.out`).
-
-**The code is on `wip/do-propagation`, not master**: master keeps nothing that
-fails its own live test.
+- `ask_test`: `do` answers `ok` for a carried request. It answers nothing
+  for a request refused by the remote tier, for an operator's apply
+  without a window, and for an error answer.
+- `node_fleet.sh`: with A's admin tier closed, A is `failed` and the
+  command exits 1. With it open, A is `ok` and the command exits 0, with
+  B listed as serving no netcfgd. `status --at estate` is refused before
+  anything is asked.
 
 **Item 2 is unblocked.** fuzznet built the getter netcfgd asked for, in
 513562d (its sec 877; inbox 20261104T0114Z): `fzn_daemon_setting_here(key,
@@ -12726,6 +12726,22 @@ opened. It answers 1 for a value; 0 for none, in a follower, or where the
 value exceeds `cap`; and -1 where the value is sealed to a key the host
 lacks. It only reads, so it is safe from tick, from `ready` and inside a
 procedure. Using it needs the pin moved past 513562d.
+
+**The shape of item 2, measured 2026-11-04 and not started.** It is a fifth
+secret provider, `@secret:estate:KEY`, alongside file, exec, pass and
+keyring. The provider word is spelled in five places, and each one changes:
+
+- `crates/netcfgd-compile/src/lower.rs` and `crates/netcfgd-secret`;
+- `c/src/compile/lower_value.c`;
+- the document writers `c/src/model/document.c` and `c/src/plan/model_json.c`;
+- the schema witness `doc/schema/document.json`.
+
+Resolution cannot live in `c/src/host/secrets.c`, which links no fuzznet. It
+goes through a function the daemon sets on `ncfg_secret_resolver_t` when it
+serves a node, which calls `fzn_daemon_setting_here`. Without a node, the
+provider is refused with that reason. A return of -1, a value sealed to a
+key this host lacks, is `NCFG_SECRET_FAILED` and not `NOT_FOUND`: `ncfg
+secret set` is the wrong remedy for it.
 
 ## 10.707 fuzznet built the coordination netcfgd left to it: staged commit, propagation, sealed values
 
@@ -12771,9 +12787,10 @@ this host lacks, and netcfgd does not call it.
   reason for a failed host is one `--at HOST` away. Only commands that
   change something are propagated, since their answers would be discarded:
   reload, `apply --confirm-within`, confirm, revert, config, secret and
-  profile. **The calling host is not among them**, because fuzznet skips its
-  own key (`routing_self`), and `ncfg` says so rather than letting "every
-  node" include it.
+  profile. **The calling host is among them**: fuzznet runs the call
+  on itself first, where it is named, and lists it. An operator's own
+  plain fuzznetd serves no `do` and is listed `unknown`, so `ncfg` counts
+  such hosts apart, as serving no netcfgd, rather than as failures (10.708).
 - **Sealed values as secrets are parked on fuzznet.** `@secret:estate:KEY`
   would be resolved through `fzn_node_settings_here`. But the settings
   store is the daemon's static, with no accessor. `fzn_daemon_local` is

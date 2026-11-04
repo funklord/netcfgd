@@ -237,6 +237,50 @@ void ncfg_cli_ask_through(const char *host)
 	through_host = host;
 }
 
+int ncfg_cli_print_propagated(const char *rows)
+{
+	unsigned long total = 0;
+	unsigned long answered = 0;
+	unsigned long carried = 0;
+	unsigned long elsewhere = 0;
+	const char   *at;
+	char         *end;
+	int           more = 0;
+
+	if (!rows || strncmp(rows, "ok ", 3) != 0) {
+		return 0;
+	}
+	total = strtoul(rows + 3, &end, 10);
+	at = end;
+	answered = strtoul(at, &end, 10);
+	at = end;
+	while (*at == ' ') {
+		const char *row = ++at;
+		const char *stop = strchr(row, ' ');
+		size_t      length = stop ? (size_t)(stop - row) : strlen(row);
+		const char *colon = memchr(row, ':', length);
+
+		if (row[0] == '+') {
+			more = 1;
+			ncfg_out_writef("and %.*s more, not listed\n", (int)(length - 1u), row + 1);
+		} else if (colon) {
+			ncfg_out_writef("%.*s  %.*s\n", (int)(colon - row), row,
+			    (int)(length - (size_t)(colon - row) - 1u), colon + 1);
+			if ((size_t)(colon - row) + 3u == length && memcmp(colon + 1, "ok", 2) == 0) {
+				carried++;
+			} else if ((size_t)(colon - row) + 8u == length &&
+			    memcmp(colon + 1, "unknown", 7) == 0) {
+				elsewhere++; /* a host with no netcfgd: the caller's own fuzznetd, say */
+			}
+		}
+		at = row + length;
+	}
+	ncfg_out_writef("%lu of %lu netcfgd node(s) carried it out (%lu of %lu host(s) answered, "
+	                "%lu serving no netcfgd)\n", carried, total - elsewhere, answered, total,
+	    elsewhere);
+	return total > elsewhere && carried == total - elsewhere && !more;
+}
+
 int ncfg_cli_asking_elsewhere(void)
 {
 	return through_host != NULL;
@@ -273,6 +317,28 @@ static int ask_elsewhere(const ncfg_proto_request_t *request, ncfg_proto_message
 	}
 	while (line.length && line.data[line.length - 1u] == '\n') {
 		line.data[--line.length] = '\0';
+	}
+	/*
+	 * **Many hosts** (10.708): fuzznet's propagation, which reports each host
+	 * as ok, failed and the rest and carries no answer. There is no single
+	 * response to hand the verb back -- `apply` expects a journal, `reload`
+	 * an `ok` -- and a made-up `ok` would let `reload` print "reloaded" over
+	 * two hosts that failed. So the table is the whole output, and the
+	 * program ends here: 0 where every host carried the request out.
+	 */
+	if (ncfg_fuzznet_target_is_many(through_host)) {
+		char rows[2048];
+		int  every;
+
+		read_it = ncfg_fuzznet_do_many(socket, through_host, ncfg_buf_text(&line), rows,
+		    sizeof(rows), err, err_size);
+		ncfg_buf_free(&line);
+		if (!read_it) {
+			return 0;
+		}
+		every = ncfg_cli_print_propagated(rows);
+		(void)fflush(stdout);
+		exit(every ? NCFG_CLI_EXIT_OK : NCFG_CLI_EXIT_FAILED);
 	}
 	read_it = ncfg_fuzznet_ask_at(socket, through_host, ncfg_buf_text(&line), &answer, &length,
 	    err, err_size);

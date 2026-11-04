@@ -16,7 +16,8 @@
 #     command that works on this machine is refused with `--at`;
 #   - `ncfg tui --at A` runs in a pty and says it has no event stream;
 #   - a host that is no member is refused rather than waited on for ever;
-#   - with A's `remote` observe tier closed, A denies it and names the tier;
+#   - with A's `remote` observe tier closed, A denies it and names the tier,
+#     and `reload --at estate` reports A failed rather than ok;
 #   - and with its admin tier open, a configuration longer than one line,
 #     put through B, goes in pieces and lands in A's conf.d whole, its reload
 #     seen by `monitor --at A` from A's events cursor; and an
@@ -216,6 +217,18 @@ done
 echo "$said" | grep -q 'denied.*observe'
 check $? "with A's remote observe tier closed, A denies it, naming the tier"
 
+# Propagation (10.708): `reload --at estate` through B is fuzznet's `call do
+# at estate`, and A, its remote admin tier closed, is reported as failed --
+# not as ok, which `ask`'s page for a refusal would have read as.
+key16=$(echo "$host" | cut -c1-16)
+XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" reload --at estate > "$R/estate1.out" 2>&1
+code=$?
+[ $code -eq 1 ] && grep -q "^$key16  failed" "$R/estate1.out" &&
+	grep -q '^0 of 1 netcfgd node' "$R/estate1.out"
+check $? "reload --at estate reports A failed, its admin tier closed ($(head -c 40 "$R/estate1.out"))"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" status --at estate 2>&1 | grep -q 'brings back only whether'
+check $? "  and a read across many hosts is refused before anything is asked"
+
 # A configuration longer than one fuzznet line, put through B (10.695):
 # sent in pieces with `askpart` and run by digest, under A's remote admin
 # tier, open this time. It lands in A's conf.d, whole, and nothing is
@@ -266,6 +279,15 @@ check $? "monitor --at A shows A reloading for the put, from A's events cursor"
 	[ "$(grep -c padding "$R/conf/conf.d/big.conf")" = 40 ] && [ -z "$(ls -A "$R/bconf")" ]
 check $? "a $(wc -c < "$R/big.conf")-byte config put --at A goes in pieces and lands in A's conf.d whole"
 
+# Propagation again, the admin tier open: carried out on A. Before the
+# revert below, since A then refuses a reload of the configuration it
+# reverted away from until it is edited -- correctly, and as `failed`. B's
+# own fuzznetd serves no netcfgd and is listed as such, not as a failure.
+XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" reload --at estate > "$R/estate2.out" 2>&1
+code=$?
+[ $code -eq 0 ] && grep -q "^$key16  ok" "$R/estate2.out" &&
+	grep -q '^1 of 1 netcfgd node(s) carried it out (2 of 2 host(s) answered, 1 serving no netcfgd)' "$R/estate2.out"
+check $? "with its admin tier open, reload --at estate is carried out on A ($(tail -1 "$R/estate2.out" | cut -c1-30))"
 # The remote safety path (0312): an apply from another host carries a window,
 # and is confirmed from there. A's configuration changes nothing here (lo,
 # unmanaged), so the apply has no actions to need privilege for.
@@ -294,7 +316,7 @@ check $? "  and a window nobody confirms reverts by itself ($(grep -i revert "$R
 check $? "netcfgd's log carries no sanitizer report"
 
 if [ $failed -ne 0 ]; then
-	for f in a.log b.log root.out a3.log big.out apply.out confirm.out tui.out monitor.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
+	for f in a.log b.log root.out a3.log big.out apply.out confirm.out tui.out monitor.out estate1.out estate2.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
 	echo "node_fleet: some checks FAILED"
 	exit 1
 fi

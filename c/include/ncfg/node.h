@@ -175,6 +175,8 @@ typedef struct {
 #define NCFG_NODE_PROCEDURE_ASK "ask"
 /* And `askpart`, a piece of a request too long for one line (10.695). */
 #define NCFG_NODE_PROCEDURE_ASK_PART "askpart"
+/* And `do`, a request carried out, for propagation to many hosts (10.708). */
+#define NCFG_NODE_PROCEDURE_DO "do"
 
 /*
  * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to

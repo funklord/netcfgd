@@ -53,6 +53,35 @@ static int fake_answer(void *context, const ncfg_proto_request_t *request,
 	return 1;
 }
 
+/* The dispatcher, answering every request with the socket's `ok`. */
+static int ok_answer(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	(void)context;
+	(void)request;
+	(void)peer;
+	(void)arrival;
+	(void)err;
+	(void)err_size;
+	runs++;
+	ncfg_buf_add_text(out, "{\"response\":\"ok\"}\n");
+	return 1;
+}
+
+/* The dispatcher, answering every request with the socket's error document. */
+static int error_answer(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	(void)context;
+	(void)request;
+	(void)peer;
+	(void)arrival;
+	runs++;
+	return ncfg_daemon_error_encode("the machine said no", out, err, err_size);
+}
+
 /* Every page of `request` from this caller, joined into `out`; the number of
  * pages, or 0 where one was not a page of the same answer. */
 static size_t gather(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
@@ -282,6 +311,40 @@ int main(void)
 			offset += piece;
 		}
 		check(strstr(reply, "digest") != NULL, "pieces that are not their digest are refused");
+	}
+
+	/* `do` (10.708): `ok` only where the daemon carried the request out, and
+	 * nothing where it refused -- which fuzznet's propagation reports as
+	 * `failed`, where `ask`'s page would have read `ok`. */
+	{
+		ncfg_main_ask_t refusing;
+		static const char apply[] = "{\"request\":\"apply\",\"confirm\":60}";
+
+		runs = 0;
+		remote.admin = 1;
+		ask.answer = ok_answer;
+		n = ncfg_main_do(&ask, operator_key, NULL, apply, strlen(apply), reply, sizeof(reply),
+		    120000u);
+		check(n == 3u && memcmp(reply, "ok\n", 3u) == 0 && runs == 1u,
+		    "do answers ok where the daemon carried the request out");
+		remote.admin = 0;
+		n = ncfg_main_do(&ask, operator_key, NULL, apply, strlen(apply), reply, sizeof(reply),
+		    120001u);
+		check(n == 0u && runs == 1u,
+		    "  and nothing where the node's remote tier refused it, so fuzznet says failed");
+		remote.admin = 1;
+		n = ncfg_main_do(&ask, operator_key, NULL, "{\"request\":\"apply\",\"confirm\":null}",
+		    strlen("{\"request\":\"apply\",\"confirm\":null}"), reply, sizeof(reply), 120002u);
+		check(n == 0u && runs == 1u, "  nor where an operator's apply had no window");
+
+		/* A dispatcher that answers with the socket's error document. */
+		refusing = ask;
+		memset(refusing.slots, 0, sizeof(refusing.slots));
+		memset(refusing.parts, 0, sizeof(refusing.parts));
+		refusing.answer = error_answer;
+		n = ncfg_main_do(&refusing, operator_key, NULL, apply, strlen(apply), reply,
+		    sizeof(reply), 120003u);
+		check(n == 0u, "  nor where the daemon answered with an error");
 	}
 
 	ncfg_buf_free(&joined);

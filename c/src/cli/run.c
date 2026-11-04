@@ -2485,6 +2485,32 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
 	char   why[NCFG_ERROR_MAX];
 	size_t at;
 
+	/* **Many hosts** (10.708): only what changes something is propagated,
+	 * since each host's answer is not carried back -- a read across them
+	 * would be a table of "ok" with nothing read. */
+	if (ncfg_fuzznet_target_is_many(options->at)) {
+		static const char *const changing[] = { "reload", "apply", "confirm", "revert",
+			"config", "secret", "profile" };
+
+		for (at = 0; at < sizeof(changing) / sizeof(changing[0]); at++) {
+			if (strcmp(command, changing[at]) == 0) {
+				break;
+			}
+		}
+		if (at == sizeof(changing) / sizeof(changing[0])) {
+			(void)snprintf(why, sizeof(why),
+			    "`--at %s` runs a change on many hosts and brings back only whether each "
+			    "carried it out, so `ncfg %s` is refused: ask each node with `--at HOST`",
+			    options->at, command);
+			return fail(why);
+		}
+		if (strcmp(command, "apply") == 0 && !options->confirm.has) {
+			return fail("`apply` on many hosts needs --confirm-within, so that a change "
+			            "which cuts you off from them undoes itself on each");
+		}
+		ncfg_cli_ask_through(options->at);
+		return 0;
+	}
 	if (strcmp(command, "status") == 0) {
 		return 0; /* its own path, the `status` procedure */
 	}
