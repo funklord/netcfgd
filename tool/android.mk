@@ -562,6 +562,49 @@ define android_verify_signature
 		echo "android: a keystore was given but the artifact is DEBUG-signed" >&2; \
 		exit 1; \
 	fi
+	$(call android_verify_compact,$(1))
+endef
+
+# How much of the artifact is dead space, read from the file rather than
+# trusted to android-fresh. Called from android_verify_signature, so every
+# project that verifies its signature verifies this too.
+#
+# Dead space is every byte before the central directory that no entry the
+# directory lists accounts for: zipflinger's nameless free-space entries
+# (android-fresh, below) and anything else that leaves a hole. A healthy
+# APK's only such bytes are its v2 signing block, 4,096 of them in every
+# one of the 23 healthy APKs measured across five trees 2026-11-05 -- 0.01%
+# of the file. The bloated ones measured 13.5% to 17.0%, and beerssh's
+# arm64 build was still carrying 17.0% that day, months after the first
+# report, because the size was printed and compared to nothing.
+#
+# The threshold is a per cent of the FILE size, the number that reaches a
+# device and Play. ANDROID_DEAD_SPACE_MAX overrides it (default 1);
+# ANDROID_DEAD_SPACE_OK=1 reports and passes.
+ANDROID_DEAD_SPACE_MAX ?= 1
+
+define android_verify_compact
+	@if ! command -v python3 >/dev/null 2>&1; then \
+		echo "android: no python3, so dead space in $(1) is UNCHECKED." >&2; \
+		echo "android:   Install python3, or set ANDROID_DEAD_SPACE_OK=1." >&2; \
+		[ "$(ANDROID_DEAD_SPACE_OK)" = 1 ] || exit 1; \
+	else \
+		out=$$(python3 -I -c 'import os, struct, sys, zipfile; \
+p = sys.argv[1]; z = zipfile.ZipFile(p); f = open(p, "rb"); \
+entry = lambda i: (f.seek(i.header_offset + 26), \
+                   30 + sum(struct.unpack("<HH", f.read(4))) + i.compress_size)[1]; \
+print(z.start_dir - sum(map(entry, z.infolist())), os.path.getsize(p))' "$(1)") || exit 1; \
+		set -- $$out; \
+		if [ $$(( $$1 * 100 )) -gt $$(( $$2 * $(ANDROID_DEAD_SPACE_MAX) )) ]; then \
+			echo "android: $(1) is $$1 bytes of dead space in $$2," >&2; \
+			echo "android:   over $(ANDROID_DEAD_SPACE_MAX)% of the file. Gradle reopened an old APK" >&2; \
+			echo "android:   and padded the holes: wire android-fresh ahead of" >&2; \
+			echo "android:   the build, or set ANDROID_DEAD_SPACE_OK=1." >&2; \
+			[ "$(ANDROID_DEAD_SPACE_OK)" = 1 ] || exit 1; \
+		else \
+			echo "android: dead space $$1 of $$2 bytes, under $(ANDROID_DEAD_SPACE_MAX)% of the file"; \
+		fi; \
+	fi
 endef
 
 # What Play will refuse, read from the bundle itself before uploading it.
