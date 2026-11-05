@@ -518,8 +518,8 @@ static void an_access_point_can_be_asked_at_last(void)
 }
 
 /*
- * A daemon with no pid file of netcfgd's is unanswerable, for each kind with no
- * other handle on it. openvpn has one, and is below.
+ * A supplicant with no pid file of netcfgd's is unanswerable while anything
+ * says it may be there. The five with only a mark are below.
  *
  * **The rule was applied to one of them.** `a_client_netcfgd_gave_no_pid_file_
  * is_left_alone` covers the DHCP arm, which got it in 10.237 because a udhcpc
@@ -542,32 +542,60 @@ static void an_access_point_can_be_asked_at_last(void)
  */
 static void a_daemon_with_no_pid_file_of_netcfgds_is_left_alone(void)
 {
-	static const struct {
-		int         kind;
-		const char *interface;
-		const char *what;
-	} kinds[] = {
-		{ NCFG_BACKEND_SUPPLICANT, "wlan-nofile", "a supplicant" }
-	};
-	size_t at;
+	static const char interface[] = "wlan-nofile";
+	const char       *directory = testdir_make("liveness-ctrl");
+	char              socket_file[512];
+	char              marker[512];
+	char              pid_path[512];
+	char              message[NCFG_ERROR_MAX];
+	ncfg_observed_t  *observed;
+	pid_t             child;
 
-	for (at = 0; at < sizeof(kinds) / sizeof(kinds[0]); at++) {
-		ncfg_observed_t *observed = observed_with(kinds[at].kind, kinds[at].interface, 1);
-		char             message[NCFG_ERROR_MAX];
-		char             said[256];
-
-		if (!observed) {
-			check(0, "the fixture reads");
-			continue;
-		}
-		message[0] = '\0';
-		(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
-		(void)snprintf(said, sizeof(said),
-		    "%s with no pid file of netcfgd's is unanswerable, not dead",
-		    kinds[at].what);
-		check(observed->backend_count == 1u && observed->backends[0].running, said);
-		ncfg_observed_free(observed);
+	/* A control socket on disk and no mark: the wedged supplicant, which has
+	 * to stay `running` for its control socket to be asked at all. */
+	(void)setenv("NCFG_WPA_CTRL_DIR", directory, 1);
+	(void)snprintf(socket_file, sizeof(socket_file), "%s/%s", directory, interface);
+	(void)testdir_write(socket_file, "", 0u);
+	observed = observed_with(NCFG_BACKEND_SUPPLICANT, interface, 1);
+	if (!observed) {
+		check(0, "the fixture reads");
+		return;
 	}
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(observed->backends[0].running,
+	    "a supplicant with no pid file or mark and a socket on disk is unanswerable, not dead");
+	ncfg_observed_free(observed);
+	(void)unlink(socket_file);
+
+	/* Its mark, with the socket gone: there, and not to be called dead. */
+	observed = observed_with(NCFG_BACKEND_SUPPLICANT, interface, 1);
+	if (!observed || !ncfg_service_backend_handle(run_dir, NCFG_BACKEND_SUPPLICANT, interface,
+	        pid_path, sizeof(pid_path), marker, sizeof(marker))) {
+		check(0, "the fixture reads");
+		ncfg_observed_free(observed);
+		return;
+	}
+	child = marked_child(marker);
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(child > 0 && observed->backends[0].running,
+	    "  one carrying its mark is running, whatever else is missing");
+	ncfg_observed_free(observed);
+	reap();
+
+	/* None of the three: one that left by itself, taking all of it. */
+	observed = observed_with(NCFG_BACKEND_SUPPLICANT, interface, 1);
+	if (!observed) {
+		check(0, "the fixture reads");
+		return;
+	}
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(!observed->backends[0].running,
+	    "  and with no file, no mark and no socket it has gone");
+	ncfg_observed_free(observed);
+	(void)unsetenv("NCFG_WPA_CTRL_DIR");
 }
 
 /*

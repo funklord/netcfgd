@@ -78,6 +78,7 @@
 #include "ncfg/ra.h"
 #include "ncfg/supplicant.h"
 
+#include <stdio.h>
 #include <unistd.h>
 
 /*
@@ -178,15 +179,34 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 		return ncfg_autoip_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_SUPPLICANT:
 		/*
-		 * **The one left at "cannot tell"** (10.716). It has a mark as the
-		 * four below do, but this answer also decides whether its control
-		 * socket is asked at all, and `wedged.sh` holds that round with a
-		 * supplicant carrying none. The file's absence is the test, not the
-		 * pid's -- see `backend_pid_file`, and the DHCP arm below for the
-		 * same rule written out.
+		 * **Its mark, then its control socket** (10.719). wpa_supplicant
+		 * takes its pid file with it as the five below do, so no file and no
+		 * mark can be one that left. But this answer also decides whether the
+		 * control socket is asked at all, and a supplicant carrying no mark
+		 * with a socket on disk is the wedged one `wedged.sh` holds that round
+		 * for. So a socket keeps it at "cannot tell": only none of the three
+		 * says it has gone, and one killed outright leaves its pid file.
 		 */
 		if (!backend_pid_file(backend, run_dir)) {
-			*answerable = 0;
+			char pid_path[512];
+			char marker[512];
+			char directory[512];
+			char control[1024];
+
+			if (!ncfg_service_backend_handle(run_dir, backend->kind, backend->interface,
+			        pid_path, sizeof(pid_path), marker, sizeof(marker)) ||
+			    !ncfg_supplicant_ctrl_dir(directory, sizeof(directory), NULL, 0)) {
+				*answerable = 0;
+				return 0;
+			}
+			pid = ncfg_process_pid_by_marker(marker);
+			if (pid > 0) {
+				return pid;
+			}
+			(void)snprintf(control, sizeof(control), "%s/%s", directory, backend->interface);
+			if (access(control, F_OK) == 0) {
+				*answerable = 0;
+			}
 			return 0;
 		}
 		return ncfg_supplicant_running_pid(run_dir, backend->interface);

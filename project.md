@@ -12686,6 +12686,20 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.719 A supplicant that left by itself is noticed too
+
+10.716 left the supplicant at "cannot tell", since its answer decides whether
+the control socket is asked and `wedged.sh` holds that round with a planted
+record and a fake carrying no mark. So wifi whose supplicant exited cleanly
+stayed `running`, and nothing started it.
+
+**The two cases differ on disk.** A wedged supplicant has its control socket
+there, and one that left cleanly takes it along with its pid file. So: its mark
+on a process is running; no mark and a socket is still "cannot tell", which keeps
+`wedged.sh`'s round; none of the three is gone. One killed outright leaves its
+pid file, so that arm is unchanged. A socket left by a crash keeps "cannot tell",
+which is what it answered before.
+
 ## 10.718 Sections collected in every build, and a fake that lost replies
 
 **The size rule (2026-11-05) reached four builds here beyond `c/`.** Measured
@@ -12765,11 +12779,7 @@ that had been so was not measured. It lingers 8 seconds now.
 replacement started inside the window. The C reports the stop as not done
 (10.661), the record keeps the tunnel, and it is started once it has gone.
 
-**Open: the supplicant is left at "cannot tell".** It has a mark too, but its
-answer decides whether the control socket is asked, and `wedged.sh` holds that
-round with a planted record and a fake carrying no mark. So a supplicant that
-exits cleanly may still stay `running`. Closing that means changing the fixture
-and deciding what an unmarked supplicant in a record is.
+**The supplicant followed in 10.719.**
 
 **And a filter hid a failed build while this was being done.** `grep ' error '`
 does not match a compiler's `error:`, so `make` failed on a missing include,
