@@ -141,9 +141,9 @@ run: $(TARGET)
 # other's Makefile.
 TEST_PROS = $(wildcard tests/*.pro)
 
-# fuzznetd too, which `phone_pair` pairs with: a test builds what it needs.
+# `ncfg` too, whose node `phone_pair` pairs: a test builds what it needs.
 test: $(CLIENT_LIB)
-	@$(MAKE) --no-print-directory -C ../c fuzznet.a
+	@$(MAKE) --no-print-directory -C ../c netcfgd ncfg
 	@failed=0; \
 	for pro in $(TEST_PROS); do \
 		name=$$(basename $$pro .pro); \
@@ -199,14 +199,16 @@ ANDROID_TRIPLE_x86_64    = x86_64-linux-android
 ANDROID_NDK_BIN = $(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/linux-x86_64/bin
 ANDROID_CC = $(ANDROID_NDK_BIN)/$(ANDROID_TRIPLE_$(ANDROID_ABI))$(ANDROID_API)-clang
 ANDROID_NODE_DIR = $(abspath build-android-node-$(ANDROID_ABI))
-ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libfuzznetd.so
+ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libncfgnode.so
 
+# Linked by fuzznet's own build, as fuzznetd is, with this product's main.
 android-node: android-check
 	CFLAGS='-Os -ffunction-sections -fdata-sections' $(MAKE) -s -C ../fuzznet \
+	        -f Makefile -f ../gui/src/phone/node.mk \
 	        BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) FZN_LOG_PACK=0 \
 	        FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 \
-	        $(ANDROID_NODE_DIR)/fuzznetd
-	$(ANDROID_NDK_BIN)/llvm-strip -o $(ANDROID_NODE_LIB) $(ANDROID_NODE_DIR)/fuzznetd
+	        NCFG_NODE_OUT=$(ANDROID_NODE_DIR)/ncfgnode $(ANDROID_NODE_DIR)/ncfgnode
+	$(ANDROID_NDK_BIN)/llvm-strip -o $(ANDROID_NODE_LIB) $(ANDROID_NODE_DIR)/ncfgnode
 
 # The sed is the one way to say this from qmake: the node has to exist as a
 # file to be run, so the libraries are extracted at install, which AGP calls

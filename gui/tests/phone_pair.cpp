@@ -6,7 +6,7 @@
  *   part that needs a phone. So the rest is held here: a code as a host draws
  *   it is read back from an image, at a width whose rows are padded; a code
  *   nobody issued is refused and never reaches the node; and a code taken by
- *   the view joins a real fuzznetd, started the way the app starts it, to a
+ *   the view joins a real node, started the way the app starts it, to a
  *   real host, ending in `paired` with the host's key.
  *
  * HOW IT STOPS
@@ -14,14 +14,14 @@
  *   `timeout` and killed at the end, and the phone's node is this process's
  *   child. The directory is a QTemporaryDir, removed on the way out.
  *
- *   No fuzznetd built: it says so and fails, since `make -C c` is what makes
+ *   No ncfg built: it says so and fails, since `make -C c` is what makes
  *   one, and a screen not tested is no pass.
  */
 
 #include "../src/pair_code.h"
 #include "../src/phone/code_reader.h"
 #include "../src/phone/pair_view.h"
-#include "../src/phone/phone_fit.h"
+#include "../src/layout.h"
 #include "../src/phone/phone_node.h"
 extern "C" {
 #include "ncfg_fuzznet.h"
@@ -163,7 +163,7 @@ int main(int argc, char **argv)
 
 	/* ---- a dialog on a phone ---- */
 	{
-		ncfg_phone_fit fit;
+		ncfg_mobile_fit fit;
 		QDialog        dialog;
 		auto          *form = new QFormLayout(&dialog);
 
@@ -181,20 +181,38 @@ int main(int argc, char **argv)
 		application.removeEventFilter(&fit);
 	}
 
+	/* ---- the layout ---- */
+	check(ncfg_layout_resolve(QStringLiteral("mobile")) == ncfg_layout::mobile &&
+	          ncfg_layout_resolve(QStringLiteral("desktop")) == ncfg_layout::desktop,
+	      "the layout is what was asked for, on any device", QString());
+	check(ncfg_layout_resolve(QStringLiteral("auto")) == ncfg_layout_for_device() &&
+	          ncfg_layout_resolve(QStringLiteral("nonsense")) == ncfg_layout_for_device(),
+	      "and otherwise the device's", QString());
+
 	/* ---- the nodes ---- */
 	/* From this binary, not the directory it was run in: `make test` runs it from
 	 * gui/, a person from beside it. */
-	const QString fuzznetd = QDir(QCoreApplication::applicationDirPath() +
-	                              QStringLiteral("/../../../../c/fuzznet-build"))
-	                             .absoluteFilePath(QStringLiteral("fuzznetd"));
-	const QString program = qEnvironmentVariable("NCFG_TEST_FUZZNETD", fuzznetd);
+	const QString ncfg = QDir(QCoreApplication::applicationDirPath() +
+	                          QStringLiteral("/../../../../c"))
+	                         .absoluteFilePath(QStringLiteral("ncfg"));
 
-	if (!QFile::exists(program)) {
-		check(false, "a fuzznetd to pair with", QStringLiteral("none at %1: `make -C c`").arg(program));
+	if (!QFile::exists(ncfg)) {
+		check(false, "an ncfg to pair with", QStringLiteral("none at %1: `make -C c`").arg(ncfg));
 		return 1;
 	}
 	QTemporaryDir scratch(QStringLiteral("/tmp/ncf.XXXXXX"));
 	const QString base = scratch.path();
+	/* The app runs its node as a program of its own, which is `ncfg node`'s
+	 * core with no `node` to type. */
+	const QString program = base + QStringLiteral("/node");
+	{
+		QFile script(program);
+
+		script.open(QIODevice::WriteOnly);
+		script.write(QStringLiteral("#!/bin/sh\nexec '%1' node \"$@\"\n").arg(ncfg).toUtf8());
+		script.close();
+		script.setPermissions(script.permissions() | QFile::ExeOwner);
+	}
 	QString       why;
 
 	check(ncfg_phone_node_start(program, base + QStringLiteral("/phone"), &application, &why),

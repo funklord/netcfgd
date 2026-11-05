@@ -293,7 +293,7 @@ const char *ncfg_cli_asking_host(void)
 
 /*
  * The request asked of another node (0312, 10.694): its socket's own line, as
- * `call ask at HOST`, through this user's fuzznetd, and the answer read as
+ * `call ask at HOST`, through this user's node, and the answer read as
  * that node's socket would have written it. Nothing about the transport shows
  * past this function, so every verb asking the daemon asks that node instead.
  */
@@ -307,7 +307,7 @@ static int ask_elsewhere(const ncfg_proto_request_t *request, ncfg_proto_message
 	int        read_it;
 
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
-		ncfg_error_set(err, err_size, "this user's fuzznetd socket path does not fit");
+		ncfg_error_set(err, err_size, "this user's node socket path does not fit");
 		return 0;
 	}
 	ncfg_buf_init(&line, NCFG_PROTO_MAX_LINE);

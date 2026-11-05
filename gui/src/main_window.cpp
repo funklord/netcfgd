@@ -36,9 +36,16 @@ extern "C" {
 #include "tray.h"
 #include "wifi_view.h"
 
+#include "layout.h"
+
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDir>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QSignalBlocker>
 #include <QLabel>
 #include <QPushButton>
@@ -230,12 +237,14 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	auto *tools = addToolBar(QStringLiteral("main"));
 	/* **Which node, chosen here** (10.699): this machine first, then the
-	 * estate's other members as this user's fuzznetd lists them -- by whole
+	 * estate's other members as this user's node lists them -- by whole
 	 * key, as `where()` names them, since that is what tells them apart. A
-	 * user with no fuzznetd sees this machine alone. */
+	 * user with no node sees this machine alone. */
 	nodes = new QComboBox(tools);
 	nodes->setObjectName(QStringLiteral("nodes"));
-	nodes->addItem(QStringLiteral("this machine"), QString());
+	if (ncfg_device_has_local()) {
+		nodes->addItem(QStringLiteral("this machine"), QString());
+	}
 	for (const QString &key : estate_members()) {
 		nodes->addItem(key, key);
 	}
@@ -253,7 +262,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	/* **Only where there is a fleet** (10.710): somebody with one machine and
 	 * no estate is the person this window is for, and an empty tab about
 	 * nodes would be one more thing to not understand. */
-	if (nodes->count() > 1) {
+	if (nodes->count() > (ncfg_device_has_local() ? 1 : 0)) {
 		fleet = new ncfg_fleet_view([this]() {
 			const QStringList found = estate_members();
 
@@ -278,6 +287,16 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 		tabs->addTab(fleet, QStringLiteral("fleet"));
 	}
 	tools->addWidget(nodes);
+	/* **This machine is the default, a host elsewhere the unusual case, and so
+	 * only this much of the window** (10.735). A phone has its first screen. */
+	if (ncfg_device_has_local() && nodes->count() == 1) {
+		join_button = new QPushButton(QStringLiteral("Another host..."), tools);
+		join_button->setObjectName(QStringLiteral("join_host"));
+		join_button->setToolTip(QStringLiteral(
+		    "Manage a machine elsewhere, by the code `ncfg pair` shows on it."));
+		connect(join_button, &QPushButton::clicked, this, &ncfg_main_window::join_host);
+		tools->addWidget(join_button);
+	}
 	auto *refresh_button = new QPushButton(QStringLiteral("Refresh"), tools);
 	connect(refresh_button, &QPushButton::clicked, this, &ncfg_main_window::refresh);
 	tools->addWidget(refresh_button);
@@ -384,8 +403,8 @@ void ncfg_main_window::closeEvent(QCloseEvent *event)
 	QMainWindow::closeEvent(event);
 }
 
-/* The estate's other members, as this user's fuzznetd lists them; none for a
- * user with no fuzznetd. */
+/* The estate's other members, as this user's node lists them; none for a
+ * user with no node. */
 QStringList ncfg_main_window::estate_members()
 {
 	static char keys[256][NCFG_FUZZNET_KEY_TEXT];
@@ -393,7 +412,15 @@ QStringList ncfg_main_window::estate_members()
 	char        ignored[NCFG_ERROR_MAX];
 	size_t      count = 0;
 	QStringList found;
+	static bool started = false;
 
+	/* A store means this person has joined something, or may have: their node
+	 * is what knows, and after a reboot nobody has started it (10.735). */
+	if (!started && QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+	                     QStringLiteral("/fuzznet")).exists()) {
+		started = true;
+		(void)ncfg_fuzznet_user_node(1, ignored, sizeof(ignored));
+	}
 	if (ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
 	    ncfg_fuzznet_members(socket, keys, 256u, &count, ignored, sizeof(ignored))) {
 		for (size_t at = 0; at < count; at++) {
@@ -456,6 +483,46 @@ void ncfg_main_window::follow_node()
 	} else if (!poll->isActive()) {
 		poll->start();
 	}
+}
+
+void ncfg_main_window::join_host()
+{
+	bool          given = false;
+	const QString code = QInputDialog::getText(this, QStringLiteral("Another host"),
+	    QStringLiteral("The code `ncfg pair` shows on that machine:"), QLineEdit::Normal,
+	    QString(), &given).trimmed();
+
+	if (!given || code.isEmpty()) {
+		return;
+	}
+	/* `ncfg join`, not the window's own copy of it: it starts this user's node,
+	 * asks, and waits out the host's answer, which is minutes at the most. */
+	auto *join = new QProcess(this);
+
+	join_button->setEnabled(false);
+	note(QStringLiteral("asking that host"));
+	connect(join, &QProcess::finished, this, [this, join](int code_out, QProcess::ExitStatus) {
+		const QString key = QString::fromUtf8(join->readAllStandardOutput()).trimmed();
+		const QString why = QString::fromUtf8(join->readAllStandardError()).trimmed();
+
+		join->deleteLater();
+		join_button->setEnabled(true);
+		if (code_out != 0 || key.isEmpty()) {
+			note(QStringLiteral("that host did not let this user in: %1").arg(why));
+			return;
+		}
+		nodes->addItem(key, key);
+		nodes->setCurrentIndex(nodes->findData(key));
+		join_button->hide();
+	});
+	connect(join, &QProcess::errorOccurred, this, [this, join](QProcess::ProcessError failed) {
+		if (failed == QProcess::FailedToStart) {
+			join->deleteLater();
+			join_button->setEnabled(true);
+			note(QStringLiteral("could not run ncfg to join that host"));
+		}
+	});
+	join->start(QStringLiteral("ncfg"), {QStringLiteral("join"), code});
 }
 
 void ncfg_main_window::node_chosen(int index)

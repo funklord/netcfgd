@@ -9,6 +9,10 @@
  */
 #include "ncfg_connection.h"
 
+extern "C" {
+#include "ncfg_fuzznet.h"
+}
+
 #include <cstring>
 
 namespace {
@@ -178,6 +182,10 @@ bool ncfg_connection::open_at(const QString &key, QString *error)
 
 	char message[NCFG_ERROR_MAX];
 
+	/* Local is the default and needs no node; asking for a host is what starts
+	 * one (10.735). One that did not start is not this call's refusal: opening
+	 * reaches nothing yet, and the first request says what was wrong. */
+	(void)ncfg_fuzznet_user_node(1, message, sizeof(message));
 	client = ncfg_client_open_at(requested.constData(), message, sizeof(message));
 	if (!client) {
 		if (error) {

@@ -64,9 +64,7 @@ bool ncfg_phone_node_start(const QString &program, const QString &base, QObject 
 	                    /* Any free one: the phone starts every conversation, and
 	                     * a host answers where it heard from. A fixed port was
 	                     * one a second node beside it could already hold. */
-	                    QStringLiteral("--udp-port=0"),
-	                    QStringLiteral("--fuzznet-service=%1").arg(NCFG_FUZZNET_SERVICE),
-	                    QStringLiteral("--fuzznet-product=%1").arg(NCFG_FUZZNET_PRODUCT)});
+	                    QStringLiteral("--udp-port=0")});
 	node->setStandardOutputFile(QProcess::nullDevice());
 	node->setStandardErrorFile(QProcess::nullDevice());
 	node->start();

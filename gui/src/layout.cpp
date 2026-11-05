@@ -1,11 +1,31 @@
-#include "phone_fit.h"
+#include "layout.h"
 
 #include <QDialog>
 #include <QEvent>
 #include <QFormLayout>
 #include <QMessageBox>
 
-bool ncfg_phone_fit::eventFilter(QObject *watched, QEvent *event)
+ncfg_layout ncfg_layout_for_device()
+{
+#ifdef Q_OS_ANDROID
+	return ncfg_layout::mobile;
+#else
+	return ncfg_layout::desktop;
+#endif
+}
+
+ncfg_layout ncfg_layout_resolve(const QString &preference)
+{
+	if (preference == QStringLiteral("desktop")) {
+		return ncfg_layout::desktop;
+	}
+	if (preference == QStringLiteral("mobile")) {
+		return ncfg_layout::mobile;
+	}
+	return ncfg_layout_for_device();
+}
+
+bool ncfg_mobile_fit::eventFilter(QObject *watched, QEvent *event)
 {
 	if (event->type() == QEvent::Show) {
 		auto *dialog = qobject_cast<QDialog *>(watched);

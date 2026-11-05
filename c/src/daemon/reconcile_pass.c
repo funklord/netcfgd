@@ -1414,7 +1414,7 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 	}
 
 	/* What was seen, written down before anything acts on it (10.666). A
-	 * machine with no fuzznetd writes nothing and says so once. */
+	 * daemon with no node and no socket writes nothing and says so once. */
 	if (loop->seen && loop->state->observed) {
 		(void)ncfg_seen_record(loop->seen, loop->state->observed, now_of(&loop->world));
 	}

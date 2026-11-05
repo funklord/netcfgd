@@ -309,7 +309,7 @@ void ncfg_fleet_view::draw()
 	    ? QStringLiteral("no other nodes in the estate")
 	    : QStringLiteral("%1 of %2 nodes answering").arg(answering).arg(keys.size());
 	QString note = QStringLiteral(
-	    "%1. Each node is asked through this user's fuzznetd and judged by its own `remote` "
+	    "%1. Each node is asked through this user's node and judged by its own `remote` "
 	    "block, once a minute while this tab is in front. A double click moves the window "
 	    "there.").arg(summary);
 	if (!action_said.isEmpty()) {

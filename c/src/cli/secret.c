@@ -520,7 +520,7 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 	}
 	if (ncfg_cli_asking_elsewhere()) {
 		ncfg_error_set(err, err_size,
-		    "`secret seal` speaks to the whole group through your own fuzznetd, so `--at` "
+		    "`secret seal` speaks to the whole group through your own node, so `--at` "
 		    "has no node to mean");
 		return 0;
 	}
@@ -530,7 +530,7 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 		return 0;
 	}
 	if (!ncfg_fuzznet_user_socket(socket_path, sizeof(socket_path))) {
-		ncfg_error_set(err, err_size, "this user's fuzznetd socket path does not fit");
+		ncfg_error_set(err, err_size, "this user's node socket path does not fit");
 		return 0;
 	}
 	if (!ncfg_cli_read_secret("value to seal", &value, err, err_size)) {
@@ -558,7 +558,7 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 	explicit_bzero(escaped, sizeof(escaped));
 	explicit_bzero(line, sizeof(line));
 	if (!answered) {
-		ncfg_error_set(err, err_size, "%s", why[0] ? why : "this user's fuzznetd did not answer");
+		ncfg_error_set(err, err_size, "%s", why[0] ? why : "this user's node did not answer");
 		return 0;
 	}
 	if (sscanf(reply, "ok %lu %lu", &sealed, &missing) != 2) {

@@ -36,6 +36,12 @@ laptop configuring a router across the room and a phone doing the same thing wan
 the same screens. Do not build a "lite" Android client, and do not put desktop-only
 code behind a platform `#ifdef` when the honest gate is a capability check.
 
+Two things are not capabilities, and `src/layout.h` holds them apart (0313). How the
+window is shown is a layout, `--layout auto|desktop|mobile`, the device's by default.
+What a phone lacks is compiled in: it has no root node of its own, so it connects only
+to hosts and opens on a prompt for one. A desktop opens on this machine, and reaches a
+host on asking.
+
 ## 2. Non-negotiables
 
 Inherited from the family, and from netcfgd:

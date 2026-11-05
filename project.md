@@ -12686,6 +12686,68 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.736 One window, in a layout: what is a mode and what a device has
+
+The holder: phone and desktop stay the same GUI, with minor differences by mobile or
+desktop mode "like other GUI software here", and some things hardcoded, "the
+non-existence of a local root node and prompting for remotes on mobile" (0313).
+
+`gui/src/layout.h` keeps those two apart. `ncfg_layout` is how things are shown:
+`--layout auto|desktop|mobile`, the device's by default, compiled in as
+bbq-predictor's is. Today it decides one thing, the fit of 10.728, which left
+`src/phone/` and now runs on any machine, so it can be tested with no phone.
+`ncfg_device_has_local` is what is there at all, and no preference moves it.
+
+**A phone's node box offered "this machine", which does not exist there.** It is
+gone, and the fleet tab's test counts members rather than rows. `src/phone/` keeps
+only what needs a phone: the camera, the first screen, the app's node.
+
+## 10.735 Local by default, a host on asking
+
+The holder: clients also connect to a remote netcfgd; on a phone that is the default
+and only connection, on a desktop local is the default and remote "unusual but not
+impossible". The transport was there (`--at`, `open_at`), but it stood on a node
+nothing started. `ncfg_fuzznet_user_node` now starts `ncfg node` where a client asks
+for a host, and `ncfg join CODE` does what the phone's first screen does. The window
+has "Another host..." beside the node box until it has one, running `ncfg join`, and
+starts the node at its own start where the user has a store, or after a reboot a
+joined person would see this machine alone.
+
+**The test is a connect and nothing more.** Asking `get prekey` was the first version:
+it would take the one connection a test's fake serves, and it runs before every use.
+
+The node is left up, as an agent is: the next look needs it, and starting it costs a
+second. Nothing asks for it on a machine used only locally, which `node_user.sh`
+checks. Whether it should also be a user unit is open (0313).
+
+**For the next pin:** fuzznet's sec 896 now has `add invite [delegable] [open|confirm]
+[LIFE]`, and a device asks for 15 minutes. The pin here is older. `ncfg join` and the
+first screen both stop looking at 660 half-seconds, sized to the old five minutes, so
+they move with the pin. `open` is what `ncfg pair` means today; offering `confirm` is
+the holder's question about a scanned code, which that gives an answer to.
+
+## 10.734 `ncfg node`: netcfgd brings its own, and fuzznetd is a witness
+
+The holder: all fuzznet software has its full function and coexists on the same files
+and the same estate; fuzzypickles does not install fuzznetd, which is for testing that;
+a client and a node are the same thing, hardcoded differently (0313). So every path here
+that said "this user's fuzznetd" stood on a program nothing installs.
+
+`c/src/node/user_node.c` is fuzznet's node with netcfgd's numbers, any free port, and
+an empty extension, which is what makes it follow beside a face rather than exit.
+`ncfg node` runs it from the binary already installed, and the app carries the same
+file under a `main` of its own as `libncfgnode.so`, linked by fuzznet's build
+(`gui/src/phone/node.mk`), as fuzzypickles links fzpd.
+
+**The feared cost was the capability**, which fuzznet derives from service and product,
+so a store opened under another product's number might have reached nothing.
+Measured by `c/tests/node_user.sh`: joined as netcfgd, then served by fuzznetd under
+fuzzypickles' number 2 on the same default store, `status --at` is answered by the
+host, and `ncfg node` started beside it follows and becomes the face when it goes.
+
+**`restart_argv` is the original command line**, or taking the claim would run `ncfg`
+with fuzznet's options and no `node`.
+
 ## 10.733 `service_test` needed more than a fifth of a second
 
 `make check` failed "the stop waited for the process, not the file" at load 90. The

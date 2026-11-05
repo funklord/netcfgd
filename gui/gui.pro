@@ -61,10 +61,8 @@ android {
 	QUIRC = $$PWD/../fuzznet/quirc/lib
 	INCLUDEPATH += $$QUIRC $$PWD/src/phone
 	SOURCES += src/phone/phone_node.cpp src/phone/code_reader.cpp src/phone/pair_view.cpp \
-		src/phone/phone_fit.cpp \
 		$$QUIRC/quirc.c $$QUIRC/decode.c $$QUIRC/identify.c $$QUIRC/version_db.c
-	HEADERS += src/phone/phone_node.h src/phone/code_reader.h src/phone/pair_view.h \
-		src/phone/phone_fit.h
+	HEADERS += src/phone/phone_node.h src/phone/code_reader.h src/phone/pair_view.h
 	# The node, as gui/Makefile builds it. A `lib*.so` because that is what
 	# Android extracts and marks executable; it is a program.
 	ANDROID_EXTRA_LIBS += $$NETCFGD_NODE_LIB
@@ -164,6 +162,7 @@ SOURCES += \
 	src/modems_view.cpp \
 	src/stations_view.cpp \
 	src/fleet_view.cpp \
+	src/layout.cpp \
 	src/pair_code.cpp \
 	src/leases_view.cpp \
 	src/table_view.cpp \
@@ -214,6 +213,7 @@ HEADERS += \
 	src/modems_view.h \
 	src/stations_view.h \
 	src/fleet_view.h \
+	src/layout.h \
 	src/pair_code.h \
 	src/leases_view.h \
 	src/table_view.h \

@@ -20,7 +20,7 @@ LIBS += $$CLIENT_DIR/libncfg_client.a -lm
 PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
 SOURCES += phone_pair.cpp ../src/pair_code.cpp \
-	../src/phone/phone_node.cpp ../src/phone/code_reader.cpp ../src/phone/pair_view.cpp ../src/phone/phone_fit.cpp \
+	../src/phone/phone_node.cpp ../src/phone/code_reader.cpp ../src/phone/pair_view.cpp ../src/layout.cpp \
 	$$QUIRC/quirc.c $$QUIRC/decode.c $$QUIRC/identify.c $$QUIRC/version_db.c \
 	$$FUZZNET/qr/qr.c
-HEADERS += ../src/phone/phone_node.h ../src/phone/code_reader.h ../src/phone/pair_view.h ../src/phone/phone_fit.h
+HEADERS += ../src/phone/phone_node.h ../src/phone/code_reader.h ../src/phone/pair_view.h ../src/layout.h

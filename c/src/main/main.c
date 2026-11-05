@@ -20,6 +20,8 @@
 #include "ncfg/cli.h"
 #include "ncfg/node.h"
 
+#include <string.h>
+
 
 int main(int argc, char **argv)
 {
@@ -88,6 +90,10 @@ int main(int argc, char **argv)
 		 * nothing from it.
 		 */
 		ncfg_log_accept_from_env();
+		/* Before the parser, whose options are not fuzznet's. */
+		if (argc > 1 && strcmp(argv[1], "node") == 0) {
+			return ncfg_node_user_main(argc, argv, 1);
+		}
 		return ncfg_cli_main_on(argc, argv, ncfg_main_cli_machine());
 	case NCFG_MAIN_PROGRAM_DAEMON:
 		return ncfg_main_netcfgd(argc, argv);

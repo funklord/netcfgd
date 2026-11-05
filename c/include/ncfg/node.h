@@ -234,4 +234,12 @@ void ncfg_node_refuse_huge_pages(char *const *argv);
  */
 size_t ncfg_node_publish_event(const char *subject);
 
+/*
+ * This user's node, `ncfg node` (`user_node.c`): fuzznet's node with netcfgd's
+ * numbers, on the user's own store and socket unless `argv` says otherwise.
+ * `skip` words after `argv[0]` are not fuzznet's: 1 for `node`. Does not return
+ * while it serves; the process's exit status.
+ */
+int ncfg_node_user_main(int argc, char **argv, int skip);
+
 #endif /* NCFG_NODE_H */

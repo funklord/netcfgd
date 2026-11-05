@@ -198,6 +198,16 @@ void ncfg_fuzznet_events_end(ncfg_fuzznet_events_t *events);
 int ncfg_fuzznet_user_socket(char *out, size_t out_size);
 
 /*
+ * Whether this user's node answers, and with `start` one started where none
+ * does: `ncfg node`, left running for the session, as an agent is, since the
+ * next look at that host needs it as well (10.735). A client that means to reach
+ * another host calls this; one that stays on this machine needs no node, and
+ * never starts one. A phone's node is the app's, so there `start` does nothing.
+ * 1 with a node answering, 0 with a sentence in `why`.
+ */
+int ncfg_fuzznet_user_node(int start, char *why, size_t why_size);
+
+/*
  * Another node's status, asked as an operator of its estate (0311, 10.691):
  * through the fuzznetd at `socket` -- this user's own, the third of
  * fuzznet's three models -- `call status at HOST FROM`, `host` the node's

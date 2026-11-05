@@ -9,6 +9,7 @@
 #include "ncfg_fuzznet.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -16,6 +17,8 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 /* A page unescaped: one local reply line (1024) or a remote answer (4096). */
@@ -594,6 +597,138 @@ int ncfg_fuzznet_user_socket(char *out, size_t out_size)
 		    (unsigned long)getuid());
 	}
 	return wrote > 0 && (size_t)wrote < out_size;
+}
+
+/* Connected and let go, with nothing asked: a socket left behind by a node that
+ * died refuses, and this is asked before every use. */
+static int user_node_answers(const char *socket_path)
+{
+	struct sockaddr_un address;
+	int                fd;
+	int                up;
+
+	if (strlen(socket_path) >= sizeof(address.sun_path)) {
+		return 0;
+	}
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		return 0;
+	}
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	memcpy(address.sun_path, socket_path, strlen(socket_path) + 1u);
+	up = connect(fd, (const struct sockaddr *)&address, sizeof(address)) == 0;
+	(void)close(fd);
+	return up;
+}
+
+#ifndef __ANDROID__
+/*
+ * Twice forked, so a window that never reaps does not keep a zombie, and in a
+ * session of its own, so the node outlives the terminal. Only what is safe
+ * after a fork in a process with threads, which a window is: the path is read
+ * before it. `ncfg` is the program itself where this is `ncfg`, and the one on
+ * the PATH where this is a window.
+ */
+/* 1 where `ncfg` is on the PATH: without one there is nothing to wait for, and
+ * a window asks this from its own thread. */
+static int user_node_program(void)
+{
+	const char *path = getenv("PATH");
+	char        candidate[4096];
+
+	while (path && *path) {
+		const char  *end = strchr(path, ':');
+		const size_t length = end ? (size_t)(end - path) : strlen(path);
+		const int    wrote = snprintf(candidate, sizeof(candidate), "%.*s/ncfg", (int)length, path);
+
+		if (wrote > 0 && (size_t)wrote < sizeof(candidate) && access(candidate, X_OK) == 0) {
+			return 1;
+		}
+		path = end ? end + 1 : NULL;
+	}
+	return 0;
+}
+
+static int user_node_spawn(void)
+{
+	char *const argv[] = { (char *)"ncfg", (char *)"node", NULL };
+	char        self[4096];
+	ssize_t     length = readlink("/proc/self/exe", self, sizeof(self) - 1u);
+	int         own = 0;
+	pid_t       child;
+
+	if (length > 8) {
+		self[length] = '\0';
+		own = strcmp(self + length - 8, "/netcfgd") == 0;
+	}
+	if (!own && !user_node_program()) {
+		return 0;
+	}
+	child = fork();
+	if (child == 0) {
+		int fd;
+
+		(void)setsid();
+		if (fork() != 0) {
+			_exit(0);
+		}
+		fd = open("/dev/null", O_RDWR);
+		if (fd >= 0) {
+			(void)dup2(fd, 0);
+			(void)dup2(fd, 1);
+			(void)dup2(fd, 2);
+		}
+		for (fd = 3; fd < 1024; fd++) {
+			(void)close(fd);
+		}
+		if (own) {
+			(void)execv(self, argv);
+		}
+		(void)execvp("ncfg", argv);
+		_exit(127);
+	}
+	if (child > 0) {
+		(void)waitpid(child, NULL, 0);
+	}
+	return child > 0;
+}
+#endif
+
+int ncfg_fuzznet_user_node(int start, char *why, size_t why_size)
+{
+	char socket[1100];
+
+	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
+		say(why, why_size, "this user's node socket path does not fit");
+		return 0;
+	}
+	if (user_node_answers(socket)) {
+		return 1;
+	}
+#ifndef __ANDROID__
+	if (start) {
+		const struct timespec look = { 0, 250000000L };
+		int                   looks;
+
+		if (!user_node_spawn()) {
+			say(why, why_size, "this user's node did not start: `ncfg` is not installed");
+			return 0;
+		}
+		for (looks = 0; looks < 20; looks++) {
+			if (user_node_answers(socket)) {
+				return 1;
+			}
+			(void)nanosleep(&look, NULL);
+		}
+		say(why, why_size, "this user's node did not start");
+		return 0;
+	}
+#else
+	(void)start;
+#endif
+	say(why, why_size, "this user's node is not running: start one with `ncfg node`");
+	return 0;
 }
 
 int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, size_t *length,

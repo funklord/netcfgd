@@ -93,6 +93,7 @@ private slots:
 	void note(const QString &summary);
 	/* Another node chosen in the toolbar's node box, or this machine (10.699). */
 	void node_chosen(int index);
+	void join_host();
 
 public slots:
 	/*
@@ -121,6 +122,7 @@ private:
 	 * event stream; the socket this machine's daemon was reached on, to go
 	 * back to (10.699). */
 	class QComboBox   *nodes;
+	class QPushButton *join_button = nullptr;
 	/* Every node at once, where there are any (10.710); null otherwise. */
 	class ncfg_fleet_view *fleet = nullptr;
 	static QStringList estate_members();

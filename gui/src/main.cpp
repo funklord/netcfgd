@@ -26,10 +26,11 @@
 #define NETCFGD_VERSION_TEXT "(version not given to this build)"
 #endif
 
+#include "layout.h"
+
 #include <QFileInfo>
 #ifdef Q_OS_ANDROID
 #  include "phone/pair_view.h"
-#  include "phone/phone_fit.h"
 #  include "phone/phone_node.h"
 #  include <QStandardPaths>
 extern "C" {
@@ -170,9 +171,15 @@ int main(int argc, char **argv)
 	QCommandLineOption at_option(
 	    QStringList() << QStringLiteral("at"),
 	    QStringLiteral("Another node of this estate, by its key in hex, asked through your "
-	               "own fuzznetd: `ncfg nodes` lists them."),
+	               "own node: `ncfg nodes` lists them."),
 	    QStringLiteral("key"));
 	parser.addOption(at_option);
+	QCommandLineOption layout_option(
+	    QStringList() << QStringLiteral("layout"),
+	    QStringLiteral("auto, desktop or mobile: how this window is shown. Auto is the "
+	               "device's."),
+	    QStringLiteral("shape"), QStringLiteral("auto"));
+	parser.addOption(layout_option);
 	QCommandLineOption tray_option(
 	    QStringList() << QStringLiteral("tray"),
 	    QStringLiteral("Start in the notification area with no window. Closing the window "
@@ -198,6 +205,9 @@ int main(int argc, char **argv)
 	parser.addOption(gui_option);
 #endif
 	parser.process(application);
+	if (ncfg_layout_resolve(parser.value(layout_option)) == ncfg_layout::mobile) {
+		application.installEventFilter(new ncfg_mobile_fit(&application));
+	}
 
 	ncfg_connection connection;
 	QString error;
@@ -227,13 +237,12 @@ int main(int argc, char **argv)
 	QString phone_host;
 #ifdef Q_OS_ANDROID
 	{
-		application.installEventFilter(new ncfg_phone_fit(&application));
 		const QString home = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 		QString       why;
 		char          node_socket[1100];
 
 		if (!ncfg_phone_node_start(QCoreApplication::applicationDirPath() +
-		                               QStringLiteral("/libfuzznetd.so"),
+		                               QStringLiteral("/libncfgnode.so"),
 		                           home, &application, &why) ||
 		    !ncfg_fuzznet_user_socket(node_socket, sizeof(node_socket))) {
 			QMessageBox::critical(nullptr, QStringLiteral("netcfgd"), why);

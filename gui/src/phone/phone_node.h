@@ -1,12 +1,13 @@
 /*
- * phone_node.h -- the phone's fuzznet node: a fuzznetd the app starts
- * (project.md 10.720).
+ * phone_node.h -- the phone's fuzznet node, which the app starts
+ * (project.md 10.720): `ncfg node`'s core under a main of its own (10.734), since
+ * no fuzznet program but a product's own is carried.
  *
  * WHY THE APP STARTS IT
  *   The client reaches another host through this user's own node, by
  *   `call ask at HOST` on its socket. A desktop has one running. A phone has
  *   no place for a long-lived program but an app, so the app carries one, as
- *   `libfuzznetd.so`: Android extracts and marks executable only `lib*.so`.
+ *   `libncfgnode.so`: Android extracts and marks executable only `lib*.so`.
  *   It stays a separate process, so everything above the socket is the
  *   desktop's code.
  *
