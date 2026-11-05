@@ -334,7 +334,10 @@ device vpn0 {
 	openvpn { config = "$work/etc/work.ovpn" }
 }
 CONF
-FAKE_OPENVPN_EXIT_DELAY=3 "$ncfg" apply > /dev/null 2>&1 || true
+# Past `OPENVPN_STOP_PATIENCE_MILLISECONDS`, 3000: the stop below waits that long
+# for the daemon to go, so a delay of 3 closed the window before anything looked,
+# and only the control underneath could say so.
+FAKE_OPENVPN_EXIT_DELAY=8 "$ncfg" apply > /dev/null 2>&1 || true
 waited=0
 while [ ! -S "$work/run/openvpn/vpn0.sock" ]; do
 	waited=$((waited + 1))
@@ -371,9 +374,20 @@ CONF
 "$ncfg" apply > "$work/unreachable.txt" 2>&1 || true
 check "a daemon that cannot be reached is not adopted" \
 	"$(grep -c 'adopted the OpenVpn backend' "$work/unreachable.txt" || true)" "0"
-# Declining costs nothing here *because* the marker is the socket: unreachable
-# means the path is free, so the replacement binds where the one that is leaving
-# cannot.
+# The stop above timed out and said so, so the record still calls this tunnel
+# up, and it is: there is nothing to start until it has gone. **Then it has
+# gone, and left no pid file**, since openvpn takes that with it. That is what a
+# tunnel leaving by itself looks like, and netcfgd read it as "cannot tell", so
+# every apply after this said `nothing to do` over a tunnel that was not there.
+waited=0
+while still_running "$doomed"; do
+	waited=$((waited + 1))
+	[ "$waited" -gt 120 ] && break
+	sleep 0.1
+done
+check "the one that was leaving took its pid file with it" \
+	"$([ -e "$work/run/openvpn/vpn0.pid" ] && echo yes || echo no)" "no"
+"$ncfg" apply > "$work/replaced.txt" 2>&1 || true
 waited=0
 while [ ! -S "$work/run/openvpn/vpn0.sock" ]; do
 	waited=$((waited + 1))

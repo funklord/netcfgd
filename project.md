@@ -12686,6 +12686,44 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.716 A tunnel that left by itself stayed `running` for ever
+
+`ncfg apply` said `nothing to do` over an openvpn tunnel that was gone, and
+nothing started it again. Any tunnel that exits by itself does this, and a
+slow stop too. openvpn removes its pid file on the way out, and the liveness
+pass read a missing file as "cannot tell" (34e8b045, wedged.sh), which kept the
+record's `running`. A `kill -9` leaves the file, which is why the one check of
+this, "netcfgd notices the tunnel is gone", passed.
+
+**The rule stands for what it was written for, and openvpn was outside its
+premise.** "No handle means cannot tell" protects a live daemon from being
+called dead for having no file, which took the supplicant out of its
+`answering` round. openvpn has a handle: every tunnel netcfgd starts carries
+its socket path in its `argv`. So it now answers as link-local does, always:
+that mark on a process is running, and no file and no mark is gone.
+`liveness_test` holds both halves, the live one first.
+
+**How it was found.** `make live` failed "and is still running, which is the
+window this is about" in `openvpn.sh`, every run. That control was doing its
+job. The fake lingered 3 seconds and `OPENVPN_STOP_PATIENCE_MILLISECONDS` is
+3000, so on the C the stop outlasted it and the section's window never opened:
+its checks passed with nothing to test, the control alone saying so. How long
+that had been so was not measured. It lingers 8 seconds now.
+
+**The section changed with it.** The Rust did not wait for a stop, so its
+replacement started inside the window. The C reports the stop as not done
+(10.661), the record keeps the tunnel, and it is started once it has gone.
+
+**Open, the same shape:** hostapd, the supplicant, the router advertisement
+daemon, the DHCP server and miniupnpd keep "cannot tell" for a missing file. Each may remove its
+own pid file on a clean exit, and whether each carries a mark that makes this
+fix safe has not been read.
+
+**And a filter hid a failed build while this was being done.** `grep ' error '`
+does not match a compiler's `error:`, so `make` failed on a missing include,
+the old binary stayed, and two runs of the test tested that. Judged by the exit
+code since. Those two runs did show the check fail against the old code.
+
 ## 10.715 `make check` was measuring clang's fuzznet in a fresh tree
 
 The `size` gate failed by 232 bytes at 2,454,928, while the same commit built

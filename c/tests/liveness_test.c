@@ -31,6 +31,7 @@
 #include "ncfg/base.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
+#include "ncfg/openvpn.h"
 #include "ncfg/process.h"
 #include "ncfg/supplicant.h"
 
@@ -517,7 +518,8 @@ static void an_access_point_can_be_asked_at_last(void)
 }
 
 /*
- * A daemon with no pid file of netcfgd's is unanswerable, for all five kinds.
+ * A daemon with no pid file of netcfgd's is unanswerable, for each kind with no
+ * other handle on it. openvpn has one, and is below.
  *
  * **The rule was applied to one of them.** `a_client_netcfgd_gave_no_pid_file_
  * is_left_alone` covers the DHCP arm, which got it in 10.237 because a udhcpc
@@ -547,8 +549,7 @@ static void a_daemon_with_no_pid_file_of_netcfgds_is_left_alone(void)
 	} kinds[] = {
 		{ NCFG_BACKEND_SUPPLICANT, "wlan-nofile", "a supplicant" },
 		{ NCFG_BACKEND_ACCESS_POINT, "ap-nofile", "an access point" },
-		{ NCFG_BACKEND_ROUTER_ADVERT, "ra-nofile", "a router advertisement daemon" },
-		{ NCFG_BACKEND_OPENVPN, "vpn-nofile", "an openvpn tunnel" }
+		{ NCFG_BACKEND_ROUTER_ADVERT, "ra-nofile", "a router advertisement daemon" }
 	};
 	size_t at;
 
@@ -569,6 +570,47 @@ static void a_daemon_with_no_pid_file_of_netcfgds_is_left_alone(void)
 		check(observed->backend_count == 1u && observed->backends[0].running, said);
 		ncfg_observed_free(observed);
 	}
+}
+
+/*
+ * openvpn takes its pid file with it (10.716), so "no file" is what a tunnel
+ * that left by itself looks like, and "cannot tell" kept it `running` for ever
+ * while `ncfg apply` said `nothing to do`. It has a handle the rule above
+ * assumes is missing: its socket path in its `argv`. **The half that must not
+ * regress is the first**, that rule's whole reason: a tunnel that is there is
+ * not called dead for having no file.
+ */
+static void an_openvpn_tunnel_is_found_by_its_mark_with_no_pid_file(void)
+{
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_OPENVPN, "vpn-nofile", 1);
+	char             marker[512];
+	char             message[NCFG_ERROR_MAX];
+	pid_t            child;
+
+	if (!observed || !ncfg_openvpn_socket_path(run_dir, "vpn-nofile", marker, sizeof(marker),
+	        NULL, 0)) {
+		check(0, "the fixture reads");
+		ncfg_observed_free(observed);
+		return;
+	}
+	child = marked_child(marker);
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(child > 0 && observed->backends[0].running,
+	    "an openvpn tunnel with no pid file and its mark in argv is running");
+	ncfg_observed_free(observed);
+	reap();
+
+	observed = observed_with(NCFG_BACKEND_OPENVPN, "vpn-nofile", 1);
+	if (!observed) {
+		check(0, "the fixture reads");
+		return;
+	}
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(!observed->backends[0].running,
+	    "  and with neither, it has gone, so the planner can start it again");
+	ncfg_observed_free(observed);
 }
 
 static void the_round_refuses_what_it_cannot_be_asked(void)
@@ -605,6 +647,7 @@ int main(void)
 	a_client_that_has_died_reports_no_metric();
 	an_access_point_can_be_asked_at_last();
 	a_daemon_with_no_pid_file_of_netcfgds_is_left_alone();
+	an_openvpn_tunnel_is_found_by_its_mark_with_no_pid_file();
 	the_round_refuses_what_it_cannot_be_asked();
 
 	/* Named pids, never a pattern: another session's `sleep` is not this
