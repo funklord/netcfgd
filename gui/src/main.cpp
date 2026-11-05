@@ -19,6 +19,12 @@
 #include <QThread>
 
 #include <cstdio>
+#include <cstring>
+
+/* `VERSION`, by gui.pro; a build that reads no .pro says so rather than guess. */
+#ifndef NETCFGD_VERSION_TEXT
+#define NETCFGD_VERSION_TEXT "(version not given to this build)"
+#endif
 
 #include <QFileInfo>
 #ifdef Q_OS_ANDROID
@@ -112,6 +118,13 @@ static bool asked_for_tui(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+	/* Before QApplication, so that it answers with no display. The first line is
+	 * the program and its version alone, for whatever reads it. */
+	if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+		printf("netcfgd-gui %s\nCopyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>\n",
+		       NETCFGD_VERSION_TEXT);
+		return 0;
+	}
 #ifndef NETCFGD_QTTY
 	/* Before QApplication: this must work with no display, which is the
 	 * situation somebody typing `netcfgd-tui` is usually in. */

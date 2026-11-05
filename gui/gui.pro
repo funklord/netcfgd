@@ -40,6 +40,9 @@ CLIENT_LIB = $$CLIENT_DIR/libncfg_client.a
 
 INCLUDEPATH += $$CLIENT_DIR
 
+# The one place the version is stated, for `--version`.
+DEFINES += NETCFGD_VERSION_TEXT=\\\"$$cat($$PWD/../VERSION)\\\"
+
 android {
 	# The same three sources, compiled by the kit rather than linked from an
 	# archive: `libncfg_client.a` is this machine's architecture, and a second
