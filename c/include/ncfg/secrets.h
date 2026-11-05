@@ -159,7 +159,7 @@ typedef struct {
 /*
  * The reader behind the `estate` provider: 1 with the value in `value` and
  * its length in `*length`, 0 for none set here, -1 for one sealed to a key
- * this host lacks. Installed by the node while it serves, because this module
+ * this host lacks or a fuzznetd beside it not answering. Installed by the node while it serves, because this module
  * links no fuzznet; NULL takes it away. **Called on the loop's thread**, which
  * is where every apply and every request runs (the mailbox), and which is what
  * makes fuzznet's reader safe to call.

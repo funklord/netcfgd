@@ -354,8 +354,8 @@ int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t siz
  * The same, for a procedure anybody holding one of `tiers` may reach, as `ask`
  * is: netcfgd's own gate judges each request behind it, so fuzznet's grant only
  * has to let the caller in. 1 with the grants, space-separated and each once;
- * 0 where every tier is root's; -1 where one cannot be granted, `any` first
- * among them.
+ * 0 where every tier is root's; -1 where one cannot be granted. `any=x` alone
+ * where a tier is open to any user.
  */
 int ncfg_main_node_permit_any_of(const ncfg_principal_t *const *tiers, size_t count, char *out,
     size_t size);

@@ -12686,6 +12686,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.717 fuzznet's answers taken: a follower reads settings, and `any=x`
+
+Both signals of 10.709 and 10.712 came back built (inbox 20261104T2332Z), and
+`fuzznet` is pinned at 3b71a88 for them.
+
+- **Sec 882: an estate secret works beside a fuzznetd.**
+  `tests/live/c_estate_secret.sh` now stops netcfgd, makes a fuzznetd the face,
+  starts netcfgd as its follower, deletes `wg0`, and applies: the device comes
+  back with the sealed key, and the key is in neither daemon's log. The getter
+  can block up to 5 s, on the loop. An apply is what asks, and an apply is
+  already the loop's, so nothing new waits on it. -1 now also means the face did
+  not answer, so the refusal names both causes.
+- **Sec 883: a tier of `any` writes `any=x`**, for `status` and `ask` alike, and
+  alone, since it covers every other holder. Read back from a real node in
+  `node_serve.sh`, so fuzznet's parser took it.
+
+**The control socket is held now by `monitor`, by the client's connect on open,
+and by raidcfgd.** A permitted caller "subscribes to nothing" (`node/permit.h`),
+so a local stream needs fuzznet's word before `monitor` can move.
+
+`gui/Makefile` deletes Gradle's old APK before a build (`android-fresh`, inbox
+20261104T2327Z): Gradle otherwise pads holes in the APK it reopens, 15 to 17 per
+cent in beerssh.
+
 ## 10.716 A daemon that left by itself stayed `running` for ever
 
 `ncfg apply` said `nothing to do` over an openvpn tunnel that was gone, and
@@ -12849,9 +12873,9 @@ in `ask_test`. The wipe is by reading only: no test can see freed memory.
 - **`monitor` is a stream**, and 0312 does not carry one. The GUI, trays and
   `ncfg monitor` follow this machine on the socket. The events cursor of 10.703
   is the likely replacement, at a cost in latency nobody has measured.
-- **A tier of `any` has no grant**: fuzznet's grammar names a user or a group
-  (`node/permit.h`). Under `observe = "any"`, somebody other than the node's
-  user stays on the socket. Signalled to fuzznet (inbox 20261104T2251Z).
+- ~~A tier of `any` has no grant~~ -- **built by fuzznet as sec 883**, 3b71a88:
+  `any=x` lets every local user call a procedure, and is what such a tier
+  writes now, for `status` as well. Signalled as inbox 20261104T2251Z.
 - **The client still connects to the control socket on open**, so with that
   socket gone `ncfg_client_open` fails while `ncfg` works. It is the last step
   of retiring the socket, after the two above.
@@ -12972,12 +12996,13 @@ values. `ncfg nodes member` and `ncfg secret seal` say both (10.711). Sec 880 is
 coming: copies held by other root and admin hosts, so a later member is served
 once the sealer has gone.
 
-**Open: beside a fuzznetd, netcfgd is a follower, and a follower reads no
-setting.** The getter answers 0 there, so an estate secret reads as "no value
-here" on exactly the machines the holder wants running both.
-`fzn_daemon_local` would ask the face, and it is refused from `tick` and a
-procedure, which is where an apply runs. The sentence names this case.
-Signalled to fuzznet (inbox 20261104T2229Z); the fix is theirs.
+**Beside a fuzznetd, netcfgd is a follower, and it reads through the face.**
+The getter answered 0 there at first, so an estate secret read as "no value
+here" on exactly the machines the holder wants running both. Signalled
+(inbox 20261104T2229Z) and built by fuzznet as sec 882, 322f0d0: it asks the
+face, whose node opens what is sealed, so no prekey secret reaches this
+process. It can hold the loop up to 5 s, and -1 now also means the face did not
+answer, which the refusal says.
 
 **The Rust does not know this provider.** It is retired, and only C reads the
 witness now: `doc/schema/document.json` carries `estate` on the PPPoE password,

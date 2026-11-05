@@ -214,8 +214,14 @@ int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t siz
 	if (observe->kind == NCFG_PRINCIPAL_ROOT) {
 		return 0; /* the node's own user, whom fuzznet serves without a grant */
 	}
+	/* Every local user may call (fuzznet sec 883), and netcfgd's tiers judge
+	 * what they asked behind the procedure. */
+	if (observe->kind == NCFG_PRINCIPAL_ANY) {
+		(void)snprintf(out, size, "any=x");
+		return 1;
+	}
 	if (observe->kind != NCFG_PRINCIPAL_USER && observe->kind != NCFG_PRINCIPAL_GROUP) {
-		return -1; /* `any`: a grant names a user or a group, and nothing else */
+		return -1;
 	}
 	if (!observe->name || !observe->name[0]) {
 		return -1;
@@ -261,6 +267,11 @@ int ncfg_main_node_permit_any_of(const ncfg_principal_t *const *tiers, size_t co
 		}
 		if (want == 0) {
 			continue;
+		}
+		/* Anybody covers everybody else named. */
+		if (strcmp(grant, "any=x") == 0) {
+			(void)snprintf(out, size, "any=x");
+			return 1;
 		}
 		length = strlen(grant);
 		/* A whole grant already here, not one that merely starts the same. */

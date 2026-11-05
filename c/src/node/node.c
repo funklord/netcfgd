@@ -584,7 +584,9 @@ size_t ncfg_node_local(const char *line, char *reply, size_t cap)
 	return fzn_daemon_local(line, reply, cap);
 }
 
-/* The `estate` secret provider's reader, while this process serves (10.709). */
+/* The `estate` secret provider's reader, while this process serves (10.709).
+ * In a follower it asks the face, so it can hold the loop up to 5 s (fuzznet
+ * sec 882); an apply is what asks, and that is already the loop's. */
 static int estate_read(const char *key, char *value, size_t cap, size_t *length)
 {
 	return fzn_daemon_setting_here((const uint8_t *)key, strlen(key), (uint8_t *)value, cap,

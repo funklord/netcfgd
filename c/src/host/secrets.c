@@ -495,8 +495,9 @@ static ncfg_secret_t *read_estate(const char *name, ncfg_secret_error_t *why, ch
 	if (answer < 0) {
 		fail(why, NCFG_SECRET_FAILED);
 		ncfg_error_set(err, err_size,
-		    "secret `%s` is sealed to a key this host lacks: an operator names it a member "
-		    "with `ncfg nodes member HOST GROUP`, and seals it again", name);
+		    "secret `%s` could not be read: it is sealed to a key this host lacks, which an "
+		    "operator mends with `ncfg nodes member HOST GROUP` and sealing it again, or a "
+		    "fuzznetd beside this daemon did not answer", name);
 		return NULL;
 	}
 	if (answer == 0) {
@@ -504,8 +505,7 @@ static ncfg_secret_t *read_estate(const char *name, ncfg_secret_error_t *why, ch
 		 * operator sets across the estate, not a file here. */
 		fail(why, NCFG_SECRET_FAILED);
 		ncfg_error_set(err, err_size,
-		    "secret `%s` has no value here: an operator of the estate sets it, and a node "
-		    "following a fuzznetd holds no settings of its own", name);
+		    "secret `%s` has no value here: an operator of the estate sets it", name);
 		return NULL;
 	}
 	secret = secret_new(value, length);

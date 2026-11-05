@@ -206,8 +206,9 @@ int main(void)
 		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 0,
 		    "  root's needs none: fuzznet serves the node's own user");
 		who.kind = NCFG_PRINCIPAL_ANY;
-		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == -1,
-		    "  and `any` is none a grant can say");
+		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "any=x") == 0,
+		    "  and `any` is fuzznet's any=x, every local user's call");
 	}
 	{
 		/* `ask` admits a holder of any tier: each said once, root's left out. */
@@ -242,9 +243,9 @@ int main(void)
 		    "  and a name that starts another is its own");
 		check(ncfg_main_node_permit_any_of(roots, 3u, grant, sizeof(grant)) == 0,
 		    "  every tier root's needs none");
-		check(ncfg_main_node_permit_any_of(open, 3u, grant, sizeof(grant)) == -1 &&
-		        grant[0] == '\0',
-		    "  and a tier open to anybody is none a grant can say");
+		check(ncfg_main_node_permit_any_of(open, 3u, grant, sizeof(grant)) == 1 &&
+		        strcmp(grant, "any=x") == 0,
+		    "  and a tier open to anybody covers the rest, alone");
 	}
 
 	ncfg_buf_free(&whole);

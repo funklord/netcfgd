@@ -199,6 +199,25 @@ check $? "  and of askpart ($said)"
 kill -TERM $pid
 wait $pid
 
+# ---- a tier open to any user: fuzznet's any=x (sec 883, 10.712) ----
+printf 'global {\n\tcontrol {\n\t\tobserve = "any"\n\t\twifi = "group:%s"\n\t\tadmin = "root"\n\t}\n}\n' \
+	"$g" > "$R/conf/netcfgd.conf"
+timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/store" --fuzznet-arg "--socket=$R/fz.sock" \
+	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/log5" 2>&1 &
+pid=$!
+n=0
+until grep -q "permit for .askpart." "$R/log5" 2>/dev/null || [ $n -gt 50 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+said=$(ask "$R/fz.sock" "get setting host local/permit/ask")
+echo "$said" | grep -q '^ok [a-z]* any=x$'
+check $? "observe = any grants every local user's call of ask, fuzznet taking it ($said)"
+kill -TERM $pid
+wait $pid
+
 # ---- the observe tier closed: the same verb denied ----
 # A daemon of its own, because the control policy is read once at start (the
 # socket's servers hold the same copy), so an edit would not close it. With a

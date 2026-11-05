@@ -366,6 +366,7 @@ static void the_estate_provider(const char *config_dir)
 	message[0] = '\0';
 	check(!ncfg_secret_resolve(&resolver, &reference, &why, message, sizeof(message)) &&
 	    why == NCFG_SECRET_FAILED && strstr(kept(message), "sealed to a key this host lacks") &&
+	    strstr(kept(message), "did not answer") &&
 	    strstr(kept(message), "ncfg nodes member"),
 	    "sealed to another key says so, and names what an operator does about it");
 

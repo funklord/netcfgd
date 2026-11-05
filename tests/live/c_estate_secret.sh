@@ -15,6 +15,8 @@
 # group nobody is in says so; the same apply after `ncfg nodes member` and
 # `ncfg secret seal` carries it. Both are spoken to the socket `ncfg` finds for
 # this user, under a scratch XDG_RUNTIME_DIR, as an operator's would be.
+# Then beside a fuzznetd, netcfgd its follower: the device deleted and made
+# again, the key read through the face (fuzznet sec 882).
 #
 # HOW IT STOPS: the daemon runs under `timeout -k 5 60` and is killed by pid on
 # every path; each client call is under `timeout`; the socket wait is a count
@@ -46,8 +48,10 @@ ip link del wgprobe 2>/dev/null
 R=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-estate.XXXXXX") || exit 1
 case "$R" in */ncfg-estate.?*) ;; *) echo "c_estate_secret: odd scratch $R"; exit 1;; esac
 daemon=
+face=
 stop() {
 	[ -n "$daemon" ] && kill -TERM "$daemon" 2>/dev/null && wait "$daemon" 2>/dev/null
+	[ -n "$face" ] && kill -TERM "$face" 2>/dev/null && wait "$face" 2>/dev/null
 	rm -rf "$R"
 }
 trap stop EXIT
@@ -130,8 +134,37 @@ check $? "the kernel derives the public key of the sealed private key"
 ! grep -qF "$key" "$R/a.log" "$R/apply1.out" "$R/apply2.out" "$R/seal.out"
 check $? "the key is in no log and no output"
 
+# ---- beside a fuzznetd: netcfgd follows, and reads through the face ----
+kill -TERM "$daemon" 2>/dev/null
+wait "$daemon" 2>/dev/null
+daemon=
+ip link del wg0 2>/dev/null
+timeout -k 5 60 "$F" --fuzznet-dir="$R/a" --no-log-file --fuzznet-service=1 --fuzznet-product=1 \
+	--udp-port=$((33900 + $$ % 90)) > "$R/face.log" 2>&1 &
+face=$!
+n=0
+until ask status 2>/dev/null | grep -q '^ok ' || [ $n -gt 40 ]; do sleep 0.5; n=$((n + 1)); done
+timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/a" --fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
+	--fuzznet-arg --fuzznet-product=1 > "$R/follow.log" 2>&1 &
+daemon=$!
+n=0
+until grep -q 'following the face' "$R/follow.log" 2>/dev/null || [ $n -gt 40 ]; do
+	sleep 0.5
+	n=$((n + 1))
+done
+grep -q 'following the face' "$R/follow.log"
+check $? "beside a fuzznetd, netcfgd follows it"
+timeout 30 "$C" apply > "$R/apply3.out" 2>&1
+check $? "an apply there carries ($(tail -1 "$R/apply3.out" | head -c 50))"
+got=$(wg show wg0 public-key 2>&1)
+[ -n "$want" ] && [ "$want" = "$got" ]
+check $? "  with the sealed key, read through the face"
+! grep -qF "$key" "$R/follow.log" "$R/face.log" "$R/apply3.out"
+check $? "  and in no log there either"
+
 if [ $failed -ne 0 ]; then
-	for f in a.log apply1.out apply2.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
+	for f in a.log apply1.out apply2.out follow.log apply3.out; do sed "s/^/  $f: /" "$R/$f" | tail -15; done
 	echo "c_estate_secret.sh: some checks FAILED"
 	exit 1
 fi
