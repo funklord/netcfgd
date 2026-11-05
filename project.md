@@ -12686,6 +12686,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.718 Sections collected in every build, and a fake that lost replies
+
+**The size rule (2026-11-05) reached four builds here beyond `c/`.** Measured
+from clean builds:
+
+| Build | Text before | Text after |
+|---|---|---|
+| `netcfgd-nm` | 212,394 | 167,707 (-21%) |
+| `netcfgd-remote` | file 4,920,152 | file 3,634,992 (-26%) |
+| `netcfgd-gui` | 1,569,498 | 1,562,928 (-0.4%) |
+
+The window keeps nearly everything it links. qmake does not rebuild objects for
+changed flags, so the first GUI figure, 2 KB, was a new link over old objects;
+this one is a clean build. The Android mkspec already collects sections, so its
+build is unmeasured here. `client/`, the shim and `bridge/` pass their suites on
+the collected binaries, as do the GUI probes in `make check`.
+
+**`fuzznet_line_test` failed about one run in three under load**, on a different
+check each time: 23 of 72 at twelve at once, 0 of 40 alone. It is what stopped a
+`make check`. Its fake read one `recv` and closed, and `ncfg_fuzznet_ask` sends
+the newline as a second write, so the fake could close with data unread, which
+resets a unix socket's peer. The client lost a reply it had been sent. Real
+fuzznet reads a whole line. The fake does now: 0 of 72.
+
 ## 10.717 fuzznet's answers taken: a follower reads settings, and `any=x`
 
 Both signals of 10.709 and 10.712 came back built (inbox 20261104T2332Z), and

@@ -53,6 +53,11 @@ CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I$(CLIENT) \
 	   $(shell pkg-config --cflags dbus-1)
 LDLIBS  += $(CLIENT)/libncfg_client.a $(shell pkg-config --libs dbus-1)
 
+# Each function and datum in a section of its own, and the ones nothing reaches
+# dropped at link: the size rule, and `c/Makefile` says what it bought there.
+CFLAGS  += -ffunction-sections -fdata-sections
+LDFLAGS += -Wl,--gc-sections
+
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
 endif

@@ -50,6 +50,11 @@ WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 CFLAGS  ?= -Os
 CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE
 
+# Each function and datum in a section of its own, and the ones nothing reaches
+# dropped at link: the size rule, and `c/Makefile` says what it bought there.
+CFLAGS  += -ffunction-sections -fdata-sections
+LDFLAGS += -Wl,--gc-sections
+
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
 endif

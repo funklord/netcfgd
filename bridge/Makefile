@@ -75,6 +75,11 @@ CFLAGS  ?= -std=c11 -Os
 CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -I$(FUZZNET) -I$(FUZZNET)/wire/generated -I$(CLIENT) \
 	   -I$(CORE)/include
 
+# Each function and datum in a section of its own, and the ones nothing reaches
+# dropped at link: the size rule, and `c/Makefile` says what it bought there.
+CFLAGS  += -ffunction-sections -fdata-sections
+LDFLAGS += -Wl,--gc-sections
+
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
 endif

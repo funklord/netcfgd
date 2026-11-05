@@ -29,6 +29,12 @@ CONFIG -= app_bundle
 QMAKE_CXXFLAGS_RELEASE -= -O2
 QMAKE_CXXFLAGS_RELEASE += -Os
 
+# Each function and datum in a section of its own, and the ones nothing reaches
+# dropped at link: the size rule, and c/Makefile says what it bought there.
+QMAKE_CFLAGS += -ffunction-sections -fdata-sections
+QMAKE_CXXFLAGS += -ffunction-sections -fdata-sections
+QMAKE_LFLAGS += -Wl,--gc-sections
+
 CLIENT_DIR = $$PWD/../client
 CLIENT_LIB = $$CLIENT_DIR/libncfg_client.a
 
