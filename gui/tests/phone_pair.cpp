@@ -150,6 +150,8 @@ int main(int argc, char **argv)
 		check(ncfg_pair_code_image("no code here\n", 4).isNull(),
 		      "and output with no code in it is no picture");
 	}
+	check(ncfg_code_reader::read_image(drawn(card, 4, 0).flipped(Qt::Vertical)) == card,
+	      "and mirrored, as a camera may give it");
 	QImage blank(300, 300, QImage::Format_RGB32);
 
 	blank.fill(Qt::white);

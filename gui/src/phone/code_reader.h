@@ -16,6 +16,10 @@
 
 #include <QByteArray>
 #include <QImage>
+#ifdef Q_OS_ANDROID
+#include <QMutex>
+#include <QVideoFrame>
+#endif
 #include <QObject>
 #include <QString>
 
@@ -55,7 +59,10 @@ private:
 	QCamera              *camera = nullptr;
 	QMediaCaptureSession *capture = nullptr;
 	QVideoSink           *sink = nullptr;
-	qint64                last_look = 0;
+#ifdef Q_OS_ANDROID
+	QMutex                latest_lock;
+	QVideoFrame           latest;
+#endif
 	int                   frames = 0;
 	int                   ticks = 0;
 };

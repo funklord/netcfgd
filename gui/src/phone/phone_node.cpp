@@ -11,10 +11,6 @@ extern "C" {
 
 #include <sys/stat.h>
 
-/* The peer port. The phone starts every conversation, so nothing has to find
- * it here: it is fixed only because fuzznetd asks for one. */
-static const int phone_udp_port = 48090;
-
 /* Two hundred looks, 50 ms apart: ten seconds. A first start makes keys. */
 static const int start_looks = 200;
 
@@ -65,7 +61,10 @@ bool ncfg_phone_node_start(const QString &program, const QString &base, QObject 
 	node->setProgram(program);
 	node->setArguments({QStringLiteral("--fuzznet-dir=%1").arg(store),
 	                    QStringLiteral("--no-log-file"),
-	                    QStringLiteral("--udp-port=%1").arg(phone_udp_port),
+	                    /* Any free one: the phone starts every conversation, and
+	                     * a host answers where it heard from. A fixed port was
+	                     * one a second node beside it could already hold. */
+	                    QStringLiteral("--udp-port=0"),
 	                    QStringLiteral("--fuzznet-service=%1").arg(NCFG_FUZZNET_SERVICE),
 	                    QStringLiteral("--fuzznet-product=%1").arg(NCFG_FUZZNET_PRODUCT)});
 	node->setStandardOutputFile(QProcess::nullDevice());

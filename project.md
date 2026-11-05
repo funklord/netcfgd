@@ -12686,6 +12686,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.727 The camera, on an emulator: a code read, and a leak found
+
+`-camera-back imagefile:` shows an emulator's camera a file, so the whole first run
+could be driven: Scan pressed, a real `ncfg pair` code read through the camera,
+the phone joined, and the window on the host's links, with `ncfg pair` saying so.
+
+**It found the worst fault of the phone work.** Scanning grew the app to 1.4 GB in a
+minute and Android killed it. Frames were handled on the GUI thread, each a queued
+call holding its buffer, and arrived faster than `toImage` could convert one. Now the
+camera's thread keeps the latest frame only, the tick takes it, and brightness is the
+Y plane as it stands. 144 frames in 15 s where it had managed none; 179 MB. A slow
+phone would have met this; fuzzypickles' scanner, which this followed, handles frames
+the same way (told, its inbox).
+
+**A mirrored code is read too**, with quirc's flip: the emulator's picture arrived
+flipped, and a front camera's does.
+
+**The phone's port is any free one.** `make check` failed on `phone_pair` with the
+fixed 48090 held by a netcfgd on the same machine. A phone starts every conversation.
+
+Not tested here: a printed or on-screen code through a lens, with its blur and
+angle. That is the phone's.
+
 ## 10.726 `ncfg pair open`: one step for who does not know what `remote` is
 
 A closed machine answered `ncfg pair` with a sentence about the `global` block,

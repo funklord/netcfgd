@@ -10,7 +10,7 @@
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
 #include <QPermissions>
-#include <QVideoFrame>
+#include <QMutexLocker>
 #include <QVideoSink>
 #endif
 
@@ -23,9 +23,6 @@ extern "C" {
 /* A phone's camera gives far more pixels than a code needs, and recognition
  * costs in proportion to them. */
 static const int widest_frame = 960;
-
-/* A look at most this often, in ms: the frames arrive on the GUI thread. */
-static const int look_every = 80;
 
 /* Ticks of 100 ms: long enough to aim, short enough that a phone left on a
  * table does not hold the camera. */
@@ -62,7 +59,14 @@ QByteArray ncfg_code_reader::read_image(const QImage &image)
 		static struct quirc_data data;
 
 		quirc_extract(reader, at, &code);
-		if (quirc_decode(&code, &data) == QUIRC_SUCCESS) {
+		quirc_decode_error_t read = quirc_decode(&code, &data);
+
+		/* Mirrored, as a front camera or a screen's reflection gives it. */
+		if (read == QUIRC_ERROR_DATA_ECC) {
+			quirc_flip(&code);
+			read = quirc_decode(&code, &data);
+		}
+		if (read == QUIRC_SUCCESS) {
 			found = QByteArray(reinterpret_cast<const char *>(data.payload), data.payload_len);
 		}
 	}
@@ -104,8 +108,53 @@ void ncfg_code_reader::look(const QImage &frame)
 	}
 }
 
+#ifdef Q_OS_ANDROID
+/*
+ * A frame's brightness as a grey image. Reading a code needs nothing else, and in
+ * the YUV formats a camera gives it is the first plane as it stands, where
+ * `toImage` converts every pixel of colour nobody looks at. Anything else goes the
+ * long way.
+ */
+static QImage grey_of(QVideoFrame frame)
+{
+	switch (frame.pixelFormat()) {
+	case QVideoFrameFormat::Format_NV12:
+	case QVideoFrameFormat::Format_NV21:
+	case QVideoFrameFormat::Format_YUV420P:
+	case QVideoFrameFormat::Format_YV12:
+		if (frame.map(QVideoFrame::ReadOnly)) {
+			const QImage plane(frame.bits(0), frame.width(), frame.height(),
+			                   frame.bytesPerLine(0), QImage::Format_Grayscale8);
+			QImage       copied = plane.copy();
+
+			frame.unmap();
+			return copied;
+		}
+		break;
+	default:
+		break;
+	}
+	return frame.toImage();
+}
+#endif
+
 void ncfg_code_reader::tick()
 {
+#ifdef Q_OS_ANDROID
+	QVideoFrame frame;
+	{
+		const QMutexLocker hold(&latest_lock);
+
+		frame = latest;
+		latest = QVideoFrame();
+	}
+	if (frame.isValid()) {
+		look(grey_of(frame));
+		if (!camera) {
+			return;
+		}
+	}
+#endif
 	ticks++;
 	if (ticks % 10 == 0) {
 		emit status(QStringLiteral("Looked at %1 frames.").arg(frames));
@@ -160,19 +209,20 @@ void ncfg_code_reader::start()
 	sink = new QVideoSink(this);
 	capture->setCamera(camera);
 	capture->setVideoSink(sink);
-	last_look = 0;
-	connect(sink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
-		static QElapsedTimer clock;
+	/*
+	 * **The latest frame and no other, taken on the camera's own thread.** Handled
+	 * on the GUI thread, each frame was a queued call holding its buffer, and they
+	 * arrived faster than one could be converted: the app reached 1.4 GB in a minute
+	 * on an emulator and Android killed it. Here a frame not looked at is replaced
+	 * and let go, so a slow phone looks less often and holds one.
+	 */
+	connect(sink, &QVideoSink::videoFrameChanged, this,
+	        [this](const QVideoFrame &frame) {
+		        const QMutexLocker hold(&latest_lock);
 
-		if (!clock.isValid()) {
-			clock.start();
-		}
-		if (!camera || clock.elapsed() - last_look < look_every) {
-			return;
-		}
-		last_look = clock.elapsed();
-		look(frame.toImage());
-	});
+		        latest = frame;
+	        },
+	        Qt::DirectConnection);
 	frames = 0;
 	ticks = 0;
 	camera->start();
@@ -204,6 +254,9 @@ void ncfg_code_reader::stop(const QString &why)
 		sink->deleteLater();
 		sink = nullptr;
 	}
+	const QMutexLocker hold(&latest_lock);
+
+	latest = QVideoFrame();
 #endif
 	if (was) {
 		emit running_changed(false);
