@@ -12701,7 +12701,10 @@ nothing, as the socket cannot go until raidcfgd moves anyway. **Before the socke
 that detail needs a home: a read of the last events, by `ask`, is the likely one.
 
 **Limits.** `any` has no `=r` (fuzznet's sec 883), so under `observe = "any"` only the
-daemon's own user holds a stream; asked of fuzznet. `ncfg tui` still takes the control
+daemon's own user holds a stream, and everyone else stays on the control socket.
+Asked of fuzznet, which parked it for the holder: `any` could take all four held slots
+and shut a tray out, and it suggests a right that holds a stream and nothing else.
+`ncfg tui` still takes the control
 socket alone. fuzznet tested with one account, and so has this: a second real user
 is unconfirmed.
 
