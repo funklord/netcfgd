@@ -735,6 +735,84 @@ static void a_request_is_not_sent_twice(void)
 }
 
 /*
+ * With no control socket at all, a daemon that answers on fuzznet is reached there
+ * (0309), which is the socket's retirement seen from a client. And one that does
+ * not is the old sentence, naming the remedy.
+ */
+static void a_daemon_on_fuzznet_alone_opens(void)
+{
+	char   dir[] = "/tmp/ncfg-open.XXXXXX";
+	char   control[128];
+	char   fuzznet[128];
+	char   err[NCFG_ERROR_MAX];
+	pid_t  child;
+	int    listener;
+	int    status = 0;
+
+	if (!mkdtemp(dir)) {
+		ok("a scratch directory", 0, strerror(errno));
+		return;
+	}
+	snprintf(control, sizeof(control), "%s/netcfgd.sock", dir);
+	snprintf(fuzznet, sizeof(fuzznet), "%s/fuzznet.sock", dir);
+	ncfg_client_t *client = ncfg_client_open(control, err, sizeof(err));
+	ok("no socket of either kind is the sentence naming the remedy",
+	   client == NULL && strstr(err, "systemctl") != NULL, err);
+	if (client) {
+		ncfg_client_close(client);
+	}
+	listener = listen_at(fuzznet);
+	if (listener < 0) {
+		ok("the fake fuzznet listens", 0, strerror(errno));
+		return;
+	}
+	child = fork();
+	if (child == 0) {
+		char line[256];
+
+		alarm(10);
+		for (int at = 0; at < 3; at++) {
+			int fd = accept(listener, NULL, NULL);
+
+			if (fd < 0) {
+				_exit(1);
+			}
+			(void)read_request(fd, line, sizeof(line));
+			if (at == 0) {
+				(void)!write(fd, "ok served\n", 10u);
+			} else if (at == 1) {
+				fake_page(fd, "{\"response\":\"plan\",\"said_by\":\"fuzznet\"}");
+			} else {
+				(void)!write(fd, "error no procedure ask here\n", 28u);
+			}
+			close(fd);
+		}
+		_exit(0);
+	}
+	close(listener);
+	client = ncfg_client_open(control, err, sizeof(err));
+	ok("a daemon on fuzznet alone opens", client != NULL, err);
+	ok("  and leaves no error behind", client == NULL || err[0] == '\0', err);
+	ncfg_json_doc_t *plan = client ? ncfg_client_plan(client, err, sizeof(err)) : NULL;
+	ok("  and answers over it", plan != NULL, err);
+	if (plan) {
+		ncfg_json_free(plan);
+	}
+	plan = client ? ncfg_client_plan(client, err, sizeof(err)) : NULL;
+	ok("a refusal with no socket to fall back on is an error", plan == NULL, err);
+	ok("  saying fuzznet's words", strstr(err, "no procedure") != NULL, err);
+	if (plan) {
+		ncfg_json_free(plan);
+	}
+	if (client) {
+		ncfg_client_close(client);
+	}
+	waitpid(child, &status, 0);
+	unlink(fuzznet);
+	rmdir(dir);
+}
+
+/*
  * A client of another node (10.698): with this user's fuzznetd faked at
  * `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, a request goes as `call ask at
  * KEY 0 REQUEST` and the node's answer comes back as a document; the client
@@ -3314,6 +3392,7 @@ int main(int argc, char **argv)
 	a_refusal_is_not_a_dead_socket();
 	status_over_fuzznet_first();
 	a_request_is_not_sent_twice();
+	a_daemon_on_fuzznet_alone_opens();
 	a_client_of_another_node();
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();

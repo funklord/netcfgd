@@ -13038,9 +13038,9 @@ in `ask_test`. The wipe is by reading only: no test can see freed memory.
 - ~~A tier of `any` has no grant~~ -- **built by fuzznet as sec 883**, 3b71a88:
   `any=x` lets every local user call a procedure, and is what such a tier
   writes now, for `status` as well. Signalled as inbox 20261104T2251Z.
-- **The client still connects to the control socket on open**, so with that
-  socket gone `ncfg_client_open` fails while `ncfg` works. It is the last step
-  of retiring the socket, after the two above.
+- ~~**The client still connects to the control socket on open.**~~ It opens on
+  fuzznet alone now, where the connect fails and fuzznet answers, with
+  `client_test` holding both that and the old sentence for no daemon at all.
 - **raidcfgd reads the JSON socket**, told in `20261102T2345Z`; the socket
   cannot go until it has moved.
 

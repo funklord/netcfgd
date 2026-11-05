@@ -165,6 +165,22 @@ static int connect_socket(const char *socket_path, char *err, size_t err_size)
 	return fd;
 }
 
+/* Whether the daemon named by `socket_path` answers on its fuzznet socket, in the
+ * same run directory. Any reply will do: a refusal is still somebody there. */
+static int fuzznet_serves(const char *socket_path)
+{
+	char run_dir[sizeof(((ncfg_client_t *)0)->path)];
+	char socket[1100];
+	char reply[256];
+	char why[256];
+	int  silent = 0;
+
+	return ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir)) &&
+	    ncfg_fuzznet_daemon_socket(run_dir, socket, sizeof(socket)) &&
+	    ncfg_fuzznet_ask(socket, "status", reply, sizeof(reply), 2000, &silent, why,
+	        sizeof(why));
+}
+
 ncfg_client_t *ncfg_client_open(const char *socket_path, char *err, size_t err_size)
 {
 	if (err && err_size) {
@@ -174,15 +190,24 @@ ncfg_client_t *ncfg_client_open(const char *socket_path, char *err, size_t err_s
 		socket_path = ncfg_client_default_socket();
 	}
 
+	/* **The control socket is not needed to open** (0309): a daemon that answers
+	 * on its fuzznet socket is reached there, and the fallback below it simply
+	 * is not there. Asked only after the connect failed, so the sentence that
+	 * names the remedy is still the one a stopped daemon gets. */
 	int fd = connect_socket(socket_path, err, err_size);
-	if (fd < 0) {
+	if (fd < 0 && !fuzznet_serves(socket_path)) {
 		return NULL;
+	}
+	if (fd < 0 && err && err_size) {
+		err[0] = '\0';
 	}
 
 	ncfg_client_t *client = calloc(1, sizeof(*client));
 	if (!client) {
 		set_error(err, err_size, "out of memory");
-		close(fd);
+		if (fd >= 0) {
+			close(fd);
+		}
 		return NULL;
 	}
 	client->fd = fd;
@@ -404,7 +429,7 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 	 * the socket would run it again. */
 	time_t now = time(NULL);
 	char   run_dir[sizeof(client->path)];
-	if (now >= client->fuzznet_after &&
+	if ((client->fd < 0 || now >= client->fuzznet_after) &&
 	    ncfg_fuzznet_run_dir_of(client->path, run_dir, sizeof(run_dir))) {
 		char  *answer = NULL;
 		size_t answer_length = 0;
@@ -424,7 +449,7 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 			}
 			return answered;
 		}
-		if (!nothing_ran) {
+		if (!nothing_ran || client->fd < 0) {
 			set_error(err, err_size, "%s", why);
 			client->broken = 1;
 			return NULL;
