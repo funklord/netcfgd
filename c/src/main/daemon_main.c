@@ -971,6 +971,7 @@ static void node_permits(const ncfg_main_policy_t *policy)
 
 	want = ncfg_main_node_permit(policy ? &policy->control.observe : NULL, grant, sizeof(grant));
 	node_permit("status", want, grant);
+	node_permit("eventlog", want, grant);
 	/* And the events netcfgd publishes follow it too, held by whoever may read
 	 * the status they say to read: the same grant as a read. A word nobody
 	 * granted is no stream for anybody, the node's own user included (fuzznet's
@@ -1037,6 +1038,10 @@ static size_t node_call(void *context, const char *name, const uint8_t *key,
 		(void)clock_gettime(CLOCK_MONOTONIC, &now);
 		return ncfg_main_ask(&driven->ask, key, key ? NULL : peer, args, length, answer, cap,
 		    escaped_cap, (uint64_t)now.tv_sec * 1000u + (uint64_t)now.tv_nsec / 1000000u);
+	}
+	if (strcmp(name, NCFG_NODE_PROCEDURE_EVENTLOG) == 0) {
+		return ncfg_main_node_events(driven->policy, driven->subscribers, key ? NULL : peer,
+		    args, length, answer, cap, escaped_cap);
 	}
 	if (strcmp(name, NCFG_NODE_PROCEDURE_STATUS) != 0) {
 		return 0u;

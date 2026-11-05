@@ -155,6 +155,26 @@ size_t ncfg_main_subscribers_prune(ncfg_main_subscribers_t *subscribers)
 	return gone;
 }
 
+int ncfg_main_subscribers_since(const ncfg_main_subscribers_t *subscribers, long from,
+    ncfg_buf_t *out)
+{
+	size_t told = subscribers ? subscribers->told : 0u;
+	size_t at = from < 0 || (size_t)from > told ? told : (size_t)from;
+
+	if (told - at > NCFG_MAIN_EVENTS_KEPT) {
+		at = told - NCFG_MAIN_EVENTS_KEPT;
+	}
+	ncfg_buf_addf(out, "%zu\n", told);
+	for (; at < told; at++) {
+		const char *line = subscribers->kept[at % NCFG_MAIN_EVENTS_KEPT];
+
+		if (line) {
+			ncfg_buf_add(out, line, strlen(line));
+		}
+	}
+	return !ncfg_buf_failed(out);
+}
+
 void ncfg_main_subscribers_close(ncfg_main_subscribers_t *subscribers)
 {
 	size_t at;
@@ -166,6 +186,12 @@ void ncfg_main_subscribers_close(ncfg_main_subscribers_t *subscribers)
 		(void)close(subscribers->at[at]);
 	}
 	subscribers->count = 0;
+	if (subscribers) {
+		for (size_t kept = 0; kept < NCFG_MAIN_EVENTS_KEPT; kept++) {
+			free(subscribers->kept[kept]);
+			subscribers->kept[kept] = NULL;
+		}
+	}
 }
 
 /*
@@ -268,7 +294,7 @@ void ncfg_main_subscribers_tell(ncfg_main_subscribers_t *subscribers,
 	if (subscribers && event && (unsigned)event->kind < 8u * sizeof(subscribers->unpublished)) {
 		subscribers->unpublished |= 1u << (unsigned)event->kind;
 	}
-	if (!subscribers || subscribers->count == 0u || !event) {
+	if (!subscribers || !event) {
 		return;
 	}
 	/* Once, not per subscriber: the line is the same for everybody and
@@ -286,6 +312,13 @@ void ncfg_main_subscribers_tell(ncfg_main_subscribers_t *subscribers,
 	}
 	bytes = ncfg_buf_text(&line);
 	length = line.length;
+	{
+		char **slot = &subscribers->kept[subscribers->told % NCFG_MAIN_EVENTS_KEPT];
+
+		free(*slot);
+		*slot = strndup(bytes, length);
+		subscribers->told++;
+	}
 
 	for (at = 0; at < subscribers->count; at++) {
 		int fd = subscribers->at[at];

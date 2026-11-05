@@ -118,7 +118,7 @@ held=$!
 sleep 1
 timeout 10 "$C" reload --run-dir "$R/run" > /dev/null 2>&1
 wait $held
-grep -q '"event":"reloaded"' "$R/held"
+grep -q '"event":"reloaded".*"ok":true\|"ok":true.*"event":"reloaded"' "$R/held"
 check $? "  and \`monitor\` hears a reload on fuzznet's stream ($(head -c 60 "$R/held"))"
 # And `ncfg tui`'s events pane, in a pty, bounded by its own deadline and `timeout`.
 timeout 14 python3 -I -c '
@@ -147,7 +147,7 @@ os.write(fd, b"q")
 time.sleep(0.3)
 os.kill(pid, 9)
 sys.stdout.write(seen.decode(errors="replace"))' "$C" "$R/run" > "$R/tui.held" 2>&1
-grep -q 'read again' "$R/tui.held"
+grep -q 'reloaded' "$R/tui.held"
 check $? "  and \`ncfg tui\`'s events pane hears it too"
 # Every request now (0309, 10.712), and not only `status`: with no control
 # socket to reach, these can only have come through `call ask`. A request past

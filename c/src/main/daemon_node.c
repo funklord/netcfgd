@@ -25,6 +25,7 @@
  * Kept apart from `daemon_main.c` so a test can ask it without a node.
  */
 #include "main_internal.h"
+#include "loop_internal.h"
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
@@ -77,6 +78,58 @@ static size_t escaped_length(const char *text, size_t length)
 }
 
 /*
+ * One page of `status`, whatever it holds: the header and as much from `from` as
+ * fits `cap`, and `escaped_cap` escaped where that is not 0. 0 where not even the
+ * header would.
+ */
+static size_t page_of(const ncfg_buf_t *whole, unsigned long from, char *reply, size_t cap,
+    size_t escaped_cap)
+{
+	const ncfg_buf_t *status = whole;
+	uint64_t          digest;
+	size_t            header;
+	size_t            count;
+	int               wrote;
+
+	if (from > status->length) {
+		from = status->length;
+	}
+	/* The header at its longest, so the page is sized before it is written. */
+	digest = ncfg_status_page_digest(status->data, status->length);
+	wrote = snprintf(reply, cap, "ok %zu %lu %zu %016llx\n", status->length, from, status->length,
+	    (unsigned long long)digest);
+	if (wrote <= 0 || (size_t)wrote >= cap ||
+	    (escaped_cap && escaped_length(reply, (size_t)wrote) >= escaped_cap)) {
+		return 0u;
+	}
+	count = status->length - (size_t)from;
+	if (count > cap - (size_t)wrote) {
+		count = cap - (size_t)wrote;
+	}
+	if (escaped_cap) {
+		size_t room = escaped_cap - escaped_length(reply, (size_t)wrote);
+		size_t take = 0;
+
+		while (take < count) {
+			size_t one = escaped_length(status->data + from + take, 1u);
+
+			if (one > room) {
+				break;
+			}
+			room -= one;
+			take++;
+		}
+		count = take;
+	}
+	wrote = snprintf(reply, cap, "ok %zu %lu %zu %016llx\n", status->length, from, count,
+	    (unsigned long long)digest);
+	header = (size_t)wrote;
+	memcpy(reply + header, status->data + from, count);
+	return header + count;
+}
+
+
+/*
  * The status, one page of it, for a caller already identified: `local` the
  * peer of a caller on this machine, judged by the control tiers as the socket
  * judges one; NULL for an operator of the estate, judged by the `remote`
@@ -95,10 +148,7 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
 	char                 err[NCFG_ERROR_MAX];
 	const char          *rest = line;
 	unsigned long        from = 0;
-	size_t               header;
-	size_t               count;
-	uint64_t             digest;
-	int                  wrote;
+	size_t               wrote_all;
 	int                  allowed;
 
 	if (!policy || !reply || cap == 0u) {
@@ -136,43 +186,50 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
 		ncfg_buf_free(&status);
 		return say(reply, cap, "error", err[0] ? err : "there is no observation to answer with");
 	}
-	if (from > status.length) {
-		from = status.length;
-	}
-	/* The header at its longest, so the page is sized before it is written. */
-	digest = ncfg_status_page_digest(status.data, status.length);
-	wrote = snprintf(reply, cap, "ok %zu %lu %zu %016llx\n", status.length, from, status.length,
-	    (unsigned long long)digest);
-	if (wrote <= 0 || (size_t)wrote >= cap ||
-	    (escaped_cap && escaped_length(reply, (size_t)wrote) >= escaped_cap)) {
-		ncfg_buf_free(&status);
+	wrote_all = page_of(&status, from, reply, cap, escaped_cap);
+	ncfg_buf_free(&status);
+	return wrote_all;
+}
+
+size_t ncfg_main_node_events(const ncfg_main_policy_t *policy,
+    const ncfg_main_subscribers_t *subscribers, const ncfg_peer_t *local, const char *args,
+    size_t length, char *reply, size_t cap, size_t escaped_cap)
+{
+	ncfg_proto_request_t asked;
+	ncfg_authz_roots_t   roots = ncfg_authz_roots_default();
+	ncfg_buf_t           lines;
+	char                 line[64];
+	char                 err[NCFG_ERROR_MAX];
+	long                 since = -1;
+	unsigned long        from = 0;
+	size_t               wrote;
+
+	if (!policy || !reply || cap == 0u) {
 		return 0u;
 	}
-	count = status.length - (size_t)from;
-	if (count > cap - (size_t)wrote) {
-		count = cap - (size_t)wrote;
+	/* SINCE FROM, or `-` for only where to ask from. */
+	if (!line_of(args ? args : "", args ? length : 0u, line, sizeof(line)) ||
+	    (line[0] != '-' && sscanf(line, "%ld %lu", &since, &from) != 2)) {
+		return say(reply, cap, "malformed", "`eventlog` takes SINCE FROM, or `-`");
 	}
-	if (escaped_cap) {
-		size_t room = escaped_cap - escaped_length(reply, (size_t)wrote);
-		size_t take = 0;
-
-		while (take < count) {
-			size_t one = escaped_length(status.data + from + take, 1u);
-
-			if (one > room) {
-				break;
-			}
-			room -= one;
-			take++;
-		}
-		count = take;
+	/* What may read the status may read what it says happened. */
+	memset(&asked, 0, sizeof(asked));
+	asked.kind = NCFG_PROTO_REQ_STATUS;
+	err[0] = '\0';
+	if (!(local ? ncfg_authz_permitted(&roots, &policy->control, &policy->remote,
+	                  NCFG_ARRIVED_LOCAL, local, &asked, err, sizeof(err))
+	            : ncfg_authz_check(&roots, &policy->control, &policy->remote,
+	                  NCFG_ARRIVED_REMOTE, NULL, &asked, err, sizeof(err)))) {
+		return say(reply, cap, "denied", err);
 	}
-	wrote = snprintf(reply, cap, "ok %zu %lu %zu %016llx\n", status.length, from, count,
-	    (unsigned long long)digest);
-	header = (size_t)wrote;
-	memcpy(reply + header, status.data + from, count);
-	ncfg_buf_free(&status);
-	return header + count;
+	ncfg_buf_init(&lines, NCFG_PROTO_MAX_LINE);
+	if (!ncfg_main_subscribers_since(subscribers, since, &lines)) {
+		ncfg_buf_free(&lines);
+		return say(reply, cap, "error", "the events would not fit an answer");
+	}
+	wrote = page_of(&lines, from, reply, cap, escaped_cap);
+	ncfg_buf_free(&lines);
+	return wrote;
 }
 
 size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,

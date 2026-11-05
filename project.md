@@ -12686,6 +12686,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.731 The events' detail has a home, so fuzznet's stream loses nothing
+
+10.729's stream said an event's kind and nothing else. Its name field is 32 bytes, and
+a summary or a compiler's diagnostics are sentences, so they could not ride on it. The
+daemon now keeps its last 64 event lines, and a procedure of its own, `eventlog SINCE
+FROM`, reads them by a cursor, paged and judged as `status` is. A reader that hears a
+kind reads what happened since, and gets the lines the control socket would have
+sent, whole: `{"response":"event","event":"reloaded","ok":true}` through fuzznet, to
+the second user too. A procedure rather than a new control request: no schema or
+vocabulary changes for something only the stream needs. A reader 64 behind has lost
+the rest, and re-reads the status, as after any gap; if the read fails it still gets
+the kind.
+
 ## 10.729 `monitor` over fuzznet, where the control socket is not there
 
 fuzznet built held streams (its sec 899, asked from here): `get events net`, for a
@@ -12693,12 +12706,8 @@ caller `local/permit/net` lets read, hears what this daemon publishes as `net-..
 The daemon writes that permit from the `observe` tier. `ncfg monitor` and the GUI's
 stream take it when the control socket is gone, on the same descriptor to wait on.
 
-**It is the fallback, not the first choice, deliberately.** Fuzznet's event is a
-subject and no more, so it loses the interface, whether a reload compiled, and a
-window's seconds, which the control socket's stream carries, and a summary can only
-say to read the status. Preferring it now would make the events tab worse for
-nothing, as the socket cannot go until raidcfgd moves anyway. **Before the socket goes**
-that detail needs a home: a read of the last events, by `ask`, is the likely one.
+It was the fallback at first, since fuzznet's event is a subject and no more; 10.731
+gave the detail a home.
 
 **A second real user is confirmed** by `c/tests/node_second_user.sh`: a user namespace
 with subordinate ids gives real uids, so the user `observe` names holds the stream and
@@ -13117,8 +13126,11 @@ in `ask_test`. The wipe is by reading only: no test can see freed memory.
 - ~~**The client still connects to the control socket on open.**~~ It opens on
   fuzznet alone now, where the connect fails and fuzznet answers, with
   `client_test` holding both that and the old sentence for no daemon at all.
-- **raidcfgd reads the JSON socket**, told in `20261102T2345Z`; the socket
-  cannot go until it has moved.
+- ~~**raidcfgd reads the JSON socket**; the socket cannot go until it has moved.~~
+  **It never did.** Written from a misreading of 0309's "adopted", and repeated in
+  reports until read against its tree on 2026-11-05: raidcfgd copied the encoding for
+  its own daemon's socket, and nothing in its code connects to netcfgd. Nothing outside
+  this tree holds the socket up.
 
 **Verified:**
 

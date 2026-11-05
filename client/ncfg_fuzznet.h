@@ -167,13 +167,27 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
 int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size);
 
 /*
- * One line of that stream as the event line the control socket would have sent,
- * into `out`: 1, or 0 for a line that is not one of netcfgd's events. **Only the
- * kind arrives** -- no interface, no `ok`, no seconds -- so the summary says what
- * happened and that the rest is in the status, which is how fuzznet means a stream
- * to be read.
+ * What a held stream's lines mean (10.731). A line says only an event's kind, so
+ * hearing one asks the `eventlog` procedure for what happened since the cursor, and
+ * those are the event lines the control socket would have sent, whole. Where that
+ * read fails, the kind alone is made into one, so a reader still hears something.
  */
-int ncfg_fuzznet_event_json(const char *line, char *out, size_t out_size);
+typedef struct {
+	char   run_dir[256];
+	long   cursor; /* -1 until known */
+	char  *pending;
+	size_t length;
+	size_t at;
+} ncfg_fuzznet_events_t;
+
+/* Where this stream starts: from now. */
+void ncfg_fuzznet_events_begin(ncfg_fuzznet_events_t *events, const char *run_dir);
+/* A line read from the stream. */
+void ncfg_fuzznet_events_heard(ncfg_fuzznet_events_t *events, const char *line);
+/* The next event's line, without its newline, valid until the next call: 1, or 0
+ * for none waiting. */
+int ncfg_fuzznet_events_take(ncfg_fuzznet_events_t *events, const char **line, size_t *length);
+void ncfg_fuzznet_events_end(ncfg_fuzznet_events_t *events);
 
 /*
  * This user's own fuzznetd, where it serves when given no `--socket` and a

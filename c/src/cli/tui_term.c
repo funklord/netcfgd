@@ -248,6 +248,7 @@ static void terminal_size(size_t *rows_out, size_t *columns_out)
  * events pane says the stream never started.
  */
 static int events_held; /* the stream is fuzznet's, whose lines are not JSON */
+static ncfg_fuzznet_events_t events_read;
 
 static int subscribe(const char *socket_path, char *err, size_t err_size)
 {
@@ -282,6 +283,10 @@ static int subscribe(const char *socket_path, char *err, size_t err_size)
 			held = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
 		}
 		events_held = held >= 0;
+		if (events_held) {
+			ncfg_fuzznet_events_begin(&events_read, run_dir);
+			err[0] = '\0';
+		}
 		return held;
 	}
 	memset(&request, 0, sizeof(request));
@@ -482,6 +487,32 @@ static void paint(const ncfg_tui_t *tui)
 	ncfg_buf_free(&frame);
 }
 
+static void event_shown(ncfg_tui_t *tui, const char *line, size_t length)
+{
+	ncfg_proto_message_t message;
+	char                 text[NCFG_TUI_EVENT_MAX];
+	char                 err[NCFG_ERROR_MAX];
+
+	if (!ncfg_proto_response_read(line, length, &message, err, sizeof(err))) {
+		/* A line this build cannot decode is still shown. A monitor that
+		 * refused to parse an event a newer daemon sent would be useless
+		 * for the ones it does understand. */
+		ncfg_tui_event_push(tui, ncfg_cli_event_text(NULL, line, length, text, sizeof(text)));
+		return;
+	}
+	if (message.kind == NCFG_PROTO_MESSAGE_EVENT) {
+		ncfg_tui_event_push(tui, ncfg_cli_event_text(&message.u.event, line, length, text,
+		    sizeof(text)));
+	} else if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
+	    message.u.response.kind == NCFG_PROTO_RESP_EVENT) {
+		ncfg_tui_event_push(tui, ncfg_cli_event_text(&message.u.response.u.event, line, length,
+		    text, sizeof(text)));
+	} else {
+		ncfg_tui_event_push(tui, ncfg_cli_event_text(NULL, line, length, text, sizeof(text)));
+	}
+	ncfg_proto_message_free(&message);
+}
+
 /*
  * What arrived on the event socket, as lines for the pane.
  *
@@ -511,10 +542,8 @@ static int drain_events(ncfg_tui_t *tui, int fd, ncfg_proto_framer_t *framer)
 		return 0;
 	}
 	for (;;) {
-		const char          *line = NULL;
-		size_t               length = 0;
-		ncfg_proto_message_t message;
-		char                 text[NCFG_TUI_EVENT_MAX];
+		const char *line = NULL;
+		size_t      length = 0;
 
 		if (ncfg_proto_framer_next(framer, &line, &length, err, sizeof(err)) !=
 		    NCFG_PROTO_LINE) {
@@ -522,38 +551,17 @@ static int drain_events(ncfg_tui_t *tui, int fd, ncfg_proto_framer_t *framer)
 		}
 		if (events_held) {
 			char        copy[256];
-			char        json[256];
-			const char *said;
+			const char *taken = NULL;
+			size_t      taken_length = 0;
 
 			(void)snprintf(copy, sizeof(copy), "%.*s", (int)length, line);
-			if (ncfg_fuzznet_event_json(copy, json, sizeof(json)) &&
-			    (said = strstr(json, "\"summary\":\"")) != NULL) {
-				said += sizeof("\"summary\":\"") - 1u;
-				json[strlen(json) - 2u] = '\0'; /* its closing quote and brace */
-				ncfg_tui_event_push(tui, said);
+			ncfg_fuzznet_events_heard(&events_read, copy);
+			while (ncfg_fuzznet_events_take(&events_read, &taken, &taken_length)) {
+				event_shown(tui, taken, taken_length);
 			}
 			continue;
 		}
-		if (!ncfg_proto_response_read(line, length, &message, err, sizeof(err))) {
-			/* A line this build cannot decode is still shown. A monitor that
-			 * refused to parse an event a newer daemon sent would be useless
-			 * for the ones it does understand. */
-			ncfg_tui_event_push(tui,
-			    ncfg_cli_event_text(NULL, line, length, text, sizeof(text)));
-			continue;
-		}
-		if (message.kind == NCFG_PROTO_MESSAGE_EVENT) {
-			ncfg_tui_event_push(tui, ncfg_cli_event_text(&message.u.event, line,
-			    length, text, sizeof(text)));
-		} else if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
-		    message.u.response.kind == NCFG_PROTO_RESP_EVENT) {
-			ncfg_tui_event_push(tui, ncfg_cli_event_text(&message.u.response.u.event,
-			    line, length, text, sizeof(text)));
-		} else {
-			ncfg_tui_event_push(tui,
-			    ncfg_cli_event_text(NULL, line, length, text, sizeof(text)));
-		}
-		ncfg_proto_message_free(&message);
+		event_shown(tui, line, length);
 	}
 }
 

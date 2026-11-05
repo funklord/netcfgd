@@ -177,6 +177,8 @@ typedef struct {
 #define NCFG_NODE_PROCEDURE_ASK_PART "askpart"
 /* And `do`, a request carried out, for propagation to many hosts (10.708). */
 #define NCFG_NODE_PROCEDURE_DO "do"
+/* The events behind what fuzznet's held stream says the kind of (10.731). */
+#define NCFG_NODE_PROCEDURE_EVENTLOG "eventlog"
 
 /*
  * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to

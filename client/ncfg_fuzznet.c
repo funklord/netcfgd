@@ -494,6 +494,7 @@ typedef struct {
 	const char *path;
 	const char *host;
 	const char *request; /* for `ask`; NULL asks `status` */
+	const char *eventlog; /* for `eventlog`, its SINCE or `-`; wins over the others */
 	char        staged[18]; /* `@DIGEST` once it went in pieces, else "" */
 	int         wait_ms;    /* for `ask` on this machine; else fuzznet's round */
 	int         ran_maybe;  /* the request may have reached the daemon */
@@ -511,7 +512,14 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	int            silent = 0;
 	long           n;
 
-	if (asked->request) {
+	if (asked->eventlog) {
+		(void)snprintf(line, sizeof(line), "call eventlog %s", asked->eventlog);
+		if (asked->eventlog[0] != '-') {
+			size_t used = strlen(line);
+
+			(void)snprintf(line + used, sizeof(line) - used, " %zu", from);
+		}
+	} else if (asked->request) {
 		const char *request = asked->staged[0] ? asked->staged : asked->request;
 		int wrote = asked->host
 		    ? snprintf(line, sizeof(line), "call ask at %s %zu %s", asked->host, from, request)
@@ -566,9 +574,8 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
 		say(err, err_size, "no fuzznet socket path fits");
 		return 0;
 	}
+	memset(&asked, 0, sizeof(asked));
 	asked.path = path;
-	asked.host = NULL;
-	asked.request = NULL;
 	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
 }
 
@@ -1091,7 +1098,7 @@ int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size)
 	return fd;
 }
 
-int ncfg_fuzznet_event_json(const char *line, char *out, size_t out_size)
+static int event_json(const char *line, char *out, size_t out_size)
 {
 	static const struct {
 		const char *subject;
@@ -1123,4 +1130,95 @@ int ncfg_fuzznet_event_json(const char *line, char *out, size_t out_size)
 		return wrote > 0 && (size_t)wrote < out_size;
 	}
 	return 0;
+}
+
+/* The events since `events->cursor` into `pending`, the cursor moved on. */
+static int events_read(ncfg_fuzznet_events_t *events)
+{
+	char    path[1100];
+	char    since[32];
+	char    why[256];
+	char   *text = NULL;
+	char   *end = NULL;
+	size_t  length = 0;
+	asked_t asked;
+	long    next;
+
+	if (!ncfg_fuzznet_daemon_socket(events->run_dir, path, sizeof(path))) {
+		return 0;
+	}
+	memset(&asked, 0, sizeof(asked));
+	asked.path = path;
+	(void)snprintf(since, sizeof(since), "%ld", events->cursor);
+	asked.eventlog = events->cursor < 0 ? "-" : since;
+	if (!ncfg_status_pages_join(fuzznet_page, &asked, &text, &length, why, sizeof(why))) {
+		return 0;
+	}
+	next = strtol(text, &end, 10);
+	if (end == text || *end != '\n' || next < 0) {
+		free(text);
+		return 0;
+	}
+	free(events->pending);
+	events->pending = text;
+	events->length = length;
+	events->at = (size_t)(end + 1 - text);
+	events->cursor = next;
+	return 1;
+}
+
+void ncfg_fuzznet_events_begin(ncfg_fuzznet_events_t *events, const char *run_dir)
+{
+	memset(events, 0, sizeof(*events));
+	events->cursor = -1;
+	(void)snprintf(events->run_dir, sizeof(events->run_dir), "%s", run_dir);
+	(void)events_read(events);
+}
+
+void ncfg_fuzznet_events_heard(ncfg_fuzznet_events_t *events, const char *line)
+{
+	char json[256];
+
+	/* Everything waiting is what this one was told of; only what has been given
+	 * out already goes, or a burst heard together would lose its earlier half. */
+	if (events->at < events->length) {
+		return;
+	}
+	if (events->cursor >= 0 && events_read(events)) {
+		return;
+	}
+	if (event_json(line, json, sizeof(json))) {
+		size_t length = strlen(json);
+		char  *copy = malloc(length + 2u);
+
+		if (copy) {
+			memcpy(copy, json, length);
+			copy[length] = '\n';
+			copy[length + 1u] = '\0';
+			free(events->pending);
+			events->pending = copy;
+			events->length = length + 1u;
+			events->at = 0;
+		}
+	}
+}
+
+int ncfg_fuzznet_events_take(ncfg_fuzznet_events_t *events, const char **line, size_t *length)
+{
+	char *newline;
+
+	if (!events->pending || events->at >= events->length) {
+		return 0;
+	}
+	*line = events->pending + events->at;
+	newline = memchr(events->pending + events->at, '\n', events->length - events->at);
+	*length = newline ? (size_t)(newline - *line) : events->length - events->at;
+	events->at += *length + 1u;
+	return 1;
+}
+
+void ncfg_fuzznet_events_end(ncfg_fuzznet_events_t *events)
+{
+	free(events->pending);
+	events->pending = NULL;
 }

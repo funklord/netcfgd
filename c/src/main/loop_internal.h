@@ -960,6 +960,8 @@ void ncfg_main_signals_restore(void);
  */
 #define NCFG_MAIN_SUBSCRIBERS_MAX 16
 
+#define NCFG_MAIN_EVENTS_KEPT 64u
+
 /*
  * The descriptors an event is written to.
  *
@@ -990,7 +992,32 @@ typedef struct ncfg_main_subscribers {
 	 * next tick. Set whether or not anybody is subscribed locally, since
 	 * another host reads them through fuzznet's `events`. */
 	unsigned unpublished;
+	/* The last events as the stream writes them, for a reader of fuzznet's
+	 * held stream, whose event says only its kind (10.731): `kept[n % KEPT]` is
+	 * event `n`, and `told` how many there have been. */
+	char  *kept[NCFG_MAIN_EVENTS_KEPT];
+	size_t told;
 } ncfg_main_subscribers_t;
+
+/*
+ * The events since `from` into `out`: a first line of where to ask from next, then
+ * each event's line. `from` of -1 asks only where that is. Those older than the
+ * last `NCFG_MAIN_EVENTS_KEPT` are gone, and a reader that fell that far behind
+ * re-reads the status, as after any gap. 0 where `out` ran out.
+ */
+int ncfg_main_subscribers_since(const ncfg_main_subscribers_t *subscribers, long from,
+    ncfg_buf_t *out);
+
+#ifdef NCFG_MAIN_INTERNAL_H
+/*
+ * `eventlog`, a page of the events since a cursor, for a reader of fuzznet's held
+ * stream (10.731): the fuller line behind each kind it hears. Judged as `status`
+ * is, and paged as it is.
+ */
+size_t ncfg_main_node_events(const ncfg_main_policy_t *policy,
+    const ncfg_main_subscribers_t *subscribers, const ncfg_peer_t *local, const char *args,
+    size_t length, char *reply, size_t cap, size_t escaped_cap);
+#endif
 
 void ncfg_main_subscribers_init(ncfg_main_subscribers_t *subscribers);
 

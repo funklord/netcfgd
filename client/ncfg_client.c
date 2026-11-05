@@ -7135,6 +7135,7 @@ int ncfg_client_revert(ncfg_client_t *client, char *err, size_t err_size)
 struct ncfg_monitor {
 	int    fd;
 	int    held; /* fuzznet's stream, whose lines are not JSON */
+	ncfg_fuzznet_events_t events;
 	char  *buffer; /* what has arrived and not yet been given out, partial
 	        * lines included */
 	size_t length;
@@ -7155,8 +7156,8 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 	 * preferred while the socket stands, since what it carries is the fuller. */
 	int fd = connect_socket(socket_path, err, err_size);
 	int held = 0;
+	char run_dir[sizeof(((ncfg_client_t *)0)->path)];
 	if (fd < 0) {
-		char run_dir[sizeof(((ncfg_client_t *)0)->path)];
 		char why[NCFG_ERROR_MAX];
 
 		if (!ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
@@ -7205,6 +7206,9 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 	}
 	monitor->fd = fd;
 	monitor->held = held;
+	if (held) {
+		ncfg_fuzznet_events_begin(&monitor->events, run_dir);
+	}
 	return monitor;
 }
 
@@ -7215,6 +7219,9 @@ void ncfg_monitor_close(ncfg_monitor_t *monitor)
 	}
 	if (monitor->fd >= 0) {
 		close(monitor->fd);
+	}
+	if (monitor->held) {
+		ncfg_fuzznet_events_end(&monitor->events);
 	}
 	free(monitor->buffer);
 	free(monitor);
@@ -7374,23 +7381,29 @@ int ncfg_monitor_next(ncfg_monitor_t *monitor, ncfg_event_t *out, char *err, siz
 
 	size_t line_length = 0;
 	int waiting = 0;
-	char *line = monitor_line(monitor, &line_length, &waiting, err, err_size);
-	if (!line) {
-		return waiting ? 0 : -1;
-	}
+	char *line = NULL;
 	if (monitor->held) {
-		char json[256];
+		const char *taken = NULL;
 
-		if (!ncfg_fuzznet_event_json(line, json, sizeof(json))) {
-			free(line);
-			return 0;
+		/* Everything heard so far, before anything else is read. */
+		while (!ncfg_fuzznet_events_take(&monitor->events, &taken, &line_length)) {
+			char *heard = monitor_line(monitor, &line_length, &waiting, err, err_size);
+
+			if (!heard) {
+				return waiting ? 0 : -1;
+			}
+			ncfg_fuzznet_events_heard(&monitor->events, heard);
+			free(heard);
 		}
-		free(line);
-		line = dup_text(json, strlen(json));
-		line_length = strlen(json);
+		line = dup_text(taken, line_length);
 		if (!line) {
 			set_error(err, err_size, "out of memory");
 			return -1;
+		}
+	} else {
+		line = monitor_line(monitor, &line_length, &waiting, err, err_size);
+		if (!line) {
+			return waiting ? 0 : -1;
 		}
 	}
 

@@ -500,6 +500,24 @@ static size_t serve_status(void *ctx, const uint8_t *caller, const fzn_peer_t *f
 	    FZN_DAEMON_CALL_ESCAPED_MAX);
 }
 
+/* A call of `eventlog` (10.731): the same shape, its own name. */
+static size_t serve_eventlog(void *ctx, const uint8_t *caller, const fzn_peer_t *from,
+    const uint8_t *args, size_t args_len, uint8_t *answer, size_t cap)
+{
+	ncfg_peer_t peer;
+
+	(void)ctx;
+	if (!serving || !serving->call || (!caller && !from)) {
+		return 0u;
+	}
+	if (!caller) {
+		peer_of(from, &peer);
+	}
+	return serving->call(serving->context, NCFG_NODE_PROCEDURE_EVENTLOG, caller,
+	    caller ? NULL : &peer, (const char *)args, args_len, (char *)answer, cap,
+	    FZN_DAEMON_CALL_ESCAPED_MAX);
+}
+
 /* A call of `ask` (0312): the same shape, its own name. */
 static size_t serve_ask(void *ctx, const uint8_t *caller, const fzn_peer_t *from,
     const uint8_t *args, size_t args_len, uint8_t *answer, size_t cap)
@@ -560,6 +578,7 @@ static const fzn_daemon_procedure_t procedures[] = {
 	{ NCFG_NODE_PROCEDURE_ASK, serve_ask },
 	{ NCFG_NODE_PROCEDURE_ASK_PART, serve_ask_part },
 	{ NCFG_NODE_PROCEDURE_DO, serve_do },
+	{ NCFG_NODE_PROCEDURE_EVENTLOG, serve_eventlog },
 };
 
 static void serve_tick(void *ctx, uint64_t now)

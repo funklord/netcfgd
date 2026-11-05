@@ -466,12 +466,49 @@ void ncfg_cli_print_event(const ncfg_proto_event_t *event, const char *raw, size
 	ncfg_out_writef("%s\n", ncfg_cli_event_text(event, raw, raw_length, text, sizeof(text)));
 }
 
+/* One event's line, as `ncfg monitor` shows it. */
+static void stream_print(const char *answer, size_t length, int json)
+{
+	ncfg_proto_message_t message;
+	char                 err[NCFG_ERROR_MAX];
+
+	if (json) {
+		/*
+		 * The line as it arrived, decoded by nobody. See `cli_internal.h`: a
+		 * monitor is the one verb whose argument for existing is that it does
+		 * not swallow what it cannot name, and a rendering from
+		 * `ncfg_proto_event_t` would drop every member this build has never
+		 * heard of. It is not even parsed first -- a line that will not decode
+		 * is a line a newer daemon sent.
+		 */
+		ncfg_cli_print_event(NULL, answer, length);
+		return;
+	}
+	if (ncfg_proto_response_read(answer, length, &message, err, sizeof(err))) {
+		if (message.kind == NCFG_PROTO_MESSAGE_EVENT) {
+			ncfg_cli_print_event(&message.u.event, answer, length);
+		} else if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
+		    message.u.response.kind == NCFG_PROTO_RESP_EVENT) {
+			ncfg_cli_print_event(&message.u.response.u.event, answer, length);
+		} else {
+			ncfg_cli_print_event(NULL, answer, length);
+		}
+		ncfg_proto_message_free(&message);
+	} else {
+		/* A line this build cannot decode is still shown. A monitor that refused
+		 * to parse an event a newer daemon sent would be useless for the ones it
+		 * does understand. */
+		ncfg_cli_print_event(NULL, answer, length);
+	}
+}
+
 int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_size)
 {
 	ncfg_proto_request_t request;
 	ncfg_proto_framer_t  framer;
 	ncfg_buf_t           line;
-	char                 event[256];
+	ncfg_fuzznet_events_t events;
+	char                 run_dir[NCFG_CLI_TEXT_MAX];
 	int                  fd;
 	int                  held = 0;
 
@@ -485,7 +522,6 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 	}
 	fd = connect_to(socket_path, NULL, err, err_size);
 	if (fd < 0) {
-		char run_dir[NCFG_CLI_TEXT_MAX];
 		char why[NCFG_ERROR_MAX] = "";
 
 		/* Over fuzznet where the control socket is not there (10.729). */
@@ -501,6 +537,7 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 		}
 		held = 1;
 		err[0] = '\0';
+		ncfg_fuzznet_events_begin(&events, run_dir);
 	}
 	if (!held && !send_all(fd, ncfg_buf_text(&line), line.length)) {
 		what_it_said_instead(fd, errno, err, err_size);
@@ -514,7 +551,6 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 	for (;;) {
 		const char          *answer = NULL;
 		size_t               length = 0;
-		ncfg_proto_message_t message;
 
 		if (!read_line(fd, &framer, &answer, &length, err, err_size)) {
 			/*
@@ -529,6 +565,9 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 
 			ncfg_proto_framer_free(&framer);
 			close(fd);
+			if (held) {
+				ncfg_fuzznet_events_end(&events);
+			}
 			if (ended) {
 				err[0] = '\0';
 				return 1;
@@ -536,46 +575,17 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 			return 0;
 		}
 		if (held) {
-			char copy[256];
+			char        copy[256];
+			const char *taken = NULL;
+			size_t      taken_length = 0;
 
-			if (length >= sizeof(copy)) {
-				continue;
+			(void)snprintf(copy, sizeof(copy), "%.*s", (int)length, answer);
+			ncfg_fuzznet_events_heard(&events, copy);
+			while (ncfg_fuzznet_events_take(&events, &taken, &taken_length)) {
+				stream_print(taken, taken_length, json);
 			}
-			memcpy(copy, answer, length);
-			copy[length] = '\0';
-			if (!ncfg_fuzznet_event_json(copy, event, sizeof(event))) {
-				continue;
-			}
-			answer = event;
-			length = strlen(event);
-		}
-		if (json) {
-			/*
-			 * The line as it arrived, decoded by nobody. See
-			 * `cli_internal.h`: a monitor is the one verb whose argument for
-			 * existing is that it does not swallow what it cannot name, and
-			 * a rendering from `ncfg_proto_event_t` would drop every member
-			 * this build has never heard of. It is not even parsed first --
-			 * a line that will not decode is a line a newer daemon sent.
-			 */
-			ncfg_cli_print_event(NULL, answer, length);
 			continue;
 		}
-		if (ncfg_proto_response_read(answer, length, &message, err, err_size)) {
-			if (message.kind == NCFG_PROTO_MESSAGE_EVENT) {
-				ncfg_cli_print_event(&message.u.event, answer, length);
-			} else if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
-			    message.u.response.kind == NCFG_PROTO_RESP_EVENT) {
-				ncfg_cli_print_event(&message.u.response.u.event, answer, length);
-			} else {
-				ncfg_cli_print_event(NULL, answer, length);
-			}
-			ncfg_proto_message_free(&message);
-		} else {
-			/* A line this build cannot decode is still shown. A monitor that
-			 * refused to parse an event a newer daemon sent would be useless
-			 * for the ones it does understand. */
-			ncfg_cli_print_event(NULL, answer, length);
-		}
+		stream_print(answer, length, json);
 	}
 }
