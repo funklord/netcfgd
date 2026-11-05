@@ -115,9 +115,14 @@ qtty:
 		echo "gui:   netcfgd-tui will say so rather than opening a window (0173)."; \
 	fi
 
-$(TARGET): $(CLIENT_LIB) qtty gui.pro $(wildcard src/*.cpp src/*.h)
+# qmake only when its input moved, so a second `make` writes nothing: `qtty` is
+# phony, and as a plain prerequisite it ran qmake every time. Order-only here, and
+# its library is named, because gui.pro decides `--tui` by whether that exists.
+$(BUILD_DIR)/Makefile: gui.pro $(wildcard $(QTTY_LIB)) | qtty
 	@mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) ../gui.pro
+
+$(TARGET): $(CLIENT_LIB) qtty $(BUILD_DIR)/Makefile $(wildcard src/*.cpp src/*.h)
 	$(MAKE) -C $(BUILD_DIR)
 
 run: $(TARGET)
