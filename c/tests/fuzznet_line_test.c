@@ -36,6 +36,30 @@ static void check(int condition, const char *what)
 
 /* Three connections: an answer to the line, a reply split in two sends,
  * and one never answered (held until the client gives up). */
+/*
+ * The whole line, to its newline. `ncfg_fuzznet_ask` sends the newline as a
+ * second write, so one `recv` could leave it unread, and closing a unix socket
+ * with data unread resets the peer: the client lost a reply it had been sent,
+ * under load only, and on a different check each time.
+ */
+static void read_line_of(int fd, char *line, size_t size)
+{
+	size_t have = 0;
+
+	while (have + 1u < size) {
+		ssize_t got = recv(fd, line + have, size - 1u - have, 0);
+
+		if (got <= 0) {
+			break;
+		}
+		have += (size_t)got;
+		if (memchr(line, '\n', have)) {
+			break;
+		}
+	}
+	line[have] = '\0';
+}
+
 static void serve(int listener)
 {
 	int at;
@@ -235,7 +259,7 @@ int main(void)
 				if (fd < 0) {
 					_exit(1);
 				}
-				(void)recv(fd, line, sizeof(line), 0);
+				read_line_of(fd, line, sizeof(line));
 				(void)send(fd, answers[page], strlen(answers[page]), MSG_NOSIGNAL);
 				close(fd);
 			}
@@ -295,7 +319,7 @@ int main(void)
 				if (fd < 0) {
 					_exit(1);
 				}
-				(void)recv(fd, line, sizeof(line), 0);
+				read_line_of(fd, line, sizeof(line));
 				(void)send(fd, pages[page], strlen(pages[page]), MSG_NOSIGNAL);
 				close(fd);
 			}
