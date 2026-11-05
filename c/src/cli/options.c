@@ -48,6 +48,7 @@ static const char usage_text[] =
     "                           `status --at`\n"
     "  ncfg nodes member HOST GROUP  say HOST is in GROUP, for what is sealed to it\n"
     "  ncfg pair                draw a one-use code a phone joins this host by\n"
+    "  ncfg pair open           let this host be reached by its estate's devices\n"
     "  ncfg pair list           the devices this host serves, by key\n"
     "  ncfg pair revoke KEY     take a device back, lost or stolen\n"
     "  ncfg secret seal GROUP KEY  a value for GROUP's members, read from standard\n"

@@ -385,12 +385,15 @@ void ncfg_fleet_view::ask_pair()
 	auto        *code = new QLabel(&dialog);
 	auto        *said = new QLabel(QStringLiteral("Asking for root..."), &dialog);
 	auto        *close = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+	auto        *open_button = close->addButton(QStringLiteral("Open this machine"),
+	                                            QDialogButtonBox::ActionRole);
 	QProcess     process;
 	QByteArray   out;
 	QStringList  arguments;
 
 	dialog.setWindowTitle(QStringLiteral("Pair a phone"));
 	said->setWordWrap(true);
+	open_button->hide();
 	layout->addWidget(code, 0, Qt::AlignHCenter);
 	layout->addWidget(said);
 	layout->addWidget(close);
@@ -414,6 +417,28 @@ void ncfg_fleet_view::ask_pair()
 		                  ? QStringLiteral("A device joined.")
 		                  : (err.isEmpty() ? QStringLiteral("No code was made.") : err));
 		emit acted(exit_code == 0, said->text());
+		/* A closed machine is a question for the person, in words they can
+		 * answer, rather than a sentence about a config block. */
+		if (err.contains(QStringLiteral("ncfg pair open"))) {
+			said->setText(QStringLiteral("This machine is not open to phones yet. Opening it "
+			                             "lets a phone you pair read and change its network, "
+			                             "and restarts netcfgd."));
+			open_button->show();
+		}
+	});
+	connect(open_button, &QPushButton::clicked, &dialog, [&]() {
+		QStringList opening = arguments;
+
+		opening << QStringLiteral("open");
+		open_button->hide();
+		said->setText(QStringLiteral("Opening..."));
+		out.clear();
+		process.disconnect(&dialog);
+		process.start(elevate, opening);
+		process.waitForFinished(60000);
+		said->setText(process.exitCode() == 0
+		                  ? QStringLiteral("Open. Close this, and press Pair a phone again.")
+		                  : QString::fromUtf8(process.readAllStandardError()).trimmed());
 	});
 	if (elevate == QStringLiteral("sudo")) {
 		arguments << QStringLiteral("-A");

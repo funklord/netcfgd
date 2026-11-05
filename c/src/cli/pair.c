@@ -14,6 +14,8 @@
 #include "cli_internal.h"
 #include "ncfg/base.h"
 #include "ncfg/node.h"
+#include "ncfg/state.h"
+#include "subcommand_internal.h"
 #include "ncfg_fuzznet.h"
 
 #include <arpa/inet.h>
@@ -140,6 +142,44 @@ static long members_of(const char *socket_path)
 	return end == reply + 3 ? -1 : total;
 }
 
+/*
+ * `ncfg pair open`: the one step somebody who does not know what `remote` is can
+ * take (10.726). What it does is plain in the file it leaves, `conf.d/remote.conf`,
+ * and undone by removing that. Only a machine's own daemon is restarted, and only
+ * under systemd: the tiers and the port are read at the start, and a run directory
+ * of somebody's test is not this machine's service.
+ */
+static int pair_open(const ncfg_cli_options_t *options, const char *run_dir, char *err,
+    size_t err_size)
+{
+	static const char text[] = "# `ncfg pair open`: devices of this machine's estate may read\n"
+	                           "# and change its network. Remove this file to close it again.\n"
+	                           "global {\n\tremote {\n\t\tobserve = true\n\t\tadmin = true\n"
+	                           "\t}\n}\n";
+	ncfg_cli_wrote_t  wrote = { 0, 0, NULL, NULL };
+	int               ok = ncfg_cli_put_text("remote", text, 1, "`remote`", options, &wrote, err,
+	                       err_size);
+
+	ncfg_cli_wrote_free(&wrote);
+	if (!ok) {
+		return 0;
+	}
+	if (strcmp(run_dir, NCFG_RUN_DIR_DEFAULT) == 0 && geteuid() == 0 &&
+	    access("/run/systemd/system", F_OK) == 0) {
+		int status = system("systemctl restart netcfgd");
+
+		if (status != 0) {
+			ncfg_error_set(err, err_size, "opened, but `systemctl restart netcfgd` failed: "
+			                              "restart it, then `ncfg pair`");
+			return 0;
+		}
+		puts("Open. Devices of this machine's estate may read and change its network.");
+		return 1;
+	}
+	puts("Open, once netcfgd restarts: it reads this at its start.");
+	return 1;
+}
+
 /* The devices and other hosts this node serves, one key a line. */
 static int pair_list(const char *socket_path, char *err, size_t err_size)
 {
@@ -219,19 +259,22 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	if (count == 1u && strcmp(positional[0], "list") == 0) {
 		return pair_list(socket_path, err, err_size);
 	}
+	if (count == 1u && strcmp(positional[0], "open") == 0) {
+		return pair_open(options, run_dir, err, err_size);
+	}
 	if (count == 2u && strcmp(positional[0], "revoke") == 0) {
 		return pair_revoke(socket_path, positional[1], err, err_size);
 	}
 	if (count != 0u) {
-		ncfg_error_set(err, err_size, "`ncfg pair` draws a code; `ncfg pair list` and "
-		                              "`ncfg pair revoke KEY` are the rest of it");
+		ncfg_error_set(err, err_size, "`ncfg pair` draws a code; `open`, `list` and "
+		                              "`revoke KEY` are the rest of it");
 		return 0;
 	}
 	if (!port_is_served()) {
 		ncfg_error_set(err, err_size,
-		    "nothing here listens for a device: open `remote` in the `global` block, "
-		    "`remote { observe = true; admin = true }` for a phone that configures this "
-		    "machine, and restart netcfgd");
+		    "this machine is not open to devices: `ncfg pair open` opens it, or write "
+		    "`remote { observe = true; admin = true }` in the `global` block yourself and "
+		    "restart netcfgd");
 		return 0;
 	}
 	if (!outward_address(address, sizeof(address))) {

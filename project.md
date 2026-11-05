@@ -12686,6 +12686,20 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.726 `ncfg pair open`: one step for who does not know what `remote` is
+
+A closed machine answered `ncfg pair` with a sentence about the `global` block,
+which is a dead end for the second of this project's three audiences. `ncfg pair
+open` puts `conf.d/remote.conf`, with `observe` and `admin` open and a comment
+saying how to close it, and on a machine's own daemon under systemd restarts it,
+since the tiers and the port are read at the start. The window asks in words first.
+It goes through the same `config put` as everything else, so a `remote` written by
+hand elsewhere collides and is refused rather than overridden.
+
+`node_remote.sh`: `ncfg pair open` against a running daemon, the file, and the port
+at the next start. The restart branch is not reached in the test, by design: a run
+directory of a test is not this machine's service.
+
 ## 10.725 What is let in can be put out: `ncfg pair list`, `ncfg pair revoke`
 
 gui/project.md says a stolen phone is a capability to revoke, and pairing made

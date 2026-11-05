@@ -102,7 +102,7 @@ check $? "a stock netcfgd answers fuzznet's verbs ($(cut -c1-24 "$R/closed/preke
 ! grep -q ':BBDA ' "$R/closed/udp"
 check $? "and with nothing opened it binds no port"
 
-[ "$(cat "$R/closed/pair.status")" != 0 ] && grep -q 'open `remote`' "$R/closed/pair"
+[ "$(cat "$R/closed/pair.status")" != 0 ] && grep -q 'ncfg pair open' "$R/closed/pair"
 check $? "and \`ncfg pair\` says what to open rather than draw a code nothing answers"
 
 one open '	remote {
@@ -125,6 +125,36 @@ check $? "and that device reaches the host's status"
 check $? "\`ncfg pair list\` names it, and \`ncfg pair revoke\` takes it off the list"
 ! grep -q '^ok' "$R/open/after"
 check $? "and revoked, it reaches nothing ($(cat "$R/open/after"))"
+
+# The one step: `ncfg pair open` against a running daemon, then its start opens.
+mkdir -p "$R/opening/a" "$R/opening/run" "$R/opening/conf"
+chmod 700 "$R/opening/a"
+printf 'global {\n}\n' > "$R/opening/conf/netcfgd.conf"
+unshare -Urn sh -c '
+	d=$2
+	timeout -k 2 20 "$1" --run-dir "$d/run" --config-dir "$d/conf" --no-apply-on-start \
+		--fuzznet-dir "$d/a" --fuzznet-arg --no-log-file > "$d/log2" 2>&1 &
+	pid=$!
+	n=0
+	until [ -S "$d/run/netcfgd.sock" ] || [ $n -gt 12 ]; do sleep 0.5; n=$((n + 1)); done
+	"${1%netcfgd}ncfg" pair open --run-dir "$d/run" --config-dir "$d/conf" > "$d/opened" 2>&1
+	echo $? > "$d/opened.status"
+	kill -TERM $pid 2>/dev/null
+	wait $pid 2>/dev/null
+	timeout -k 2 8 "$1" --run-dir "$d/run" --config-dir "$d/conf" --no-apply-on-start \
+		--fuzznet-dir "$d/a" --fuzznet-arg --no-log-file > "$d/log3" 2>&1 &
+	pid=$!
+	n=0
+	until [ -S "$d/run/fuzznet.sock" ] || [ $n -gt 12 ]; do sleep 0.5; n=$((n + 1)); done
+	sleep 1
+	cat /proc/net/udp /proc/net/udp6 > "$d/udp.opened" 2>/dev/null
+	kill -TERM $pid 2>/dev/null
+	wait $pid 2>/dev/null
+' sh "$N" "$R/opening"
+[ "$(cat "$R/opening/opened.status")" = 0 ] && [ -f "$R/opening/conf/conf.d/remote.conf" ]
+check $? "\`ncfg pair open\` leaves a file saying so ($(cut -c1-40 "$R/opening/opened"))"
+grep -q ':BBDA ' "$R/opening/udp.opened"
+check $? "and the daemon's next start serves netcfgd's port"
 
 [ "$failed" -eq 0 ] && echo "node_remote: all checks passed"
 exit "$failed"
