@@ -63,7 +63,7 @@ s.sendall((sys.argv[2] + \"\n\").encode()); print(s.recv(4096).decode(errors=\"r
 		timeout 12 "${1%netcfgd}ncfg" pair --run-dir "$2/run" > "$2/pair" 2>&1 &
 		pair=$!
 		n=0
-		until grep -q "^FZI1:" "$2/pair" || ! kill -0 $pair 2>/dev/null || [ $n -gt 16 ]; do
+		until grep -q "^FZI1:" "$2/pair" 2>/dev/null || ! kill -0 $pair 2>/dev/null || [ $n -gt 16 ]; do
 			sleep 0.5
 			n=$((n + 1))
 		done

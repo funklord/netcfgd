@@ -91,3 +91,23 @@ bool ncfg_phone_node_start(const QString &program, const QString &base, QObject 
 	}
 	return false;
 }
+
+bool ncfg_phone_node_forget(const QString &base, QObject *owner, QString *why)
+{
+	for (QProcess *node : owner->findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) {
+		node->kill();
+		node->waitForFinished(3000);
+		delete node;
+	}
+	/* A node kept from before this process, which it holds no handle on, is
+	 * stopped by the app's own process going; the store is what matters here. */
+	QDir store(base + QStringLiteral("/node"));
+
+	if (store.exists() && !store.removeRecursively()) {
+		if (why) {
+			*why = QStringLiteral("the node's store would not go: %1").arg(store.path());
+		}
+		return false;
+	}
+	return true;
+}

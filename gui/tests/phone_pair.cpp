@@ -277,6 +277,14 @@ int main(int argc, char **argv)
 
 	check(open_codes == QStringLiteral("ok 0"), "and the code is used up", open_codes);
 
+	/* ---- starting over ---- */
+	check(ncfg_phone_node_forget(base + QStringLiteral("/phone"), &application, &why),
+	      "forgetting the host stops the node and takes its store", why);
+	check(!QDir(base + QStringLiteral("/phone/node")).exists(), "and the store is gone");
+	check(ncfg_phone_node_start(program, base + QStringLiteral("/phone"), &application, &why),
+	      "and the next start has a node", why);
+	check(ncfg_pair_view::joined_host(phone).isEmpty(), "which has joined nothing, so it pairs");
+
 	host.terminate();
 	host.waitForFinished(8000);
 	fprintf(stderr, "%s\n", failures ? "phone_pair: FAILED" : "phone_pair: all checks passed");

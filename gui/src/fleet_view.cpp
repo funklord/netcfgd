@@ -25,8 +25,11 @@
 #include <QVBoxLayout>
 
 #ifdef Q_OS_ANDROID
+#include "phone/phone_node.h"
+
 #include <QApplication>
 #include <QPointer>
+#include <QStandardPaths>
 #include <QThread>
 
 #include <cstdlib>
@@ -87,6 +90,27 @@ ncfg_fleet_view::ncfg_fleet_view(std::function<QStringList()> members, QWidget *
 	member_button->hide();
 	seal_button->hide();
 	pair_button->hide();
+	auto *forget_button = new QPushButton(QStringLiteral("Forget this host..."), this);
+	connect(forget_button, &QPushButton::clicked, this, [this]() {
+		if (QMessageBox::question(this, QStringLiteral("Forget this host"),
+		                          QStringLiteral("This phone leaves the host and starts over, "
+		                                         "at the pairing screen, with a new key. For a "
+		                                         "host that moved, or a phone it revoked."))
+		    != QMessageBox::Yes) {
+			return;
+		}
+		QString why;
+
+		if (!ncfg_phone_node_forget(
+		        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), qApp, &why)) {
+			QMessageBox::warning(this, QStringLiteral("Forget this host"), why);
+			return;
+		}
+		/* The app ends here: a window on a host this phone has left shows nothing
+		 * true, and the next start is the pairing screen. */
+		QCoreApplication::quit();
+	});
+	table->add_control(forget_button);
 #endif
 	if (auto *cells = table->findChild<QTableWidget *>()) {
 		connect(cells, &QTableWidget::cellDoubleClicked, this,

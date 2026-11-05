@@ -12695,11 +12695,13 @@ names them. `ncfg pair revoke KEY` makes the signed revocation and then removes 
 pairing. `node_remote.sh`: the device reads the host's status, is listed, is
 revoked, and then reaches nothing.
 
-**Open: a phone cannot start over.** One whose host moved to a new address, or
-which was revoked, stays joined to that estate, and the pairing screen shows only
-to a phone that has joined nothing. Android's "clear storage" is the way out today.
-`net/address` is also set only when a code is made, so a host on a changing DHCP
-lease has this problem in the ordinary course.
+**A phone can start over.** One whose host moved, or which was revoked, stayed
+joined for ever, since the pairing screen shows only to a phone that has joined
+nothing. "Forget this host...", on the fleet tab on a phone, stops the node and
+removes its store, keys and all, and the app ends; the next start pairs.
+`net/address` is set only when a code is made, so a host on a changing DHCP lease
+needs this in the ordinary course. A device following its host to a new address is
+fuzznet's question, unasked as yet.
 
 ## 10.724 The window can show the code too
 

@@ -33,4 +33,10 @@ class QObject;
 bool ncfg_phone_node_start(const QString &program, const QString &base, QObject *owner,
                            QString *why);
 
+/* Starts this phone over: the node `owner` holds stopped, and its store under
+ * `base` gone, keys and all, so the next start joins nothing and shows the pairing
+ * screen. For a phone revoked, or whose host moved. False with a sentence in `why`
+ * where the store would not go. */
+bool ncfg_phone_node_forget(const QString &base, QObject *owner, QString *why);
+
 #endif
