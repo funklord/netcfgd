@@ -23,6 +23,7 @@
 #include "node/identity.h"
 #include "node/types.h"
 #include "persist/persist_file.h"
+#include "qr/qr.h"
 #include "session/agree_monocypher.h"
 #include "session/hash_monocypher.h"
 #include "session/random_system.h"
@@ -583,6 +584,11 @@ size_t ncfg_node_publish_event(const char *subject)
 void ncfg_node_refuse_huge_pages(char *const *argv)
 {
 	fzn_daemon_refuse_huge_pages(argv);
+}
+
+int ncfg_node_qr(const char *text, uint8_t *out, size_t cap, size_t *size)
+{
+	return fzn_qr_encode(text, strlen(text), FZN_QR_LEVEL_L, out, cap, size) == FZN_QR_OK;
 }
 
 size_t ncfg_node_local(const char *line, char *reply, size_t cap)

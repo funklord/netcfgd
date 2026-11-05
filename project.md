@@ -12686,6 +12686,23 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.722 `ncfg pair`: the terminal displays, the phone scans
+
+`ncfg pair PREKEY` admits a device and draws its card as a QR code in half blocks,
+black on white, since a dark terminal would otherwise invert it and quirc reads
+no inverted code. The host's `net/address` is set first, from the source address
+the kernel picks for the way out, or a card says nowhere. With no port held it says
+what to open rather than draw a code nothing answers: a bind is the test, since
+what counts is what the daemon read at its start, not what the file says now.
+
+Root's, as fuzznet's `peer` is not grantable. **The prekey argument is the part
+that goes** when fuzznet's join by one code lands (10.720): today a phone has no
+way to give it, so this serves a laptop's fuzznetd and the tests.
+
+Verified: `c/tests/pair_draw_test.c` reads the drawing back module by module, on
+an odd side, where the last line holds one row (dropping it failed its check);
+`node_remote.sh` both refusal and card, in a namespace.
+
 ## 10.721 netcfgd has its numbers, and listens only where the config says
 
 fuzznet assigned `FZN_PRODUCT_NETCFGD`, 3 (its `chain/service.h`), and `src/node/node.c`

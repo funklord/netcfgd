@@ -78,6 +78,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------------ *
  * What the program leaves with
@@ -1070,6 +1071,15 @@ int ncfg_cli_wifi_forget(const ncfg_cli_options_t *options, const char **positio
  */
 int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size);
+
+/* `ncfg pair PREKEY`: admit a device to this host's estate and draw its card as a
+ * code (10.722). */
+int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/* `size` squared modules, row-major, drawn to `out` two rows to a line of half
+ * blocks with the standard's quiet zone, black on white. */
+void ncfg_cli_pair_draw(FILE *out, const uint8_t *modules, size_t size);
 
 /* `ncfg secret set`: store a credential the configuration refers to (0075). */
 int ncfg_cli_secret(const ncfg_cli_options_t *options, const char **positional, size_t count,

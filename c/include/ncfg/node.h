@@ -203,6 +203,11 @@ ncfg_node_serve_t ncfg_node_serve(ncfg_node_t *node, const char *const *extra,
     size_t extra_count, char *const *restart_argv, const ncfg_node_loop_t *loop, char *err,
     size_t err_size);
 
+/* `text` as a QR code's modules in `out`, `*size` squared of them, row-major with
+ * no quiet zone: fuzznet's encoder at its lowest level, since a card is long and a
+ * screen is clean. 0 where it does not fit. */
+int ncfg_node_qr(const char *text, uint8_t *out, size_t cap, size_t *size);
+
 /* A line asked of this node in-process, as its own user (fuzznet's
  * `fzn_daemon_local`): the reply's length with its newline, or 0 where the node
  * is not serving. Only from the loop's `tick`. */

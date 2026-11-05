@@ -2650,6 +2650,9 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	if (strcmp(command, "secret") == 0) {
 		return subcommand(ncfg_cli_secret, options, positional, count);
 	}
+	if (strcmp(command, "pair") == 0) {
+		return subcommand(ncfg_cli_pair, options, positional, count);
+	}
 	/* `reset` is `netcfgd-cli`'s own `lib.rs` rather than one of the four
 	 * modules above, so it is `reset.c` here -- and it goes through the same
 	 * adapter, because it answers a sentence like the rest of them. */
