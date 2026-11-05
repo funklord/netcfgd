@@ -12699,8 +12699,9 @@ from clean builds:
 
 The window keeps nearly everything it links. qmake does not rebuild objects for
 changed flags, so the first GUI figure, 2 KB, was a new link over old objects;
-this one is a clean build. The Android mkspec already collects sections, so its
-build is unmeasured here. `client/`, the shim and `bridge/` pass their suites on
+this one is a clean build. The same flags reach the Android build, whose `.so`
+text falls 0.16% (1,868,511 to 1,865,488, x86_64), and it still starts on the
+emulator. `client/`, the shim and `bridge/` pass their suites on
 the collected binaries, as do the GUI probes in `make check`.
 
 **`fuzznet_line_test` failed about one run in three under load**, on a different
