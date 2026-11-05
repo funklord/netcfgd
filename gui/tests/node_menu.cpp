@@ -95,7 +95,13 @@ int main(int argc, char **argv)
 					if (fd < 0) {
 						_exit(1);
 					}
-					(void)!read(fd, line, sizeof(line));
+					/* To its newline: the client sends that apart, and a fake
+					 * that answers and closes first breaks its send, which
+					 * failed this check about one run in four. */
+					size_t got = 0;
+					while (got < sizeof(line) && read(fd, line + got, 1) == 1 &&
+					       line[got++] != '\n') {
+					}
 					(void)!write(fd, answer, strlen(answer));
 					close(fd);
 				}

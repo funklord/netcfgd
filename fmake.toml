@@ -27,7 +27,13 @@
 # workspace, so the dependency graph leaves a tree with no vendored registry
 # in it, and fmake resolves nothing from one (10.521).
 [project]
-exclude = ["crates", "backend", "adapter", "fuzz"]
+# `c` and `fuzznet` too: the C daemon is `make -C c`'s, with fuzznet built under
+# flags of its own, and fmake was stopping there before it reached the client (its
+# fuzz harnesses each define `ncfg_fuzz_one`). `client/fuzz` likewise: programs of
+# their own that `make fuzz` builds. `bridge` needs fuzznet, and `gui/src/phone` is
+# the Android build's, with a camera a desktop build has no Qt module for.
+exclude = ["crates", "backend", "adapter", "fuzz", "c", "fuzznet", "client/fuzz", "bridge",
+           "gui/src/phone"]
 
 # The Qt client, `make gui`. fmake names a target after the directory its
 # root TU sits in; `gui` is a directory in the way here, so it falls back to

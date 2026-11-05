@@ -69,8 +69,13 @@ static void serve_each(const char *path, const char *log, const char *const *ans
 			if (fd < 0) {
 				_exit(1);
 			}
-			got = read(fd, line, sizeof(line) - 1u);
-			line[got > 0 ? got : 0] = '\0';
+			/* To its newline, which a client may send apart: answered and closed
+			 * before it, its send fails (116731fe). */
+			got = 0;
+			while (got < (ssize_t)sizeof(line) - 1 && read(fd, line + got, 1) == 1 &&
+			    line[got++] != '\n') {
+			}
+			line[got] = '\0';
 			out = fopen(log, "a");
 			if (out) {
 				fputs(line, out);
