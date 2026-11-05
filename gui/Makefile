@@ -187,7 +187,7 @@ $(ANDROID_BUILD_DIR)/Makefile: android-check gui.pro
 	cd $(ANDROID_BUILD_DIR) && $(QT_ANDROID_ROOT)/bin/qmake ../gui.pro \
 	        NETCFGD_VERSION=$(VERSION) NETCFGD_VERSION_CODE=$(ANDROID_VERSION_CODE)
 
-android android-build: $(ANDROID_BUILD_DIR)/Makefile
+android android-build: android-fresh $(ANDROID_BUILD_DIR)/Makefile
 	$(MAKE) -C $(ANDROID_BUILD_DIR) apk
 	@src=$$(find $(ANDROID_BUILD_DIR)/android-build/build/outputs/apk -name '*.apk' -print -quit); \
 	if [ -z "$$src" ]; then echo "android: no .apk was produced" >&2; exit 1; fi; \
