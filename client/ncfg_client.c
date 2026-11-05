@@ -7151,25 +7151,21 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 		socket_path = ncfg_client_default_socket();
 	}
 
-	/* **Over fuzznet where the control socket is not there** (10.729): the same
-	 * descriptor to wait on, carrying the kind of each event and no more. Not
-	 * preferred while the socket stands, since what it carries is the fuller. */
-	int fd = connect_socket(socket_path, err, err_size);
-	int held = 0;
+	/* **Fuzznet's stream first** (0309, 10.732), and the control socket for a caller
+	 * it will not hold: under `observe = "any"`, past its four, or with no node. */
 	char run_dir[sizeof(((ncfg_client_t *)0)->path)];
-	if (fd < 0) {
+	int held = 0;
+	int fd = -1;
+	if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
 		char why[NCFG_ERROR_MAX];
 
-		if (!ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
-			return NULL;
-		}
 		fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+		held = fd >= 0;
+	}
+	if (fd < 0) {
+		fd = connect_socket(socket_path, err, err_size);
 		if (fd < 0) {
 			return NULL;
-		}
-		held = 1;
-		if (err && err_size) {
-			err[0] = '\0';
 		}
 	}
 

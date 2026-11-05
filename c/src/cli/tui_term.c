@@ -255,6 +255,7 @@ static int subscribe(const char *socket_path, char *err, size_t err_size)
 	struct sockaddr_un address;
 	ncfg_proto_request_t request;
 	ncfg_buf_t           line;
+	char                 run_dir[sizeof(address.sun_path)];
 	int                  fd;
 	int                  sent;
 
@@ -266,28 +267,28 @@ static int subscribe(const char *socket_path, char *err, size_t err_size)
 	}
 	memcpy(address.sun_path, socket_path, strlen(socket_path));
 
+	/* Fuzznet's stream first (0309, 10.732), and the control socket for a caller
+	 * it will not hold. */
+	if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+		char why[NCFG_ERROR_MAX];
+
+		fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+		if (fd >= 0) {
+			events_held = 1;
+			ncfg_fuzznet_events_begin(&events_read, run_dir);
+			return fd;
+		}
+	}
+
 	fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd < 0) {
 		ncfg_error_set(err, err_size, "cannot open a socket: %s", strerror(errno));
 		return -1;
 	}
 	if (connect(fd, (const struct sockaddr *)&address, sizeof(address)) < 0) {
-		char run_dir[sizeof(address.sun_path)];
-		char why[NCFG_ERROR_MAX];
-		int  held = -1;
-
 		ncfg_error_set(err, err_size, "cannot subscribe to events: %s", strerror(errno));
 		(void)close(fd);
-		/* Over fuzznet where the control socket is not there (10.729). */
-		if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
-			held = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
-		}
-		events_held = held >= 0;
-		if (events_held) {
-			ncfg_fuzznet_events_begin(&events_read, run_dir);
-			err[0] = '\0';
-		}
-		return held;
+		return -1;
 	}
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_MONITOR;

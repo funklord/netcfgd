@@ -12686,6 +12686,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.732 `monitor` takes fuzznet's stream first
+
+With 10.731 it costs nothing, so `ncfg monitor`, `ncfg tui` and the GUI's stream hold
+fuzznet's first, and the control socket only for a caller it will not hold: under
+`observe = "any"` until the holder's agreed right lands, past fuzznet's four, or on a
+daemon with no node. Every request and stream a client makes now goes over fuzznet
+first.
+
+**What is left of 0309, which is all in this tree:**
+- `observe = "any"` needs fuzznet's held-stream right, agreed by the holder 2026-11-05.
+- A daemon with no node has the socket as its only way in. A node that will not open
+  should say so and stop, or keep this; that is the decision left.
+- 42 live scripts and the unit tests wait on `netcfgd.sock` as "the daemon is up", and
+  `doc/schema/socket.json` is the witness of what goes.
+
 ## 10.731 The events' detail has a home, so fuzznet's stream loses nothing
 
 10.729's stream said an event's kind and nothing else. Its name field is 32 bytes, and

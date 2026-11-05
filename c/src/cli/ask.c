@@ -509,6 +509,7 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 	ncfg_buf_t           line;
 	ncfg_fuzznet_events_t events;
 	char                 run_dir[NCFG_CLI_TEXT_MAX];
+	char                 why[NCFG_ERROR_MAX];
 	int                  fd;
 	int                  held = 0;
 
@@ -520,14 +521,18 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 		ncfg_buf_free(&line);
 		return 0;
 	}
-	fd = connect_to(socket_path, NULL, err, err_size);
-	if (fd < 0) {
-		char why[NCFG_ERROR_MAX] = "";
-
-		/* Over fuzznet where the control socket is not there (10.729). */
-		if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
-			fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
-		}
+	/* Fuzznet's stream first (0309, 10.732), and the control socket for a caller
+	 * it will not hold. */
+	fd = -1;
+	why[0] = '\0';
+	if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+		fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+	}
+	if (fd >= 0) {
+		held = 1;
+		ncfg_fuzznet_events_begin(&events, run_dir);
+	} else {
+		fd = connect_to(socket_path, NULL, err, err_size);
 		if (fd < 0) {
 			if (strstr(why, "would not hold")) {
 				ncfg_error_set(err, err_size, "%s", why);
@@ -535,9 +540,6 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 			ncfg_buf_free(&line);
 			return 0;
 		}
-		held = 1;
-		err[0] = '\0';
-		ncfg_fuzznet_events_begin(&events, run_dir);
 	}
 	if (!held && !send_all(fd, ncfg_buf_text(&line), line.length)) {
 		what_it_said_instead(fd, errno, err, err_size);
