@@ -521,6 +521,7 @@ AT_USAGE = ("  --at HOST                another node of this estate, HOST its ke
 NODES_USAGE = ("  ncfg nodes [--json]      the other nodes of your estate, by key, for\n"
 	       "                           `status --at`\n"
 	       "  ncfg nodes member HOST GROUP  say HOST is in GROUP, for what is sealed to it\n"
+	       "  ncfg pair                draw a one-use code a phone joins this host by\n"
 	       "  ncfg secret seal GROUP KEY  a value for GROUP's members, read from standard\n"
 	       "                           input: `@secret:estate:KEY` in a configuration\n")
 C_ONLY_LINES = {
