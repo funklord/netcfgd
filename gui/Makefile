@@ -136,7 +136,9 @@ run: $(TARGET)
 # other's Makefile.
 TEST_PROS = $(wildcard tests/*.pro)
 
+# fuzznetd too, which `phone_pair` pairs with: a test builds what it needs.
 test: $(CLIENT_LIB)
+	@$(MAKE) --no-print-directory -C ../c fuzznet.a
 	@failed=0; \
 	for pro in $(TEST_PROS); do \
 		name=$$(basename $$pro .pro); \

@@ -156,7 +156,10 @@ int main(int argc, char **argv)
 	check(ncfg_code_reader::read_image(blank).isEmpty(), "and an image with no code gives none");
 
 	/* ---- the nodes ---- */
-	const QString fuzznetd = QDir(QStringLiteral("../../../../c/fuzznet-build"))
+	/* From this binary, not the directory it was run in: `make test` runs it from
+	 * gui/, a person from beside it. */
+	const QString fuzznetd = QDir(QCoreApplication::applicationDirPath() +
+	                              QStringLiteral("/../../../../c/fuzznet-build"))
 	                             .absoluteFilePath(QStringLiteral("fuzznetd"));
 	const QString program = qEnvironmentVariable("NCFG_TEST_FUZZNETD", fuzznetd);
 
