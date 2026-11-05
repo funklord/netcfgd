@@ -159,6 +159,7 @@ SOURCES += \
 	src/modems_view.cpp \
 	src/stations_view.cpp \
 	src/fleet_view.cpp \
+	src/pair_code.cpp \
 	src/leases_view.cpp \
 	src/table_view.cpp \
 	src/secrets_view.cpp \
@@ -208,6 +209,7 @@ HEADERS += \
 	src/modems_view.h \
 	src/stations_view.h \
 	src/fleet_view.h \
+	src/pair_code.h \
 	src/leases_view.h \
 	src/table_view.h \
 	src/secrets_view.h \

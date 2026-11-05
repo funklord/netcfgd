@@ -19,7 +19,7 @@ INCLUDEPATH += $$CLIENT_DIR $$PWD/../src/phone $$QUIRC $$FUZZNET/qr
 LIBS += $$CLIENT_DIR/libncfg_client.a -lm
 PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
-SOURCES += phone_pair.cpp \
+SOURCES += phone_pair.cpp ../src/pair_code.cpp \
 	../src/phone/phone_node.cpp ../src/phone/code_reader.cpp ../src/phone/pair_view.cpp \
 	$$QUIRC/quirc.c $$QUIRC/decode.c $$QUIRC/identify.c $$QUIRC/version_db.c \
 	$$FUZZNET/qr/qr.c

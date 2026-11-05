@@ -92,6 +92,7 @@ private:
 	void ask_reload();
 	void ask_member();
 	void ask_seal();
+	void ask_pair();
 	bool act(const QStringList &arguments, const QByteArray &input);
 
 	std::function<QStringList()>  members;

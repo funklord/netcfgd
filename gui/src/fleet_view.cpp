@@ -3,6 +3,8 @@
  */
 #include "fleet_view.h"
 
+#include "access_view.h"
+#include "pair_code.h"
 #include "table_view.h"
 
 #include <QDialog>
@@ -12,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QProcess>
@@ -72,12 +75,18 @@ ncfg_fleet_view::ncfg_fleet_view(std::function<QStringList()> members, QWidget *
 	    "@secret:estate:KEY."));
 	connect(seal_button, &QPushButton::clicked, this, &ncfg_fleet_view::ask_seal);
 	table->add_control(seal_button);
+	auto *pair_button = new QPushButton(QStringLiteral("Pair a phone..."), this);
+	pair_button->setToolTip(QStringLiteral(
+	    "Show a code the netcfgd app on a phone scans to join this machine's estate."));
+	connect(pair_button, &QPushButton::clicked, this, &ncfg_fleet_view::ask_pair);
+	table->add_control(pair_button);
 #ifdef Q_OS_ANDROID
 	/* Each of these runs `ncfg`, which a phone has none of. A button that
 	 * answers that it could not run a program is no use to the person. */
 	reload_button->hide();
 	member_button->hide();
 	seal_button->hide();
+	pair_button->hide();
 #endif
 	if (auto *cells = table->findChild<QTableWidget *>()) {
 		connect(cells, &QTableWidget::cellDoubleClicked, this,
@@ -330,6 +339,71 @@ bool ncfg_fleet_view::act(const QStringList &arguments, const QByteArray &input)
 	process->closeWriteChannel();
 	limit->start();
 	return true;
+}
+
+/*
+ * `ncfg pair` as root, through what the access tab elevates with, since the node's
+ * trust is not grantable. A root child cannot be signalled from here, so closing
+ * this leaves it waiting out its code: ten minutes at most, by its own bound.
+ */
+void ncfg_fleet_view::ask_pair()
+{
+	const QString elevate = ncfg_access_view::elevator();
+
+	if (elevate.isEmpty()) {
+		QMessageBox::information(this, QStringLiteral("Pair a phone"),
+		                         QStringLiteral("Nothing here can ask for root. In a terminal: "
+		                                        "sudo ncfg pair"));
+		return;
+	}
+	QDialog      dialog(this);
+	auto        *layout = new QVBoxLayout(&dialog);
+	auto        *code = new QLabel(&dialog);
+	auto        *said = new QLabel(QStringLiteral("Asking for root..."), &dialog);
+	auto        *close = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+	QProcess     process;
+	QByteArray   out;
+	QStringList  arguments;
+
+	dialog.setWindowTitle(QStringLiteral("Pair a phone"));
+	said->setWordWrap(true);
+	layout->addWidget(code, 0, Qt::AlignHCenter);
+	layout->addWidget(said);
+	layout->addWidget(close);
+	connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	connect(&process, &QProcess::readyReadStandardOutput, &dialog, [&]() {
+		out += process.readAllStandardOutput();
+		const QImage image = ncfg_pair_code_image(out, 5);
+
+		if (!image.isNull() && code->pixmap().isNull() && out.contains("FZI1:")) {
+			code->setPixmap(QPixmap::fromImage(image));
+			said->setText(QStringLiteral("Open the netcfgd app on the phone and scan this. It "
+			                             "works once, for ten minutes, and whoever scans it "
+			                             "may join, so show it to nobody else."));
+		}
+	});
+	connect(&process, &QProcess::finished, &dialog, [&](int exit_code, QProcess::ExitStatus how) {
+		const QString err = QString::fromUtf8(process.readAllStandardError()).trimmed();
+
+		code->clear();
+		said->setText(how == QProcess::NormalExit && exit_code == 0
+		                  ? QStringLiteral("A device joined.")
+		                  : (err.isEmpty() ? QStringLiteral("No code was made.") : err));
+		emit acted(exit_code == 0, said->text());
+	});
+	if (elevate == QStringLiteral("sudo")) {
+		arguments << QStringLiteral("-A");
+	}
+	arguments << QStringLiteral("ncfg") << QStringLiteral("pair");
+	process.start(elevate, arguments);
+	dialog.exec();
+	process.disconnect(&dialog);
+	/* Told nothing further: see above. A process we still own is let go of. */
+	process.closeReadChannel(QProcess::StandardOutput);
+	if (process.state() != QProcess::NotRunning) {
+		process.kill();
+		process.waitForFinished(1000);
+	}
 }
 
 bool ncfg_fleet_view::reload_all()

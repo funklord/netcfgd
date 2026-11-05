@@ -18,6 +18,7 @@
  *   one, and a screen not tested is no pass.
  */
 
+#include "../src/pair_code.h"
 #include "../src/phone/code_reader.h"
 #include "../src/phone/pair_view.h"
 #include "../src/phone/phone_node.h"
@@ -118,6 +119,37 @@ int main(int argc, char **argv)
 	      "and at a width whose rows are padded");
 	check(ncfg_code_reader::read_image(drawn(card, 9, 0)) == card,
 	      "and from an image wider than a frame is looked at");
+	/* What `ncfg pair` prints, read as the desktop's dialog reads it. */
+	{
+		std::vector<uint8_t> modules(32768);
+		size_t               size = 0;
+		QByteArray           printed("cruft\n");
+
+		(void)fzn_qr_encode(card.constData(), (size_t)card.size(), FZN_QR_LEVEL_L, modules.data(),
+		                    modules.size(), &size);
+		const int side = (int)size + 8;
+		auto      dark = [&](int x, int y) {
+			return x >= 4 && y >= 4 && x < (int)size + 4 && y < (int)size + 4 &&
+			       modules[(size_t)(y - 4) * size + (size_t)(x - 4)];
+		};
+
+		for (int y = 0; y < side; y += 2) {
+			printed += "\033[30;47m";
+			for (int x = 0; x < side; x++) {
+				const bool top = dark(x, y);
+				const bool bottom = y + 1 < side && dark(x, y + 1);
+
+				printed += top ? (bottom ? "\xe2\x96\x88" : "\xe2\x96\x80")
+				               : (bottom ? "\xe2\x96\x84" : " ");
+			}
+			printed += "\033[0m\n";
+		}
+		printed += "\nScan this.\n";
+		check(ncfg_code_reader::read_image(ncfg_pair_code_image(printed, 4)) == card,
+		      "the desktop's picture of what ncfg printed reads back as the code");
+		check(ncfg_pair_code_image("no code here\n", 4).isNull(),
+		      "and output with no code in it is no picture");
+	}
 	QImage blank(300, 300, QImage::Format_RGB32);
 
 	blank.fill(Qt::white);

@@ -12686,6 +12686,15 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.724 The window can show the code too
+
+The fleet tab has "Pair a phone...", for somebody who will not open a terminal. It
+runs `ncfg pair` through what the access tab elevates with, and draws what that
+printed (`gui/src/pair_code.cpp`), so the window needs no encoder and shows only the
+code issued. Closing the dialog cannot signal a root child: it waits out its code,
+ten minutes at most. Not run with a real `pkexec`; `phone_pair` holds the parsing,
+read back through quirc.
+
 ## 10.723 One code: fuzznet's invite, and nothing carried back
 
 fuzznet built what 10.720 asked for the same day (its sec 896, `30ca61f`). `ncfg
