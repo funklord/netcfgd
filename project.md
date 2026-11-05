@@ -12686,6 +12686,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.728 A dialog fits a phone
+
+Configuring a link from the emulator showed the dialog as the desktop's: narrower
+than the screen, labels taking half of it, fields behind a scroll bar. Fixed once,
+in `gui/src/phone/phone_fit.cpp`, by an event filter: a dialog shows full screen and
+a form's labels go over their fields. The dialogs stay the desktop's, as gui/project.md
+section 1 asks.
+
+**A change made from the phone landed.** Saved in that dialog on the emulator, paired
+by camera with a stock netcfgd with `admin` open: the host wrote
+`conf.d/interface-eth0.conf`, and the table on the phone said eth0 is configured. Not
+applied, the host being unprivileged here; a remote `apply` is `node_fleet.sh`'s.
+
 ## 10.727 The camera, on an emulator: a code read, and a leak found
 
 `-camera-back imagefile:` shows an emulator's camera a file, so the whole first run

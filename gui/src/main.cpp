@@ -23,6 +23,7 @@
 #include <QFileInfo>
 #ifdef Q_OS_ANDROID
 #  include "phone/pair_view.h"
+#  include "phone/phone_fit.h"
 #  include "phone/phone_node.h"
 #  include <QStandardPaths>
 extern "C" {
@@ -213,6 +214,7 @@ int main(int argc, char **argv)
 	QString phone_host;
 #ifdef Q_OS_ANDROID
 	{
+		application.installEventFilter(new ncfg_phone_fit(&application));
 		const QString home = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 		QString       why;
 		char          node_socket[1100];

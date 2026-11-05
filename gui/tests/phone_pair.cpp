@@ -21,12 +21,16 @@
 #include "../src/pair_code.h"
 #include "../src/phone/code_reader.h"
 #include "../src/phone/pair_view.h"
+#include "../src/phone/phone_fit.h"
 #include "../src/phone/phone_node.h"
 extern "C" {
 #include "ncfg_fuzznet.h"
 }
 
 #include <QApplication>
+#include <QDialog>
+#include <QFormLayout>
+#include <QMessageBox>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -156,6 +160,26 @@ int main(int argc, char **argv)
 
 	blank.fill(Qt::white);
 	check(ncfg_code_reader::read_image(blank).isEmpty(), "and an image with no code gives none");
+
+	/* ---- a dialog on a phone ---- */
+	{
+		ncfg_phone_fit fit;
+		QDialog        dialog;
+		auto          *form = new QFormLayout(&dialog);
+
+		form->addRow(QStringLiteral("a label of some length"), new QLabel(&dialog));
+		application.installEventFilter(&fit);
+		dialog.show();
+		check(form->rowWrapPolicy() == QFormLayout::WrapAllRows, "a form's labels go over their fields");
+		check(dialog.windowState() & Qt::WindowMaximized, "and a dialog fills the screen");
+		dialog.hide();
+		QMessageBox box(QMessageBox::Information, QStringLiteral("t"), QStringLiteral("x"));
+
+		box.show();
+		check(!(box.windowState() & Qt::WindowMaximized), "and a message box stays a message box");
+		box.hide();
+		application.removeEventFilter(&fit);
+	}
 
 	/* ---- the nodes ---- */
 	/* From this binary, not the directory it was run in: `make test` runs it from
