@@ -12758,6 +12758,10 @@ On `Galaxy_Nexus_API_33`: the screen; the camera permission, opening and frames
 through `-camera-back virtualscene`; and with the app's own node joined to a real
 netcfgd at 10.0.2.2, **the window showing that machine's links**.
 
+And after 10.721 and 10.722, a stock netcfgd with `remote` open, no fuzznet options
+given: `ncfg pair` made the card, the emulator's node joined at this machine's LAN
+address, port 48090, and the fleet tab read its host name and state.
+
 **Not verified:** a code read through a camera, since the virtual scene was never
 aimed at its poster; and the view's join on the emulator, since `adb shell input
 text` did not deliver a 703-character card whole, so the join there was asked of
@@ -12912,9 +12916,9 @@ all this step claims.
 1. A node on the phone: built, 10.720.
 2. Joining an estate: the screen is built, 10.720, and the holder answered how it
    should feel.
-3. **The fleet tab's child processes do not exist on a phone**: there is no
-   `ncfg` to run (10.710, 10.713), so that tab reports it could not start. It
-   needs its reads moved onto a thread with `ncfg_client_open_at`.
+3. The fleet tab's child processes do not exist on a phone (10.710, 10.713). Its
+   reads now run on a thread there, through `ncfg_fuzznet_status_at`, and the three
+   buttons that run `ncfg` are hidden.
 4. A window laid out for a phone. Forty tabs are a desktop's.
 
 **Verified**, on `Galaxy_Nexus_API_33` (x86_64, API 33): installed, running as

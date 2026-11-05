@@ -21,6 +21,18 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#ifdef Q_OS_ANDROID
+#include <QApplication>
+#include <QPointer>
+#include <QThread>
+
+#include <cstdlib>
+
+extern "C" {
+#include "ncfg_fuzznet.h"
+}
+#endif
+
 /* What `ncfg status --at` takes up on a node at once, and how often the tab
  * asks while it is in front. */
 static const int MOST_AT_ONCE = 4;
@@ -60,6 +72,13 @@ ncfg_fleet_view::ncfg_fleet_view(std::function<QStringList()> members, QWidget *
 	    "@secret:estate:KEY."));
 	connect(seal_button, &QPushButton::clicked, this, &ncfg_fleet_view::ask_seal);
 	table->add_control(seal_button);
+#ifdef Q_OS_ANDROID
+	/* Each of these runs `ncfg`, which a phone has none of. A button that
+	 * answers that it could not run a program is no use to the person. */
+	reload_button->hide();
+	member_button->hide();
+	seal_button->hide();
+#endif
 	if (auto *cells = table->findChild<QTableWidget *>()) {
 		connect(cells, &QTableWidget::cellDoubleClicked, this,
 		        [this](int, int) { open_selected(); });
@@ -145,6 +164,34 @@ void ncfg_fleet_view::start_next()
 {
 	while (asking < MOST_AT_ONCE && !waiting.isEmpty()) {
 		const QString key = waiting.takeFirst();
+#ifdef Q_OS_ANDROID
+		/* There is no `ncfg` to run on a phone, so the same read is made here,
+		 * off the window's thread: each call waits on another host. */
+		asking++;
+		QPointer<ncfg_fleet_view> self(this);
+		QThread                  *worker = QThread::create([self, key]() {
+			char       socket[1100];
+			char       err[256];
+			char      *json = nullptr;
+			size_t     length = 0;
+			err[0] = '\0';
+			const bool ok = ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
+			    ncfg_fuzznet_status_at(socket, key.toUtf8().constData(), &json, &length, err,
+			                           sizeof(err));
+			const QByteArray out = ok ? QByteArray(json, (qsizetype)length) : QByteArray();
+			const QByteArray said(err);
+
+			free(json);
+			QMetaObject::invokeMethod(qApp, [self, key, ok, out, said]() {
+				if (self) {
+					self->answered(key, ok ? 0 : 1, out, said);
+				}
+			});
+		});
+		connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+		worker->start();
+		continue;
+#endif
 		auto         *process = new QProcess(this);
 		auto         *limit = new QTimer(process);
 
