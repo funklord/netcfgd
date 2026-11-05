@@ -252,6 +252,9 @@ crash_daemon
 check "and it survives the daemon being killed" "$(present)" "yes"
 
 restart_daemon --no-apply-on-start
+# The socket is bound before the observation the revert needs, so its appearing
+# says nothing about the revert: read at once, this failed under load.
+await no || true
 check "the restarted daemon reverts what was never confirmed" "$(present)" "no"
 check "and says why" \
 	"$(grep -ci 'confirm window was open' "$work/restart.log")" "1"
@@ -299,6 +302,7 @@ check "while the promise is kept elsewhere" \
 	"$([ -e "$work/run-confirm/confirm.json" ] && echo present || echo gone)" "present"
 
 restart_daemon --no-apply-on-start
+await no || true
 check "a real stop does not cost the window" "$(present)" "no"
 check "and the daemon says it found one" \
 	"$(grep -ci 'confirm window was open' "$work/restart.log")" "1"
