@@ -12686,6 +12686,17 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.733 `service_test` needed more than a fifth of a second
+
+`make check` failed "the stop waited for the process, not the file" at load 90. The
+stop takes hostapd's pid from its pid file, and the stand-in removes that file by
+itself after 0.2 s, so a stalled test found no file and nothing to wait on. A 0.4 s
+stall before the stop failed it three times of three. The stand-in now waits a second.
+
+**The same gap is there for a real hostapd**, though narrow: one already leaving by
+itself as a stop begins has removed its file, and the stop returns while it finishes,
+so a start could meet it. Not changed: nothing names that process once its file is gone.
+
 ## 10.732 `monitor` takes fuzznet's stream first
 
 With 10.731 it costs nothing, so `ncfg monitor`, `ncfg tui` and the GUI's stream hold

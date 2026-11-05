@@ -1569,15 +1569,20 @@ static void stopping_an_access_point_waits_for_it_to_go(void)
 	 * **hostapd removes its own pid file on the way out, before it has
 	 * exited**, and the wait re-read that file -- so it said "gone" while the
 	 * process was still deinitialising (10.661). This one removes the file a
-	 * fifth of a second in and runs on for most of a second after: the
+	 * second in and runs on for most of a second after: the
 	 * process is what has to be waited for.
+	 *
+	 * **A full second before it does**, and that is the margin rather than the
+	 * case: the stop takes the pid from that file, so a machine at load 90 that
+	 * had not reached it in 0.2 s found no file, had nothing to wait on, and
+	 * failed this check with the code right.
 	 */
 	memset(&fake_config, 0, sizeof(fake_config));
 	if (!fake_start(directory, "wlan0")) {
 		check(0, "a fake access point could be started for the file that goes first");
 		return;
 	}
-	leaving = a_hostapd_leaving_by("sleep 0.2; rm -f \"$3\"; sleep \"$1\"", pid_file, "0.6");
+	leaving = a_hostapd_leaving_by("sleep 1; rm -f \"$3\"; sleep \"$1\"", pid_file, "0.8");
 	message[0] = '\0';
 	check(ncfg_service_backend_stop(&service, NCFG_BACKEND_ACCESS_POINT, "wlan0", message,
 	    sizeof(message)), "an access point whose pid file goes before it does is stopped");
