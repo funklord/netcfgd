@@ -31,8 +31,8 @@
 #include "ncfg/base.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
-#include "ncfg/openvpn.h"
 #include "ncfg/process.h"
+#include "ncfg/service.h"
 #include "ncfg/supplicant.h"
 
 #include "testdir.h"
@@ -547,9 +547,7 @@ static void a_daemon_with_no_pid_file_of_netcfgds_is_left_alone(void)
 		const char *interface;
 		const char *what;
 	} kinds[] = {
-		{ NCFG_BACKEND_SUPPLICANT, "wlan-nofile", "a supplicant" },
-		{ NCFG_BACKEND_ACCESS_POINT, "ap-nofile", "an access point" },
-		{ NCFG_BACKEND_ROUTER_ADVERT, "ra-nofile", "a router advertisement daemon" }
+		{ NCFG_BACKEND_SUPPLICANT, "wlan-nofile", "a supplicant" }
 	};
 	size_t at;
 
@@ -573,44 +571,59 @@ static void a_daemon_with_no_pid_file_of_netcfgds_is_left_alone(void)
 }
 
 /*
- * openvpn takes its pid file with it (10.716), so "no file" is what a tunnel
- * that left by itself looks like, and "cannot tell" kept it `running` for ever
- * while `ncfg apply` said `nothing to do`. It has a handle the rule above
- * assumes is missing: its socket path in its `argv`. **The half that must not
- * regress is the first**, that rule's whole reason: a tunnel that is there is
+ * These daemons take their pid file with them (10.716), so "no file" is what
+ * one that left by itself looks like, and "cannot tell" kept it `running` for
+ * ever while `ncfg apply` said `nothing to do`. They have a handle the rule
+ * above assumes is missing: the mark in their `argv`. **The half that must not
+ * regress is the first**, that rule's whole reason: a daemon that is there is
  * not called dead for having no file.
  */
-static void an_openvpn_tunnel_is_found_by_its_mark_with_no_pid_file(void)
+static void a_daemon_is_found_by_its_mark_with_no_pid_file(void)
 {
-	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_OPENVPN, "vpn-nofile", 1);
-	char             marker[512];
-	char             message[NCFG_ERROR_MAX];
-	pid_t            child;
+	static const struct {
+		int         kind;
+		const char *interface;
+	} kinds[] = {
+		{ NCFG_BACKEND_ACCESS_POINT, "ap-marked" },
+		{ NCFG_BACKEND_ROUTER_ADVERT, "ra-marked" },
+		{ NCFG_BACKEND_DHCP_SERVER, "dhcp-marked" },
+		{ NCFG_BACKEND_UPNP, "upnp-marked" },
+		{ NCFG_BACKEND_OPENVPN, "vpn-marked" }
+	};
+	size_t at;
 
-	if (!observed || !ncfg_openvpn_socket_path(run_dir, "vpn-nofile", marker, sizeof(marker),
-	        NULL, 0)) {
-		check(0, "the fixture reads");
+	for (at = 0; at < sizeof(kinds) / sizeof(kinds[0]); at++) {
+		ncfg_observed_t *observed = observed_with(kinds[at].kind, kinds[at].interface, 1);
+		char             marker[512];
+		char             pid_path[512];
+		char             message[NCFG_ERROR_MAX];
+		pid_t            child;
+
+		if (!observed || !ncfg_service_backend_handle(run_dir, kinds[at].kind,
+		        kinds[at].interface, pid_path, sizeof(pid_path), marker, sizeof(marker))) {
+			check(0, "the fixture reads, and the kind has a mark");
+			ncfg_observed_free(observed);
+			continue;
+		}
+		child = marked_child(marker);
+		message[0] = '\0';
+		(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+		check(child > 0 && observed->backends[0].running,
+		    "a daemon with no pid file and its mark in argv is running");
 		ncfg_observed_free(observed);
-		return;
-	}
-	child = marked_child(marker);
-	message[0] = '\0';
-	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
-	check(child > 0 && observed->backends[0].running,
-	    "an openvpn tunnel with no pid file and its mark in argv is running");
-	ncfg_observed_free(observed);
-	reap();
+		reap();
 
-	observed = observed_with(NCFG_BACKEND_OPENVPN, "vpn-nofile", 1);
-	if (!observed) {
-		check(0, "the fixture reads");
-		return;
+		observed = observed_with(kinds[at].kind, kinds[at].interface, 1);
+		if (!observed) {
+			check(0, "the fixture reads");
+			continue;
+		}
+		message[0] = '\0';
+		(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+		check(!observed->backends[0].running,
+		    "  and with neither, it has gone, so the planner can start it again");
+		ncfg_observed_free(observed);
 	}
-	message[0] = '\0';
-	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
-	check(!observed->backends[0].running,
-	    "  and with neither, it has gone, so the planner can start it again");
-	ncfg_observed_free(observed);
 }
 
 static void the_round_refuses_what_it_cannot_be_asked(void)
@@ -647,7 +660,7 @@ int main(void)
 	a_client_that_has_died_reports_no_metric();
 	an_access_point_can_be_asked_at_last();
 	a_daemon_with_no_pid_file_of_netcfgds_is_left_alone();
-	an_openvpn_tunnel_is_found_by_its_mark_with_no_pid_file();
+	a_daemon_is_found_by_its_mark_with_no_pid_file();
 	the_round_refuses_what_it_cannot_be_asked();
 
 	/* Named pids, never a pattern: another session's `sleep` is not this

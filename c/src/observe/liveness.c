@@ -72,6 +72,7 @@
 #include "ncfg/hostapd.h"
 #include "ncfg/openvpn.h"
 #include "ncfg/process.h"
+#include "ncfg/service.h"
 #include "ncfg/dhcp_server.h"
 #include "ncfg/upnp.h"
 #include "ncfg/ra.h"
@@ -176,19 +177,43 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 		 */
 		return ncfg_autoip_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_SUPPLICANT:
-	case NCFG_BACKEND_ACCESS_POINT:
-	case NCFG_BACKEND_ROUTER_ADVERT:
-	case NCFG_BACKEND_DHCP_SERVER:
-	case NCFG_BACKEND_UPNP:
-		/* The file's absence is the test, not the pid's -- see
-		 * `backend_pid_file`, and the DHCP arm below for the same rule
-		 * written out in the one place it was already applied. */
+		/*
+		 * **The one left at "cannot tell"** (10.716). It has a mark as the
+		 * four below do, but this answer also decides whether its control
+		 * socket is asked at all, and `wedged.sh` holds that round with a
+		 * supplicant carrying none. The file's absence is the test, not the
+		 * pid's -- see `backend_pid_file`, and the DHCP arm below for the
+		 * same rule written out.
+		 */
 		if (!backend_pid_file(backend, run_dir)) {
 			*answerable = 0;
 			return 0;
 		}
-		if (backend->kind == (int)NCFG_BACKEND_SUPPLICANT) {
-			return ncfg_supplicant_running_pid(run_dir, backend->interface);
+		return ncfg_supplicant_running_pid(run_dir, backend->interface);
+	case NCFG_BACKEND_ACCESS_POINT:
+	case NCFG_BACKEND_ROUTER_ADVERT:
+	case NCFG_BACKEND_DHCP_SERVER:
+	case NCFG_BACKEND_UPNP:
+	case NCFG_BACKEND_OPENVPN:
+		/*
+		 * **Always answerable, for link-local's reason** (10.716). These daemons
+		 * remove their pid file on the way out, so "no file" is what one that
+		 * left by itself looks like, and answering "cannot tell" kept it
+		 * `running` for ever: `ncfg apply` said `nothing to do` over a tunnel
+		 * that was gone. Only netcfgd starts them and each carries its mark in
+		 * its `argv`, so with no file the process is still findable, and
+		 * finding none says it has gone.
+		 */
+		if (!backend_pid_file(backend, run_dir)) {
+			char pid_path[512];
+			char marker[512];
+
+			if (!ncfg_service_backend_handle(run_dir, backend->kind, backend->interface,
+			        pid_path, sizeof(pid_path), marker, sizeof(marker))) {
+				*answerable = 0;
+				return 0;
+			}
+			return ncfg_process_pid_by_marker(marker);
 		}
 		if (backend->kind == (int)NCFG_BACKEND_ACCESS_POINT) {
 			return ncfg_hostapd_running_pid(run_dir, backend->interface);
@@ -199,26 +224,8 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 		if (backend->kind == (int)NCFG_BACKEND_DHCP_SERVER) {
 			return ncfg_dhcp_server_running_pid(run_dir, backend->interface);
 		}
-		return ncfg_upnp_running_pid(run_dir);
-	case NCFG_BACKEND_OPENVPN:
-		/*
-		 * **Always answerable, for link-local's reason** (10.716). openvpn
-		 * removes its pid file on the way out, so "no file" is what a tunnel
-		 * that left by itself looks like, and answering "cannot tell" kept it
-		 * `running` for ever: `ncfg apply` said `nothing to do` over a tunnel
-		 * that was gone. Every tunnel netcfgd starts carries its socket path
-		 * in its `argv`, so with no file the process is still findable, and
-		 * finding none says it has gone.
-		 */
-		if (!backend_pid_file(backend, run_dir)) {
-			char marker[NCFG_OPENVPN_PATH_MAX];
-
-			if (!ncfg_openvpn_socket_path(run_dir, backend->interface, marker, sizeof(marker),
-			        NULL, 0)) {
-				*answerable = 0;
-				return 0;
-			}
-			return ncfg_process_pid_by_marker(marker);
+		if (backend->kind == (int)NCFG_BACKEND_UPNP) {
+			return ncfg_upnp_running_pid(run_dir);
 		}
 		return ncfg_openvpn_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_DHCP4:

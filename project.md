@@ -12686,7 +12686,7 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.716 A tunnel that left by itself stayed `running` for ever
+## 10.716 A daemon that left by itself stayed `running` for ever
 
 `ncfg apply` said `nothing to do` over an openvpn tunnel that was gone, and
 nothing started it again. Any tunnel that exits by itself does this, and a
@@ -12695,13 +12695,15 @@ pass read a missing file as "cannot tell" (34e8b045, wedged.sh), which kept the
 record's `running`. A `kill -9` leaves the file, which is why the one check of
 this, "netcfgd notices the tunnel is gone", passed.
 
-**The rule stands for what it was written for, and openvpn was outside its
+**The rule stands for what it was written for, and these were outside its
 premise.** "No handle means cannot tell" protects a live daemon from being
 called dead for having no file, which took the supplicant out of its
-`answering` round. openvpn has a handle: every tunnel netcfgd starts carries
-its socket path in its `argv`. So it now answers as link-local does, always:
+`answering` round. openvpn, hostapd, the router advertisement daemon, the DHCP
+server and miniupnpd have a handle: the mark `ncfg_service_backend_handle`
+names, which adoption reads too. So they now answer as link-local does, always:
 that mark on a process is running, and no file and no mark is gone.
-`liveness_test` holds both halves, the live one first.
+`liveness_test` holds both halves for each, the live one first. Only openvpn's
+was seen live; the other four rest on that test.
 
 **How it was found.** `make live` failed "and is still running, which is the
 window this is about" in `openvpn.sh`, every run. That control was doing its
@@ -12714,10 +12716,11 @@ that had been so was not measured. It lingers 8 seconds now.
 replacement started inside the window. The C reports the stop as not done
 (10.661), the record keeps the tunnel, and it is started once it has gone.
 
-**Open, the same shape:** hostapd, the supplicant, the router advertisement
-daemon, the DHCP server and miniupnpd keep "cannot tell" for a missing file. Each may remove its
-own pid file on a clean exit, and whether each carries a mark that makes this
-fix safe has not been read.
+**Open: the supplicant is left at "cannot tell".** It has a mark too, but its
+answer decides whether the control socket is asked, and `wedged.sh` holds that
+round with a planted record and a fake carrying no mark. So a supplicant that
+exits cleanly may still stay `running`. Closing that means changing the fixture
+and deciding what an unmarked supplicant in a record is.
 
 **And a filter hid a failed build while this was being done.** `grep ' error '`
 does not match a compiler's `error:`, so `make` failed on a missing include,
