@@ -42,10 +42,14 @@
 
 /*
  * The pair netcfgd's nodes run under (fuzznet's `chain/service.h`): a host's
- * netcfgd and a phone's fuzznetd must agree on it to be one estate.
+ * netcfgd and a phone's fuzznetd must agree on it to be one estate. Restated
+ * here because this file is libc only; `src/node/node.c` holds it to theirs.
  */
 #define NCFG_FUZZNET_SERVICE 1u
-#define NCFG_FUZZNET_PRODUCT 1u
+#define NCFG_FUZZNET_PRODUCT 3u
+
+/* The port a node serves its remote hop on, where one is served at all. */
+#define NCFG_FUZZNET_PORT 48090u
 
 /*
  * Ask `line` (with or without its newline) of the socket at `path`. 1 with

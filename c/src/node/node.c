@@ -14,6 +14,7 @@
 #include "ncfg/base.h"
 #include "ncfg/secrets.h"
 
+#include "chain/service.h"
 #include "chain/sign_monocypher.h"
 #include "claim/claim_file.h"
 #include "cli/cli.h"
@@ -30,6 +31,8 @@
 
 #include "ncfg/scope.h"
 
+#include "ncfg_fuzznet.h"
+
 #include <errno.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -37,6 +40,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+
+_Static_assert(NCFG_FUZZNET_SERVICE == FZN_SERVICE_NODE, "netcfgd's service is fuzznet's number");
+_Static_assert(NCFG_FUZZNET_PRODUCT == FZN_PRODUCT_NETCFGD, "netcfgd's product is fuzznet's number");
 #include <unistd.h>
 
 /*

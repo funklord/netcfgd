@@ -34,6 +34,7 @@
  *   defaults are pasted in from the constants that decide them, so a default
  *   that moves moves in the help as well or does not compile.
  */
+#include "ncfg_fuzznet.h"
 #include "main_internal.h"
 
 #include "loop_internal.h"
@@ -1173,10 +1174,15 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	 * a client with configuration of its own, which the holder ruled out.
 	 */
 	static char        socket_arg[NCFG_NODE_DIR_MAX + 32u];
+	static char        service_arg[40];
+	static char        product_arg[40];
+	static char        port_arg[32];
 	static const char *args[33];
 	size_t             arg_count = 0;
 	size_t             at;
 	int                named = 0;
+	int                numbered = 0;
+	int                ported = 0;
 
 	static node_driven_t driven;
 	ncfg_node_loop_t     loop;
@@ -1214,11 +1220,38 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 		if (strncmp(options->fuzznet_args[at], "--socket", 8u) == 0) {
 			named = 1;
 		}
+		if (strncmp(options->fuzznet_args[at], "--fuzznet-service", 17u) == 0) {
+			numbered = 1;
+		}
+		if (strncmp(options->fuzznet_args[at], "--udp-port", 10u) == 0) {
+			ported = 1;
+		}
 		args[arg_count++] = options->fuzznet_args[at];
 	}
 	if (!named && arg_count < 32u) {
 		(void)snprintf(socket_arg, sizeof(socket_arg), "--socket=%s/fuzznet.sock", run_dir);
 		args[arg_count++] = socket_arg;
+	}
+	/*
+	 * **netcfgd's numbers always, a port only when the config opens one**
+	 * (10.721). The numbers cost nothing on the network, and without them the
+	 * node has none of fuzznet's verbs, so nothing can pair. The port is this
+	 * project's first listener on a network by default, so it follows the one
+	 * thing that says a machine is reached from outside: `global { remote }`,
+	 * closed unless somebody opened it. Read at the start, as the sockets are.
+	 */
+	if (!numbered && arg_count + 2u <= 32u) {
+		(void)snprintf(service_arg, sizeof(service_arg), "--fuzznet-service=%u",
+		    NCFG_FUZZNET_SERVICE);
+		(void)snprintf(product_arg, sizeof(product_arg), "--fuzznet-product=%u",
+		    NCFG_FUZZNET_PRODUCT);
+		args[arg_count++] = service_arg;
+		args[arg_count++] = product_arg;
+		numbered = 1;
+	}
+	if (numbered && !ported && arg_count < 32u && ncfg_main_remote_is_open(&policy->remote)) {
+		(void)snprintf(port_arg, sizeof(port_arg), "--udp-port=%u", NCFG_FUZZNET_PORT);
+		args[arg_count++] = port_arg;
 	}
 	err[0] = '\0';
 	served = ncfg_node_serve(node, args, arg_count, options->argv, &loop, err, sizeof(err));

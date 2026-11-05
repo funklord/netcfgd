@@ -193,7 +193,8 @@ int main(int argc, char **argv)
 				node->kill();
 				node->waitForFinished(2000);
 			}
-			host.kill();
+			host.terminate();
+			host.waitForFinished(3000);
 			(void)scratch.remove();
 			_exit(1);
 		});

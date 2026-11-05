@@ -12686,6 +12686,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.721 netcfgd has its numbers, and listens only where the config says
+
+fuzznet assigned `FZN_PRODUCT_NETCFGD`, 3 (its `chain/service.h`), and `src/node/node.c`
+holds `NCFG_FUZZNET_PRODUCT` to it at compile time. **The daemon now always gives
+its node the numbers**, so a stock netcfgd has fuzznet's verbs and something can
+pair with it; until now only the tests passed any.
+
+**The port is another matter.** gui/project.md section 9 says a daemon listening
+on a network is a thing this project has deliberately never had. So the node binds
+UDP 48090 only where `global { remote }` opens a tier, which is closed by default
+and is the one thing that already says a machine is reached from outside. Read at
+the start, as the sockets are, so opening it takes a restart.
+
+Rejected: always listening, since a member-only hop is still a new listener on
+every laptop that installs this; and a separate switch, a second word for what
+`remote` already says.
+
+`c/tests/node_remote.sh`, each daemon in its own network namespace: the verbs
+answer closed and open, the port is bound only when open. With the condition
+removed, the closed case fails.
+
 ## 10.720 A phone pairs first, on a node of its own
 
 The holder, 2026-11-05: on a phone, QR/code pairing is the first thing a person
@@ -12710,11 +12731,8 @@ typed address.
 **Still needed from fuzznet**, asked 2026-11-05 (its inbox 20261105T0931Z). A
 join is two carries, the prekey out and the card back, and a phone's prekey has
 no road to the host: 277 hex digits, no camera on the host, no file. A join by
-one code is asked for. So is netcfgd's product number:
-`NCFG_FUZZNET_PRODUCT` is **1, the test product, until it is assigned**, and a
-stock netcfgd starts with no capability at all (fuzznet's sec 857), so there is
-nothing yet for a person to pair with. `ncfg pair`, which the screen names, waits
-on both.
+one code is asked for, and `ncfg pair`, which the screen names, waits on it. (The
+product number asked for beside it came the same day: 10.721.)
 
 **Verified.** `gui/tests/phone_pair` on real nodes: a card's length of code read
 back from its image, refusals, a fuzznetd started as the app starts it, the view
