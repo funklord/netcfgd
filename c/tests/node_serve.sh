@@ -120,6 +120,35 @@ timeout 10 "$C" reload --run-dir "$R/run" > /dev/null 2>&1
 wait $held
 grep -q '"event":"reloaded"' "$R/held"
 check $? "  and \`monitor\` hears a reload on fuzznet's stream ($(head -c 60 "$R/held"))"
+# And `ncfg tui`'s events pane, in a pty, bounded by its own deadline and `timeout`.
+timeout 14 python3 -I -c '
+import os, pty, select, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.environ["TERM"] = "xterm"
+    os.execv(sys.argv[1], [sys.argv[1], "tui", "--run-dir", sys.argv[2]])
+seen = b""
+start = time.time()
+sent = 0
+while time.time() - start < 7:
+    r, _, _ = select.select([fd], [], [], 0.2)
+    if r:
+        try:
+            seen += os.read(fd, 65536)
+        except OSError:
+            break
+    if not sent and time.time() - start > 1.5:
+        os.write(fd, b"e")
+        sent = 1
+    if sent == 1 and time.time() - start > 2.5:
+        os.system(sys.argv[1] + " reload --run-dir " + sys.argv[2] + " > /dev/null 2>&1")
+        sent = 2
+os.write(fd, b"q")
+time.sleep(0.3)
+os.kill(pid, 9)
+sys.stdout.write(seen.decode(errors="replace"))' "$C" "$R/run" > "$R/tui.held" 2>&1
+grep -q 'read again' "$R/tui.held"
+check $? "  and \`ncfg tui\`'s events pane hears it too"
 # Every request now (0309, 10.712), and not only `status`: with no control
 # socket to reach, these can only have come through `call ask`. A request past
 # one line goes in pieces.

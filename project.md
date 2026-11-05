@@ -12700,13 +12700,16 @@ say to read the status. Preferring it now would make the events tab worse for
 nothing, as the socket cannot go until raidcfgd moves anyway. **Before the socket goes**
 that detail needs a home: a read of the last events, by `ask`, is the likely one.
 
+**A second real user is confirmed** by `c/tests/node_second_user.sh`: a user namespace
+with subordinate ids gives real uids, so the user `observe` names holds the stream and
+a third is refused `denied`, each judged by `SO_PEERCRED`. `ncfg tui`'s events pane
+takes the stream too.
+
 **Limits.** `any` has no `=r` (fuzznet's sec 883), so under `observe = "any"` only the
 daemon's own user holds a stream, and everyone else stays on the control socket.
 Asked of fuzznet, which parked it for the holder: `any` could take all four held slots
-and shut a tray out, and it suggests a right that holds a stream and nothing else.
-`ncfg tui` still takes the control
-socket alone. fuzznet tested with one account, and so has this: a second real user
-is unconfirmed.
+and shut a tray out, and it suggested a right that holds a stream and nothing else.
+**The holder agreed, 2026-11-05**; fuzznet told, and its spelling awaited.
 
 `node_serve.sh`: control socket hidden, `monitor --json` hears a reload.
 

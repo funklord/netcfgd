@@ -247,6 +247,8 @@ static void terminal_size(size_t *rows_out, size_t *columns_out)
  * five panes work without it -- so the sentence goes on the status line and the
  * events pane says the stream never started.
  */
+static int events_held; /* the stream is fuzznet's, whose lines are not JSON */
+
 static int subscribe(const char *socket_path, char *err, size_t err_size)
 {
 	struct sockaddr_un address;
@@ -269,9 +271,18 @@ static int subscribe(const char *socket_path, char *err, size_t err_size)
 		return -1;
 	}
 	if (connect(fd, (const struct sockaddr *)&address, sizeof(address)) < 0) {
+		char run_dir[sizeof(address.sun_path)];
+		char why[NCFG_ERROR_MAX];
+		int  held = -1;
+
 		ncfg_error_set(err, err_size, "cannot subscribe to events: %s", strerror(errno));
 		(void)close(fd);
-		return -1;
+		/* Over fuzznet where the control socket is not there (10.729). */
+		if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+			held = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+		}
+		events_held = held >= 0;
+		return held;
 	}
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_MONITOR;
@@ -508,6 +519,20 @@ static int drain_events(ncfg_tui_t *tui, int fd, ncfg_proto_framer_t *framer)
 		if (ncfg_proto_framer_next(framer, &line, &length, err, sizeof(err)) !=
 		    NCFG_PROTO_LINE) {
 			return 1;
+		}
+		if (events_held) {
+			char        copy[256];
+			char        json[256];
+			const char *said;
+
+			(void)snprintf(copy, sizeof(copy), "%.*s", (int)length, line);
+			if (ncfg_fuzznet_event_json(copy, json, sizeof(json)) &&
+			    (said = strstr(json, "\"summary\":\"")) != NULL) {
+				said += sizeof("\"summary\":\"") - 1u;
+				json[strlen(json) - 2u] = '\0'; /* its closing quote and brace */
+				ncfg_tui_event_push(tui, said);
+			}
+			continue;
 		}
 		if (!ncfg_proto_response_read(line, length, &message, err, sizeof(err))) {
 			/* A line this build cannot decode is still shown. A monitor that

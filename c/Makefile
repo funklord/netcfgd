@@ -391,6 +391,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	timeout 400 sh tests/node_fleet.sh || fail=1; \
 	echo "== tests/node_remote.sh"; \
 	timeout 60 sh tests/node_remote.sh || fail=1; \
+	echo "== tests/node_second_user.sh"; \
+	timeout 60 sh tests/node_second_user.sh || fail=1; \
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
