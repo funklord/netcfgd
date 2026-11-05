@@ -12686,6 +12686,48 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.720 A phone pairs first, on a node of its own
+
+The holder, 2026-11-05: on a phone, QR/code pairing is the first thing a person
+does, since it is the main platform for this use, and it is not easy to move
+files to a phone or share auth data between apps. That answers gui/project.md
+section 9's two questions. **The code is the pairing and the discovery**: fuzznet's
+card says where its sponsor is (its sec 671), so a phone needs no mDNS and no
+typed address.
+
+- **The phone's node**, `gui/src/phone/phone_node.cpp`: fuzznetd rides in the APK as
+  `libfuzznetd.so`, built from the pin by `make -C gui android-node`, and the app
+  starts it with `XDG_RUNTIME_DIR` in its own directory, so
+  `ncfg_fuzznet_user_socket` and everything above it is the desktop's code.
+  **No Android service**, which is where this differs from fuzzypickles: nothing
+  arrives for this node, so it goes with the app.
+- **The first screen**, `pair_view.cpp`: scan, or type. Nothing else is reachable
+  until it is done. Back ends the app; the first version kept waiting with no
+  window, and the emulator found it.
+- **`allowBackup` is off** now that the app's storage holds keys, and the floor is
+  API 28, fuzznet's.
+
+**Still needed from fuzznet**, asked 2026-11-05 (its inbox 20261105T0931Z). A
+join is two carries, the prekey out and the card back, and a phone's prekey has
+no road to the host: 277 hex digits, no camera on the host, no file. A join by
+one code is asked for. So is netcfgd's product number:
+`NCFG_FUZZNET_PRODUCT` is **1, the test product, until it is assigned**, and a
+stock netcfgd starts with no capability at all (fuzznet's sec 857), so there is
+nothing yet for a person to pair with. `ncfg pair`, which the screen names, waits
+on both.
+
+**Verified.** `gui/tests/phone_pair` on real nodes: a card's length of code read
+back from its image, refusals, a fuzznetd started as the app starts it, the view
+taking a card and ending in `paired`; three sabotages, each failed by its check.
+On `Galaxy_Nexus_API_33`: the screen; the camera permission, opening and frames
+through `-camera-back virtualscene`; and with the app's own node joined to a real
+netcfgd at 10.0.2.2, **the window showing that machine's links**.
+
+**Not verified:** a code read through a camera, since the virtual scene was never
+aimed at its poster; and the view's join on the emulator, since `adb shell input
+text` did not deliver a 703-character card whole, so the join there was asked of
+the node by hand. The probe covers the view's. Not built for arm64.
+
 ## 10.719 A supplicant that left by itself is noticed too
 
 10.716 left the supplicant at "cannot tell", since its answer decides whether
@@ -12832,12 +12874,9 @@ all this step claims.
 
 **What it needs next, in order:**
 
-1. A node on the phone. fuzzypickles ships fuzznetd as `libfuzznetd.so`, and
-   started with `XDG_RUNTIME_DIR` in the app's directory,
-   `ncfg_fuzznet_user_socket` would find it with no change here.
-2. Joining an estate: `add join CARD HOST PORT` exists, so what is missing is a
-   screen. **How the first pairing should feel is listed in gui/project.md
-   section 9 to raise**, and how a phone finds a host with it.
+1. A node on the phone: built, 10.720.
+2. Joining an estate: the screen is built, 10.720, and the holder answered how it
+   should feel.
 3. **The fleet tab's child processes do not exist on a phone**: there is no
    `ncfg` to run (10.710, 10.713), so that tab reports it could not start. It
    needs its reads moved onto a thread with `ncfg_client_open_at`.

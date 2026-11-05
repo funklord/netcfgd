@@ -198,8 +198,8 @@ not by a timer.
 **LAN first.** The first target is a phone and a netcfgd host on the same network,
 which is the case an operator most often has ("I am at home, the wifi is wrong").
 No rendezvous, no hole punching, no relay. Discovery on a LAN is **OPEN** — mDNS,
-a broadcast probe, or a typed-in address — and typing an address is a perfectly
-good first answer.
+a broadcast probe, or a typed-in address — ~~and typing an address is a perfectly
+good first answer~~ **settled in §9: the pairing code carries the address.**
 
 **The datagram problem is the real work.** A `status` is the whole observation and
 a `show` is the compiled document; on a router with a dozen interfaces both are
@@ -542,11 +542,11 @@ to decide, not this tree's.
   having seen that this was listed here to raise. It is one condition in
   `c/src/main/daemon_ask.c` and one in `c/src/cli/run.c`, so either answer is
   cheap to make.
-- How a phone finds a host on the LAN (§6).
-- How pairing works the first time: the sibling has QR and camera code in its
-  `client/` for exactly this, and reusing it is plausible — but netcfgd's first
-  pairing may be simpler, since the operator is usually root on the host already
-  and can run a command there.
+- ~~How a phone finds a host on the LAN, and how pairing works the first time.~~
+  **Answered by the holder, 2026-11-05:** on a phone, pairing by QR code is the
+  first thing a person does, and no file or other app's auth data is part of it.
+  The code says where the host is. [project.md 10.720](../project.md) has what is
+  built and what waits on fuzznet.
 - Whether `agent/` ships in netcfgd's own packages or as a separate one. It is a
   daemon that listens on a network, which is a thing this project has deliberately
   never had.

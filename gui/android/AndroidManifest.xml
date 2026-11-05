@@ -8,6 +8,10 @@
          ask for external storage, which nothing in a network client reads. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- Pairing reads a code off the host's screen. Not required: a phone with
+         no camera, or one that says no, types it. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <!-- %%INSERT_FEATURES -->
     <supports-screens
         android:anyDensity="true"
@@ -20,8 +24,10 @@
         android:label="netcfgd"
         android:icon="-- %%INSERT_APP_ICON%% --"
         android:enableOnBackInvokedCallback="true"
-        android:allowBackup="true"
-        android:fullBackupOnly="false">
+        android:allowBackup="false">
+        <!-- No backup: the store holds this device's keys, and a copy of them
+             somewhere the person cannot see is what pairing per device is
+             there to avoid. -->
         <activity
             android:name="org.qtproject.qt.android.bindings.QtActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"

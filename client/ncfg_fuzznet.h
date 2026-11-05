@@ -41,6 +41,13 @@
 #include <stdint.h>
 
 /*
+ * The pair netcfgd's nodes run under (fuzznet's `chain/service.h`): a host's
+ * netcfgd and a phone's fuzznetd must agree on it to be one estate.
+ */
+#define NCFG_FUZZNET_SERVICE 1u
+#define NCFG_FUZZNET_PRODUCT 1u
+
+/*
  * Ask `line` (with or without its newline) of the socket at `path`. 1 with
  * the reply in `reply`, its newline taken off; 0 with a sentence in `why`,
  * and `*silent` set where nobody answered -- no socket, nothing listening, no

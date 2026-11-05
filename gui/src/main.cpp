@@ -21,6 +21,14 @@
 #include <cstdio>
 
 #include <QFileInfo>
+#ifdef Q_OS_ANDROID
+#  include "phone/pair_view.h"
+#  include "phone/phone_node.h"
+#  include <QStandardPaths>
+extern "C" {
+#  include "ncfg_fuzznet.h"
+}
+#endif
 
 #ifdef NETCFGD_QTTY
 #  include <qtty/qtty.h>
@@ -200,7 +208,32 @@ int main(int argc, char **argv)
 		fprintf(stderr, "netcfgd-gui: --at and --socket each say which machine; give one\n");
 		return 2;
 	}
+	/* The host this window shows, on a phone: there is no machine of its own
+	 * to configure, so pairing comes before anything else (10.720). */
+	QString phone_host;
+#ifdef Q_OS_ANDROID
+	{
+		const QString home = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+		QString       why;
+		char          node_socket[1100];
+
+		if (!ncfg_phone_node_start(QCoreApplication::applicationDirPath() +
+		                               QStringLiteral("/libfuzznetd.so"),
+		                           home, &application, &why) ||
+		    !ncfg_fuzznet_user_socket(node_socket, sizeof(node_socket))) {
+			QMessageBox::critical(nullptr, QStringLiteral("netcfgd"), why);
+			return 1;
+		}
+		phone_host = ncfg_phone_host(QString::fromLocal8Bit(node_socket), home);
+		if (phone_host.isEmpty()) {
+			return 0;
+		}
+	}
+#endif
 	auto open_it = [&](QString *why) {
+		if (!phone_host.isEmpty()) {
+			return connection.open_at(phone_host, why);
+		}
 		return parser.isSet(at_option) ? connection.open_at(parser.value(at_option), why)
 		                               : connection.open(parser.value(socket_option), why);
 	};
@@ -240,13 +273,6 @@ int main(int argc, char **argv)
 	 * message is about to act on it. Cancel is what closing the dialog does,
 	 * so there is no way to dismiss it into a window that would lie. */
 	while (!login && !open_it(&error)) {
-#ifdef Q_OS_ANDROID
-		/* The C layer's sentence names `systemctl`, and a phone runs no netcfgd
-		 * to start: it reaches one on another host, which this build cannot
-		 * yet (10.714). Said plainly rather than as a daemon that is down. */
-		error = QStringLiteral("netcfgd runs on the machine it configures, and a phone is not "
-		                       "one. This build cannot reach another host yet.");
-#endif
 		QMessageBox box(QMessageBox::Critical, QStringLiteral("netcfgd"), error,
 		            QMessageBox::Retry | QMessageBox::Cancel);
 		box.setDefaultButton(QMessageBox::Retry);
@@ -266,7 +292,7 @@ int main(int argc, char **argv)
 	 * Made before the window, so it outlives the tray the window owns.
 	 */
 	ncfg_connection here;
-	if (parser.isSet(at_option)) {
+	if (parser.isSet(at_option) || !phone_host.isEmpty()) {
 		(void)here.open(parser.value(socket_option), nullptr);
 	} else {
 		(void)here.open(connection.where(), nullptr);

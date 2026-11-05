@@ -177,15 +177,40 @@ APP_ID = se.vibes.netcfgd
 ANDROID_PROGRAM = netcfgd-gui
 ANDROID_BUILD_DIR ?= build-android-$(ANDROID_ABI)
 ANDROID_ARTIFACT = $(ANDROID_BUILD_DIR)/$(ANDROID_PROGRAM)-$(VERSION)-$(ANDROID_ABI).apk
+# fuzznet's floor, and so the app's: it builds at 28.
+ANDROID_API = 28
 
 include ../tool/android.mk
 
-.PHONY: android android-build
+.PHONY: android android-build android-node
 
-$(ANDROID_BUILD_DIR)/Makefile: android-check gui.pro
+# The phone's node (10.720), from the pin, in a directory `android-fresh` does
+# not empty: it takes minutes and depends on nothing of this tree. The service
+# flags are c/Makefile's: a phone carries no stickers or notes either.
+ANDROID_TRIPLE_arm64-v8a = aarch64-linux-android
+ANDROID_TRIPLE_x86_64    = x86_64-linux-android
+ANDROID_NDK_BIN = $(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/linux-x86_64/bin
+ANDROID_CC = $(ANDROID_NDK_BIN)/$(ANDROID_TRIPLE_$(ANDROID_ABI))$(ANDROID_API)-clang
+ANDROID_NODE_DIR = $(abspath build-android-node-$(ANDROID_ABI))
+ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libfuzznetd.so
+
+android-node: android-check
+	CFLAGS='-Os -ffunction-sections -fdata-sections' $(MAKE) -s -C ../fuzznet \
+	        BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) FZN_LOG_PACK=0 \
+	        FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 \
+	        $(ANDROID_NODE_DIR)/fuzznetd
+	$(ANDROID_NDK_BIN)/llvm-strip -o $(ANDROID_NODE_LIB) $(ANDROID_NODE_DIR)/fuzznetd
+
+# The sed is the one way to say this from qmake: the node has to exist as a
+# file to be run, so the libraries are extracted at install, which AGP calls
+# legacy packaging and refuses from the manifest. fuzzypickles' Makefile has the
+# long form of how that was found.
+$(ANDROID_BUILD_DIR)/Makefile: android-check android-node gui.pro
 	mkdir -p $(ANDROID_BUILD_DIR)
 	cd $(ANDROID_BUILD_DIR) && $(QT_ANDROID_ROOT)/bin/qmake ../gui.pro \
-	        NETCFGD_VERSION=$(VERSION) NETCFGD_VERSION_CODE=$(ANDROID_VERSION_CODE)
+	        NETCFGD_VERSION=$(VERSION) NETCFGD_VERSION_CODE=$(ANDROID_VERSION_CODE) \
+	        NETCFGD_NODE_LIB=$(ANDROID_NODE_LIB) && \
+	sed -i '1a\   "android-legacy-packaging": true,' android-*-deployment-settings.json
 
 android android-build: android-fresh $(ANDROID_BUILD_DIR)/Makefile
 	$(MAKE) -C $(ANDROID_BUILD_DIR) apk
