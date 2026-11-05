@@ -1,10 +1,10 @@
 /*
- * pair.c -- `ncfg pair PREKEY`: admit a device to this host's estate, and draw
- * the code it takes (project.md 10.722).
+ * pair.c -- `ncfg pair`: draw a one-use code a device joins this host's estate by
+ * (project.md 10.722, 10.723).
  *
- * The terminal displays and the phone scans. The card says where this host is,
- * so the host's own address is set first; a card that says nowhere would leave
- * a phone with nothing to reach.
+ * The terminal displays and the phone scans, and nothing goes back by hand:
+ * fuzznet's invite (its sec 896) carries the device's key home over the network.
+ * The code says where this host is, so the host's own address is set first.
  *
  * Asked of the daemon's fuzznet socket, whose verbs are its own user's, so this
  * is root's on a machine, as the node's trust is not grantable (fuzznet's
@@ -19,12 +19,17 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 /* The quiet zone the standard asks for, in modules. */
 #define PAIR_QUIET 4u
+
+/* How long a code stands, in seconds: fuzznet's own default, said so that the
+ * wait and the sentence are the code's. */
+#define PAIR_LIFE 600u
 
 /* Whether module (x, y), quiet zone included, is dark. */
 static int dark(const uint8_t *modules, size_t size, size_t x, size_t y)
@@ -116,6 +121,24 @@ static int ask_node(const char *socket_path, const char *line, char *reply, size
 	return 1;
 }
 
+/* How many members this node has, or -1 where it does not say. */
+static long members_of(const char *socket_path)
+{
+	char  reply[256];
+	char  why[NCFG_ERROR_MAX];
+	int   silent = 0;
+	char *end = NULL;
+	long  total;
+
+	if (!ncfg_fuzznet_ask(socket_path, "list peer", reply, sizeof(reply), 2000, &silent, why,
+	        sizeof(why)) ||
+	    strncmp(reply, "ok ", 3) != 0) {
+		return -1;
+	}
+	total = strtol(reply + 3, &end, 10);
+	return end == reply + 3 ? -1 : total;
+}
+
 int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
@@ -126,9 +149,11 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	char           line[NCFG_FUZZNET_REQUEST_MAX];
 	char           reply[2048];
 	size_t         size = 0;
+	long           before;
 
-	if (count != 1u) {
-		ncfg_error_set(err, err_size, "`ncfg pair` takes the device's prekey");
+	(void)positional;
+	if (count != 0u) {
+		ncfg_error_set(err, err_size, "`ncfg pair` takes nothing: it draws a code to scan");
 		return 0;
 	}
 	(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
@@ -145,7 +170,7 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	}
 	if (!outward_address(address, sizeof(address))) {
 		ncfg_error_set(err, err_size,
-		    "this machine has no route out, so a card could say nowhere to reach it");
+		    "this machine has no route out, so a code could say nowhere to reach it");
 		return 0;
 	}
 	(void)snprintf(line, sizeof(line), "set setting host net/address %s %u", address,
@@ -157,24 +182,34 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 		ncfg_error_set(err, err_size, "netcfgd's node refused its address: %s", reply);
 		return 0;
 	}
-	if (snprintf(line, sizeof(line), "add peer %s delegable", positional[0]) >=
-	    (int)sizeof(line)) {
-		ncfg_error_set(err, err_size, "that is too long to be a prekey");
-		return 0;
-	}
+	before = members_of(socket_path);
+	(void)snprintf(line, sizeof(line), "add invite delegable %u", PAIR_LIFE);
 	if (!ask_node(socket_path, line, reply, sizeof(reply), err, err_size)) {
 		return 0;
 	}
 	if (strncmp(reply, "ok ", 3) != 0) {
-		ncfg_error_set(err, err_size, "netcfgd's node refused the device: %s", reply);
+		ncfg_error_set(err, err_size, "netcfgd's node would not make a code: %s", reply);
 		return 0;
 	}
 	if (!ncfg_node_qr(reply + 3, modules, sizeof(modules), &size)) {
-		ncfg_error_set(err, err_size, "the card would not fit a code");
+		ncfg_error_set(err, err_size, "the code would not fit");
 		return 0;
 	}
 	ncfg_cli_pair_draw(stdout, modules, size);
-	printf("\nScan this with the device. It reaches this machine at %s, port %u.\n\n%s\n",
-	    address, NCFG_FUZZNET_PORT, reply + 3);
-	return 1;
+	printf("\nScan this with the netcfgd app. It works once, for %u minutes, and whoever\n"
+	       "scans it may join, so show it to nobody else. It reaches this machine at %s,\n"
+	       "port %u.\n\n%s\n\n",
+	    PAIR_LIFE / 60u, address, NCFG_FUZZNET_PORT, reply + 3);
+	(void)fflush(stdout);
+	for (unsigned waited = 0; waited < PAIR_LIFE; waited++) {
+		long now = members_of(socket_path);
+
+		if (now > before && before >= 0) {
+			puts("A device joined. It is in `ncfg nodes` on any member.");
+			return 1;
+		}
+		sleep(1);
+	}
+	ncfg_error_set(err, err_size, "nobody scanned it, and the code has run out");
+	return 0;
 }

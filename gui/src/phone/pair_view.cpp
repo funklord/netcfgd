@@ -18,17 +18,24 @@ extern "C" {
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include <sys/stat.h>
+#include <cstring>
 
-/* A join reaches the host and pulls from it: the longest thing a node is asked
- * here. fuzznet's round waits are 3 s each. */
-static const int join_wait_ms = 20000;
+/* `add join` answers at once, `ok asking`, and asks the host from then on. */
+static const int join_wait_ms = 5000;
 
-/* The node starts again in place after a join; 60 looks, 500 ms apart. */
-static const int looks_max = 60;
+/* A look every 500 ms. The node asks for five minutes, then says `idle`, so this
+ * only bounds a node that stops answering altogether. */
+static const int looks_max = 660;
 
-/* What a pairing code starts with: fuzznet's card, as `ncfg pair` draws it. */
-static const char code_prefix[] = "FZN";
+/* From here on, the wait says what is likely wrong: ten seconds. */
+static const int looks_patient = 20;
+
+/* Looks allowed before `idle` means anything: the node starts again in place
+ * after it has joined, and is `idle` then too. */
+static const int looks_settling = 10;
+
+/* What a pairing code starts with: fuzznet's invite (its sec 896). */
+static const char code_prefix[] = "FZI1:";
 
 QString ncfg_pair_view::joined_host(const QString &socket)
 {
@@ -44,8 +51,8 @@ QString ncfg_pair_view::joined_host(const QString &socket)
 	return QString::fromUtf8(keys[0]);
 }
 
-ncfg_pair_view::ncfg_pair_view(const QString &socket, const QString &scratch, QWidget *parent)
-    : QWidget(parent), socket_path(socket), scratch_dir(scratch)
+ncfg_pair_view::ncfg_pair_view(const QString &socket, QWidget *parent)
+    : QWidget(parent), socket_path(socket)
 {
 	QVBoxLayout *layout = new QVBoxLayout(this);
 	QLabel      *title = new QLabel(QStringLiteral("Pair with your netcfgd"), this);
@@ -77,9 +84,11 @@ ncfg_pair_view::ncfg_pair_view(const QString &socket, const QString &scratch, QW
 	layout->addSpacing(how->fontMetrics().height());
 	layout->addWidget(scan);
 	layout->addWidget(status_line);
-	layout->addStretch(1);
+	/* Above the stretch: a phone's keyboard rises over the bottom of the screen,
+	 * and a person has to see what they type. */
 	layout->addWidget(typed);
 	layout->addWidget(use);
+	layout->addStretch(1);
 	reader = new ncfg_code_reader(this);
 	waiting = new QTimer(this);
 	waiting->setInterval(500);
@@ -135,26 +144,8 @@ void ncfg_pair_view::take_code(const QByteArray &code)
 			return;
 		}
 	}
-	/* A card is longer than the 512 bytes a line to the node may be, so it goes
-	 * in a file, which the node reads and which goes straight after. Private
-	 * to this app, and the card is the host's to give only to this device. */
-	QByteArray line = "add join " + text;
-	QString    held;
+	const QByteArray line = "add join " + text;
 
-	if (line.size() >= (int)NCFG_FUZZNET_REQUEST_MAX) {
-		held = scratch_dir + QStringLiteral("/code");
-		QFile file(held);
-
-		if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
-		    !file.setPermissions(QFile::ReadOwner | QFile::WriteOwner) ||
-		    file.write(text) != text.size()) {
-			status_line->setText(QStringLiteral("The code could not be held: %1")
-			                         .arg(file.errorString()));
-			return;
-		}
-		file.close();
-		line = "add join " + QFile::encodeName(held);
-	}
 	busy(true);
 	status_line->setText(QStringLiteral("Reaching the host."));
 
@@ -168,9 +159,6 @@ void ncfg_pair_view::take_code(const QByteArray &code)
 		                             join_wait_ms, &silent, why, sizeof(why));
 		const QString answer = QString::fromUtf8(said ? reply : why);
 
-		if (!held.isEmpty()) {
-			QFile::remove(held);
-		}
 		QMetaObject::invokeMethod(qApp, [self, said, answer]() {
 			if (self) {
 				self->asked(said != 0 && answer.startsWith(QStringLiteral("ok")), answer);
@@ -189,36 +177,49 @@ void ncfg_pair_view::asked(bool ok, const QString &answer)
 		status_line->setText(QStringLiteral("The host did not take it: %1").arg(answer));
 		return;
 	}
-	status_line->setText(QStringLiteral("Joined. Starting again."));
+	status_line->setText(QStringLiteral("Asking the host."));
 	looks = 0;
 	waiting->start();
 }
 
 void ncfg_pair_view::look_for_node()
 {
-	const QString host = joined_host(socket_path);
+	const QString    host = joined_host(socket_path);
+	const QByteArray path = QFile::encodeName(socket_path);
+	char             reply[64];
+	char             why[256];
+	int              silent = 0;
 
 	if (!host.isEmpty()) {
 		waiting->stop();
 		emit paired(host);
 		return;
 	}
-	if (++looks >= looks_max) {
+	looks++;
+	const bool gave_up = looks > looks_settling &&
+	    ncfg_fuzznet_ask(path.constData(), "get join", reply, sizeof(reply), 1000, &silent, why,
+	                     sizeof(why)) &&
+	    strstr(reply, "idle") != nullptr;
+
+	if (gave_up || looks >= looks_max) {
 		waiting->stop();
 		busy(false);
-		status_line->setText(QStringLiteral("Joined, and the host has not been heard from. "
-		                                    "Is the phone on its network?"));
+		status_line->setText(QStringLiteral("The host did not answer. The code may have run "
+		                                    "out or been used: run ncfg pair again."));
+	} else if (looks == looks_patient) {
+		status_line->setText(QStringLiteral("Still asking the host. Is this phone on its "
+		                                    "network?"));
 	}
 }
 
-QString ncfg_phone_host(const QString &socket, const QString &scratch)
+QString ncfg_phone_host(const QString &socket)
 {
 	QString host = ncfg_pair_view::joined_host(socket);
 
 	if (!host.isEmpty()) {
 		return host;
 	}
-	ncfg_pair_view view(socket, scratch);
+	ncfg_pair_view view(socket);
 	QEventLoop     wait;
 
 	QObject::connect(&view, &ncfg_pair_view::paired, &wait, [&](const QString &key) {

@@ -1072,8 +1072,8 @@ int ncfg_cli_wifi_forget(const ncfg_cli_options_t *options, const char **positio
 int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size);
 
-/* `ncfg pair PREKEY`: admit a device to this host's estate and draw its card as a
- * code (10.722). */
+/* `ncfg pair`: a one-use code a device joins this host's estate by, drawn, and
+ * the wait for it to be used (10.723). */
 int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size);
 

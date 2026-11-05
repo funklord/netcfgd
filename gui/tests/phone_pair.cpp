@@ -5,7 +5,7 @@
  *   Everything a phone does hangs off this screen, and the camera is the one
  *   part that needs a phone. So the rest is held here: a code as a host draws
  *   it is read back from an image, at a width whose rows are padded; a code
- *   nobody issued is refused and never reaches the node; and a card taken by
+ *   nobody issued is refused and never reaches the node; and a code taken by
  *   the view joins a real fuzznetd, started the way the app starts it, to a
  *   real host, ending in `paired` with the host's key.
  *
@@ -199,30 +199,31 @@ int main(int argc, char **argv)
 			_exit(1);
 		});
 		stuck.start(5000);
-		left_host = ncfg_phone_host(phone, base);
+		left_host = ncfg_phone_host(phone);
 		stuck.stop();
 		check(left_host.isEmpty(), "closing the first screen ends the wait, with no host");
 	}
 
 	/* ---- the view ---- */
-	ncfg_pair_view view(phone, base);
+	ncfg_pair_view view(phone);
 	QLabel        *status = view.findChild<QLabel *>(QStringLiteral("status"));
 
 	view.take_code("hello");
 	check(status && status->text().contains(QStringLiteral("not a pairing code")),
 	      "a code nobody issued is refused in words", status ? status->text() : QString());
-	view.take_code("FZN4:AB CD");
+	view.take_code("FZI1:AB CD");
 	check(status && status->text().contains(QStringLiteral("space")),
 	      "and a code with a space, which would be two words to the node",
 	      status ? status->text() : QString());
 
-	const QString prekey = ask(phone, QStringLiteral("get prekey")).mid(3);
 	const QString set = ask(host_socket,
 	                        QStringLiteral("set setting host net/address 127.0.0.1 %1").arg(port));
-	const QString answer = ask(host_socket, QStringLiteral("add peer %1 delegable").arg(prekey));
+	const QString answer = ask(host_socket, QStringLiteral("add invite delegable"));
 
-	check(answer.startsWith(QStringLiteral("ok FZN")), "the host makes a card for the phone",
+	check(answer.startsWith(QStringLiteral("ok FZI1:")), "the host makes a code for a phone",
 	      answer + QStringLiteral(" / ") + set);
+	check(ncfg_code_reader::read_image(drawn(answer.mid(3).toUtf8(), 4, 0)) == answer.mid(3).toUtf8(),
+	      "and the real code is read back from its image");
 
 	QString    paired;
 	QEventLoop wait;
@@ -233,11 +234,13 @@ int main(int argc, char **argv)
 	QTimer::singleShot(40000, &wait, &QEventLoop::quit);
 	view.take_code(answer.mid(3).toUtf8());
 	wait.exec();
-	check(paired.size() == 64, "the card joins the phone, and `paired` names the host",
+	check(paired.size() == 64, "the code joins the phone, and `paired` names the host",
 	      status ? status->text() : QString());
 	check(!paired.isEmpty() && ncfg_pair_view::joined_host(phone) == paired,
 	      "and the next start of the app finds it joined");
-	check(!QFile::exists(base + QStringLiteral("/code")), "and the card's file is gone");
+	const QString open_codes = ask(host_socket, QStringLiteral("get invite"));
+
+	check(open_codes == QStringLiteral("ok 0"), "and the code is used up", open_codes);
 
 	host.terminate();
 	host.waitForFinished(8000);

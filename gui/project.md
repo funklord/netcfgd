@@ -545,8 +545,7 @@ to decide, not this tree's.
 - ~~How a phone finds a host on the LAN, and how pairing works the first time.~~
   **Answered by the holder, 2026-11-05:** on a phone, pairing by QR code is the
   first thing a person does, and no file or other app's auth data is part of it.
-  The code says where the host is. [project.md 10.720](../project.md) has what is
-  built and what waits on fuzznet.
+  The code says where the host is. Built: [project.md 10.720 to 10.723](../project.md).
 - Whether `agent/` ships in netcfgd's own packages or as a separate one. It is a
   daemon that listens on a network, which is a thing this project has deliberately
   never had.

@@ -4,9 +4,11 @@
  * The holder, 2026-11-05: on a phone, pairing by QR code is the first thing a
  * person does, because it is the main platform for this use, and files do not
  * move easily to a phone, nor does auth data between apps. So what joins a
- * phone is one code, read off the host's screen or typed from it: no file, and
+ * phone is one code, fuzznet's invite, read off the host's screen: no file, and
  * nothing asked of another app. The code says where the host is too, which is
- * how a phone finds one.
+ * how a phone finds one. It is about 150 characters, so typing it is for a phone
+ * with no camera and somebody patient; a short code would need a PAKE (fuzznet's
+ * sec 896).
  *
  * Nothing else of the app is reachable until this is done: a phone that is no
  * member of an estate has nothing to look at.
@@ -28,9 +30,8 @@ class ncfg_pair_view : public QWidget {
 	Q_OBJECT
 
 public:
-	/* `socket` is this device's node; `scratch` a private directory, for a
-	 * code longer than one line to the node. */
-	ncfg_pair_view(const QString &socket, const QString &scratch, QWidget *parent = nullptr);
+	/* `socket` is this device's node. */
+	explicit ncfg_pair_view(const QString &socket, QWidget *parent = nullptr);
 
 	/* A code, however it came: refused here with a sentence, or asked of the
 	 * node. Public so a probe can hand one in without a camera. */
@@ -54,7 +55,6 @@ private:
 	void busy(bool on);
 
 	QString           socket_path;
-	QString           scratch_dir;
 	QLabel           *status_line;
 	QLineEdit        *typed;
 	QPushButton      *scan;
@@ -66,6 +66,6 @@ private:
 
 /* The host to open: this node's, or, where it has none, what a person pairs in
  * the view this shows. Empty when they closed it. */
-QString ncfg_phone_host(const QString &socket, const QString &scratch);
+QString ncfg_phone_host(const QString &socket);
 
 #endif

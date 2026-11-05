@@ -12686,18 +12686,43 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.723 One code: fuzznet's invite, and nothing carried back
+
+fuzznet built what 10.720 asked for the same day (its sec 896, `30ca61f`). `ncfg
+pair` now takes nothing: it asks `add invite delegable`, draws the `FZI1:` code,
+and waits for a new member, up to the code's ten minutes. The phone gives it to
+`add join`, and its key goes home sealed over the network. The prekey argument of
+10.722 is gone, as it said it would be, and so is the file a card needed.
+
+- **Whoever scans a code may join, with no word from the host's person.** fuzznet
+  decided that and put it to the holder; `ncfg pair` says so beside the code. A
+  device believes only a card signed by the key in the code, so a photographed code
+  can join but cannot pose as the host.
+- **It cannot be short.** About 150 characters, fuzznet's answer being that shorter
+  needs a PAKE, which is not built. So the field for typing stays, for a phone with
+  no camera, and QR is the way in.
+- **The keyboard covered the field** at the foot of the screen, which the emulator
+  showed; it sits under the status line now.
+
+**Verified.** `node_remote.sh`: `ncfg pair` in a namespace, a device told only the
+code joins, and that ends the wait. `phone_pair`: the view takes a real code from a
+real host, ends in `paired`, and `get invite` is 0 after. On the emulator, the app's
+node told the code joined a stock netcfgd on this machine's LAN address.
+
+**Still not verified, and both want a phone:** a code read through a camera; and
+the view's field by hand. `adb shell input text` put the first letter last, or
+lost it, so the emulator's join was given to the node directly. Not run on arm64.
+
 ## 10.722 `ncfg pair`: the terminal displays, the phone scans
 
-`ncfg pair PREKEY` admits a device and draws its card as a QR code in half blocks,
+`ncfg pair` draws a code in half blocks,
 black on white, since a dark terminal would otherwise invert it and quirc reads
 no inverted code. The host's `net/address` is set first, from the source address
 the kernel picks for the way out, or a card says nowhere. With no port held it says
 what to open rather than draw a code nothing answers: a bind is the test, since
 what counts is what the daemon read at its start, not what the file says now.
 
-Root's, as fuzznet's `peer` is not grantable. **The prekey argument is the part
-that goes** when fuzznet's join by one code lands (10.720): today a phone has no
-way to give it, so this serves a laptop's fuzznetd and the tests.
+Root's, as fuzznet's `peer` is not grantable. It took the device's prekey until 10.723.
 
 Verified: `c/tests/pair_draw_test.c` reads the drawing back module by module, on
 an odd side, where the last line holds one row (dropping it failed its check);
@@ -12745,11 +12770,9 @@ typed address.
 - **`allowBackup` is off** now that the app's storage holds keys, and the floor is
   API 28, fuzznet's.
 
-**Still needed from fuzznet**, asked 2026-11-05 (its inbox 20261105T0931Z). A
-join is two carries, the prekey out and the card back, and a phone's prekey has
-no road to the host: 277 hex digits, no camera on the host, no file. A join by
-one code is asked for, and `ncfg pair`, which the screen names, waits on it. (The
-product number asked for beside it came the same day: 10.721.)
+**Asked of fuzznet** the same day: a join was two carries, the prekey out and the
+card back, and a phone's prekey had no road to the host: 277 hex digits, no camera
+on the host, no file. Built, 10.723; and netcfgd's product number, 10.721.
 
 **Verified.** `gui/tests/phone_pair` on real nodes: a card's length of code read
 back from its image, refusals, a fuzznetd started as the app starts it, the view

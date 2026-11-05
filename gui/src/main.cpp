@@ -224,7 +224,7 @@ int main(int argc, char **argv)
 			QMessageBox::critical(nullptr, QStringLiteral("netcfgd"), why);
 			return 1;
 		}
-		phone_host = ncfg_phone_host(QString::fromLocal8Bit(node_socket), home);
+		phone_host = ncfg_phone_host(QString::fromLocal8Bit(node_socket));
 		if (phone_host.isEmpty()) {
 			return 0;
 		}

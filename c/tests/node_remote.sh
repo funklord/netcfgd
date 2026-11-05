@@ -5,7 +5,7 @@
 # fixed port cannot meet another run's; where namespaces are not allowed the
 # script says so and fails, since a port not looked at is no pass.
 #
-# HOW IT STOPS: each daemon is under `timeout -k 2 15` and killed by pid at the
+# HOW IT STOPS: each daemon is under `timeout -k 2 30` and killed by pid at the
 # end of its case; waits are counts of 0.5 s looks. The directory is mktemp's,
 # checked by shape, and removed at the end.
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -30,7 +30,7 @@ one() {
 	chmod 700 "$d/a"
 	printf 'global {\n%s}\n' "$2" > "$d/conf/netcfgd.conf"
 	unshare -Urn sh -c '
-		timeout -k 2 15 "$1" --run-dir "$2/run" --config-dir "$2/conf" \
+		timeout -k 2 30 "$1" --run-dir "$2/run" --config-dir "$2/conf" \
 			--no-apply-on-start --fuzznet-dir "$2/a" --fuzznet-arg --no-log-file \
 			> "$2/log" 2>&1 &
 		pid=$!
@@ -46,11 +46,32 @@ s.sendall(b\"get prekey\n\"); print(s.recv(4096).decode(errors=\"replace\").stri
 		ip link set lo up
 		ip addr add 192.0.2.7/24 dev lo
 		ip route add default dev lo
-		mkdir -m 700 "$2/device"
-		key=$(timeout 10 "${1%netcfgd}fuzznet-build/fuzznetd" --fuzznet-dir="$2/device" \
-			--prekey 2>/dev/null | tail -1)
-		"${1%netcfgd}ncfg" pair "$key" --run-dir "$2/run" > "$2/pair" 2>&1
+		# A device beside it: `ncfg pair` draws a code and waits, and the device
+		# told only the code joins, which is what ends the wait.
+		mkdir -m 700 "$2/device" "$2/xdg"
+		XDG_RUNTIME_DIR=$2/xdg timeout -k 2 25 "${1%netcfgd}fuzznet-build/fuzznetd" \
+			--fuzznet-dir="$2/device" --no-log-file --udp-port=48123 \
+			--fuzznet-service=1 --fuzznet-product=3 > "$2/device.log" 2>&1 &
+		device=$!
+		timeout 12 "${1%netcfgd}ncfg" pair --run-dir "$2/run" > "$2/pair" 2>&1 &
+		pair=$!
+		n=0
+		until grep -q "^FZI1:" "$2/pair" || ! kill -0 $pair 2>/dev/null || [ $n -gt 16 ]; do
+			sleep 0.5
+			n=$((n + 1))
+		done
+		code=$(sed -n "s/^\(FZI1:.*\)$/\1/p" "$2/pair")
+		if [ -n "$code" ]; then
+			python3 -I -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(4); s.connect(sys.argv[1])
+s.sendall((\"add join \" + sys.argv[2] + \"\n\").encode()); print(s.recv(4096).decode(errors=\"replace\").strip())
+" "$2/xdg/fuzznet/fuzznetd.sock" "$code" > "$2/join" 2>&1
+		fi
+		wait $pair
 		echo $? > "$2/pair.status"
+		kill -TERM $device 2>/dev/null
+		wait $device 2>/dev/null
 		kill -TERM $pid 2>/dev/null
 		wait $pid 2>/dev/null
 	' sh "$N" "$d"
@@ -75,9 +96,10 @@ check $? "with \`remote\` opened it still does"
 grep -q ':BBDA ' "$R/open/udp"
 check $? "and it serves its remote hop on netcfgd's port"
 
-[ "$(cat "$R/open/pair.status")" = 0 ] && grep -q '^FZN4:' "$R/open/pair" &&
-	grep -q 'at 192.0.2.7, port 48090' "$R/open/pair"
-check $? "and \`ncfg pair\` gives a card, saying where this machine is reached"
+grep -q '^FZI1:' "$R/open/pair" && grep -q 'at 192.0.2.7,' "$R/open/pair"
+check $? "and \`ncfg pair\` draws a code, saying where this machine is reached"
+[ "$(cat "$R/open/pair.status")" = 0 ] && grep -q 'A device joined' "$R/open/pair"
+check $? "and a device told only that code joins, which ends the wait ($(cat "$R/open/join"))"
 
 [ "$failed" -eq 0 ] && echo "node_remote: all checks passed"
 exit "$failed"
