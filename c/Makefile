@@ -312,7 +312,9 @@ $(FUZZNET_LIB): FORCE
 		echo "c: fuzznet was built otherwise; building it with $$want"; \
 		find $(FUZZNET_BUILD) -name '*.o' -exec rm -f {} +; \
 	fi; \
-	mkdir -p $(FUZZNET_BUILD) && printf '%s\n' "$$want" > $(FUZZNET_BUILD)/.built-with
+	mkdir -p $(FUZZNET_BUILD); \
+	[ "$$(cat $(FUZZNET_BUILD)/.built-with 2>/dev/null)" = "$$want" ] || \
+		printf '%s\n' "$$want" > $(FUZZNET_BUILD)/.built-with
 	@CFLAGS='$(FUZZNET_CFLAGS)' $(MAKE) --no-print-directory -s -C $(FUZZNET) \
 		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) FZN_LOG_PACK=0 \
 		FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 all
