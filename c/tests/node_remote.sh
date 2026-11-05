@@ -5,7 +5,7 @@
 # fixed port cannot meet another run's; where namespaces are not allowed the
 # script says so and fails, since a port not looked at is no pass.
 #
-# HOW IT STOPS: each daemon is under `timeout -k 2 30` and killed by pid at the
+# HOW IT STOPS: each daemon is under `timeout -k 2 45` and killed by pid at the
 # end of its case; waits are counts of 0.5 s looks. The directory is mktemp's,
 # checked by shape, and removed at the end.
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -30,7 +30,7 @@ one() {
 	chmod 700 "$d/a"
 	printf 'global {\n%s}\n' "$2" > "$d/conf/netcfgd.conf"
 	unshare -Urn sh -c '
-		timeout -k 2 30 "$1" --run-dir "$2/run" --config-dir "$2/conf" \
+		timeout -k 2 45 "$1" --run-dir "$2/run" --config-dir "$2/conf" \
 			--no-apply-on-start --fuzznet-dir "$2/a" --fuzznet-arg --no-log-file \
 			> "$2/log" 2>&1 &
 		pid=$!
@@ -43,13 +43,20 @@ s = socket.socket(socket.AF_UNIX); s.settimeout(4); s.connect(sys.argv[1])
 s.sendall(b\"get prekey\n\"); print(s.recv(4096).decode(errors=\"replace\").strip()[:40])
 " "$2/run/fuzznet.sock" > "$2/prekey" 2>&1
 		cat /proc/net/udp /proc/net/udp6 > "$2/udp" 2>/dev/null
+		ask() { # $1 socket, $2 line
+			python3 -I -c "
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(6); s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + \"\n\").encode()); print(s.recv(4096).decode(errors=\"replace\").strip())
+" "$1" "$2" 2>&1
+		}
 		ip link set lo up
 		ip addr add 192.0.2.7/24 dev lo
 		ip route add default dev lo
 		# A device beside it: `ncfg pair` draws a code and waits, and the device
 		# told only the code joins, which is what ends the wait.
 		mkdir -m 700 "$2/device" "$2/xdg"
-		XDG_RUNTIME_DIR=$2/xdg timeout -k 2 25 "${1%netcfgd}fuzznet-build/fuzznetd" \
+		XDG_RUNTIME_DIR=$2/xdg timeout -k 2 40 "${1%netcfgd}fuzznet-build/fuzznetd" \
 			--fuzznet-dir="$2/device" --no-log-file --udp-port=48123 \
 			--fuzznet-service=1 --fuzznet-product=3 > "$2/device.log" 2>&1 &
 		device=$!
@@ -70,6 +77,17 @@ s.sendall((\"add join \" + sys.argv[2] + \"\n\").encode()); print(s.recv(4096).d
 		fi
 		wait $pair
 		echo $? > "$2/pair.status"
+		# And back out: the device reaches the host until it is revoked.
+		host=$(ask "$2/xdg/fuzznet/fuzznetd.sock" "list peer" | cut -d" " -f4)
+		n=0
+		while ! ask "$2/xdg/fuzznet/fuzznetd.sock" "call status at $host" | grep -q "^ok" &&
+			[ $n -lt 16 ]; do sleep 0.5; n=$((n + 1)); done
+		ask "$2/xdg/fuzznet/fuzznetd.sock" "call status at $host" | cut -c1-2 > "$2/before"
+		"${1%netcfgd}ncfg" pair list --run-dir "$2/run" > "$2/listed" 2>&1
+		"${1%netcfgd}ncfg" pair revoke "$(tail -1 "$2/listed")" --run-dir "$2/run" > "$2/revoked" 2>&1
+		echo $? > "$2/revoke.status"
+		"${1%netcfgd}ncfg" pair list --run-dir "$2/run" > "$2/listed.after" 2>&1
+		ask "$2/xdg/fuzznet/fuzznetd.sock" "call status at $host" | cut -c1-40 > "$2/after"
 		kill -TERM $device 2>/dev/null
 		wait $device 2>/dev/null
 		kill -TERM $pid 2>/dev/null
@@ -100,6 +118,13 @@ grep -q '^FZI1:' "$R/open/pair" && grep -q 'at 192.0.2.7,' "$R/open/pair"
 check $? "and \`ncfg pair\` draws a code, saying where this machine is reached"
 [ "$(cat "$R/open/pair.status")" = 0 ] && grep -q 'A device joined' "$R/open/pair"
 check $? "and a device told only that code joins, which ends the wait ($(cat "$R/open/join"))"
+
+[ "$(cat "$R/open/before")" = ok ]
+check $? "and that device reaches the host's status"
+[ "$(cat "$R/open/revoke.status")" = 0 ] && [ -s "$R/open/listed" ] && [ ! -s "$R/open/listed.after" ]
+check $? "\`ncfg pair list\` names it, and \`ncfg pair revoke\` takes it off the list"
+! grep -q '^ok' "$R/open/after"
+check $? "and revoked, it reaches nothing ($(cat "$R/open/after"))"
 
 [ "$failed" -eq 0 ] && echo "node_remote: all checks passed"
 exit "$failed"

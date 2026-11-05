@@ -12686,6 +12686,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.725 What is let in can be put out: `ncfg pair list`, `ncfg pair revoke`
+
+gui/project.md says a stolen phone is a capability to revoke, and pairing made
+phones without a way to do it: `ncfg nodes` reads this user's fuzznetd, not the
+daemon's node, so a host could not even list what it had admitted. `ncfg pair list`
+names them. `ncfg pair revoke KEY` makes the signed revocation and then removes the
+pairing. `node_remote.sh`: the device reads the host's status, is listed, is
+revoked, and then reaches nothing.
+
+**Open: a phone cannot start over.** One whose host moved to a new address, or
+which was revoked, stays joined to that estate, and the pairing screen shows only
+to a phone that has joined nothing. Android's "clear storage" is the way out today.
+`net/address` is also set only when a code is made, so a host on a changing DHCP
+lease has this problem in the ordinary course.
+
 ## 10.724 The window can show the code too
 
 The fleet tab has "Pair a phone...", for somebody who will not open a terminal. It

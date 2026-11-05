@@ -5,6 +5,7 @@
  * The terminal displays and the phone scans, and nothing goes back by hand:
  * fuzznet's invite (its sec 896) carries the device's key home over the network.
  * The code says where this host is, so the host's own address is set first.
+ * `list` and `revoke` are the other end of that: what is let in can be put out.
  *
  * Asked of the daemon's fuzznet socket, whose verbs are its own user's, so this
  * is root's on a machine, as the node's trust is not grantable (fuzznet's
@@ -139,6 +140,65 @@ static long members_of(const char *socket_path)
 	return end == reply + 3 ? -1 : total;
 }
 
+/* The devices and other hosts this node serves, one key a line. */
+static int pair_list(const char *socket_path, char *err, size_t err_size)
+{
+	static char keys[4096][NCFG_FUZZNET_KEY_TEXT];
+	size_t      total = 0;
+
+	if (!ncfg_fuzznet_members(socket_path, keys, sizeof(keys) / sizeof(keys[0]), &total, err,
+	        err_size)) {
+		return 0;
+	}
+	for (size_t at = 0; at < total; at++) {
+		puts(keys[at]);
+	}
+	return 1;
+}
+
+/*
+ * A stolen phone is a capability to revoke (gui/project.md section 6): the signed
+ * act first, which outlives the pairing and travels the estate, and then the
+ * pairing, so its next frame finds no session here either.
+ */
+static int pair_revoke(const char *socket_path, const char *key, char *err, size_t err_size)
+{
+	char line[NCFG_FUZZNET_REQUEST_MAX];
+	char reply[256];
+	int  wrote = 0;
+
+	for (const char *at = key; *at; at++) {
+		if (!((*at >= '0' && *at <= '9') || (*at >= 'a' && *at <= 'f'))) {
+			wrote = -1;
+			break;
+		}
+		wrote++;
+	}
+	if (wrote != 64) {
+		ncfg_error_set(err, err_size, "a device is its key: 64 lower-case hex digits, as "
+		                              "`ncfg pair list` gives them");
+		return 0;
+	}
+	(void)snprintf(line, sizeof(line), "revoke peer %s", key);
+	if (!ask_node(socket_path, line, reply, sizeof(reply), err, err_size)) {
+		return 0;
+	}
+	if (strncmp(reply, "ok", 2) != 0) {
+		ncfg_error_set(err, err_size, "netcfgd's node would not revoke it: %s", reply);
+		return 0;
+	}
+	(void)snprintf(line, sizeof(line), "remove peer %s", key);
+	if (!ask_node(socket_path, line, reply, sizeof(reply), err, err_size)) {
+		return 0;
+	}
+	if (strncmp(reply, "ok", 2) != 0) {
+		ncfg_error_set(err, err_size, "revoked, but its pairing stands: %s", reply);
+		return 0;
+	}
+	puts("Revoked. It reaches nothing here again.");
+	return 1;
+}
+
 int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
@@ -151,14 +211,20 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	size_t         size = 0;
 	long           before;
 
-	(void)positional;
-	if (count != 0u) {
-		ncfg_error_set(err, err_size, "`ncfg pair` takes nothing: it draws a code to scan");
-		return 0;
-	}
 	(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
 	if (!ncfg_fuzznet_daemon_socket(run_dir, socket_path, sizeof(socket_path))) {
 		ncfg_error_set(err, err_size, "the daemon's fuzznet socket path does not fit");
+		return 0;
+	}
+	if (count == 1u && strcmp(positional[0], "list") == 0) {
+		return pair_list(socket_path, err, err_size);
+	}
+	if (count == 2u && strcmp(positional[0], "revoke") == 0) {
+		return pair_revoke(socket_path, positional[1], err, err_size);
+	}
+	if (count != 0u) {
+		ncfg_error_set(err, err_size, "`ncfg pair` draws a code; `ncfg pair list` and "
+		                              "`ncfg pair revoke KEY` are the rest of it");
 		return 0;
 	}
 	if (!port_is_served()) {
@@ -205,7 +271,8 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 		long now = members_of(socket_path);
 
 		if (now > before && before >= 0) {
-			puts("A device joined. It is in `ncfg nodes` on any member.");
+			puts("A device joined. `ncfg pair list` shows it, and `ncfg pair revoke KEY` "
+			     "takes it back.");
 			return 1;
 		}
 		sleep(1);
