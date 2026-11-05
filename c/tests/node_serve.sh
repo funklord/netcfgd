@@ -112,6 +112,14 @@ check $? "the station that fuzznetd recorded is read back in-process, in ncfg st
 mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
 check $? "  and over fuzznet's call status, with the control socket out of the way"
+# And `monitor`, on fuzznet's held stream (10.729): a reload, heard.
+timeout 8 "$C" monitor --json --run-dir "$R/run" > "$R/held" 2>&1 &
+held=$!
+sleep 1
+timeout 10 "$C" reload --run-dir "$R/run" > /dev/null 2>&1
+wait $held
+grep -q '"event":"reloaded"' "$R/held"
+check $? "  and \`monitor\` hears a reload on fuzznet's stream ($(head -c 60 "$R/held"))"
 # Every request now (0309, 10.712), and not only `status`: with no control
 # socket to reach, these can only have come through `call ask`. A request past
 # one line goes in pieces.

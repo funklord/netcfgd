@@ -12686,6 +12686,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.729 `monitor` over fuzznet, where the control socket is not there
+
+fuzznet built held streams (its sec 899, asked from here): `get events net`, for a
+caller `local/permit/net` lets read, hears what this daemon publishes as `net-...`.
+The daemon writes that permit from the `observe` tier. `ncfg monitor` and the GUI's
+stream take it when the control socket is gone, on the same descriptor to wait on.
+
+**It is the fallback, not the first choice, deliberately.** Fuzznet's event is a
+subject and no more, so it loses the interface, whether a reload compiled, and a
+window's seconds, which the control socket's stream carries, and a summary can only
+say to read the status. Preferring it now would make the events tab worse for
+nothing, as the socket cannot go until raidcfgd moves anyway. **Before the socket goes**
+that detail needs a home: a read of the last events, by `ask`, is the likely one.
+
+**Limits.** `any` has no `=r` (fuzznet's sec 883), so under `observe = "any"` only the
+daemon's own user holds a stream; asked of fuzznet. `ncfg tui` still takes the control
+socket alone. fuzznet tested with one account, and so has this: a second real user
+is unconfirmed.
+
+`node_serve.sh`: control socket hidden, `monitor --json` hears a reload.
+
 ## 10.728 A dialog fits a phone
 
 Configuring a link from the emulator showed the dialog as the desktop's: narrower
@@ -13082,9 +13103,8 @@ in `ask_test`. The wipe is by reading only: no test can see freed memory.
 
 **Open, so newline-delimited JSON has not gone yet:**
 
-- **`monitor` is a stream**, and 0312 does not carry one. The GUI, trays and
-  `ncfg monitor` follow this machine on the socket. The events cursor of 10.703
-  is the likely replacement, at a cost in latency nobody has measured.
+- **`monitor` is a stream**, and 0312 does not carry one. fuzznet's held stream
+  (10.729) carries the kinds, as a fallback; the detail still needs a home.
 - ~~A tier of `any` has no grant~~ -- **built by fuzznet as sec 883**, 3b71a88:
   `any=x` lets every local user call a procedure, and is what such a tier
   writes now, for `status` as well. Signalled as inbox 20261104T2251Z.

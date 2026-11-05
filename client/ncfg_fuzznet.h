@@ -159,6 +159,23 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
     size_t err_size);
 
 /*
+ * This machine's daemon's events, held (0309, 10.729): `get events net` on the
+ * fuzznet socket in `run_dir`, fuzznet's sec 899. The descriptor, blocking, past
+ * its `ok events`; -1 with a sentence. Read by whoever the `net` permit lets,
+ * which follows the `observe` tier, and `any` has no such grant.
+ */
+int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size);
+
+/*
+ * One line of that stream as the event line the control socket would have sent,
+ * into `out`: 1, or 0 for a line that is not one of netcfgd's events. **Only the
+ * kind arrives** -- no interface, no `ok`, no seconds -- so the summary says what
+ * happened and that the rest is in the status, which is how fuzznet means a stream
+ * to be read.
+ */
+int ncfg_fuzznet_event_json(const char *line, char *out, size_t out_size);
+
+/*
  * This user's own fuzznetd, where it serves when given no `--socket` and a
  * client looks when told nowhere (fuzznet's sec 663): `$XDG_RUNTIME_DIR/
  * fuzznet/fuzznetd.sock`, or `/tmp/fuzznet-UID/fuzznetd.sock` where that

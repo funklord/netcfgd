@@ -1036,3 +1036,91 @@ int ncfg_fuzznet_do_many(const char *socket, const char *target, const char *req
 	}
 	return 1;
 }
+
+int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size)
+{
+	static const char  request[] = "get events net\n";
+	struct sockaddr_un address;
+	char               path[1100];
+	char               buffer[256];
+	char               reply[256];
+	size_t             have = 0;
+	int                fd;
+
+	if (!ncfg_fuzznet_daemon_socket(run_dir, path, sizeof(path)) ||
+	    strlen(path) >= sizeof(address.sun_path)) {
+		say(why, why_size, "no fuzznet socket path fits");
+		return -1;
+	}
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) {
+		say(why, why_size, "no socket: %s", strerror(errno));
+		return -1;
+	}
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	memcpy(address.sun_path, path, strlen(path) + 1u);
+	if (connect(fd, (const struct sockaddr *)&address, sizeof(address)) != 0 ||
+	    write(fd, request, sizeof(request) - 1u) != (ssize_t)(sizeof(request) - 1u)) {
+		say(why, why_size, "fuzznet is not at %s: %s", path, strerror(errno));
+		(void)close(fd);
+		return -1;
+	}
+	/* Byte by byte, so nothing of the stream is read past its first line. */
+	while (have + 1u < sizeof(buffer)) {
+		struct pollfd wait = { fd, POLLIN, 0 };
+		char          byte;
+
+		if (poll(&wait, 1, 3000) <= 0 || read(fd, &byte, 1) != 1) {
+			say(why, why_size, "fuzznet at %s gave no answer", path);
+			(void)close(fd);
+			return -1;
+		}
+		if (byte == '\n') {
+			break;
+		}
+		buffer[have++] = byte;
+	}
+	memcpy(reply, buffer, have);
+	reply[have] = '\0';
+	if (strcmp(reply, "ok events") != 0) {
+		say(why, why_size, "fuzznet would not hold netcfgd's events: %.160s", reply);
+		(void)close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+int ncfg_fuzznet_event_json(const char *line, char *out, size_t out_size)
+{
+	static const struct {
+		const char *subject;
+		const char *event;
+		const char *summary;
+	} kinds[] = {
+		{ "net-observed", "observed", "the machine changed: its status has what" },
+		{ "net-reloaded", "reloaded", "the configuration was read again: its status has how" },
+		{ "net-drift", "drift", "the machine drifted from its configuration" },
+		{ "net-armed", "confirm_armed", "a confirm window opened" },
+		{ "net-resolved", "confirm_resolved", "a confirm window closed" },
+	};
+	static const char word[] = "event ";
+
+	if (!line || strncmp(line, word, sizeof(word) - 1u) != 0) {
+		return 0;
+	}
+	line += sizeof(word) - 1u;
+	for (size_t at = 0; at < sizeof(kinds) / sizeof(kinds[0]); at++) {
+		size_t length = strlen(kinds[at].subject);
+		int    wrote;
+
+		if (strncmp(line, kinds[at].subject, length) != 0 ||
+		    (line[length] != ' ' && line[length] != '\0')) {
+			continue;
+		}
+		wrote = snprintf(out, out_size, "{\"event\":\"%s\",\"summary\":\"%s\"}",
+		    kinds[at].event, kinds[at].summary);
+		return wrote > 0 && (size_t)wrote < out_size;
+	}
+	return 0;
+}

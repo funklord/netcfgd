@@ -7134,6 +7134,7 @@ int ncfg_client_revert(ncfg_client_t *client, char *err, size_t err_size)
 
 struct ncfg_monitor {
 	int    fd;
+	int    held; /* fuzznet's stream, whose lines are not JSON */
 	char  *buffer; /* what has arrived and not yet been given out, partial
 	        * lines included */
 	size_t length;
@@ -7149,9 +7150,26 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 		socket_path = ncfg_client_default_socket();
 	}
 
+	/* **Over fuzznet where the control socket is not there** (10.729): the same
+	 * descriptor to wait on, carrying the kind of each event and no more. Not
+	 * preferred while the socket stands, since what it carries is the fuller. */
 	int fd = connect_socket(socket_path, err, err_size);
+	int held = 0;
 	if (fd < 0) {
-		return NULL;
+		char run_dir[sizeof(((ncfg_client_t *)0)->path)];
+		char why[NCFG_ERROR_MAX];
+
+		if (!ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+			return NULL;
+		}
+		fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+		if (fd < 0) {
+			return NULL;
+		}
+		held = 1;
+		if (err && err_size) {
+			err[0] = '\0';
+		}
 	}
 
 	/* The request goes out while the descriptor is still blocking, and
@@ -7160,7 +7178,7 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 	 * and doing it in this order means the non-blocking half of this file
 	 * has no write path at all to get wrong. */
 	static const char request[] = "{\"request\":\"monitor\"}\n";
-	if (!write_all(fd, request, sizeof(request) - 1u)) {
+	if (!held && !write_all(fd, request, sizeof(request) - 1u)) {
 		set_error(err, err_size, "cannot subscribe to netcfgd at %s: %s", socket_path,
 		      strerror(errno));
 		close(fd);
@@ -7186,6 +7204,7 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 		return NULL;
 	}
 	monitor->fd = fd;
+	monitor->held = held;
 	return monitor;
 }
 
@@ -7358,6 +7377,21 @@ int ncfg_monitor_next(ncfg_monitor_t *monitor, ncfg_event_t *out, char *err, siz
 	char *line = monitor_line(monitor, &line_length, &waiting, err, err_size);
 	if (!line) {
 		return waiting ? 0 : -1;
+	}
+	if (monitor->held) {
+		char json[256];
+
+		if (!ncfg_fuzznet_event_json(line, json, sizeof(json))) {
+			free(line);
+			return 0;
+		}
+		free(line);
+		line = dup_text(json, strlen(json));
+		line_length = strlen(json);
+		if (!line) {
+			set_error(err, err_size, "out of memory");
+			return -1;
+		}
 	}
 
 	char parse_error[NCFG_ERROR_MAX];

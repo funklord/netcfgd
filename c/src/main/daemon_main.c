@@ -971,6 +971,18 @@ static void node_permits(const ncfg_main_policy_t *policy)
 
 	want = ncfg_main_node_permit(policy ? &policy->control.observe : NULL, grant, sizeof(grant));
 	node_permit("status", want, grant);
+	/* And the events netcfgd publishes follow it too, held by whoever may read
+	 * the status they say to read: the same grant as a read. A word nobody
+	 * granted is no stream for anybody, the node's own user included (fuzznet's
+	 * sec 899), so root's tier is said by number; and so is `any`, for want of an
+	 * `any=r` (its sec 883), which leaves every other user on the control socket. */
+	if (want == 0 || (want == 1 && strcmp(grant, "any=x") == 0)) {
+		(void)snprintf(grant, sizeof(grant), "user:#%u=r", (unsigned)geteuid());
+		want = 1;
+	} else if (want == 1) {
+		grant[strlen(grant) - 1u] = 'r';
+	}
+	node_permit("net", want, grant);
 	if (!policy) {
 		return;
 	}

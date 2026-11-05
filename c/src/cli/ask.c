@@ -471,7 +471,9 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 	ncfg_proto_request_t request;
 	ncfg_proto_framer_t  framer;
 	ncfg_buf_t           line;
+	char                 event[256];
 	int                  fd;
+	int                  held = 0;
 
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_MONITOR;
@@ -483,10 +485,24 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 	}
 	fd = connect_to(socket_path, NULL, err, err_size);
 	if (fd < 0) {
-		ncfg_buf_free(&line);
-		return 0;
+		char run_dir[NCFG_CLI_TEXT_MAX];
+		char why[NCFG_ERROR_MAX] = "";
+
+		/* Over fuzznet where the control socket is not there (10.729). */
+		if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+			fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+		}
+		if (fd < 0) {
+			if (strstr(why, "would not hold")) {
+				ncfg_error_set(err, err_size, "%s", why);
+			}
+			ncfg_buf_free(&line);
+			return 0;
+		}
+		held = 1;
+		err[0] = '\0';
 	}
-	if (!send_all(fd, ncfg_buf_text(&line), line.length)) {
+	if (!held && !send_all(fd, ncfg_buf_text(&line), line.length)) {
 		what_it_said_instead(fd, errno, err, err_size);
 		ncfg_buf_free(&line);
 		close(fd);
@@ -518,6 +534,20 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 				return 1;
 			}
 			return 0;
+		}
+		if (held) {
+			char copy[256];
+
+			if (length >= sizeof(copy)) {
+				continue;
+			}
+			memcpy(copy, answer, length);
+			copy[length] = '\0';
+			if (!ncfg_fuzznet_event_json(copy, event, sizeof(event))) {
+				continue;
+			}
+			answer = event;
+			length = strlen(event);
 		}
 		if (json) {
 			/*
