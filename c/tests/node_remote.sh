@@ -46,11 +46,9 @@ s.sendall(b\"get prekey\n\"); print(s.recv(4096).decode(errors=\"replace\").stri
 		ip link set lo up
 		ip addr add 192.0.2.7/24 dev lo
 		ip route add default dev lo
-		key=$(python3 -I -c "
-import socket, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(4); s.connect(sys.argv[1])
-s.sendall(b\"get prekey\n\"); print(s.recv(4096).decode(errors=\"replace\").split()[1])
-" "$2/run/fuzznet.sock" 2>/dev/null)
+		mkdir -m 700 "$2/device"
+		key=$(timeout 10 "${1%netcfgd}fuzznet-build/fuzznetd" --fuzznet-dir="$2/device" \
+			--prekey 2>/dev/null | tail -1)
 		"${1%netcfgd}ncfg" pair "$key" --run-dir "$2/run" > "$2/pair" 2>&1
 		echo $? > "$2/pair.status"
 		kill -TERM $pid 2>/dev/null
@@ -77,7 +75,6 @@ check $? "with \`remote\` opened it still does"
 grep -q ':BBDA ' "$R/open/udp"
 check $? "and it serves its remote hop on netcfgd's port"
 
-# The key is the node's own here: what is tested is the drawing and the card.
 [ "$(cat "$R/open/pair.status")" = 0 ] && grep -q '^FZN4:' "$R/open/pair" &&
 	grep -q 'at 192.0.2.7, port 48090' "$R/open/pair"
 check $? "and \`ncfg pair\` gives a card, saying where this machine is reached"
