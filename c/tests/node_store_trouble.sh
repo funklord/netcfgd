@@ -130,6 +130,15 @@ says 'IN TROUBLE.*did not open'
 check $? "a store that will not open is said in \`ncfg status\`"
 grep -q 'no fuzznet node' "$R/b.log"
 check $? "  and logged"
+# And once it can, nobody has to restart anything. execv keeps the pid.
+rm -f "$R/store" "$R/fz.sock"
+mkdir "$R/store"
+n=0
+until [ -S "$R/fz.sock" ] || [ $n -gt 30 ]; do sleep 0.5; n=$((n + 1)); done
+[ -S "$R/fz.sock" ]
+check $? "  and when the store opens the daemon comes up on it by itself"
+[ ! -e "$R/run/netcfgd.sock" ]
+check $? "  leaving no netcfgd.sock"
 kill -TERM $daemon
 wait $daemon
 

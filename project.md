@@ -12741,7 +12741,8 @@ read-only store with `netcfgd.sock` removed: `status`, `ask`, `askpart`, `hosts`
 staged, as the remount is refused while files are open for writing. A key that will not read
 makes fuzznet's own daemon wait for it (its sec 920, no keyless mode, the holder calling it a
 startup problem). netcfgd's `ncfg_node_open` still fails there, measured at 41eaf1a6: no node,
-the own loop and `netcfgd.sock`, said in `ncfg status`, and nothing tries again until a restart.
+the own loop and `netcfgd.sock`, said in `ncfg status`, and every 5 s it tries again, starting itself over on the node when it opens, as a stop
+holds. Set as `node_again_refresh`, after fuzznet's own wait for a key.
 
 **A delegating odhcp6c could not be stopped, and only `vm-delegation` could see it.**
 `ncfg_dhcp6_start` made `<run>/dhcp` and never `<run>/odhcp6c`, where it told the client

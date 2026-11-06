@@ -65,6 +65,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <time.h>
 #include <unistd.h>
 
 /*
@@ -871,6 +872,9 @@ int ncfg_main_only_one_here(const char *run_dir, char *err, size_t err_size)
 	return 1;
 }
 
+/* Whether a node was asked for and would not open, so that it is tried again. */
+static int node_would_not_open;
+
 static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t *where)
 {
 	const char  *named = options->fuzznet_dir ? options->fuzznet_dir
@@ -905,6 +909,7 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
 		    "no fuzznet node, and the network is configured as usual: %s", err);
 		(void)snprintf(why, sizeof(why), "it did not open: %s", err);
 		ncfg_main_node_problem(where->run, why);
+		node_would_not_open = 1;
 		return NULL;
 	}
 	ncfg_main_node_problem(where->run, NULL);
@@ -923,6 +928,59 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
 	return node;
 }
 
+
+/*
+ * **A node that would not open is tried again**, every few seconds, as fuzznet's own
+ * daemon waits for a key (its sec 920): a late mount or a disk not yet unlocked should
+ * not leave a host unreachable until somebody restarts it. Where it opens the daemon
+ * starts itself over, which a stop holds through (0134), and comes up on its node.
+ */
+#define NODE_AGAIN_SECONDS 5
+
+typedef struct {
+	ncfg_main_watchers_t    *watchers;
+	const options_t         *options;
+	const ncfg_main_where_t *where;
+	time_t                   looked;
+} node_again_t;
+
+static void node_again_refresh(void *context, ncfg_main_sources_t *sources)
+{
+	node_again_t *again = context;
+	const char   *named = again->options->fuzznet_dir ? again->options->fuzznet_dir
+	                                                  : getenv(NCFG_FUZZNET_DIR_ENV);
+	char          beside[NCFG_NODE_DIR_MAX];
+	char          dir[NCFG_NODE_DIR_MAX];
+	char          err[NCFG_ERROR_MAX];
+	const time_t  now = time(NULL);
+	int           made = 0;
+	ncfg_node_t  *node;
+
+	ncfg_main_watchers_refresh(again->watchers, sources);
+	if (!node_would_not_open || now - again->looked < NODE_AGAIN_SECONDS) {
+		return;
+	}
+	again->looked = now;
+	if (!named && strcmp(again->where->run, NCFG_RUN_DIR_DEFAULT) != 0) {
+		(void)snprintf(beside, sizeof(beside), "%s/fuzznet-store", again->where->run);
+		named = beside;
+	}
+	if (!ncfg_node_where(named, strcmp(again->where->run, NCFG_RUN_DIR_DEFAULT) == 0, dir,
+	    &made, err, sizeof(err))) {
+		return;
+	}
+	node = ncfg_node_open(dir, 0, err, sizeof(err));
+	if (!node) {
+		return;
+	}
+	ncfg_node_close(node);
+	ncfg_log_emitf("node", NCFG_LOG_NOTE, "the fuzznet store opens now, so this daemon starts "
+	    "over on it");
+	(void)unlink(again->where->socket);
+	(void)execv("/proc/self/exe", (char *const *)again->options->argv);
+	ncfg_log_emitf("node", NCFG_LOG_ERROR, "could not start over: %s", strerror(errno));
+	node_would_not_open = 0;
+}
 
 /*
  * The round, driven from fuzznet's loop (10.676): the three calls
@@ -1402,6 +1460,7 @@ static int start(const options_t *options)
 	uint64_t                 next_tick = 0;
 	ncfg_main_where_t        where;
 	ncfg_daemon_state_t      state;
+	node_again_t             again = { 0 };
 	ncfg_observe_source_t    source;
 	ncfg_main_policy_t       policy;
 	ncfg_main_subscribers_t  subscribers;
@@ -1872,8 +1931,11 @@ static int start(const options_t *options)
 	 * A second list would be a second answer to how many streams are open, and
 	 * the bound is what refuses the seventeenth `monitor`. */
 	run.subscribers = &subscribers;
-	run.refresh = ncfg_main_watchers_refresh;
-	run.refresh_context = &watchers;
+	again.watchers = &watchers;
+	again.options = options;
+	again.where = &where;
+	run.refresh = node_again_refresh;
+	run.refresh_context = &again;
 	/* Kept across rounds, so a daemon asked something every second still
 	 * ticks (`ncfg_main_run_t::next_tick`, project.md 10.678). */
 	run.next_tick = &next_tick;
