@@ -113,7 +113,7 @@ CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 # subcommand, so the question is whether it is on PATH.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde tde-container install-tde deb-tde help
+.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss rss-node live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde tde-container install-tde deb-tde help
 
 all: build
 
@@ -162,7 +162,7 @@ PORTABLE_GATES = style fmt ascii shell clippy clang default-goal unsafe-policy \
                  executor-policy nm-containment packaging claims client-test \
                  conformance test example gui linkage c-test agree ledger \
                  module-order registry bridge-test nm-c-test
-BUDGET_GATES   = size footprint rss
+BUDGET_GATES   = size footprint rss rss-node
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
 
@@ -2333,6 +2333,9 @@ footprint:
 # what netcfgd allocates. So, as before, the observed peak plus a band wider
 # than the spread: 3380 + 264, the spread being 256.
 RSS_LIMIT_KB ?= 3644
+RSS_NAME ?= rss
+RSS_DAEMON_OPTIONS ?= --fuzznet-dir ""
+RSS_SOCKET ?= netcfgd.sock
 
 # **The control directory is redirected too, and was not (0224).**
 # `--config-dir` and `--run-dir` send this daemon's own state into a scratch
@@ -2354,26 +2357,37 @@ RSS_LIMIT_KB ?= 3644
 # **`--fuzznet-dir ""`: this is the daemon alone, and no machine runs that.** It always
 # measured a daemon with no node, which went unsaid until a daemon on any run directory
 # had one and this read 6584 KB (3064 of it netcfgd's) on 2026-11-06. The limit below is
-# for the figure it was set against; what a node costs is the holder's budget to set.
+# for the figure it was set against; `rss-node` below holds the daemon with its node.
 rss:
 	@$(MAKE) --no-print-directory -C c
 	@work=$$(mktemp -d); \
 	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run" "$$work/wpa"; \
 	NCFG_WPA_CTRL_DIR="$$work/wpa" \
-	./c/netcfgd --fuzznet-dir "" --config-dir "$$work/etc" --run-dir "$$work/run" \
+	./c/netcfgd $(RSS_DAEMON_OPTIONS) --config-dir "$$work/etc" --run-dir "$$work/run" \
 		--no-apply-on-start >/dev/null 2>&1 & \
 	pid=$$!; \
+	n=0; until [ -S "$$work/run/$(RSS_SOCKET)" ] || [ $$n -gt 50 ]; do sleep 0.1; n=$$((n + 1)); done; \
 	sleep 2; \
 	peak=$$(awk '/VmHWM/ {print $$2}' /proc/$$pid/status 2>/dev/null); \
 	anon=$$(awk '/RssAnon/ {print $$2}' /proc/$$pid/status 2>/dev/null); \
 	pss=$$(awk '/^Pss:/ {print $$2}' /proc/$$pid/smaps_rollup 2>/dev/null); \
 	kill $$pid 2>/dev/null; wait $$pid 2>/dev/null; \
 	rm -rf "$$work"; \
-	if [ -z "$$peak" ]; then echo "rss: could not measure"; exit 1; fi; \
-	printf 'rss: netcfgd peak %s KB of %s limit\n' "$$peak" "$(RSS_LIMIT_KB)"; \
-	printf 'rss:   of which %s KB is netcfgd'"'"'s own; %s KB is this process'"'"' share\n' \
+	if [ -z "$$peak" ]; then echo "$(RSS_NAME): could not measure"; exit 1; fi; \
+	printf '$(RSS_NAME): netcfgd peak %s KB of %s limit\n' "$$peak" "$(RSS_LIMIT_KB)"; \
+	printf '$(RSS_NAME):   of which %s KB is netcfgd'"'"'s own; %s KB is this process'"'"' share\n' \
 		"$${anon:-?}" "$${pss:-?}"; \
-	if [ "$$peak" -gt "$(RSS_LIMIT_KB)" ]; then echo "rss: over limit"; exit 1; fi
+	if [ "$$peak" -gt "$(RSS_LIMIT_KB)" ]; then echo "$(RSS_NAME): over limit"; exit 1; fi
+
+# **What a machine actually runs: the daemon with its node.** `rss` holds the daemon
+# alone. Read eight times on 2026-11-06, two seconds after fuzznet's socket appeared, at
+# load 3: 6400 to 6616 KB, with RssAnon 3056 in every one, so the spread is file-backed
+# pages as above. Ten seconds in it read 6552 to 6712. As `RSS_LIMIT_KB`, the observed
+# peak plus a band wider than the spread: 6712 + 328, the spread being 216.
+RSS_NODE_LIMIT_KB ?= 7040
+rss-node:
+	@$(MAKE) --no-print-directory rss RSS_NAME=rss-node RSS_DAEMON_OPTIONS= \
+		RSS_SOCKET=fuzznet.sock RSS_LIMIT_KB=$(RSS_NODE_LIMIT_KB)
 
 # Section 6 wants a target per parser. **The variables that drive them live
 # beside the `fuzz` target itself now**, because there were two sets: this

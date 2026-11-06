@@ -12763,7 +12763,7 @@ open at the start, and those four, and the Rust they compare against.
 
 **The `rss` gate measured a daemon with no node too.** Its limit, 3644 KB, is for that, and
 it stays on it with `--fuzznet-dir ""`. With a node the same daemon peaked at 6584 KB, 3064 of
-it netcfgd's own. No gate holds that figure; setting a budget for it is the holder's.
+it netcfgd's own. `make rss-node` holds that one, at 7040 KB: the observed peak of 6712 plus a band.
 
 **`make live` tested a daemon nobody runs.** 41 of 42 live scripts started a daemon on a run
 directory of their own, and such a daemon had no node, so they ran the own loop and
