@@ -1012,8 +1012,9 @@ them because no test had ever carried those keys.
    - ~~events across the estate~~ -- **built** (10.703, 10.704): netcfgd
      publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
      from a cursor, and the GUI and TUI follow a node by it;
-   - **the control socket has not gone** (0309): requests go over fuzznet,
-     and 10.712 lists what still holds it;
+   - **the control socket is only a no-node daemon's now** (0309, 10.738): a
+     daemon with a node binds none. Its code goes with the Rust that four
+     scripts compare it against;
    - **beyond the simple case** (partial authority, callers who are not
      operators), which is the holder's, as 0311 left it.
 
