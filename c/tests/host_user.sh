@@ -168,27 +168,38 @@ until [ ! -S "$U" ] || [ $n -gt 12 ]; do sleep 0.5; n=$((n + 1)); done
 timeout 5 "$C" status --run-dir "$R/run" > /dev/null 2>&1
 [ ! -S "$U" ]
 check $? "a verb of this machine starts no node"
-sleep 6 # past fuzznet's kept replies, which a host just gone left on the far side
 timeout 8 "$C" status --at "$key" --json > "$R/started" 2>&1
 check $? "\`--at\` with no daemon up starts one, and is answered the first time"
 timeout 5 "$C" status --at "$key" --json > "$R/again" 2>&1
 check $? "and a second \`--at\` straight after it"
-sleep 3
-[ -S "$U" ]
-check $? "with no client left it lingers past the far side's kept replies"
 n=0
-while [ -S "$U" ] && [ $n -lt 120 ]; do sleep 0.1; n=$((n + 1)); done
+while [ -S "$U" ] && [ $n -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
 [ ! -S "$U" ]
-check $? "and then stops, nothing of this user's left running"
+check $? "and with no client left it stops, nothing of this user's left running"
+
+# Each of these may meet a daemon on its way out, or one just started: a host begun
+# again numbers from a point of its own, so the far side takes it for nobody's copy
+# (fuzznet's sec 910), and a client that meets the stop waits for the lock.
+bad=0
+n=0
+while [ $n -lt 40 ]; do
+	timeout 8 "$C" status --at "$key" --json > /dev/null 2>&1 || bad=$((bad + 1))
+	sleep "0.$((n * 7 % 10))$((n % 10))"
+	n=$((n + 1))
+done
+[ $bad -eq 0 ]
+check $? "and asking at any moment of its stopping is answered ($bad of 40 were not)"
+n=0
+while [ -S "$U" ] && [ $n -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
 
 # A client still holding keeps it: a shared lock, as a window holds one.
 L=$R/xdg/fuzznet/ncfg-clients.lock
-timeout 18 flock -s "$L" sleep 15 &
+timeout 9 flock -s "$L" sleep 6 &
 holder=$!
 pids="$pids $holder"
 sleep 0.2
 at "$R/held"
-sleep 12
+sleep 3
 [ -S "$U" ] && timeout 5 "$C" status --at "$key" --json > /dev/null 2>&1
 check $? "a daemon stays up while another client holds it"
 wait $holder

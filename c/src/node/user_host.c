@@ -16,10 +16,10 @@
  *   fuzznet ends a follower with none, having nothing for it to do.
  *
  * ITS LIFE (0314)
- *   `--while-held` is how a client starts it: it stops ten seconds after no client
- *   holds the lock beside its socket, so nothing of this person's outlives what
- *   they are doing. The lock it takes to stop is kept to the exit, so a client arriving
- *   then waits and starts another. Typed by hand it stays up until stopped.
+ *   `--while-held` is how a client starts it: it stops within a second of no client
+ *   holding the lock beside its socket, so nothing of this person's outlives what
+ *   they are doing (0315). The lock it takes to stop is kept to the exit, so a client
+ *   arriving then waits and starts another. Typed by hand it stays up until stopped.
  *
  *   A phone's is the app's child, so none of that is built there.
  *
@@ -55,17 +55,12 @@ static int given(int argc, char **argv, const char *option)
 }
 
 #ifndef __ANDROID__
-/* How long nobody may hold it before it stops. Past fuzznet's kept replies: a host
- * started again numbers its messages from 0 on a new port, so the same request
- * within those few seconds is taken for a stranger's copy and dropped (its secs 737,
- * 900). It also leaves one daemon under a script's run of `--at`. */
-#define HELD_LINGER_SECONDS 10u
-
-/* From `tick`, which runs after every pass: a look a second. */
+/* From `tick`, which runs after every pass: a look a second, and it stops the
+ * first time nobody holds it. A client coming in as it goes waits for the lock and
+ * then starts another, which costs about 15 ms, so nothing is gained by lingering. */
 static void held_tick(void *context, uint64_t now)
 {
 	static uint64_t last;
-	static uint64_t held_at;
 	static int      fd = -1;
 	char            path[1100];
 
@@ -74,9 +69,6 @@ static void held_tick(void *context, uint64_t now)
 		return;
 	}
 	last = now;
-	if (held_at == 0u) {
-		held_at = now;
-	}
 	if (fd < 0) {
 		if (!ncfg_fuzznet_user_lock(path, sizeof(path))) {
 			return;
@@ -86,15 +78,9 @@ static void held_tick(void *context, uint64_t now)
 			return;
 		}
 	}
-	if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
-		held_at = now;
-		return;
-	}
-	if (now - held_at >= HELD_LINGER_SECONDS) {
+	if (flock(fd, LOCK_EX | LOCK_NB) == 0) {
 		fzn_daemon_stop(); /* and the lock is kept to the exit */
-		return;
 	}
-	(void)flock(fd, LOCK_UN);
 }
 #endif
 

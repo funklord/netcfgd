@@ -1,6 +1,6 @@
 # 0314: a client configures this machine, or is a host of its own
 
-Status: accepted
+Status: accepted; its ten seconds superseded by [0315](0315-a-host-stops-with-its-last-client.md)
 Date: 2026-11-06
 Milestone: fuzznet integration (project.md 10.737, 10.738)
 Amends: [0313](0313-every-fuzznet-program-is-whole-and-netcfgd-has-its-own-node.md), whose user's node left running and "client and node are one" this replaces

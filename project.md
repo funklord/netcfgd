@@ -12716,18 +12716,35 @@ join; `ncfg join` alone asks MAKE. So a look no longer leaves a key behind.
 **A flock is the count of clients.** Each holds `ncfg-clients.lock` shared, beside the
 socket, from before it looks for the daemon until it exits. `ncfg host --while-held`,
 which is what a client starts, tries it exclusively once a second from fuzznet's
-`tick`, and stops after ten seconds of winning. A socket of holders was the first
+`tick`, and stops the first time it wins. A socket of holders was the first
 design and fails on `add join`, which restarts the process in place. Typed by hand
 `ncfg host` takes no option and stays up.
 
-**Why ten seconds rather than none, and it is a finding.** Stopping at once made every
-second `--at` hang 3 s with `the host did not answer`. fuzznet keeps a reply a few
+**It stops at once, and for a while it did not (0315).** Stopping at once first made
+every second `--at` hang 3 s with `the host did not answer`: fuzznet keeps a reply a few
 seconds against resends (its sec 737), matched on sender, message number and bytes; a
-new caller numbers from 0, and `--udp-port=0` gives it a new port; and since its sec 900
-a match from another address is dropped, not answered. At 2a3bd069 the same case got
-the kept reply back, which is why the first measurement in 10.735 saw no fault. Told to
-fuzznet, inbox 20261106T0215Z. The linger keeps a restart outside that window, and
-leaves one daemon under a script's run of `--at`.
+new caller numbered from 0 on a new port; and since its sec 900 a match from another
+address is dropped. So ten seconds of linger went in, and the fault went to fuzznet
+(inbox 20261106T0215Z). Its sec 910, at a3d1fd9, begins a caller's numbers at a random
+point, and the pin is at e9b815a3. With no linger and the test's wait removed, the first
+`--at` after a restart fails at ba567ec2 and passes here, three runs of three. An `--at`
+that starts a daemon takes 24 ms against 10 ms for one that finds it up, so the linger's
+other reason, one daemon under a script, was worth nothing. `host_user.sh` now asks 40
+times at spread moments across the stops: 0 unanswered here, 1 at ba567ec2. A client
+meeting a stop waits for the lock, up to 500 looks, and starts another.
+
+**fuzznet's presets (its sec 908) are at this pin and unused.** `preset`,
+`preset_values` and `preset_revision` in the extension, `--preset=`, and a client's own
+`local/client_config.h`, with names `rootd`, `userd`, `vault`, `ui-client` and
+`one-shot-client`. It looks like the mechanism for the holder's profile system, but
+fuzznet calls its values a first guess and the profile design is the holder's, so
+nothing here takes it up yet.
+
+**A cargo `target/` built from a worktree keeps that worktree's paths.** Sixty files in
+`target/debug/deps` held `/tmp/claude-1000/wt-final`, gone since, because `env!` bakes in
+`CARGO_MANIFEST_DIR` and cargo took them as fresh. `conformance` then reported the C
+client's test binary as unbuilt beside the binary itself. Touching each crate's root
+rebuilt them.
 
 **`the node is waiting on a peer; ask again` is asked again,** for up to 4 s, in
 `ask_again`: a daemon just started is usually in a round, and handing that on made a
