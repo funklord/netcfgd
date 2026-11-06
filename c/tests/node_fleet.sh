@@ -10,7 +10,7 @@
 # estate by verbs (`add peer ... delegable` at A, `add join` at B). Then:
 #   - `ncfg status --at A` through B, the third of fuzznet's models, answers
 #     A's observation, judged by A's `remote` block: open here;
-#   - `ncfg nodes` lists A by the same key, for `--at`;
+#   - `ncfg hosts` lists A by the same key, for `--at`;
 #   - `call ask at A` answers a plan and refuses an apply, by A's tiers;
 #   - `ncfg modem --at A` is A's answer, `reload --at A` A's refusal, and a
 #     command that works on this machine is refused with `--at`;
@@ -111,10 +111,10 @@ check $? "ncfg status --at A, through B, answers A's observation"
 
 # The keys an operator asks by (10.692): B lists A among its estate's
 # members, the same key `--at` took, so a peer's key is the host a call names.
-XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" nodes > "$R/nodes.out" 2>&1
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" hosts > "$R/nodes.out" 2>&1
 grep -qx "$host" "$R/nodes.out"
-check $? "ncfg nodes, through B, lists A by the key status --at takes"
-XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" nodes --json 2>/dev/null |
+check $? "ncfg hosts, through B, lists A by the key status --at takes"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" hosts --json 2>/dev/null |
 	python3 -I -c 'import json, sys; d = json.load(sys.stdin); sys.exit(0 if sys.argv[1] in d else 1)' "$host"
 check $? "  and --json is a list of them"
 

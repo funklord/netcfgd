@@ -530,7 +530,7 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 		return 0;
 	}
 	if (!ncfg_fuzznet_user_socket(socket_path, sizeof(socket_path))) {
-		ncfg_error_set(err, err_size, "this user's node socket path does not fit");
+		ncfg_error_set(err, err_size, "this user's host socket path does not fit");
 		return 0;
 	}
 	if (!ncfg_cli_read_secret("value to seal", &value, err, err_size)) {
@@ -558,7 +558,7 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 	explicit_bzero(escaped, sizeof(escaped));
 	explicit_bzero(line, sizeof(line));
 	if (!answered) {
-		ncfg_error_set(err, err_size, "%s", why[0] ? why : "this user's node did not answer");
+		ncfg_error_set(err, err_size, "%s", why[0] ? why : "this user's host did not answer");
 		return 0;
 	}
 	if (sscanf(reply, "ok %lu %lu", &sealed, &missing) != 2) {
@@ -569,7 +569,7 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 	 * and the configuration on every host would read it as not set. */
 	if (sealed == 0u && missing == 0u) {
 		ncfg_error_set(err, err_size,
-		    "group `%s` has no members to seal to. Name them with `ncfg nodes member HOST "
+		    "group `%s` has no members to seal to. Name them with `ncfg hosts member HOST "
 		    "%s`, and fuzznet seals it to them within a minute", rest[0], rest[0]);
 		return 0;
 	}

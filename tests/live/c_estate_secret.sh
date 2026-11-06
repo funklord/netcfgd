@@ -12,7 +12,7 @@
 # printed. A namespace is what makes that askable.
 #
 # Checked: an apply before anything is set refuses and says so; sealing to a
-# group nobody is in says so; the same apply after `ncfg nodes member` and
+# group nobody is in says so; the same apply after `ncfg hosts member` and
 # `ncfg secret seal` carries it. Both are spoken to the socket `ncfg` finds for
 # this user, under a scratch XDG_RUNTIME_DIR, as an operator's would be.
 # Then beside a fuzznetd, netcfgd its follower: the device deleted and made
@@ -113,7 +113,7 @@ code=$?
 check $? "sealing to a group nobody is in says so ($(echo "$said" | head -c 50))"
 host=$(ask 'get prekey' | sed -n 's/^ok \(.*\)$/\1/p' | cut -c5-68)
 timeout 20 "$C" nodes member "$host" zone1 > "$R/member.out" 2>&1
-check $? "ncfg nodes member says this host is in zone1 ($(head -c 40 "$R/member.out"))"
+check $? "ncfg hosts member says this host is in zone1 ($(head -c 40 "$R/member.out"))"
 timeout 20 "$C" nodes member "$host" 'Zone One' > /dev/null 2>&1
 check "$([ $? -ne 0 ]; echo $?)" "  and refuses a group fuzznet's grammar would"
 printf '%s\n' "$key" | timeout 20 "$C" secret seal zone1 wg/key > "$R/seal.out" 2>&1

@@ -60,12 +60,12 @@ android {
 	QT += multimedia
 	QUIRC = $$PWD/../fuzznet/quirc/lib
 	INCLUDEPATH += $$QUIRC $$PWD/src/phone
-	SOURCES += src/phone/phone_node.cpp src/phone/code_reader.cpp src/phone/pair_view.cpp \
+	SOURCES += src/phone/phone_host.cpp src/phone/code_reader.cpp src/phone/pair_view.cpp \
 		$$QUIRC/quirc.c $$QUIRC/decode.c $$QUIRC/identify.c $$QUIRC/version_db.c
-	HEADERS += src/phone/phone_node.h src/phone/code_reader.h src/phone/pair_view.h
+	HEADERS += src/phone/phone_host.h src/phone/code_reader.h src/phone/pair_view.h
 	# The node, as gui/Makefile builds it. A `lib*.so` because that is what
 	# Android extracts and marks executable; it is a program.
-	ANDROID_EXTRA_LIBS += $$NETCFGD_NODE_LIB
+	ANDROID_EXTRA_LIBS += $$NETCFGD_HOST_LIB
 	ANDROID_TARGET_SDK_VERSION = 36
 } else {
 	LIBS += $$CLIENT_LIB

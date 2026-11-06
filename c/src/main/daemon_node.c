@@ -232,6 +232,52 @@ size_t ncfg_main_node_events(const ncfg_main_policy_t *policy,
 	return wrote;
 }
 
+/*
+ * The estate's hosts, for a client of this machine (0314): fuzznet's `list peer
+ * FROM`, asked as the node's own user and handed on as it stands, judged as a read
+ * of the status is. Not for another host, which has its own list. `ask` is
+ * fuzznet's in-process request, `ncfg_node_local`.
+ */
+size_t ncfg_main_node_hosts(const ncfg_main_policy_t *policy, const ncfg_peer_t *local,
+    const char *args, size_t length, char *reply, size_t cap,
+    size_t (*ask)(const char *line, char *said, size_t said_cap))
+{
+	ncfg_proto_request_t asked;
+	ncfg_authz_roots_t   roots = ncfg_authz_roots_default();
+	char                 line[64];
+	char                 request[80];
+	char                 err[NCFG_ERROR_MAX];
+	unsigned long        from = 0;
+	size_t               n;
+
+	if (!policy || !reply || cap == 0u || !ask) {
+		return 0u;
+	}
+	if (!local) {
+		return say(reply, cap, "denied", "`hosts` is for a client of this machine");
+	}
+	if (!line_of(args ? args : "", args ? length : 0u, line, sizeof(line)) ||
+	    sscanf(line, "%lu", &from) != 1) {
+		return say(reply, cap, "malformed", "`hosts` takes FROM");
+	}
+	memset(&asked, 0, sizeof(asked));
+	asked.kind = NCFG_PROTO_REQ_STATUS;
+	err[0] = '\0';
+	if (!ncfg_authz_permitted(&roots, &policy->control, &policy->remote, NCFG_ARRIVED_LOCAL,
+	        local, &asked, err, sizeof(err))) {
+		return say(reply, cap, "denied", err);
+	}
+	(void)snprintf(request, sizeof(request), "list peer %lu", from);
+	n = ask(request, reply, cap);
+	if (n == 0u) {
+		return say(reply, cap, "busy", "fuzznet is waiting on a peer; ask again");
+	}
+	while (n && (reply[n - 1u] == '\n' || reply[n - 1u] == '\r')) {
+		n--;
+	}
+	return n;
+}
+
 size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
     int contact, const char *request, size_t length, char *reply, size_t cap)
 {

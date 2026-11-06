@@ -8,7 +8,7 @@
  *   never answers is given up on within the wait, and none there is said to
  *   be silent rather than refusing.
  *
- * HOW IT STOPS: the server child serves three connections and exits, under
+ * HOW IT STOPS: each server child serves a counted few connections and exits, under
  * `alarm(10)` either way; the scratch directory is mkdtemp's and the four
  * names written in it are removed by name.
  */
@@ -336,6 +336,46 @@ int main(void)
 		fine = ncfg_fuzznet_members(path, keys, 4u, &count, why, sizeof(why));
 		check(!fine && strstr(why, "not a key") != NULL,
 		    "  and a peer that is not a key is refused");
+		(void)waitpid(child, &status, 0);
+	}
+	/* A daemon busy with a peer says to ask again, usually one just started (0314):
+	 * asked again, past the wait, and the caller sees only the answer. */
+	{
+		char said[128];
+		int  fine;
+
+		listener = socket(AF_UNIX, SOCK_STREAM, 0);
+		(void)unlink(path);
+		check(listener >= 0 && bind(listener, (struct sockaddr *)&address, sizeof(address)) == 0 &&
+		        listen(listener, 4) == 0,
+		    "a socket for the busy daemon");
+		child = fork();
+		if (child == 0) {
+			static const char *const replies[] = {
+				"error the node is waiting on a peer; ask again\n",
+				"error the node is waiting on a peer; ask again\n",
+				"ok done\n",
+			};
+			int turn;
+
+			alarm(10);
+			for (turn = 0; turn < 3; turn++) {
+				int  fd = accept(listener, NULL, NULL);
+				char line[64];
+
+				read_line_of(fd, line, sizeof(line));
+				if (write(fd, replies[turn], strlen(replies[turn])) < 0) {
+					_exit(1);
+				}
+				close(fd);
+			}
+			_exit(0);
+		}
+		close(listener);
+		fine = ncfg_fuzznet_ask(path, "call status 0", said, sizeof(said), 1000, &silent, why,
+		    sizeof(why));
+		check(fine && strncmp(said, "ok done", 7) == 0,
+		    "a daemon waiting on a peer is asked again until it answers");
 		(void)waitpid(child, &status, 0);
 	}
 	(void)unlink(path);

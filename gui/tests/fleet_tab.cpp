@@ -87,7 +87,7 @@ int main(int argc, char **argv)
 	check(script.open(QIODevice::WriteOnly), "the stand-in ncfg is written");
 	script.write("#!/bin/sh\n"
 	             "case \"$1\" in\n"
-	             "reload|nodes|secret)\n"
+	             "reload|hosts|secret)\n"
 	             "  echo \"$*\" >> \"$FLEET_LOG.acts\"\n"
 	             "  [ \"$1\" = secret ] && cat >> \"$FLEET_LOG.input\"\n"
 	             "  [ \"$FLEET_MODE\" = refuse ] && { echo 'ncfg: group has no members' >&2; "
@@ -204,7 +204,7 @@ int main(int argc, char **argv)
 		const QByteArray asked = acts.open(QIODevice::ReadOnly) ? acts.readAll() : QByteArray();
 		const QByteArray given = input.open(QIODevice::ReadOnly) ? input.readAll() : QByteArray();
 		check(asked.contains("reload --at estate") &&
-		          asked.contains(("nodes member " + up + " zone1").toUtf8()) &&
+		          asked.contains(("hosts member " + up + " zone1").toUtf8()) &&
 		          asked.contains("secret seal zone1 wg/key"),
 		      "each is ncfg's own verb", QString::fromUtf8(asked));
 		check(given.startsWith(secret.toUtf8() + '\n'), "the value goes to standard input");

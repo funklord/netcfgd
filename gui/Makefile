@@ -199,12 +199,12 @@ ANDROID_TRIPLE_x86_64    = x86_64-linux-android
 ANDROID_NDK_BIN = $(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/linux-x86_64/bin
 ANDROID_CC = $(ANDROID_NDK_BIN)/$(ANDROID_TRIPLE_$(ANDROID_ABI))$(ANDROID_API)-clang
 ANDROID_NODE_DIR = $(abspath build-android-node-$(ANDROID_ABI))
-ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libncfgnode.so
+ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libncfghost.so
 
 # Linked by fuzznet's own build, as fuzznetd is, with this product's main.
 android-node: android-check
 	CFLAGS='-Os -ffunction-sections -fdata-sections' $(MAKE) -s -C ../fuzznet \
-	        -f Makefile -f ../gui/src/phone/node.mk \
+	        -f Makefile -f ../gui/src/phone/host.mk \
 	        BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) FZN_LOG_PACK=0 \
 	        FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 \
 	        NCFG_NODE_OUT=$(ANDROID_NODE_DIR)/ncfgnode $(ANDROID_NODE_DIR)/ncfgnode
@@ -218,7 +218,7 @@ $(ANDROID_BUILD_DIR)/Makefile: android-check android-node gui.pro
 	mkdir -p $(ANDROID_BUILD_DIR)
 	cd $(ANDROID_BUILD_DIR) && $(QT_ANDROID_ROOT)/bin/qmake ../gui.pro \
 	        NETCFGD_VERSION=$(VERSION) NETCFGD_VERSION_CODE=$(ANDROID_VERSION_CODE) \
-	        NETCFGD_NODE_LIB=$(ANDROID_NODE_LIB) && \
+	        NETCFGD_HOST_LIB=$(ANDROID_NODE_LIB) && \
 	sed -i '1a\   "android-legacy-packaging": true,' android-*-deployment-settings.json
 
 android android-build: android-fresh $(ANDROID_BUILD_DIR)/Makefile

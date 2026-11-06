@@ -225,6 +225,12 @@ done
 said=$(ask "$R/fz.sock" "get setting host local/permit/status")
 echo "$said" | grep -q "^ok [a-z]* local:@$g=x\$"
 check $? "observe = group:NAME grants that group fuzznet's call of status ($said)"
+said=$(ask "$R/fz.sock" "get setting host local/permit/hosts")
+echo "$said" | grep -q "^ok [a-z]* local:@$g=x\$"
+check $? "  and of hosts, the estate read the same way ($said)"
+said=$(ask "$R/fz.sock" "get setting host local/events")
+echo "$said" | grep -q "^ok [a-z]* local:@$g=r\$"
+check $? "  and held events are the same grant as a read ($said)"
 # `ask` admits a holder of any tier, netcfgd's gate judging each request behind
 # it (10.712), or a GUI user of a root daemon would stay on the old socket.
 said=$(ask "$R/fz.sock" "get setting host local/permit/ask")

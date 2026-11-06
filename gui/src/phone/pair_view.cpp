@@ -23,9 +23,9 @@ extern "C" {
 /* `add join` answers at once, `ok asking`, and asks the host from then on. */
 static const int join_wait_ms = 5000;
 
-/* A look every 500 ms. The node asks for five minutes, then says `idle`, so this
+/* A look every 500 ms. The node asks for fifteen minutes, then says `idle`, so this
  * only bounds a node that stops answering altogether. */
-static const int looks_max = 660;
+static const int looks_max = 1860;
 
 /* From here on, the wait says what is likely wrong: ten seconds. */
 static const int looks_patient = 20;

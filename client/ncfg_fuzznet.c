@@ -12,10 +12,13 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -249,10 +252,34 @@ static int ask_noting_sent(const char *path, const char *line, char *reply, size
 	return 1;
 }
 
+/*
+ * `ask_noting_sent`, through a daemon busy with a peer: fuzznet refuses a call to
+ * another host while one of its steps waits, up to 3 s, and says to ask again. That
+ * is the usual state of a daemon just started, which a client that started it would
+ * otherwise hand on as a failure (0314). Nothing has run, so asking again is safe.
+ */
+static int ask_again(const char *path, const char *line, char *reply, size_t reply_size,
+    int wait_ms, int *silent, int *sent, char *why, size_t why_size)
+{
+	static const char     busy[] = "error the node is waiting on a peer";
+	const struct timespec look = { 0, 50000000L };
+	int                   looks;
+
+	for (looks = 0;; looks++) {
+		int asked = ask_noting_sent(path, line, reply, reply_size, wait_ms, silent, sent, why,
+		    why_size);
+
+		if (!asked || looks >= 80 || strncmp(reply, busy, sizeof(busy) - 1u) != 0) {
+			return asked;
+		}
+		(void)nanosleep(&look, NULL);
+	}
+}
+
 int ncfg_fuzznet_ask(const char *path, const char *line, char *reply, size_t reply_size,
     int wait_ms, int *silent, char *why, size_t why_size)
 {
-	return ask_noting_sent(path, line, reply, reply_size, wait_ms, silent, NULL, why, why_size);
+	return ask_again(path, line, reply, reply_size, wait_ms, silent, NULL, why, why_size);
 }
 
 /*
@@ -541,7 +568,7 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	if (asked->wait_ms) {
 		int sent = 0;
 
-		if (!ask_noting_sent(asked->path, line, reply, sizeof(reply), asked->wait_ms, &silent,
+		if (!ask_again(asked->path, line, reply, sizeof(reply), asked->wait_ms, &silent,
 		        &sent, err, err_size)) {
 			((asked_t *)context)->ran_maybe |= sent;
 			return 0;
@@ -601,7 +628,7 @@ int ncfg_fuzznet_user_socket(char *out, size_t out_size)
 
 /* Connected and let go, with nothing asked: a socket left behind by a node that
  * died refuses, and this is asked before every use. */
-static int user_node_answers(const char *socket_path)
+static int user_host_answers(const char *socket_path)
 {
 	struct sockaddr_un address;
 	int                fd;
@@ -622,7 +649,91 @@ static int user_node_answers(const char *socket_path)
 	return up;
 }
 
+int ncfg_fuzznet_user_lock(char *out, size_t out_size)
+{
+	char *slash;
+
+	if (!out || !ncfg_fuzznet_user_socket(out, out_size)) {
+		return 0;
+	}
+	slash = strrchr(out, '/');
+	if (!slash || (size_t)(slash - out) + sizeof("/ncfg-clients.lock") > out_size) {
+		return 0;
+	}
+	memcpy(slash, "/ncfg-clients.lock", sizeof("/ncfg-clients.lock"));
+	return 1;
+}
+
+/* Where a person's store is, as fuzznet's default puts it: only joining makes one,
+ * so this is whether they are a host (0314). A look, and nothing read. */
+int ncfg_fuzznet_user_joined(void)
+{
+	const char *data = getenv("XDG_DATA_HOME");
+	const char *home = getenv("HOME");
+	char        path[1100];
+	struct stat seen;
+	int         wrote;
+
+	if (data && data[0] == '/') {
+		wrote = snprintf(path, sizeof(path), "%s/fuzznet", data);
+	} else if (home && home[0] == '/') {
+		wrote = snprintf(path, sizeof(path), "%s/.local/share/fuzznet", home);
+	} else {
+		return 0;
+	}
+	return wrote > 0 && (size_t)wrote < sizeof(path) && stat(path, &seen) == 0 &&
+	       S_ISDIR(seen.st_mode);
+}
+
 #ifndef __ANDROID__
+/*
+ * This process's hold on the host daemon, for as long as it runs (0314): a shared
+ * lock, which the kernel lets go of however the process ends. Taken before the
+ * daemon is looked for or started. One going away holds the lock exclusively until
+ * it has gone, so a look that waits here finds nothing and starts another rather
+ * than leaning on one that is stopping.
+ */
+static int user_host_hold(char *why, size_t why_size)
+{
+	static _Atomic int    held = -1;
+	const struct timespec look = { 0, 10000000L };
+	char                  path[1100];
+	char                 *slash;
+	int                   fd;
+	int                   looks;
+	int                   none = -1;
+
+	if (held >= 0) {
+		return 1;
+	}
+	if (!ncfg_fuzznet_user_lock(path, sizeof(path))) {
+		say(why, why_size, "this user's host lock path does not fit");
+		return 0;
+	}
+	/* The daemon makes these too, private, but this comes first. */
+	slash = strrchr(path, '/');
+	*slash = '\0';
+	(void)mkdir(path, 0700);
+	*slash = '/';
+	fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		say(why, why_size, "could not open %s: %s", path, strerror(errno));
+		return 0;
+	}
+	for (looks = 0; flock(fd, LOCK_SH | LOCK_NB) != 0; looks++) {
+		if (looks >= 500) {
+			say(why, why_size, "this user's host is taking too long to stop");
+			(void)close(fd);
+			return 0;
+		}
+		(void)nanosleep(&look, NULL);
+	}
+	if (!atomic_compare_exchange_strong(&held, &none, fd)) {
+		(void)close(fd); /* another thread of this process holds it */
+	}
+	return 1;
+}
+
 /*
  * Twice forked, so a window that never reaps does not keep a zombie, and in a
  * session of its own, so the node outlives the terminal. Only what is safe
@@ -632,7 +743,7 @@ static int user_node_answers(const char *socket_path)
  */
 /* 1 where `ncfg` is on the PATH: without one there is nothing to wait for, and
  * a window asks this from its own thread. */
-static int user_node_program(void)
+static int user_host_program(void)
 {
 	const char *path = getenv("PATH");
 	char        candidate[4096];
@@ -650,9 +761,9 @@ static int user_node_program(void)
 	return 0;
 }
 
-static int user_node_spawn(void)
+static int user_host_spawn(void)
 {
-	char *const argv[] = { (char *)"ncfg", (char *)"node", NULL };
+	char *const argv[] = { (char *)"ncfg", (char *)"host", (char *)"--while-held", NULL };
 	char        self[4096];
 	ssize_t     length = readlink("/proc/self/exe", self, sizeof(self) - 1u);
 	int         own = 0;
@@ -662,7 +773,7 @@ static int user_node_spawn(void)
 		self[length] = '\0';
 		own = strcmp(self + length - 8, "/netcfgd") == 0;
 	}
-	if (!own && !user_node_program()) {
+	if (!own && !user_host_program()) {
 		return 0;
 	}
 	child = fork();
@@ -695,39 +806,50 @@ static int user_node_spawn(void)
 }
 #endif
 
-int ncfg_fuzznet_user_node(int start, char *why, size_t why_size)
+int ncfg_fuzznet_user_host(int start, char *why, size_t why_size)
 {
 	char socket[1100];
 
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
-		say(why, why_size, "this user's node socket path does not fit");
+		say(why, why_size, "this user's host socket path does not fit");
 		return 0;
 	}
-	if (user_node_answers(socket)) {
-		return 1;
-	}
 #ifndef __ANDROID__
-	if (start) {
-		const struct timespec look = { 0, 250000000L };
+	if (start != NCFG_FUZZNET_HOST_LOOK) {
+		const struct timespec look = { 0, 10000000L };
 		int                   looks;
 
-		if (!user_node_spawn()) {
-			say(why, why_size, "this user's node did not start: `ncfg` is not installed");
+		if (start == NCFG_FUZZNET_HOST_USE && !ncfg_fuzznet_user_joined() &&
+		    !user_host_answers(socket)) {
+			say(why, why_size, "this user is no host yet: `ncfg join` with a host's code");
 			return 0;
 		}
-		for (looks = 0; looks < 20; looks++) {
-			if (user_node_answers(socket)) {
+		if (!user_host_hold(why, why_size)) {
+			return 0;
+		}
+		if (user_host_answers(socket)) {
+			return 1;
+		}
+		if (!user_host_spawn()) {
+			say(why, why_size, "this user's host did not start: `ncfg` is not installed");
+			return 0;
+		}
+		for (looks = 0; looks < 500; looks++) {
+			if (user_host_answers(socket)) {
 				return 1;
 			}
 			(void)nanosleep(&look, NULL);
 		}
-		say(why, why_size, "this user's node did not start");
+		say(why, why_size, "this user's host did not start");
 		return 0;
 	}
 #else
 	(void)start;
 #endif
-	say(why, why_size, "this user's node is not running: start one with `ncfg node`");
+	if (user_host_answers(socket)) {
+		return 1;
+	}
+	say(why, why_size, "this user's host is not running");
 	return 0;
 }
 
@@ -904,8 +1026,10 @@ static int key_at(const char *text, const char *end)
 	return 1;
 }
 
-int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT], size_t cap,
-    size_t *count, char *err, size_t err_size)
+/* `through_root`: asked of a root netcfgd's `hosts`, which hands on the same list
+ * as a procedure's answer, escaped. */
+static int members_of(const char *socket, int through_root,
+    char (*keys)[NCFG_FUZZNET_KEY_TEXT], size_t cap, size_t *count, char *err, size_t err_size)
 {
 	char   reply[2048];
 	size_t from = 0;
@@ -926,10 +1050,22 @@ int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT]
 		size_t        taken = 0;
 		int           silent = 0;
 
-		(void)snprintf(line, sizeof(line), "list peer %zu", from);
+		(void)snprintf(line, sizeof(line), through_root ? "call hosts %zu" : "list peer %zu", from);
 		if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 2000, &silent, err,
 		        err_size)) {
 			return 0;
+		}
+		if (through_root && strncmp(reply, "ok ", 3) == 0) {
+			char plain[sizeof(reply)];
+			long n = ncfg_fuzznet_unescape(reply + 3, strcspn(reply + 3, "\r\n"), plain,
+			    sizeof(plain) - 1u);
+
+			if (n < 0) {
+				say(err, err_size, "netcfgd's host list is not one");
+				return 0;
+			}
+			plain[n] = '\0';
+			memcpy(reply, plain, (size_t)n + 1u);
 		}
 		if (strncmp(reply, "ok ", 3) != 0) {
 			say(err, err_size, "fuzznet answered %.160s", reply);
@@ -983,6 +1119,24 @@ int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT]
 		from += taken;
 	} while (from < total && ++pages < 100000u);
 	return from >= total;
+}
+
+int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT], size_t cap,
+    size_t *count, char *err, size_t err_size)
+{
+	return members_of(socket, 0, keys, cap, count, err, err_size);
+}
+
+int ncfg_fuzznet_root_members(const char *run_dir, char (*keys)[NCFG_FUZZNET_KEY_TEXT],
+    size_t cap, size_t *count, char *err, size_t err_size)
+{
+	char path[1100];
+
+	if (!ncfg_fuzznet_daemon_socket(run_dir, path, sizeof(path))) {
+		say(err, err_size, "no fuzznet socket path fits");
+		return 0;
+	}
+	return members_of(path, 1, keys, cap, count, err, err_size);
 }
 
 int ncfg_fuzznet_events_at(const char *socket, const char *host, size_t from, size_t *next,

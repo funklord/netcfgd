@@ -197,15 +197,27 @@ void ncfg_fuzznet_events_end(ncfg_fuzznet_events_t *events);
  */
 int ncfg_fuzznet_user_socket(char *out, size_t out_size);
 
+/* The file beside that socket whose shared lock is a client's hold on the daemon
+ * (0314). Into `out`; 0 where it does not fit. */
+int ncfg_fuzznet_user_lock(char *out, size_t out_size);
+
+/* Whether this person has a store, which only joining makes: 1 where they are a
+ * host of their own (0314). */
+int ncfg_fuzznet_user_joined(void);
+
 /*
- * Whether this user's node answers, and with `start` one started where none
- * does: `ncfg node`, left running for the session, as an agent is, since the
- * next look at that host needs it as well (10.735). A client that means to reach
- * another host calls this; one that stays on this machine needs no node, and
- * never starts one. A phone's node is the app's, so there `start` does nothing.
- * 1 with a node answering, 0 with a sentence in `why`.
+ * Whether this user's host daemon answers (0314), which is the role of a client
+ * reaching another host; one that stays on this machine needs none. `start` says
+ * how far to go: LOOK asks and does nothing else; USE holds it for this process's
+ * life, starting it for a person who has joined; MAKE does that for one who has
+ * not, which is `ncfg join` alone, as only joining makes a person a host. It stops
+ * when the last holder has gone. A phone's is the app's, so there only LOOK is
+ * done. 1 with a daemon answering, 0 with a sentence in `why`.
  */
-int ncfg_fuzznet_user_node(int start, char *why, size_t why_size);
+#define NCFG_FUZZNET_HOST_LOOK 0
+#define NCFG_FUZZNET_HOST_USE  1
+#define NCFG_FUZZNET_HOST_MAKE 2
+int ncfg_fuzznet_user_host(int start, char *why, size_t why_size);
 
 /*
  * Another node's status, asked as an operator of its estate (0311, 10.691):
@@ -290,5 +302,10 @@ int ncfg_fuzznet_do_many(const char *socket, const char *target, const char *req
  */
 int ncfg_fuzznet_members(const char *socket, char (*keys)[NCFG_FUZZNET_KEY_TEXT], size_t cap,
     size_t *count, char *err, size_t err_size);
+
+/* The same of a root netcfgd's estate, for a client of that machine, through its
+ * `hosts` procedure in `run_dir` (0314). */
+int ncfg_fuzznet_root_members(const char *run_dir, char (*keys)[NCFG_FUZZNET_KEY_TEXT],
+    size_t cap, size_t *count, char *err, size_t err_size);
 
 #endif /* NCFG_FUZZNET_H */

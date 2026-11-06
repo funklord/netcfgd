@@ -31,7 +31,7 @@
 #include <QFileInfo>
 #ifdef Q_OS_ANDROID
 #  include "phone/pair_view.h"
-#  include "phone/phone_node.h"
+#  include "phone/phone_host.h"
 #  include <QStandardPaths>
 extern "C" {
 #  include "ncfg_fuzznet.h"
@@ -171,7 +171,7 @@ int main(int argc, char **argv)
 	QCommandLineOption at_option(
 	    QStringList() << QStringLiteral("at"),
 	    QStringLiteral("Another node of this estate, by its key in hex, asked through your "
-	               "own node: `ncfg nodes` lists them."),
+	               "own node: `ncfg hosts` lists them."),
 	    QStringLiteral("key"));
 	parser.addOption(at_option);
 	QCommandLineOption layout_option(
@@ -241,8 +241,8 @@ int main(int argc, char **argv)
 		QString       why;
 		char          node_socket[1100];
 
-		if (!ncfg_phone_node_start(QCoreApplication::applicationDirPath() +
-		                               QStringLiteral("/libncfgnode.so"),
+		if (!ncfg_phone_host_start(QCoreApplication::applicationDirPath() +
+		                               QStringLiteral("/libncfghost.so"),
 		                           home, &application, &why) ||
 		    !ncfg_fuzznet_user_socket(node_socket, sizeof(node_socket))) {
 			QMessageBox::critical(nullptr, QStringLiteral("netcfgd"), why);

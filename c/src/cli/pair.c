@@ -6,6 +6,8 @@
  * fuzznet's invite (its sec 896) carries the device's key home over the network.
  * The code says where this host is, so the host's own address is set first.
  * `list` and `revoke` are the other end of that: what is let in can be put out.
+ * `confirm` draws one that holds whoever scans it until the person here says yes;
+ * a scanned code is otherwise enough, as the holder settled in fuzznet's sec 896.
  *
  * Asked of the daemon's fuzznet socket, whose verbs are its own user's, so this
  * is root's on a machine, as the node's trust is not grantable (fuzznet's
@@ -239,6 +241,43 @@ static int pair_revoke(const char *socket_path, const char *key, char *err, size
 	return 1;
 }
 
+/*
+ * A device waiting on the person at this terminal (fuzznet's `list invite`): 1 let in,
+ * 0 nobody waiting, -1 turned away or not answerable, said in `err`. The key is all
+ * there is to show. Anything but yes turns it away, end of input included.
+ */
+static int pair_ask_person(const char *socket_path, char *err, size_t err_size)
+{
+	char reply[2048];
+	char line[NCFG_FUZZNET_REQUEST_MAX];
+	char answer[16];
+	char key[NCFG_FUZZNET_KEY_TEXT];
+	int  yes;
+
+	if (!ask_node(socket_path, "list invite", reply, sizeof(reply), err, err_size)) {
+		return -1;
+	}
+	if (sscanf(reply, "ok %*u %64[0-9a-f]", key) != 1 || strlen(key) != 64u) {
+		return 0;
+	}
+	printf("A device asks to join: %s\nLet it in? [y/N] ", key);
+	(void)fflush(stdout);
+	yes = fgets(answer, sizeof(answer), stdin) && (answer[0] == 'y' || answer[0] == 'Y');
+	(void)snprintf(line, sizeof(line), "%s invite %s", yes ? "grant" : "remove", key);
+	if (!ask_node(socket_path, line, reply, sizeof(reply), err, err_size)) {
+		return -1;
+	}
+	if (strncmp(reply, "ok", 2) != 0) {
+		ncfg_error_set(err, err_size, "netcfgd's node would not say so: %s", reply);
+		return -1;
+	}
+	if (!yes) {
+		ncfg_error_set(err, err_size, "turned away, and that code is spent");
+		return -1;
+	}
+	return 1;
+}
+
 int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
@@ -250,6 +289,8 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	char           reply[2048];
 	size_t         size = 0;
 	long           before;
+	int            confirm;
+	int            answered = 0;
 
 	(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
 	if (!ncfg_fuzznet_daemon_socket(run_dir, socket_path, sizeof(socket_path))) {
@@ -265,9 +306,11 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	if (count == 2u && strcmp(positional[0], "revoke") == 0) {
 		return pair_revoke(socket_path, positional[1], err, err_size);
 	}
-	if (count != 0u) {
-		ncfg_error_set(err, err_size, "`ncfg pair` draws a code; `open`, `list` and "
-		                              "`revoke KEY` are the rest of it");
+	confirm = count == 1u && strcmp(positional[0], "confirm") == 0;
+	if (count != 0u && !confirm) {
+		ncfg_error_set(err, err_size, "`ncfg pair` draws a code, and `confirm` one that asks "
+		                              "you first; `open`, `list` and `revoke KEY` are the "
+		                              "rest of it");
 		return 0;
 	}
 	if (!port_is_served()) {
@@ -292,7 +335,9 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 		return 0;
 	}
 	before = members_of(socket_path);
-	(void)snprintf(line, sizeof(line), "add invite delegable %u", PAIR_LIFE);
+	/* With no word, the host setting `invite/confirm` says, which fuzznet leaves off. */
+	(void)snprintf(line, sizeof(line), "add invite delegable %s%u", confirm ? "confirm " : "",
+	    PAIR_LIFE);
 	if (!ask_node(socket_path, line, reply, sizeof(reply), err, err_size)) {
 		return 0;
 	}
@@ -305,10 +350,12 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 		return 0;
 	}
 	ncfg_cli_pair_draw(stdout, modules, size);
-	printf("\nScan this with the netcfgd app. It works once, for %u minutes, and whoever\n"
-	       "scans it may join, so show it to nobody else. It reaches this machine at %s,\n"
-	       "port %u.\n\n%s\n\n",
-	    PAIR_LIFE / 60u, address, NCFG_FUZZNET_PORT, reply + 3);
+	printf("\nScan this with the netcfgd app. It works once, for %u minutes, and %s.\n"
+	       "It reaches this machine at %s, port %u.\n\n%s\n\n",
+	    PAIR_LIFE / 60u,
+	    confirm ? "you will be asked here before anybody who scans it joins"
+	            : "whoever scans it may join, so show it to nobody else",
+	    address, NCFG_FUZZNET_PORT, reply + 3);
 	(void)fflush(stdout);
 	for (unsigned waited = 0; waited < PAIR_LIFE; waited++) {
 		long now = members_of(socket_path);
@@ -317,6 +364,15 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 			puts("A device joined. `ncfg pair list` shows it, and `ncfg pair revoke KEY` "
 			     "takes it back.");
 			return 1;
+		}
+		/* Asked with no `confirm` too, as the host setting may have said so. */
+		if (!answered) {
+			int said = pair_ask_person(socket_path, err, err_size);
+
+			if (said < 0) {
+				return 0;
+			}
+			answered = said;
 		}
 		sleep(1);
 	}

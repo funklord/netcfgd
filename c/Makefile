@@ -276,7 +276,7 @@ NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS)
 # optional (its sec 842). The memory it cost was mostly huge pages (10.679).
 NODE_SRCS   = $(filter src/node/%,$(SRCS))
 src/node/%.o: CFLAGS += $(NODE_CFLAGS)
-src/node/node.o src/node/user_node.o: | $(FUZZNET_LIB)
+src/node/node.o src/node/user_host.o: | $(FUZZNET_LIB)
 
 # Re-archived only when an object is newer than the archive, so a build with
 # nothing to do relinks nothing: make compares the archive's time after this
@@ -391,8 +391,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	sh tests/node_serve.sh || fail=1; \
 	echo "== tests/node_fleet.sh"; \
 	timeout 400 sh tests/node_fleet.sh || fail=1; \
-	echo "== tests/node_user.sh"; \
-	timeout 100 sh tests/node_user.sh || fail=1; \
+	echo "== tests/host_user.sh"; \
+	timeout 120 sh tests/host_user.sh || fail=1; \
 	echo "== tests/node_remote.sh"; \
 	timeout 60 sh tests/node_remote.sh || fail=1; \
 	echo "== tests/node_second_user.sh"; \
@@ -602,7 +602,7 @@ $(FUZZ_BUILD_DIR)/client/%.o: ../client/%.c
 # (10.681). The replays kept passing throughout, because they link the plain
 # archive; only the exploring half was broken, which is the half no gate runs.
 $(FUZZ_BUILD_DIR)/src/node/%.o: FUZZ_CFLAGS += $(NODE_CFLAGS)
-$(FUZZ_BUILD_DIR)/src/node/node.o $(FUZZ_BUILD_DIR)/src/node/user_node.o: | $(FUZZNET_LIB)
+$(FUZZ_BUILD_DIR)/src/node/node.o $(FUZZ_BUILD_DIR)/src/node/user_host.o: | $(FUZZNET_LIB)
 
 $(FUZZ_LIB): $(FUZZ_OBJS)
 	rm -f $@

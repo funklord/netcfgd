@@ -237,11 +237,11 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	auto *tools = addToolBar(QStringLiteral("main"));
 	/* **Which node, chosen here** (10.699): this machine first, then the
-	 * estate's other members as this user's node lists them -- by whole
+	 * estate's other members as this user's host lists them -- by whole
 	 * key, as `where()` names them, since that is what tells them apart. A
 	 * user with no node sees this machine alone. */
 	nodes = new QComboBox(tools);
-	nodes->setObjectName(QStringLiteral("nodes"));
+	nodes->setObjectName(QStringLiteral("hosts"));
 	if (ncfg_device_has_local()) {
 		nodes->addItem(QStringLiteral("this machine"), QString());
 	}
@@ -403,7 +403,7 @@ void ncfg_main_window::closeEvent(QCloseEvent *event)
 	QMainWindow::closeEvent(event);
 }
 
-/* The estate's other members, as this user's node lists them; none for a
+/* The estate's other members, as this user's host lists them; none for a
  * user with no node. */
 QStringList ncfg_main_window::estate_members()
 {
@@ -414,12 +414,10 @@ QStringList ncfg_main_window::estate_members()
 	QStringList found;
 	static bool started = false;
 
-	/* A store means this person has joined something, or may have: their node
-	 * is what knows, and after a reboot nobody has started it (10.735). */
-	if (!started && QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
-	                     QStringLiteral("/fuzznet")).exists()) {
-		started = true;
-		(void)ncfg_fuzznet_user_node(1, ignored, sizeof(ignored));
+	/* Held for as long as this window runs, by a person who has joined something
+	 * (0314): their daemon is what knows, and it stops with the last client. */
+	if (!started) {
+		started = ncfg_fuzznet_user_host(NCFG_FUZZNET_HOST_USE, ignored, sizeof(ignored)) != 0;
 	}
 	if (ncfg_fuzznet_user_socket(socket, sizeof(socket)) &&
 	    ncfg_fuzznet_members(socket, keys, 256u, &count, ignored, sizeof(ignored))) {
@@ -495,7 +493,7 @@ void ncfg_main_window::join_host()
 	if (!given || code.isEmpty()) {
 		return;
 	}
-	/* `ncfg join`, not the window's own copy of it: it starts this user's node,
+	/* `ncfg join`, not the window's own copy of it: it starts this user's host,
 	 * asks, and waits out the host's answer, which is minutes at the most. */
 	auto *join = new QProcess(this);
 

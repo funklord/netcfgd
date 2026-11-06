@@ -22,7 +22,7 @@
 #include "../src/phone/code_reader.h"
 #include "../src/phone/pair_view.h"
 #include "../src/layout.h"
-#include "../src/phone/phone_node.h"
+#include "../src/phone/phone_host.h"
 extern "C" {
 #include "ncfg_fuzznet.h"
 }
@@ -202,20 +202,20 @@ int main(int argc, char **argv)
 	}
 	QTemporaryDir scratch(QStringLiteral("/tmp/ncf.XXXXXX"));
 	const QString base = scratch.path();
-	/* The app runs its node as a program of its own, which is `ncfg node`'s
+	/* The app runs its node as a program of its own, which is `ncfg host`'s
 	 * core with no `node` to type. */
 	const QString program = base + QStringLiteral("/node");
 	{
 		QFile script(program);
 
 		script.open(QIODevice::WriteOnly);
-		script.write(QStringLiteral("#!/bin/sh\nexec '%1' node \"$@\"\n").arg(ncfg).toUtf8());
+		script.write(QStringLiteral("#!/bin/sh\nexec '%1' host \"$@\"\n").arg(ncfg).toUtf8());
 		script.close();
 		script.setPermissions(script.permissions() | QFile::ExeOwner);
 	}
 	QString       why;
 
-	check(ncfg_phone_node_start(program, base + QStringLiteral("/phone"), &application, &why),
+	check(ncfg_phone_host_start(program, base + QStringLiteral("/phone"), &application, &why),
 	      "the phone's node starts as the app starts it", why);
 	char socket[1100];
 
@@ -224,7 +224,7 @@ int main(int argc, char **argv)
 	      "and the client's own lookup finds it, in the app's directory");
 	const QString phone = QString::fromUtf8(socket);
 
-	check(ncfg_phone_node_start(program, base + QStringLiteral("/phone"), &application, &why),
+	check(ncfg_phone_host_start(program, base + QStringLiteral("/phone"), &application, &why),
 	      "started again, the node already answering is the node", why);
 	check(ncfg_pair_view::joined_host(phone).isEmpty(), "a new phone has joined nothing");
 
@@ -322,10 +322,10 @@ int main(int argc, char **argv)
 	check(open_codes == QStringLiteral("ok 0"), "and the code is used up", open_codes);
 
 	/* ---- starting over ---- */
-	check(ncfg_phone_node_forget(base + QStringLiteral("/phone"), &application, &why),
+	check(ncfg_phone_host_forget(base + QStringLiteral("/phone"), &application, &why),
 	      "forgetting the host stops the node and takes its store", why);
 	check(!QDir(base + QStringLiteral("/phone/node")).exists(), "and the store is gone");
-	check(ncfg_phone_node_start(program, base + QStringLiteral("/phone"), &application, &why),
+	check(ncfg_phone_host_start(program, base + QStringLiteral("/phone"), &application, &why),
 	      "and the next start has a node", why);
 	check(ncfg_pair_view::joined_host(phone).isEmpty(), "which has joined nothing, so it pairs");
 

@@ -999,7 +999,7 @@ them because no test had ever carried those keys.
      is judged by its tiers and fuzznet's permit (10.688), and an operator of
      the estate by the node's `remote` block. A request longer than a line
      goes in pieces (10.695).
-   - **The operator's side exists**: `ncfg nodes` (10.692), `status --at`
+   - **The operator's side exists**: `ncfg hosts` (10.692), `status --at`
      (10.691), and `--at HOST` for every socket verb (10.694), with nothing
      falling back to this machine. A remote apply carries a window, which is
      shown live to arm, confirm and revert (10.697). The GUI and the shim
@@ -12686,26 +12686,67 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.738 Two client roles, and a host daemon that lives with its clients
+
+0314 is the decision. A client configures this machine through the root netcfgd and
+holds nothing, or the person has joined and is a host of their own, whose key and store
+are `ncfg host`'s. `ncfg node` and `ncfg nodes` became `ncfg host` and `ncfg hosts`, and
+the phone's program `libncfghost.so`, on fuzznet's word that node no longer names
+anything. `fzn_node_*`, `ncfg_node_*` and `node_*.sh` stay until a rename buys something.
+
+**Only joining makes a host.** `--at`, `ncfg hosts` and a window's first look ask
+`ncfg_fuzznet_user_host` for USE, which refuses a person with no store and says to
+join; `ncfg join` alone asks MAKE. So a look no longer leaves a key behind.
+
+**A flock is the count of clients.** Each holds `ncfg-clients.lock` shared, beside the
+socket, from before it looks for the daemon until it exits. `ncfg host --while-held`,
+which is what a client starts, tries it exclusively once a second from fuzznet's
+`tick`, and stops after ten seconds of winning. A socket of holders was the first
+design and fails on `add join`, which restarts the process in place. Typed by hand
+`ncfg host` takes no option and stays up.
+
+**Why ten seconds rather than none, and it is a finding.** Stopping at once made every
+second `--at` hang 3 s with `the host did not answer`. fuzznet keeps a reply a few
+seconds against resends (its sec 737), matched on sender, message number and bytes; a
+new caller numbers from 0, and `--udp-port=0` gives it a new port; and since its sec 900
+a match from another address is dropped, not answered. At 2a3bd069 the same case got
+the kept reply back, which is why the first measurement in 10.735 saw no fault. Told to
+fuzznet, inbox 20261106T0215Z. The linger keeps a restart outside that window, and
+leaves one daemon under a script's run of `--at`.
+
+**`the node is waiting on a peer; ask again` is asked again,** for up to 4 s, in
+`ask_again`: a daemon just started is usually in a round, and handing that on made a
+cold `--at` fail. It refuses before anything runs, so a second asking is safe.
+`fuzznet_line_test` holds this against a scripted socket; with the retry removed the
+check fails.
+
+**The first role's view of the estate is a procedure, `hosts`.** `peer` is not a grantable
+subject, so a local user cannot ask root `list peer`; netcfgd asks it in-process and
+hands it on under the `observe` tier, for a caller on this machine only. `ncfg hosts`
+takes that for a person who has not joined, and their own daemon's list for one who has.
+The fleet tab stays the second role's: its columns are each host's status, which only a
+key can ask.
+
+**`ncfg join` and the first screen wait 15.5 minutes,** as a device now asks for 15.
+
+**`ncfg pair confirm` holds whoever scans until the person at the terminal says yes,**
+which answers the question of whether a scanned code is enough: the holder settled it
+in fuzznet's sec 896 as both, and configurable. Plain `ncfg pair` sends no word, so the
+host setting `invite/confirm` chooses, and it prompts all the same when one waits.
+
 ## 10.737 fuzznet's shape and terms, and what the next pin has to carry
 
 From fuzznet's inbox message 20261106T0137Z and its sec 906, which reports the
-holder's words; the holder had said here that it was coming. 
+holder's words; the holder had said here that it was coming.
 **Terms.** A machine is the computer. A host is one user account's presence on it, the
 unit of identity and authorisation, so several on a machine are normal. Daemons and
 clients are processes of a host. "Node" now means only the English word, so this
-document's "this user's node" and 0313's are the old usage. Root is the host holding
+document's "this user's host" and 0313's are the old usage. Root is the host holding
 the estate's root key; vault is reserved, not a synonym.
 
-**What this does to 10.734 and 10.735, and it is not settled.** For all the software so
-far a client does not touch the disk or relay, and a host's key is made at the daemon's
-first start. So `ncfg node`, with a store and a key, is a daemon of the user's host, not
-a client, and the holder's "netcfgd as root and clients as users" leaves a desktop user
-with no key to reach a remote with. It also rules out running that core inside the
-client, the fix suggested after 10.735's figure was corrected, since the client would
-then write the disk. Between users the OS authenticates (`local:alice`), so the shape
-that fits those words is a client asking the root's netcfgd locally; a local socket
-connection may also become an alternative to a key. The holder's to decide. Nothing
-changed yet; the phone is not touched by this, as the app ships its daemon.
+**What this did to 10.734 and 10.735:** `ncfg node`, with a store and a key, is a
+daemon of the user's host and not a client, and running that core inside a client would
+have it write the disk. The holder settled it as two roles, 10.738.
 
 **The repin, at ba567ec2** (f18ca13 or later, never 3f6b44b, which crashes on a tracked
 write), done: `get events`, the setting `local/events`, and grants spelled `local:NAME`
@@ -12716,10 +12757,9 @@ has one; the node's own user needs no grant, which retires the root-by-number gr
 
 Nothing to do for two of fuzznet's changes: no netcfgd verb takes a contact's name, so
 `two contacts have that name` cannot reach us, and sec 897's SIGTERM is for a daemon
-with no handler, which is `ncfg node` and not netcfgd's signal descriptor.
+with no handler, which is `ncfg host` and not netcfgd's signal descriptor.
 
-Still to carry: `add join` waits grow with the invite's 15 minutes (10.735), and
-`make daemon-lib` in place of `FUZZNETD_LINK`.
+Still to carry: `make daemon-lib` in place of `FUZZNETD_LINK`.
 
 ## 10.736 One window, in a layout: what is a mode and what a device has
 
@@ -12742,7 +12782,7 @@ only what needs a phone: the camera, the first screen, the app's node.
 The holder: clients also connect to a remote netcfgd; on a phone that is the default
 and only connection, on a desktop local is the default and remote "unusual but not
 impossible". The transport was there (`--at`, `open_at`), but it stood on a node
-nothing started. `ncfg_fuzznet_user_node` now starts `ncfg node` where a client asks
+nothing started. `ncfg_fuzznet_user_host` now starts `ncfg host` where a client asks
 for a host, and `ncfg join CODE` does what the phone's first screen does. The window
 has "Another host..." beside the node box until it has one, running `ncfg join`, and
 starts the node at its own start where the user has a store, or after a reboot a
@@ -12751,44 +12791,29 @@ joined person would see this machine alone.
 **The test is a connect and nothing more.** Asking `get prekey` was the first version:
 it would take the one connection a test's fake serves, and it runs before every use.
 
-The node is left up, as an agent is. The reason first given here, that starting it
-costs a second, was never measured and is wrong: on loopback it answers in 13 ms, and
-`status --at` takes 259 ms from cold against 10 ms warm, nearly all of that the 250 ms
-look in `ncfg_fuzznet_user_node`. A real network's round trips are not in those
-figures. Nothing asks for it on a machine used only locally, which `node_user.sh`
-checks.
+Left up after its client, as this was first built, it was a user daemon in all but
+name, and the holder wanted none: 10.738 replaced that. The reason first given here,
+that a start costs a second, was never measured. On loopback a start is 13 ms, and the
+rest of the 259 ms a cold `--at` took was this client's own 250 ms look.
 
-**No user daemon, for now.** The holder, 2026-11-06: "For now we only have netcfgd as
-root and clients as users"; a user daemon would hinge on needing something on each
-user, nothing does yet, and it stays that way "until we iron out all functionality".
-So no user unit, which closes what 0313 left open. Whether a node left up after its
-client exits already counts as one is put to the holder, and waits on fuzznet's coming
-account of its terms.
-
-**For the next pin:** fuzznet's sec 896 now has `add invite [delegable] [open|confirm]
-[LIFE]`, and a device asks for 15 minutes. The pin here is older. `ncfg join` and the
-first screen both stop looking at 660 half-seconds, sized to the old five minutes, so
-they move with the pin. `open` is what `ncfg pair` means today; offering `confirm` is
-the holder's question about a scanned code, which that gives an answer to.
-
-## 10.734 `ncfg node`: netcfgd brings its own, and fuzznetd is a witness
+## 10.734 `ncfg host`: netcfgd brings its own, and fuzznetd is a witness
 
 The holder: all fuzznet software has its full function and coexists on the same files
 and the same estate; fuzzypickles does not install fuzznetd, which is for testing that;
 a client and a node are the same thing, hardcoded differently (0313). So every path here
 that said "this user's fuzznetd" stood on a program nothing installs.
 
-`c/src/node/user_node.c` is fuzznet's node with netcfgd's numbers, any free port, and
+`c/src/node/user_host.c` is fuzznet's node with netcfgd's numbers, any free port, and
 an empty extension, which is what makes it follow beside a face rather than exit.
-`ncfg node` runs it from the binary already installed, and the app carries the same
-file under a `main` of its own as `libncfgnode.so`, linked by fuzznet's build
-(`gui/src/phone/node.mk`), as fuzzypickles links fzpd.
+`ncfg host` runs it from the binary already installed, and the app carries the same
+file under a `main` of its own as `libncfghost.so`, linked by fuzznet's build
+(`gui/src/phone/host.mk`), as fuzzypickles links fzpd.
 
 **The feared cost was the capability**, which fuzznet derives from service and product,
 so a store opened under another product's number might have reached nothing.
-Measured by `c/tests/node_user.sh`: joined as netcfgd, then served by fuzznetd under
+Measured by `c/tests/host_user.sh`: joined as netcfgd, then served by fuzznetd under
 fuzzypickles' number 2 on the same default store, `status --at` is answered by the
-host, and `ncfg node` started beside it follows and becomes the face when it goes.
+host, and `ncfg host` started beside it follows and becomes the face when it goes.
 
 **`restart_argv` is the original command line**, or taking the claim would run `ncfg`
 with fuzznet's options and no `node`.
@@ -12908,7 +12933,7 @@ directory of a test is not this machine's service.
 ## 10.725 What is let in can be put out: `ncfg pair list`, `ncfg pair revoke`
 
 gui/project.md says a stolen phone is a capability to revoke, and pairing made
-phones without a way to do it: `ncfg nodes` reads this user's fuzznetd, not the
+phones without a way to do it: `ncfg hosts` reads this user's fuzznetd, not the
 daemon's node, so a host could not even list what it had admitted. `ncfg pair list`
 names them. `ncfg pair revoke KEY` makes the signed revocation and then removes the
 pairing. `node_remote.sh`: the device reads the host's status, is listed, is
@@ -13003,7 +13028,7 @@ section 9's two questions. **The code is the pairing and the discovery**: fuzzne
 card says where its sponsor is (its sec 671), so a phone needs no mDNS and no
 typed address.
 
-- **The phone's node**, `gui/src/phone/phone_node.cpp`: fuzznetd rides in the APK as
+- **The phone's node**, `gui/src/phone/phone_host.cpp`: fuzznetd rides in the APK as
   `libfuzznetd.so`, built from the pin by `make -C gui android-node`, and the app
   starts it with `XDG_RUNTIME_DIR` in its own directory, so
   `ncfg_fuzznet_user_socket` and everything above it is the desktop's code.
@@ -13197,7 +13222,7 @@ storage. Not built for arm64, and not run on a phone.
 ## 10.713 The `fleet` tab acts: reload all, add to a group, seal a value
 
 10.710 only looked. Three buttons now do what an operator does to many nodes:
-`ncfg reload --at estate`, `ncfg nodes member`, and `ncfg secret seal`. They
+`ncfg reload --at estate`, `ncfg hosts member`, and `ncfg secret seal`. They
 are `ncfg`'s own verbs, run as child processes as the tab's reads are, so what
 each refuses and prints stays in one place and the window never waits. The
 last line of the answer sits under the table until the next action, which for
@@ -13280,10 +13305,10 @@ in `ask_test`. The wipe is by reading only: no test can see freed memory.
   `config_arrives`, `apply_race`, `remote_tiers`, `control_exposure`, `profile`.
   `make live` as a whole has not been run on it.
 
-## 10.711 An operator's group verbs: `ncfg nodes member`, `ncfg secret seal`
+## 10.711 An operator's group verbs: `ncfg hosts member`, `ncfg secret seal`
 
 10.709 left both as lines typed at fuzznet's socket, with a passphrase in the
-line. `ncfg nodes member HOST GROUP` is `set setting host=HOST group/member
+line. `ncfg hosts member HOST GROUP` is `set setting host=HOST group/member
 GROUP`. `ncfg secret seal GROUP KEY` is `set sealed`, on this user's own
 fuzznetd, since it writes other hosts' cells.
 
@@ -13292,11 +13317,11 @@ fuzznetd, since it writes other hosts' cells.
   escaped form and the request line among them.
 - **Sealing to nobody is a failure, not `ok 0 0`.** fuzznet keeps a copy for a
   later member, but every host's configuration would read the key as unset, so
-  the sentence names `ncfg nodes member`.
+  the sentence names `ncfg hosts member`.
 - **`--at` is refused on `seal`**: it speaks for a group, and `--at` means one
   node. `secret` otherwise takes `--at`, so this is the one verb under it that
   does not.
-- **Under `nodes` and `secret`, and no `group` word.** `nodes` is where a host
+- **Under `hosts` and `secret`, and no `group` word.** `hosts` is where a host
   is named and `secret` where a value is given. A group has nothing of its own
   here to list.
 
@@ -13361,7 +13386,7 @@ person to `ncfg secret set`:
 
 - no node in this process: `UNSUPPORTED`, saying so;
 - none set here: `FAILED`, saying an operator of the estate sets it;
-- sealed to a key this host lacks: `FAILED`, naming `ncfg nodes member`.
+- sealed to a key this host lacks: `FAILED`, naming `ncfg hosts member`.
 
 `ncfg secret list` skips these references, since its subject is the `secrets/`
 directory and "referenced, not stored" would ask for a copy on disk. The
@@ -13375,7 +13400,7 @@ its `group/member` is in force at an admin's or a root's rank and it stands. So
 a new access point gets a roaming key when an operator says `set setting
 host=KEY group/member zone1`, not when it says so itself, and the refusal
 above names that verb. Its own word still places it for the group's plain
-values. `ncfg nodes member` and `ncfg secret seal` say both (10.711). Sec 880 is
+values. `ncfg hosts member` and `ncfg secret seal` say both (10.711). Sec 880 is
 coming: copies held by other root and admin hosts, so a later member is served
 once the sealer has gone.
 
@@ -13804,7 +13829,7 @@ aimed at this machine's default socket. The probe also refreshes the events
 tab three times on a node and finds one line, where without the once-only
 rule it finds three.
 
-**Not done yet:** a node menu in the window, from `ncfg nodes`'s list, so
+**Not done yet:** a node menu in the window, from `ncfg hosts`'s list, so
 the GUI can move between nodes without a restart.
 
 ## 10.697 The remote safety path, live: a window armed, confirmed, and left to revert
@@ -14011,10 +14036,10 @@ tier.
 
 `ncfg`'s socket verbs followed in 10.694.
 
-## 10.692 `ncfg nodes`: the estate's members, by the key `--at` takes
+## 10.692 `ncfg hosts`: the estate's members, by the key `--at` takes
 
 10.691 asks a node by its 64-digit key, which nobody types from memory.
-`ncfg nodes` lists the other members of this user's estate, one key a line
+`ncfg hosts` lists the other members of this user's estate, one key a line
 or a JSON array with `--json`. It reads them from this user's fuzznetd with
 `list peer [FROM]`, every page.
 

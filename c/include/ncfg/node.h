@@ -179,6 +179,9 @@ typedef struct {
 #define NCFG_NODE_PROCEDURE_DO "do"
 /* The events behind what fuzznet's held stream says the kind of (10.731). */
 #define NCFG_NODE_PROCEDURE_EVENTLOG "eventlog"
+/* The estate's hosts, for a client of this machine, who holds no key and may not
+ * ask fuzznet's `list peer`, its `peer` being no grantable subject (0314). */
+#define NCFG_NODE_PROCEDURE_HOSTS "hosts"
 
 /*
  * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to
@@ -235,11 +238,11 @@ void ncfg_node_refuse_huge_pages(char *const *argv);
 size_t ncfg_node_publish_event(const char *subject);
 
 /*
- * This user's node, `ncfg node` (`user_node.c`): fuzznet's node with netcfgd's
+ * This user's host, `ncfg host` (`user_host.c`): fuzznet's node with netcfgd's
  * numbers, on the user's own store and socket unless `argv` says otherwise.
  * `skip` words after `argv[0]` are not fuzznet's: 1 for `node`. Does not return
  * while it serves; the process's exit status.
  */
-int ncfg_node_user_main(int argc, char **argv, int skip);
+int ncfg_host_user_main(int argc, char **argv, int skip);
 
 #endif /* NCFG_NODE_H */

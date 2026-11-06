@@ -25,7 +25,7 @@
 #include <QVBoxLayout>
 
 #ifdef Q_OS_ANDROID
-#include "phone/phone_node.h"
+#include "phone/phone_host.h"
 
 #include <QApplication>
 #include <QPointer>
@@ -101,7 +101,7 @@ ncfg_fleet_view::ncfg_fleet_view(std::function<QStringList()> members, QWidget *
 		}
 		QString why;
 
-		if (!ncfg_phone_node_forget(
+		if (!ncfg_phone_host_forget(
 		        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), qApp, &why)) {
 			QMessageBox::warning(this, QStringLiteral("Forget this host"), why);
 			return;
@@ -309,7 +309,7 @@ void ncfg_fleet_view::draw()
 	    ? QStringLiteral("no other nodes in the estate")
 	    : QStringLiteral("%1 of %2 nodes answering").arg(answering).arg(keys.size());
 	QString note = QStringLiteral(
-	    "%1. Each node is asked through this user's node and judged by its own `remote` "
+	    "%1. Each node is asked through this user's host and judged by its own `remote` "
 	    "block, once a minute while this tab is in front. A double click moves the window "
 	    "there.").arg(summary);
 	if (!action_said.isEmpty()) {
@@ -465,7 +465,7 @@ bool ncfg_fleet_view::reload_all()
 
 bool ncfg_fleet_view::add_member(const QString &key, const QString &group)
 {
-	return act(QStringList { QStringLiteral("nodes"), QStringLiteral("member"), key, group },
+	return act(QStringList { QStringLiteral("hosts"), QStringLiteral("member"), key, group },
 	           QByteArray());
 }
 

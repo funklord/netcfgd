@@ -348,6 +348,10 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
  * the node's own user, who needs none; -1 where no grant can say it -- `any`,
  * or a name fuzznet's grants cannot carry.
  */
+size_t ncfg_main_node_hosts(const ncfg_main_policy_t *policy, const ncfg_peer_t *local,
+    const char *args, size_t length, char *reply, size_t cap,
+    size_t (*ask)(const char *line, char *said, size_t said_cap));
+
 int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t size);
 
 /*

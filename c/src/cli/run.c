@@ -689,7 +689,7 @@ static int command_monitor_at(const ncfg_cli_options_t *options)
 	size_t      at;
 
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
-		return fail("this user's node socket path does not fit");
+		return fail("this user's host socket path does not fit");
 	}
 	if (!ncfg_fuzznet_events_at(socket, options->at, cursor, &next, &first, subjects,
 	        sizeof(subjects) / sizeof(subjects[0]), &count, err, sizeof(err))) {
@@ -1332,7 +1332,7 @@ static void take_from_daemon(const ncfg_cli_options_t *options, ncfg_observed_t 
 
 /*
  * **Another node of the estate** (0311's fleet, 10.691): its own
- * observation, asked through this user's node -- the third of fuzznet's
+ * observation, asked through this user's host -- the third of fuzznet's
  * models, a client and its daemon calling a remote one -- and judged there
  * by that node's `remote` block. Nothing of this machine is observed or
  * written: the answer is that node's, and this one is not the subject.
@@ -1348,7 +1348,7 @@ static int command_status_at(const ncfg_cli_options_t *options)
 	int              code = NCFG_CLI_EXIT_OK;
 
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
-		return fail("this user's node socket path does not fit");
+		return fail("this user's host socket path does not fit");
 	}
 	err[0] = '\0';
 	if (!ncfg_fuzznet_status_at(socket, options->at, &json, &length, err, sizeof(err))) {
@@ -1382,12 +1382,12 @@ static int command_status_at(const ncfg_cli_options_t *options)
 
 /*
  * The other nodes of this user's estate (10.692): the keys `status --at`
- * takes, from this user's node, contacts left out. Every member, not
+ * takes, from this user's host, contacts left out. Every member, not
  * only netcfgd's -- which of them answers `status` is each node's to say,
  * and asking all of them would turn a listing into a fleet-wide wait.
  */
 /*
- * `ncfg nodes member HOST GROUP` (10.711): an operator's word that HOST is in
+ * `ncfg hosts member HOST GROUP` (10.711): an operator's word that HOST is in
  * GROUP, which is what a sealed value reaches it by. A host may say so of
  * itself and be placed for the group's plain values; only this reaches sealed
  * ones (fuzznet sec 879), so it is here and not left to the host.
@@ -1400,10 +1400,10 @@ static int command_nodes_member(const char *socket, const char **rest, size_t co
 	int  silent = 0;
 
 	if (count != 2u) {
-		return fail("`ncfg nodes member` takes a host's key and a group");
+		return fail("`ncfg hosts member` takes a host's key and a group");
 	}
 	if (strlen(rest[0]) != 64u || strspn(rest[0], "0123456789abcdef") != 64u) {
-		return fail("a host is its key: 64 lower-case hex digits, as `ncfg nodes` lists them");
+		return fail("a host is its key: 64 lower-case hex digits, as `ncfg hosts` lists them");
 	}
 	if (rest[1][0] == '\0' || strlen(rest[1]) > 48u ||
 	    strspn(rest[1], "abcdefghijklmnopqrstuvwxyz0123456789._/-") != strlen(rest[1])) {
@@ -1412,7 +1412,7 @@ static int command_nodes_member(const char *socket, const char **rest, size_t co
 	(void)snprintf(line, sizeof(line), "set setting host=%s group/member %s", rest[0], rest[1]);
 	why[0] = '\0';
 	if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 5000, &silent, why, sizeof(why))) {
-		return fail(why[0] ? why : "this user's node did not answer: start one with `ncfg node`");
+		return fail(why[0] ? why : "this user's host did not answer: start one with `ncfg host`");
 	}
 	if (strcmp(reply, "ok") != 0 && strncmp(reply, "ok ", 3u) != 0) {
 		return fail(reply);
@@ -1430,21 +1430,36 @@ static int command_nodes(const ncfg_cli_options_t *options, const char **positio
 	size_t      at;
 
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
-		return fail("this user's node socket path does not fit");
+		return fail("this user's host socket path does not fit");
 	}
-	if (!ncfg_fuzznet_user_node(0, err, sizeof(err))) {
-		return fail(err);
+	if (count_of > 0u && strcmp(positional[0], "member") != 0) {
+		return fail("`ncfg hosts` lists them, and has one subcommand: member");
 	}
-	if (count_of > 0u) {
-		if (strcmp(positional[0], "member") == 0) {
+	/* A person who has joined sees what their host does; one who has not is a
+	 * client of this machine, and sees what its root does (0314). */
+	if (ncfg_fuzznet_user_host(NCFG_FUZZNET_HOST_USE, err, sizeof(err))) {
+		if (count_of > 0u) {
 			return command_nodes_member(socket, positional + 1, count_of - 1u);
 		}
-		return fail("`ncfg nodes` lists them, and has one subcommand: member");
-	}
-	err[0] = '\0';
-	if (!ncfg_fuzznet_members(socket, keys, sizeof(keys) / sizeof(keys[0]), &count, err,
-	        sizeof(err))) {
-		return fail(err[0] ? err : "this user's node did not answer");
+		err[0] = '\0';
+		if (!ncfg_fuzznet_members(socket, keys, sizeof(keys) / sizeof(keys[0]), &count, err,
+		        sizeof(err))) {
+			return fail(err[0] ? err : "this user's host did not answer");
+		}
+	} else {
+		char run_dir[NCFG_CLI_TEXT_MAX];
+		char why[NCFG_ERROR_MAX];
+
+		if (count_of > 0u || ncfg_fuzznet_user_joined()) {
+			return fail(err);
+		}
+		(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
+		why[0] = '\0';
+		if (!ncfg_fuzznet_root_members(run_dir, keys, sizeof(keys) / sizeof(keys[0]), &count,
+		        why, sizeof(why))) {
+			ncfg_error_set(why, sizeof(why), "%s", err);
+			return fail(why);
+		}
 	}
 	if (options->json) {
 		ncfg_out_writef("[");
@@ -1463,7 +1478,7 @@ static int command_nodes(const ncfg_cli_options_t *options, const char **positio
 /*
  * `ncfg join CODE`: what the phone's first screen does, for a person at a
  * keyboard (10.734). `add join` answers at once and asks the host from then on,
- * for five minutes, restarting the node once it has joined, so a look may meet
+ * for fifteen minutes, restarting the daemon once it has joined, so a look may meet
  * no node at all; `idle` means something only after that has had time.
  */
 static int command_join(const char *const *positional, size_t count_of)
@@ -1480,11 +1495,11 @@ static int command_join(const char *const *positional, size_t count_of)
 	if (count_of != 1u) {
 		return fail("`ncfg join` takes one code, which `ncfg pair` drew");
 	}
-	if (!ncfg_fuzznet_user_node(1, why, sizeof(why))) {
+	if (!ncfg_fuzznet_user_host(NCFG_FUZZNET_HOST_MAKE, why, sizeof(why))) {
 		return fail(why);
 	}
 	if (!ncfg_fuzznet_user_socket(socket, sizeof(socket))) {
-		return fail("this user's node socket path does not fit");
+		return fail("this user's host socket path does not fit");
 	}
 	if (snprintf(line, sizeof(line), "add join %s", positional[0]) >= (int)sizeof(line)) {
 		return fail("that code is too long to be one");
@@ -1495,7 +1510,7 @@ static int command_join(const char *const *positional, size_t count_of)
 	if (strncmp(reply, "ok", 2u) != 0) {
 		return fail(reply);
 	}
-	for (looks = 0; looks < 660; looks++) {
+	for (looks = 0; looks < 1860; looks++) {
 		size_t members = 0;
 
 		why[0] = '\0';
@@ -2648,12 +2663,12 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	if (options->at && (refused = at_refused(command, options, positional, count)) != 0) {
 		return refused;
 	}
-	/* Reaching another host is what this user's node is for, so asking to
+	/* Reaching another host is what this user's host is for, so asking to
 	 * starts it. Nothing else does: this machine's own verbs need none. */
 	if (options->at) {
 		char why[NCFG_ERROR_MAX];
 
-		if (!ncfg_fuzznet_user_node(1, why, sizeof(why))) {
+		if (!ncfg_fuzznet_user_host(NCFG_FUZZNET_HOST_USE, why, sizeof(why))) {
 			return fail(why);
 		}
 	}
@@ -2685,15 +2700,15 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	if (strcmp(command, "status") == 0) {
 		return command_status(options);
 	}
-	if (strcmp(command, "nodes") == 0) {
+	if (strcmp(command, "hosts") == 0) {
 		return command_nodes(options, positional, count);
 	}
 	if (strcmp(command, "join") == 0) {
 		return command_join(positional, count);
 	}
-	/* `ncfg node` first on the line is `main`'s, whose options are fuzznet's and
+	/* `ncfg host` first on the line is `main`'s, whose options are fuzznet's and
 	 * not this parser's. Here is one with an option of `ncfg`'s before it. */
-	if (strcmp(command, "node") == 0) {
+	if (strcmp(command, "host") == 0) {
 		return fail("`node` comes first: its options are fuzznet's, not ncfg's");
 	}
 	if (strcmp(command, "plan") == 0) {

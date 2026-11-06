@@ -517,10 +517,10 @@ AT_USAGE = ("  --at HOST                another node of this estate, HOST its ke
 	    "                           asked through your own fuzznetd: for status,\n"
 	    "                           wifi, modem, reload, confirm, revert, apply,\n"
 	    "                           config, secret, profile, tui and monitor\n")
-# And `ncfg nodes`, 10.692: the estate's members, for `--at`, the same reason.
-NODES_USAGE = ("  ncfg nodes [--json]      the other nodes of your estate, by key, for\n"
+# And `ncfg hosts`, 10.692: the estate's members, for `--at`, the same reason.
+NODES_USAGE = ("  ncfg hosts [--json]      the other nodes of your estate, by key, for\n"
 	       "                           `status --at`\n"
-	       "  ncfg nodes member HOST GROUP  say HOST is in GROUP, for what is sealed to it\n"
+	       "  ncfg hosts member HOST GROUP  say HOST is in GROUP, for what is sealed to it\n"
 	       "  ncfg pair                draw a one-use code a phone joins this host by\n"
 	       "  ncfg pair open           let this host be reached by its estate's devices\n"
 	       "  ncfg pair list           the devices this host serves, by key\n"

@@ -1085,7 +1085,7 @@ public:
 	bool open(const QString &socket_path, QString *error);
 	/*
 	 * Another node of the estate, `key` in hex (`--at`, project.md 10.698):
-	 * every request asked of that node through this user's node and
+	 * every request asked of that node through this user's host and
 	 * judged by its `remote` block. A reopen reopens the node, never the
 	 * default socket -- which would be this machine, shown as the other.
 	 */

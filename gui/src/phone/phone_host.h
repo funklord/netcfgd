@@ -1,13 +1,13 @@
 /*
- * phone_node.h -- the phone's fuzznet node, which the app starts
- * (project.md 10.720): `ncfg node`'s core under a main of its own (10.734), since
+ * phone_host.h -- the phone's fuzznet node, which the app starts
+ * (project.md 10.720): `ncfg host`'s core under a main of its own (10.734), since
  * no fuzznet program but a product's own is carried.
  *
  * WHY THE APP STARTS IT
  *   The client reaches another host through this user's own node, by
  *   `call ask at HOST` on its socket. A desktop has one running. A phone has
  *   no place for a long-lived program but an app, so the app carries one, as
- *   `libncfgnode.so`: Android extracts and marks executable only `lib*.so`.
+ *   `libncfghost.so`: Android extracts and marks executable only `lib*.so`.
  *   It stays a separate process, so everything above the socket is the
  *   desktop's code.
  *
@@ -31,13 +31,13 @@ class QObject;
  * latter put in XDG_RUNTIME_DIR. A node already answering is the node: Android
  * brings an activity back into a process it kept. The start is bounded; false
  * with a sentence in `why` where no node answered within it. */
-bool ncfg_phone_node_start(const QString &program, const QString &base, QObject *owner,
+bool ncfg_phone_host_start(const QString &program, const QString &base, QObject *owner,
                            QString *why);
 
 /* Starts this phone over: the node `owner` holds stopped, and its store under
  * `base` gone, keys and all, so the next start joins nothing and shows the pairing
  * screen. For a phone revoked, or whose host moved. False with a sentence in `why`
  * where the store would not go. */
-bool ncfg_phone_node_forget(const QString &base, QObject *owner, QString *why);
+bool ncfg_phone_host_forget(const QString &base, QObject *owner, QString *why);
 
 #endif

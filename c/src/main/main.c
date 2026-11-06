@@ -91,8 +91,8 @@ int main(int argc, char **argv)
 		 */
 		ncfg_log_accept_from_env();
 		/* Before the parser, whose options are not fuzznet's. */
-		if (argc > 1 && strcmp(argv[1], "node") == 0) {
-			return ncfg_node_user_main(argc, argv, 1);
+		if (argc > 1 && strcmp(argv[1], "host") == 0) {
+			return ncfg_host_user_main(argc, argv, 1);
 		}
 		return ncfg_cli_main_on(argc, argv, ncfg_main_cli_machine());
 	case NCFG_MAIN_PROGRAM_DAEMON:

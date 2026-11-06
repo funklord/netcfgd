@@ -58,7 +58,7 @@ int main(int argc, char **argv)
 
 	check(connection.open_at(key, &error), "a connection opens on another node", error);
 	ncfg_main_window window(&connection);
-	QComboBox *nodes = window.findChild<QComboBox *>(QStringLiteral("nodes"));
+	QComboBox *nodes = window.findChild<QComboBox *>(QStringLiteral("hosts"));
 	bool polling = false;
 	for (QTimer *timer : window.findChildren<QTimer *>()) {
 		polling = polling || (timer->interval() == 5000 && timer->isActive());

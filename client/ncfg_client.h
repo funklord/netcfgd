@@ -68,7 +68,7 @@ const char *ncfg_client_socket_path(const ncfg_client_t *client);
 
 /*
  * A client of another node of the estate, `host` its key in hex (10.698):
- * every request asked through this user's node as `call ask at HOST`,
+ * every request asked through this user's host as `call ask at HOST`,
  * answered as that node's socket would answer it, judged by its `remote`
  * block. Nothing is connected until a request, so this fails only on a key
  * that is not one. **Its socket path is ""**, and a caller reopening a

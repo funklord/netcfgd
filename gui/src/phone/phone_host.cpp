@@ -1,4 +1,4 @@
-#include "phone_node.h"
+#include "phone_host.h"
 
 extern "C" {
 #include "ncfg_fuzznet.h"
@@ -29,7 +29,7 @@ static bool node_answers(const char *socket)
 	                        sizeof(why)) != 0;
 }
 
-bool ncfg_phone_node_start(const QString &program, const QString &base, QObject *owner,
+bool ncfg_phone_host_start(const QString &program, const QString &base, QObject *owner,
                            QString *why)
 {
 	const QString store = base + QStringLiteral("/node");
@@ -89,7 +89,7 @@ bool ncfg_phone_node_start(const QString &program, const QString &base, QObject 
 	return false;
 }
 
-bool ncfg_phone_node_forget(const QString &base, QObject *owner, QString *why)
+bool ncfg_phone_host_forget(const QString &base, QObject *owner, QString *why)
 {
 	for (QProcess *node : owner->findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) {
 		node->kill();

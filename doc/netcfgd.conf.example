@@ -2188,7 +2188,7 @@
 # access point of a zone must share, a `roaming_key` say, is set once for the
 # group, and only the hosts an operator named as its members can open it:
 #
-#   ncfg nodes member HOST zone1
+#   ncfg hosts member HOST zone1
 #   ncfg secret seal zone1 KEY
 #
 # This holds for every credential netcfgd knows: wifi passphrases, 802.1X
