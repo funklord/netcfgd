@@ -12716,8 +12716,11 @@ joined person would see this machine alone.
 **The test is a connect and nothing more.** Asking `get prekey` was the first version:
 it would take the one connection a test's fake serves, and it runs before every use.
 
-The node is left up, as an agent is: the next look needs it, and starting it costs a
-second. Nothing asks for it on a machine used only locally, which `node_user.sh`
+The node is left up, as an agent is. The reason first given here, that starting it
+costs a second, was never measured and is wrong: on loopback it answers in 13 ms, and
+`status --at` takes 259 ms from cold against 10 ms warm, nearly all of that the 250 ms
+look in `ncfg_fuzznet_user_node`. A real network's round trips are not in those
+figures. Nothing asks for it on a machine used only locally, which `node_user.sh`
 checks.
 
 **No user daemon, for now.** The holder, 2026-11-06: "For now we only have netcfgd as
