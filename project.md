@@ -16098,6 +16098,15 @@ warning turns its check red.
 A red `hull-steer` with an empty plan now carries the warning if this was the
 cause, and the hostapd line beside it says which bound held the steer if not.
 
+**Found 2026-11-06, and it was the silent bound after all.** `make -k hull` failed
+`hull-steer` again, and in five more runs three failed, on either machine. Printing
+hostapd's line on the weak machine too read `inactive_msec=30916` at a failed plan and 264
+and 312 at passing ones: an idle station says nothing for long stretches, and the three
+reruns of 2026-10-31 happened to fall short of 30 s. The rule was right and the rigs had an
+idle station, so they now take the plan once hostapd has heard it, waiting up to 45 s; the
+image has no ping, which a first fix used and which logged 127 on every call while the
+runs it was credited with passed for the wait. The walk's warning stays.
+
 ## 10.646 SLAAC turned on for an interface already up
 
 hull 5be9f34 lets a segment advertise unasked, `(advertise_every D)`, which

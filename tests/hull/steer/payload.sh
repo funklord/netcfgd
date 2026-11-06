@@ -139,6 +139,16 @@ say "a plan before the station settled: $early steer(s)"
 sleep 62
 stayed=$(status | grep -E '^bssid=')
 say "a minute later, unasked, the station is on: $stayed"
+# **A station with nothing to send is silent, and a steer skips one silent past 30 s,**
+# which is the rule working. Idle here it was past that at the plan in about half the
+# runs, as it goes unheard for up to 32 s at a time. This image has no ping to make it
+# talk, so the plan waits for hostapd to hear it, up to 45 s.
+n=0
+until [ "$(hostapd_cli -p "$work/run/hostapd" -i wlan0 all_sta 2>/dev/null |
+	sed -n 's/^inactive_msec=//p' | head -1)" -lt 10000 ] 2>/dev/null || [ "$n" -gt 90 ]; do
+	sleep 0.5
+	n=$((n + 1))
+done
 "$build/ncfg" plan > "$work/plan.log" 2>&1
 planned=$(grep -cE '^ +[0-9]+ +station\.steer ' "$work/plan.log")
 say "the plan after a minute: $(grep -E '^ +[0-9]+ +station\.steer ' "$work/plan.log" | head -1)"
