@@ -531,14 +531,15 @@ void ncfg_main_window::node_chosen(int index)
 	const QString was_node = connection->node();
 	const QString was_socket = was_node.isEmpty() ? connection->where() : QString();
 	QString       error;
+	QString       failed;
 	bool          opened = key.isEmpty() ? connection->open(home_socket, &error)
 	                                     : connection->open_at(key, &error);
 
 	/* **Back to where it was, on a failure**, rather than a window left
 	 * unconnected that still looks as if it moved. */
 	if (!opened) {
-		note(QStringLiteral("could not reach %1: %2")
-		         .arg(key.isEmpty() ? QStringLiteral("this machine") : key, error));
+		failed = QStringLiteral("could not reach %1: %2")
+		             .arg(key.isEmpty() ? QStringLiteral("this machine") : key, error);
 		if (was_node.isEmpty()) {
 			(void)connection->open(was_socket, nullptr);
 		} else {
@@ -549,6 +550,11 @@ void ncfg_main_window::node_chosen(int index)
 	}
 	follow_node();
 	refresh();
+	/* After, as the pane in front says its own count when it refreshes; and not
+	 * by `note`, which hears only that pane. */
+	if (!failed.isEmpty()) {
+		status->setText(failed);
+	}
 }
 
 void ncfg_main_window::refresh()

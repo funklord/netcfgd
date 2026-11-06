@@ -18,6 +18,7 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QLabel>
 #include <QListWidget>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -136,6 +137,12 @@ int main(int argc, char **argv)
 	      "a choice that cannot be reached puts the window back on the node",
 	      QStringLiteral("node \"%1\", box \"%2\"")
 	          .arg(connection.node(), nodes ? nodes->currentData().toString() : QString()));
+
+	bool said = false;
+	for (QLabel *label : window.findChildren<QLabel *>()) {
+		said = said || label->text().startsWith(QStringLiteral("could not reach"));
+	}
+	check(said, "  and says it could not reach it");
 
 	if (failures == 0) {
 		fprintf(stderr, "node_menu: all checks passed\n");
