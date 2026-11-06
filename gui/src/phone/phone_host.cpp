@@ -6,8 +6,10 @@ extern "C" {
 
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
 #include <QProcess>
 #include <QThread>
+#include <QTimer>
 
 #include <sys/stat.h>
 
@@ -27,6 +29,30 @@ static bool node_answers(const char *socket)
 
 	return ncfg_fuzznet_ask(socket, "status", reply, sizeof(reply), 1000, &silent, why,
 	                        sizeof(why)) != 0;
+}
+
+/*
+ * Started again whenever it has gone and the app is in front. Android kills a child
+ * of a backgrounded app and leaves the app, so the window would come back to a host
+ * that is not there. In front only: behind, a restart would be killed again, for
+ * ever, and what it holds is on disk.
+ */
+static void keep_up(QProcess *node)
+{
+	const auto start_in_front = [node]() {
+		if (node->state() == QProcess::NotRunning &&
+		    QGuiApplication::applicationState() == Qt::ApplicationActive) {
+			node->start();
+		}
+	};
+
+	QObject::connect(node, &QProcess::finished, node, [node, start_in_front]() {
+		if (!QCoreApplication::closingDown()) {
+			QTimer::singleShot(1000, node, start_in_front);
+		}
+	});
+	QObject::connect(qApp, &QGuiApplication::applicationStateChanged, node,
+	                 [start_in_front](Qt::ApplicationState) { start_in_front(); });
 }
 
 bool ncfg_phone_host_start(const QString &program, const QString &base, QObject *owner,
@@ -74,6 +100,7 @@ bool ncfg_phone_host_start(const QString &program, const QString &base, QObject 
 		}
 		return false;
 	}
+	keep_up(node);
 	for (int look = 0; look < start_looks; look++) {
 		if (node_answers(socket)) {
 			return true;
@@ -92,6 +119,7 @@ bool ncfg_phone_host_start(const QString &program, const QString &base, QObject 
 bool ncfg_phone_host_forget(const QString &base, QObject *owner, QString *why)
 {
 	for (QProcess *node : owner->findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) {
+		QObject::disconnect(node, nullptr, nullptr, nullptr); /* not to start again */
 		node->kill();
 		node->waitForFinished(3000);
 		delete node;

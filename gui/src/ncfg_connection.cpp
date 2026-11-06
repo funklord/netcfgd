@@ -253,7 +253,7 @@ QString ncfg_connection::where() const
 {
 	/* The whole key, never an abbreviation another node could share: this is
 	 * the line that says whose network the window changes. */
-	return node_key.isEmpty() ? path : QStringLiteral("node %1").arg(node_key);
+	return node_key.isEmpty() ? path : QStringLiteral("host %1").arg(node_key);
 }
 
 /*

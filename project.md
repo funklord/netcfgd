@@ -12727,6 +12727,17 @@ takes that for a person who has not joined, and their own daemon's list for one 
 The fleet tab stays the second role's: its columns are each host's status, which only a
 key can ask.
 
+**A phone's daemon is started again whenever it has gone and the app is in front**
+(`keep_up`), as Android kills a child of a backgrounded app and leaves the app. Behind,
+it is left dead: a restart would be killed again, and what it holds is on disk. Seen on
+the emulator: killed in front it was back within 4 s, killed behind it stayed gone, and
+it came back when the app did.
+
+**A renamed library survives in Gradle's intermediates and hangs the app blank.** With
+`libncfgnode.so` left beside `libncfghost.so` the app drew nothing, with no error, and
+Qt's main had returned; the store was never made. Five named copies under
+`gui/build-android-*` had to go. Only a rename does this, and a clean tree never sees it.
+
 **`ncfg join` and the first screen wait 15.5 minutes,** as a device now asks for 15.
 
 **`ncfg pair confirm` holds whoever scans until the person at the terminal says yes,**

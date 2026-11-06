@@ -57,13 +57,13 @@ int main(int argc, char **argv)
 	check(!connection.open_at(QStringLiteral("not-a-key"), &error),
 	      "a key that is not one is refused when opened");
 	check(connection.open_at(key, &error), "a connection opens on another node", error);
-	check(connection.node() == key && connection.where() == QStringLiteral("node %1").arg(key),
+	check(connection.node() == key && connection.where() == QStringLiteral("host %1").arg(key),
 	      "  it names that node, by its whole key, as where it is");
 	check(!connection.links(&links, &error) && !connection.is_open(),
 	      "  a request no fuzznetd carries leaves it broken", error);
 	QString why;
 	check(connection.reopen_if_broken(&why), "  and it reopens", why);
-	check(connection.node() == key && connection.where() == QStringLiteral("node %1").arg(key),
+	check(connection.node() == key && connection.where() == QStringLiteral("host %1").arg(key),
 	      "  onto that node again, never this machine's default socket");
 	{
 		/* The events tab on a node: no stream of this machine's, and its one
