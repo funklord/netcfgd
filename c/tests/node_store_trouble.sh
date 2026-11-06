@@ -21,7 +21,7 @@ C=$here/ncfg
 R=$(mktemp -d /tmp/nst.XXXXXX) || exit 1
 case "$R" in /tmp/nst.?*) ;; *) echo "node_store_trouble: odd scratch $R"; exit 1;; esac
 pids=
-trap 'kill -KILL $pids 2>/dev/null; umount "$R/store" 2>/dev/null; rm -rf "$R"' EXIT
+trap 'kill -TERM $pids 2>/dev/null; wait 2>/dev/null; umount -l "$R/store" 2>/dev/null; rm -rf "$R"' EXIT
 failed=0
 check() { # $1 0 for ok, $2 what
 	if [ "$1" -eq 0 ]; then printf '%-72s ok\n' "$2"; else printf '%-72s FAILED\n' "$2"; failed=1; fi

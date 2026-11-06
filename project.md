@@ -12735,7 +12735,9 @@ from the tick, anything but disk and calm is an error in the log, said again hou
 in `ncfg status` from `<run>/node-problem`, and `net-store-bad` then `net-store-ok` published
 for another host, which `monitor --at`, the TUI and the GUI print as any `net-` subject.
 Pressure comes down a step per 30 s, so the line outlasts the trouble by a minute or so.
-`node_store_trouble.sh` holds it. A store going read-only under a running daemon is not
+`node_store_trouble.sh` holds it, and `node_ram_host.sh` runs every call netcfgd needs on a
+read-only store with `netcfgd.sock` removed: `status`, `ask`, `askpart`, `hosts`, `eventlog`,
+`get events`, `list peer` and the remote hop, an apply with its window among them. A store going read-only under a running daemon is not
 staged, as the remount is refused while files are open for writing, and a store that cannot
 be read is still refused: whether a host then runs with no identity is the holder's.
 
