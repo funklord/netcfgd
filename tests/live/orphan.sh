@@ -242,7 +242,7 @@ start_daemon() {
 	"$build/netcfgd" $daemon_flags > "$work/$1.log" 2>&1 &
 	daemon=$!
 	waited=0
-	while [ ! -e "$work/run/netcfgd.sock" ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ]; do
 		waited=$((waited + 1))
 		if [ "$waited" -gt 60 ]; then
 			cat "$work/$1.log" >&2
@@ -268,7 +268,7 @@ check "netcfgd starts a supplicant on the radio it owns" \
 kill "$daemon" 2>/dev/null
 wait "$daemon" 2>/dev/null || true
 daemon=
-rm -f "$work/run/netcfgd.sock"
+rm -f "$work/run/fuzznet.sock"
 check "stopping netcfgd leaves its supplicant running" \
 	"$([ -e "/proc/$first" ] && echo alive || echo gone)" "alive"
 check "and it still holds the control socket" \
@@ -321,7 +321,7 @@ contains "and the radio is netcfgd's" "$("$ncfg" wifi radios 2>&1)" "netcfgd's"
 kill "$daemon" 2>/dev/null || true
 wait "$daemon" 2>/dev/null || true
 daemon=
-rm -f "$work/run/netcfgd.sock"
+rm -f "$work/run/fuzznet.sock"
 # The supplicant stays, and stops answering: its socket is replaced by one that
 # binds and never replies, which is what a wedged wpa_supplicant looks like
 # from outside and what NetworkManager's D-Bus-driven one looks like always.
@@ -347,7 +347,8 @@ rm -f "$work/run/supplicant/radio0.pid" "$work/run/owned.json"
 start_daemon d3
 sleep 2
 check "a supplicant that answers nothing is not adopted" \
-	"$([ -s "$work/run/supplicant/radio0.pid" ] && echo adopted || echo declined)" "declined"
+	"$([ "$(cat "$work/run/supplicant/radio0.pid" 2>/dev/null)" = "$adopted" ] && echo adopted ||
+		echo declined)" "declined"
 check "and netcfgd says the radio is not usable rather than claiming it" \
 	"$(grep -ci 'adopted' "$work/d3.log" 2>/dev/null | head -1)" "0"
 kill -CONT "$adopted" 2>/dev/null || true

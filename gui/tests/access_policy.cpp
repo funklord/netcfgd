@@ -109,13 +109,14 @@ int main(int argc, char **argv)
 	daemon.start(QStringLiteral(NETCFGD_BINARY), { QStringLiteral("--no-apply-on-start") });
 
 	const QString socket = run + QStringLiteral("/netcfgd.sock");
+	const QString listening = run + QStringLiteral("/fuzznet.sock");
 	QElapsedTimer waited;
 	waited.start();
-	while (!QFile::exists(socket) && waited.elapsed() < 10000) {
+	while (!QFile::exists(listening) && waited.elapsed() < 10000) {
 		app.processEvents();
 		QThread::msleep(50);
 	}
-	if (!QFile::exists(socket)) {
+	if (!QFile::exists(listening)) {
 		fprintf(stderr, "access_policy: the daemon never bound its socket\n");
 		daemon.kill();
 		daemon.waitForFinished(2000);

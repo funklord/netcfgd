@@ -272,7 +272,7 @@ write_config false
 "$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e /run/netcfgd/netcfgd.sock ]; do
+while [ ! -e /run/netcfgd/fuzznet.sock ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 60 ]; then
 		cat "$work/daemon.log" >&2

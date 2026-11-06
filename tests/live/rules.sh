@@ -116,7 +116,7 @@ CONF
 "$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e "$work/run/fuzznet.sock" ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 60 ]; then
 		if grep -q 'Operation not permitted' "$work/daemon.log" 2>/dev/null; then

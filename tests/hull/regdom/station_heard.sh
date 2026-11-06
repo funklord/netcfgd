@@ -69,11 +69,11 @@ export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
 "$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 100 ]; do
+while [ ! -e "$work/run/fuzznet.sock" ] && [ "$waited" -lt 100 ]; do
 	waited=$((waited + 1))
 	sleep 0.1
 done
-if [ ! -e "$work/run/netcfgd.sock" ]; then
+if [ ! -e "$work/run/fuzznet.sock" ]; then
 	say "VERDICT bad: the daemon never started"
 	sed 's/^/  daemon: /' "$work/daemon.log" >> "$out"
 	kill "$relay" 2>/dev/null

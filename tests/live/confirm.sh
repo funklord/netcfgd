@@ -117,7 +117,7 @@ start_daemon() {
 	"$build/netcfgd" $daemon_flags $1 > "$work/daemon.log" 2>&1 &
 	daemon=$!
 	waited=0
-	while [ ! -e "$work/run/netcfgd.sock" ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ]; do
 		waited=$((waited + 1))
 		if [ "$waited" -gt 60 ]; then
 			if grep -q 'Operation not permitted' "$work/daemon.log" 2>/dev/null; then
@@ -150,7 +150,7 @@ crash_daemon() {
 	[ -n "$daemon" ] && kill -9 "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	daemon=
-	rm -f "$work/run/netcfgd.sock"
+	rm -f "$work/run/fuzznet.sock"
 }
 
 restart_daemon() {
@@ -158,7 +158,7 @@ restart_daemon() {
 	"$build/netcfgd" $daemon_flags $1 > "$work/restart.log" 2>&1 &
 	daemon=$!
 	waited=0
-	while [ ! -e "$work/run/netcfgd.sock" ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ]; do
 		waited=$((waited + 1))
 		if [ "$waited" -gt 60 ]; then
 			cat "$work/restart.log" >&2

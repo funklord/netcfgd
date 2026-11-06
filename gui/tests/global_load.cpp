@@ -73,12 +73,13 @@ static QString start(QProcess *daemon, const QString &work, const QString &body,
 	daemon->start(QStringLiteral(NETCFGD_BINARY), { QStringLiteral("--no-apply-on-start") });
 
 	const QString socket = run + QStringLiteral("/netcfgd.sock");
+	const QString listening = run + QStringLiteral("/fuzznet.sock");
 	QElapsedTimer waited;
 	waited.start();
-	while (!QFile::exists(socket) && waited.elapsed() < 10000) {
+	while (!QFile::exists(listening) && waited.elapsed() < 10000) {
 		QThread::msleep(50);
 	}
-	return QFile::exists(socket) ? socket : QString();
+	return QFile::exists(listening) ? socket : QString();
 }
 
 static void stop(QProcess *daemon)

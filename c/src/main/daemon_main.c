@@ -64,6 +64,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 /*
@@ -846,6 +847,30 @@ static void report_writability(const char *config)
  * the outcome, once, because a node that made itself a new identity is the
  * thing an operator most needs to find afterwards.
  */
+/*
+ * Two daemons on one run directory would fight over one machine. Binding the socket
+ * used to refuse the second, and a daemon with a node binds none, so this does: a lock
+ * the kernel lets go of however the holder ends, kept for the life of the process.
+ */
+int ncfg_main_only_one_here(const char *run_dir, char *err, size_t err_size)
+{
+	char path[NCFG_MAIN_PATH_MAX + 16u];
+	int  fd;
+
+	(void)snprintf(path, sizeof(path), "%s/netcfgd.lock", run_dir);
+	fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		ncfg_error_set(err, err_size, "cannot open %s: %s", path, strerror(errno));
+		return 0;
+	}
+	if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+		ncfg_error_set(err, err_size, "another netcfgd is running on %s", run_dir);
+		(void)close(fd);
+		return 0;
+	}
+	return 1;
+}
+
 static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t *where)
 {
 	const char  *named = options->fuzznet_dir ? options->fuzznet_dir
@@ -1708,10 +1733,22 @@ static int start(const options_t *options)
 	reach[0] = &policy.control.observe;
 	reach[1] = &policy.control.wifi;
 	reach[2] = &policy.control.admin;
-	local = bind_one(where.socket, NCFG_ARRIVED_LOCAL, reach, 3u, &policy, &mailbox);
-	if (!local) {
-		code = NCFG_MAIN_EXIT_FAILED;
+	/*
+	 * **One protocol (0309).** A daemon with a node is reached through fuzznet and
+	 * binds nothing of its own, which leaves `netcfgd.sock` to a daemon with none:
+	 * one told so, or one whose node would not open.
+	 */
+	if (!ncfg_main_only_one_here(where.run, err, sizeof(err))) {
+		code = cannot("this daemon cannot start", err);
 		goto shut;
+	}
+	node = open_node(options, &where);
+	if (!node) {
+		local = bind_one(where.socket, NCFG_ARRIVED_LOCAL, reach, 3u, &policy, &mailbox);
+		if (!local) {
+			code = NCFG_MAIN_EXIT_FAILED;
+			goto shut;
+		}
 	}
 	if (ncfg_main_remote_is_open(&policy.remote)) {
 		agent[0] = &policy.remote.agent;
@@ -1747,7 +1784,7 @@ static int start(const options_t *options)
 	    watchers.has_watch
 	        ? ncfg_watch_mechanism_name((int)ncfg_watch_mechanism(&watchers.watch))
 	        : "nothing",
-	    ncfg_daemon_server_path(local));
+	    local ? ncfg_daemon_server_path(local) : "fuzznet's");
 
 	/*
 	 * **What was already here, before anything is adopted or applied.**
@@ -1812,7 +1849,6 @@ static int start(const options_t *options)
 		    "a confirm window cannot be armed until the first apply", err);
 	}
 	err[0] = '\0';
-	node = open_node(options, &where);
 	/* The node's store names its face, which is where a record goes; a
 	 * socket the environment names is a test's or an unusual layout's, and
 	 * is left as it was. */

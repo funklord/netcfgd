@@ -124,7 +124,7 @@ export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" NCFG_RESOLV_CONF="$w
 "$build/netcfgd" $daemon_flags > "$work/d.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e "$work/run/fuzznet.sock" ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 60 ]; then
 		cat "$work/d.log" >&2; echo "the daemon never started" >&2; exit 1

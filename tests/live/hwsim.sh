@@ -456,7 +456,7 @@ innc "$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&
 # in the initial namespace where `ip netns pids` never looks.
 daemon_job=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e "$work/run/fuzznet.sock" ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 100 ]; then
 		cat "$work/daemon.log" >&2

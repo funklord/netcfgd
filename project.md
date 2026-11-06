@@ -12750,6 +12750,19 @@ udhcpc's start already made its own. `delegation.sh` also grepped wording the pl
 since changed. It passes in the guest now, a real kea to a real odhcp6c, and `dhcp_test`
 holds the directory, as `vm-delegation` is not in `make check`.
 
+**A daemon with a node binds no `netcfgd.sock` (0309).** The socket is only a no-node
+daemon's now: one told `--fuzznet-dir ""`, or one whose node would not open. Binding it was
+also what refused a second daemon on one run directory, so `<run>/netcfgd.lock` does.
+`ncfg_cli_daemon_listening` took the socket for the daemon, so `ncfg` wrote the disk itself
+beside a running one until it looked at fuzznet's too. The live scripts wait on `fuzznet.sock`;
+`c_daemon_answers`, `control_exposure`, `log_shape` and `remote_tiers` are about the socket
+and run with no node. Its code goes when nothing can reach that state: a node that will not
+open at the start, and those four, and the Rust they compare against.
+
+**The `rss` gate measured a daemon with no node too.** Its limit, 3644 KB, is for that, and
+it stays on it with `--fuzznet-dir ""`. With a node the same daemon peaked at 6584 KB, 3064 of
+it netcfgd's own. No gate holds that figure; setting a budget for it is the holder's.
+
 **`make live` tested a daemon nobody runs.** 41 of 42 live scripts started a daemon on a run
 directory of their own, and such a daemon had no node, so they ran the own loop and
 `netcfgd.sock` while every real machine runs fuzznet's. A daemon on any run directory has a

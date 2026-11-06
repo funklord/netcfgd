@@ -2,8 +2,8 @@
 # node_ram_host.sh -- what netcfgd needs of fuzznet, on a host whose store will not
 # write (0316, fuzznet secs 916 and 917). A has joined an estate; it is stopped, its
 # store made read-only, and started again, so its rows are read and every write is
-# held in RAM. `netcfgd.sock` is removed first, so nothing here can be answered by
-# anything but fuzznet: that socket goes once this passes. Run by `make test`.
+# held in RAM. A daemon with a node binds no `netcfgd.sock`, so nothing here can be
+# answered by anything but fuzznet. Run by `make test`.
 #
 # HOW IT STOPS: all of it runs in a user, mount and network namespace under `timeout
 # -k 2 200`. The daemons are under timeouts of their own and killed by pid, client
@@ -91,9 +91,8 @@ rm -f "$R/a.sock"
 start_a a2.log
 [ -S "$R/a.sock" ]
 check $? "A starts again on its store gone read-only"
-rm -f "$R/run/netcfgd.sock"
 [ ! -e "$R/run/netcfgd.sock" ]
-check $? "and with netcfgd.sock gone, only fuzznet can answer below"
+check $? "and binds no netcfgd.sock, so only fuzznet can answer below"
 
 said=$(ask "$R/a.sock" 'add record t/ram one')
 [ "${said%% *}" = ok ]

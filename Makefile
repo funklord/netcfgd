@@ -2350,12 +2350,17 @@ RSS_LIMIT_KB ?= 3644
 # Found by watching three days of real evidence disappear from
 # `/run/wpa_supplicant` during a `make check` that was only supposed to be
 # measuring how much memory the daemon uses.
+#
+# **`--fuzznet-dir ""`: this is the daemon alone, and no machine runs that.** It always
+# measured a daemon with no node, which went unsaid until a daemon on any run directory
+# had one and this read 6584 KB (3064 of it netcfgd's) on 2026-11-06. The limit below is
+# for the figure it was set against; what a node costs is the holder's budget to set.
 rss:
 	@$(MAKE) --no-print-directory -C c
 	@work=$$(mktemp -d); \
 	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run" "$$work/wpa"; \
 	NCFG_WPA_CTRL_DIR="$$work/wpa" \
-	./c/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
+	./c/netcfgd --fuzznet-dir "" --config-dir "$$work/etc" --run-dir "$$work/run" \
 		--no-apply-on-start >/dev/null 2>&1 & \
 	pid=$$!; \
 	sleep 2; \

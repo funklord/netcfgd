@@ -30,6 +30,7 @@
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
 #include "ncfg/state.h"
+#include "ncfg_fuzznet.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -98,7 +99,22 @@ int ncfg_cli_daemon_listening(const char *socket_path)
 	if (ncfg_cli_asking_elsewhere()) {
 		return 1;
 	}
-	return socket_path != NULL && stat(socket_path, &about) == 0;
+	if (socket_path == NULL) {
+		return 0;
+	}
+	if (stat(socket_path, &about) == 0) {
+		return 1;
+	}
+	/* A daemon with a node binds no control socket, so its fuzznet socket is what
+	 * says it is there (0309). */
+	{
+		char run_dir[NCFG_CLI_PATH_MAX];
+		char fuzznet[NCFG_CLI_PATH_MAX];
+
+		return ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir)) &&
+		       ncfg_fuzznet_daemon_socket(run_dir, fuzznet, sizeof(fuzznet)) &&
+		       stat(fuzznet, &about) == 0;
+	}
 }
 
 int ncfg_cli_ask_ok(const char *socket_path, const ncfg_proto_request_t *request, char *err,

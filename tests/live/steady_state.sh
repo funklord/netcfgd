@@ -88,11 +88,11 @@ printf 'global { control { observe = "any" } }\n' > "$work/etc/netcfgd.conf"
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -S "$work/run/netcfgd.sock" ] && [ "$waited" -lt 60 ]; do
+while [ ! -S "$work/run/fuzznet.sock" ] && [ "$waited" -lt 60 ]; do
 	waited=$((waited + 1))
 	sleep 0.1
 done
-[ -S "$work/run/netcfgd.sock" ] || skip "the daemon never bound its socket"
+[ -S "$work/run/fuzznet.sock" ] || skip "the daemon never bound its socket"
 
 rss() { awk '/VmRSS/ { print $2 }' "/proc/$daemon/status"; }
 fds() { ls "/proc/$daemon/fd" | wc -l; }

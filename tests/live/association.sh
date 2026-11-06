@@ -68,7 +68,7 @@ ncfg="$repo/target/debug/ncfg"
 [ -x "$ncfg" ] || ncfg=$(command -v ncfg 2>/dev/null || true)
 { [ -n "$ncfg" ] && [ -x "$ncfg" ]; } ||
 	skip "no ncfg to take an independent reading with"
-[ -S /run/netcfgd/netcfgd.sock ] || skip "no netcfgd is running to compare against"
+[ -S /run/netcfgd/fuzznet.sock ] || skip "no netcfgd is running to compare against"
 
 # A radio that is not associated cannot answer the question this asks. Skipping
 # is the honest outcome: "no association found" would otherwise read as a pass

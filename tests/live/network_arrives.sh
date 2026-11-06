@@ -238,7 +238,7 @@ chmod 0600 "$work/etc/secrets/HomeFiber"
 # to measure.
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
-awaits '[ -e "$work/run/netcfgd.sock" ]' ||
+awaits '[ -e "$work/run/fuzznet.sock" ]' ||
 	{ cat "$work/daemon.log" >&2; skip "the daemon never bound its socket"; }
 awaits '[ -S "$work/ctrl/wlan0" ]' || {
 	echo "--- daemon:"; tail -15 "$work/daemon.log"

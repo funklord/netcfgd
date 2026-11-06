@@ -67,14 +67,15 @@ static QString start(QProcess *daemon, const QString &work)
 	daemon->start(QStringLiteral(NETCFGD_BINARY), { QStringLiteral("--no-apply-on-start") });
 
 	const QString socket = run + QStringLiteral("/netcfgd.sock");
+	const QString listening = run + QStringLiteral("/fuzznet.sock");
 	QElapsedTimer waited;
 	waited.start();
 	/* Bounded, and the bound is what makes this safe to run unattended: a
 	 * daemon that never binds ends the test rather than the day. */
-	while (!QFile::exists(socket) && waited.elapsed() < 10000) {
+	while (!QFile::exists(listening) && waited.elapsed() < 10000) {
 		QThread::msleep(50);
 	}
-	return QFile::exists(socket) ? socket : QString();
+	return QFile::exists(listening) ? socket : QString();
 }
 
 static void stop(QProcess *daemon)
@@ -118,6 +119,7 @@ int main(int argc, char **argv)
 	/* The upgrade, in one line. */
 	stop(&first);
 	QFile::remove(socket);
+	QFile::remove(work.path() + QStringLiteral("/run/fuzznet.sock"));
 
 	check(!connection.links(&links, &error), "with the daemon gone, the question fails");
 	/* **The half that was wrong.** A pointer test says this connection is fine

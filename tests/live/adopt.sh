@@ -90,7 +90,7 @@ start_daemon() {
 	"$build/netcfgd" $daemon_flags > "$work/$1.log" 2>&1 &
 	daemon=$!
 	waited=0
-	while [ ! -e "$work/run/netcfgd.sock" ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ]; do
 		waited=$((waited + 1))
 		if [ "$waited" -gt 60 ]; then
 			cat "$work/$1.log" >&2
@@ -125,7 +125,7 @@ stop_daemon() {
 	kill "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	daemon=
-	rm -f "$work/run/netcfgd.sock"
+	rm -f "$work/run/fuzznet.sock"
 }
 
 ip link add net0 type dummy 2>/dev/null || skip "cannot create a dummy link"

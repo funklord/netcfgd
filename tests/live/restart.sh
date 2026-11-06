@@ -104,11 +104,11 @@ start_daemon() {
 	"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 	daemon=$!
 	waited=0
-	while [ ! -S "$work/run/netcfgd.sock" ] && [ "$waited" -lt 60 ]; do
+	while [ ! -S "$work/run/fuzznet.sock" ] && [ "$waited" -lt 60 ]; do
 		waited=$((waited + 1))
 		sleep 0.1
 	done
-	[ -S "$work/run/netcfgd.sock" ] || skip "the daemon never bound its socket"
+	[ -S "$work/run/fuzznet.sock" ] || skip "the daemon never bound its socket"
 	sleep 2
 }
 
@@ -144,8 +144,8 @@ check "and so is the route" "$(routed)" "1"
 
 # Everything the last run left is still in the run directory -- the socket, the
 # two lock files, the recorded state. A restart has to walk over all of it.
-check "the socket file is left behind, as it is on a real stop" \
-	"$([ -e "$work/run/netcfgd.sock" ] && echo present || echo absent)" "present"
+check "the daemon's lock is left behind, as it is on a real stop" \
+	"$([ -e "$work/run/netcfgd.lock" ] && echo present || echo absent)" "present"
 
 start_daemon
 check "it starts again over its own leftovers" \

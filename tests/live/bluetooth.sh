@@ -179,7 +179,7 @@ NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" \
 daemon=$!
 
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e "$work/run/fuzznet.sock" ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 100 ]; then
 		echo "bluetooth.sh: the daemon never bound its socket:" >&2

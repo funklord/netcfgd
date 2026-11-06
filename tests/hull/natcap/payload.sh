@@ -147,15 +147,15 @@ load() {
 
 apply_now() {   # -> rc, with the output in $work/apply.log
 	cp "$1" "$work/etc/netcfgd.conf"
-	rm -f "$work/run/netcfgd.sock"
+	rm -f "$work/run/fuzznet.sock"
 	"$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 	pid=$!
 	waited=0
-	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 60 ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ] && [ "$waited" -lt 60 ]; do
 		waited=$((waited + 1))
 		sleep 0.1
 	done
-	if [ ! -e "$work/run/netcfgd.sock" ]; then
+	if [ ! -e "$work/run/fuzznet.sock" ]; then
 		echo "    the daemon never started:"
 		sed 's/^/      /' "$work/daemon.log"
 		kill "$pid" 2>/dev/null

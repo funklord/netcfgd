@@ -238,7 +238,7 @@ writes() {
 }
 
 if writes rust "$repo/target/debug/netcfgd" &&
-	writes c "$repo/c/netcfgd"
+	writes c "$repo/c/netcfgd" --fuzznet-dir ""
 then
 	check "the writing verbs answer alike" \
 		"$(cat "$work/c.said")" "$(cat "$work/rust.said")"

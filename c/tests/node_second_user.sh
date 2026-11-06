@@ -32,7 +32,6 @@ n=0
 until [ -S "$R/run/fuzznet.sock" ] || [ $n -gt 20 ]; do sleep 0.5; n=$((n + 1)); done
 sleep 2
 chmod 755 "$R/run"
-mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
 as() { # $1 uid, then the command
 	u=$1
 	shift
@@ -60,10 +59,9 @@ timeout -k 2 16 "$R/netcfgd" --run-dir "$R/run" --config-dir "$R/conf" --no-appl
 	--fuzznet-dir "$R/a" --fuzznet-arg --no-log-file > "$R/log2" 2>&1 &
 pid=$!
 n=0
-until [ -S "$R/run/netcfgd.sock" ] || [ $n -gt 20 ]; do sleep 0.5; n=$((n + 1)); done
+until [ -S "$R/run/fuzznet.sock" ] || [ $n -gt 20 ]; do sleep 0.5; n=$((n + 1)); done
 sleep 2
 chmod 755 "$R/run"
-mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
 as 2 timeout 8 "$R/ncfg" monitor --json --run-dir "$R/run" > "$R/any" 2>&1 &
 sleep 1
 "$R/ncfg" reload --run-dir "$R/run" > /dev/null 2>&1

@@ -127,11 +127,11 @@ done
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 50 ]; do
+while [ ! -e "$work/run/fuzznet.sock" ] && [ "$waited" -lt 50 ]; do
 	waited=$((waited + 1))
 	sleep 0.1
 done
-[ -e "$work/run/netcfgd.sock" ] || { cat "$work/daemon.log" >&2; exit 1; }
+[ -e "$work/run/fuzznet.sock" ] || { cat "$work/daemon.log" >&2; exit 1; }
 
 # The watcher has to have found the socket and attached before an event can
 # reach it. It scans the directory each pass, so this is a bounded wait on a

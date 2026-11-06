@@ -341,6 +341,7 @@ typedef struct {
 	uint64_t said;
 } ncfg_main_store_watch_t;
 
+int  ncfg_main_only_one_here(const char *run_dir, char *err, size_t err_size);
 void ncfg_main_node_problem(const char *run_dir, const char *why);
 /* Whether `get node`'s answer says trouble, and if so what. */
 int  ncfg_main_store_trouble(const char *node, char *why, size_t why_size);

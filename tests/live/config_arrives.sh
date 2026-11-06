@@ -146,11 +146,11 @@ start_daemon() {
 	"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 	daemon=$!
 	i=0
-	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$i" -lt 100 ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ] && [ "$i" -lt 100 ]; do
 		i=$((i + 1))
 		sleep 0.1
 	done
-	if [ ! -e "$work/run/netcfgd.sock" ]; then
+	if [ ! -e "$work/run/fuzznet.sock" ]; then
 		echo "$name: the daemon never bound its socket" >&2
 		cat "$work/daemon.log" >&2
 		exit 1

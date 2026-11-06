@@ -136,7 +136,7 @@ unshare -Urn sh -c '
 		--fuzznet-dir "$d/a" --fuzznet-arg --no-log-file > "$d/log2" 2>&1 &
 	pid=$!
 	n=0
-	until [ -S "$d/run/netcfgd.sock" ] || [ $n -gt 12 ]; do sleep 0.5; n=$((n + 1)); done
+	until [ -S "$d/run/fuzznet.sock" ] || [ $n -gt 12 ]; do sleep 0.5; n=$((n + 1)); done
 	"${1%netcfgd}ncfg" pair open --run-dir "$d/run" --config-dir "$d/conf" > "$d/opened" 2>&1
 	echo $? > "$d/opened.status"
 	kill -TERM $pid 2>/dev/null

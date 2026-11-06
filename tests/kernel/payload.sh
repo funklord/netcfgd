@@ -60,11 +60,11 @@ CONF
 	"$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 	pid=$!
 	waited=0
-	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 100 ]; do
+	while [ ! -e "$work/run/fuzznet.sock" ] && [ "$waited" -lt 100 ]; do
 		waited=$((waited + 1))
 		sleep 0.1
 	done
-	if [ ! -e "$work/run/netcfgd.sock" ]; then
+	if [ ! -e "$work/run/fuzznet.sock" ]; then
 		echo "the daemon never started:"
 		sed 's/^/     /' "$work/daemon.log"
 		echo "VERDICT bad: no daemon"
@@ -136,11 +136,11 @@ CONF
 "$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 pid=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 100 ]; do
+while [ ! -e "$work/run/fuzznet.sock" ] && [ "$waited" -lt 100 ]; do
 	waited=$((waited + 1))
 	sleep 0.1
 done
-if [ ! -e "$work/run/netcfgd.sock" ]; then
+if [ ! -e "$work/run/fuzznet.sock" ]; then
 	echo "the daemon never started:"
 	sed 's/^/     /' "$work/daemon.log"
 	echo "VERDICT bad: no daemon"

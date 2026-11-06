@@ -77,7 +77,7 @@ timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-sta
 	--fuzznet-arg --fuzznet-product=1 > "$R/log" 2>&1 &
 pid=$!
 n=0
-until { [ -S "$R/fz.sock" ] && [ -S "$R/run/netcfgd.sock" ]; } || [ $n -gt 50 ]; do
+until [ -S "$R/fz.sock" ] || [ $n -gt 50 ]; do
 	sleep 0.2
 	n=$((n + 1))
 done
@@ -106,10 +106,8 @@ check $? "an edit to the configuration is compiled"
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
 check $? "the station that fuzznetd recorded is read back in-process, in ncfg status"
 
-# The same over fuzznet alone (10.689): with the control socket out of the
-# way, only `call status` can bring the daemon's stations to `ncfg status`.
-# Renamed rather than removed, so the daemon's listener is untouched.
-mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
+# The same over fuzznet alone (10.689): a daemon with a node binds no control
+# socket, so only `call status` can bring its stations to `ncfg status`.
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
 check $? "  and over fuzznet's call status, with the control socket out of the way"
 # And `monitor`, on fuzznet's held stream (10.729): a reload, heard.
@@ -169,7 +167,6 @@ timeout 20 "$C" config put --run-dir "$R/run" --config-dir "$R/conf" big "$R/big
 [ "$(grep -c padding "$R/conf/conf.d/big.conf" 2>/dev/null)" = 40 ]
 check $? "  and a request longer than a line, in pieces ($(head -c 40 "$R/big.out"))"
 rm -f -- "$R/conf/conf.d/big.conf"
-mv "$R/run/hidden.sock" "$R/run/netcfgd.sock"
 
 # 0309's first verb (10.682): the observation written where the caller says,
 # judged by netcfgd's own tiers on the caller fuzznet read (sec 849).
@@ -307,7 +304,7 @@ XDG_RUNTIME_DIR="$R/xdg" timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$
 	--fuzznet-arg --fuzznet-product=1 > "$R/log2" 2>&1 &
 pid=$!
 n=0
-until [ -S "$R/run/netcfgd.sock" ] || [ $n -gt 50 ]; do
+until [ -S "$R/run/fuzznet.sock" ] || [ $n -gt 50 ]; do
 	sleep 0.2
 	n=$((n + 1))
 done

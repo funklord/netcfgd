@@ -86,7 +86,8 @@ check() {
 
 start_daemon() {
 	rm -f "$work/run/netcfgd.sock" "$work/run/remote.sock"
-	"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
+	# No node: this asks what the local socket and the remote one each allow.
+	"$build/netcfgd" $daemon_flags --fuzznet-dir "" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 	daemon=$!
 	i=0
 	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$i" -lt 50 ]; do

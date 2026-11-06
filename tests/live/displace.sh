@@ -150,7 +150,7 @@ CONF
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e "$work/run/fuzznet.sock" ]; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 60 ]; then
 		cat "$work/daemon.log" >&2
@@ -225,7 +225,7 @@ contains "and scanning works through it" "$("$ncfg" wifi scan radio0 2>&1 || tru
 kill "$daemon" 2>/dev/null || true
 wait "$daemon" 2>/dev/null || true
 daemon=
-rm -f "$work/run/netcfgd.sock" "$work/run/owned.json"
+rm -f "$work/run/fuzznet.sock" "$work/run/owned.json"
 # **Stop the supplicant before erasing the record that names it.** Section 2
 # left one running, on purpose: netcfgd does not kill its backends when it
 # stops (0134). The `rm -rf` below is what makes this section's scenario --
@@ -282,7 +282,7 @@ export NCFG_PROC="$work/root/proc"
 "$build/netcfgd" $daemon_flags > "$work/d3.log" 2>&1 &
 daemon=$!
 waited=0
-while [ ! -e "$work/run/netcfgd.sock" ]; do
+while [ ! -e "$work/run/fuzznet.sock" ]; do
 	waited=$((waited + 1))
 	[ "$waited" -gt 60 ] && break
 	sleep 0.1
@@ -311,7 +311,7 @@ rm -rf "$work/root/NetworkManager"
 kill "$daemon" 2>/dev/null || true
 wait "$daemon" 2>/dev/null || true
 daemon=
-rm -f "$work/run/netcfgd.sock" "$work/run/owned.json"
+rm -f "$work/run/fuzznet.sock" "$work/run/owned.json"
 rm -rf "$work/run/supplicant"
 
 "$build/netcfgd" $daemon_flags > "$work/d4.log" 2>&1 &

@@ -141,7 +141,7 @@ CONF
 
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
-awaits '[ -e "$work/run/netcfgd.sock" ]' || {
+awaits '[ -e "$work/run/fuzznet.sock" ]' || {
 	echo "$name: the daemon never bound its socket" >&2
 	cat "$work/daemon.log" >&2
 	exit 1

@@ -99,11 +99,11 @@ say "ncfg apply rc=$?"
 "$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 n=0
-while [ ! -e "$work/run/netcfgd.sock" ] && [ "$n" -lt 50 ]; do
+while [ ! -e "$work/run/fuzznet.sock" ] && [ "$n" -lt 50 ]; do
 	sleep 0.1
 	n=$((n + 1))
 done
-[ -e "$work/run/netcfgd.sock" ] || say "  the daemon's socket never appeared"
+[ -e "$work/run/fuzznet.sock" ] || say "  the daemon's socket never appeared"
 
 cat > "$work/sta.conf" <<CONF
 ctrl_interface=$work/sta
