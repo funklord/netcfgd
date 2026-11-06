@@ -917,18 +917,18 @@ typedef struct {
  * `ncfg_main_node_permit` said. Asked in-process on the loop's first pass,
  * because `fzn_daemon_local` answers only inside it.
  */
-static void node_permit(const char *subject, int want, const char *grant)
+static void node_setting(const char *setting, int want, const char *grant)
 {
 	char   key[64];
 	char   line[420];
 	char   said[1100];
 	size_t n;
 
-	(void)snprintf(key, sizeof(key), "host local/permit/%s", subject);
+	(void)snprintf(key, sizeof(key), "host %s", setting);
 	if (want < 0) {
 		ncfg_log_emitf("node", NCFG_LOG_INFO,
-		    "fuzznet's permit for `%s` is left alone: a tier is open to any user, or to a "
-		    "name a grant cannot carry", subject);
+		    "fuzznet's `%s` is left alone: a tier is open to any user, or to a name a grant "
+		    "cannot carry", setting);
 		return;
 	}
 	(void)snprintf(line, sizeof(line), "get setting %s", key);
@@ -952,13 +952,20 @@ static void node_permit(const char *subject, int want, const char *grant)
 	n = ncfg_node_local(line, said, sizeof(said) - 1u);
 	said[n] = '\0';
 	if (strncmp(said, "ok", 2) == 0) {
-		ncfg_log_emitf("node", NCFG_LOG_INFO, "fuzznet's permit for `%s`: %s", subject,
-		    want ? grant : "cleared, the tiers being root's");
+		ncfg_log_emitf("node", NCFG_LOG_INFO, "fuzznet's `%s`: %s", setting,
+		    want ? grant : "cleared");
 	} else {
-		ncfg_log_emitf("node", NCFG_LOG_WARNING,
-		    "fuzznet's permit for `%s` could not be set: %.200s", subject,
-		    n ? said : "no answer");
+		ncfg_log_emitf("node", NCFG_LOG_WARNING, "fuzznet's `%s` could not be set: %.200s",
+		    setting, n ? said : "no answer");
 	}
+}
+
+static void node_permit(const char *subject, int want, const char *grant)
+{
+	char setting[64];
+
+	(void)snprintf(setting, sizeof(setting), "local/permit/%s", subject);
+	node_setting(setting, want, grant);
 }
 
 /* `status` follows `observe`; `ask` and its pieces admit every tier's holder,
@@ -973,17 +980,16 @@ static void node_permits(const ncfg_main_policy_t *policy)
 	node_permit("status", want, grant);
 	node_permit("eventlog", want, grant);
 	/* And the events netcfgd publishes follow it too, held by whoever may read
-	 * the status they say to read: the same grant as a read. A word nobody
-	 * granted is no stream for anybody, the node's own user included (fuzznet's
-	 * sec 899), so root's tier is said by number; and so is `any`, for want of an
-	 * `any=r` (its sec 883), which leaves every other user on the control socket. */
-	if (want == 0 || (want == 1 && strcmp(grant, "any=x") == 0)) {
-		(void)snprintf(grant, sizeof(grant), "user:#%u=r", (unsigned)geteuid());
-		want = 1;
+	 * the status they say to read: the same grant as a read, in a setting of its
+	 * own (fuzznet's sec 899). The node's own user holds them with no grant.
+	 * `any` has no read to grant, which leaves every other user on the control
+	 * socket until fuzznet has one. */
+	if (want == 1 && strcmp(grant, "any=x") == 0) {
+		want = 0;
 	} else if (want == 1) {
 		grant[strlen(grant) - 1u] = 'r';
 	}
-	node_permit("net", want, grant);
+	node_setting("local/events", want, grant);
 	if (!policy) {
 		return;
 	}

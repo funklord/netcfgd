@@ -223,15 +223,15 @@ until grep -q "permit for .askpart." "$R/log4" 2>/dev/null || [ $n -gt 50 ]; do
 	n=$((n + 1))
 done
 said=$(ask "$R/fz.sock" "get setting host local/permit/status")
-echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
+echo "$said" | grep -q "^ok [a-z]* local:@$g=x\$"
 check $? "observe = group:NAME grants that group fuzznet's call of status ($said)"
 # `ask` admits a holder of any tier, netcfgd's gate judging each request behind
 # it (10.712), or a GUI user of a root daemon would stay on the old socket.
 said=$(ask "$R/fz.sock" "get setting host local/permit/ask")
-echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
+echo "$said" | grep -q "^ok [a-z]* local:@$g=x\$"
 check $? "  and of ask, each grant once, the admin tier being root's ($said)"
 said=$(ask "$R/fz.sock" "get setting host local/permit/askpart")
-echo "$said" | grep -q "^ok [a-z]* group:$g=x\$"
+echo "$said" | grep -q "^ok [a-z]* local:@$g=x\$"
 check $? "  and of askpart ($said)"
 kill -TERM $pid
 wait $pid

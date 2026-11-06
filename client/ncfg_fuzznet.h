@@ -159,9 +159,9 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
     size_t err_size);
 
 /*
- * This machine's daemon's events, held (0309, 10.729): `get events net` on the
+ * This machine's daemon's events, held (0309, 10.729): `get events` on the
  * fuzznet socket in `run_dir`, fuzznet's sec 899. The descriptor, blocking, past
- * its `ok events`; -1 with a sentence. Read by whoever the `net` permit lets,
+ * its `ok events`; -1 with a sentence. Read by whoever `local/events` lets,
  * which follows the `observe` tier, and `any` has no such grant.
  */
 int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size);

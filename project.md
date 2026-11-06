@@ -12689,8 +12689,7 @@ check exists for, and has stopped asserting the one thing it could not know.
 ## 10.737 fuzznet's shape and terms, and what the next pin has to carry
 
 From fuzznet's inbox message 20261106T0137Z and its sec 906, which reports the
-holder's words; the holder had said here that it was coming. The pin is still 2a3bd069.
-
+holder's words; the holder had said here that it was coming. 
 **Terms.** A machine is the computer. A host is one user account's presence on it, the
 unit of identity and authorisation, so several on a machine are normal. Daemons and
 clients are processes of a host. "Node" now means only the English word, so this
@@ -12708,17 +12707,19 @@ that fits those words is a client asking the root's netcfgd locally; a local soc
 connection may also become an alternative to a key. The holder's to decide. Nothing
 changed yet; the phone is not touched by this, as the app ships its daemon.
 
-**For the repin, at f18ca13 or later, never 3f6b44b:**
+**The repin, at ba567ec2** (f18ca13 or later, never 3f6b44b, which crashes on a tracked
+write), done: `get events`, the setting `local/events`, and grants spelled `local:NAME`
+and `local:@GROUP`. The `net-*` subjects stay. `any` has no read to grant, so such a
+tier clears `local/events` and leaves those users on the control socket until fuzznet
+has one; the node's own user needs no grant, which retires the root-by-number grant.
+`node_second_user.sh` holds the stream as a real second uid at this pin.
 
-- `get events net` in `ncfg_fuzznet.c` becomes plain `get events`, and
-  `local/permit/net` in `daemon_main.c` becomes the host setting `local/events`. The
-  `net-*` subjects stay. A same-user program needs no permit; `any` is not built, and a
-  local user is `local:NAME`, which is the held-stream right 10.732 waited on.
-- `error two contacts have that name: give the key` means ask the user, not a fault.
-- `add join` waits grow with the invite's 15 minutes (10.735). SIGTERM stops a serving
-  daemon cleanly only with no handler of our own, so read that against `daemon_main.c`.
-- Link from `make daemon-lib` and `make daemon-flags`, not `FUZZNETD_LINK`.
-- A second real user is untested on both sides.
+Nothing to do for two of fuzznet's changes: no netcfgd verb takes a contact's name, so
+`two contacts have that name` cannot reach us, and sec 897's SIGTERM is for a daemon
+with no handler, which is `ncfg node` and not netcfgd's signal descriptor.
+
+Still to carry: `add join` waits grow with the invite's 15 minutes (10.735), and
+`make daemon-lib` in place of `FUZZNETD_LINK`.
 
 ## 10.736 One window, in a layout: what is a mode and what a device has
 
@@ -12833,9 +12834,9 @@ the kind.
 
 ## 10.729 `monitor` over fuzznet, where the control socket is not there
 
-fuzznet built held streams (its sec 899, asked from here): `get events net`, for a
-caller `local/permit/net` lets read, hears what this daemon publishes as `net-...`.
-The daemon writes that permit from the `observe` tier. `ncfg monitor` and the GUI's
+fuzznet built held streams (its sec 899, asked from here): `get events`, for a
+caller `local/events` lets read, hears what this daemon publishes as `net-...`.
+The daemon writes that setting from the `observe` tier. `ncfg monitor` and the GUI's
 stream take it when the control socket is gone, on the same descriptor to wait on.
 
 It was the fallback at first, since fuzznet's event is a subject and no more; 10.731

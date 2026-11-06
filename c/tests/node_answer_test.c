@@ -191,12 +191,12 @@ int main(void)
 		who.kind = NCFG_PRINCIPAL_GROUP;
 		who.name = (char *)"netcfgd";
 		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 1 &&
-		        strcmp(grant, "group:netcfgd=x") == 0,
+		        strcmp(grant, "local:@netcfgd=x") == 0,
 		    "observe = group:netcfgd grants that group fuzznet's call");
 		who.kind = NCFG_PRINCIPAL_USER;
 		who.name = (char *)"alice";
 		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == 1 &&
-		        strcmp(grant, "user:alice=x") == 0,
+		        strcmp(grant, "local:alice=x") == 0,
 		    "  a user, that user");
 		who.name = (char *)"al ice";
 		check(ncfg_main_node_permit(&who, grant, sizeof(grant)) == -1 && grant[0] == '\0',
@@ -233,13 +233,13 @@ int main(void)
 		root.kind = NCFG_PRINCIPAL_ROOT;
 		any.kind = NCFG_PRINCIPAL_ANY;
 		check(ncfg_main_node_permit_any_of(usual, 3u, grant, sizeof(grant)) == 1 &&
-		        strcmp(grant, "group:netcfgd=x") == 0,
+		        strcmp(grant, "local:@netcfgd=x") == 0,
 		    "the usual tiers grant ask to the group once, and leave root out");
 		check(ncfg_main_node_permit_any_of(three, 3u, grant, sizeof(grant)) == 1 &&
-		        strcmp(grant, "group:netcfgd=x user:alice=x") == 0,
+		        strcmp(grant, "local:@netcfgd=x local:alice=x") == 0,
 		    "  two holders are two grants");
 		check(ncfg_main_node_permit_any_of(prefix, 2u, grant, sizeof(grant)) == 1 &&
-		        strcmp(grant, "group:netcfgd2=x group:netcfgd=x") == 0,
+		        strcmp(grant, "local:@netcfgd2=x local:@netcfgd=x") == 0,
 		    "  and a name that starts another is its own");
 		check(ncfg_main_node_permit_any_of(roots, 3u, grant, sizeof(grant)) == 0,
 		    "  every tier root's needs none");

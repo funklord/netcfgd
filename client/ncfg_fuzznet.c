@@ -1181,7 +1181,7 @@ int ncfg_fuzznet_do_many(const char *socket, const char *target, const char *req
 
 int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size)
 {
-	static const char  request[] = "get events net\n";
+	static const char  request[] = "get events\n";
 	struct sockaddr_un address;
 	char               path[1100];
 	char               buffer[256];

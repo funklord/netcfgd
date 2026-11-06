@@ -293,8 +293,8 @@ int ncfg_main_node_permit(const ncfg_principal_t *observe, char *out, size_t siz
 			return -1;
 		}
 	}
-	wrote = snprintf(out, size, "%s:%s=x",
-	    observe->kind == NCFG_PRINCIPAL_GROUP ? "group" : "user", observe->name);
+	wrote = snprintf(out, size, "local:%s%s=x",
+	    observe->kind == NCFG_PRINCIPAL_GROUP ? "@" : "", observe->name);
 	if (wrote <= 0 || (size_t)wrote >= size || (size_t)(at - observe->name) >= 64u) {
 		out[0] = '\0';
 		return -1;
