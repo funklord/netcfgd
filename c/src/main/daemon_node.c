@@ -31,22 +31,18 @@
 #include "ncfg/buf.h"
 #include "ncfg/daemon.h"
 #include "ncfg/log.h"
+#include "ncfg/node.h"
 #include "ncfg/observed.h"
 #include "ncfg/proto.h"
 #include "ncfg_fuzznet.h"
 
-#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/statvfs.h>
 #include <unistd.h>
 
-/* Less than this free and the store is about to stop taking writes. */
-#define STORE_FREE_MIN (256u * 1024u)
-/* statvfs asks the kernel and writes nothing, which is why this can be often: a
- * write to prove the store takes one would wear a router's flash. */
+/* How often fuzznet is asked how it is. */
 #define STORE_LOOK_SECONDS 10u
 /* A problem nobody has fixed is said again, so it does not scroll away. */
 #define STORE_SAY_AGAIN_SECONDS 3600u
@@ -73,40 +69,45 @@ void ncfg_main_node_problem(const char *run_dir, const char *why)
 	}
 }
 
-int ncfg_main_store_trouble(const char *dir, char *why, size_t why_size)
+int ncfg_main_store_trouble(const char *node, char *why, size_t why_size)
 {
-	struct statvfs seen;
+	const char   *from = strstr(node, " pressure ");
+	char          pressure[16];
+	char          store[8];
+	unsigned long held = 0;
+	unsigned long dropped = 0;
 
-	if (statvfs(dir, &seen) != 0) {
-		(void)snprintf(why, why_size, "its store %s cannot be looked at: %s", dir,
-		    strerror(errno));
+	if (!from || sscanf(from, " pressure %15s store %7s held %lu dropped %lu", pressure, store,
+	        &held, &dropped) != 4) {
+		(void)snprintf(why, why_size, "it does not say how it is");
 		return 1;
 	}
-	if (seen.f_flag & ST_RDONLY) {
-		(void)snprintf(why, why_size, "its store %s is on a read-only filesystem", dir);
-		return 1;
+	if (strcmp(store, "disk") == 0 && strcmp(pressure, "calm") == 0) {
+		return 0;
 	}
-	if ((uint64_t)seen.f_bavail * seen.f_frsize < STORE_FREE_MIN) {
-		(void)snprintf(why, why_size, "its store %s is out of space", dir);
-		return 1;
-	}
-	return 0;
+	(void)snprintf(why, why_size, "its store is on %s at pressure %s, %lu row(s) held that a "
+	    "stop would lose and %lu dropped", store, pressure, held, dropped);
+	return 1;
 }
 
 const char *ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir,
-    const char *dir, uint64_t now)
+    uint64_t now)
 {
-	char why[1200];
+	char node[512];
+	char why[256];
 	int  trouble;
+	size_t got;
 
 	if (watch->looked && now - watch->looked < STORE_LOOK_SECONDS) {
 		return NULL;
 	}
 	watch->looked = now;
-	trouble = ncfg_main_store_trouble(dir, why, sizeof(why));
+	got = ncfg_node_local("get node", node, sizeof(node) - 1u);
+	node[got] = '\0';
+	trouble = ncfg_main_store_trouble(node, why, sizeof(why));
 	if (!trouble) {
 		if (watch->said) {
-			ncfg_log_emitf("node", NCFG_LOG_NOTE, "the fuzznet store takes writes again");
+			ncfg_log_emitf("node", NCFG_LOG_NOTE, "fuzznet is on its disk again, and calm");
 			ncfg_main_node_problem(run_dir, NULL);
 			watch->said = 0;
 			return "net-store-ok";

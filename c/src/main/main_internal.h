@@ -340,11 +340,12 @@ typedef struct {
 } ncfg_main_store_watch_t;
 
 void ncfg_main_node_problem(const char *run_dir, const char *why);
-int  ncfg_main_store_trouble(const char *dir, char *why, size_t why_size);
+/* Whether `get node`'s answer says trouble, and if so what. */
+int  ncfg_main_store_trouble(const char *node, char *why, size_t why_size);
 /* From the tick. The fuzznet subject to publish where something was said, for an
  * operator on another host, or NULL. */
 const char *ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir,
-    const char *dir, uint64_t now);
+    uint64_t now);
 
 /*
  * A request an operator of this node's estate sent over fuzznet's remote hop

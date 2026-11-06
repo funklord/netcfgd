@@ -1,10 +1,11 @@
 #!/bin/sh
 # node_store_trouble.sh -- fuzznet in trouble is seen and said (0316): a store that
-# fills, goes read-only or will not open is an error in netcfgd's log and a line in
-# `ncfg status`, and the line goes when the trouble does. Run by `make test`.
+# fills or is read-only leaves the host working from RAM, which `get node` says and
+# which is then an error in netcfgd's log and a line in `ncfg status`. The line goes
+# when the trouble does. One that will not open at all is said too. By `make test`.
 #
 # HOW IT STOPS: all of it runs in a user and mount namespace under `timeout -k 2
-# 100`, the store a 2 MB tmpfs that namespace owns, so the filling is bounded by
+# 170`, the store a 2 MB tmpfs that namespace owns, so the filling is bounded by
 # the filesystem. The daemon is under a timeout of its own and killed by pid, and
 # waits are counts of 0.5 s looks. The directory is mktemp's, checked by shape.
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -13,7 +14,7 @@ if [ "$1" != inside ]; then
 		echo "node_store_trouble: no user namespaces here, so nothing was looked at"
 		exit 1
 	fi
-	exec timeout -k 2 100 unshare -Urmn sh "$0" inside
+	exec timeout -k 2 170 unshare -Urmn sh "$0" inside
 fi
 N=$here/netcfgd
 C=$here/ncfg
@@ -25,6 +26,17 @@ failed=0
 check() { # $1 0 for ok, $2 what
 	if [ "$1" -eq 0 ]; then printf '%-72s ok\n' "$2"; else printf '%-72s FAILED\n' "$2"; failed=1; fi
 }
+ask() { # $1 line: one reply line from fuzznet's socket
+	timeout 10 python3 -I -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(5); s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + "\n").encode()); out = b""
+while not out.endswith(b"\n"):
+    b = s.recv(4096)
+    if not b: break
+    out += b
+print(out.decode(errors="replace").strip())' "$R/fz.sock" "$1" 2>&1
+}
 says() { # $1 pattern: wait for `ncfg status` to say it
 	n=0
 	until timeout 5 "$C" status --run-dir "$R/run" 2>&1 | grep -q "$1" || [ $n -gt 50 ]; do
@@ -34,7 +46,7 @@ says() { # $1 pattern: wait for `ncfg status` to say it
 	[ $n -le 50 ]
 }
 start() { # $1 log
-	timeout -k 5 80 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	timeout -k 5 110 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
 		--fuzznet-dir "$R/store" --fuzznet-serve --fuzznet-arg "--socket=$R/fz.sock" \
 		> "$R/$1" 2>&1 &
 	daemon=$!
@@ -54,7 +66,7 @@ check $? "a daemon with a healthy store serves fuzznet"
 check $? "  and \`ncfg status\` says no trouble"
 
 # What an operator on another host reads: fuzznet's events, held from here.
-timeout 35 python3 -I -c '
+timeout 80 python3 -I -c '
 import socket, sys
 s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"get events\n")
 out = open(sys.argv[2], "wb", buffering=0)
@@ -67,19 +79,22 @@ pids="$pids $listener"
 sleep 0.5
 
 dd if=/dev/zero of="$R/store/filler" bs=64k count=64 2>/dev/null
-says 'IN TROUBLE.*out of space'
+ask 'add record t/full one' | grep -q '^ok'
+check $? "a store that has filled still takes a record, as RAM"
+says 'IN TROUBLE.*on ram'
 check $? "a store that fills is said in \`ncfg status\`"
-grep -q 'fuzznet is in trouble.*out of space' "$R/a.log"
+grep -q 'fuzznet is in trouble.*on ram' "$R/a.log"
 check $? "  and logged"
 [ -d "/proc/$daemon" ]
 check $? "  and the daemon is still up"
 truncate -s 0 "$R/store/filler"
 n=0
-while timeout 5 "$C" status --run-dir "$R/run" 2>&1 | grep -q 'IN TROUBLE' && [ $n -lt 50 ]; do
+# Pressure comes down a step per 30 s, so this is a longer wait than going up.
+while timeout 5 "$C" status --run-dir "$R/run" 2>&1 | grep -q 'IN TROUBLE' && [ $n -lt 120 ]; do
 	sleep 0.5
 	n=$((n + 1))
 done
-[ $n -lt 50 ] && grep -q 'takes writes again' "$R/a.log"
+[ $n -lt 120 ] && grep -q 'on its disk again' "$R/a.log"
 check $? "  and when it has room the line goes, and the log says so"
 n=0
 until grep -q 'net-store-ok' "$R/events" 2>/dev/null || [ $n -gt 10 ]; do sleep 0.5; n=$((n + 1)); done
@@ -88,14 +103,20 @@ check $? "  and fuzznet's events said both, for another host ($(tr '\n' ' ' < "$
 kill -KILL $listener 2>/dev/null
 
 # Read-only under a running daemon cannot be staged here: it holds files open for
-# writing, so the remount is refused as busy. Starting on one is the same fault, and
-# today's answer to it is fuzznet not opening, which 0316 asks fuzznet to end.
+# writing, so the remount is refused as busy. Starting on one is the case to hold.
 kill -TERM $daemon
 wait $daemon
 mount -o remount,bind,ro "$R/store"
+rm -f "$R/fz.sock"
 start r.log
-says 'IN TROUBLE.*did not open.*Read-only'
-check $? "a store on a read-only filesystem is said in \`ncfg status\`"
+n=0
+until [ -S "$R/fz.sock" ] || [ $n -gt 40 ]; do sleep 0.5; n=$((n + 1)); done
+[ -S "$R/fz.sock" ]
+check $? "a host opens on a read-only filesystem"
+ask 'add record t/ro one' | grep -q '^ok'
+check $? "  and takes a record, as RAM"
+says 'IN TROUBLE.*on ram'
+check $? "  and that is said in \`ncfg status\`"
 kill -TERM $daemon
 wait $daemon
 mount -o remount,bind,rw "$R/store"

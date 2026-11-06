@@ -12726,15 +12726,18 @@ an error on the target. `--confirm-within 0` had been getting past both of 0312'
 refusals, which asked only that a value was present; `ask_test` fails with that restored.
 The field is C's alone, as only an `ask` of another host reads it.
 
-**What fuzznet does on a bad store, measured at e9b815a3 in a 2 MB tmpfs.** Full, running:
-it stays up, reads answer, and `add record` says `the record was not kept`. Started full:
-it serves. Started read-only: **it does not open** (`the claim ... would not open`), and
-that is the case 0316 says must not exist. Told to fuzznet. `node_store_trouble.sh` holds
-netcfgd's half: full, read-only at start and unopenable are each said in `ncfg status` and
-logged, and a running daemon publishes `net-store-bad` and `net-store-ok`, which
-`monitor --at`, the TUI and the GUI print as they print any `net-` subject. A store going read-only under a running daemon is not staged, as the remount is
-refused while files are open for writing, so `ST_RDONLY` in `ncfg_main_store_trouble` has
-not run with a daemon up.
+**A bad store, and what fuzznet does about it since its sec 917.** At e9b815a3 a read-only
+store did not open: no node, no socket, no protocol, the case 0316 says must not exist. At
+b81184c a host opens and works on one, and on a full one, writes held in RAM and flushed by
+themselves when the disk returns. Rows held are lost by a stop. `get node` ends `pressure
+STATE store disk|ram held N dropped N`, and that replaced the `statvfs` look here: every 10 s
+from the tick, anything but disk and calm is an error in the log, said again hourly, a line
+in `ncfg status` from `<run>/node-problem`, and `net-store-bad` then `net-store-ok` published
+for another host, which `monitor --at`, the TUI and the GUI print as any `net-` subject.
+Pressure comes down a step per 30 s, so the line outlasts the trouble by a minute or so.
+`node_store_trouble.sh` holds it. A store going read-only under a running daemon is not
+staged, as the remount is refused while files are open for writing, and a store that cannot
+be read is still refused: whether a host then runs with no identity is the holder's.
 
 **A delegating odhcp6c could not be stopped, and only `vm-delegation` could see it.**
 `ncfg_dhcp6_start` made `<run>/dhcp` and never `<run>/odhcp6c`, where it told the client

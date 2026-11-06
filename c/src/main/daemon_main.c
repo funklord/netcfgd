@@ -911,7 +911,6 @@ typedef struct {
 	ncfg_main_ask_t           ask;
 	/* Where the events told since the last tick wait to be published. */
 	ncfg_main_subscribers_t  *subscribers;
-	const char               *store;
 	const char               *run_dir;
 	ncfg_main_store_watch_t   store_watch;
 } node_driven_t;
@@ -1167,7 +1166,7 @@ static int node_tick(void *context)
 		const char     *told;
 
 		(void)clock_gettime(CLOCK_MONOTONIC, &now);
-		told = ncfg_main_store_look(&driven->store_watch, driven->run_dir, driven->store,
+		told = ncfg_main_store_look(&driven->store_watch, driven->run_dir,
 		    (uint64_t)now.tv_sec);
 		if (told) {
 			(void)ncfg_node_publish_event(told);
@@ -1244,7 +1243,6 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	}
 	memset(&driven, 0, sizeof(driven));
 	driven.run = run;
-	driven.store = ncfg_node_dir(node);
 	driven.run_dir = run_dir;
 	ncfg_main_outside_begin(run, &driven.outside);
 	driven.seen = seen;

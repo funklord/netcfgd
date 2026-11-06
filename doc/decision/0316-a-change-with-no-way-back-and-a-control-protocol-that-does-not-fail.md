@@ -1,6 +1,6 @@
 # 0316: a change with no way back, and a control protocol that does not fail
 
-Status: accepted
+Status: accepted; its `statvfs` look replaced by `get node`, as it said it would be (project.md 10.738)
 Date: 2026-11-06
 Milestone: fuzznet integration (project.md 10.738)
 Amends: [0312](0312-the-control-vocabulary-is-one-fuzznet-procedure.md), whose refusal of a remote apply without a window gains one exception; answers what [0309](0309-one-protocol-the-local-socket-is-fuzznets-too.md)'s last step waited on
