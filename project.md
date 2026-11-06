@@ -12802,7 +12802,9 @@ Nothing to do for two of fuzznet's changes: no netcfgd verb takes a contact's na
 `two contacts have that name` cannot reach us, and sec 897's SIGTERM is for a daemon
 with no handler, which is `ncfg host` and not netcfgd's signal descriptor.
 
-Still to carry: `make daemon-lib` in place of `FUZZNETD_LINK`.
+The phone's daemon links fuzznet's `make daemon-lib` and reads `make daemon-flags`, in
+`gui/Makefile`, in place of a fragment read after fuzznet's Makefile for `FUZZNETD_LINK`.
+At this pin the two links define the same 3109 symbols and differ by 16 bytes stripped.
 
 ## 10.736 One window, in a layout: what is a mode and what a device has
 
@@ -12849,8 +12851,8 @@ that said "this user's fuzznetd" stood on a program nothing installs.
 `c/src/node/user_host.c` is fuzznet's node with netcfgd's numbers, any free port, and
 an empty extension, which is what makes it follow beside a face rather than exit.
 `ncfg host` runs it from the binary already installed, and the app carries the same
-file under a `main` of its own as `libncfghost.so`, linked by fuzznet's build
-(`gui/src/phone/host.mk`), as fuzzypickles links fzpd.
+file under a `main` of its own as `libncfghost.so`, linked against fuzznet's
+`libfuzznetd.a`, as fuzzypickles links fzpd.
 
 **The feared cost was the capability**, which fuzznet derives from service and product,
 so a store opened under another product's number might have reached nothing.

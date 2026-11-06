@@ -201,14 +201,33 @@ ANDROID_CC = $(ANDROID_NDK_BIN)/$(ANDROID_TRIPLE_$(ANDROID_ABI))$(ANDROID_API)-c
 ANDROID_NODE_DIR = $(abspath build-android-node-$(ANDROID_ABI))
 ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libncfghost.so
 
-# Linked by fuzznet's own build, as fuzznetd is, with this product's main.
+# fuzznet's own build makes the archive and says how to use it (its sec 907), and
+# this product's main is linked against that: `daemon-lib` is every object of
+# fuzznetd but its main, so nothing here reads fuzznet's variables. The flags go
+# through a file so that the line naming $(MAKE), which a dry run executes, holds
+# no compiler.
+ANDROID_NODE_FUZZNET = CFLAGS='-Os -ffunction-sections -fdata-sections' \
+	$(MAKE) -s -C ../fuzznet BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) \
+	FZN_LOG_PACK=0 FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0
+ANDROID_NODE_CFLAGS = -Os -ffunction-sections -fdata-sections \
+	-I../c/include -I../client
+ANDROID_NODE_SRCS = src/phone/host_main.c ../c/src/node/user_host.c
+ANDROID_NODE_HDRS = ../c/include/ncfg/node.h ../client/ncfg_fuzznet.h
+
 android-node: android-check
-	CFLAGS='-Os -ffunction-sections -fdata-sections' $(MAKE) -s -C ../fuzznet \
-	        -f Makefile -f ../gui/src/phone/host.mk \
-	        BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) FZN_LOG_PACK=0 \
-	        FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 \
-	        NCFG_NODE_OUT=$(ANDROID_NODE_DIR)/ncfgnode $(ANDROID_NODE_DIR)/ncfgnode
-	$(ANDROID_NDK_BIN)/llvm-strip -o $(ANDROID_NODE_LIB) $(ANDROID_NODE_DIR)/ncfgnode
+	$(ANDROID_NODE_FUZZNET) daemon-lib
+	@$(MAKE) --no-print-directory $(ANDROID_NODE_LIB)
+
+$(ANDROID_NODE_DIR)/daemon.flags: ../fuzznet/Makefile Makefile
+	$(ANDROID_NODE_FUZZNET) daemon-flags > $@
+
+$(ANDROID_NODE_LIB): $(ANDROID_NODE_SRCS) $(ANDROID_NODE_HDRS) \
+                     $(ANDROID_NODE_DIR)/daemon.flags $(ANDROID_NODE_DIR)/libfuzznetd.a
+	cflags=$$(sed -n 's/^FZN_DAEMON_CFLAGS=//p' $(ANDROID_NODE_DIR)/daemon.flags); \
+	libs=$$(sed -n 's/^FZN_DAEMON_LIBS=//p' $(ANDROID_NODE_DIR)/daemon.flags); \
+	$(ANDROID_CC) $(ANDROID_NODE_CFLAGS) $$cflags $(ANDROID_NODE_SRCS) $$libs \
+		-o $(ANDROID_NODE_DIR)/ncfgnode
+	$(ANDROID_NDK_BIN)/llvm-strip -o $@ $(ANDROID_NODE_DIR)/ncfgnode
 
 # The sed is the one way to say this from qmake: the node has to exist as a
 # file to be run, so the libraries are extracted at install, which AGP calls
