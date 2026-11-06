@@ -12686,6 +12686,40 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.737 fuzznet's shape and terms, and what the next pin has to carry
+
+From fuzznet's inbox message 20261106T0137Z and its sec 906, which reports the
+holder's words; the holder had said here that it was coming. The pin is still 2a3bd069.
+
+**Terms.** A machine is the computer. A host is one user account's presence on it, the
+unit of identity and authorisation, so several on a machine are normal. Daemons and
+clients are processes of a host. "Node" now means only the English word, so this
+document's "this user's node" and 0313's are the old usage. Root is the host holding
+the estate's root key; vault is reserved, not a synonym.
+
+**What this does to 10.734 and 10.735, and it is not settled.** For all the software so
+far a client does not touch the disk or relay, and a host's key is made at the daemon's
+first start. So `ncfg node`, with a store and a key, is a daemon of the user's host, not
+a client, and the holder's "netcfgd as root and clients as users" leaves a desktop user
+with no key to reach a remote with. It also rules out running that core inside the
+client, the fix suggested after 10.735's figure was corrected, since the client would
+then write the disk. Between users the OS authenticates (`local:alice`), so the shape
+that fits those words is a client asking the root's netcfgd locally; a local socket
+connection may also become an alternative to a key. The holder's to decide. Nothing
+changed yet; the phone is not touched by this, as the app ships its daemon.
+
+**For the repin, at f18ca13 or later, never 3f6b44b:**
+
+- `get events net` in `ncfg_fuzznet.c` becomes plain `get events`, and
+  `local/permit/net` in `daemon_main.c` becomes the host setting `local/events`. The
+  `net-*` subjects stay. A same-user program needs no permit; `any` is not built, and a
+  local user is `local:NAME`, which is the held-stream right 10.732 waited on.
+- `error two contacts have that name: give the key` means ask the user, not a fault.
+- `add join` waits grow with the invite's 15 minutes (10.735). SIGTERM stops a serving
+  daemon cleanly only with no handler of our own, so read that against `daemon_main.c`.
+- Link from `make daemon-lib` and `make daemon-flags`, not `FUZZNETD_LINK`.
+- A second real user is untested on both sides.
+
 ## 10.736 One window, in a layout: what is a mode and what a device has
 
 The holder: phone and desktop stay the same GUI, with minor differences by mobile or
