@@ -511,10 +511,10 @@ BLOCK_FETCH_USAGE = "  ncfg block fetch [LIST...] download block lists from thei
 OWE_USAGE = ("  --owe                    encrypted with no passphrase (OWE, \"Enhanced Open\"):\n"
 	     "                           not --open, which would not associate with one\n")
 # 0311's fleet, 10.691: `status --at HOST`, another node of the estate asked
-# through this user's fuzznetd. fuzznet is the C's alone, so the Rust has no
+# through this user's host daemon. fuzznet is the C's alone, so the Rust has no
 # estate to ask across.
 AT_USAGE = ("  --at HOST                another node of this estate, HOST its key in hex,\n"
-	    "                           asked through your own fuzznetd: for status,\n"
+	    "                           asked through your own host: for status,\n"
 	    "                           wifi, modem, reload, confirm, revert, apply,\n"
 	    "                           config, secret, profile, tui and monitor\n")
 # And `ncfg hosts`, 10.692: the estate's members, for `--at`, the same reason.
@@ -522,15 +522,23 @@ NODES_USAGE = ("  ncfg hosts [--json]      the other nodes of your estate, by ke
 	       "                           `status --at`\n"
 	       "  ncfg hosts member HOST GROUP  say HOST is in GROUP, for what is sealed to it\n"
 	       "  ncfg pair                draw a one-use code a phone joins this host by\n"
+	       "  ncfg pair confirm        the same, asking you before anybody joins\n"
 	       "  ncfg pair open           let this host be reached by its estate's devices\n"
 	       "  ncfg pair list           the devices this host serves, by key\n"
 	       "  ncfg pair revoke KEY     take a device back, lost or stolen\n"
 	       "  ncfg secret seal GROUP KEY  a value for GROUP's members, read from standard\n"
 	       "                           input: `@secret:estate:KEY` in a configuration\n")
+# And the host daemon and joining, 0314, which are fuzznet's too.
+HOST_USAGE = ("  ncfg host [OPTIONS]      this user's host, which `--at`, `ncfg hosts` and\n"
+	      "                           `ncfg join` reach other hosts through. Started\n"
+	      "                           by them and gone with them; typed, it stays up.\n"
+	      "                           Beside another fuzznet program it follows that one\n"
+	      "  ncfg join CODE           join an estate by a code `ncfg pair` drew, and wait\n"
+	      "                           until the host has let this user in\n")
 C_ONLY_LINES = {
 	# Both spellings of asking for the usage.
-	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE],
-	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE],
+	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE, HOST_USAGE],
+	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE, HOST_USAGE],
 	# And `secret seal`, in the sentence asking for a subcommand.
 	"secret": [", seal"],
 }

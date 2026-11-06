@@ -159,7 +159,7 @@ static const char usage_text[] =
     "                           that already exists\n"
     "  --run-dir PATH           default /run/netcfgd, or $NCFG_RUN_DIR\n"
     "  --at HOST                another node of this estate, HOST its key in hex,\n"
-    "                           asked through your own node: for status,\n"
+    "                           asked through your own host: for status,\n"
     "                           wifi, modem, reload, confirm, revert, apply,\n"
     "                           config, secret, profile, tui and monitor\n"
     "  --oneshot                apply once and exit; the default, there being no\n"
