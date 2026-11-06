@@ -1680,6 +1680,7 @@ static void interface_kind_release(void *field)
 	ncfg_type_free(&pppoe_type, &value->pppoe);
 	ncfg_type_free(&openvpn_type, &value->openvpn);
 	ncfg_type_free(&veth_type, &value->veth);
+	ncfg_type_free(&mesh_point_type, &value->mesh_point);
 	ncfg_type_free(&vrf_type, &value->vrf);
 	ncfg_type_free(&macvlan_type, &value->macvlan);
 	ncfg_type_free(&tunnel_type, &value->tunnel);

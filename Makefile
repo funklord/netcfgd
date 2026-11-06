@@ -432,6 +432,13 @@ client/tests/client_test: FORCE
 c-test:
 	@$(MAKE) --no-print-directory -C c test
 
+# The C suite under ASan and UBSan. Not in `check`, which would build the tree twice,
+# so it is run by hand; a mesh_point's name leaked on every reload for as long as
+# nobody did.
+.PHONY: c-san
+c-san:
+	$(MAKE) --no-print-directory -C c test SANITIZE=1
+
 client-test: client/tests/client_test
 	@$(MAKE) --no-print-directory -C client test
 

@@ -12743,6 +12743,11 @@ udhcpc's start already made its own. `delegation.sh` also grepped wording the pl
 since changed. It passes in the guest now, a real kea to a real odhcp6c, and `dhcp_test`
 holds the directory, as `vm-delegation` is not in `make check`.
 
+**A mesh_point's parent leaked on every reload.** `interface_kind_release` names each arm
+that holds anything, and 5401de14 added `mesh_point` to the read and write tables and not
+to it, so a daemon on a mesh router lost the name at each compile. LeakSanitizer named it in
+five tests; the suite under ASan and UBSan is clean now, which is `make c-san`.
+
 **`make live` ends at `sandbox_writes.sh` because that is its last step,** not because
 anything is left behind it: `hwsim`, `association`, `pppoe-session` and `delegation` run
 before it and skip without root. `make vm-sandbox` and `make vm-skipped` are what run
