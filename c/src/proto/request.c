@@ -61,7 +61,7 @@ static const char *const request_names[NCFG_PROTO_REQ_COUNT] = {
 /* The shared member lists, named after what they belong to. */
 static const char *const members_none[1] = { NULL };
 static const char *const members_apply[] = {
-	"confirm", "allow_disruption", "strand_credentials", "restart_wedged"
+	"confirm", "allow_disruption", "strand_credentials", "restart_wedged", "no_rollback"
 };
 static const char *const members_subject[] = { "subject" };
 static const char *const members_interface[] = { "interface" };
@@ -325,6 +325,7 @@ static int encode_payload(const ncfg_proto_request_t *request, ncfg_json_writer_
 		member_strs(writer, "allow_disruption", request->u.apply.allow_disruption);
 		member_strs(writer, "strand_credentials", request->u.apply.strand_credentials);
 		member_strs(writer, "restart_wedged", request->u.apply.restart_wedged);
+		member_str_if(writer, "no_rollback", request->u.apply.no_rollback);
 		break;
 	case NCFG_PROTO_REQ_EXPLAIN:
 		ncfg_json_write_key(writer, "subject");
@@ -663,7 +664,9 @@ int ncfg_proto_decode_request(ncfg_proto_dec_t *dec, uint32_t object, ncfg_proto
 		    !ncfg_proto_get_strs(dec, object, "strand_credentials", 0, what,
 		        &out->u.apply.strand_credentials) ||
 		    !ncfg_proto_get_strs(dec, object, "restart_wedged", 0, what,
-		        &out->u.apply.restart_wedged)) {
+		        &out->u.apply.restart_wedged) ||
+		    !ncfg_proto_get_str(dec, object, "no_rollback", 0, what,
+		        &out->u.apply.no_rollback)) {
 			return 0;
 		}
 		break;

@@ -517,6 +517,12 @@ AT_USAGE = ("  --at HOST                another node of this estate, HOST its ke
 	    "                           asked through your own host: for status,\n"
 	    "                           wifi, modem, reload, confirm, revert, apply,\n"
 	    "                           config, secret, profile, tui and monitor\n")
+# `--no-rollback`, 0316: an apply on another host with no way back, which needs
+# `--at` and so has no Rust spelling either.
+NO_ROLLBACK_USAGE = ("  --no-rollback HOST       with `--at HOST`, HOST said twice on purpose: apply\n"
+		     "                           with no confirm window, for a change that cannot be\n"
+		     "                           undone. Needs --reason; that host logs it as an error\n"
+		     "  --reason TEXT            why, for that host's log\n")
 # And `ncfg hosts`, 10.692: the estate's members, for `--at`, the same reason.
 NODES_USAGE = ("  ncfg hosts [--json]      the other nodes of your estate, by key, for\n"
 	       "                           `status --at`\n"
@@ -537,8 +543,8 @@ HOST_USAGE = ("  ncfg host [OPTIONS]      this user's host, which `--at`, `ncfg 
 	      "                           until the host has let this user in\n")
 C_ONLY_LINES = {
 	# Both spellings of asking for the usage.
-	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE, HOST_USAGE],
-	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NODES_USAGE, HOST_USAGE],
+	"--help": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NO_ROLLBACK_USAGE, NODES_USAGE, HOST_USAGE],
+	"-h": [BLOCK_FETCH_USAGE, OWE_USAGE, AT_USAGE, NO_ROLLBACK_USAGE, NODES_USAGE, HOST_USAGE],
 	# And `secret seal`, in the sentence asking for a subcommand.
 	"secret": [", seal"],
 }

@@ -34,11 +34,16 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/daemon.h"
+#include "ncfg/log.h"
+#include "ncfg/node.h"
 #include "ncfg/proto.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* It goes in a log line, and a sentence is enough to say why. */
+#define NO_ROLLBACK_REASON_MAX 200u
 
 #define ASK_KEPT_MS 60000u
 
@@ -353,12 +358,59 @@ static size_t refused(const char *why, char *reply, size_t cap, size_t escaped_c
 }
 
 /*
+ * **An operator's apply carries a window** (0312): across the estate a change
+ * that cuts the caller off has no other way back. A window of no seconds is no
+ * window, and that form got past this until 0316 by being present. The one way
+ * round is a change that must not be undone, which says why and is logged as an
+ * error whether or not it goes on to run, naming who asked.
+ */
+static int remote_apply_allowed(const ncfg_proto_apply_t *apply, const uint8_t *key, char *err,
+    size_t err_size)
+{
+	const int window = apply->confirm.present && apply->confirm.value > 0;
+	char      who[NCFG_NODE_KEY_HEX];
+	size_t    at;
+
+	if (!apply->no_rollback.bytes) {
+		if (!window) {
+			ncfg_error_set(err, err_size,
+			    "an apply from another host needs a confirm window (--confirm-within), "
+			    "so that a change which cuts you off undoes itself");
+		}
+		return window;
+	}
+	if (!apply->confirm.present || apply->confirm.value != 0) {
+		ncfg_error_set(err, err_size, "an apply with no rollback declines the window, so "
+		    "its `confirm` has to be 0");
+		return 0;
+	}
+	if (apply->no_rollback.length == 0u || apply->no_rollback.length > NO_ROLLBACK_REASON_MAX) {
+		ncfg_error_set(err, err_size, "an apply with no rollback gives a reason of 1 to %u "
+		    "bytes", NO_ROLLBACK_REASON_MAX);
+		return 0;
+	}
+	for (at = 0; at < apply->no_rollback.length; at++) {
+		const unsigned char c = (unsigned char)apply->no_rollback.bytes[at];
+
+		if (c < 0x20u || c == 0x7fu) {
+			ncfg_error_set(err, err_size, "the reason for an apply with no rollback goes "
+			    "in a log, so it holds no control characters");
+			return 0;
+		}
+	}
+	ncfg_node_key_hex(key, who);
+	ncfg_log_emitf("apply", NCFG_LOG_ERROR, "NO ROLLBACK: %s asked for an apply nothing will "
+	    "undo, because: %.*s", who, (int)apply->no_rollback.length, apply->no_rollback.bytes);
+	return 1;
+}
+
+/*
  * The answer to `request` from this caller, as the socket would write it,
  * into `out`: 1, or 0 with the refusal in `err`.
  */
 static int answer(ncfg_main_ask_t *ask, const ncfg_proto_request_t *request,
-    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
-    size_t err_size)
+    const ncfg_peer_t *peer, const uint8_t *key, ncfg_arrival_t arrival, ncfg_buf_t *out,
+    char *err, size_t err_size)
 {
 	if (!ncfg_authz_permitted(&ask->roots, ask->control, ask->remote, arrival, peer, request,
 	        err, err_size)) {
@@ -370,13 +422,8 @@ static int answer(ncfg_main_ask_t *ask, const ncfg_proto_request_t *request,
 		    "fuzznet's `get events` is the estate's stream");
 		return 0;
 	}
-	/* **An operator's apply carries a window** (0312): across the estate a
-	 * change that cuts the caller off has no other way back. */
 	if (arrival == NCFG_ARRIVED_REMOTE && request->kind == NCFG_PROTO_REQ_APPLY &&
-	    !request->u.apply.confirm.present) {
-		ncfg_error_set(err, err_size,
-		    "an apply from another host needs a confirm window (--confirm-within), so "
-		    "that a change which cuts you off undoes itself");
+	    !remote_apply_allowed(&request->u.apply, key, err, err_size)) {
 		return 0;
 	}
 	if (request->kind == NCFG_PROTO_REQ_HELLO) {
@@ -489,7 +536,7 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	}
 	ncfg_buf_init(&out, NCFG_PROTO_MAX_LINE * 64u);
 	err[0] = '\0';
-	if (!answer(ask, &message.u.request, key ? NULL : peer, arrival, &out, err, sizeof(err))) {
+	if (!answer(ask, &message.u.request, key ? NULL : peer, key, arrival, &out, err, sizeof(err))) {
 		ncfg_buf_free(&out);
 		ncfg_proto_message_free(&message);
 		if (staged) {
@@ -586,7 +633,7 @@ size_t ncfg_main_do(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t 
 	}
 	ncfg_buf_init(&out, NCFG_PROTO_MAX_LINE * 64u);
 	err[0] = '\0';
-	if (answer(ask, &message.u.request, key ? NULL : peer, arrival, &out, err, sizeof(err)) &&
+	if (answer(ask, &message.u.request, key ? NULL : peer, key, arrival, &out, err, sizeof(err)) &&
 	    !ncfg_buf_failed(&out)) {
 		memset(&answered, 0, sizeof(answered));
 		carried = ncfg_proto_response_read(out.data, out.length, &answered, err, sizeof(err)) &&

@@ -222,6 +222,33 @@ int main(void)
 	    "a caller on this machine is judged by the control tiers: not root, denied");
 	said = once(&ask, NULL, &root, "{\"request\":\"apply\",\"confirm\":null}", 85000u);
 	check(runs == 1u, "  and root may apply with no window, being at the console");
+	/* 0316: a window of no seconds is no window, whoever's client sent it, and
+	 * the way round says why. `runs` counts what reached the daemon. */
+	{
+		static const struct {
+			const char *request;
+			const char *says;
+		} refused[] = {
+			{ "{\"request\":\"apply\",\"confirm\":0}", "needs a confirm window" },
+			{ "{\"request\":\"apply\",\"no_rollback\":\"x\"}", "has to be 0" },
+			{ "{\"request\":\"apply\",\"confirm\":60,\"no_rollback\":\"x\"}", "has to be 0" },
+			{ "{\"request\":\"apply\",\"confirm\":0,\"no_rollback\":\"\"}", "a reason of 1" },
+			{ "{\"request\":\"apply\",\"confirm\":0,\"no_rollback\":\"a\\nb\"}", "control" },
+		};
+		size_t  before = runs;
+		size_t  which;
+		uint64_t when = 86000u;
+
+		for (which = 0; which < sizeof(refused) / sizeof(refused[0]); which++) {
+			said = once(&ask, operator_key, NULL, refused[which].request, when++);
+			check(strstr(said, refused[which].says) != NULL && runs == before,
+			    "an operator's apply with no real window or reason is refused");
+		}
+		said = once(&ask, operator_key, NULL,
+		    "{\"request\":\"apply\",\"confirm\":0,\"no_rollback\":\"flashed\"}", when++);
+		check(runs == before + 1u, "  and one that says why reaches the daemon");
+		runs = before;
+	}
 
 	runs = 0;
 	said = once(&ask, NULL, &root, "{\"request\":\"hello\"}", 86000u);

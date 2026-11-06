@@ -2234,6 +2234,9 @@ static int apply_through_daemon(const ncfg_cli_options_t *options, int *absent)
 	}
 	request.u.apply.restart_wedged.items = at > 0 ? wedged : NULL;
 	request.u.apply.restart_wedged.count = at;
+	if (options->no_rollback) {
+		request.u.apply.no_rollback = ncfg_proto_str(options->reason);
+	}
 	if (!ask_or_fail_noting(options, &request, &message, &code, absent)) {
 		return code;
 	}
@@ -2619,7 +2622,8 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
 			    options->at, command);
 			return fail(why);
 		}
-		if (strcmp(command, "apply") == 0 && !options->confirm.has) {
+		if (strcmp(command, "apply") == 0 &&
+		    (!options->confirm.has || options->confirm.value <= 0)) {
 			return fail("`apply` on many hosts needs --confirm-within, so that a change "
 			            "which cuts you off from them undoes itself on each");
 		}
@@ -2650,9 +2654,17 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
 		    "machine. `config put --at` carries a network block", positional[0]);
 		return fail(why);
 	}
-	if (strcmp(command, "apply") == 0 && !options->confirm.has) {
+	if (strcmp(command, "apply") == 0 && options->no_rollback) {
+		if (strcmp(options->no_rollback, options->at) != 0) {
+			return fail("--no-rollback has to name the same host as --at, and they differ");
+		}
+		(void)fprintf(stderr, "ncfg: this apply has no confirm window, so nothing will undo "
+		              "it, and %s will log it as an error\n", options->at);
+	} else if (strcmp(command, "apply") == 0 &&
+	           (!options->confirm.has || options->confirm.value <= 0)) {
 		return fail("`apply --at` needs --confirm-within, so that a change which cuts you "
-		            "off from that node undoes itself");
+		            "off from that node undoes itself; a change that must not be undone "
+		            "is --no-rollback");
 	}
 	ncfg_cli_ask_through(options->at);
 	return 0;
@@ -2663,6 +2675,10 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 {
 	int refused;
 
+	if (options->no_rollback && (!options->at || strcmp(command, "apply") != 0)) {
+		return fail("--no-rollback is for `apply --at HOST`: on this machine "
+		            "`--confirm-within 0` declines a window");
+	}
 	if (options->at && (refused = at_refused(command, options, positional, count)) != 0) {
 		return refused;
 	}

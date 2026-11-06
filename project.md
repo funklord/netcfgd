@@ -12720,6 +12720,21 @@ which is what a client starts, tries it exclusively once a second from fuzznet's
 design and fails on `add join`, which restarts the process in place. Typed by hand
 `ncfg host` takes no option and stays up.
 
+**A remote apply may have no way back, and fuzznet may not fail (0316).** `apply --at
+HOST --no-rollback HOST --reason TEXT` is the one remote apply with no window, logged as
+an error on the target. `--confirm-within 0` had been getting past both of 0312's
+refusals, which asked only that a value was present; `ask_test` fails with that restored.
+The field is C's alone, as only an `ask` of another host reads it.
+
+**What fuzznet does on a bad store, measured at e9b815a3 in a 2 MB tmpfs.** Full, running:
+it stays up, reads answer, and `add record` says `the record was not kept`. Started full:
+it serves. Started read-only: **it does not open** (`the claim ... would not open`), and
+that is the case 0316 says must not exist. Told to fuzznet. `node_store_trouble.sh` holds
+netcfgd's half: full, read-only at start and unopenable are each said in `ncfg status` and
+logged. A store going read-only under a running daemon is not staged, as the remount is
+refused while files are open for writing, so `ST_RDONLY` in `ncfg_main_store_trouble` has
+not run with a daemon up.
+
 **It stops at once, and for a while it did not (0315).** Stopping at once first made
 every second `--at` hang 3 s with `the host did not answer`: fuzznet keeps a reply a few
 seconds against resends (its sec 737), matched on sender, message number and bytes; a

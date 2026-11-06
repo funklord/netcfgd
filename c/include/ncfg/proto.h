@@ -387,6 +387,10 @@ typedef struct {
 	ncfg_proto_strs_t allow_disruption;
 	ncfg_proto_strs_t strand_credentials;
 	ncfg_proto_strs_t restart_wedged;
+	/* Why an operator of the estate applies with no window (0316), absent on
+	 * any other apply. Read only from an `ask` of another host, which the Rust
+	 * daemon never had, so `netcfgd-proto` has no such member. */
+	ncfg_proto_str_t  no_rollback;
 } ncfg_proto_apply_t;
 
 /*

@@ -242,6 +242,7 @@ static int fully_populated(ncfg_proto_request_kind_t kind, ncfg_proto_request_t 
 		out->u.apply.strand_credentials.count = 1u;
 		out->u.apply.restart_wedged.items = one;
 		out->u.apply.restart_wedged.count = 1u;
+		out->u.apply.no_rollback = ncfg_proto_str("flashed");
 		return 1;
 	case NCFG_PROTO_REQ_EXPLAIN:
 		out->u.explain.kind = NCFG_PROTO_SUBJECT_INTERFACE;

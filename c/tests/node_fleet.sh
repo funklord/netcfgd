@@ -140,6 +140,16 @@ XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" show --at "$host" 2>&1 | grep -q 'works o
 check $? "  a command that works here is refused with --at, not done here"
 XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" 2>&1 | grep -q 'confirm-within'
 check $? "  and apply --at without a window is refused before anything is asked"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" --confirm-within 0 2>&1 | grep -q 'no-rollback'
+check $? "  and a window of no seconds is no window (0316)"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" --no-rollback "$host" 2>&1 | grep -q 'needs --reason'
+check $? "  --no-rollback is refused with no reason"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" --no-rollback beef --reason why 2>&1 | grep -q 'same host'
+check $? "  and when it names another host than --at"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --no-rollback "$host" --reason why 2>&1 | grep -q 'is for .apply --at'
+check $? "  and on this machine"
+XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at estate --no-rollback estate --reason why 2>&1 | grep -q 'many hosts'
+check $? "  and on many hosts"
 
 # `ncfg tui --at A` (10.700), in a pty for four seconds: drawn, then `e` for
 # the events pane, which says it has no stream from another node, and `q`
@@ -306,6 +316,24 @@ check $? "  confirm --at A confirms it"
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" confirm --at "$host" > "$R/confirm2.out" 2>&1
 [ $? -ne 0 ] && grep -q 'no confirm window' "$R/confirm2.out"
 check $? "  and a second confirm finds no window ($(head -c 60 "$R/confirm2.out"))"
+# A change that must not be undone (0316): refused while a window would undo it,
+# carried out with no window otherwise, and said loudly on A with who and why.
+XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" apply --at "$host" --confirm-within 60 > /dev/null 2>&1
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" apply --at "$host" --no-rollback "$host" \
+	--reason "firmware flashed" > "$R/stands0.out" 2>&1
+[ $? -ne 0 ] && grep -q 'would undo this' "$R/stands0.out"
+check $? "--no-rollback is refused while a window would undo it ($(tail -1 "$R/stands0.out" | cut -c1-50))"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" confirm --at "$host" > /dev/null 2>&1
+XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" apply --at "$host" --no-rollback "$host" \
+	--reason "firmware flashed" > "$R/stands.out" 2>&1
+check $? "--no-rollback applies on A ($(tail -1 "$R/stands.out" | cut -c1-50))"
+grep -q 'nothing will undo' "$R/stands.out"
+check $? "  and the one who asked is told nothing will undo it"
+grep -q 'NO ROLLBACK:.*firmware flashed' "$R/a3.log" && grep -q 'NO ROLLBACK: applied' "$R/a3.log"
+check $? "  and A logs who asked, why, and that it stands"
+XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" confirm --at "$host" > "$R/stands2.out" 2>&1
+[ $? -ne 0 ] && grep -q 'no confirm window' "$R/stands2.out"
+check $? "  and no window was armed"
 # And one nobody confirms undoes itself: what stops an operator who cut
 # themselves off from being cut off for good.
 XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" apply --at "$host" --confirm-within 3 \

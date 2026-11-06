@@ -201,6 +201,11 @@ typedef struct {
 	/* Interfaces whose wedged backend may be killed and restarted (0141). */
 	ncfg_cli_list_t restart_wedged;
 	ncfg_cli_list_t strand_credentials;
+	/* `--no-rollback HOST --reason TEXT` (0316): an apply on another host with
+	 * no way back. HOST says `--at` again, so a recalled line cannot land on
+	 * another machine. */
+	const char     *no_rollback;
+	const char     *reason;
 	ncfg_cli_wifi_t wifi;
 	ncfg_cli_control_t control;
 } ncfg_cli_options_t;

@@ -175,6 +175,10 @@ static const char usage_text[] =
     "                           answering nothing on this interface (0141)\n"
     "  --allow-disruption IFACE consent to disrupting one guarded interface;\n"
     "                           repeatable, and deliberately not a blanket --force\n"
+    "  --no-rollback HOST       with `--at HOST`, HOST said twice on purpose: apply\n"
+    "                           with no confirm window, for a change that cannot be\n"
+    "                           undone. Needs --reason; that host logs it as an error\n"
+    "  --reason TEXT            why, for that host's log\n"
     "  --strand-credentials DEV consent to unmanaging one device while leaving a\n"
     "                           key on it that cannot be revoked; repeatable.\n"
     "                           `on_unmanage = \"clear\"` is the durable answer\n"
@@ -349,6 +353,16 @@ int ncfg_cli_parse(int count, char *const *arguments, ncfg_cli_options_t *option
 			}
 			options->confirm.has = 1;
 			options->confirm.value = seconds;
+		} else if (strcmp(argument, "--no-rollback") == 0) {
+			if (!(options->no_rollback = take_value("--no-rollback", count, arguments,
+			    &index, err, err_size))) {
+				return 0;
+			}
+		} else if (strcmp(argument, "--reason") == 0) {
+			if (!(options->reason = take_value("--reason", count, arguments, &index,
+			    err, err_size))) {
+				return 0;
+			}
 		} else if (strcmp(argument, "--restart-wedged") == 0) {
 			if (!(value = take_value("--restart-wedged", count, arguments, &index,
 			    err, err_size))) {
@@ -524,6 +538,25 @@ int ncfg_cli_parse(int count, char *const *arguments, ncfg_cli_options_t *option
 		} else {
 			positional[(*positional_count)++] = argument;
 		}
+	}
+	/* Saying no window is what the zero is for (0094), so the rest of the way
+	 * this is an apply that declines one. */
+	if (options->no_rollback) {
+		if (options->confirm.has) {
+			ncfg_error_set(err, err_size, "--no-rollback and --confirm-within say opposite "
+			    "things: a window is a way back");
+			return 0;
+		}
+		if (!options->reason || !options->reason[0]) {
+			ncfg_error_set(err, err_size, "--no-rollback needs --reason TEXT, for the log "
+			    "of the host it cannot be undone on");
+			return 0;
+		}
+		options->confirm.has = 1;
+		options->confirm.value = 0;
+	} else if (options->reason) {
+		ncfg_error_set(err, err_size, "--reason goes with --no-rollback");
+		return 0;
 	}
 	return 1;
 }

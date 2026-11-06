@@ -313,6 +313,7 @@ static int answer_apply(ncfg_main_desk_t *desk, const ncfg_proto_apply_t *ask, n
     char *err, size_t err_size)
 {
 	ncfg_daemon_apply_ask_t wanted;
+	ncfg_confirm_window_t   open_window;
 	ncfg_journal_t          journal;
 	char                  **disruption = NULL;
 	char                  **strand = NULL;
@@ -325,6 +326,14 @@ static int answer_apply(ncfg_main_desk_t *desk, const ncfg_proto_apply_t *ask, n
 	if (!desk->loop) {
 		ncfg_error_set(err, err_size, "this daemon was given no way to change the "
 		    "machine, so it observes and reports and applies nothing");
+		return 0;
+	}
+	/* An open window would put this back when it closes, which is the one thing
+	 * the caller said must not happen (0316). */
+	if (ask->no_rollback.bytes &&
+	    ncfg_confirm_read_window(desk->loop->state->paths.run, &open_window)) {
+		ncfg_error_set(err, err_size, "a confirm window is open here, and it would undo this "
+		    "when it closes: settle it with `confirm` or `revert` first");
 		return 0;
 	}
 	if (!names_of(ask->allow_disruption, "allow_disruption name", &disruption,
@@ -354,6 +363,9 @@ static int answer_apply(ncfg_main_desk_t *desk, const ncfg_proto_apply_t *ask, n
 	names_free(wedged, wedged_count);
 	if (!encoded) {
 		return 0;
+	}
+	if (ask->no_rollback.bytes) {
+		ncfg_log_emitf("apply", NCFG_LOG_ERROR, "NO ROLLBACK: applied, and it stands");
 	}
 	encoded = ncfg_daemon_journal_encode(&journal, out, err, err_size);
 	ncfg_journal_free(&journal);
