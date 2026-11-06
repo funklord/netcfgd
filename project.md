@@ -12718,7 +12718,14 @@ it would take the one connection a test's fake serves, and it runs before every 
 
 The node is left up, as an agent is: the next look needs it, and starting it costs a
 second. Nothing asks for it on a machine used only locally, which `node_user.sh`
-checks. Whether it should also be a user unit is open (0313).
+checks.
+
+**No user daemon, for now.** The holder, 2026-11-06: "For now we only have netcfgd as
+root and clients as users"; a user daemon would hinge on needing something on each
+user, nothing does yet, and it stays that way "until we iron out all functionality".
+So no user unit, which closes what 0313 left open. Whether a node left up after its
+client exits already counts as one is put to the holder, and waits on fuzznet's coming
+account of its terms.
 
 **For the next pin:** fuzznet's sec 896 now has `add invite [delegable] [open|confirm]
 [LIFE]`, and a device asks for 15 minutes. The pin here is older. `ncfg join` and the
