@@ -1102,4 +1102,10 @@ netcfgd
 # Measured together with fuzznet at f1fdea6d: 2,383,200, which is -64,192 on
 # 2,447,392 and the 2,492,936 the program had reached since. The bss fell by
 # 4.6 MB with it, which is the resident gate's business rather than this one's.
-total 2383200
+#
+# 2026-11-06: 2,458,360, +75,160 at fuzznet 41eaf1a6, measured over the commits. Most is
+# fuzznet: its RAM delta and pressure ladder (secs 917, 920, 921) and the sections before
+# them, about +71,000 between the pin of 2,383,200 and this one. netcfgd's own share, about
+# +4,000, is `--no-rollback`, the store watch, the job for a slow request and the retry.
+# Its `make embedded` switches (sec 922) are the next thing to try against this figure.
+total 2458360
