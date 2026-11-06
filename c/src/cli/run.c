@@ -1457,8 +1457,11 @@ static int command_nodes(const ncfg_cli_options_t *options, const char **positio
 		why[0] = '\0';
 		if (!ncfg_fuzznet_root_members(run_dir, keys, sizeof(keys) / sizeof(keys[0]), &count,
 		        why, sizeof(why))) {
-			ncfg_error_set(why, sizeof(why), "%s", err);
-			return fail(why);
+			char both[NCFG_ERROR_MAX];
+
+			ncfg_error_set(both, sizeof(both), "%s; and this machine's netcfgd did not list "
+			               "its estate: %s", err, why);
+			return fail(both);
 		}
 	}
 	if (options->json) {

@@ -493,12 +493,14 @@ void ncfg_main_window::join_host()
 	if (!given || code.isEmpty()) {
 		return;
 	}
+	/* Straight to the status line: `note` hears only the pane in front, and this
+	 * is none. */
 	/* `ncfg join`, not the window's own copy of it: it starts this user's host,
 	 * asks, and waits out the host's answer, which is minutes at the most. */
 	auto *join = new QProcess(this);
 
 	join_button->setEnabled(false);
-	note(QStringLiteral("asking that host"));
+	status->setText(QStringLiteral("asking that host"));
 	connect(join, &QProcess::finished, this, [this, join](int code_out, QProcess::ExitStatus) {
 		const QString key = QString::fromUtf8(join->readAllStandardOutput()).trimmed();
 		const QString why = QString::fromUtf8(join->readAllStandardError()).trimmed();
@@ -506,7 +508,7 @@ void ncfg_main_window::join_host()
 		join->deleteLater();
 		join_button->setEnabled(true);
 		if (code_out != 0 || key.isEmpty()) {
-			note(QStringLiteral("that host did not let this user in: %1").arg(why));
+			status->setText(QStringLiteral("that host did not let this user in: %1").arg(why));
 			return;
 		}
 		nodes->addItem(key, key);
@@ -517,7 +519,7 @@ void ncfg_main_window::join_host()
 		if (failed == QProcess::FailedToStart) {
 			join->deleteLater();
 			join_button->setEnabled(true);
-			note(QStringLiteral("could not run ncfg to join that host"));
+			status->setText(QStringLiteral("could not run ncfg to join that host"));
 		}
 	});
 	join->start(QStringLiteral("ncfg"), {QStringLiteral("join"), code});

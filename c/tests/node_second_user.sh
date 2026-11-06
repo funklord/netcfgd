@@ -43,6 +43,12 @@ sleep 1
 "$R/ncfg" reload --run-dir "$R/run" > /dev/null 2>&1
 as 2 timeout 4 "$R/ncfg" monitor --json --run-dir "$R/run" > "$R/refused" 2>&1
 echo $? > "$R/refused.status"
+mkdir -p "$R/h1" "$R/h2"
+chmod 777 "$R/h1" "$R/h2"
+HOME=$R/h1 XDG_RUNTIME_DIR=$R/h1 as 1 timeout 4 "$R/ncfg" hosts --run-dir "$R/run" > "$R/hosts1" 2>&1
+echo $? > "$R/hosts1.status"
+HOME=$R/h2 XDG_RUNTIME_DIR=$R/h2 as 2 timeout 4 "$R/ncfg" hosts --run-dir "$R/run" > "$R/hosts2" 2>&1
+echo $? > "$R/hosts2.status"
 wait %2 2>/dev/null
 sleep 1
 kill -TERM $pid 2>/dev/null
@@ -57,5 +63,9 @@ grep -q '"event":"reloaded"' "$R/held"
 check $? "the user \`observe\` names holds the stream ($(head -c 40 "$R/held"))"
 [ "$(cat "$R/refused.status")" != 0 ] && grep -q 'would not hold' "$R/refused"
 check $? "another user is refused it ($(head -c 70 "$R/refused"))"
+[ "$(cat "$R/hosts1.status")" = 0 ]
+check $? "that user reads the estate's hosts from root ($(head -c 50 "$R/hosts1"))"
+[ "$(cat "$R/hosts2.status")" != 0 ]
+check $? "another user does not ($(head -c 70 "$R/hosts2"))"
 [ "$failed" -eq 0 ] && echo "node_second_user: all checks passed"
 exit "$failed"

@@ -21,6 +21,8 @@
  *   they are doing. The lock it takes to stop is kept to the exit, so a client arriving
  *   then waits and starts another. Typed by hand it stays up until stopped.
  *
+ *   A phone's is the app's child, so none of that is built there.
+ *
  * THE PORT
  *   Any free one. The host's daemon holds netcfgd's own, a machine has both,
  *   and this node starts every conversation it has.
@@ -52,6 +54,7 @@ static int given(int argc, char **argv, const char *option)
 	return 0;
 }
 
+#ifndef __ANDROID__
 /* How long nobody may hold it before it stops. Past fuzznet's kept replies: a host
  * started again numbers its messages from 0 on a new port, so the same request
  * within those few seconds is taken for a stranger's copy and dropped (its secs 737,
@@ -93,6 +96,7 @@ static void held_tick(void *context, uint64_t now)
 	}
 	(void)flock(fd, LOCK_UN);
 }
+#endif
 
 int ncfg_host_user_main(int argc, char **argv, int skip)
 {
@@ -109,10 +113,12 @@ int ncfg_host_user_main(int argc, char **argv, int skip)
 	}
 	args[count++] = argv[0];
 	for (at = 1 + skip; at < argc; at++) {
+#ifndef __ANDROID__
 		if (strcmp(argv[at], "--while-held") == 0) {
 			ext.tick = held_tick;
 			continue;
 		}
+#endif
 		args[count++] = argv[at];
 	}
 	if (!given(argc, argv, "--fuzznet-service")) {

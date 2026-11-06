@@ -112,9 +112,9 @@ code=$?
 [ $code -ne 0 ] && echo "$said" | grep -q 'no members'
 check $? "sealing to a group nobody is in says so ($(echo "$said" | head -c 50))"
 host=$(ask 'get prekey' | sed -n 's/^ok \(.*\)$/\1/p' | cut -c5-68)
-timeout 20 "$C" nodes member "$host" zone1 > "$R/member.out" 2>&1
+timeout 20 "$C" hosts member "$host" zone1 > "$R/member.out" 2>&1
 check $? "ncfg hosts member says this host is in zone1 ($(head -c 40 "$R/member.out"))"
-timeout 20 "$C" nodes member "$host" 'Zone One' > /dev/null 2>&1
+timeout 20 "$C" hosts member "$host" 'Zone One' > /dev/null 2>&1
 check "$([ $? -ne 0 ]; echo $?)" "  and refuses a group fuzznet's grammar would"
 printf '%s\n' "$key" | timeout 20 "$C" secret seal zone1 wg/key > "$R/seal.out" 2>&1
 check $? "ncfg secret seal seals the key to zone1 ($(head -c 44 "$R/seal.out"))"
