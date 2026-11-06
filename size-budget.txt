@@ -1107,5 +1107,5 @@ netcfgd
 # fuzznet: its RAM delta and pressure ladder (secs 917, 920, 921) and the sections before
 # them, about +71,000 between the pin of 2,383,200 and this one. netcfgd's own share, about
 # +4,000, is `--no-rollback`, the store watch, the job for a slow request and the retry.
-# Its `make embedded` switches (sec 922) are the next thing to try against this figure.
+# `make embedded` (sec 922) offers no more here: netcfgd already has its four services off.
 total 2458360
