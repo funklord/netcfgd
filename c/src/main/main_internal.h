@@ -329,6 +329,22 @@ typedef struct {
  * unreadable file.
  */
 /*
+ * fuzznet is the control protocol and must not fail (0316), and keeping it up is
+ * fuzznet's job. Seeing that it is in trouble and saying so is this: an error in
+ * the log, said again hourly, and `<run>/node-problem`, which `ncfg status` shows
+ * and which is there only while the problem is.
+ */
+typedef struct {
+	uint64_t looked;
+	uint64_t said;
+} ncfg_main_store_watch_t;
+
+void ncfg_main_node_problem(const char *run_dir, const char *why);
+int  ncfg_main_store_trouble(const char *dir, char *why, size_t why_size);
+void ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir, const char *dir,
+    uint64_t now);
+
+/*
  * A request an operator of this node's estate sent over fuzznet's remote hop
  * (decision 0311, `daemon_node.c`): `request` the line, `contact` whether
  * fuzznet says the sender is a contact rather than a member. The answer's

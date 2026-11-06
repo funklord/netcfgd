@@ -30,14 +30,95 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/daemon.h"
+#include "ncfg/log.h"
 #include "ncfg/observed.h"
 #include "ncfg/proto.h"
 #include "ncfg_fuzznet.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/statvfs.h>
+#include <unistd.h>
+
+/* Less than this free and the store is about to stop taking writes. */
+#define STORE_FREE_MIN (256u * 1024u)
+/* statvfs asks the kernel and writes nothing, which is why this can be often: a
+ * write to prove the store takes one would wear a router's flash. */
+#define STORE_LOOK_SECONDS 10u
+/* A problem nobody has fixed is said again, so it does not scroll away. */
+#define STORE_SAY_AGAIN_SECONDS 3600u
+
+void ncfg_main_node_problem(const char *run_dir, const char *why)
+{
+	char  path[1100];
+	char  next[1120];
+	FILE *file;
+
+	(void)snprintf(path, sizeof(path), "%s/node-problem", run_dir);
+	if (!why) {
+		(void)unlink(path);
+		return;
+	}
+	(void)snprintf(next, sizeof(next), "%s.new", path);
+	file = fopen(next, "w");
+	if (!file) {
+		return;
+	}
+	(void)fprintf(file, "why=%s\n", why);
+	if (fclose(file) != 0 || rename(next, path) != 0) {
+		(void)unlink(next);
+	}
+}
+
+int ncfg_main_store_trouble(const char *dir, char *why, size_t why_size)
+{
+	struct statvfs seen;
+
+	if (statvfs(dir, &seen) != 0) {
+		(void)snprintf(why, why_size, "its store %s cannot be looked at: %s", dir,
+		    strerror(errno));
+		return 1;
+	}
+	if (seen.f_flag & ST_RDONLY) {
+		(void)snprintf(why, why_size, "its store %s is on a read-only filesystem", dir);
+		return 1;
+	}
+	if ((uint64_t)seen.f_bavail * seen.f_frsize < STORE_FREE_MIN) {
+		(void)snprintf(why, why_size, "its store %s is out of space", dir);
+		return 1;
+	}
+	return 0;
+}
+
+void ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir, const char *dir,
+    uint64_t now)
+{
+	char why[1200];
+	int  trouble;
+
+	if (watch->looked && now - watch->looked < STORE_LOOK_SECONDS) {
+		return;
+	}
+	watch->looked = now;
+	trouble = ncfg_main_store_trouble(dir, why, sizeof(why));
+	if (!trouble) {
+		if (watch->said) {
+			ncfg_log_emitf("node", NCFG_LOG_NOTE, "the fuzznet store takes writes again");
+			ncfg_main_node_problem(run_dir, NULL);
+			watch->said = 0;
+		}
+		return;
+	}
+	if (watch->said && now - watch->said < STORE_SAY_AGAIN_SECONDS) {
+		return;
+	}
+	ncfg_log_emitf("node", NCFG_LOG_ERROR, "fuzznet is in trouble: %s", why);
+	ncfg_main_node_problem(run_dir, why);
+	watch->said = now;
+}
 
 /* The line, NUL-ended, into `out`: 0 where it does not fit or holds a NUL. */
 static int line_of(const char *request, size_t length, char *out, size_t out_size)

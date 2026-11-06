@@ -389,6 +389,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	done; \
 	echo "== tests/node_serve.sh"; \
 	sh tests/node_serve.sh || fail=1; \
+	echo "== tests/node_store_trouble.sh"; \
+	sh tests/node_store_trouble.sh || fail=1; \
 	echo "== tests/node_fleet.sh"; \
 	timeout 400 sh tests/node_fleet.sh || fail=1; \
 	echo "== tests/host_user.sh"; \

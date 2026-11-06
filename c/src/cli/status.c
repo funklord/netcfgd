@@ -556,6 +556,29 @@ static int node_value(const char *text, const char *name, char *out, size_t out_
 	return 0;
 }
 
+/* `<run>/node-problem`, there only while fuzznet is in trouble (0316). */
+static void print_node_problem(const char *run_dir)
+{
+	char   path[1100];
+	char   text[1400];
+	char   why[1300];
+	FILE  *file;
+	size_t got;
+
+	(void)snprintf(path, sizeof(path), "%s/node-problem", run_dir);
+	file = fopen(path, "r");
+	if (!file) {
+		return;
+	}
+	got = fread(text, 1u, sizeof(text) - 1u, file);
+	(void)fclose(file);
+	text[got] = '\0';
+	if (node_value(text, "why", why, sizeof(why))) {
+		ncfg_out_line("");
+		ncfg_out_writef("FUZZNET IS IN TROUBLE: %s\n", why);
+	}
+}
+
 void ncfg_cli_print_node(const char *run_dir)
 {
 	char  path[1100];
@@ -568,6 +591,7 @@ void ncfg_cli_print_node(const char *run_dir)
 	if (!run_dir) {
 		return;
 	}
+	print_node_problem(run_dir);
 	(void)snprintf(path, sizeof(path), "%s/node", run_dir);
 	file = fopen(path, "r");
 	if (!file) {

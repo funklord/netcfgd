@@ -866,10 +866,15 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
 	}
 	node = ncfg_node_open(dir, made, err, sizeof(err));
 	if (!node) {
-		ncfg_log_emitf("node", NCFG_LOG_WARNING,
+		char why[NCFG_ERROR_MAX + 32u];
+
+		ncfg_log_emitf("node", NCFG_LOG_ERROR,
 		    "no fuzznet node, and the network is configured as usual: %s", err);
+		(void)snprintf(why, sizeof(why), "it did not open: %s", err);
+		ncfg_main_node_problem(where->run, why);
 		return NULL;
 	}
+	ncfg_main_node_problem(where->run, NULL);
 	ncfg_node_key_hex(ncfg_node_key(node), key);
 	if (ncfg_node_found(node) == NCFG_NODE_BESIDE_FACE) {
 		ncfg_log_emitf("node", NCFG_LOG_INFO,
@@ -906,6 +911,9 @@ typedef struct {
 	ncfg_main_ask_t           ask;
 	/* Where the events told since the last tick wait to be published. */
 	ncfg_main_subscribers_t  *subscribers;
+	const char               *store;
+	const char               *run_dir;
+	ncfg_main_store_watch_t   store_watch;
 } node_driven_t;
 
 /*
@@ -1154,6 +1162,13 @@ static int node_tick(void *context)
 		driven->permitted = 1;
 		node_permits(driven->policy);
 	}
+	{
+		struct timespec now;
+
+		(void)clock_gettime(CLOCK_MONOTONIC, &now);
+		ncfg_main_store_look(&driven->store_watch, driven->run_dir, driven->store,
+		    (uint64_t)now.tv_sec);
+	}
 	/* **netcfgd's events into fuzznet's** (10.703), from the tick, which is
 	 * the one place fuzznet takes them: for another host reading `events`
 	 * from a cursor, since no stream crosses the estate (fuzznet sec 866).
@@ -1225,6 +1240,8 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	}
 	memset(&driven, 0, sizeof(driven));
 	driven.run = run;
+	driven.store = ncfg_node_dir(node);
+	driven.run_dir = run_dir;
 	ncfg_main_outside_begin(run, &driven.outside);
 	driven.seen = seen;
 	driven.policy = policy;
