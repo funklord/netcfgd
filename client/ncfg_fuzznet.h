@@ -167,6 +167,15 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
 int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size);
 
 /*
+ * For a caller fuzznet will not hold, with no control socket to turn to, as under
+ * `observe = "any"`, which has no read to grant: the same stream's shape, a line
+ * every two seconds that says only to look, read through `eventlog` as a held
+ * line is. What the tier lets call, so no permit stands in the way. The descriptor,
+ * or -1 with a sentence.
+ */
+int ncfg_fuzznet_events_tick(const char *run_dir, char *why, size_t why_size);
+
+/*
  * What a held stream's lines mean (10.731). A line says only an event's kind, so
  * hearing one asks the `eventlog` procedure for what happened since the cursor, and
  * those are the event lines the control socket would have sent, whole. Where that

@@ -1456,6 +1456,64 @@ static int events_read(ncfg_fuzznet_events_t *events)
 	return 1;
 }
 
+int ncfg_fuzznet_events_tick(const char *run_dir, char *why, size_t why_size)
+{
+	static const char line[] = "event net-tick -\n";
+	char              path[1100];
+	char              reply[256];
+	int               silent = 0;
+	int               ends[2];
+	pid_t             child;
+
+	if (!ncfg_fuzznet_daemon_socket(run_dir, path, sizeof(path))) {
+		say(why, why_size, "no fuzznet socket path fits");
+		return -1;
+	}
+	if (!ncfg_fuzznet_ask(path, "call eventlog -", reply, sizeof(reply), 2000, &silent, why,
+	        why_size)) {
+		return -1;
+	}
+	if (strncmp(reply, "ok ", 3) != 0) {
+		say(why, why_size, "fuzznet would not hold netcfgd's events: %.120s", reply);
+		return -1;
+	}
+	/* A socket, as every reader of a stream here reads with `recv`. */
+	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, ends) != 0) {
+		say(why, why_size, "no socket pair: %s", strerror(errno));
+		return -1;
+	}
+	/* Twice forked, as `user_host_spawn` is, for a window that never reaps, and only
+	 * what is safe after a fork in a process with threads. The reader going takes
+	 * this with it by the write failing, and the daemon going ends the stream as a
+	 * held one ends. */
+	child = fork();
+	if (child == 0) {
+		const struct timespec look = { 2, 0 };
+		int                   fd;
+
+		if (fork() != 0) {
+			_exit(0);
+		}
+		for (fd = 3; fd < 1024; fd++) {
+			if (fd != ends[1]) {
+				(void)close(fd);
+			}
+		}
+		while (user_host_answers(path) && write(ends[1], line, sizeof(line) - 1u) > 0) {
+			(void)nanosleep(&look, NULL);
+		}
+		_exit(0);
+	}
+	(void)close(ends[1]);
+	if (child < 0) {
+		say(why, why_size, "no process to watch with: %s", strerror(errno));
+		(void)close(ends[0]);
+		return -1;
+	}
+	(void)waitpid(child, NULL, 0);
+	return ends[0];
+}
+
 void ncfg_fuzznet_events_begin(ncfg_fuzznet_events_t *events, const char *run_dir)
 {
 	memset(events, 0, sizeof(*events));

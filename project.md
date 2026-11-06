@@ -12686,6 +12686,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.739 A caller with no stream and no socket is read to
+
+`any` has no read to grant, so under `observe = "any"` only the control socket gave an
+ordinary user a stream, which held 0309's last step back. `eventlog` is a call, and
+`any=x` reaches a call. `ncfg_fuzznet_events_tick` hands such a caller a socket on which
+a small child writes `event net-tick -` every two seconds, and the reader takes that
+line as it takes a held one and reads `eventlog`. So `ncfg monitor`, the TUI and the
+GUI's stream need no second path. It comes after the control socket, not before, as a
+held stream's word is immediate and this is up to two seconds late. It ends when the
+reader goes, by the write failing, or when the daemon does, by the look failing.
+`node_second_user.sh` hears a reload this way as a real second uid.
+
+**Left alone: the live scripts' wait on `netcfgd.sock`,** which 10.732 lists. Moving 42
+scripts buys a user nothing until the holder says what a daemon with no node does.
+
 ## 10.738 Two client roles, and a host daemon that lives with its clients
 
 0314 is the decision. A client configures this machine through the root netcfgd and
@@ -12849,7 +12864,8 @@ daemon with no node. Every request and stream a client makes now goes over fuzzn
 first.
 
 **What is left of 0309, which is all in this tree:**
-- `observe = "any"` needs fuzznet's held-stream right, agreed by the holder 2026-11-05.
+- ~~`observe = "any"` needs fuzznet's held-stream right~~ -- not built there, and its
+  direction is named users, so 10.739 serves that tier without one.
 - A daemon with no node has the socket as its only way in. A node that will not open
   should say so and stop, or keep this; that is the decision left.
 - 42 live scripts and the unit tests wait on `netcfgd.sock` as "the daemon is up", and

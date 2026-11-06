@@ -7165,7 +7165,15 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 	if (fd < 0) {
 		fd = connect_socket(socket_path, err, err_size);
 		if (fd < 0) {
-			return NULL;
+			char why[NCFG_ERROR_MAX];
+
+			if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+				fd = ncfg_fuzznet_events_tick(run_dir, why, sizeof(why));
+			}
+			if (fd < 0) {
+				return NULL;
+			}
+			held = 1;
 		}
 	}
 

@@ -525,14 +525,26 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 	 * it will not hold. */
 	fd = -1;
 	why[0] = '\0';
+	run_dir[0] = '\0';
 	if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
 		fd = ncfg_fuzznet_events_hold(run_dir, why, sizeof(why));
+	} else {
+		run_dir[0] = '\0';
 	}
 	if (fd >= 0) {
 		held = 1;
 		ncfg_fuzznet_events_begin(&events, run_dir);
 	} else {
 		fd = connect_to(socket_path, NULL, err, err_size);
+		if (fd < 0 && run_dir[0]) {
+			char tick_why[NCFG_ERROR_MAX];
+
+			fd = ncfg_fuzznet_events_tick(run_dir, tick_why, sizeof(tick_why));
+			if (fd >= 0) {
+				held = 1;
+				ncfg_fuzznet_events_begin(&events, run_dir);
+			}
+		}
 		if (fd < 0) {
 			if (strstr(why, "would not hold")) {
 				ncfg_error_set(err, err_size, "%s", why);

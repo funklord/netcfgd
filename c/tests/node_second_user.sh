@@ -5,7 +5,7 @@
 # SO_PEERCRED like any other. `make test` runs it; where a machine has no
 # subordinate ids for this user it says so and passes, having looked at nothing.
 #
-# HOW IT STOPS: the namespace's whole script is under `timeout 40`, the daemon
+# HOW IT STOPS: the namespace's whole script is under `timeout 60`, the daemon
 # under its own `timeout -k 2 30`, each client under `timeout`. The directory is
 # mktemp's, checked by shape, removed at the end.
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -53,8 +53,25 @@ wait %2 2>/dev/null
 sleep 1
 kill -TERM $pid 2>/dev/null
 wait $pid 2>/dev/null
+# `any` has no read to grant, so with the control socket gone a user is read to.
+printf 'global {\n\tcontrol {\n\t\tobserve = "any"\n\t}\n}\n' > "$R/conf/netcfgd.conf"
+rm -f "$R/run/hidden.sock"
+timeout -k 2 16 "$R/netcfgd" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
+	--fuzznet-dir "$R/a" --fuzznet-arg --no-log-file > "$R/log2" 2>&1 &
+pid=$!
+n=0
+until [ -S "$R/run/netcfgd.sock" ] || [ $n -gt 20 ]; do sleep 0.5; n=$((n + 1)); done
+sleep 2
+chmod 755 "$R/run"
+mv "$R/run/netcfgd.sock" "$R/run/hidden.sock"
+as 2 timeout 8 "$R/ncfg" monitor --json --run-dir "$R/run" > "$R/any" 2>&1 &
+sleep 1
+"$R/ncfg" reload --run-dir "$R/run" > /dev/null 2>&1
+wait $!
+kill -TERM $pid 2>/dev/null
+wait $pid 2>/dev/null
 INSIDE
-timeout 40 unshare --map-auto --map-root-user --net sh "$R/inside.sh" "$R"
+timeout 60 unshare --map-auto --map-root-user --net sh "$R/inside.sh" "$R"
 failed=0
 check() { # $1 0 for ok, $2 what
 	if [ "$1" -eq 0 ]; then printf '%-72s ok\n' "$2"; else printf '%-72s FAILED\n' "$2"; failed=1; fi
@@ -67,5 +84,7 @@ check $? "another user is refused it ($(head -c 70 "$R/refused"))"
 check $? "that user reads the estate's hosts from root ($(head -c 50 "$R/hosts1"))"
 [ "$(cat "$R/hosts2.status")" != 0 ]
 check $? "another user does not ($(head -c 70 "$R/hosts2"))"
+grep -q '"event":"reloaded"' "$R/any"
+check $? "under \`any\`, with no socket, a user hears it by eventlog ($(head -c 60 "$R/any"))"
 [ "$failed" -eq 0 ] && echo "node_second_user: all checks passed"
 exit "$failed"

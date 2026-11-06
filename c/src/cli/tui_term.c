@@ -286,9 +286,19 @@ static int subscribe(const char *socket_path, char *err, size_t err_size)
 		return -1;
 	}
 	if (connect(fd, (const struct sockaddr *)&address, sizeof(address)) < 0) {
+		char why[NCFG_ERROR_MAX];
+		int  ticking = -1;
+
 		ncfg_error_set(err, err_size, "cannot subscribe to events: %s", strerror(errno));
 		(void)close(fd);
-		return -1;
+		if (ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir))) {
+			ticking = ncfg_fuzznet_events_tick(run_dir, why, sizeof(why));
+		}
+		if (ticking >= 0) {
+			events_held = 1;
+			ncfg_fuzznet_events_begin(&events_read, run_dir);
+		}
+		return ticking;
 	}
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_MONITOR;
