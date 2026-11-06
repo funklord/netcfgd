@@ -93,14 +93,14 @@ int ncfg_main_store_trouble(const char *dir, char *why, size_t why_size)
 	return 0;
 }
 
-void ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir, const char *dir,
-    uint64_t now)
+const char *ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir,
+    const char *dir, uint64_t now)
 {
 	char why[1200];
 	int  trouble;
 
 	if (watch->looked && now - watch->looked < STORE_LOOK_SECONDS) {
-		return;
+		return NULL;
 	}
 	watch->looked = now;
 	trouble = ncfg_main_store_trouble(dir, why, sizeof(why));
@@ -109,15 +109,17 @@ void ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run_dir, c
 			ncfg_log_emitf("node", NCFG_LOG_NOTE, "the fuzznet store takes writes again");
 			ncfg_main_node_problem(run_dir, NULL);
 			watch->said = 0;
+			return "net-store-ok";
 		}
-		return;
+		return NULL;
 	}
 	if (watch->said && now - watch->said < STORE_SAY_AGAIN_SECONDS) {
-		return;
+		return NULL;
 	}
 	ncfg_log_emitf("node", NCFG_LOG_ERROR, "fuzznet is in trouble: %s", why);
 	ncfg_main_node_problem(run_dir, why);
 	watch->said = now;
+	return "net-store-bad";
 }
 
 /* The line, NUL-ended, into `out`: 0 where it does not fit or holds a NUL. */

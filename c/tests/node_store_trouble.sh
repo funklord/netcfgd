@@ -53,6 +53,19 @@ check $? "a daemon with a healthy store serves fuzznet"
 ! timeout 5 "$C" status --run-dir "$R/run" 2>&1 | grep -q 'IN TROUBLE'
 check $? "  and \`ncfg status\` says no trouble"
 
+# What an operator on another host reads: fuzznet's events, held from here.
+timeout 35 python3 -I -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"get events\n")
+out = open(sys.argv[2], "wb", buffering=0)
+while True:
+    b = s.recv(4096)
+    if not b: break
+    out.write(b)' "$R/fz.sock" "$R/events" &
+listener=$!
+pids="$pids $listener"
+sleep 0.5
+
 dd if=/dev/zero of="$R/store/filler" bs=64k count=64 2>/dev/null
 says 'IN TROUBLE.*out of space'
 check $? "a store that fills is said in \`ncfg status\`"
@@ -68,6 +81,11 @@ while timeout 5 "$C" status --run-dir "$R/run" 2>&1 | grep -q 'IN TROUBLE' && [ 
 done
 [ $n -lt 50 ] && grep -q 'takes writes again' "$R/a.log"
 check $? "  and when it has room the line goes, and the log says so"
+n=0
+until grep -q 'net-store-ok' "$R/events" 2>/dev/null || [ $n -gt 10 ]; do sleep 0.5; n=$((n + 1)); done
+grep -q 'net-store-bad' "$R/events" && grep -q 'net-store-ok' "$R/events"
+check $? "  and fuzznet's events said both, for another host ($(tr '\n' ' ' < "$R/events" | cut -c1-50))"
+kill -KILL $listener 2>/dev/null
 
 # Read-only under a running daemon cannot be staged here: it holds files open for
 # writing, so the remount is refused as busy. Starting on one is the same fault, and

@@ -12731,9 +12731,16 @@ it stays up, reads answer, and `add record` says `the record was not kept`. Star
 it serves. Started read-only: **it does not open** (`the claim ... would not open`), and
 that is the case 0316 says must not exist. Told to fuzznet. `node_store_trouble.sh` holds
 netcfgd's half: full, read-only at start and unopenable are each said in `ncfg status` and
-logged. A store going read-only under a running daemon is not staged, as the remount is
+logged, and a running daemon publishes `net-store-bad` and `net-store-ok`, which
+`monitor --at`, the TUI and the GUI print as they print any `net-` subject. A store going read-only under a running daemon is not staged, as the remount is
 refused while files are open for writing, so `ST_RDONLY` in `ncfg_main_store_trouble` has
 not run with a daemon up.
+
+**`make live` ends at `sandbox_writes.sh` because that is its last step,** not because
+anything is left behind it: `hwsim`, `association`, `pppoe-session` and `delegation` run
+before it and skip without root. `make vm-sandbox` and `make vm-skipped` are what run
+them. fuzznet's smallest host (its sec 912) reaches a daemon as an ordinary `call NAME`
+from a paired peer, so nothing here changes for it.
 
 **It stops at once, and for a while it did not (0315).** Stopping at once first made
 every second `--at` hang 3 s with `the host did not answer`: fuzznet keeps a reply a few

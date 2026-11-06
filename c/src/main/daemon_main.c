@@ -1164,10 +1164,14 @@ static int node_tick(void *context)
 	}
 	{
 		struct timespec now;
+		const char     *told;
 
 		(void)clock_gettime(CLOCK_MONOTONIC, &now);
-		ncfg_main_store_look(&driven->store_watch, driven->run_dir, driven->store,
+		told = ncfg_main_store_look(&driven->store_watch, driven->run_dir, driven->store,
 		    (uint64_t)now.tv_sec);
+		if (told) {
+			(void)ncfg_node_publish_event(told);
+		}
 	}
 	/* **netcfgd's events into fuzznet's** (10.703), from the tick, which is
 	 * the one place fuzznet takes them: for another host reading `events`
