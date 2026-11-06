@@ -592,12 +592,12 @@ static size_t serve_do(void *ctx, const uint8_t *caller, const fzn_peer_t *from,
 }
 
 static const fzn_daemon_procedure_t procedures[] = {
-	{ NCFG_NODE_PROCEDURE_STATUS, serve_status },
-	{ NCFG_NODE_PROCEDURE_ASK, serve_ask },
-	{ NCFG_NODE_PROCEDURE_ASK_PART, serve_ask_part },
-	{ NCFG_NODE_PROCEDURE_DO, serve_do },
-	{ NCFG_NODE_PROCEDURE_EVENTLOG, serve_eventlog },
-	{ NCFG_NODE_PROCEDURE_HOSTS, serve_hosts },
+	{ NCFG_NODE_PROCEDURE_STATUS, serve_status, NULL },
+	{ NCFG_NODE_PROCEDURE_ASK, serve_ask, NULL },
+	{ NCFG_NODE_PROCEDURE_ASK_PART, serve_ask_part, NULL },
+	{ NCFG_NODE_PROCEDURE_DO, serve_do, NULL },
+	{ NCFG_NODE_PROCEDURE_EVENTLOG, serve_eventlog, NULL },
+	{ NCFG_NODE_PROCEDURE_HOSTS, serve_hosts, NULL },
 };
 
 static void serve_tick(void *ctx, uint64_t now)

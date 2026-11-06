@@ -12738,8 +12738,10 @@ Pressure comes down a step per 30 s, so the line outlasts the trouble by a minut
 `node_store_trouble.sh` holds it, and `node_ram_host.sh` runs every call netcfgd needs on a
 read-only store with `netcfgd.sock` removed: `status`, `ask`, `askpart`, `hosts`, `eventlog`,
 `get events`, `list peer` and the remote hop, an apply with its window among them. A store going read-only under a running daemon is not
-staged, as the remount is refused while files are open for writing, and a store that cannot
-be read is still refused: whether a host then runs with no identity is the holder's.
+staged, as the remount is refused while files are open for writing. A key that will not read
+makes fuzznet's own daemon wait for it (its sec 920, no keyless mode, the holder calling it a
+startup problem). netcfgd's `ncfg_node_open` still fails there, measured at 41eaf1a6: no node,
+the own loop and `netcfgd.sock`, said in `ncfg status`, and nothing tries again until a restart.
 
 **A delegating odhcp6c could not be stopped, and only `vm-delegation` could see it.**
 `ncfg_dhcp6_start` made `<run>/dhcp` and never `<run>/odhcp6c`, where it told the client
