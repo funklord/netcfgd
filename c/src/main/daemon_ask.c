@@ -38,6 +38,8 @@
 #include "ncfg/node.h"
 #include "ncfg/proto.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,6 +89,14 @@ void ncfg_main_ask_free(ncfg_main_ask_t *ask)
 	for (at = 0; at < NCFG_MAIN_ASK_SLOTS; at++) {
 		slot_clear(&ask->slots[at]);
 		part_clear(&ask->parts[at]);
+	}
+	/* A job still out is left to the exit: waiting would hold a stop for as long
+	 * as a silent radio does, and all it holds is its own copy. */
+	if (atomic_load(&ask->job.state) == 1) {
+		(void)pthread_detach(ask->job.thread);
+	} else if (atomic_load(&ask->job.state) == 2) {
+		(void)pthread_join(ask->job.thread, NULL);
+		ncfg_buf_free(&ask->job.out);
 	}
 }
 
@@ -437,7 +447,80 @@ static int answer(ncfg_main_ask_t *ask, const ncfg_proto_request_t *request,
 		ncfg_error_set(err, err_size, "this daemon takes no requests over fuzznet yet");
 		return 0;
 	}
+	if (ask->freshen) {
+		ask->freshen(ask->freshen_context);
+	}
 	return ask->answer(ask->context, request, peer, arrival, out, err, err_size);
+}
+
+/* The job an `ask` on this thread would run the waiting in, where there is no slot:
+ * fuzznet's loop has no thread of its own for a caller to wait on. */
+static _Thread_local ncfg_main_ask_job_t *asking;
+
+void ncfg_main_ask_capture(ncfg_main_ask_job_t *job)
+{
+	asking = job;
+}
+
+ncfg_main_ask_job_t *ncfg_main_ask_capturing(void)
+{
+	return asking;
+}
+
+static void *job_run(void *context)
+{
+	ncfg_main_ask_job_t *job = context;
+
+	ncfg_buf_init(&job->out, NCFG_PROTO_MAX_LINE * 64u);
+	job->err[0] = '\0';
+	job->result = job->work(job->context, &job->out, job->err, sizeof(job->err));
+	if (job->free_context) {
+		job->free_context(job->context);
+	}
+	atomic_store(&job->state, 2);
+	return NULL;
+}
+
+/* The thread is done, or was never there; its answer goes with it. */
+static void job_clear(ncfg_main_ask_job_t *job)
+{
+	if (atomic_load(&job->state) == 2) {
+		(void)pthread_join(job->thread, NULL);
+		ncfg_buf_free(&job->out);
+	}
+	job->work = NULL;
+	atomic_store(&job->state, 0);
+}
+
+static int job_is_for(const ncfg_main_ask_job_t *job, uint64_t asked, const uint8_t *key,
+    const ncfg_peer_t *peer)
+{
+	if (job->asked != asked || job->remote != (key != NULL)) {
+		return 0;
+	}
+	return key ? memcmp(job->key, key, sizeof(job->key)) == 0
+	           : job->uid == (unsigned long)peer->uid;
+}
+
+/* Start what the answer handed back. 0 where no thread could be had, and the work
+ * is then done here, as it was before there was a job. */
+static int job_start(ncfg_main_ask_job_t *job, uint64_t asked, const uint8_t *key,
+    const ncfg_peer_t *peer, uint64_t now_ms)
+{
+	job->asked = asked;
+	job->until = now_ms + ASK_KEPT_MS;
+	job->remote = key != NULL;
+	if (key) {
+		memcpy(job->key, key, sizeof(job->key));
+	} else {
+		job->uid = (unsigned long)peer->uid;
+	}
+	atomic_store(&job->state, 1);
+	if (pthread_create(&job->thread, NULL, job_run, job) != 0) {
+		atomic_store(&job->state, 0);
+		return 0;
+	}
+	return 1;
 }
 
 size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t *peer,
@@ -536,18 +619,67 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	}
 	ncfg_buf_init(&out, NCFG_PROTO_MAX_LINE * 64u);
 	err[0] = '\0';
-	if (!answer(ask, &message.u.request, key ? NULL : peer, key, arrival, &out, err, sizeof(err))) {
-		ncfg_buf_free(&out);
-		ncfg_proto_message_free(&message);
-		if (staged) {
-			part_clear(staged);
+	{
+		ncfg_main_ask_job_t *job = &ask->job;
+		const int            state = atomic_load(&job->state);
+		int                  answered;
+
+		if (state == 2 && !job_is_for(job, asked, key, peer) && now_ms > job->until) {
+			job_clear(job); /* nobody came back for it */
 		}
-		return refused(err[0] ? err : "the request was not answered", reply, cap, escaped_cap);
+		if (atomic_load(&job->state) != 0 && job_is_for(job, asked, key, peer)) {
+			ncfg_proto_message_free(&message);
+			if (atomic_load(&job->state) == 1) {
+				ncfg_buf_free(&out);
+				return refused(NCFG_MAIN_ASK_WORKING, reply, cap, escaped_cap);
+			}
+			ncfg_buf_free(&out);
+			out = job->out;
+			answered = job->result;
+			(void)snprintf(err, sizeof(err), "%s", job->err);
+			ncfg_buf_init(&job->out, 0);
+			job_clear(job);
+			if (staged) {
+				part_clear(staged);
+			}
+			if (!answered) {
+				ncfg_buf_free(&out);
+				return refused(err[0] ? err : "the request was not answered", reply, cap,
+				    escaped_cap);
+			}
+			goto answered;
+		}
+		ncfg_main_ask_capture(atomic_load(&job->state) == 0 ? job : NULL);
+		answered = answer(ask, &message.u.request, key ? NULL : peer, key, arrival, &out, err,
+		    sizeof(err));
+		ncfg_main_ask_capture(NULL);
+		if (job->work && atomic_load(&job->state) == 0) {
+			if (job_start(job, asked, key, peer, now_ms)) {
+				ncfg_buf_free(&out);
+				ncfg_proto_message_free(&message);
+				return refused(NCFG_MAIN_ASK_WORKING, reply, cap, escaped_cap);
+			}
+			answered = job->work(job->context, &out, err, sizeof(err));
+			if (job->free_context) {
+				job->free_context(job->context);
+			}
+			job->work = NULL;
+		}
+		if (!answered) {
+			ncfg_buf_free(&out);
+			ncfg_proto_message_free(&message);
+			if (staged) {
+				part_clear(staged);
+			}
+			return refused(err[0] ? err : "the request was not answered", reply, cap,
+			    escaped_cap);
+		}
 	}
 	ncfg_proto_message_free(&message);
 	if (staged) {
 		part_clear(staged); /* run; a staged request is run once */
 	}
+answered:
 	if (ncfg_buf_failed(&out)) {
 		ncfg_buf_free(&out);
 		return refused("the answer did not fit in memory", reply, cap, escaped_cap);

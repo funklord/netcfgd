@@ -12748,6 +12748,24 @@ udhcpc's start already made its own. `delegation.sh` also grepped wording the pl
 since changed. It passes in the guest now, a real kea to a real odhcp6c, and `dhcp_test`
 holds the directory, as `vm-delegation` is not in `make check`.
 
+**`make live` tested a daemon nobody runs.** 41 of 42 live scripts started a daemon on a run
+directory of their own, and such a daemon had no node, so they ran the own loop and
+`netcfgd.sock` while every real machine runs fuzznet's. A daemon on any run directory has a
+node there now (`<run>/fuzznet-store`, `--fuzznet-dir ""` for none), so they test what ships.
+The first run of that found four things:
+- **`cat > netcfgd.conf; ncfg apply` could remove every interface.** The own loop takes a
+  configuration event ahead of a request in one round. fuzznet's calls a procedure before
+  the tick, so an apply could be answered from a read taken as the file was truncated.
+  `node_freshen` now takes what the outside loop has heard before any `ask` is answered.
+  `nat.sh`, `rules.sh`, the shaping and ingress scripts all met it.
+- **A wifi scan held the whole node deaf for up to ten seconds.** A procedure has to answer
+  at once and the socket's thread had hidden the wait. A slow request now runs on a thread
+  and `ask` answers `netcfgd is working on that; ask again`, which the client does for up to
+  15 s, so `status` and the remote hop go on.
+- **`NCFG_LOG` did not reach fuzznet.** It is passed as `--log-level` now, which governs its
+  log file. Its stderr follows no level, told to fuzznet, so `log_shape.sh` runs with no node.
+- **A stop takes about a second**, fuzznet's next pass. `restart.sh` allows two.
+
 **A mesh_point's parent leaked on every reload.** `interface_kind_release` names each arm
 that holds anything, and 5401de14 added `mesh_point` to the read and write tables and not
 to it, so a daemon on a mesh router lost the name at each compile. LeakSanitizer named it in

@@ -50,6 +50,8 @@
 #include "ncfg/document.h"
 #include "ncfg/observed.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -416,11 +418,45 @@ typedef struct {
 /* The longest request staged in pieces: a configuration drop-in's worth. */
 #define NCFG_MAIN_ASK_PART_MAX (256u * 1024u)
 
+/*
+ * A request that waits on something else, run on a thread of its own while
+ * fuzznet's loop goes on (10.738). A procedure has to answer at once, so `ask` says
+ * NCFG_MAIN_ASK_WORKING and the caller asks again; a wifi scan held the whole node
+ * deaf for up to ten seconds before this. One at a time: a second such request is
+ * done in place. Only its own caller is given the answer.
+ */
+#define NCFG_MAIN_ASK_WORKING "netcfgd is working on that; ask again"
+
+typedef struct {
+	atomic_int     state; /* 0 nothing, 1 running, 2 done */
+	pthread_t      thread;
+	uint64_t       asked;
+	uint64_t       until;
+	int            remote;
+	uint8_t        key[32];
+	unsigned long  uid;
+	int          (*work)(void *context, ncfg_buf_t *out, char *err, size_t err_size);
+	void          *context;
+	void         (*free_context)(void *context);
+	ncfg_buf_t     out;
+	int            result;
+	char           err[NCFG_ERROR_MAX];
+} ncfg_main_ask_job_t;
+
+/* Where `ncfg_main_answer_after_the_loop` hands the waiting, on this thread. */
+void                 ncfg_main_ask_capture(ncfg_main_ask_job_t *job);
+ncfg_main_ask_job_t *ncfg_main_ask_capturing(void);
+
 typedef struct {
 	/* The socket's dispatcher and its desk: `ncfg_main_answer`. NULL answers
 	 * nothing but `hello`, which is this module's. */
 	ncfg_daemon_answer_fn       answer;
 	void                       *context;
+	/* What a daemon in fuzznet's loop has to take in before it answers: NULL for
+	 * none. `node_freshen` says why. */
+	void (*freshen)(void *context);
+	void                       *freshen_context;
+	ncfg_main_ask_job_t         job;
 	const ncfg_control_t       *control;
 	const ncfg_remote_policy_t *remote;
 	ncfg_authz_roots_t          roots;

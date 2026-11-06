@@ -96,9 +96,11 @@ printf 'global { control { observe = "any" } }\n' > "$work/etc/netcfgd.conf"
 say() {
 	rm -f "$work/run/netcfgd.sock"
 	if [ -n "${1:-}" ]; then
-		NCFG_LOG="$1" "$build/netcfgd" $daemon_flags > "$work/said" 2>&1 &
+		# No node: fuzznet's stderr does not follow a level yet, only its log file
+		# does, which is told to it. This is about netcfgd's own lines.
+		NCFG_LOG="$1" "$build/netcfgd" $daemon_flags --fuzznet-dir "" > "$work/said" 2>&1 &
 	else
-		"$build/netcfgd" $daemon_flags > "$work/said" 2>&1 &
+		"$build/netcfgd" $daemon_flags --fuzznet-dir "" > "$work/said" 2>&1 &
 	fi
 	daemon=$!
 	waited=0

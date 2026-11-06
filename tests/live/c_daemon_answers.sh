@@ -131,7 +131,8 @@ export NCFG_CONFIG_DIR="$work/etc"
 NCFG_RUN_DIR="$work/run-rust" "$repo/target/debug/netcfgd" --no-apply-on-start \
 	> "$work/rust.log" 2>&1 &
 rust_pid=$!
-NCFG_RUN_DIR="$work/run-c" "$repo/c/netcfgd" --no-apply-on-start \
+# No node: the Rust daemon has none, and this compares the two over the socket.
+NCFG_RUN_DIR="$work/run-c" "$repo/c/netcfgd" --fuzznet-dir "" --no-apply-on-start \
 	> "$work/c.log" 2>&1 &
 c_pid=$!
 

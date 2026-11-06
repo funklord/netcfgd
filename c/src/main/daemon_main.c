@@ -855,8 +855,16 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
 	char         err[NCFG_ERROR_MAX];
 	int          made = 0;
 	ncfg_node_t *node;
+	char         beside[NCFG_NODE_DIR_MAX];
 
 	err[0] = '\0';
+	/* A daemon on another run directory has a node as well, in that directory: the
+	 * path every machine runs, so that `make live` tests it (10.738). Saying
+	 * `--fuzznet-dir ""` is how to have none. */
+	if (!named && strcmp(where->run, NCFG_RUN_DIR_DEFAULT) != 0) {
+		(void)snprintf(beside, sizeof(beside), "%s/fuzznet-store", where->run);
+		named = beside;
+	}
 	if (!ncfg_node_where(named, strcmp(where->run, NCFG_RUN_DIR_DEFAULT) == 0, dir, &made,
 	    err, sizeof(err))) {
 		if (err[0]) {
@@ -864,7 +872,7 @@ static ncfg_node_t *open_node(const options_t *options, const ncfg_main_where_t 
 		}
 		return NULL;
 	}
-	node = ncfg_node_open(dir, made, err, sizeof(err));
+	node = ncfg_node_open(dir, made || named == beside, err, sizeof(err));
 	if (!node) {
 		char why[NCFG_ERROR_MAX + 32u];
 
@@ -913,7 +921,11 @@ typedef struct {
 	ncfg_main_subscribers_t  *subscribers;
 	const char               *run_dir;
 	ncfg_main_store_watch_t   store_watch;
+	/* A stop a round taken for a request heard, for the next tick to hand on. */
+	int                       stopping;
 } node_driven_t;
+
+#define NODE_FRESHEN_FDS 256u
 
 /*
  * fuzznet's `local/permit/SUBJECT` in step with netcfgd's tiers (10.688,
@@ -1152,6 +1164,31 @@ static void node_ready(void *context, int fd)
 	ncfg_main_outside_ready(driven->run, &driven->outside, fd);
 }
 
+/*
+ * **What the outside loop has heard, before a request reads it.** The own loop
+ * takes a configuration event ahead of a request in one round, and fuzznet's calls
+ * a procedure before the tick. So `cat > netcfgd.conf; ncfg apply` could be answered
+ * from a read taken as the file was truncated, and that plan removed everything.
+ * The last step of 0309 would have shipped it: `tests/live/nat.sh` found it the day
+ * its daemon first had a node.
+ */
+static void node_freshen(void *context)
+{
+	node_driven_t           *driven = context;
+	ncfg_main_round_report_t report;
+	int                      fds[NODE_FRESHEN_FDS];
+	size_t                   count;
+	size_t                   at;
+
+	count = ncfg_main_outside_fds(driven->run, fds, NODE_FRESHEN_FDS);
+	for (at = 0; at < count; at++) {
+		ncfg_main_outside_ready(driven->run, &driven->outside, fds[at]);
+	}
+	if (ncfg_main_outside_tick(driven->run, &driven->outside, &report) && report.stopping) {
+		driven->stopping = 1;
+	}
+}
+
 static int node_tick(void *context)
 {
 	node_driven_t           *driven = context;
@@ -1199,7 +1236,8 @@ static int node_tick(void *context)
 			}
 		}
 	}
-	return ncfg_main_outside_tick(driven->run, &driven->outside, &report) && report.stopping;
+	return (ncfg_main_outside_tick(driven->run, &driven->outside, &report) && report.stopping) ||
+	    driven->stopping;
 }
 
 /*
@@ -1249,6 +1287,8 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 	driven.policy = policy;
 	driven.roots = ncfg_authz_roots_default();
 	driven.ask.answer = ncfg_main_answer;
+	driven.ask.freshen = node_freshen;
+	driven.ask.freshen_context = &driven;
 	driven.ask.context = desk;
 	driven.ask.control = &policy->control;
 	driven.ask.remote = &policy->remote;
@@ -1274,6 +1314,28 @@ static int serve_node(ncfg_node_t *node, const options_t *options, const ncfg_ma
 			ported = 1;
 		}
 		args[arg_count++] = options->fuzznet_args[at];
+	}
+	/* `NCFG_LOG` turns the daemon down, and fuzznet is the daemon too: its lines went
+	 * to the same place at any level. Only a name fuzznet's option takes, as it
+	 * refuses to start on any other. */
+	{
+		static const char *const levels[] = { "critical", "error", "warning", "note", "info",
+			"verbose", "debug", "trace" };
+		static char              level_arg[32];
+		const char              *level = getenv("NCFG_LOG");
+		size_t                   which;
+
+		for (which = 0; level && which < sizeof(levels) / sizeof(levels[0]); which++) {
+			if (strcmp(level, levels[which]) == 0 && arg_count < 32u) {
+				(void)snprintf(level_arg, sizeof(level_arg), "--log-level=%s", level);
+				args[arg_count++] = level_arg;
+			}
+		}
+	}
+	/* A daemon on another run directory keeps out of this user's fuzznet log, which
+	 * is `~/.local/state`, as its store keeps out of theirs. */
+	if (strcmp(run_dir, NCFG_RUN_DIR_DEFAULT) != 0 && arg_count < 32u) {
+		args[arg_count++] = "--no-log-file";
 	}
 	if (!named && arg_count < 32u) {
 		(void)snprintf(socket_arg, sizeof(socket_arg), "--socket=%s/fuzznet.sock", run_dir);

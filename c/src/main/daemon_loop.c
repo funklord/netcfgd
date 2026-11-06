@@ -45,6 +45,7 @@
  *   0 with a sentence -- and the log is for the things that are neither a
  *   failure of the round nor worth nothing.
  */
+#include "main_internal.h"
 #include "loop_internal.h"
 
 #include "ncfg/log.h"
@@ -248,6 +249,14 @@ static _Thread_local ncfg_main_waiting_t *delivering;
 int ncfg_main_answer_after_the_loop(int (*work)(void *context, ncfg_buf_t *out, char *err,
     size_t err_size), void *context, void (*free_context)(void *context))
 {
+	ncfg_main_ask_job_t *asking = ncfg_main_ask_capturing();
+
+	if (asking && work && !delivering) {
+		asking->work = work;
+		asking->context = context;
+		asking->free_context = free_context;
+		return 1;
+	}
 	if (!delivering || !work) {
 		return 0;
 	}

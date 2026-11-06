@@ -124,7 +124,9 @@ check() {
 # from the document it read then.
 start_daemon() {
 	rm -f "$work/run/netcfgd.sock" "$work/run/remote.sock"
-	"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
+	# No node: this is about the socket's own connection cap, which `ncfg` would
+	# otherwise go round through fuzznet.
+	"$build/netcfgd" $daemon_flags --fuzznet-dir "" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 	daemon=$!
 	i=0
 	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$i" -lt 50 ]; do

@@ -593,6 +593,31 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	return 1;
 }
 
+/*
+ * The pages of `asked`, asking again while the daemon says it is still at it: a
+ * procedure answers at once, so a slow request runs beside fuzznet's loop and is
+ * collected. Bounded by the longest wait such a request has, with room over.
+ */
+static int pages_of_work(asked_t *asked, char **out, size_t *length, char *err, size_t err_size)
+{
+	const struct timespec look = { 0, 100000000L };
+	int                   looks;
+
+	for (looks = 0;; looks++) {
+		int joined = ncfg_status_pages_join(fuzznet_page, asked, out, length, err, err_size);
+
+		if (!joined || !strstr(*out, "working on that; ask again")) {
+			return joined;
+		}
+		if (looks >= 150) {
+			return joined; /* said to the caller as it stands */
+		}
+		free(*out);
+		*out = NULL;
+		(void)nanosleep(&look, NULL);
+	}
+}
+
 int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *err,
     size_t err_size)
 {
@@ -955,7 +980,7 @@ int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *reques
 		(void)snprintf(asked.staged, sizeof(asked.staged), "@%016llx",
 		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
 	}
-	return ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
+	return pages_of_work(&asked, out, length, err, err_size);
 }
 
 int ncfg_fuzznet_run_dir_of(const char *socket_path, char *out, size_t out_size)
@@ -1005,7 +1030,7 @@ int ncfg_fuzznet_ask_here(const char *run_dir, const char *request, char **out, 
 		(void)snprintf(asked.staged, sizeof(asked.staged), "@%016llx",
 		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
 	}
-	joined = ncfg_status_pages_join(fuzznet_page, &asked, out, length, err, err_size);
+	joined = pages_of_work(&asked, out, length, err, err_size);
 	*nothing_ran = !joined && !asked.ran_maybe;
 	return joined;
 }

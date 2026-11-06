@@ -131,8 +131,9 @@ daemon=
 # disposition ends the process, so `TimeoutStopSec` -- 90 seconds here -- never
 # comes into it. A daemon that started blocking on the way out would push
 # every reboot and every upgrade by up to that long, silently.
-check "SIGTERM ends it in well under a second" \
-	"$([ "$took" -lt 1000 ] && echo prompt || echo "slow: ${took}ms")" "prompt"
+# Two seconds rather than one: fuzznet's loop ends on its next pass, about a second.
+check "SIGTERM ends it within two seconds" \
+	"$([ "$took" -lt 2000 ] && echo prompt || echo "slow: ${took}ms")" "prompt"
 
 # 0134, asserted rather than asserted about: stopping the daemon must not take
 # the network with it.
