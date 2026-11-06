@@ -12736,6 +12736,13 @@ logged, and a running daemon publishes `net-store-bad` and `net-store-ok`, which
 refused while files are open for writing, so `ST_RDONLY` in `ncfg_main_store_trouble` has
 not run with a daemon up.
 
+**A delegating odhcp6c could not be stopped, and only `vm-delegation` could see it.**
+`ncfg_dhcp6_start` made `<run>/dhcp` and never `<run>/odhcp6c`, where it told the client
+to write its pid; odhcp6c says nothing when that fails, so the one handle was missing.
+udhcpc's start already made its own. `delegation.sh` also grepped wording the plan had
+since changed. It passes in the guest now, a real kea to a real odhcp6c, and `dhcp_test`
+holds the directory, as `vm-delegation` is not in `make check`.
+
 **`make live` ends at `sandbox_writes.sh` because that is its last step,** not because
 anything is left behind it: `hwsim`, `association`, `pppoe-session` and `delegation` run
 before it and skip without root. `make vm-sandbox` and `make vm-skipped` are what run

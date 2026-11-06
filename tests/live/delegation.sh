@@ -236,7 +236,7 @@ CONF
 # client whose lease it is waiting for, which stops the apply and means the
 # router never comes up at all. A tunnel taught that once already.
 check "the address waits for the delegation rather than failing" \
-	"$(grep -c 'waiting on a delegated prefix from wan0; nothing planned' "$work/plan.txt" \
+	"$(grep -c 'waiting on a delegated prefix from wan0, so nothing is planned' "$work/plan.txt" \
 		|| true)" "1"
 check "and so does the advertisement, rather than being planned to fail" \
 	"$(grep -c 'before advertising' "$work/plan.txt" || true)" "1"

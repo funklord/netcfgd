@@ -905,6 +905,13 @@ int ncfg_dhcp6_start(const char *run, const char *iface, const char *request,
 			    "runs with", iface, (int)adopted, pid_path);
 			return 1;
 		}
+		/* **Its pid file's directory is ours to make.** odhcp6c says nothing when
+		 * it cannot write the file and carries on, and that file is the only
+		 * handle there is, so a client started without this could not be stopped. */
+		if (!ncfg_dhcp_client_dir(run, "odhcp6c", dir, sizeof(dir), err, err_size) ||
+		    !ncfg_backend_make_dir(dir, 0755, err, err_size)) {
+			return 0;
+		}
 		program = program_for(machine->odhcp6c_program, "odhcp6c", &owned);
 		if (!program) {
 			/* Between the two asks above something took it away, which is a

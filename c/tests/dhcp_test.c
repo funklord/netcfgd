@@ -1158,6 +1158,11 @@ static void a_dhcp6_start_carries_the_document_s_request(const char *base)
 	 * since the host module landed. */
 	(void)snprintf(hook, sizeof(hook), "%s/hooks/pd-eth6", where);
 	check(testdir_exists(hook), "  and leaves the prefix hook where it told odhcp6c to look");
+	/* odhcp6c does not make this and says nothing when it cannot write its pid
+	 * there, which `tests/live/delegation.sh` found as a client nothing could stop. */
+	(void)snprintf(hook, sizeof(hook), "%s/odhcp6c", where);
+	check(testdir_exists(hook), "  and makes the directory its pid file goes in");
+	(void)snprintf(hook, sizeof(hook), "%s/hooks/pd-eth6", where);
 	said = testdir_read(hook, NULL);
 	check(said && strstr(said, "${PREFIXES:-}") != NULL,
 	    "  which reads odhcp6c's PREFIXES");
