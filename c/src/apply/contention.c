@@ -8,9 +8,16 @@
  *     <run>/NetworkManager/devices/<ifindex>
  *     <run>/systemd/netif/links/<ifindex>
  *
- *   and, for liveness, `<proc>/<pid>/comm` for every numeric entry under
- *   `<proc>`. It opens nothing else, writes nothing, and signals nothing:
- *   netcfgd reports here and the operator decides.
+ *   one for all of them, `<etc>/config/network`, for OpenWrt's netifd; and, for
+ *   liveness, `<proc>/<pid>/comm` for every numeric entry under `<proc>`. It
+ *   opens nothing else, writes nothing, and signals nothing: netcfgd reports
+ *   here and the operator decides.
+ *
+ * WHY NETIFD IS READ FROM ITS CONFIGURATION
+ *   netifd keeps no state file: it answers over ubus, and section 1 constraint 3
+ *   keeps a bus off the core's path. Its configuration says what it was told to
+ *   hold, which is the claim. This reads UCI only to answer that, naming no
+ *   setting and importing nothing, so 0019 stands (project.md 10.746).
  *
  * WHY A PROCESS NAME IS CONSULTED AT ALL
  *   `process.h` forbids finding a process by name, and is right to: an
@@ -67,6 +74,7 @@
  */
 static const char *const network_manager_names[] = { "NetworkManager" };
 static const char *const networkd_names[] = { "systemd-network", "systemd-networkd" };
+static const char *const netifd_names[] = { "netifd" };
 
 /* ------------------------------------------------------------------------ *
  * Small things
@@ -226,19 +234,22 @@ static int named(const char *const *names, size_t count, const char *name)
  * the direction that keeps the guard, rather than the one that starts a second
  * supplicant on somebody else's radio.
  */
-static void running_daemons(const char *proc_root, int *network_manager, int *networkd)
+static void running_daemons(const char *proc_root, int *network_manager, int *networkd,
+    int *netifd)
 {
 	DIR                 *entries = opendir(proc_root);
 	const struct dirent *found;
 
 	*network_manager = 0;
 	*networkd = 0;
+	*netifd = 0;
 	if (!entries) {
 		*network_manager = 1;
 		*networkd = 1;
+		*netifd = 1;
 		return;
 	}
-	while ((*network_manager == 0 || *networkd == 0) &&
+	while ((*network_manager == 0 || *networkd == 0 || *netifd == 0) &&
 	    (found = readdir(entries)) != NULL) {
 		char   path[512];
 		char   comm[NCFG_PROGRAM_MAX + 16];
@@ -274,6 +285,9 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 			if (named(networkd_names, sizeof(networkd_names) / sizeof(*networkd_names),
 			    name)) {
 				*networkd = 1;
+			}
+			if (named(netifd_names, sizeof(netifd_names) / sizeof(*netifd_names), name)) {
+				*netifd = 1;
 			}
 		}
 		(void)fclose(file);
@@ -332,6 +346,136 @@ static int claims_under(const char *run_root, const char *directory, const char 
 	return 1;
 }
 
+/*
+ * The next word of a UCI line, quoted or not, or NULL at its end or at a comment.
+ * Advances `*at` past it, and writes into the line.
+ */
+static char *uci_word(char **at)
+{
+	char *word = *at;
+	char *end;
+	char  quote = '\0';
+
+	while (*word == ' ' || *word == '\t') {
+		word++;
+	}
+	if (*word == '\0' || *word == '#') {
+		*at = word;
+		return NULL;
+	}
+	if (*word == '\'' || *word == '"') {
+		quote = *word++;
+	}
+	end = word;
+	while (*end != '\0' && (quote ? *end != quote : *end != ' ' && *end != '\t')) {
+		end++;
+	}
+	*at = *end == '\0' ? end : end + 1;
+	*end = '\0';
+	return word;
+}
+
+/* Whether a value names `wanted`: the older `ifname` lists several in one word. */
+static int names_device(char *value, const char *wanted)
+{
+	char *word;
+
+	while ((word = uci_word(&value)) != NULL) {
+		if (strcmp(word, wanted) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Whether `<etc>/config/network` gives netifd the device `wanted`.
+ *
+ * An `interface` section's `device` or `ifname`, and a `device` section's `name`
+ * or `ports`: a bridge netifd makes and each port of it. Nothing else, as a
+ * `rule` or a `route` has an `interface` that is no device, and `@lan` names a
+ * section and so matches nothing here. No file means no claim.
+ */
+static int netifd_configures(const char *etc_root, const char *wanted)
+{
+	char  path[1024];
+	char  line[LINE_MAX_BYTES];
+	FILE *file;
+	int   lines = 0;
+	int   in_interface = 0;
+	int   in_device = 0;
+	int   found = 0;
+	int   written;
+
+	written = snprintf(path, sizeof(path), "%s/config/network", etc_root);
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	while (!found && lines++ < LINE_LIMIT && fgets(line, (int)sizeof(line), file)) {
+		char *at = trim(line);
+		char *kind = uci_word(&at);
+		char *key;
+
+		if (!kind) {
+			continue;
+		}
+		key = uci_word(&at);
+		if (!key) {
+			continue;
+		}
+		if (strcmp(kind, "config") == 0) {
+			in_interface = strcmp(key, "interface") == 0;
+			in_device = strcmp(key, "device") == 0;
+		} else if (strcmp(kind, "option") == 0 || strcmp(kind, "list") == 0) {
+			if ((in_interface && (strcmp(key, "device") == 0 ||
+			    strcmp(key, "ifname") == 0)) ||
+			    (in_device && (strcmp(key, "name") == 0 ||
+			    strcmp(key, "ports") == 0))) {
+				char *value = uci_word(&at);
+
+				found = value && names_device(value, wanted);
+			}
+		}
+	}
+	(void)fclose(file);
+	return found;
+}
+
+/* Which of `claims` netifd is configured to hold, as `claims_under` answers. */
+static int netifd_claims(const char *etc_root, const ncfg_interface_claim_t *claims,
+    size_t claim_count, char ***names, size_t *count)
+{
+	size_t at;
+
+	*names = NULL;
+	*count = 0u;
+	if (claim_count == 0u) {
+		return 1;
+	}
+	*names = calloc(claim_count, sizeof(**names));
+	if (!*names) {
+		return 0;
+	}
+	for (at = 0u; at < claim_count; at++) {
+		if (!claims[at].name || !netifd_configures(etc_root, claims[at].name)) {
+			continue;
+		}
+		(*names)[*count] = duplicate(claims[at].name);
+		if (!(*names)[*count]) {
+			return 0;
+		}
+		(*count)++;
+	}
+	if (*count > 1u) {
+		qsort(*names, *count, sizeof(**names), compare_names);
+	}
+	return 1;
+}
+
 /* Put one contender into the answer, taking the names with it. */
 static int push(ncfg_contenders_t *out, const char *name, const char *remedy, char **names,
     size_t count)
@@ -371,6 +515,7 @@ void ncfg_contention_machine(ncfg_contention_where_t *out)
 	out->run_root = "/run";
 	out->proc_root = "/proc";
 	out->run_root_is_the_machines = 1;
+	out->etc_root = "/etc";
 }
 
 void ncfg_contenders_free(ncfg_contenders_t *found)
@@ -396,6 +541,7 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 	size_t count = 0u;
 	int    network_manager = 0;
 	int    networkd = 0;
+	int    netifd = 0;
 
 	if (!out) {
 		ncfg_error_set(err, err_size, "there is nowhere to put what was found");
@@ -411,7 +557,7 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 	if (!run_root_is_ours(where)) {
 		return 1;
 	}
-	running_daemons(where->proc_root, &network_manager, &networkd);
+	running_daemons(where->proc_root, &network_manager, &networkd, &netifd);
 
 	/*
 	 * `NetworkManager` writes `<run>/NetworkManager/devices/<ifindex>`. The
@@ -474,6 +620,35 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 				ncfg_contenders_free(out);
 				ncfg_error_set(err, err_size,
 				    "there was no memory to record what systemd-networkd claims");
+				return 0;
+			}
+		} else {
+			release_names(names, count);
+		}
+	}
+
+	/*
+	 * OpenWrt's netifd, on every stock router. Its file says what it holds and
+	 * has no way of saying it has stepped aside, so a stopped netifd is the
+	 * withdrawal: `/etc/init.d/network stop`, or the device taken out of it.
+	 */
+	names = NULL;
+	count = 0u;
+	if (netifd && where->etc_root) {
+		if (!netifd_claims(where->etc_root, claims, claim_count, &names, &count)) {
+			release_names(names, count);
+			ncfg_contenders_free(out);
+			ncfg_error_set(err, err_size,
+			    "there was no memory to read what netifd claims");
+			return 0;
+		}
+		if (count > 0u) {
+			if (!push(out, "netifd", "take {} out of /etc/config/network, then "
+			    "`/etc/init.d/network reload`", names, count)) {
+				release_names(names, count);
+				ncfg_contenders_free(out);
+				ncfg_error_set(err, err_size,
+				    "there was no memory to record what netifd claims");
 				return 0;
 			}
 		} else {

@@ -802,6 +802,9 @@ typedef struct {
 	/* Where to look for running processes. */
 	const char *proc_root;
 	int         run_root_is_the_machines;
+	/* Where OpenWrt's `config/network` is, which is all netifd says of what it
+	 * holds without a bus. NULL asks nothing of netifd. */
+	const char *etc_root;
 } ncfg_contention_where_t;
 
 /*

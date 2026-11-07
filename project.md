@@ -12683,6 +12683,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.746 The manager a stock router already has
+
+`contention.c` knew NetworkManager and systemd-networkd, and every stock OpenWrt runs
+**netifd**, which appeared once in this document, in passing. So the first install on a real
+router would have put two managers on one interface in silence, which is the failure that file
+exists to prevent, and `packaging/procd/netcfgd`'s `START=21` assumes they coexist.
+
+netifd keeps no state file; it answers over ubus, and constraint 3 keeps a bus off the core's
+path. **So the claim is its configuration**: `<etc>/config/network`, an `interface` section's
+`device` or `ifname`, a `device` section's `name` or `ports`, with a running `netifd` as the
+liveness, as for the other two. This is detection and imports nothing, so 0019 stands, and it
+feeds what the others feed: the warning, and the refusal of a second supplicant.
+
+**Rejected: `ubus call network.device status`**, the live answer, as a process per look on
+the observe path and a word of netifd's protocol in the core. **Rejected: disabling netifd on
+install**, as an installer that takes down the only network on a router with no console is the
+lockout `confirm` exists to prevent. Which of the two a router keeps is the operator's, and
+the remedy says how. Wireless is not read: `/etc/config/wireless` names radios and a
+`wifi-iface`, and netifd's hostapd comes up under a name netcfgd would not have claimed.
+
+`make hull-malta` is the witness: stock netifd, told of `eth0` by OpenWrt itself, and a document
+naming the same device. netcfgd says `netifd also manages eth0`.
+
 ## 10.745 Every local user holds the events
 
 10.739 read to a user under `observe = "any"`, as `any` had no read to grant: a child

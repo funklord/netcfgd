@@ -227,6 +227,8 @@ static void networkd_link_as_written(unsigned index, const char *sample)
 	free(body);
 }
 
+static char etc_root[PATH_BYTES];
+
 static void process(unsigned pid, const char *comm)
 {
 	char path[PATH_BYTES];
@@ -252,6 +254,8 @@ static void here(ncfg_contention_where_t *where)
 	where->run_root = run_root;
 	where->proc_root = proc_root;
 	where->run_root_is_the_machines = 0;
+	(void)snprintf(etc_root, sizeof(etc_root), "%s/etc", run_root);
+	where->etc_root = etc_root;
 }
 
 /* The contender with this name, or NULL. */
@@ -636,6 +640,79 @@ static void state_from_another_namespace_claims_nothing(const char *dir)
 	ncfg_contenders_free(&found);
 }
 
+/*
+ * OpenWrt's netifd keeps no state file, so what it was told is the claim: the
+ * shape below is a stock `/etc/config/network`, with the two spellings of a
+ * device, and two lines that must not count, as neither names a device it holds.
+ */
+static void netifd_holds_what_its_configuration_gives_it(void)
+{
+	static const ncfg_interface_claim_t claims[] = {
+		{ "eth0", 2u }, { "br-lan", 3u }, { "eth2", 4u }, { "wlan9", 5u },
+		{ "wlan7", 6u }, { "eth", 7u }
+	};
+	static const char stock[] =
+	    "config interface 'loopback'\n"
+	    "\toption device 'lo'\n"
+	    "\toption proto 'static'\n"
+	    "\n"
+	    "config device\n"
+	    "\toption name 'br-lan'\n"
+	    "\toption type 'bridge'\n"
+	    "\tlist ports 'eth0'\n"
+	    "\n"
+	    "config interface 'lan'\n"
+	    "\toption device 'br-lan'\n"
+	    "\n"
+	    "config interface 'wan'\n"
+	    "\toption ifname \"eth1 eth2\"\n"
+	    "\n"
+	    "config route\n"
+	    "\toption interface 'wlan9'\n"
+	    "\n"
+	    "# option device 'wlan7'\n";
+	ncfg_contention_where_t where;
+	ncfg_contenders_t       found;
+	const ncfg_contender_t *netifd;
+	char                    err[NCFG_ERROR_MAX];
+	char                    path[PATH_BYTES + 32];
+	char                    remedy[NCFG_REMEDY_MAX];
+
+	here(&where);
+	(void)snprintf(path, sizeof(path), "%s/config/network", etc_root);
+	put(path, stock);
+	process(4400u, "netifd");
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)), "netifd is looked at");
+	netifd = by_name(&found, "netifd");
+	check(netifd && netifd->interface_count == 3u &&
+	    strcmp(netifd->interfaces[0], "br-lan") == 0 &&
+	    strcmp(netifd->interfaces[1], "eth0") == 0 &&
+	    strcmp(netifd->interfaces[2], "eth2") == 0,
+	    "a bridge, its port and a word of `ifname`, and not a route's interface or a comment");
+	check(netifd && ncfg_contender_remedy_for(netifd, "eth0", remedy, sizeof(remedy)) &&
+	    strstr(remedy, "eth0") && strstr(remedy, "/etc/config/network"),
+	    "  and the remedy names the device and the file");
+	ncfg_contenders_free(&found);
+
+	where.etc_root = NULL;
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "netifd"), "told nothing of `/etc`, it asks nothing of netifd");
+	ncfg_contenders_free(&found);
+	here(&where);
+
+	stop_process(4400u);
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "netifd"), "a stopped netifd holds nothing, whatever its file says");
+	ncfg_contenders_free(&found);
+
+	process(4400u, "netifd");
+	forget(path);
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "netifd"), "and a netifd with no file was told nothing");
+	ncfg_contenders_free(&found);
+	stop_process(4400u);
+}
+
 /* Where the daemon reads when nobody has said otherwise, asserted by reading
  * it rather than by letting anything go near it. */
 static void the_machine_is_run_and_proc(void)
@@ -647,6 +724,7 @@ static void the_machine_is_run_and_proc(void)
 	check(strcmp(where.run_root, "/run") == 0 && strcmp(where.proc_root, "/proc") == 0 &&
 	    where.run_root_is_the_machines,
 	    "the machine's own roots are `/run` and `/proc`, and its namespace is asked about");
+	check(strcmp(where.etc_root, "/etc") == 0, "and netifd's is `/etc`");
 }
 
 /* ------------------------------------------------------------------------ *
@@ -883,6 +961,7 @@ int main(void)
 	each_contender_has_its_own_remedy();
 	a_stopped_daemon_has_no_claim_however_much_state_it_left();
 	a_proc_that_cannot_be_read_keeps_the_guard();
+	netifd_holds_what_its_configuration_gives_it();
 	state_from_another_namespace_claims_nothing(dir);
 	the_machine_is_run_and_proc();
 	the_measured_reply_parses();

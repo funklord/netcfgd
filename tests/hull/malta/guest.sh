@@ -56,6 +56,20 @@ say "a second plan says: $(head -3 /tmp/plan | cut -c1-100 | tr '\n' ' ')"
 grep -q 'nothing to do' /tmp/plan || failed=1
 /usr/bin/ncfg status > /tmp/status 2>&1
 say "ncfg status left with $?, $(grep -c . /tmp/status) line(s)"
+
+# And the manager a stock router has: netifd, told of `eth0` by OpenWrt itself and
+# running all along. Given the same device, netcfgd has to say so (10.746).
+say "netifd: $(pidof netifd | wc -w) process(es), $(grep -c eth0 /etc/config/network) eth0 line(s)"
+printf 'device eth0 {\n\tkind = "dummy"\n}\ninterface eth0 {\n\tconfig = "192.168.3.1/24"\n}\n' \
+	>> /etc/netcfgd/netcfgd.conf
+n=0
+until { /usr/bin/ncfg plan 2>&1; logread; } | grep -q 'netifd also manages' || [ $n -gt 30 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+told=$({ /usr/bin/ncfg plan 2>&1; logread; } | grep 'netifd also manages' | tail -1 | cut -c1-150)
+say "netcfgd says: ${told:-nothing of netifd}"
+[ -n "$told" ] || failed=1
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep netcfgd | tail -14 | sed 's/^/  log: /' >> "$out"
 	say "VERDICT bad"
