@@ -69,8 +69,37 @@ awk '
 		}
 	}' /verdict/test.log | sort > /verdict/sections
 cat /verdict/sections >> "$out"
+bad=0
 if grep -q 'NOT EXCUSED' /verdict/sections; then
 	grep -E '\bFAILED\b' /verdict/test.log | head -30 >> "$out"
+	bad=1
+fi
+
+# One estate of two byte orders, which no machine of either kind can test alone: a
+# node built for this machine, which can observe, and a MIPS operator and client.
+# All native first, so that a failure in the second pass is the second pass's.
+mkdir -p /native
+(cd /repo && tar -cf - --exclude='*.o' --exclude='*.a' --exclude='*.d' \
+	--exclude=fuzznet-build --exclude='fuzznet/build*' --exclude=.git \
+	--exclude=fuzznet/qtty --exclude=.build-flags --exclude=c/netcfgd --exclude=c/ncfg \
+	c client fuzznet VERSION) | tar -xf - -C /native
+(cd /native/c && PATH=${PATH#/tools:} timeout 900 make -j4 CC=gcc netcfgd ncfg) > /verdict/native.log 2>&1
+say "native build: exit $?"
+fleet() { # $1 the log, then the environment
+	log=$1
+	shift
+	(cd /native/c && env "$@" timeout 420 sh tests/node_fleet.sh) > "$log" 2>&1
+	echo "$?"
+}
+same=$(fleet /verdict/fleet-native.log PATH="${PATH#/tools:}")
+say "fleet, one byte order: exit $same, $(grep -c ' ok$' /verdict/fleet-native.log) ok"
+mixed=$(fleet /verdict/fleet-mixed.log PATH="${PATH#/tools:}" \
+	NODE_FLEET_OPERATOR=/work/c/fuzznet-build/fuzznetd NODE_FLEET_CLIENT=/work/c/ncfg)
+say "fleet, two byte orders: exit $mixed, $(grep -c ' ok$' /verdict/fleet-mixed.log) ok"
+grep -E '\bFAILED\b' /verdict/fleet-mixed.log | head -20 | cut -c1-140 >> "$out"
+[ "$same" -eq 0 ] && [ "$mixed" -eq 0 ] || bad=1
+
+if [ "$bad" -ne 0 ]; then
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

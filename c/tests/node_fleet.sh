@@ -31,9 +31,12 @@
 # and killed by pid at the end on every path (`trap`). The directory is
 # mktemp's, checked by shape, and removed at the end.
 here=$(cd "$(dirname "$0")/.." && pwd)
-N=$here/netcfgd
-F=$here/fuzznet-build/fuzznetd
-C=$here/ncfg
+# Each side nameable, so that `make hull-mips` can put a big-endian operator in
+# an estate with a little-endian node (10.747). The default is this build's.
+N=${NODE_FLEET_DAEMON:-$here/netcfgd}
+F=${NODE_FLEET_ROOT:-$here/fuzznet-build/fuzznetd}
+OPERATOR=${NODE_FLEET_OPERATOR:-$F}
+C=${NODE_FLEET_CLIENT:-$here/ncfg}
 R=$(mktemp -d /tmp/ncf.XXXXXX) || exit 1
 case "$R" in /tmp/ncf.?*) ;; *) echo "node_fleet: odd scratch $R"; exit 1;; esac
 failed=0
@@ -77,7 +80,7 @@ timeout -k 5 150 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-st
 	--fuzznet-arg "--udp-port=$PA" --fuzznet-arg --fuzznet-service=1 \
 	--fuzznet-arg --fuzznet-product=1 > "$R/a.log" 2>&1 &
 pids="$pids $!"
-XDG_RUNTIME_DIR=$R/xdg timeout -k 5 150 "$F" --fuzznet-dir="$R/b" --no-log-file \
+XDG_RUNTIME_DIR=$R/xdg timeout -k 5 150 "$OPERATOR" --fuzznet-dir="$R/b" --no-log-file \
 	"--udp-port=$PB" --fuzznet-service=1 --fuzznet-product=1 > "$R/b.log" 2>&1 &
 pids="$pids $!"
 B=$R/xdg/fuzznet/fuzznetd.sock
