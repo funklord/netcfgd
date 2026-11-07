@@ -12683,6 +12683,14 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.755 fuzznet 364241c: a removal a fork silently undid
+
+Past 60934e20, fuzznet fixed what touches this tree's fleet: a group's fork made again only the
+first 16 acts of a host it dropped, so a removal past those was silently undone (its sec 947,
+20261107T1636Z), and it keeps such an act's time (sec 946). Three commits of notes and shares
+at scale ride along; netcfgd holds no thousands of notes. No interface it calls changed. Its
+full gates were still running when it said to take this pin, and it will say if they fail.
+
 ## 10.754 An access point restarted under its first station, on every boot
 
 A pass of `hull-malta` read `wlan1 after 11 s: not connected`, with the handshake refused: *IE
