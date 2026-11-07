@@ -746,6 +746,8 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 	const ncfg_mesh_t        *mesh;
 	char                      command[96];
 	char                      detail[NCFG_ERROR_MAX];
+	char                      reply[NCFG_SUPPLICANT_REPLY_MAX];
+	int                       kind = NCFG_SUPPLICANT_REPLY_FAIL;
 	int                       mac_policy;
 	int                       randomise;
 	int                       joins;
@@ -780,8 +782,12 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 	}
 	/* Explicit, not assumed. 0015: a silent default is not a control, and this
 	 * is what keeps the document the only authority over what a supplicant
-	 * holds. */
-	if (!ncfg_supplicant_command(client, "SET update_config 0", detail, sizeof(detail))) {
+	 * holds. A `FAIL` is a supplicant built with no way to write its
+	 * configuration, as OpenWrt's `wpad` is, which has no such setting and no
+	 * such risk: refusing there stopped every apply on a stock router (10.747).
+	 * What is not an answer at all still is a failure. */
+	if (!ncfg_supplicant_request(client, "SET update_config 0", reply, sizeof(reply), &kind,
+	    detail, sizeof(detail))) {
 		ncfg_error_set(err, err_size, "could not pin update_config on %s: %s", device,
 		    detail);
 		ncfg_supplicant_client_free(client);

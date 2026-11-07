@@ -95,6 +95,11 @@ struct fake {
 	 * walk is cut short the way a hostapd too busy to reply cuts one (10.647).
 	 * 0 for never. */
 	size_t stations_silent_after;
+	/* A supplicant built with no way to write its configuration, as OpenWrt's
+	 * `wpad` is: it has no `update_config` to set (10.747). */
+	int    no_config_write;
+	/* A hostapd with no MIB commands, as OpenWrt builds it (10.749). */
+	int    no_station_walk;
 };
 
 static struct fake fake_config;
@@ -220,6 +225,11 @@ static inline void fake_handle(struct fake *state, const char *command, const st
 		fake_reply(state, from, from_length, state->neighbours);
 		return;
 	}
+	if (state->no_station_walk && (strcmp(command, "STA-FIRST") == 0 ||
+	    starts_with(command, "STA-NEXT "))) {
+		fake_reply(state, from, from_length, "UNKNOWN COMMAND\n");
+		return;
+	}
 	if (state->station_count &&
 	    (strcmp(command, "STA-FIRST") == 0 || starts_with(command, "STA-NEXT "))) {
 		size_t next = 0u;
@@ -290,6 +300,10 @@ static inline void fake_handle(struct fake *state, const char *command, const st
 		fake_reply(state, from, from_length, "OK\n");
 		(void)sendto(state->fd, connected, sizeof(connected) - 1u, 0,
 		    (const struct sockaddr *)from, from_length);
+		return;
+	}
+	if (state->no_config_write && starts_with(command, "SET update_config")) {
+		fake_reply(state, from, from_length, "FAIL\n");
 		return;
 	}
 	if (strcmp(command, "TERMINATE") == 0 || strcmp(command, "DISCONNECT") == 0 ||

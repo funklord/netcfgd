@@ -787,6 +787,34 @@ static ncfg_service_t a_context(void)
 	return service;
 }
 
+/*
+ * OpenWrt's `wpad` is built with no way to write a configuration, so it has no
+ * `update_config` and answers `FAIL`. That is the pin's own outcome and not a
+ * refusal: on a stock router it stopped every apply (10.747). A supplicant that
+ * answers nothing is still a failure, which the wedged cases elsewhere hold.
+ */
+static void a_supplicant_that_cannot_write_its_configuration_is_still_filled(void)
+{
+	ncfg_service_t service;
+	char           message[NCFG_ERROR_MAX];
+
+	make_tree(supplicant_dir);
+	a_document(1, 1);
+	memset(&fake_config, 0, sizeof(fake_config));
+	fake_config.no_config_write = 1;
+	if (!fake_start(supplicant_dir, "wlan0")) {
+		check(0, "a fake supplicant could be started");
+		return;
+	}
+	service = a_context();
+	message[0] = '\0';
+	check(ncfg_service_set_profiles(&service, "wlan0", message, sizeof(message)),
+	    "a `wpad` with no `update_config` is given the document's networks all the same");
+	check(heard_times("SET update_config 0") == 1, "  having been asked");
+	check(heard_times("REMOVE_NETWORK all") == 1, "  and it goes on to fill it");
+	fake_stop();
+}
+
 static void a_supplicant_is_filled_from_the_document(void)
 {
 	ncfg_service_t service;
@@ -1759,6 +1787,7 @@ int main(void)
 	a_steer_names_its_candidates_and_holds_long_enough();
 
 	a_supplicant_is_filled_from_the_document();
+	a_supplicant_that_cannot_write_its_configuration_is_still_filled();
 	a_disabled_network_is_enabled_and_nothing_removed();
 	a_radio_told_not_to_join_is_told_so();
 	joining_asks_before_it_acts();
