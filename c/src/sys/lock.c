@@ -24,7 +24,9 @@
 /* Room for the parent of a lock path. */
 #define LOCK_PATH_MAX 4096u
 
-static long now_ms(void)
+/* 64 bits, as a `long` of milliseconds overflows on a 32-bit machine after 24.8
+ * days up, which is a router having a quiet month (10.741). */
+static int64_t now_ms(void)
 {
 	struct timespec at;
 
@@ -35,7 +37,7 @@ static long now_ms(void)
 	if (clock_gettime(CLOCK_MONOTONIC, &at) != 0) {
 		return 0;
 	}
-	return (long)at.tv_sec * 1000L + at.tv_nsec / 1000000L;
+	return (int64_t)at.tv_sec * 1000 + at.tv_nsec / 1000000L;
 }
 
 static void wait_ms(long milliseconds)
@@ -140,8 +142,8 @@ int ncfg_lock_take(ncfg_lock_t *lock, const char *path, char *err, size_t err_si
 int ncfg_lock_take_within(ncfg_lock_t *lock, const char *path, long patience_ms, int *held,
     char *err, size_t err_size)
 {
-	long deadline;
-	int  opened;
+	int64_t deadline;
+	int     opened;
 
 	if (held) {
 		*held = 0;

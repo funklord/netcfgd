@@ -12687,6 +12687,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.741 32-bit, which most routers are, had never been compiled
+
+Everything here had only ever been built for a 64-bit machine, and the routers expected
+next are as likely as not 32-bit ARM or MIPS. `gcc -m32` was on this machine all along.
+**The tree did not compile**, and once it did the suite found the one fault that mattered:
+
+- **`(long)UINT32_MAX` is -1 where `long` is 32 bits**, so `interface_index_of` in
+  `apply/backend_ops.c` read `value > -1`, turned down every real index, and the refusal to
+  start a second supplicant on a radio NetworkManager holds **failed open, in silence**: it
+  has never worked on a 32-bit machine, and `contention_test` passed throughout, the
+  fault being in the caller. `service_test` caught it. The bound is `INT32_MAX`, an ifindex
+  being the kernel's `int`.
+- **`sys/lock.c` kept milliseconds in a `long`**, which overflows on a 32-bit machine after
+  24.8 days of uptime, a router having a quiet month. No test could see that, so it
+  was found by reading for the shape of the first: every other clock helper widens first.
+- **Two assertions stated an LP64 fact as a universal one**: `ifreq` is 32 bytes on 32-bit,
+  so the tun request's length now comes from `sizeof(long)`, and the size of
+  `ncfg_device_t` is held on x86-64 only. It is a reminder to whoever adds a field, and the
+  figure is an ABI's: i386 and ARM do not even agree.
+
+**A first guess was tested and was wrong**, and is worth keeping: 32-bit glibc's `readdir` failing
+on ext4 offsets. `-D_FILE_OFFSET_BITS=64` changed nothing about that failure. The flags stay
+regardless, with `_TIME_BITS=64`, in `LARGE_TYPES`, for what they do on a 32-bit glibc; they
+do nothing on 64-bit or on musl, so OpenWrt never needed them.
+
+`make c-32` runs the C suite as 32-bit: every check passes, 8840 lines reading `ok`. It is
+not in `make check`, for the reason `c-san` is not. **What this does not show**: i386 is
+little-endian with 4-byte `int64_t` alignment, so a MIPS router, big-endian and 8-byte, is
+still unexercised, and there is no cross compiler here for one.
+
 ## 10.740 A program a router could not exec, and every gate green
 
 fuzznet sizes its static tables for a person's thousands of notes and shares, and

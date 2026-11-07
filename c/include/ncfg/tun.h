@@ -80,8 +80,10 @@
 #define NCFG_TUN_NAME_MAX 16u
 
 /* `struct ifreq` as `TUNSETIFF` reads it: a name, the flags, and a tail the
- * kernel ignores. Checked against the libc's `sizeof` in tun.c. */
-#define NCFG_TUN_REQUEST_LEN 40u
+ * kernel ignores. Checked against the libc's `sizeof` in tun.c. The tail is
+ * `struct ifmap`, two `unsigned long`s and eight bytes with its padding, so
+ * forty bytes on a 64-bit machine and thirty-two on a 32-bit one. */
+#define NCFG_TUN_REQUEST_LEN (NCFG_TUN_NAME_MAX + 8u + 2u * sizeof(long))
 
 /*
  * Whether the device carries IP packets (`NCFG_TUN_MODE_TUN`) or ethernet
@@ -121,7 +123,7 @@ int ncfg_tun_mode_from_name(const char *text, ncfg_tun_mode_t *out);
 typedef struct {
 	char    name[NCFG_TUN_NAME_MAX];
 	int16_t flags;
-	uint8_t padding[22];
+	uint8_t padding[NCFG_TUN_REQUEST_LEN - NCFG_TUN_NAME_MAX - sizeof(int16_t)];
 } ncfg_tun_request_t;
 
 /* What to make. `owner` and `group` are the ids permitted to attach to it,

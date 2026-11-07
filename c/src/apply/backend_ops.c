@@ -646,7 +646,7 @@ static int interface_index_of(const char *class_net, const char *iface, uint32_t
 	}
 	(void)fclose(file);
 	value = strtol(text, NULL, 10);
-	if (value <= 0 || value > (long)UINT32_MAX) {
+	if (value <= 0 || value > INT32_MAX) {
 		return 0;
 	}
 	*out = (uint32_t)value;

@@ -439,6 +439,13 @@ c-test:
 c-san:
 	$(MAKE) --no-print-directory -C c test SANITIZE=1
 
+# The C suite as 32-bit code, which is what most OpenWrt devices run. Not in `check`
+# for the reason `c-san` is not, and it needs a compiler that can link `-m32`. It
+# found a radio guard that had never worked on a 32-bit machine (10.741).
+.PHONY: c-32
+c-32:
+	$(MAKE) --no-print-directory -C c test CC='$(CC) -m32'
+
 client-test: client/tests/client_test
 	@$(MAKE) --no-print-directory -C client test
 

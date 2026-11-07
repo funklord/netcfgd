@@ -27,9 +27,9 @@
  * for the type, which tun.h declares for the reason given there.
  */
 _Static_assert(sizeof(struct ifreq) == NCFG_TUN_REQUEST_LEN,
-    "a tun request is forty bytes and this libc's ifreq is not");
+    "a tun request is an ifreq and this libc's ifreq is another size");
 _Static_assert(sizeof(ncfg_tun_request_t) == NCFG_TUN_REQUEST_LEN,
-    "and the one built here is not forty bytes");
+    "and the one built here is not that size");
 _Static_assert(offsetof(ncfg_tun_request_t, flags) == NCFG_TUN_NAME_MAX,
     "the flags must sit where the kernel reads ifr_flags");
 _Static_assert(offsetof(struct ifreq, ifr_flags) == NCFG_TUN_NAME_MAX,

@@ -723,9 +723,14 @@ static int our_ifb_name(const char *name, const char *shaped)
  */
 /* 600 from 2026-11-03: the kind gained `mesh_point` (10.687), a config a
  * synthesised `ifb` never carries, so `bare_ifb` needs no clause for it. */
+/* Only here, because the point is that whoever adds a field meets it, and the
+ * figure is an ABI's: i386 and a 32-bit ARM do not even agree with each other,
+ * and a build for a router must not stop over a reminder (10.741). */
+#ifdef __x86_64__
 #define NCFG_RENDER_DEVICE_SIZE 600u /* measured, x86-64, 2026-11-03 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
     "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
+#endif
 
 static int bare_ifb(const ncfg_device_t *device, int64_t *rate)
 {

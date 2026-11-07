@@ -128,6 +128,12 @@ WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 # appended.
 CFLAGS  ?= -Os
 CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client -MMD -MP
+# A 32-bit glibc's `off_t` and `time_t` otherwise stay 32 bits: `readdir` can fail
+# on ext4's offsets, and a lease stops making sense in 2038. Nothing on a 64-bit
+# machine or on musl, where they are 64 bits already (project.md 10.741). In
+# `FUZZNET_CFLAGS` too, since the two share structures holding them.
+LARGE_TYPES = -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64
+CFLAGS  += $(LARGE_TYPES)
 
 # **Each function and datum in a section of its own, and the ones nothing
 # reaches dropped at link** (fuzznet sec 860, project.md 10.702). fuzznet links
@@ -266,7 +272,8 @@ FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 # Some reach headers, so src/node is compiled with them too.
 FUZZNET_BOUNDS = -DFZN_NOTES_MAX=64u -DFZN_NODE_RECEIVED_MAX=2u -DFZN_NOTES_SHARES_MAX=16u \
 		-DFZN_NODE_FILES_SHARES_MAX=16u -DFZND_GROUP_SHARES_MAX=2u
-FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os) -ffunction-sections -fdata-sections $(FUZZNET_BOUNDS)
+FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os) -ffunction-sections -fdata-sections \
+		$(FUZZNET_BOUNDS) $(LARGE_TYPES)
 # The system libraries the objects decided they need, asked of the archive
 # with `nm` for the reason `bridge/Makefile` gives (fuzznet probes for zstd,
 # so naming it here would be a claim about another tree's configuration) --
