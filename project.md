@@ -12683,6 +12683,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.752 A machine by its name, and closing a window that is still asking
+
+Run on the emulator at pin 60934e20, the phone's node comes up at 5.4 to 6.5 MB resident,
+reads the store an older pin wrote, joins a stock netcfgd by `ncfg pair`, and the window shows
+that machine's links; `ncfg pair revoke` ends it. What it also showed was the host box: a
+person with two paired machines chose between two strings of hex, while the fleet tab beside
+it knew their names.
+
+**The box now says `ml350g6-01 (8aaf89488c5552f2)`.** The name is what a host says of itself
+and two can share one, so the start of the key stays beside it, and the line above the tabs
+keeps the whole key, which is the line that says whose network the window changes. The fleet
+asks once as the window opens rather than when its tab is first shown, and asks the host the
+window is on whether or not it is in an estate: a paired machine need not be, and it had no
+row, so it would never have had a name. `fleet_tab` found that.
+
+**That round found a crash older than it.** A running QProcess is its owner's child, so it
+dies in ~QObject, after the owner's own part, and says `finished` as it goes: to a handler on
+what is left. Asking from the first moment made it easy to reach, and `fleet_tab` died by
+signal on its way out, past every check it printed. It had been reachable already: closing the
+window during a slow round, during `ncfg join`, which waits minutes, or **in administrator
+mode**, the one the window's own comment called the normal path. Nothing called `stop_helper`
+on the way out, only the button, so closing the window left a root helper to ~QProcess, which
+an unprivileged client may not signal, and segfaulted. The view and the window now stop
+listening first, and the access view ends its helper by end-of-file, which is its protocol.
+Each removed again fails: the fleet view and the access view by a segfault. The window's
+own destructor, around `ncfg join`, has no test: the join waits in a modal dialog.
+
 ## 10.751 fuzznet 60934e20, and the first measure on a small machine
 
 fuzznet took 10.740's finding to its default build: 1136 MB of bss to 434 MB, with the notes

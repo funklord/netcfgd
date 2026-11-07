@@ -47,6 +47,7 @@ class ncfg_access_view : public QWidget {
 
 public:
 	explicit ncfg_access_view(ncfg_connection *connection, QWidget *parent = nullptr);
+	~ncfg_access_view() override;
 
 	/* Who the kernel says is running this, or an empty string where the
 	 * account has no password-database entry.

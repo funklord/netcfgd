@@ -175,6 +175,17 @@ ncfg_access_view::ncfg_access_view(ncfg_connection *connection, QWidget *parent)
 	set_administrator_mode(false);
 }
 
+/*
+ * **The window closing is the normal way out of administrator mode**, and only
+ * the button called `stop_helper`: a helper running as root was left to ~QProcess,
+ * which sends a signal an unprivileged client may not send to it, waits, and says
+ * `finished` to a view that is already gone. End-of-file is the helper's protocol.
+ */
+ncfg_access_view::~ncfg_access_view()
+{
+	stop_helper();
+}
+
 void ncfg_access_view::set_administrator_mode(bool live)
 {
 	administrator = live;

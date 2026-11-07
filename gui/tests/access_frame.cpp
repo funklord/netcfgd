@@ -133,6 +133,28 @@ int main(int argc, char **argv)
 	const bool cleared = spin_until([&view] { return red_pixels(&view) == 0; });
 	check(cleared, "leaving administrator mode takes the red away");
 
+	/* The window closing is how most people leave: the helper hears end-of-file,
+	 * which is its protocol, rather than a signal it may be out of reach of. */
+	{
+		const QString told = bin.filePath(QStringLiteral("told"));
+		QFile         fake(bin.filePath(QStringLiteral("pkexec")));
+
+		fake.open(QIODevice::WriteOnly);
+		fake.write(QStringLiteral("#!/bin/sh\necho 'ready uid=0'\n"
+		                          "while read -r line; do :; done\necho end > '%1'\n")
+		               .arg(told)
+		               .toUtf8());
+		fake.close();
+		auto *closing = new ncfg_access_view(&connection);
+		closing->resize(600, 400);
+		closing->show();
+		QMetaObject::invokeMethod(closing, "unlock");
+		check(spin_until([closing] { return red_pixels(closing) > 200; }),
+		      "a second view has a root helper");
+		delete closing;
+		check(QFile::exists(told), "closing it with the helper up ends the helper by end-of-file");
+	}
+
 	fprintf(stderr, "access_frame: %d red pixels while a root helper was running\n", during);
 	return failures ? 1 : 0;
 }

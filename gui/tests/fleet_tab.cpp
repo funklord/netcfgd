@@ -20,6 +20,7 @@
 #include "../src/ncfg_connection.h"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
@@ -239,6 +240,20 @@ int main(int argc, char **argv)
 	members.removeLast();
 	check(round_of(&view) && cells->rowCount() == 9, "a node gone from the estate leaves the table");
 
+	/* Closed with a node still being asked, which a window now does from its
+	 * first moment: the process ends with it and nobody hears it end. */
+	{
+		const QString slow(64, QLatin1Char('c'));
+		auto         *leaving = new ncfg_fleet_view([&slow]() { return QStringList { slow }; });
+		bool          heard = false;
+
+		QObject::connect(leaving, &ncfg_fleet_view::finished_round, leaving,
+		                 [&heard]() { heard = true; });
+		leaving->refresh();
+		delete leaving;
+		check(!heard, "a view closed in the middle of a round goes quietly");
+	}
+
 	/* The tab is the fleet's: none for somebody with one machine. */
 	{
 		ncfg_connection  home;
@@ -260,6 +275,18 @@ int main(int argc, char **argv)
 		auto            *tabs = window.findChild<QTabWidget *>();
 
 		check(fleet != nullptr, "a window on a node has one");
+		auto *box = window.findChild<QComboBox *>(QStringLiteral("hosts"));
+		const int shown = box ? box->findData(up) : -1;
+		check(shown >= 0 && box->itemText(shown) == up,
+		      "the box lists a host by its key until it has said its name");
+		if (fleet && round_of(fleet)) {
+			check(shown >= 0 && box->itemText(shown) ==
+			          QStringLiteral("router-1 (%1)").arg(up.left(16)),
+			      "  and then by that name, with the start of the key beside it",
+			      box ? box->itemText(shown) : QString());
+			check(box && box->itemData(shown).toString() == up,
+			      "  and choosing it still means that key");
+		}
 		if (fleet && tabs) {
 			tabs->setCurrentWidget(fleet);
 			emit fleet->opened(up);

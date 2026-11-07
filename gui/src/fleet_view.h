@@ -54,6 +54,7 @@ public:
 	/* `members` lists the estate's other nodes by key, asked at each round,
 	 * so a node that joined appears without a restart. */
 	explicit ncfg_fleet_view(std::function<QStringList()> members, QWidget *parent = nullptr);
+	~ncfg_fleet_view() override;
 
 	/* Fill a row from `ncfg status --json`; false for what is not one. */
 	static bool read_status(const QByteArray &json, ncfg_fleet_row *row);
@@ -75,6 +76,8 @@ signals:
 	void reported(const QString &summary);
 	/* The operator asked to go to this node. */
 	void opened(const QString &key);
+	/* A node said what it is called. */
+	void named(const QString &key, const QString &host);
 	/* A round has every answer in. */
 	void finished_round();
 	/* An action has ended, `said` being what the operator is shown. */

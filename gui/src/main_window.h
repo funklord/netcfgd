@@ -57,6 +57,7 @@ class ncfg_main_window : public QMainWindow {
 
 public:
 	explicit ncfg_main_window(ncfg_connection *connection, QWidget *parent = nullptr);
+	~ncfg_main_window() override;
 
 public slots:
 	/* Re-asks the tab in front of the operator. Refreshing all three would

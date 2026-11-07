@@ -193,6 +193,19 @@ void ncfg_fleet_view::refresh()
 	start_next();
 }
 
+/*
+ * **Before the view is gone.** A running QProcess is this object's child, so it
+ * dies in ~QObject, after this class has; it says `finished` as it goes, and that
+ * would run a handler on what is left. Closing the window during a round
+ * is all it takes.
+ */
+ncfg_fleet_view::~ncfg_fleet_view()
+{
+	for (QProcess *running : findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) {
+		running->disconnect(this);
+	}
+}
+
 void ncfg_fleet_view::start_next()
 {
 	while (asking < MOST_AT_ONCE && !waiting.isEmpty()) {
@@ -267,6 +280,9 @@ void ncfg_fleet_view::answered(const QString &key, int code, const QByteArray &o
 			row = fresh;
 			row.state = QStringLiteral("answering");
 			row.answered = QDateTime::currentDateTime();
+			if (!row.host.isEmpty()) {
+				emit named(key, row.host);
+			}
 		} else if (said.contains(QStringLiteral("denied"))) {
 			/* It is there and said no: a closed tier, not a dead node. */
 			row.state = QStringLiteral("refused: %1")

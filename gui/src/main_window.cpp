@@ -264,8 +264,14 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * nodes would be one more thing to not understand. */
 	if (nodes->count() > (ncfg_device_has_local() ? 1 : 0)) {
 		fleet = new ncfg_fleet_view([this]() {
-			const QStringList found = estate_members();
+			QStringList found = estate_members();
+			const QString here = this->connection->node();
 
+			/* The host this window is on, estate or not: a paired machine
+			 * need not be in one, and it is the one being looked at. */
+			if (!here.isEmpty() && !found.contains(here)) {
+				found.append(here);
+			}
 			for (const QString &key : found) {
 				if (nodes->findData(key) < 0) {
 					nodes->addItem(key, key);
@@ -284,6 +290,24 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 				}
 			}
 		});
+		/* **A person chooses a machine by what it is called.** The box listed
+		 * keys, so somebody with two paired routers picked between two strings
+		 * of hex while the tab beside it knew their names. The name is only what
+		 * that host says of itself and two hosts can share one, so the start of
+		 * the key stays beside it, and the line above the tabs keeps the whole
+		 * key: that one says whose network the window changes (`where`). */
+		connect(fleet, &ncfg_fleet_view::named, this, [this](const QString &key,
+		                                                     const QString &host) {
+			const int index = nodes->findData(key);
+
+			if (index >= 0) {
+				nodes->setItemText(index,
+				                   QStringLiteral("%1 (%2)").arg(host, key.left(16)));
+			}
+		});
+		/* Once, without waiting for the tab to be opened: the box is in front
+		 * from the start. The tab keeps its own rounds after that. */
+		QTimer::singleShot(0, fleet, &ncfg_fleet_view::refresh);
 		tabs->addTab(fleet, QStringLiteral("fleet"));
 	}
 	tools->addWidget(nodes);
@@ -468,6 +492,19 @@ void ncfg_main_window::poll_node()
 	node_cursor = next;
 	if (moved) {
 		refresh();
+	}
+}
+
+/*
+ * **Before the window is gone.** A running QProcess is this object's child, so it
+ * dies in ~QObject, after this class has; it says `finished` as it goes, and that
+ * would run a handler on what is left. Closing the window during an `ncfg join`, which waits minutes,
+ * is all it takes.
+ */
+ncfg_main_window::~ncfg_main_window()
+{
+	for (QProcess *running : findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) {
+		running->disconnect(this);
 	}
 }
 
