@@ -12683,6 +12683,14 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.751 fuzznet 60934e20, and the first measure on a small machine
+
+fuzznet took 10.740's finding to its default build: 1136 MB of bss to 434 MB, with the notes
+view and six tables on the heap, and a reply past 68608 bytes, which never arrived, now
+received (20261107T1029Z, 20261107T1108Z). netcfgd builds no reassembly slots of its own.
+It asked for this tree's numbers, no small machine having run it. On OpenWrt's malta-be at
+128 MB: bss 20.5 MB, netcfgd 4.7 MB resident, 51 MB of 118 available, and every tier passes.
+
 ## 10.750 A package for the router
 
 netcfgd claimed to fit an OpenWrt router and had no way onto one but a copied binary.

@@ -1114,4 +1114,6 @@ netcfgd
 # 2026-11-07: 2,477,696, +272: reading what netifd was told (10.746).
 # 2026-11-07: 2,477,880, +184: the `radio` kind, and asking the kernel for stations
 # hostapd will not list, on top of a `FAIL` being no refusal (10.748, 10.749).
-total 2477880
+# 2026-11-07: 2,482,560, +4,680 at fuzznet 60934e20, all of it fuzznet's: tables moved to
+# the heap, which costs text and saves the bss that stopped a small machine (10.751).
+total 2482560
