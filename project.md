@@ -12683,6 +12683,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.750 A package for the router
+
+netcfgd claimed to fit an OpenWrt router and had no way onto one but a copied binary.
+`tool/ipk.sh PROGRAM ARCHITECTURE OUT.ipk` makes the `.ipk`, which is a gzipped tar of three
+members and needs nothing of OpenWrt's build. **Installing configures nothing and starts
+nothing**, the rule of the Debian and Alpine packages and sharper here: netifd is holding
+the network, and there may be no console. With no `postinst` the init script stays out of
+`/etc/rc.d` until a person enables it, which is the moment 10.746's warning is for.
+
+`hull-malta` installs it with the real `opkg`, finds it listed, disabled and not running,
+asks the installed `ncfg` for its version, and removes it. **Not a feed**: a package per
+architecture wants the SDK and somewhere to publish, which is the holder's. Also here, unmentioned
+in 402205ea's message: `dhcp_server_test`'s stand-in was stopped before its trap was set, the
+race of 10.742's `autoip_test`, and now says when it is ready.
+
 ## 10.749 What OpenWrt's hostapd does not answer
 
 `ncfg wifi clients` said nothing was associated beside a kernel holding a station. OpenWrt

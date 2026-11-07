@@ -160,6 +160,22 @@ echo "$link" | grep -q 'SSID: bigend' && [ "$station" -ge 1 ] || {
 /usr/bin/ncfg plan 2>&1 | grep -iE 'wlan0|access|hostapd|bigend' | head -8 | cut -c1-150 >> "$out"
 say "ncfg wifi status: $(/usr/bin/ncfg wifi status 2>&1 | head -3 | cut -c1-90 | tr '\n' ';')"
 say "ncfg wifi clients: $(/usr/bin/ncfg wifi clients 2>&1 | head -3 | cut -c1-90 | tr '\n' ';')"
+# What a person has: the package, on this machine. Before the rest of this file
+# would have mattered, it has to install, say nothing was started, and go again.
+/etc/init.d/netcfgd stop 2>/dev/null
+rm -f /etc/init.d/netcfgd /usr/sbin/netcfgd /usr/bin/ncfg
+installed=$(opkg install /payload/netcfgd.ipk 2>&1 | tail -2 | cut -c1-100 | tr '\n' ';')
+say "opkg: $installed"
+listed=$(opkg list-installed 2>/dev/null | grep -c '^netcfgd ')
+enabled=$(ls /etc/rc.d 2>/dev/null | grep -c netcfgd)
+running=$(pidof netcfgd | wc -w)
+say "installed $listed, enabled $enabled, running $running, $(/usr/bin/ncfg --version 2>&1 | head -1)"
+[ "$listed" = 1 ] && [ "$enabled" = 0 ] && [ "$running" = 0 ] || failed=1
+/usr/bin/ncfg --version 2>/dev/null | grep -q '^ncfg ' || failed=1
+opkg remove netcfgd > /dev/null 2>&1
+[ ! -e /usr/sbin/netcfgd ] && [ ! -e /etc/init.d/netcfgd ] || failed=1
+say "after removal: $(opkg list-installed 2>/dev/null | grep -c '^netcfgd ') installed, $(ls /usr/sbin/netcfgd 2>/dev/null | wc -l) program"
+
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep netcfgd | tail -14 | sed 's/^/  log: /' >> "$out"
 	say "VERDICT bad"
