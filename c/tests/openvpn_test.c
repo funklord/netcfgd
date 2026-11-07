@@ -827,13 +827,12 @@ static void a_management_stop_does_not_pull_the_socket_from_the_next_start(const
 		}
 		(void)write(served, ">INFO:OpenVPN Management Interface Version 5\n", 45u);
 		/*
-		 * **Read to the newline, not just once.** netcfgd sends the command
-		 * and its newline as two writes, so a single `read` can return the
-		 * command without its terminator -- and a stand-in that answers and
-		 * closes at that point leaves the newline landing on a closed peer.
-		 * That is how this fixture killed the suite under load before
-		 * `MSG_NOSIGNAL` (10.573), and a fixture whose timing decides whether
-		 * the run survives is not a fixture.
+		 * **Read to the newline, not just once.** A stream may hand over a line
+		 * in pieces, and a stand-in that answers and closes partway leaves the
+		 * rest landing on a closed peer. That is how this fixture killed the
+		 * suite under load before `MSG_NOSIGNAL` (10.573), when a command and
+		 * its newline were two writes, and a fixture whose timing decides
+		 * whether the run survives is not a fixture.
 		 */
 		{
 			size_t taken = 0u;
@@ -934,9 +933,8 @@ static void a_management_stop_does_not_pull_the_socket_from_the_next_start(const
 /*
  * A PEER THAT CLOSES MID-COMMAND IS AN ERROR, NOT A DEAD DAEMON.
  *
- * netcfgd sends a management command as two writes -- the command, then its
- * newline -- and the peer is openvpn, which the command usually tells to
- * terminate. So netcfgd writes to a process it is in the act of killing, and a
+ * The peer of a management command is openvpn, which the command usually tells
+ * to terminate. So netcfgd writes to a process it is in the act of killing, and a
  * plain `write` to a closed peer raises `SIGPIPE`, whose default action ends
  * the process holding `CAP_NET_ADMIN`.
  *
@@ -946,7 +944,7 @@ static void a_management_stop_does_not_pull_the_socket_from_the_next_start(const
  * control, on the socket where the peer's death is intended rather than
  * merely possible.**
  *
- * The stand-in reads one byte and closes, which puts the newline on a dead
+ * The stand-in closes before anything is sent, which puts the command on a dead
  * socket every time rather than when the scheduler happens to allow it. With
  * `MSG_NOSIGNAL` the call returns an error naming the command; without it this
  * process dies here and the suite reports nothing at all, which is exactly how

@@ -12683,6 +12683,16 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.756 A management command is one write
+
+`hull-mips` at 364241c failed `openvpn_test` for the first time: *reads past the greeting*, on
+a loaded machine. 10.573's shape again. `ncfg_openvpn_command` sent the command and then its
+newline; a stand-in that read once took the first, answered and closed, and the second failed
+a command that had worked. 10.573 made that survivable and taught one fixture to read to the
+newline, and left the two writes and the other fixture. It is one write now, which is what a
+line is, and so a peer has no gap to leave in. No test proves it: two sends on a stream can
+arrive as one, so neither form fails on demand. `hull-mips` passing again is all there is.
+
 ## 10.755 fuzznet 364241c: a removal a fork silently undid
 
 Past 60934e20, fuzznet fixed what touches this tree's fleet: a group's fork made again only the

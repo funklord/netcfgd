@@ -160,6 +160,7 @@ int ncfg_openvpn_command(ncfg_openvpn_management_t *management, const char *comm
 	char        line[MANAGEMENT_LINE_MAX];
 	const char *at;
 	size_t      left;
+	int         wrote;
 
 	if (reply && reply_size > 0u) {
 		reply[0] = '\0';
@@ -179,17 +180,26 @@ int ncfg_openvpn_command(ncfg_openvpn_management_t *management, const char *comm
 	 * that is what makes it worth the sentence. The peer is openvpn, and the
 	 * command netcfgd most often sends is `signal SIGTERM`: netcfgd is writing
 	 * to a process it is in the act of telling to die. A daemon that exits
-	 * between the two writes below -- the command, then its newline -- takes
-	 * netcfgd with it. So **telling openvpn to stop could kill netcfgd**, by
-	 * the one path where the peer's death is not merely possible but intended.
+	 * before the write takes netcfgd with it. So **telling openvpn to stop could
+	 * kill netcfgd**, by the one path where the peer's death is not merely
+	 * possible but intended.
 	 *
 	 * Found by a test failing under load, not by reading: the fixture's
 	 * stand-in closed its socket after a short read, the newline landed on a
 	 * closed peer, and the suite died with no output because its stderr was
 	 * redirected at the time. 10.573 has the sequence.
+	 *
+	 * **And the line is one write** (10.756). It was the command and then its
+	 * newline, so a peer could take the first, answer and go, and the second
+	 * then failed a command that had worked.
 	 */
-	at = command;
-	left = strlen(command);
+	wrote = snprintf(line, sizeof(line), "%s\n", command);
+	if (wrote < 0 || (size_t)wrote >= sizeof(line)) {
+		ncfg_error_set(err, err_size, "a management command is longer than a line");
+		return 0;
+	}
+	at = line;
+	left = (size_t)wrote;
 	while (left > 0u) {
 		ssize_t put = send(management->fd, at, left, MSG_NOSIGNAL);
 
@@ -203,10 +213,6 @@ int ncfg_openvpn_command(ncfg_openvpn_management_t *management, const char *comm
 		}
 		at += put;
 		left -= (size_t)put;
-	}
-	if (send(management->fd, "\n", 1u, MSG_NOSIGNAL) != 1) {
-		ncfg_error_set(err, err_size, "could not send `%s`: %s", command, strerror(errno));
-		return 0;
 	}
 
 	/* **Read until a line is an answer.** OpenVPN greets a new client with
