@@ -555,6 +555,7 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 {
 	char    buffer[NCFG_SUPPLICANT_REPLY_MAX + 1u];
 	ssize_t read;
+	int     failed;
 
 	if (!client || !out || !got) {
 		ncfg_error_set(err, err_size, "an event needs a client and somewhere to be put");
@@ -587,6 +588,8 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 		return 0;
 	}
 	read = recv(client->fd, buffer, NCFG_SUPPLICANT_REPLY_MAX, 0);
+	/* Before the call below, which has an `errno` of its own to leave. */
+	failed = errno;
 	/*
 	 * **The connection's own deadline is put back**, which the Rust does not
 	 * do. There, a poll for an event leaves `SO_RCVTIMEO` at the poll's
@@ -600,7 +603,7 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 		/* The two a timeout arrives as, and the interruption that is not a
 		 * timeout at all. Nothing arriving is the ordinary answer on a quiet
 		 * radio and is not a failure; neither is a signal. */
-		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+		if (failed == EAGAIN || failed == EWOULDBLOCK || failed == EINTR) {
 			/*
 			 * **`EINTR` is answered as "nothing yet", which is 0233's own
 			 * remedy.** That decision put it this way: it "is reported as
@@ -614,7 +617,7 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 			return 1;
 		}
 		ncfg_error_set(err, err_size, "the supplicant on %s stopped answering: %s",
-		    client->interface, strerror(errno));
+		    client->interface, strerror(failed));
 		return 0;
 	}
 	if ((size_t)read == NCFG_SUPPLICANT_REPLY_MAX) {
