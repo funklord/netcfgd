@@ -202,10 +202,10 @@ static void put_peer(ncfg_buf_t *array, uint16_t index, const unsigned char *pub
 			/* `sockaddr_in` on the wire: family, port in network order, the
 			 * address, and the pad the kernel sends. `sys/wg.c` reads it. */
 			unsigned char bytes[16];
+			uint16_t      family = AF_INET;
 
 			memset(bytes, 0, sizeof(bytes));
-			bytes[0] = (unsigned char)(AF_INET & 0xff);
-			bytes[1] = (unsigned char)((AF_INET >> 8) & 0xff);
+			memcpy(bytes, &family, sizeof(family));
 			bytes[2] = (unsigned char)((port >> 8) & 0xff);
 			bytes[3] = (unsigned char)(port & 0xff);
 			memcpy(bytes + 4, address.bytes, 4u);

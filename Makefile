@@ -3103,6 +3103,46 @@ hull-openwrt:
 	sed 's/^/openwrt: /' tests/hull/openwrt/verdict/openwrt; \
 	grep -q '^VERDICT ok' tests/hull/openwrt/verdict/openwrt
 
+# The C suite as big-endian 32-bit MIPS, under qemu-user in a guest that carries the
+# compiler (10.742). Hands the guest the host's binfmt_misc, as hull-openwrt does its
+# dummy. Not in `hull`, at about fifteen minutes. The payload copies the tree, so its
+# build leaves this one alone.
+hull-mips:
+	@module=$$(find /lib/modules/$$(uname -r) -name 'binfmt_misc.ko*' | head -1); \
+	case "$$module" in \
+	"") echo "mips: this kernel has no binfmt_misc module to hand the guest" >&2; exit 1 ;; \
+	*.xz) xz -dc "$$module" > tests/hull/mips/binfmt_misc.ko ;; \
+	*.zst) zstd -qdc "$$module" > tests/hull/mips/binfmt_misc.ko ;; \
+	*) cp "$$module" tests/hull/mips/binfmt_misc.ko ;; \
+	esac
+	@$(call hull_says,netcfgd/mips)
+	@$(call hull_image,mips)
+	@rm -f tests/hull/mips/verdict/mips
+	@mkdir -p tests/hull/mips/verdict
+	@timeout -k 30 3600 $(HULL) run -f tests/hull/mips/hull.conf || true
+	@if [ ! -f tests/hull/mips/verdict/mips ]; then \
+		echo "mips: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/mips: /' tests/hull/mips/verdict/mips; \
+	grep -q '^VERDICT ok' tests/hull/mips/verdict/mips
+
+# OpenWrt's own big-endian MIPS kernel and rootfs in qemu-system-mips, in 128 MB,
+# netcfgd built with OpenWrt's toolchain: what `hull-openwrt` runs, on the kind of
+# machine it stands in for (10.742). Not in `hull`, being two emulators deep.
+hull-malta:
+	@$(call hull_says,netcfgd/malta)
+	@$(call hull_image,malta)
+	@rm -f tests/hull/malta/verdict/malta
+	@mkdir -p tests/hull/malta/verdict
+	@timeout -k 30 3000 $(HULL) run -f tests/hull/malta/hull.conf || true
+	@if [ ! -f tests/hull/malta/verdict/malta ]; then \
+		echo "malta: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/malta: /' tests/hull/malta/verdict/malta; \
+	grep -q '^VERDICT ok' tests/hull/malta/verdict/malta
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -3240,7 +3280,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

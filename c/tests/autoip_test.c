@@ -346,6 +346,10 @@ static void a_client_that_appears_late_is_waited_for(const char *run)
 	    "# arrive later. See autoip_test.c for why the `-c` string matters.\n"
 	    "sh -c \"sleep 0.4; exec sh -c 'sleep 5' late --force-bind %s\" \\\n"
 	    "\t>/dev/null 2>&1 &\n"
+	    "# Long enough for that child to be `sh -c`: until it execs it is a fork\n"
+	    "# of this script, reciting the markers, and on a slow machine the scan\n"
+	    "# finds it. The client itself is not a shell, and has no such moment.\n"
+	    "sleep 0.1\n"
 	    "exit 0\n",
 	    iface);
 	write_fake(fake, body);

@@ -222,10 +222,10 @@ int main(void)
 	 * was compared against would be a device made by a different call.
 	 */
 	{
-		check((unsigned long)TUNSETIFF == 0x400454caUL, "TUNSETIFF is _IOW('T', 202, int)");
-		check((unsigned long)TUNSETPERSIST == 0x400454cbUL, "TUNSETPERSIST is 203");
-		check((unsigned long)TUNSETOWNER == 0x400454ccUL, "TUNSETOWNER is 204");
-		check((unsigned long)TUNSETGROUP == 0x400454ceUL, "TUNSETGROUP is 206");
+		check((unsigned long)TUNSETIFF == (unsigned long)_IOW('T', 202, int), "TUNSETIFF is _IOW('T', 202, int)");
+		check((unsigned long)TUNSETPERSIST == (unsigned long)_IOW('T', 203, int), "TUNSETPERSIST is 203");
+		check((unsigned long)TUNSETOWNER == (unsigned long)_IOW('T', 204, int), "TUNSETOWNER is 204");
+		check((unsigned long)TUNSETGROUP == (unsigned long)_IOW('T', 206, int), "TUNSETGROUP is 206");
 	}
 
 	/*

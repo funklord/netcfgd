@@ -60,6 +60,34 @@ static uint8_t *exact_copy(const void *bytes, size_t length)
 	return copy;
 }
 
+/*
+ * A record as this machine's kernel would have written it. The bytes below were
+ * read from a little-endian one, and `idx` is a native integer: a big-endian
+ * kernel writes it the other way round, and the parser is right to read it so.
+ */
+static int parse_recorded(const uint8_t *bytes, size_t length, ncfg_rfkill_event_t *event,
+    char *err, size_t err_size)
+{
+	uint8_t *native;
+	uint32_t index;
+	int      parsed;
+
+	if (!bytes || length < 4u) {
+		return ncfg_rfkill_parse(bytes, length, event, err, err_size);
+	}
+	/* To its own size, so that a sanitizer still sees a read past the end. */
+	native = exact_copy(bytes, length);
+	if (!native) {
+		return 0;
+	}
+	index = (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 | (uint32_t)bytes[2] << 16 |
+	    (uint32_t)bytes[3] << 24;
+	memcpy(native, &index, sizeof(index));
+	parsed = ncfg_rfkill_parse(native, length, event, err, err_size);
+	free(native);
+	return parsed;
+}
+
 int main(void)
 {
 	/* The kernel's layout, byte for byte. */
@@ -71,13 +99,13 @@ int main(void)
 		const uint8_t two[] = { 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
 		ncfg_rfkill_event_t event;
 
-		check(ncfg_rfkill_parse(one, sizeof(one), &event, NULL, 0), "a record parses");
+		check(parse_recorded(one, sizeof(one), &event, NULL, 0), "a record parses");
 		check(event.index == 1u, "and its index is the one the kernel wrote");
 		check(event.kind == RFKILL_TYPE_WLAN, "its type is WLAN");
 		check(event.op == RFKILL_OP_CHANGE, "its operation is CHANGE");
 		check(event.soft && !event.hard, "soft blocked and not hard blocked");
 
-		check(ncfg_rfkill_parse(two, sizeof(two), &event, NULL, 0), "a second record parses");
+		check(parse_recorded(two, sizeof(two), &event, NULL, 0), "a second record parses");
 		check(event.index == 0x0102u, "a multi-byte index is read in host order");
 		check(!event.soft && event.hard, "hard blocked and not soft blocked");
 	}
@@ -97,7 +125,7 @@ int main(void)
 		size_t              at;
 
 		for (at = 0; at < 4; at++) {
-			if (!ncfg_rfkill_parse(seen[at], NCFG_RFKILL_RECORD, &event, NULL, 0)) {
+			if (!parse_recorded(seen[at], NCFG_RFKILL_RECORD, &event, NULL, 0)) {
 				indices = 0;
 				break;
 			}
@@ -109,9 +137,9 @@ int main(void)
 		check(added, "every one of them was an ADD");
 		check(unblocked, "and none of them was blocked");
 
-		(void)ncfg_rfkill_parse(seen[0], NCFG_RFKILL_RECORD, &event, NULL, 0);
+		(void)parse_recorded(seen[0], NCFG_RFKILL_RECORD, &event, NULL, 0);
 		check(event.kind == RFKILL_TYPE_WLAN, "the first switch is the wlan one");
-		(void)ncfg_rfkill_parse(seen[1], NCFG_RFKILL_RECORD, &event, NULL, 0);
+		(void)parse_recorded(seen[1], NCFG_RFKILL_RECORD, &event, NULL, 0);
 		check(event.kind == RFKILL_TYPE_BLUETOOTH, "and the second is bluetooth");
 	}
 
@@ -132,7 +160,7 @@ int main(void)
 
 		check(exact != NULL, "the extended record is allocated to its own size");
 		if (exact) {
-			check(ncfg_rfkill_parse(exact, sizeof(extended), &event, NULL, 0),
+			check(parse_recorded(exact, sizeof(extended), &event, NULL, 0),
 			    "an extended record is still one event");
 			check(event.index == 1u && event.op == RFKILL_OP_CHANGE && event.soft,
 			    "and it is the event the first eight bytes describe");
@@ -151,16 +179,16 @@ int main(void)
 		memset(&event, 0xff, sizeof(event));
 		err[0] = '\0';
 		if (exact) {
-			check(!ncfg_rfkill_parse(exact, sizeof(short_record), &event, err,
+			check(!parse_recorded(exact, sizeof(short_record), &event, err,
 			    sizeof(err)), "seven bytes are not a record");
 			free(exact);
 		}
 		check(err[0] != '\0', "and the refusal says so");
 		check(event.index == 0u && event.kind == 0u && !event.soft && !event.hard,
 		    "a refused record leaves the event zeroed rather than half filled");
-		check(!ncfg_rfkill_parse(NULL, NCFG_RFKILL_RECORD, &event, NULL, 0),
+		check(!parse_recorded(NULL, NCFG_RFKILL_RECORD, &event, NULL, 0),
 		    "and no bytes at all are refused too");
-		check(!ncfg_rfkill_parse(short_record, sizeof(short_record), NULL, NULL, 0),
+		check(!parse_recorded(short_record, sizeof(short_record), NULL, NULL, 0),
 		    "as is a parse with nowhere to put the answer");
 	}
 

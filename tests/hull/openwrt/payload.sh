@@ -141,12 +141,13 @@ say "stopped: process ${left:-gone}, dummy0 $(address)"
 
 # This kernel has no nf_tables, so every observation fails to open netfilter.
 # Each daemon says so once (10.672 found it said on every pass): no process
-# may have said it twice.
+# may have said it twice. `hull-malta`'s kernel has it, so there is no note to count.
 repeated=$(logread 2>/dev/null | grep 'no netfilter socket' |
 	sed -n 's/.*netcfgd\[\([0-9]*\)\].*/\1/p' | sort | uniq -c | awk '$1 > 1' | wc -l)
 noted=$(logread 2>/dev/null | grep -c 'no netfilter socket')
 say "the no-netfilter note: $noted line(s), $repeated process(es) saying it twice"
-[ "$noted" -ge 1 ] && [ "$repeated" -eq 0 ] || failed=1
+[ -e /payload/kernel-has-netfilter ] || [ "$noted" -ge 1 ] || failed=1
+[ "$repeated" -eq 0 ] || failed=1
 
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep -E 'netcfgd|procd|oom|Out of memory' |

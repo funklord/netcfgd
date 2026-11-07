@@ -12687,6 +12687,51 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.742 A real big-endian kernel, and what it took to get one
+
+10.741 left byte order open and said there was no cross compiler here. There does not
+need to be: a hull guest can carry one, and OpenWrt publishes `malta-be`, a real kernel
+and rootfs for a machine qemu emulates. Two tiers now, because each sees what the other
+cannot:
+
+- **`make hull-mips`**: the C suite as big-endian 32-bit MIPS under qemu-user, in a Debian
+  12 guest, trixie having dropped the toolchain. 8758 lines read `ok`.
+- **`make hull-malta`**: `tests/hull/openwrt/payload.sh` itself, on OpenWrt 24.10.4's
+  `malta-be` kernel 6.6.110 in `qemu-system-mips -m 128`, under real procd, netcfgd built
+  with OpenWrt's own toolchain and so against musl. `VERDICT ok`: start, respawn with the
+  same key, the edit race, reload and stop, with addresses reaching `dummy0` over
+  big-endian netlink. netcfgd resident at 4.6 MB, 52 MB available of 118. Everything
+  fetched is pinned by checksum. Not in `make hull`, being two emulators deep.
+
+**qemu-user answers `EOPNOTSUPP` for rtnetlink it cannot translate**, so `cli_apply_test`
+and five scripts that need a machine cannot run in `hull-mips`. The verdict names them, and
+excuses a section only if it also shows that limit; any other failure fails the run.
+`hull-malta` is what covers that ground, for the paths that test takes.
+
+**What the suite found was nearly all the suite's own.** No byte-order fault in `src`:
+every ioctl comes from the kernel's headers, and native integers were copied rather than
+shifted, as `wire.h` asks. Tests carried x86 ioctl numbers and little-endian byte arrays:
+`tun_test`, `rfkill_test`, `wire_test`, `observe_wireguard_test`. Two things were real:
+
+- **`ncfg_supplicant_next_event` read `errno` after another syscall**: the deadline was
+  put back between `recv` and the test, so a failed restore reported a harmless timeout
+  or signal as a supplicant that had stopped answering. Saved straight after `recv`,
+  which took all three of `supplicant_client_test`'s failures with it.
+- **`autoip_test`'s stand-in raced its own scan**: until it execs, a forked child of the
+  script recites the same markers, and an emulator is slow enough to be caught at it.
+  Tested rather than argued: letting the child exec before the script exits took both
+  failures. The real client is no shell, so this was the test's.
+
+**Measured beside this, and needing nothing: an idle node does not wear flash.** Ten
+minutes with the node serving changed no file in the store, which stayed at 76 KB. What
+netcfgd writes, about 8 KB a second, goes to its run directory, which on a router is RAM.
+The first attempt at this measured nothing: a scratch path too long for a unix socket
+stopped fuzznet listening, so the store sat idle for the wrong reason. It was noticed
+from a peak of 3.9 MB where a node reads 6, and redone asserting the socket first.
+
+**And this answers 10.740's pressure question**: a real 128 MB OpenWrt has 44 per cent
+of its memory available, where `hull-openwrt`'s guest, carrying a desktop kernel, has 8.
+
 ## 10.741 32-bit, which most routers are, had never been compiled
 
 Everything here had only ever been built for a 64-bit machine, and the routers expected
@@ -12713,9 +12758,8 @@ regardless, with `_TIME_BITS=64`, in `LARGE_TYPES`, for what they do on a 32-bit
 do nothing on 64-bit or on musl, so OpenWrt never needed them.
 
 `make c-32` runs the C suite as 32-bit: every check passes, 8840 lines reading `ok`. It is
-not in `make check`, for the reason `c-san` is not. **What this does not show**: i386 is
-little-endian with 4-byte `int64_t` alignment, so a MIPS router, big-endian and 8-byte, is
-still unexercised, and there is no cross compiler here for one.
+not in `make check`, for the reason `c-san` is not. i386 is little-endian with 4-byte
+`int64_t` alignment, so this says nothing of a MIPS router, big-endian and 8-byte: 10.742.
 
 ## 10.740 A program a router could not exec, and every gate green
 
@@ -12764,7 +12808,7 @@ back held the vm until `HULL_TIMEOUT`. Counted now.
 host's Debian kernel: 88 MB of `MemTotal` from 128, 28 MB of that slab, about 7 MB
 available beside a 5.6 MB daemon. fuzznet's ladder reads memory, so the node can reach
 `scarce` here with an empty store, and netcfgd then says `fuzznet is in trouble`. That
-report is true of this guest, and whether it is of a real router's kernel is unmeasured.
+report is true of this guest and not of a real router's kernel, measured in 10.742.
 
 **Open, unexplained: one run in the first four at 128 MB read `procd started nothing`**
 after 21 s, where every other run reads 5 s, procd's own respawn delay, and the steps after

@@ -772,12 +772,12 @@ int main(void)
 		ncfg_wire_ip_t ip;
 		char text[4];
 		char mac[NCFG_WIRE_MAC_TEXT_MAX];
-		static const uint8_t two[2] = { 1, 0 };
+		static const uint16_t two = 1;
 		static const uint8_t five[5] = { 1, 2, 3, 4, 5 };
 		static const uint8_t not_utf8[4] = { 'e', 't', 0xffu, 0 };
 
 		ncfg_buf_init(&attrs, 0);
-		ncfg_wire_attr_put(&attrs, IFLA_MTU, two, sizeof(two));
+		ncfg_wire_attr_put(&attrs, IFLA_MTU, &two, sizeof(two));
 		check(find_in(&attrs, IFLA_MTU, &attr) == NCFG_WIRE_OK &&
 		    !ncfg_wire_attr_u32(&attr, &number, NULL, 0) &&
 		    ncfg_wire_attr_u16(&attr, &half, NULL, 0) && half == 1u,
