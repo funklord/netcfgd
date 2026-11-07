@@ -12702,6 +12702,26 @@ supplicant waits on its creation (10.687), and says so. `ncfg apply` in-process 
 therefore needs a second run for that access point. `hull-malta` waits for a settled link with
 the access point agreeing, and fails on any fall.
 
+## 10.753 What a firmware upgrade keeps
+
+The first-run guide has a person take a port out of `/etc/config/network` and give it to
+netcfgd. `sysupgrade` keeps what is named, the image holds no netcfgd, and the package named
+nothing: so an upgrade with settings kept would have left that port with netifd not holding
+it and nothing else there, the configuration gone, and a new node identity for every paired
+device to not know.
+
+**The package now lists `/lib/upgrade/keep.d/netcfgd`, and the program is in that list.**
+Keeping the configuration alone keeps a file nothing reads. A package reinstalled from a feed
+afterwards was the other way, and it needs the network the upgrade has just taken. The program
+is static, so the new image's libraries do not matter. The cost: what comes back is unknown to
+opkg, so a later install needs `--force-overwrite`, which the guide says.
+
+`hull-malta` archives what `sysupgrade -l` lists, deletes everything of ours, restores it as
+an upgrade does, and starts: the start links are there and the node key is the same. `-l` and
+not `-b`, which says *Cannot save config while running from ramdisk* on this image and exits 0
+having written nothing. **Not run: a real flash**, which a kernel loaded by qemu has nothing to
+write to, and the archive here is made by the test rather than by `sysupgrade`.
+
 ## 10.752 A machine by its name, and closing a window that is still asking
 
 Run on the emulator at pin 60934e20, the phone's node comes up at 5.4 to 6.5 MB resident,

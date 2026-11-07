@@ -26,12 +26,27 @@ size=$(wc -c < "$program")
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/data/usr/sbin" "$work/data/usr/bin" "$work/data/etc/init.d" \
-	"$work/data/etc/netcfgd" "$work/control"
+	"$work/data/etc/netcfgd" "$work/data/lib/upgrade/keep.d" "$work/control"
 cp "$program" "$work/data/usr/sbin/netcfgd"
 chmod 755 "$work/data/usr/sbin/netcfgd"
 ln -s ../sbin/netcfgd "$work/data/usr/bin/ncfg"
 cp "$here/packaging/procd/netcfgd" "$work/data/etc/init.d/netcfgd"
 chmod 755 "$work/data/etc/init.d/netcfgd"
+# **What `sysupgrade` carries over, and the program is in it on purpose** (project.md
+# 10.753). A firmware image holds no netcfgd and "keep settings" keeps only what is
+# named, so a router whose port was handed to netcfgd came back with netifd no longer
+# holding it and nothing else there to. The program is static, so it runs on whatever
+# the new image brings; the store is this node's identity, which every paired device
+# knows it by.
+cat > "$work/data/lib/upgrade/keep.d/netcfgd" <<'KEEP'
+/etc/netcfgd/
+/root/.local/share/fuzznet/
+/usr/sbin/netcfgd
+/usr/bin/ncfg
+/etc/init.d/netcfgd
+/etc/rc.d/S21netcfgd
+/etc/rc.d/K89netcfgd
+KEEP
 
 cat > "$work/control/control" <<CONTROL
 Package: netcfgd

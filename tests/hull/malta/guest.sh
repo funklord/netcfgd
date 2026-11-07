@@ -186,6 +186,42 @@ running=$(pidof netcfgd | wc -w)
 say "installed $listed, enabled $enabled, running $running, $(/usr/bin/ncfg --version 2>&1 | head -1)"
 [ "$listed" = 1 ] && [ "$enabled" = 0 ] && [ "$running" = 0 ] || failed=1
 /usr/bin/ncfg --version 2>/dev/null | grep -q '^ncfg ' || failed=1
+# What a firmware upgrade keeps, by `sysupgrade`'s own list, archived and restored:
+# what it leaves out is what an upgrade would lose. A router handed to netcfgd has to
+# come back still run by it, and as the same node.
+/etc/init.d/netcfgd enable
+logger keep-mark-one
+/etc/init.d/netcfgd start
+looks=0
+until [ -S /run/netcfgd/fuzznet.sock ] || [ "$looks" -gt 30 ]; do sleep 1; looks=$((looks + 1)); done
+sleep 2
+# Past a mark, so a line from a daemon before this one cannot answer for it.
+node_key() {
+	logread | sed -n "/$1/,\$s/.*fuzznetd: identity \([0-9a-f]\{16\}\).*/\1/p" | tail -1
+}
+before=$(node_key keep-mark-one)
+/etc/init.d/netcfgd stop
+sleep 2
+# `sysupgrade -b` refuses on a ramdisk, which is what this image runs from, so the
+# archive is made from `-l`: the list `-b` would have archived.
+tar czf /tmp/keep.tgz $(sysupgrade -l 2>/dev/null)
+say "sysupgrade kept: $(tar tzf /tmp/keep.tgz | grep -cE 'netcfgd|fuzznet|ncfg') of ours in $(tar tzf /tmp/keep.tgz | wc -l)"
+conf=$(tar tzf /tmp/keep.tgz | grep -c 'etc/netcfgd/')
+rm -rf /etc/netcfgd /root/.local/share/fuzznet /usr/sbin/netcfgd /usr/bin/ncfg \
+	/etc/init.d/netcfgd /etc/rc.d/S21netcfgd /etc/rc.d/K89netcfgd
+tar xzf /tmp/keep.tgz -C /
+rm -f /tmp/keep.tgz
+logger keep-mark-two
+/etc/init.d/netcfgd start
+looks=0
+until [ -S /run/netcfgd/fuzznet.sock ] || [ "$looks" -gt 30 ]; do sleep 1; looks=$((looks + 1)); done
+sleep 2
+after=$(node_key keep-mark-two)
+say "after the restore: $(ls /etc/rc.d | grep -c netcfgd) start links, $(pidof netcfgd | wc -w) running, node $before then $after"
+[ "$conf" -ge 1 ] && [ -n "$before" ] && [ "$before" = "$after" ] && [ -n "$(pidof netcfgd)" ] &&
+	[ -e /etc/rc.d/S21netcfgd ] || failed=1
+/etc/init.d/netcfgd stop
+/etc/init.d/netcfgd disable
 opkg remove netcfgd > /dev/null 2>&1
 [ ! -e /usr/sbin/netcfgd ] && [ ! -e /etc/init.d/netcfgd ] || failed=1
 say "after removal: $(opkg list-installed 2>/dev/null | grep -c '^netcfgd ') installed, $(ls /usr/sbin/netcfgd 2>/dev/null | wc -l) program"

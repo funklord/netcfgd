@@ -616,6 +616,13 @@ which stops a DHCP server on it. Give the device a zone, or stop `firewall` once
 hooks. When everything is handed over and confirmed, `/etc/init.d/netcfgd enable` is what
 makes it survive a reboot.
 
+**A firmware upgrade keeps netcfgd**, if you keep settings. The package lists its
+configuration, its store and the program itself for `sysupgrade`, because the new image
+holds no netcfgd and a port you took out of `/etc/config/network` would otherwise come back
+with nothing running it. `sysupgrade -n`, which keeps nothing, loses it all along with the
+rest of the router's settings. What comes back is files the package manager no longer
+knows, so a later `opkg install` of netcfgd needs `--force-overwrite`.
+
 ## When something goes wrong
 
 **Ask what netcfgd thinks it did.** `ncfg status` for what the kernel has,
