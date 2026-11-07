@@ -70,6 +70,41 @@ done
 told=$({ /usr/bin/ncfg plan 2>&1; logread; } | grep 'netifd also manages' | tail -1 | cut -c1-150)
 say "netcfgd says: ${told:-nothing of netifd}"
 [ -n "$told" ] || failed=1
+
+# A WAN port on DHCP, the commonest thing a router is told: OpenWrt's busybox
+# udhcpc under netcfgd, on one end of a pair netcfgd makes, and OpenWrt's dnsmasq
+# on the other. The stock dnsmasq is stopped for the port, and with no `lan` here
+# it was serving nothing; the stock firewall rejects input on a device it has no
+# zone for, which a DHCP server's socket is behind and a client's raw one is not.
+/etc/init.d/dnsmasq stop 2>/dev/null
+/etc/init.d/firewall stop 2>/dev/null
+insmod /payload/veth.ko 2>> "$out"
+printf 'device wan1 {\n\tveth {\n\t\tpeer = "isp1"\n\t}\n}\ninterface isp1 {\n\tconfig = "192.168.77.1/24"\n}\ninterface wan1 {\n\tconfig = "dhcp"\n}\n' \
+	>> /etc/netcfgd/netcfgd.conf
+n=0
+until ip addr show dev isp1 2>/dev/null | grep -q 'inet 192.168.77.1/' || [ $n -gt 30 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+say "the far end is up after $n s"
+dnsmasq --conf-file=/dev/null --port=0 --interface=isp1 --bind-interfaces \
+	--dhcp-range=192.168.77.50,192.168.77.60,1h --dhcp-leasefile=/tmp/leases \
+	--pid-file=/tmp/isp.pid 2>> "$out"
+n=0
+until ip addr show dev wan1 2>/dev/null | grep -q 'inet 192.168.77.' || [ $n -gt 60 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+lease=$(ip addr show dev wan1 2>/dev/null | sed -n 's/.*inet \(192.168.77.[0-9]*\).*/\1/p')
+say "wan1 took ${lease:-nothing} after $n s, by $(pidof udhcpc | wc -w) udhcpc"
+say "dnsmasq gave: $(cut -d' ' -f3 /tmp/leases 2>/dev/null | tr '\n' ' ')"
+[ -n "$lease" ] && grep -q "$lease" /tmp/leases 2>/dev/null || {
+	failed=1
+	say "dnsmasq running: $(pidof dnsmasq | wc -w), tables: $(nft list tables 2>/dev/null | tr '\n' ' ')"
+	ps w | grep -E '[u]dhcpc|[d]nsmasq' | cut -c1-120 >> "$out"
+	logread | grep -E 'dnsmasq|udhcpc' | tail -10 | cut -c1-130 >> "$out"
+}
+[ -f /tmp/isp.pid ] && kill "$(cat /tmp/isp.pid)"
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep netcfgd | tail -14 | sed 's/^/  log: /' >> "$out"
 	say "VERDICT bad"

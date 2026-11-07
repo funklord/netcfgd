@@ -12704,7 +12704,16 @@ the remedy says how. Wireless is not read: `/etc/config/wireless` names radios a
 `wifi-iface`, and netifd's hostapd comes up under a name netcfgd would not have claimed.
 
 `make hull-malta` is the witness: stock netifd, told of `eth0` by OpenWrt itself, and a document
-naming the same device. netcfgd says `netifd also manages eth0`.
+naming the same device. netcfgd says `netifd also manages eth0`. **The fight is real, and the log
+of that run shows it**: netifd took the new `eth0` into `br-lan`, and netcfgd answered
+`link.unset_master master: <absent> (was br-lan)` two seconds later.
+
+**A WAN port on DHCP works there too**, the commonest thing a router is told: OpenWrt's busybox
+udhcpc under netcfgd took `192.168.77.50` from OpenWrt's dnsmasq in 6 s, across a veth netcfgd
+made. The first run took nothing, and that was the stock firewall: it rejects input on a device
+it has no zone for, which a DHCP server's socket is behind and a client's raw one is not.
+**On a real router that is the operator's to arrange**, and `ncfg plan` already warns that other
+nftables tables filter at the firewall's hooks.
 
 ## 10.745 Every local user holds the events
 
@@ -12764,8 +12773,8 @@ which needs everything observed to compare equal to what was asked. All hold on 
 **qemu-user answers `EOPNOTSUPP` for rtnetlink it cannot translate**, so `cli_apply_test`
 and five scripts that need a machine cannot run in `hull-mips`. The verdict names them, and
 excuses a section only if it also shows that limit; any other failure fails the run.
-`hull-malta` is what covers that ground, for the paths its two documents take. wifi,
-DHCP and the fleet have not run on a big-endian kernel.
+`hull-malta` is what covers that ground, for the paths its documents take. wifi and the
+fleet have not run on a big-endian kernel.
 
 **What the suite found was nearly all the suite's own.** No byte-order fault in `src`:
 every ioctl comes from the kernel's headers, and native integers were copied rather than

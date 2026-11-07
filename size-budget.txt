@@ -1111,4 +1111,5 @@ netcfgd
 # 2026-11-07: 2,477,424, +19,064 at fuzznet 4bf32784, all of it fuzznet's: contacts and
 # notes held in RAM, and a memo of verified signatures. The bounds of 10.740 are bss, so
 # they move nothing here; what they save is the 1.14 GB fuzznet's tables reach at this pin.
-total 2477424
+# 2026-11-07: 2,477,696, +272: reading what netifd was told (10.746).
+total 2477696

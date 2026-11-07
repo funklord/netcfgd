@@ -42,6 +42,7 @@ mkdir -p $top/payload $top/repo/packaging/procd $top/verdict $top/etc
 cp netcfgd-static $top/payload/netcfgd
 "$toolchain/bin/mips-openwrt-linux-musl-strip" $top/payload/netcfgd
 cp /malta/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
+cp /malta/veth/lib/modules/*/veth.ko $top/payload/veth.ko
 cp /payload/guest.sh /payload/wider.conf $top/payload/
 cp /repo/tests/hull/openwrt/payload.sh $top/payload/payload.sh
 cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
