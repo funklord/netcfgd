@@ -562,6 +562,60 @@ source netcfgd has never been on has no card listed, because learning what is
 in the other socket costs a switch, a modem reset and the link. Nothing can
 show you both at once; this shows you both once both have been tried.
 
+## 10. An OpenWrt router
+
+Everything here has been run on OpenWrt 24.10 in an emulator (`make hull-malta`), and
+on no real router yet. A router may have no console, so the rule above matters more:
+**leave the port you are connected through with netifd until the end.**
+
+Build the program with OpenWrt's toolchain for your target, then the package. The
+Makefiles call `ar` and `nm` by their plain names, so link the toolchain's under those
+names ahead of this machine's on `PATH`, as `tests/hull/malta/payload.sh` does:
+
+```sh
+make -C c netcfgd-static CC=<target>-openwrt-linux-musl-gcc
+sh tool/ipk.sh c/netcfgd-static <architecture> netcfgd.ipk   # `opkg print-architecture`
+```
+
+Installing starts nothing and enables nothing, so nothing has changed yet:
+
+```sh
+opkg install netcfgd.ipk
+```
+
+Write `/etc/netcfgd/netcfgd.conf` for one port that you are **not** connected through,
+and read the plan. Where netifd is told of the same device, the plan says so:
+
+```
+warning: netifd also manages eth1. Two daemons on one interface will fight
+```
+
+They do fight: netifd puts the device in its bridge and netcfgd takes it out again. So
+take that device out of `/etc/config/network`, run `/etc/init.d/network reload`, and
+only then start netcfgd, with a window:
+
+```sh
+/etc/init.d/netcfgd start
+ncfg apply --confirm-within 60
+ncfg confirm
+```
+
+**On wifi, OpenWrt makes no interface on a radio**, so name the radio's `phy`, from
+`ls /sys/class/ieee80211`, and netcfgd makes one. Leave it out of
+`/etc/config/wireless`, or disable it there:
+
+```
+device wlan0 {
+	radio { phy = "phy0" }
+}
+```
+
+**OpenWrt's firewall is still there.** It rejects input on a device it has no zone for,
+which stops a DHCP server on it. Give the device a zone, or stop `firewall` once netcfgd's
+`firewall` block does its work. `ncfg plan` warns when another table filters at the same
+hooks. When everything is handed over and confirmed, `/etc/init.d/netcfgd enable` is what
+makes it survive a reboot.
+
 ## When something goes wrong
 
 **Ask what netcfgd thinks it did.** `ncfg status` for what the kernel has,

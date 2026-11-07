@@ -130,6 +130,7 @@ static pid_t marked_child(const char *marker)
 static void reap(void)
 {
 	size_t at;
+	int    tries;
 
 	for (at = 0; at < child_count; at++) {
 		if (children[at] <= 0) {
@@ -138,6 +139,15 @@ static void reap(void)
 		(void)kill(-children[at], SIGKILL);
 		(void)kill(children[at], SIGKILL);
 		(void)waitpid(children[at], NULL, 0);
+		/* `timeout`'s own child is the one carrying the mark, and only signalled
+		 * so far: for a moment it is still in `/proc` to be found, which is the
+		 * next check's answer on a slow machine. Bounded, as an init that does
+		 * not reap leaves it a zombie and the group never empties. */
+		for (tries = 0; tries < 200 && kill(-children[at], 0) == 0; tries++) {
+			struct timespec pause = { 0, 5000000L };
+
+			(void)nanosleep(&pause, NULL);
+		}
 		children[at] = 0;
 	}
 	child_count = 0;

@@ -12696,7 +12696,11 @@ the network, and there may be no console. With no `postinst` the init script sta
 asks the installed `ncfg` for its version, and removes it. **Not a feed**: a package per
 architecture wants the SDK and somewhere to publish, which is the holder's. Also here, unmentioned
 in 402205ea's message: `dhcp_server_test`'s stand-in was stopped before its trap was set, the
-race of 10.742's `autoip_test`, and now says when it is ready.
+race of 10.742's `autoip_test`, and now says when it is ready. `liveness_test` was the third of
+that family: it waited for `timeout` and scanned while `timeout`'s child was still leaving.
+**Three stand-ins, one shape, none of them netcfgd's**: a test that takes a process's arrival or
+departure at one step's word, on a machine where steps had always been fast. An emulator is
+slow enough to find them, which is `hull-mips` earning its keep beyond byte order.
 
 ## 10.749 What OpenWrt's hostapd does not answer
 
