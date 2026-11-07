@@ -107,6 +107,26 @@ void ncfg_plan_access_point(ncfg_builder_t *builder, const ncfg_interface_t *int
 		return;
 	}
 	/*
+	 * **Not on a radio this plan is making** (10.754). What hostapd is started
+	 * with depends on what the radio can do, read from the observation, and a
+	 * device that does not exist yet has none: it came up with no 802.11n and so
+	 * no WMM, and the next reconcile, reading the radio, restarted it to add them.
+	 * Every boot of a router restarted its access point once, under whoever had
+	 * joined. That next reconcile starts it instead, once and as it should be.
+	 */
+	{
+		const ncfg_device_t *device = ncfg_plan_device(builder->desired, interface->name);
+
+		if (device && device->kind.kind == NCFG_KIND_RADIO &&
+		    !ncfg_observed_link(builder->observed, interface->name)) {
+			ncfg_plan_warnf(builder->plan, interface->name,
+			    "the access point on `%s` starts once the radio exists: what it "
+			    "can do is read from it, so the apply after this one starts it",
+			    interface->name);
+			return;
+		}
+	}
+	/*
 	 * Through the same function a DHCP client is started by, which is what
 	 * carries 0079's restart limit and rule 3's wait for `link.up` here
 	 * without a second copy of either. A radio hostapd is already running on

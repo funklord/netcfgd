@@ -119,6 +119,33 @@ static void a_radio_the_document_gives_an_access_point_starts_hostapd(void)
 }
 
 /*
+ * A radio OpenWrt has no interface on yet (10.748, 10.754). Started in the plan that
+ * makes it, hostapd has no radio to read and comes up without 802.11n, and the
+ * reconcile after restarts it, under whoever had just joined.
+ */
+#define MADE_RADIO "{\"name\":\"wlan0\",\"kind\":{\"kind\":\"radio\",\"phy\":\"phy0\"}}"
+
+static void an_access_point_waits_for_a_radio_this_plan_makes(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(MADE_RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[]", &document, &observed);
+
+	check(plan && planfix_action(plan, "link.create") != NULL,
+	    "a radio with no interface is made");
+	check(plan && planfix_action(plan, "backend.start") == NULL,
+	    "and its access point is not started in the plan that makes it");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(MADE_RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" DOWN_LINK "]", &document, &observed);
+	check(plan && planfix_action(plan, "backend.start") != NULL,
+	    "the plan after, with the radio there to read, starts it");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * The whole reason the call site is `ncfg_plan_interface_contents` and not
  * `build.c`'s sequence. `plan.h` says the action list is itself a valid
  * execution order, so "the access point comes before the addressing" has to
@@ -1639,6 +1666,7 @@ static void a_feature_hostapd_lacks_is_said_and_802_11ac_withheld(void)
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
+	an_access_point_waits_for_a_radio_this_plan_makes();
 	the_addressing_waits_for_the_access_point();
 	hostapd_that_is_already_running_is_not_started_again();
 	a_port_that_authenticates_takes_the_supplicant_and_not_hostapd();

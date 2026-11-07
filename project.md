@@ -12683,6 +12683,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.754 An access point restarted under its first station, on every boot
+
+A pass of `hull-malta` read `wlan1 after 11 s: not connected`, with the handshake refused: *IE
+in 3/4 msg does not match with IE in Beacon*. Then three passes passed, so it looked like a
+flake, and it was not: **the station fell exactly once in every pass**, and the wait left at
+the first sight of an association, so a pass depended on when it looked. The two IEs differ in
+their last two bytes, `00 00` in the beacon and `0c 00` in the handshake, the replay counters
+WMM sets. The access point had changed under the station.
+
+10.748's `radio` kind did it. What hostapd is started with is read from the radio, a device
+this plan makes has nothing to read yet, so it came up with no `ieee80211n`, and WMM follows
+that; the next reconcile read the radio and restarted it to take them. On a stock OpenWrt
+router, where netcfgd makes every wifi interface, that is each boot.
+
+The plan now leaves the start to the reconcile that sees the radio, as a mesh point's
+supplicant waits on its creation (10.687), and says so. `ncfg apply` in-process with no daemon
+therefore needs a second run for that access point. `hull-malta` waits for a settled link with
+the access point agreeing, and fails on any fall.
+
 ## 10.752 A machine by its name, and closing a window that is still asking
 
 Run on the emulator at pin 60934e20, the phone's node comes up at 5.4 to 6.5 MB resident,

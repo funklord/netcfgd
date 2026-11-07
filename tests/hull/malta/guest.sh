@@ -140,13 +140,27 @@ access_point "bigend" {
 	wifi    { psk = "@secret:bigend"; proto = "wpa2" }
 }
 CONF
+# Settled, not glimpsed: three looks together, with the access point agreeing. And no
+# fall on the way: a look that left at the first sight of it was how an access point
+# restarted under its first station went unseen (10.754).
 n=0
-until iw dev wlan1 link 2>/dev/null | grep -q 'SSID: bigend' || [ $n -gt 90 ]; do
+held=0
+until [ "$held" -ge 3 ] || [ $n -gt 90 ]; do
+	if iw dev wlan1 link 2>/dev/null | grep -q 'SSID: bigend' &&
+		[ "$(iw dev wlan0 station dump 2>/dev/null | grep -c '^Station')" -ge 1 ]; then
+		held=$((held + 1))
+	else
+		held=0
+	fi
 	sleep 1
 	n=$((n + 1))
 done
 link=$(iw dev wlan1 link 2>/dev/null | grep -E 'Connected|SSID' | tr -s ' \t' ' ' | tr '\n' ';')
 say "wlan1 after $n s: ${link:-not connected}"
+fell=$(logread | grep -c 'wlan1: CTRL-EVENT-DISCONNECTED')
+say "wlan1 fell $fell time(s) on the way"
+[ "$fell" = 0 ] || failed=1
+logread | grep 'RSN IE in' | sed 's/.*WPA: //' | cut -c1-120 >> "$out"
 station=$(iw dev wlan0 station dump 2>/dev/null | grep -c '^Station')
 say "wlan0 has $station station(s)"
 clients=$(/usr/bin/ncfg wifi clients wlan0 2>&1 | head -1 | cut -c1-90)
