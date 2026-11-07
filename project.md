@@ -12710,10 +12710,17 @@ cannot:
   big-endian netlink. netcfgd resident at 4.6 MB, 52 MB available of 118. Everything
   fetched is pinned by checksum. Not in `make hull`, being two emulators deep.
 
+**A second document goes where byte order can break**, after the router test: a vlan, a
+bridge, a route, a port forward and firewall rules. Three witnesses that are not netcfgd's
+word for itself: `/proc/net/vlan/config` reads `vlan10 | 10 | lan0`, `nft` reads `dport 443`
+and `8443` where a swapped port would read 47873, and **`ncfg plan` then has nothing to do**,
+which needs everything observed to compare equal to what was asked. All hold on big-endian.
+
 **qemu-user answers `EOPNOTSUPP` for rtnetlink it cannot translate**, so `cli_apply_test`
 and five scripts that need a machine cannot run in `hull-mips`. The verdict names them, and
 excuses a section only if it also shows that limit; any other failure fails the run.
-`hull-malta` is what covers that ground, for the paths that test takes.
+`hull-malta` is what covers that ground, for the paths its two documents take. wifi,
+DHCP and the fleet have not run on a big-endian kernel.
 
 **What the suite found was nearly all the suite's own.** No byte-order fault in `src`:
 every ioctl comes from the kernel's headers, and native integers were copied rather than
@@ -12817,11 +12824,11 @@ available beside a 5.6 MB daemon. fuzznet's ladder reads memory, so the node can
 `scarce` here with an empty store, and netcfgd then says `fuzznet is in trouble`. That
 report is true of this guest and not of a real router's kernel, measured in 10.742.
 
-**Open, unexplained: one run in the first four at 128 MB read `procd started nothing`**
-after 21 s, where every other run reads 5 s, procd's own respawn delay, and the steps after
-it passed. Two reruns under load passed, which is what intermittent means rather than an
-answer. The payload now says how long the respawn took, and on failure gives procd's own
-lines beside netcfgd's, with memory read before the kill.
+**One run in four read `procd started nothing`, and that was the test.** It came back on
+the real kernel of 10.742, with the evidence this time: `after 0 s`, so the wait had ended
+at once, on a pid that was not the one killed and was gone a moment later, and procd's real
+respawn is in the log six seconds on. A fork of the daemon just killed can be seen by its
+name for an instant. The payload now wants a pid that stays.
 
 ## 10.739 A caller with no stream and no socket is read to
 

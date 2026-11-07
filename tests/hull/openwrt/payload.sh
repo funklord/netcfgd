@@ -89,12 +89,19 @@ say "serving: socket $([ -S /run/netcfgd/fuzznet.sock ] && echo there || echo ab
 say "running: $(memory) netcfgd $(awk '/^VmRSS/ { print $2 }' /proc/$(pidof netcfgd)/status 2>/dev/null) kB"
 first=$(pidof netcfgd)
 kill -9 "$first"
+# A pid that stays, as a fork of the daemon just killed can be seen by that name
+# for a moment and then be gone: that read as procd starting nothing (10.740).
 n=0
-until { [ -n "$(pidof netcfgd)" ] && [ "$(pidof netcfgd)" != "$first" ]; } || [ $n -gt 20 ]; do
+second=
+while [ $n -le 20 ]; do
+	seen=$(pidof netcfgd)
 	sleep 1
 	n=$((n + 1))
+	if [ -n "$seen" ] && [ "$seen" != "$first" ] && [ "$(pidof netcfgd)" = "$seen" ]; then
+		second=$seen
+		break
+	fi
 done
-second=$(pidof netcfgd)
 say "killed $first; procd started ${second:-nothing} after $n s"
 [ -n "$second" ] && [ "$second" != "$first" ] || failed=1
 n=0

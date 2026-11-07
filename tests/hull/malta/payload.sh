@@ -42,7 +42,7 @@ mkdir -p $top/payload $top/repo/packaging/procd $top/verdict $top/etc
 cp netcfgd-static $top/payload/netcfgd
 "$toolchain/bin/mips-openwrt-linux-musl-strip" $top/payload/netcfgd
 cp /malta/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
-cp /payload/guest.sh $top/payload/guest.sh
+cp /payload/guest.sh /payload/wider.conf $top/payload/
 cp /repo/tests/hull/openwrt/payload.sh $top/payload/payload.sh
 cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 : > $top/payload/kernel-has-netfilter
@@ -58,5 +58,9 @@ say "qemu left with $ran"
 grep -q 'GUEST-END' /verdict/console 2>/dev/null ||
 	{ tail -30 /verdict/console >> "$out"; say "VERDICT bad: the guest never finished"; exit 0; }
 sed -n '/GUEST-BEGIN/,/GUEST-END/p' /verdict/console | tr -d '\r' | grep -v 'GUEST-' >> "$out"
-grep -q '^VERDICT ok' "$out" && echo "malta: VERDICT ok" || say "VERDICT bad"
+if grep -q "^VERDICT bad" "$out" || [ "$(grep -c "^VERDICT ok" "$out")" -ne 2 ]; then
+	say "VERDICT bad"
+else
+	say "VERDICT ok"
+fi
 exit 0

@@ -3141,7 +3141,7 @@ hull-malta:
 		exit 1; \
 	fi; \
 	sed 's/^/malta: /' tests/hull/malta/verdict/malta; \
-	grep -q '^VERDICT ok' tests/hull/malta/verdict/malta
+	tail -1 tests/hull/malta/verdict/malta | grep -q '^VERDICT ok'
 
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
