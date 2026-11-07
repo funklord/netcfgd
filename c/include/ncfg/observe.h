@@ -1466,8 +1466,20 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
  */
 #define NCFG_HOSTAPD_STATION_WALK_MAX 2007
 struct ncfg_supplicant_client;
+/*
+ * **A hostapd with no walk is not one with nobody on it.** OpenWrt builds its
+ * hostapd without the MIB commands, and `UNKNOWN COMMAND` read as an empty list:
+ * `ncfg wifi clients` said nothing was associated beside a kernel holding a
+ * station, and a deny list's prefix had no one to expand against (10.749). So
+ * `interface`'s stations are then asked of the kernel, addresses and `authorized`
+ * alone, and `*unread` is set if it will not say either.
+ */
 int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
-    ncfg_hostapd_station_t **out, size_t *count, int *unread);
+    const char *interface, ncfg_hostapd_station_t **out, size_t *count, int *unread);
+
+/* The stations of `interface`, from the kernel. 0 where it could not be asked. */
+int ncfg_observe_kernel_stations(const char *interface, ncfg_hostapd_station_t **out,
+    size_t *count);
 
 /*
  * What each running supplicant is holding, and whether it answers.

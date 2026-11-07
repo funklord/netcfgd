@@ -170,7 +170,7 @@ static int by_address(const void *left, const void *right)
 	    ((const ncfg_hostapd_station_t *)right)->address);
 }
 
-int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
+int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client, const char *interface,
     ncfg_hostapd_station_t **out, size_t *count, int *unread)
 {
 	ncfg_buf_t collected;
@@ -203,6 +203,19 @@ int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
 		        sizeof(why))) {
 			*unread = 1;
 			break;
+		}
+		/* Before `FAIL`, which the client folds this into: that ends a walk,
+		 * and this says there was never going to be one. */
+		if (at == 0u && strncmp(body, "UNKNOWN COMMAND", 15u) == 0) {
+			ncfg_buf_free(&collected);
+			if (!ncfg_observe_kernel_stations(interface, out, count)) {
+				*unread = 1;
+				return 1;
+			}
+			if (*count > 1u) {
+				qsort(*out, *count, sizeof(**out), by_address);
+			}
+			return 1;
 		}
 		if (kind == NCFG_SUPPLICANT_REPLY_FAIL) {
 			break;
@@ -333,7 +346,8 @@ static int steerable_of(const ncfg_hostapd_station_t *found, size_t found_count,
 }
 
 /* The addresses alone, for the observation, and the steerable ones beside. */
-static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *count,
+static int associated_of(ncfg_supplicant_client_t *client, const char *interface, char ***out,
+    size_t *count,
     ncfg_observed_steerable_t **steerable, size_t *steerable_count, int *unread)
 {
 	ncfg_hostapd_station_t *found = NULL;
@@ -344,7 +358,7 @@ static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *
 	*count = 0u;
 	*steerable = NULL;
 	*steerable_count = 0u;
-	if (!ncfg_observe_hostapd_stations(client, &found, &found_count, unread)) {
+	if (!ncfg_observe_hostapd_stations(client, interface, &found, &found_count, unread)) {
 		return 0;
 	}
 	if (!steerable_of(found, found_count, steerable, steerable_count)) {
@@ -446,7 +460,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		 * direction -- nothing is removed on the strength of it, because a
 		 * held entry is kept by the planner whether or not it is associated.
 		 */
-		if (!associated_of(client, &associated, &associated_count, &steerable,
+		if (!associated_of(client, backend->interface, &associated, &associated_count,
+		        &steerable,
 		        &steerable_count, &unread)) {
 			associated = NULL;
 			associated_count = 0;

@@ -58,7 +58,8 @@ static pid_t a_server_leaving(const char *run, const char *iface, const char *on
 {
 	char  config[512];
 	char  pid_file[512];
-	char  script[256];
+	char  ready[560];
+	char  script[768];
 	char  text[32];
 	pid_t pid;
 	int   tries;
@@ -67,8 +68,12 @@ static pid_t a_server_leaving(const char *run, const char *iface, const char *on
 	    !ncfg_dhcp_server_pid_path(run, iface, pid_file, sizeof(pid_file), NULL, 0)) {
 		return -1;
 	}
+	(void)snprintf(ready, sizeof(ready), "%s.trapped", pid_file);
+	(void)unlink(ready);
+	/* The file says the trap is set, which `exec` does not: a TERM between the two
+	 * ends the stand-in, and a stop then truthfully reports success. */
 	(void)snprintf(script, sizeof(script),
-	    "trap '%s' TERM; while :; do sleep 0.05; done", on_term);
+	    "trap '%s' TERM; : > '%s'; while :; do sleep 0.05; done", on_term, ready);
 	pid = fork();
 	if (pid < 0) {
 		return -1;
@@ -81,11 +86,13 @@ static pid_t a_server_leaving(const char *run, const char *iface, const char *on
 	(void)testdir_write(pid_file, text, strlen(text));
 	/* Until it has exec'd it carries this test's command line and owns
 	 * nothing; at most two seconds. */
-	for (tries = 0; tries < 400 && ncfg_dhcp_server_running_pid(run, iface) != pid; tries++) {
+	for (tries = 0; tries < 400 &&
+	    (ncfg_dhcp_server_running_pid(run, iface) != pid || !testdir_exists(ready)); tries++) {
 		struct timespec pause = { 0, 5000000L };
 
 		(void)nanosleep(&pause, NULL);
 	}
+	(void)unlink(ready);
 	return pid;
 }
 

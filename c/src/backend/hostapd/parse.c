@@ -177,9 +177,10 @@ int ncfg_hostapd_parse_station(const char *reply, ncfg_hostapd_station_t *out)
 	}
 	memcpy(first, walk, length);
 	first[length] = '\0';
-	/* `FAIL`, an empty reply and `UNKNOWN COMMAND` all mean "no more", and none
-	 * of them is an error worth showing somebody. A first line that is not an
-	 * address is not trusted into the list either. */
+	/* `FAIL` and an empty reply mean "no more", and neither is an error worth
+	 * showing somebody; `UNKNOWN COMMAND` means no walk at all, which the caller
+	 * has already taken (10.749). A first line that is not an address is not
+	 * trusted into the list either. */
 	if (!ncfg_station_address_normalize(first, out->address, sizeof(out->address), NULL, 0)) {
 		return 0;
 	}

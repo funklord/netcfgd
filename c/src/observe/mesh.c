@@ -14,12 +14,16 @@
 #include "observe_internal.h"
 
 #include "ncfg/genl.h"
+#include "ncfg/genl_socket.h"
 #include "ncfg/log.h"
 #include "ncfg/mesh_peer.h"
 #include "ncfg/wds.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <net/if.h>
 
 #include <linux/nl80211.h>
 
@@ -75,6 +79,63 @@ static int ask_peers(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t
 		free(link->mesh_peers);
 		link->mesh_peers = NULL;
 	}
+	return 1;
+}
+
+int ncfg_observe_kernel_stations(const char *interface, ncfg_hostapd_station_t **out,
+    size_t *count)
+{
+	ncfg_netlink_t       socket;
+	ncfg_genl_family_t   family;
+	ncfg_netlink_reply_t reply;
+	ncfg_buf_t           message;
+	ncfg_buf_t           body;
+	char                 why[NCFG_ERROR_MAX];
+	unsigned int         index = interface ? if_nametoindex(interface) : 0u;
+	uint16_t             kind = 0;
+	uint16_t             flags = 0;
+	size_t               at;
+	int                  ok;
+
+	*out = NULL;
+	*count = 0u;
+	if (index == 0u ||
+	    !ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, why, sizeof(why))) {
+		return 0;
+	}
+	memset(&reply, 0, sizeof(reply));
+	ncfg_buf_init(&message, 0);
+	ncfg_buf_init(&body, 0);
+	ok = ncfg_mesh_peers_request(&message, &family, (uint32_t)index, 0, why, sizeof(why)) &&
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why,
+	        sizeof(why)) &&
+	    ncfg_netlink_request(&socket, kind, flags, &body, NULL, &reply, why, sizeof(why));
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&message);
+	ncfg_genl_family_free(&family);
+	ncfg_netlink_close(&socket);
+	if (!ok) {
+		return 0;
+	}
+	if (reply.count) {
+		*out = calloc(reply.count, sizeof(**out));
+		if (!*out) {
+			ncfg_netlink_reply_free(&reply);
+			return 0;
+		}
+	}
+	for (at = 0; at < reply.count; at++) {
+		ncfg_mesh_peer_t peer;
+
+		if (ncfg_mesh_peer_parse(reply.items[at].bytes, reply.items[at].length, &peer, why,
+		        sizeof(why))) {
+			(void)snprintf((*out)[*count].address, sizeof((*out)[*count].address), "%s",
+			    peer.mac);
+			(*out)[*count].authorized = peer.authorized;
+			(*count)++;
+		}
+	}
+	ncfg_netlink_reply_free(&reply);
 	return 1;
 }
 

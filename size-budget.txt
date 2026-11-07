@@ -1112,4 +1112,6 @@ netcfgd
 # notes held in RAM, and a memo of verified signatures. The bounds of 10.740 are bss, so
 # they move nothing here; what they save is the 1.14 GB fuzznet's tables reach at this pin.
 # 2026-11-07: 2,477,696, +272: reading what netifd was told (10.746).
-total 2477696
+# 2026-11-07: 2,477,880, +184: the `radio` kind, and asking the kernel for stations
+# hostapd will not list, on top of a `FAIL` being no refusal (10.748, 10.749).
+total 2477880

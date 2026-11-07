@@ -1319,7 +1319,7 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 	 * is the observer's since 10.591, which needs the same addresses to expand
 	 * a deny list's prefix against.
 	 */
-	if (!ncfg_observe_hostapd_stations(client, &found, &count, &unread)) {
+	if (!ncfg_observe_hostapd_stations(client, interface, &found, &count, &unread)) {
 		ncfg_supplicant_client_free(client);
 		ncfg_error_set(err, err_size,
 		    "the stations on %s would not fit in memory, so the list is refused rather "

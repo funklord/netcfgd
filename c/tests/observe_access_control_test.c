@@ -191,6 +191,34 @@ static void a_station_walk_cut_short_is_recorded_as_short(void)
 	}
 }
 
+/*
+ * OpenWrt's hostapd has no MIB commands, so `UNKNOWN COMMAND` is no walk at all,
+ * which read as nobody associated (10.749). The kernel is asked instead, and with
+ * no such interface here it cannot say: short, then, and never "nobody".
+ */
+static void a_hostapd_with_no_walk_is_not_one_with_nobody_on_it(void)
+{
+	ncfg_observed_t                      *observed = observed_with("access_point", "wlan0", 1);
+	const ncfg_observed_access_control_t *lists;
+	char                                  message[NCFG_ERROR_MAX];
+
+	if (!observed) {
+		check(0, "the fixture for a live access point reads");
+		return;
+	}
+	memset(&fake_config, 0, sizeof(fake_config));
+	fake_config.no_station_walk = 1;
+	check(fake_start(ctrl_dir, "wlan0"), "a hostapd with no walk is listening");
+	message[0] = '\0';
+	check(ncfg_observe_access_control(observed, run_dir, PATIENCE_MS, message,
+	    sizeof(message)), "the round runs");
+	lists = only(observed) ? only(observed)->access_control : NULL;
+	check(lists && lists->associated_unread,
+	    "  and a list nobody could read is recorded as short, not as empty");
+	fake_stop();
+	ncfg_observed_free(observed);
+}
+
 static void a_daemon_that_answers_nothing_is_not_answering(void)
 {
 	ncfg_observed_t *observed = observed_with("access_point", "wlan-wedged", 1);
@@ -409,6 +437,7 @@ int main(void)
 
 	both_lists_are_read_and_the_daemon_is_answering();
 	a_station_walk_cut_short_is_recorded_as_short();
+	a_hostapd_with_no_walk_is_not_one_with_nobody_on_it();
 	a_daemon_that_answers_nothing_is_not_answering();
 	a_daemon_that_connects_and_then_will_not_answer();
 	nothing_listening_is_the_same_answer();

@@ -12683,6 +12683,50 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.749 What OpenWrt's hostapd does not answer
+
+`ncfg wifi clients` said nothing was associated beside a kernel holding a station. OpenWrt
+builds hostapd without the MIB commands, so `STA-FIRST` answers `UNKNOWN COMMAND`, which the
+walk took for the end of it. **A false empty, and not only a wrong line of output**: the same
+walk gives a deny list's prefix its stations to expand against. The station is now asked of
+the kernel, by the `GET_STATION` dump mesh peers use, which any hostapd build answers, with
+`authorized` read from its flags. Signal and counters are hostapd's and stay absent there.
+**If the kernel will not say either, the list is `unread`**, 10.647's word for short, and never
+"nobody".
+
+## 10.748 `radio`: a router's interface is netcfgd's to make
+
+**OpenWrt patches mac80211 to make no interface on a radio.** netifd makes them as it needs
+them, so a stock router has `phy0` and no `wlan0`, `device wlan0` named nothing, and netcfgd
+could make only a `mesh_point`, whose parent has to exist first. Without netifd, wifi on a router
+needed a person with `iw`.
+
+`device wlan0 { radio { phy = "phy0" } }` is a new kind, on `mesh_point`'s pattern: made over
+nl80211, never remade by deletion, wanted before it exists. The difference is what names the
+radio: `NL80211_ATTR_WIPHY`, read from `/sys/class/ieee80211/NAME/index`, as a phy's number is not
+the digits of its name once a driver reloads. A station at first; hostapd or the supplicant makes
+of it what it needs. **Named `radio` and not `wifi`**, as `wifi { }` already is the block
+beside it saying how it is used. **Rejected: making the interface whenever an access point or a
+network names a device that is not there**, which is a typo creating an interface, and needs
+somewhere to learn the phy anyway.
+
+**Measured on real OpenWrt** (`hull-malta`): no interface on either radio beforehand, netcfgd makes
+both, and a station associates to an access point through the stock `wpad`.
+
+**Which took one fix more**: `SET update_config 0` answers `FAIL` on `wpad`, built with no way
+to write a configuration, and that stopped every apply on a stock router. 0015's pin has nothing
+to pin there, so a `FAIL` goes on and only no answer at all still fails.
+
+## 10.747 Two byte orders in one estate
+
+A router in an estate is big-endian and its operator's laptop is not, and no two nodes of
+different byte order had ever spoken. A wire fault of that kind cannot show on a machine of
+either sort alone. `make hull-mips` now runs `node_fleet.sh` with the node built for the guest
+and a MIPS fuzznetd and `ncfg` as the operator, after the same run all native as its control:
+status, `ask`, an apply with a window, a configuration in pieces and `monitor --at`, all of it.
+**It passes whole**, so fuzznet's wire and `ask` are byte-order clean. The node has to be the
+native one, as qemu-user cannot observe.
+
 ## 10.746 The manager a stock router already has
 
 `contention.c` knew NetworkManager and systemd-networkd, and every stock OpenWrt runs
@@ -12773,8 +12817,8 @@ which needs everything observed to compare equal to what was asked. All hold on 
 **qemu-user answers `EOPNOTSUPP` for rtnetlink it cannot translate**, so `cli_apply_test`
 and five scripts that need a machine cannot run in `hull-mips`. The verdict names them, and
 excuses a section only if it also shows that limit; any other failure fails the run.
-`hull-malta` is what covers that ground, for the paths its documents take. wifi and the
-fleet have not run on a big-endian kernel.
+`hull-malta` is what covers that ground, for the paths its documents take; wifi is 10.748,
+and the fleet between byte orders 10.747.
 
 **What the suite found was nearly all the suite's own.** No byte-order fault in `src`:
 every ioctl comes from the kernel's headers, and native integers were copied rather than
