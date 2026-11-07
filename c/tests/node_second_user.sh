@@ -52,7 +52,7 @@ wait %2 2>/dev/null
 sleep 1
 kill -TERM $pid 2>/dev/null
 wait $pid 2>/dev/null
-# `any` has no read to grant, so with the control socket gone a user is read to.
+# `any=r` is every local user's on the events alone, so a user holds them too.
 printf 'global {\n\tcontrol {\n\t\tobserve = "any"\n\t}\n}\n' > "$R/conf/netcfgd.conf"
 rm -f "$R/run/hidden.sock"
 timeout -k 2 16 "$R/netcfgd" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
@@ -83,6 +83,6 @@ check $? "that user reads the estate's hosts from root ($(head -c 50 "$R/hosts1"
 [ "$(cat "$R/hosts2.status")" != 0 ]
 check $? "another user does not ($(head -c 70 "$R/hosts2"))"
 grep -q '"event":"reloaded"' "$R/any"
-check $? "under \`any\`, with no socket, a user hears it by eventlog ($(head -c 60 "$R/any"))"
+check $? "under \`any\`, with no socket, a user hears it ($(head -c 60 "$R/any"))"
 [ "$failed" -eq 0 ] && echo "node_second_user: all checks passed"
 exit "$failed"

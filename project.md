@@ -12683,6 +12683,16 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.745 Every local user holds the events
+
+10.739 read to a user under `observe = "any"`, as `any` had no read to grant: a child
+writing a tick every two seconds and the reader fetching `eventlog`, so a tray was up to
+two seconds late and cost a process. fuzznet's sec 933 gave `local/events` an `any=r`, on the
+holder's yes, on that setting alone, and at 4bf32784 it is here (20261107T0300Z), so the
+special case in `node_permits` goes and `any=x` becomes `any=r` like every other grant.
+**The tick stays**, for what 10.739 did not name as its reason: fuzznet holds four streams,
+and a fifth reader, or one its hold refused, is still read to. Only the order changed.
+
 ## 10.744 fuzznet 4bf32784, and what its tables would have cost
 
 fuzznet's message of 2026-11-06 (20261106T2010Z) said its static tables had grown, to about

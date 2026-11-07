@@ -7152,7 +7152,7 @@ ncfg_monitor_t *ncfg_monitor_open(const char *socket_path, char *err, size_t err
 	}
 
 	/* **Fuzznet's stream first** (0309, 10.732), and the control socket for a caller
-	 * it will not hold: under `observe = "any"`, past its four, or with no node. */
+	 * it will not hold: past its four, or with no node. */
 	char run_dir[sizeof(((ncfg_client_t *)0)->path)];
 	int held = 0;
 	int fd = -1;

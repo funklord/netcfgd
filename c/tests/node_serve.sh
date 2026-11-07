@@ -255,6 +255,9 @@ done
 said=$(ask "$R/fz.sock" "get setting host local/permit/ask")
 echo "$said" | grep -q '^ok [a-z]* any=x$'
 check $? "observe = any grants every local user's call of ask, fuzznet taking it ($said)"
+said=$(ask "$R/fz.sock" "get setting host local/events")
+echo "$said" | grep -q '^ok [a-z]* any=r$'
+check $? "and every local user holds the events, rather than being read to ($said)"
 kill -TERM $pid
 wait $pid
 

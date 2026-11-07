@@ -1084,12 +1084,9 @@ static void node_permits(const ncfg_main_policy_t *policy)
 	node_permit("hosts", want, grant);
 	/* And the events netcfgd publishes follow it too, held by whoever may read
 	 * the status they say to read: the same grant as a read, in a setting of its
-	 * own (fuzznet's sec 899). The node's own user holds them with no grant.
-	 * `any` has no read to grant, which leaves every other user on the control
-	 * socket until fuzznet has one. */
-	if (want == 1 && strcmp(grant, "any=x") == 0) {
-		want = 0;
-	} else if (want == 1) {
+	 * own (fuzznet's sec 899). The node's own user holds them with no grant,
+	 * and `any=r` is every local user's, there and nowhere else (its sec 933). */
+	if (want == 1) {
 		grant[strlen(grant) - 1u] = 'r';
 	}
 	node_setting("local/events", want, grant);
