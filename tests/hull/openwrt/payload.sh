@@ -4,6 +4,7 @@
 # The shipped init script, `packaging/procd/netcfgd`, as an OpenWrt package
 # would install it, and these, each with what makes it mean something:
 #
+#   - the program can be run at all on a machine this small (10.740);
 #   - procd starts it and lists it running, and the address its document
 #     asks for appears on a device netcfgd created;
 #   - killed with -9, procd starts another, which is the `respawn` the script
@@ -39,6 +40,8 @@ wait_for() { # $1 the address; prints the seconds it took, or "never"
 	[ $n -gt 20 ] && echo never || echo $n
 }
 failed=0
+# What a machine this size has left, which fuzznet's pressure reads too.
+memory() { awk '/^(MemAvailable|Cached|Shmem|Slab):/ { printf "%s %d kB  ", $1, $2 }' /proc/meminfo; }
 
 say "pid 1 is $(cat /proc/1/comm); $(head -1 /etc/openwrt_release)"
 n=0
@@ -52,6 +55,13 @@ printf 'device dummy0 {\n\tkind = "dummy"\n}\ninterface dummy0 {\n\tconfig = "19
 cp /payload/netcfgd /usr/sbin/netcfgd && chmod 755 /usr/sbin/netcfgd
 ln -sf /usr/sbin/netcfgd /usr/bin/ncfg
 cp /repo/packaging/procd/netcfgd /etc/init.d/netcfgd && chmod 755 /etc/init.d/netcfgd
+
+# Whether the program can be run at all on a machine this size, asked directly:
+# the kernel refuses a program whose segments outgrow the machine, and procd
+# then has nothing to report but a respawn.
+ran=$(/usr/sbin/netcfgd --version 2>&1 | head -1)
+say "$(grep MemTotal /proc/meminfo | tr -s ' '); the program says: ${ran:-nothing}"
+[ -n "$ran" ] || failed=1
 
 /etc/init.d/netcfgd start
 took=$(wait_for 192.0.2.1)
@@ -76,6 +86,7 @@ face=$(cat /root/.local/share/fuzznet/face 2>/dev/null)
 say "serving: socket $([ -S /run/netcfgd/fuzznet.sock ] && echo there || echo absent), face ${face:-none}"
 [ -S /run/netcfgd/fuzznet.sock ] && [ "$face" = /run/netcfgd/fuzznet.sock ] || failed=1
 
+say "running: $(memory) netcfgd $(awk '/^VmRSS/ { print $2 }' /proc/$(pidof netcfgd)/status 2>/dev/null) kB"
 first=$(pidof netcfgd)
 kill -9 "$first"
 n=0
@@ -84,7 +95,7 @@ until { [ -n "$(pidof netcfgd)" ] && [ "$(pidof netcfgd)" != "$first" ]; } || [ 
 	n=$((n + 1))
 done
 second=$(pidof netcfgd)
-say "killed $first; procd started ${second:-nothing}"
+say "killed $first; procd started ${second:-nothing} after $n s"
 [ -n "$second" ] && [ "$second" != "$first" ] || failed=1
 n=0
 until [ "$(sed -n 's/^key=//p' /run/netcfgd/node 2>/dev/null)" = "$key" ] || [ $n -gt 20 ]; do
@@ -97,7 +108,12 @@ say "the respawned daemon's key: ${again:-none}, $([ "$again" = "$key" ] && echo
 
 # The race: the edit as soon as the new pid is there, no wait at all.
 kill -9 "$second"
-until { [ -n "$(pidof netcfgd)" ] && [ "$(pidof netcfgd)" != "$second" ]; }; do :; done
+# Spinning rather than sleeping, since this step is the race, and counted, so
+# a daemon that never comes back fails the step rather than holding the vm.
+n=0
+until { [ -n "$(pidof netcfgd)" ] && [ "$(pidof netcfgd)" != "$second" ]; } || [ $n -gt 20000 ]; do
+	n=$((n + 1))
+done
 sed -i 's#192.0.2.1/#192.0.2.2/#' /etc/netcfgd/netcfgd.conf
 took=$(wait_for 192.0.2.2)
 say "an edit as procd respawns it: dummy0 $(address)after $took s"
@@ -133,8 +149,8 @@ say "the no-netfilter note: $noted line(s), $repeated process(es) saying it twic
 [ "$noted" -ge 1 ] && [ "$repeated" -eq 0 ] || failed=1
 
 if [ "$failed" -ne 0 ]; then
-	logread 2>/dev/null | grep netcfgd | grep -v 'no netfilter socket' | tail -12 |
-		sed 's/^/  log: /' >> "$out"
+	logread 2>/dev/null | grep -E 'netcfgd|procd|oom|Out of memory' |
+		grep -v 'no netfilter socket' | tail -24 | sed 's/^/  log: /' >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

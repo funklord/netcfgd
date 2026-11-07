@@ -12687,6 +12687,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.740 A program a router could not exec, and every gate green
+
+fuzznet sizes its static tables for a person's thousands of notes and shares, and
+netcfgd linked them with the services that use them switched off: 173 MB of bss in
+`c/netcfgd`. **An untouched table costs no resident memory, so `make rss` passed and
+fuzznet's sec 914 is right to call it address space. But the kernel promises a private
+mapping before anything touches it**, and in its default mode refuses one larger than
+RAM and swap together. So on a 128 MB router, measured in `hull-openwrt` with the
+guest's memory cut:
+
+    __vm_enough_memory: pid: 355, comm: netcfgd, bytes: 173522944 not enough
+    procd: Instance netcfgd::instance1 s in a crash loop 6 crashes
+
+The process dies at exec, before main, and `ncfg` dies with it, being one program.
+There is no log line of netcfgd's to read. **Nothing here could have seen it**: `rss`
+reads what is touched, `size` what is installed, and the one test that boots an OpenWrt
+gave itself 512 MB, four times a router's memory, in a suite that exists because the
+routers are next. fuzznet's message of 2026-11-06 (20261106T2010Z) named the risk for its
+newer pin, which takes a full daemon to 1.14 GB, and that would have put the floor above
+any small VPS as well.
+
+**Fixed by naming the bounds, in every build** (`FUZZNET_BOUNDS`, `c/Makefile`): bss 173 MB
+to 22 MB, fuzznet's bounds being `#ifndef` for this. Not an embedded variant of netcfgd:
+these tables serve notes, shares, files and groups, which this node has off at build time
+(10.702) on every machine, so a laptop gives up nothing either and one binary stays one
+binary. The values are fuzznet's embedded ones, which `livecheck-embedded` holds.
+**Two of its bounds were deliberately not taken**: `FZND_PULL_TARGETS_MAX` and
+`FZND_SIBLING_TARGETS_MAX` stay at eight, being the estate's rounds, which a netcfgd node
+does use. `PRESET=embedded-device` was rejected for the same reason, and because it also
+turns the log file off and changes what the build reports itself as. Some bounds reach
+headers, so `src/node` is compiled with them too.
+
+`hull-openwrt` now runs at 128 MB and asks the program directly first, so this failure
+names itself. It passes whole there: procd, respawn, the edit race, reload, stop. **The
+same test, same memory, before the change: `VERDICT bad`, with the kernel line above.**
+`make bss` holds the figure at 32 MiB, fuzznet's limit for its embedded build, in
+`make check`, since `hull-openwrt` is not. 64 MB could not be measured: the host's kernel
+panics there before init, which says nothing about netcfgd.
+
+**The same run found an unbounded wait in that payload**, under a header saying every
+wait was bounded: the race step spun on `pidof` with no count, so a daemon that never came
+back held the vm until `HULL_TIMEOUT`. Counted now.
+
+**This guest is tighter than a router, so read its pressure accordingly.** It runs the
+host's Debian kernel: 88 MB of `MemTotal` from 128, 28 MB of that slab, about 7 MB
+available beside a 5.6 MB daemon. fuzznet's ladder reads memory, so the node can reach
+`scarce` here with an empty store, and netcfgd then says `fuzznet is in trouble`. That
+report is true of this guest, and whether it is of a real router's kernel is unmeasured.
+
+**Open, unexplained: one run in the first four at 128 MB read `procd started nothing`**
+after 21 s, where every other run reads 5 s, procd's own respawn delay, and the steps after
+it passed. Two reruns under load passed, which is what intermittent means rather than an
+answer. The payload now says how long the respawn took, and on failure gives procd's own
+lines beside netcfgd's, with memory read before the kill.
+
 ## 10.739 A caller with no stream and no socket is read to
 
 `any` has no read to grant, so under `observe = "any"` only the control socket gave an

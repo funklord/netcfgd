@@ -113,7 +113,7 @@ CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 # subcommand, so the question is whether it is on PATH.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss rss-node live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde tde-container install-tde deb-tde help
+.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde tde-container install-tde deb-tde help
 
 all: build
 
@@ -161,7 +161,7 @@ ncfg-link:
 PORTABLE_GATES = style fmt ascii shell clippy clang default-goal unsafe-policy \
                  executor-policy nm-containment packaging claims client-test \
                  conformance test example gui linkage c-test agree ledger \
-                 module-order registry bridge-test nm-c-test
+                 module-order registry bridge-test nm-c-test bss
 BUDGET_GATES   = size footprint rss rss-node
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -2388,6 +2388,21 @@ RSS_NODE_LIMIT_KB ?= 7040
 rss-node:
 	@$(MAKE) --no-print-directory rss RSS_NAME=rss-node RSS_DAEMON_OPTIONS= \
 		RSS_SOCKET=fuzznet.sock RSS_LIMIT_KB=$(RSS_NODE_LIMIT_KB)
+
+# **What the kernel must promise before main, and it is not what `rss` reads**
+# (project.md 10.740). An untouched table costs no resident memory, so `rss`
+# passed at 173 MB of bss -- and on a machine smaller than that the kernel
+# refuses the mapping at exec, and the daemon and `ncfg` both segfault. `size`
+# cannot see it either, measuring what is installed. 32 MiB is fuzznet's own
+# limit for its embedded build; the daemon measures 22 MB. `make hull-openwrt`
+# is the same fact on a 128 MB machine, and this is the one that runs everywhere.
+BSS_LIMIT_BYTES ?= 33554432
+bss:
+	@$(MAKE) --no-print-directory -C c netcfgd
+	@bss=$$(size c/netcfgd | awk 'NR==2{print $$3}'); \
+	case "$$bss" in ""|*[!0-9]*) echo "bss: size read nothing from c/netcfgd" >&2; exit 1 ;; esac; \
+	echo "bss: $$bss bytes, at most $(BSS_LIMIT_BYTES)"; \
+	test "$$bss" -le $(BSS_LIMIT_BYTES)
 
 # Section 6 wants a target per parser. **The variables that drive them live
 # beside the `fuzz` target itself now**, because there were two sets: this
