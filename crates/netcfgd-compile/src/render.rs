@@ -101,9 +101,8 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 		"# Written by netcfgd from what this machine was running.\n\
 		 #\n\
 		 # This is ordinary netcfgd configuration: edit it, diff it, commit it.\n\
-		 # It is a snapshot rather than a hand-written profile, so it says\n\
-		 # everything explicitly -- including things a person would have left to\n\
-		 # a default.\n",
+		 # It is a snapshot rather than a hand-written profile: a value equal to\n\
+		 # a default is left out, so it goes on following the default.\n",
 	);
 
 	render_globals(document, &mut text, &mut missing);

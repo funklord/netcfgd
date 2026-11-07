@@ -1124,15 +1124,11 @@ the community API reference at ubntwiki.com
 APIs, and the event names as two client libraries use them.
 **Whether that is worth building is the holder's.**
 
-**Three things open that a worker should not settle alone.**
+**Two things open that a worker should not settle alone.**
 
-- **The generated profile's header contradicts the renderer.** It tells its
-  reader the file "says everything explicitly -- including things a person
-  would have left to a default", and the code omits every value equal to a
-  default. Both behaviours are defensible and the round trip cannot tell them
-  apart; what is not defensible is the artifact describing itself wrongly. The
-  existing code's convention was followed rather than the header's wording, so
-  the choice stays open.
+- ~~**The generated profile's header contradicts the renderer.**~~ **Settled by the
+  holder's rule of 2026-11-06, a config file records choices, not values (10.743):**
+  the renderer was right and the sentence was false.
 - **Twenty places in the model are verified unreachable from the
   configuration language, and that is a floor rather than a count** -- it was
   seventeen until 10.172 found three more while rendering them, two of those
@@ -12686,6 +12682,17 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.743 A profile's header said the opposite of what it does
+
+A saved profile told its reader it "says everything explicitly -- including things a
+person would have left to a default", and the renderer omits every value equal to a
+default. 10's list held that open for a person to settle, with both called defensible.
+**The holder's rule of 2026-11-06, a config file records choices rather than values,
+settles it**: an absent key is the choice to follow the default, and a written default
+compiles equal to an absent one, so nothing later could tell it from a pin. Writing them
+all is the direction that rule measures freezing every default at save time. The renderer
+was right, and the sentence changes, in the C and the Rust alike.
 
 ## 10.742 A real big-endian kernel, and what it took to get one
 

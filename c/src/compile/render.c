@@ -757,20 +757,18 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 /*
  * The header the snapshot carries.
  *
- * **Its last sentence overstates what is below it**, and that is a known open
- * question rather than an oversight: this writes a value only where it differs
- * from a default, so `on_drift`, `autoconnect`, `networking`, the control and
- * remote blocks and the probe's numbers are left out when they are ordinary.
- * Both behaviours are defensible and a round trip cannot tell them apart,
- * since a written default compiles equal to an absent one. The wording is kept
- * exactly as the Rust has it rather than settled here by whoever ported it.
+ * **It says what is below it**: a value is written only where it differs from a
+ * default, so `on_drift`, `autoconnect`, `networking`, the control and remote
+ * blocks and the probe's numbers are left out when they are ordinary. That is
+ * the file keeping "follow the default" apart from a chosen value, and the only
+ * way it can: a written default compiles equal to an absent one, so writing them
+ * all would pin defaults nobody chose. It said the opposite until 10.743.
  */
 static const char header[] = "# Written by netcfgd from what this machine was running.\n"
     "#\n"
     "# This is ordinary netcfgd configuration: edit it, diff it, commit it.\n"
-    "# It is a snapshot rather than a hand-written profile, so it says\n"
-    "# everything explicitly -- including things a person would have left to\n"
-    "# a default.\n";
+    "# It is a snapshot rather than a hand-written profile: a value equal to\n"
+    "# a default is left out, so it goes on following the default.\n";
 
 /*
  * One `rule` block: a routing rule, as configuration text.
