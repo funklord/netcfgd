@@ -542,6 +542,8 @@ int ncfg_kernel_wg_configure_new(const ncfg_kernel_world_t *world, const char *i
 
 /* A mesh point made (`create` its `link.create`) or the link `name` taken
  * away, over nl80211 (10.687). */
+/* A radio's interface made on its phy, over nl80211 (10.748). */
+int ncfg_kernel_radio_op(const ncfg_op_t *create, char *err, size_t err_size);
 int ncfg_kernel_mesh_point_op(const ncfg_op_t *create, const char *name, char *err,
     size_t err_size);
 int ncfg_kernel_link_kind_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,

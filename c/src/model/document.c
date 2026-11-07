@@ -148,7 +148,7 @@ static const ncfg_enum_t tun_mode_set = WORD_SET("tun mode", tun_mode_words);
  * configuration language's are `wireguard` and `openvpn`. */
 static const char *const interface_kind_words[] = { "physical", "bridge", "bond", "vlan",
 	"vxlan", "wire_guard", "pppoe", "open_vpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
-	"tun", "ifb", "mesh_point" };
+	"tun", "ifb", "mesh_point", "radio" };
 static const ncfg_enum_t interface_kind_set = WORD_SET("interface kind", interface_kind_words);
 
 static const char *const qdisc_kind_words[] = { "fq_codel", "cake", "fq", "pfifo_fast",
@@ -218,7 +218,7 @@ const char *ncfg_interface_kind_name(int kind)
  */
 static const char *const language_kind_words[] = { "physical", "bridge", "bond", "vlan",
 	"vxlan", "wireguard", "pppoe", "openvpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
-	"tun", "ifb", "mesh_point" };
+	"tun", "ifb", "mesh_point", "radio" };
 static const ncfg_enum_t language_kind_set = WORD_SET("interface kind", language_kind_words);
 
 const char *ncfg_interface_kind_language_name(int kind)
@@ -1559,6 +1559,12 @@ static const ncfg_field_t mesh_point_fields[] = {
 };
 static const ncfg_type_t mesh_point_type = TAGGED("mesh point", mesh_point_fields, "kind");
 
+static const ncfg_field_t radio_fields[] = {
+	{ .name = "phy", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_radio_config_t, phy) }
+};
+static const ncfg_type_t radio_type = TAGGED("radio", radio_fields, "kind");
+
 static const ncfg_type_t physical_type = { "physical device", NULL, 0, "kind" };
 static const ncfg_type_t dummy_type = { "dummy device", NULL, 0, "kind" };
 static const ncfg_type_t ifb_type = { "ifb device", NULL, 0, "kind" };
@@ -1614,6 +1620,9 @@ static const ncfg_type_t *kind_arm(int kind, ncfg_interface_kind_t *value, void 
 	case NCFG_KIND_MESH_POINT:
 		*payload = &value->mesh_point;
 		return &mesh_point_type;
+	case NCFG_KIND_RADIO:
+		*payload = &value->radio;
+		return &radio_type;
 	default:
 		*payload = &value->kind;
 		return &physical_type;
@@ -1681,6 +1690,7 @@ static void interface_kind_release(void *field)
 	ncfg_type_free(&openvpn_type, &value->openvpn);
 	ncfg_type_free(&veth_type, &value->veth);
 	ncfg_type_free(&mesh_point_type, &value->mesh_point);
+	ncfg_type_free(&radio_type, &value->radio);
 	ncfg_type_free(&vrf_type, &value->vrf);
 	ncfg_type_free(&macvlan_type, &value->macvlan);
 	ncfg_type_free(&tunnel_type, &value->tunnel);

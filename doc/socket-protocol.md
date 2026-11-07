@@ -630,13 +630,15 @@ an observation names the backend it saw — so both are listed here.
 | `tun` | yes |  |
 | `ifb` | yes |  |
 | `mesh_point` | yes |  |
+| `radio` | yes |  |
 
 **Two of the three refusals are not gaps.** A `pppoe` or an `open_vpn`
 interface is made by the helper that connects it, so `backend.start` is what
 brings one up and a netlink message never would; `physical` is the one netcfgd
 configures and cannot manufacture. A client showing a plan can print all
-sixteen; only thirteen can appear as a `link.create`. `mesh_point` (project.md
-10.687) is made over nl80211 rather than rtnetlink, and appears as any other.
+seventeen; only fourteen can appear as a `link.create`. `mesh_point` (project.md
+10.687) and `radio` (10.748) are made over nl80211 rather than rtnetlink, and appear
+as any other.
 
 **`wire_guard` and `open_vpn` are the document's spellings.** An operator
 writes `wireguard` and `openvpn` in a `device` block, and the two tables are

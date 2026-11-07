@@ -1240,7 +1240,7 @@ static void the_ledger_walks_every_kind(const char *dir)
 	 * instead, which is why this is the op count less four. */
 	check(ops == (size_t)NCFG_OP_COMMIT_REVERT + 1u - 4u,
 	    "and every op but the four asked per kind");
-	check(creates == (size_t)NCFG_KIND_MESH_POINT + 1u,
+	check(creates == (size_t)NCFG_KIND_RADIO + 1u,
 	    "and `link.create` once for every interface kind there is");
 	check(backends == ((size_t)NCFG_BACKEND_UPNP + 1u) * 3u,
 	    "and each backend kind under each of the three backend verbs");

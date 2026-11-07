@@ -77,6 +77,7 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 	case NCFG_KIND_VRF:
 	case NCFG_KIND_VXLAN:
 		return 1;
+	case NCFG_KIND_RADIO:
 	case NCFG_KIND_MESH_POINT:
 		/* Yes, over nl80211: `kernel.c` takes the kind before it builds a
 		 * netlink message and hands it to `ncfg_kernel_mesh_point_op`, as it

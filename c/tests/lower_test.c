@@ -1294,6 +1294,22 @@ static void mesh_cases(void)
 	    "a mesh point with no radio is refused");
 	refuses("device mesh0 {\n\tmesh_point { parent = \"wlan2\"; mode = \"x\" }\n}\n",
 	    "unknown mesh_point key `mode`", "  and one with a key it does not have");
+
+	/* A radio with no interface, which is every radio on OpenWrt (10.748). */
+	document = compiles("device wlan0 {\n\tradio { phy = \"phy0\" }\n"
+	    "\twifi { backend = \"wpa_supplicant\" }\n}\n",
+	    "a radio is made from its phy, and is a radio like any other");
+	if (document) {
+		const ncfg_device_t *radio = ncfg_document_device(document, "wlan0");
+
+		check(radio && radio->kind.kind == NCFG_KIND_RADIO &&
+		        strcmp(radio->kind.radio.phy, "phy0") == 0 && radio->wifi,
+		    "  of its own kind, on its phy, with its wifi block beside it");
+		ncfg_document_free(document);
+	}
+	refuses("device wlan0 {\n\tradio { }\n}\n", "needs a `phy`", "a radio with no phy is refused");
+	refuses("device wlan0 {\n\tradio { phy = \"phy0\"; band = \"2g\" }\n}\n",
+	    "unknown radio key `band`", "  and one with a key it does not have");
 }
 
 static void access_point_cases(void)

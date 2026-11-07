@@ -32,6 +32,8 @@ typedef struct {
 	/* Whether the reply carried the peer link's state, and which it was. */
 	int     has_plink_state;
 	uint8_t plink_state;
+	/* Finished authenticating, as hostapd's `AUTHORIZED` flag says (10.749). */
+	int     authorized;
 } ncfg_mesh_peer_t;
 
 /* A dump of the stations of interface `index`. */
@@ -63,6 +65,13 @@ int ncfg_mesh_point_add_request(ncfg_buf_t *out, const ncfg_genl_family_t *famil
  * bit was set already, the last octet's lowest bit flipped as well.
  */
 void ncfg_mesh_point_address(const uint8_t parent[6], uint8_t out[6]);
+/*
+ * A radio's interface made on the phy numbered `wiphy` and named `name`, as a
+ * station, which is what hostapd or a supplicant then makes of it (10.748):
+ * `iw phy phy0 interface add wlan0 type managed`.
+ */
+int ncfg_radio_add_request(ncfg_buf_t *out, const ncfg_genl_family_t *family, uint32_t wiphy,
+    const char *name, uint32_t seq, char *err, size_t err_size);
 int ncfg_mesh_point_delete_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
     uint32_t index, uint32_t seq, char *err, size_t err_size);
 

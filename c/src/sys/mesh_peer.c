@@ -76,6 +76,16 @@ int ncfg_mesh_peer_parse(const void *payload, size_t length, ncfg_mesh_peer_t *o
 		}
 		out->has_plink_state = 1;
 	}
+	step = ncfg_wire_attrs_find(&info, NL80211_STA_INFO_STA_FLAGS, &state, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step == NCFG_WIRE_OK && state.length >= sizeof(struct nl80211_sta_flag_update)) {
+		struct nl80211_sta_flag_update flags;
+
+		memcpy(&flags, state.value, sizeof(flags));
+		out->authorized = (flags.set & (1u << NL80211_STA_FLAG_AUTHORIZED)) != 0u;
+	}
 	return 1;
 }
 
@@ -109,6 +119,29 @@ int ncfg_mesh_point_add_request(ncfg_buf_t *out, const ncfg_genl_family_t *famil
 	if (mac) {
 		ncfg_wire_attr_put(&attrs, NL80211_ATTR_MAC, mac, 6u);
 	}
+	ok = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs, err,
+	    err_size);
+	ncfg_buf_free(&attrs);
+	return ok;
+}
+
+int ncfg_radio_add_request(ncfg_buf_t *out, const ncfg_genl_family_t *family, uint32_t wiphy,
+    const char *name, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                ok;
+
+	if (!family || !name || !name[0]) {
+		ncfg_error_set(err, err_size, "a radio needs nl80211, its phy and a name");
+		return 0;
+	}
+	header.cmd = NL80211_CMD_NEW_INTERFACE;
+	header.version = 0;
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_WIPHY, wiphy);
+	ncfg_wire_attr_put_str(&attrs, NL80211_ATTR_IFNAME, name);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_IFTYPE, NL80211_IFTYPE_STATION);
 	ok = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs, err,
 	    err_size);
 	ncfg_buf_free(&attrs);

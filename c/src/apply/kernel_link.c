@@ -354,6 +354,7 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
 	}
 	case NCFG_KIND_TUN:
 	case NCFG_KIND_MESH_POINT:
+	case NCFG_KIND_RADIO:
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_PPPOE:
 	case NCFG_KIND_OPENVPN:

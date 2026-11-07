@@ -1551,6 +1551,14 @@
 #	config = "dhcp"
 #}
 
+# A RADIO WITH NO INTERFACE: OpenWrt makes none by itself, so a stock router has
+# `phy0` and no `wlan0` until something asks. `radio` asks, and takes the phy's
+# name from `iw dev` or /sys/class/ieee80211. Elsewhere the driver has made one
+# already, and this block is not wanted.
+#device wlan0 {
+#	radio { phy = "phy0" }
+#}
+
 # A VLAN. The parent is the physical interface; the id is the tag.
 
 #device vlan10 {

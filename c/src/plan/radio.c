@@ -103,6 +103,10 @@ int ncfg_plan_radio_supplicant_wanted(const ncfg_document_t *desired,
 	if (ncfg_plan_access_point_wanted(desired, name)) {
 		return 0;
 	}
+	/* Wanted before it exists, as a mesh point is above (10.748). */
+	if (device->kind.kind == NCFG_KIND_RADIO) {
+		return 1;
+	}
 	link = ncfg_observed_link(observed, name);
 	return link && link->wireless;
 }

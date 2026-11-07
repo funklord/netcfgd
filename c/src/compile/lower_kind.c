@@ -975,10 +975,45 @@ static int lower_mesh_point(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block
 	return 1;
 }
 
+/*
+ * `radio { phy = "phy0" }`: the interface of a radio that has none, which is
+ * every radio on a stock OpenWrt (project.md 10.748). A phy is not an interface,
+ * so this is the one kind that names something `ip link` cannot show.
+ */
+static int lower_radio(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_interface_kind_t *out)
+{
+	const ncfg_ast_item_t       *item;
+	const ncfg_ast_assignment_t *assignment;
+	char                        *phy = NULL;
+	size_t                       at;
+
+	FOR_ASSIGNMENTS(block, item, assignment) {
+		if (strcmp(assignment->key, "phy") == 0) {
+			free(phy);
+			phy = ncfg_as_interface_name(ctx, assignment->value);
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown radio key `%s`: a radio has a `phy`, as `iw dev` names it",
+			    assignment->key);
+		}
+	}
+	if (!phy) {
+		ncfg_diag(ctx, block->span,
+		    "a radio needs a `phy`, as `iw dev` or /sys/class/ieee80211 names it, "
+		    "for example: radio { phy = \"phy0\" }");
+		return 0;
+	}
+	out->kind = NCFG_KIND_RADIO;
+	out->radio.phy = phy;
+	return 1;
+}
+
 int ncfg_is_kind_block(const char *head)
 {
 	static const char *const heads[] = { "bridge", "bond", "vlan", "veth", "vxlan", "vrf",
-		"macvlan", "tunnel", "tun", "tap", "wireguard", "pppoe", "openvpn", "mesh_point" };
+		"macvlan", "tunnel", "tun", "tap", "wireguard", "pppoe", "openvpn", "mesh_point",
+		"radio" };
 	size_t i;
 
 	for (i = 0; i < sizeof(heads) / sizeof(heads[0]); i++) {
@@ -1034,6 +1069,9 @@ int ncfg_lower_kind_block(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *inner,
 	}
 	if (strcmp(head, "mesh_point") == 0) {
 		return lower_mesh_point(ctx, inner, out);
+	}
+	if (strcmp(head, "radio") == 0) {
+		return lower_radio(ctx, inner, out);
 	}
 	return 0;
 }

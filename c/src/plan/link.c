@@ -1146,6 +1146,7 @@ static const char *recreatable_kind(const ncfg_interface_kind_t *kind)
 	 * cannot be read back, and a mesh point is created only where its name is
 	 * free -- an interface of that name is never thrown away for it. */
 	case NCFG_KIND_MESH_POINT:
+	case NCFG_KIND_RADIO:
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_PPPOE:
 	case NCFG_KIND_OPENVPN:

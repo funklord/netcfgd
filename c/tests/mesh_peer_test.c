@@ -134,6 +134,25 @@ static void the_requests(void)
 	ncfg_buf_free(&message);
 	ncfg_buf_free(&body);
 
+	/* The phy's number, where a mesh point has its parent's interface: a radio
+	 * has none to name, and an `IFINDEX` here would be the wrong attribute. */
+	ncfg_buf_init(&message, 0);
+	ncfg_buf_init(&body, 0);
+	check(ncfg_radio_add_request(&message, &family, 2u, "wlan0", 2, err, sizeof(err)) &&
+	        parts(&message, &flags, &cmd, &attrs, &body) && cmd == NL80211_CMD_NEW_INTERFACE &&
+	        (flags & NLM_F_ACK) == NLM_F_ACK && u32_of(&attrs, NL80211_ATTR_WIPHY) == 2u &&
+	        (again = attrs, u32_of(&again, NL80211_ATTR_IFTYPE)) == NL80211_IFTYPE_STATION &&
+	        ncfg_wire_attrs_find(&attrs, NL80211_ATTR_IFNAME, &attr, err, sizeof(err)) ==
+	            NCFG_WIRE_OK &&
+	        attr.length >= 5u && memcmp(attr.value, "wlan0", 5u) == 0,
+	    "a radio's interface is made on the phy's number, as a station, named");
+	ncfg_buf_free(&message);
+	ncfg_buf_free(&body);
+	ncfg_buf_init(&message, 0);
+	check(!ncfg_radio_add_request(&message, &family, 2u, "", 2, err, sizeof(err)),
+	    "  and one with no name is refused");
+	ncfg_buf_free(&message);
+
 	ncfg_buf_init(&message, 0);
 	check(!ncfg_mesh_point_add_request(&message, &family, 0u, "mesh0", mac, 2, err,
 	          sizeof(err)) &&

@@ -820,6 +820,67 @@ static int radio_address(const char *name, uint8_t out[6])
 	return 1;
 }
 
+/* A phy's number from `/sys/class/ieee80211/NAME/index`, which is what nl80211
+ * knows it by and is not the digits of its name once a driver has been reloaded. */
+static int phy_index(const char *phy, uint32_t *out)
+{
+	char          path[128];
+	unsigned long value;
+	FILE         *file;
+	int           got;
+
+	if (!phy || strchr(phy, '/') != NULL ||
+	    snprintf(path, sizeof(path), "/sys/class/ieee80211/%s/index", phy) >= (int)sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	got = fscanf(file, "%lu", &value) == 1;
+	(void)fclose(file);
+	if (!got || value > UINT32_MAX) {
+		return 0;
+	}
+	*out = (uint32_t)value;
+	return 1;
+}
+
+int ncfg_kernel_radio_op(const ncfg_op_t *create, char *err, size_t err_size)
+{
+	const ncfg_interface_kind_t *kind = create->u.link_create.kind;
+	const char                  *name = create->u.link_create.name;
+	const char                  *phy = kind ? kind->radio.phy : NULL;
+	ncfg_netlink_t               socket;
+	ncfg_genl_family_t           family;
+	ncfg_buf_t                   message;
+	char                         doing[NCFG_ERROR_MAX];
+	uint32_t                     index;
+	uint32_t                     seq;
+	int                          ok;
+
+	if (!phy_index(phy, &index)) {
+		ncfg_error_set(err, err_size,
+		    "%s is a radio on %s, which is not a phy this machine has: /sys/class/ieee80211 "
+		    "lists them", name ? name : "?", phy ? phy : "no phy");
+		return 0;
+	}
+	if (!ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, err, err_size)) {
+		return 0;
+	}
+	seq = ncfg_netlink_take_seq(&socket);
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_radio_add_request(&message, &family, index, name, seq, err, err_size);
+	if (ok) {
+		(void)snprintf(doing, sizeof(doing), "make the radio %s", name);
+		ok = ncfg_kernel_send(&socket, &message, seq, create->kind, doing, err, err_size);
+	}
+	ncfg_buf_free(&message);
+	ncfg_genl_family_free(&family);
+	ncfg_netlink_close(&socket);
+	return ok;
+}
+
 int ncfg_kernel_mesh_point_op(const ncfg_op_t *create, const char *name, char *err,
     size_t err_size)
 {

@@ -326,6 +326,13 @@ static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, si
 		mark_as_ours(kernel, op->u.link_create.name, op->kind);
 		return 1;
 	}
+	if (op->u.link_create.kind && op->u.link_create.kind->kind == (int)NCFG_KIND_RADIO) {
+		if (!ncfg_kernel_radio_op(op, err, err_size)) {
+			return 0;
+		}
+		mark_as_ours(kernel, op->u.link_create.name, op->kind);
+		return 1;
+	}
 	/* `ncfg_kernel_newlink_of`, in `kernel_link.c`, and **not a conversion of
 	 * this file's own**: the five `link.set_*` ops need the identical nest,
 	 * and decision 0057 is about exactly that -- two encoders for one kind is

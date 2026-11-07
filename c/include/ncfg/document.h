@@ -811,6 +811,13 @@ typedef struct {
 	char *parent;
 } ncfg_mesh_point_config_t;
 
+/* A radio's first interface, made on `phy` (project.md 10.748). OpenWrt patches
+ * mac80211 to make none by itself, so a stock router has a phy and no `wlan0`
+ * until something asks. */
+typedef struct {
+	char *phy;
+} ncfg_radio_config_t;
+
 /*
  * What kind of thing a device is.
  *
@@ -843,7 +850,10 @@ typedef enum {
 	/* A mesh point made on a radio's phy beside its own interface (10.687):
 	 * created over nl80211, not rtnetlink, so the planner creates it and
 	 * never remakes it by deletion. */
-	NCFG_KIND_MESH_POINT
+	NCFG_KIND_MESH_POINT,
+	/* An interface made on a phy that has none, over nl80211 as a mesh point is
+	 * and never remade by deletion for the same reason (10.748). */
+	NCFG_KIND_RADIO
 } ncfg_interface_kind_tag_t;
 
 typedef struct {
@@ -861,6 +871,7 @@ typedef struct {
 	ncfg_tunnel_config_t    tunnel;
 	ncfg_tun_config_t       tun;
 	ncfg_mesh_point_config_t mesh_point;
+	ncfg_radio_config_t     radio;
 } ncfg_interface_kind_t;
 
 /* The document's word for a kind, which is not always the language's. NULL
