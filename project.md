@@ -12683,6 +12683,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.744 fuzznet 4bf32784, and what its tables would have cost
+
+fuzznet's message of 2026-11-06 (20261106T2010Z) said its static tables had grown, to about
+1.14 GB of bss in a full daemon, and asked this tree to check its targets. With 10.740's
+bounds, and `FZN_GROUP_MEMBERS_MAX` and `FZN_GROUP_HOSTS_MAX`, which the old pin did not let a
+build name, the daemon is 21.1 MB and the phone's node 20.4 MB. Without them this pin would
+have taken the floor from routers to anything under about a gigabyte. **The list is one file
+now, `c/fuzznet-bounds.mk`**, as the phone's node links fuzznet too and had none. Its
+`--log-level` reaches stderr at this pin, which was this tree's request of
+20261106T1531Z. A procedure answering later is recorded in its sec 929 and not built, and
+the slow request job stands until it is.
+
 ## 10.743 A profile's header said the opposite of what it does
 
 A saved profile told its reader it "says everything explicitly -- including things a

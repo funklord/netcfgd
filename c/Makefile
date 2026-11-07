@@ -262,16 +262,8 @@ FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 # `CFLAGS ?=` and then appends its warnings and `-std=c11`, which a
 # command-line `CFLAGS` would discard.
 #
-# **The tables, bounded** (project.md 10.740). fuzznet sizes its static tables
-# for a person's thousands of notes and shares, and a mapping larger than the
-# machine is refused at exec: `__vm_enough_memory` at 128 MB, a segfault before
-# main, and `ncfg` with it, being one program. These are the services left out
-# above, at fuzznet's own embedded values (its sec 922), so a node here gives up
-# nothing it used. `FZND_PULL_TARGETS_MAX` and `FZND_SIBLING_TARGETS_MAX` are
-# left at fuzznet's eight: those are the estate's rounds, which netcfgd does use.
-# Some reach headers, so src/node is compiled with them too.
-FUZZNET_BOUNDS = -DFZN_NOTES_MAX=64u -DFZN_NODE_RECEIVED_MAX=2u -DFZN_NOTES_SHARES_MAX=16u \
-		-DFZN_NODE_FILES_SHARES_MAX=16u -DFZND_GROUP_SHARES_MAX=2u
+# And the tables bounded, in the fragment the phone's build reads too.
+include fuzznet-bounds.mk
 FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os) -ffunction-sections -fdata-sections \
 		$(FUZZNET_BOUNDS) $(LARGE_TYPES)
 # The system libraries the objects decided they need, asked of the archive

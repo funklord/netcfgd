@@ -206,10 +206,11 @@ ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libncfghost.so
 # fuzznetd but its main, so nothing here reads fuzznet's variables. The flags go
 # through a file so that the line naming $(MAKE), which a dry run executes, holds
 # no compiler.
-ANDROID_NODE_FUZZNET = CFLAGS='-Os -ffunction-sections -fdata-sections' \
+include ../c/fuzznet-bounds.mk
+ANDROID_NODE_FUZZNET = CFLAGS='-Os -ffunction-sections -fdata-sections $(FUZZNET_BOUNDS)' \
 	$(MAKE) -s -C ../fuzznet BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) \
 	FZN_LOG_PACK=0 FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0
-ANDROID_NODE_CFLAGS = -Os -ffunction-sections -fdata-sections \
+ANDROID_NODE_CFLAGS = -Os -ffunction-sections -fdata-sections $(FUZZNET_BOUNDS) \
 	-I../c/include -I../client
 ANDROID_NODE_SRCS = src/phone/host_main.c ../c/src/node/user_host.c
 ANDROID_NODE_HDRS = ../c/include/ncfg/node.h ../client/ncfg_fuzznet.h
