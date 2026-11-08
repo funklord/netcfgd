@@ -12683,6 +12683,15 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.758 `make vm-skipped` is green: seven of seven, the shim being the C
+
+At 5960709e, in a Debian guest: `bluetooth.sh`, `hwsim.sh`, `ppp.sh`, `pppoe-session.sh`,
+`killmode.sh`, `select.sh` and `nm.sh` all pass, 214 checks, exit 0. 10.485's *5 passed, 4
+failed* was the last result recorded and is superseded; nine became seven as `association.sh`
+and `delegation.sh` left the payload for the reasons `skipped.sh` gives. `nm.sh` drives
+`adapter/netcfgd-nm/c/netcfgd-nm`, so the NetworkManager shim that passes is the C one;
+`nmcli` exists only in the guest, which is why `make live` here skips it.
+
 ## 10.757 Two live checks were testing the Rust, and the C failed them
 
 `tui.py` and `wifi_add.py` ran in `make live` against `target/debug`, the Rust, while every
