@@ -21,6 +21,9 @@ echo "systemd:  $(systemctl --version 2>/dev/null | head -1)"
 echo "pid1:     $(cat /proc/1/comm)"
 echo "run/systemd: $([ -d /run/systemd/system ] && echo present || echo ABSENT)"
 echo "systemd-run: $(command -v systemd-run || echo ABSENT)"
-echo "ncfg:     $([ -x /mnt/repo/target/debug/ncfg ] && echo present || echo MISSING)"
+# The C, which is what the script below runs (its `build` defaults to `c/`). This
+# line looked at `target/debug/ncfg` -- the retired Rust -- so it vouched for a
+# binary the checks never touched, as init.sh did before 0266.
+echo "netcfgd:  $([ -x /mnt/repo/c/netcfgd ] && /mnt/repo/c/netcfgd --version 2>&1 | head -1 || echo MISSING)"
 echo
 NCFG_LIVE=1 sh /mnt/repo/tests/live/sandbox_writes.sh

@@ -11,8 +11,10 @@ echo "marker: $([ -f /mnt/repo/project.md ] && echo project.md present || echo M
 # decides how this tier tests netcfgd.** The host builds against glibc and this
 # guest is musl, so a dynamically linked binary from target/ is not expected to
 # start -- this reports what actually happens rather than assuming it.
-if [ -x /mnt/repo/target/debug/netcfgd ]; then
-	out=$(/mnt/repo/target/debug/netcfgd --version 2>&1 | head -2)
+# The C, because the C is what ships (0266); this asked `target/debug`, the
+# retired Rust.
+if [ -x /mnt/repo/c/netcfgd ]; then
+	out=$(/mnt/repo/c/netcfgd --version 2>&1 | head -2)
 	echo "netcfgd: ${out:-no output}"
 else
 	echo "netcfgd: not built on the host"
