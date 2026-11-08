@@ -57,14 +57,16 @@ fail() {
 # build the other implementation is worse than one that says nothing.
 [ -x "$probe" ] || skip "the probe is not built (make -C c examples)"
 # **The build's `ncfg`, not an installed one.** This was the only one of the
-# live scripts to ask `command -v`; the other 68 resolve it from
-# `target/debug`. So on a machine with the tree built and netcfgd not
+# live scripts to ask `command -v`; the others resolve it from `$build`,
+# which is `c/` unless NCFG_LIVE_BUILD says otherwise (this line read
+# `target/debug`, the retired Rust, until tui.py's move made the count
+# worth checking). So on a machine with the tree built and netcfgd not
 # installed -- every development machine here, and every VM guest -- it skipped
 # for an absence that was not real, and under `NCFG_LIVE=1` that skip is a
 # failure reporting a missing tool that is sitting beside the probe. The
 # binary there talks to the same socket; `ncfg` is a symlink to `netcfgd` and
 # answers `wifi status` either way.
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 [ -x "$ncfg" ] || ncfg=$(command -v ncfg 2>/dev/null || true)
 { [ -n "$ncfg" ] && [ -x "$ncfg" ]; } ||
 	skip "no ncfg to take an independent reading with"

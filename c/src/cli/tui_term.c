@@ -209,6 +209,11 @@ static void watch_signals(void)
 	(void)sigaction(SIGINT, &stop, NULL);
 	(void)sigaction(SIGTERM, &stop, NULL);
 	(void)sigaction(SIGHUP, &stop, NULL);
+	/* Not reachable from the keyboard, raw mode having cleared ISIG, but
+	 * `kill -QUIT` is: its default dumps core with the terminal left raw and
+	 * the alternate screen up. `tests/live/tui.py` checks it; it had been run
+	 * against the Rust only. */
+	(void)sigaction(SIGQUIT, &stop, NULL);
 
 	memset(&resize, 0, sizeof(resize));
 	resize.sa_handler = on_resize;
@@ -483,19 +488,53 @@ static void use(ncfg_tui_t *tui, const char *socket_path)
  * ------------------------------------------------------------------------ */
 
 /* Compose the frame and put it on the terminal. Nothing is rendered here. */
+/*
+ * The frame last written, so an unchanged one is not written again.
+ *
+ * `loop` paints on every pass: each key, each one-second tick and each event.
+ * Writing the whole frame each time sent about two kilobytes a second to an
+ * idle screen, over ssh as much as anywhere, and repainted for a key bound to
+ * nothing. `tests/live/tui.py` asserts that last one; it had been run against
+ * the Rust only. A resize forgets the frame, because the terminal may have
+ * redrawn or reflowed what was there.
+ */
+static ncfg_buf_t last_frame;
+static int        last_frame_valid;
+
 static void paint(const ncfg_tui_t *tui)
 {
-	ncfg_buf_t frame;
-	size_t     rows;
-	size_t     columns;
+	ncfg_buf_t  frame;
+	size_t      rows;
+	size_t      columns;
+	const char *text;
 
 	terminal_size(&rows, &columns);
 	ncfg_buf_init(&frame, 0);
 	ncfg_tui_frame(tui, rows, columns, &frame);
 	/* A buffer that failed hands out the empty string rather than half a
 	 * frame, so a painted screen is a whole one or is not painted. */
-	write_all(STDOUT_FILENO, ncfg_buf_text(&frame), strlen(ncfg_buf_text(&frame)));
-	ncfg_buf_free(&frame);
+	text = ncfg_buf_text(&frame);
+	if (last_frame_valid && strcmp(text, ncfg_buf_text(&last_frame)) == 0) {
+		ncfg_buf_free(&frame);
+		return;
+	}
+	write_all(STDOUT_FILENO, text, strlen(text));
+	if (last_frame_valid) {
+		ncfg_buf_free(&last_frame);
+	}
+	last_frame = frame;
+	last_frame_valid = text[0] != '\0';
+	if (!last_frame_valid) {
+		ncfg_buf_free(&last_frame);
+	}
+}
+
+static void paint_forget(void)
+{
+	if (last_frame_valid) {
+		ncfg_buf_free(&last_frame);
+		last_frame_valid = 0;
+	}
 }
 
 static void event_shown(ncfg_tui_t *tui, const char *line, size_t length)
@@ -662,6 +701,7 @@ static void loop(ncfg_tui_t *tui, const char *socket_path, int events_fd,
 				 * composed for whatever the window is now, so there is no
 				 * layout to rebuild. */
 				size_changed = 0;
+				paint_forget();
 				continue;
 			}
 			return;
@@ -842,6 +882,7 @@ int ncfg_tui_run(const ncfg_cli_options_t *options)
 
 	/* Explicit, and before anything else can print. */
 	terminal_close();
+	paint_forget();
 	if (events_fd >= 0) {
 		(void)close(events_fd);
 	}

@@ -12683,6 +12683,22 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.757 Two live checks were testing the Rust, and the C failed them
+
+`tui.py` and `wifi_add.py` ran in `make live` against `target/debug`, the Rust, while every
+shell script takes `$NCFG_LIVE_BUILD` with `c/` as its default. So `make live` reported 28
+TUI checks passed for a program that does not ship. Pointed at the C, `wifi_add.py` passed and
+`tui.py` failed four: the C TUI wrote the whole frame on every pass of its loop, each key and
+each one-second tick, so an idle screen took about two kilobytes a second and a key bound to
+nothing repainted; and it did not catch SIGQUIT, so `kill -QUIT` left the shell raw with the
+alternate screen up (raw mode clears ISIG, so ^\ from the keyboard could not). A frame equal
+to the last is not written now, a resize forgets the last, and SIGQUIT leaves by `q`'s path.
+Each undone alone fails its own checks. `tui.py` waits for `fuzznet.sock` or `netcfgd.sock`,
+the C binding the first. `association.sh` took `ncfg` from `target/debug` too, and its comment
+said the other scripts did; both say `$build` now. Found by vm-sandbox's preamble, which named
+`target/debug/ncfg` while its script ran `c/` (8c4c79bb). The `c_*` scripts read
+`target/debug` on purpose: they are the Rust comparison.
+
 ## 10.756 A management command is one write
 
 `hull-mips` at 364241c failed `openvpn_test` for the first time: *reads past the greeting*, on

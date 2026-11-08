@@ -34,7 +34,10 @@ import termios
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-NCFG = os.path.join(REPO, "target/debug/ncfg")
+# The C unless NCFG_LIVE_BUILD names another build, as in every shell script
+# under tests/live/. This read target/debug, the retired Rust.
+BUILD = os.environ.get("NCFG_LIVE_BUILD") or os.path.join(REPO, "c")
+NCFG = os.path.join(BUILD, "ncfg")
 
 PASSPHRASE = "correct horse battery"
 

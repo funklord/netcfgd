@@ -37,8 +37,12 @@ import termios
 import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-NCFG = os.path.join(REPO, "target/debug/ncfg")
-NETCFGD = os.path.join(REPO, "target/debug/netcfgd")
+# The C, which is what ships, unless NCFG_LIVE_BUILD names another build: the
+# rule every shell script under tests/live/ follows. This read target/debug,
+# so `make live` checked the retired Rust's TUI and called it this one's.
+BUILD = os.environ.get("NCFG_LIVE_BUILD") or os.path.join(REPO, "c")
+NCFG = os.path.join(BUILD, "ncfg")
+NETCFGD = os.path.join(BUILD, "netcfgd")
 
 failures = 0
 
@@ -104,8 +108,11 @@ class Session:
 		self.daemon = subprocess.Popen(
 		    [NETCFGD], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
 		)
+		# The C serves its store on fuzznet.sock and binds no netcfgd.sock when
+		# it has a node; the Rust binds netcfgd.sock. Either is the daemon up.
 		for _ in range(100):
-			if os.path.exists(f"{self.work}/run/netcfgd.sock"):
+			if any(os.path.exists(f"{self.work}/run/{name}")
+			       for name in ("fuzznet.sock", "netcfgd.sock")):
 				return
 			if self.daemon.poll() is not None:
 				out = self.daemon.stdout.read().decode(errors="replace")
