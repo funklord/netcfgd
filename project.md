@@ -12690,8 +12690,10 @@ a loaded machine. 10.573's shape again. `ncfg_openvpn_command` sent the command 
 newline; a stand-in that read once took the first, answered and closed, and the second failed
 a command that had worked. 10.573 made that survivable and taught one fixture to read to the
 newline, and left the two writes and the other fixture. It is one write now, which is what a
-line is, and so a peer has no gap to leave in. No test proves it: two sends on a stream can
-arrive as one, so neither form fails on demand. `hull-mips` passing again is all there is.
+line is, and so a peer has no gap to leave in. Two sends on a stream can arrive as one, so no
+stand-in fails on demand; the test asks what the race depends on instead. `openvpn_test`
+defines `send`, which the client then links to, and counts: one per command, ending in the
+newline. With the two writes put back that check fails and the rest pass.
 
 ## 10.755 fuzznet 364241c: a removal a fork silently undid
 

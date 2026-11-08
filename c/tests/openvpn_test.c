@@ -82,6 +82,27 @@ static int    failures;
 static char   every_message[64u * 1024u];
 static size_t every_message_length;
 
+/*
+ * EVERY `send` THE MANAGEMENT CLIENT MAKES IS COUNTED HERE.
+ *
+ * Defined in the test, so the client links to this one: it counts, notes
+ * whether the bytes ended a line, and hands them to `sendto`, which is what
+ * `send` is. A command and its newline in two sends let a peer that reads once
+ * answer and close between them, so the second failed a command that had
+ * worked (10.756). hull-mips found it under load; no stand-in here can make
+ * that race happen on demand, so the test asks the structural question the
+ * race depends on: how many sends a command took.
+ */
+static unsigned sends_seen;
+static int      last_send_ended_a_line;
+
+ssize_t send(int fd, const void *buffer, size_t length, int flags)
+{
+	sends_seen++;
+	last_send_ended_a_line = length > 0u && ((const char *)buffer)[length - 1u] == '\n';
+	return sendto(fd, buffer, length, flags, NULL, 0);
+}
+
 static void check(int condition, const char *what)
 {
 	printf("%-72s %s\n", what, condition ? "ok" : "FAILED");
@@ -595,9 +616,12 @@ static void the_greeting_is_not_mistaken_for_an_answer(const char *base)
 	check(management != NULL, "the client connects");
 	if (management) {
 		message[0] = '\0';
+		sends_seen = 0u;
 		check(ncfg_openvpn_command(management, "signal SIGTERM", reply, sizeof(reply), message,
 		      sizeof(message)),
 		    "and reads past the greeting and the notification to the answer");
+		check(sends_seen == 1u && last_send_ended_a_line,
+		    "the command and its newline went in one send");
 		check_text(reply, "signal SIGTERM thrown", "which is what followed SUCCESS:");
 		ncfg_openvpn_disconnect(management);
 	}
