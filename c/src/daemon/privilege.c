@@ -79,6 +79,13 @@ static const struct {
 	{ "remote", "observe", NCFG_PRIV_AUTHORIZATION },
 	{ "remote", "wifi", NCFG_PRIV_AUTHORIZATION },
 	{ "remote", "admin", NCFG_PRIV_AUTHORIZATION },
+	/* Who may hold the other end of the remote socket, which decides its mode
+	 * and group (0159). `any` opens it to every local user, each of whom then
+	 * reaches whatever the three tiers above open -- so it widens who may ask
+	 * as surely as they do. Unclassified until 2026-11-09 in both
+	 * implementations: the Rust's privilege gate read only `match` arms, and
+	 * `agent` was an `if`; the C's port of that gate found it (10.760). */
+	{ "remote", "agent", NCFG_PRIV_AUTHORIZATION },
 	/* A tun device handed to a principal the caller chose. `vxlan`'s `group`
 	 * is a multicast address and is nothing to do with this -- the same word,
 	 * two meanings, which is the second time the block qualifier has earned

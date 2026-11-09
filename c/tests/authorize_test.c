@@ -852,6 +852,8 @@ static void the_content_gate_refuses_each_privileged_production(void)
 		    "an exec secret provider", "command" },
 		{ "global {\n\tcontrol {\n\t\tadmin = \"any\"\n\t}\n}\n",
 		    "a control-policy widening", "who may ask" },
+		{ "global {\n\tremote {\n\t\tagent = \"any\"\n\t}\n}\n",
+		    "a remote-agent widening", "who may ask" },
 		{ "interface tun0 {\n\topenvpn {\n\t\tconfig = \"/etc/openvpn/c.conf\"\n\t}\n}\n",
 		    "another program's configuration file", "as root" },
 		{ "include \"/etc/netcfgd/site.conf\"\n", "an include", "another file" },

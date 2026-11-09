@@ -12683,6 +12683,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.760 `remote { agent }` was ordinary, so a client could open the remote socket
+
+0127 lets a caller who is not root send configuration and refuses the productions that grant
+more than configuring a network; `privileged[]` in `c/src/daemon/privilege.c` is the list.
+`remote`'s three tiers were on it and `agent` was not. `agent` says which local principal may
+hold the other end of the remote socket, and it sets that socket's mode and group (0159), so
+`remote { agent = "any" }` from an admin-tier caller opened it to every local user -- each of
+whom then reached whatever the remote tiers open. That is widening who may ask, which is what
+`NCFG_PRIV_AUTHORIZATION` exists to refuse.
+
+**Unclassified in both implementations, and found by porting the gate that should have
+caught it.** The Rust's `privilege_gate.py` read the keys the compiler accepts out of
+`match ... key.as_str()` arms, and the Rust lowered `agent` with an `if` -- so the gate never
+saw the key and passed. The C kept the table and `authorize_test.c` pinned its rows, which
+checks that no row is lost and never that a new key was looked at. Pointing the gate at the
+C's lowering (10.759's open list) printed `agent` among 43 keys nobody had classified.
+
+Fixed by the row and a case in `the_content_gate_refuses_each_privileged_production`, which
+failed before the row and passes with it. The other 42 keys are the gate's port to classify.
+
 ## 10.758 `make vm-skipped` is green: seven of seven, the shim being the C
 
 At 5960709e, in a Debian guest: `bluetooth.sh`, `hwsim.sh`, `ppp.sh`, `pppoe-session.sh`,
