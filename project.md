@@ -12684,6 +12684,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.763 What the Rust's `live.rs` asked, asked of the C
+
+`backend/netcfgd-supplicant/tests/live.rs` sent the Rust's supplicant settings to a real
+`wpa_supplicant` -- every security mode, every key management, every MAC policy, enterprise --
+and was the one test whose subject went with the Rust and was never asked of the C: the C's
+`supplicant_test.c` renders the commands and compares them with what they should say, which
+cannot know what a parser accepts. `SET okc 7` answers OK and `ieee80211w required` does not.
+
+`c/examples/live_supplicant` compiles a configuration directory the way the daemon does and,
+for every network under each of the three MAC policies, sends the globals `wifi_ops.c` sets
+and then `ADD_NETWORK` and every `SET_NETWORK` from `ncfg_supplicant_settings`, printing each
+refusal with its line redacted. `tests/live/c_supplicant_settings.sh` gives it thirteen
+networks -- open, WPA2, WPA3, the transition, OWE, hidden, a pinned BSSID, one held from
+autoconnect, a quoted name, and EAP by PEAP, TTLS, TLS and PWD with stored certificates --
+and `wpa_supplicant -Dwired` on loopback, as `live.rs` used. 39 of 39 accepted. With WPA3's
+`ieee80211w 2` changed to `required` the three WPA3 sends are refused and the script fails;
+restored, it passes. In `make live` after `c_wireguard.sh`.
+
+Acceptance only, as `live.rs` was: a wired supplicant on loopback joins nothing.
+
 ## 10.762 Two gates the Rust's retirement took, ported to the C
 
 0317 deleted nine Python gates that parsed `crates/`. Two held properties the C needs:
@@ -12709,9 +12729,9 @@ check exists for, and has stopped asserting the one thing it could not know.
 Not ported: `op_gate` -- the C's executor switches have no `default`, so `-Wswitch` under the
 `clang` gate's `-Werror` refuses a planned op with no arm, and its other direction is dead
 weight; `print`, `disarm`, `doc_comment` and `tag_producer`, which were about Rust; and
-`supplicant_coverage` and `write`, which are open: the first would map the C's supplicant
-settings onto the live scripts that drive a real `wpa_supplicant`, the second needs a way to
-read a dropped write failure out of C.
+`supplicant_coverage`, whose question 10.763 now answers by sending every setting rather than
+by listing them; and `write`, which is open -- it needs a way to read a dropped write failure
+out of C.
 
 Also from today, for the hull tiers: hull 089facf boots its own kernel for a vm that names
 none, with a module set that covers every module these rigs name. A rig needing a host module

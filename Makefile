@@ -3254,9 +3254,15 @@ live:
 	@# The same module, asking the question before that one: whether the device
 	@# the C port *creates* carries anything at all. It did not, and no unit
 	@# check could say so -- everything after the netlink send needs
-	@# CAP_NET_ADMIN. `wg` is not needed here: the independent reader is the
-	@# Rust ncfg, observing the same kernel through its own code.
+	@# CAP_NET_ADMIN. The independent reader is `wg`, observing the same
+	@# kernel through its own code; it was the Rust ncfg until 0317.
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/c_wireguard.sh"
+	@# Every setting netcfgd sends a supplicant, for a network of every kind
+	@# under every MAC policy, sent to a real `wpa_supplicant -Dwired` on
+	@# loopback. The Rust's `live.rs` asked this of the Rust; nothing asked it
+	@# of the C, whose unit tests render the commands and cannot know what a
+	@# real parser accepts. The probe is an example, built above.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_supplicant_settings.sh"
 	@# The same module again, keyed by a value sealed through the estate: the
 	@# one secret provider whose reader is fuzznet's, so only a served node
 	@# can say it answers. `wg` is the reader. 10.709.
