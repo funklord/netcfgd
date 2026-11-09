@@ -195,13 +195,28 @@ const char *ncfg_watch_mechanism_name(int mechanism);
  * A file that does not exist contributes "absent" rather than being left out,
  * so that its appearance and its disappearance both change the fingerprint.
  * Omitting it would make a deleted drop-in invisible.
+ *
+ * **A regular file is also marked by its size and its content** (10.771),
+ * because its mtime alone cannot say it was rewritten: the kernel stamps it
+ * from a coarse clock, so two writes inside one tick of it leave the same
+ * mtime, nanoseconds and all. `cat > file` creating a drop-in empty and then
+ * filling it is exactly that, and a poll landing between the two would compile
+ * an empty file and never see the rest. Git met the same thing as its "racily
+ * clean" index entries and settled it by looking at content; this does the
+ * same, and configuration files are small enough to read on every tick.
  */
 typedef struct {
 	char    *path;
 	int      has_mtime;
 	int64_t  seconds;
 	long     nanoseconds;
+	int64_t  size;
+	uint64_t digest; /* FNV-1a of the first NCFG_WATCH_DIGEST_MAX bytes */
 } ncfg_watch_mark_t;
+
+/* How much of a file the digest reads. A configuration is a few kilobytes; a
+ * file past this is still marked by its size and mtime. */
+#define NCFG_WATCH_DIGEST_MAX (1024u * 1024u)
 
 /* A whole fingerprint: one mark per watched path and per entry beneath it. */
 typedef struct {

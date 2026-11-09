@@ -12684,6 +12684,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.771 The polling watcher missed a file rewritten inside one clock tick
+
+`make live` on d48f9fda failed two checks in `config_arrives.sh`'s mtime-polling run, after
+the same commit had passed: a drop-in written broken was not reported within ten seconds, and
+was reported only once the script touched `netcfgd.conf` afterwards. The fingerprint compared
+mtimes, nanoseconds included, and the kernel stamps them from a coarse clock, so two writes
+inside one tick of it leave the same mtime. `cat > file` is two writes -- the create empty,
+then the content -- and a poll landing between them compiles an empty drop-in, which compiles,
+and never sees the rest. Git met this as its "racily clean" index entries and settled it by
+reading content; the fingerprint now carries each regular file's size and an FNV-1a digest of
+its first megabyte, read on each tick only in the polling fallback and at startup.
+`watch_test` puts the old mtime back after a fill and after a same-length rewrite, and both
+fail with the digest taken out. **Not proven to be what the live run hit**: the daemon's log
+cannot tell an empty compile from a late one. It is the one path that fits, and real either way.
+
 ## 10.770 `on_drift = "reconcile"` survives a save
 
 The next case of 10.767's shape: the global drift policy was a plain enum with `reconcile` as

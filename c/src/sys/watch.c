@@ -61,8 +61,38 @@ static void marks_free(ncfg_watch_marks_t *marks)
 	marks->capacity = 0;
 }
 
+/* FNV-1a over a file's first NCFG_WATCH_DIGEST_MAX bytes. Not a secure
+ * digest and not meant as one: it tells a rewrite from no rewrite, which is
+ * all a fingerprint asks. A file that cannot be read digests as nothing, and
+ * its size and mtime still stand. */
+static uint64_t digest_of(const char *path)
+{
+	uint64_t      hash = 1469598103934665603ull;
+	unsigned char chunk[4096];
+	size_t        taken = 0;
+	size_t        got;
+	FILE         *file = fopen(path, "rb");
+
+	if (!file) {
+		return 0;
+	}
+	while (taken < NCFG_WATCH_DIGEST_MAX &&
+	    (got = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+		size_t at;
+
+		for (at = 0; at < got; at++) {
+			hash ^= chunk[at];
+			hash *= 1099511628211ull;
+		}
+		taken += got;
+	}
+	(void)fclose(file);
+	return hash;
+}
+
 /* One path and its mtime, or that it is not there. Absence is a mark rather
- * than a missing entry: see watch.h. */
+ * than a missing entry: see watch.h. A regular file is marked by its size
+ * and content as well, for the reason watch.h gives. */
 static int mark_add(ncfg_watch_marks_t *marks, const char *path)
 {
 	struct stat found;
@@ -88,6 +118,10 @@ static int mark_add(ncfg_watch_marks_t *marks, const char *path)
 		marks->items[marks->count].has_mtime = 1;
 		marks->items[marks->count].seconds = (int64_t)found.st_mtime;
 		marks->items[marks->count].nanoseconds = found.st_mtim.tv_nsec;
+		if (S_ISREG(found.st_mode)) {
+			marks->items[marks->count].size = (int64_t)found.st_size;
+			marks->items[marks->count].digest = digest_of(path);
+		}
 	}
 	marks->count++;
 	return 1;
@@ -188,6 +222,12 @@ static int same_fingerprint(const ncfg_watch_marks_t *one, const ncfg_watch_mark
 		if (one->items[at].has_mtime &&
 		    (one->items[at].seconds != two->items[at].seconds ||
 		    one->items[at].nanoseconds != two->items[at].nanoseconds)) {
+			return 0;
+		}
+		/* And the content, because nanoseconds are not enough either: the
+		 * kernel's clock for them is coarse (watch.h, 10.771). */
+		if (one->items[at].size != two->items[at].size ||
+		    one->items[at].digest != two->items[at].digest) {
 			return 0;
 		}
 	}

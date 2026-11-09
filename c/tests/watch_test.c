@@ -328,6 +328,41 @@ int main(void)
 		check(unlink(other) == 0, "the drop-in is removed");
 		check(ncfg_watch_wait(&watch, 20, &changed, NULL, 0) && changed == 1,
 		    "which is a change too, because absence is part of the fingerprint");
+
+		/*
+		 * **A rewrite inside one tick of the kernel's coarse clock** leaves
+		 * the mtime exactly as it was (10.771): `make_file` and putting the
+		 * old mtime back is that case made certain rather than waited for.
+		 * Two of them: a file created empty and then filled, which is what
+		 * `cat > file` does, and one rewritten at the same length.
+		 */
+		{
+			struct stat     before;
+			struct timespec kept[2];
+
+			check(make_file(other, "") && stat(other, &before) == 0,
+			    "a drop-in is created empty");
+			check(ncfg_watch_wait(&watch, 20, &changed, NULL, 0) && changed == 1,
+			    "  which is noticed");
+			kept[0] = before.st_atim;
+			kept[1] = before.st_mtim;
+			check(make_file(other, "interface eth1 { }\n") &&
+			    utimensat(AT_FDCWD, other, kept, 0) == 0,
+			    "  and then filled, inside the same tick of the clock");
+			check(ncfg_watch_wait(&watch, 20, &changed, NULL, 0) && changed == 1,
+			    "  which is a change although the mtime is the same");
+			check(stat(other, &before) == 0 &&
+			    make_file(other, "interface eth2 { }\n") &&
+			    utimensat(AT_FDCWD, other, kept, 0) == 0,
+			    "  and rewritten at the same length, in the same tick");
+			check(ncfg_watch_wait(&watch, 20, &changed, NULL, 0) && changed == 1,
+			    "  which is a change as well, the content being what moved");
+			check(ncfg_watch_wait(&watch, 20, &changed, NULL, 0) && changed == 0,
+			    "  and reading it is not itself a change");
+			check(unlink(other) == 0, "  the drop-in is removed again");
+			check(ncfg_watch_wait(&watch, 20, &changed, NULL, 0) && changed == 1,
+			    "  which is noticed");
+		}
 		ncfg_watch_close(&watch);
 		check(watch.paths == NULL && watch.marks.count == 0u,
 		    "closing a watcher releases what it held");
