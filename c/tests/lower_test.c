@@ -2782,8 +2782,15 @@ static void interface_cases(void)
 	if (document) {
 		interface = interface_named(document, "eth0");
 		check(interface && interface->probe && interface->probe->arg_count == 1u &&
-		    interface->probe->down_after == 3 && interface->probe->require_lease,
+		    ncfg_probe_down_after(interface->probe) == 3 &&
+		    ncfg_probe_require_lease(interface->probe),
 		    "  and `require_lease` is on unless turned off");
+		/* Written is kept apart from defaulted (10.767): `down_after = 3` was
+		 * said, and `timeout` and `require_lease` were not. */
+		check(interface && interface->probe && interface->probe->down_after.has &&
+		    interface->probe->interval.has && !interface->probe->timeout.has &&
+		    !interface->probe->require_lease.has,
+		    "  a value written is recorded as written, and one left out as left out");
 		ncfg_document_free(document);
 	}
 	/* A probe runs as root, so it is named by path and not found on PATH. */

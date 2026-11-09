@@ -527,13 +527,14 @@ struct ncfg_interface_config {
 	bool    nat = false;
 	QString probe_command;
 	QString probe_args;
-	int     probe_interval = 0;
-	int     probe_timeout = 0;
-	/* The parser's defaults where the document states none (10.617). */
-	int     probe_down_after = 3;
-	int     probe_up_after = 2;
-	int     probe_hold_down = 0;
-	bool    probe_require_lease = true;
+	/* -1 where the document states none, which is "follow the default"
+	 * rather than its value (10.767); `probe_require_lease` is -1, 0 or 1. */
+	int     probe_interval = -1;
+	int     probe_timeout = -1;
+	int     probe_down_after = -1;
+	int     probe_up_after = -1;
+	int     probe_hold_down = -1;
+	int     probe_require_lease = -1;
 	/* A DHCP server on it (10.608): `dhcp_range` "A-B" or empty for the
 	 * default, `dhcp_lease` -1 for the default, `dhcp_dns` space-joined. */
 	bool    dhcp_server = false;

@@ -663,7 +663,7 @@ static void run(const ncfg_probe_policy_t *policy, outcome_t *out)
 	out->started = 1;
 
 	deadline = monotonic_milliseconds() +
-	    (policy->timeout > 0 ? policy->timeout * 1000 : 0);
+	    (ncfg_probe_timeout(policy) > 0 ? ncfg_probe_timeout(policy) * 1000 : 0);
 	for (;;) {
 		pid_t answered;
 
@@ -696,7 +696,7 @@ static void run(const ncfg_probe_policy_t *policy, outcome_t *out)
 		 * about.
 		 */
 		out->detail = sentence("no answer within %llds, so it was killed",
-		    (long long)policy->timeout);
+		    (long long)ncfg_probe_timeout(policy));
 		return;
 	}
 
@@ -747,9 +747,9 @@ void ncfg_probes_clock(ncfg_probes_t *probes, ncfg_probes_clock_fn clock, void *
 /* When a verdict that has just changed may change again. */
 static void dwell(tally_t *tally, const ncfg_probe_policy_t *policy, int64_t now)
 {
-	if (policy->hold_down > 0) {
+	if (ncfg_probe_hold_down(policy) > 0) {
 		tally->settled_set = 1;
-		tally->settled_until = now + policy->hold_down * 1000;
+		tally->settled_until = now + ncfg_probe_hold_down(policy) * 1000;
 		return;
 	}
 	tally->settled_set = 0;
@@ -830,7 +830,7 @@ int ncfg_probes_run_due(ncfg_probes_t *probes, const ncfg_document_t *desired,
 			continue;
 		}
 		tally->due_set = 1;
-		tally->due = now + policy->interval * 1000;
+		tally->due = now + ncfg_probe_interval(policy) * 1000;
 
 		/*
 		 * Set aside stays set aside until the configuration changes, which
@@ -857,7 +857,7 @@ int ncfg_probes_run_due(ncfg_probes_t *probes, const ncfg_document_t *desired,
 		 * anything, which is a process per interval per interface saved on
 		 * exactly the links that are already in trouble.
 		 */
-		if (policy->require_lease && wants_dhcp(interface) &&
+		if (ncfg_probe_require_lease(policy) && wants_dhcp(interface) &&
 		    !ncfg_observed_has_dhcp_lease(observed, interface->name)) {
 			outcome.ok = 0;
 			/* Started, because this *is* an answer about the link rather than
@@ -914,7 +914,7 @@ int ncfg_probes_run_due(ncfg_probes_t *probes, const ncfg_document_t *desired,
 		if (outcome.ok) {
 			tally->failures = 0;
 			tally->successes = one_more(tally->successes);
-			if (!held && (int64_t)tally->successes >= policy->up_after &&
+			if (!held && (int64_t)tally->successes >= ncfg_probe_up_after(policy) &&
 			    !already(tally, 1)) {
 				tally->verdict.has = 1;
 				tally->verdict.value = 1;
@@ -924,7 +924,7 @@ int ncfg_probes_run_due(ncfg_probes_t *probes, const ncfg_document_t *desired,
 		} else {
 			tally->successes = 0;
 			tally->failures = one_more(tally->failures);
-			if (!held && (int64_t)tally->failures >= policy->down_after &&
+			if (!held && (int64_t)tally->failures >= ncfg_probe_down_after(policy) &&
 			    !already(tally, 0)) {
 				tally->verdict.has = 1;
 				tally->verdict.value = 0;

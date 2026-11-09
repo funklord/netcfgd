@@ -16,13 +16,22 @@
  *   silently missing, which is a defect this project has shipped twice. Each
  *   table says in its own comment which side it is on.
  *
- * A DEFAULT IS OMITTED, WITH ONE EXCEPTION THAT IS NOT A STYLE CHOICE
- *   A value equal to the parser's default is not written, so a person reading
- *   the profile afterwards can tell what was chosen from what was merely true.
- *   A bond's `mode` breaks that and has to: the *parser* requires the key even
- *   though the model defaults it, so a bond whose mode happened to equal the
- *   default would render as a block that no longer compiles. A model default
- *   and a language default are not the same fact.
+ * WHAT WAS WRITTEN IS WRITTEN, WHAT WAS NOT IS LEFT OUT
+ *   A value is written where the configuration gave it, whatever it equals,
+ *   and left out where it did not -- so a person reading the profile can tell
+ *   what was chosen from what was merely true, and a choice survives the day
+ *   its default moves. That is the holder's rule (`working-practice.md`, *A
+ *   config file records choices, not values*), and it needs the model to say
+ *   which a value was: an `ncfg_optint_t` or an enum with a "default" member,
+ *   not a number the compiler filled in.
+ *
+ *   This read "a value equal to the parser's default is not written" until
+ *   10.767, which is the opposite rule wearing the same purpose: it could not
+ *   tell `down_after = 3` written from 3 inherited, and the probe -- the one
+ *   block whose numbers the compiler filled in -- lost every chosen default on
+ *   a `profile save`. A bond's `mode` is still written whatever it is, because
+ *   the *parser* requires the key even though the model defaults it: a model
+ *   default and a language default are not the same fact.
  *
  * A CHOICE THE ROUND TRIP CANNOT SEE NEEDS AN ASSERTION ON THE TEXT
  *   Adding a form here? Ask whether it changes what the document MEANS or what

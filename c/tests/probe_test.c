@@ -377,7 +377,8 @@ static void require_lease_false_runs_the_probe_with_no_lease_at_all(const char *
 	(void)snprintf(body, sizeof(body), "#!/bin/sh\ntouch %s\nexit 0\n", marker);
 	document = dhcp_with_probe(script(base, "lease.sh", body, path, sizeof(path)), 0);
 
-	check(document->interfaces[0].probe && !document->interfaces[0].probe->require_lease,
+	check(document->interfaces[0].probe &&
+	    !ncfg_probe_require_lease(document->interfaces[0].probe),
 	    "`require_lease = false` survives the compiler");
 	(void)tick(probes, document, NULL);
 	check(testdir_exists(marker), "  and the probe runs with no lease at all");

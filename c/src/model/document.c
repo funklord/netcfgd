@@ -2040,19 +2040,52 @@ static const ncfg_field_t probe_fields[] = {
 	{ .name = "args", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_probe_policy_t, args),
 	    .count_offset = offsetof(ncfg_probe_policy_t, arg_count) },
-	{ .name = "interval", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	/* Each optional, so a value somebody wrote is told apart from one this
+	 * build would choose (10.767). Written where given, whatever it equals. */
+	{ .name = "interval", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_probe_policy_t, interval) },
-	{ .name = "timeout", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	{ .name = "timeout", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_probe_policy_t, timeout) },
-	{ .name = "down_after", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	{ .name = "down_after", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_probe_policy_t, down_after) },
-	{ .name = "require_lease", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_TRUE, .fallback = 1,
+	{ .name = "require_lease", .kind = NCFG_F_OPT_BOOL,
 	    .offset = offsetof(ncfg_probe_policy_t, require_lease) },
-	{ .name = "up_after", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	{ .name = "up_after", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_probe_policy_t, up_after) },
-	{ .name = "hold_down", .kind = NCFG_F_INT, .flags = NCFG_FF_OMIT_ZERO, R_U32,
+	{ .name = "hold_down", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_probe_policy_t, hold_down) }
 };
+
+int64_t ncfg_probe_interval(const ncfg_probe_policy_t *probe)
+{
+	return probe->interval.has ? probe->interval.value : NCFG_PROBE_INTERVAL_DEFAULT;
+}
+
+int64_t ncfg_probe_timeout(const ncfg_probe_policy_t *probe)
+{
+	return probe->timeout.has ? probe->timeout.value : NCFG_PROBE_TIMEOUT_DEFAULT;
+}
+
+int64_t ncfg_probe_down_after(const ncfg_probe_policy_t *probe)
+{
+	return probe->down_after.has ? probe->down_after.value : NCFG_PROBE_DOWN_AFTER_DEFAULT;
+}
+
+int64_t ncfg_probe_up_after(const ncfg_probe_policy_t *probe)
+{
+	return probe->up_after.has ? probe->up_after.value : NCFG_PROBE_UP_AFTER_DEFAULT;
+}
+
+int64_t ncfg_probe_hold_down(const ncfg_probe_policy_t *probe)
+{
+	return probe->hold_down.has ? probe->hold_down.value : NCFG_PROBE_HOLD_DOWN_DEFAULT;
+}
+
+int ncfg_probe_require_lease(const ncfg_probe_policy_t *probe)
+{
+	return probe->require_lease.has ? probe->require_lease.value :
+	    NCFG_PROBE_REQUIRE_LEASE_DEFAULT;
+}
 static const ncfg_type_t probe_type = TYPE("probe policy", probe_fields);
 
 static const ncfg_field_t interface_fields[] = {

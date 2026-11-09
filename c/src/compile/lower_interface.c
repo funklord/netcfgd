@@ -85,15 +85,13 @@ static int lower_probe(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	ncfg_probe_policy_t probe;
 	size_t              i;
 
+	/* **Nothing is filled in.** A value is recorded only where it was written,
+	 * so that `down_after = 3` stays a choice when 3 is also the default
+	 * (10.767); what the probe acts on otherwise is `ncfg_probe_*`'s default.
+	 * `require_lease` is on unless written off: an interface that asked for
+	 * DHCP and has no lease has nothing a reachability probe could succeed
+	 * over. */
 	memset(&probe, 0, sizeof(probe));
-	probe.interval = 30;
-	probe.timeout = 5;
-	probe.down_after = 3;
-	probe.up_after = 2;
-	probe.hold_down = 0;
-	/* On unless the operator says otherwise: an interface that asked for DHCP
-	 * and has no lease has nothing a reachability probe could succeed over. */
-	probe.require_lease = 1;
 
 	for (i = 0; i < block->items.count; i++) {
 		const ncfg_ast_item_t *item = block->items.at[i];
@@ -127,30 +125,36 @@ static int lower_probe(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			ncfg_words_free(&words);
 		} else if (strcmp(key, "interval") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &number)) {
-				probe.interval = number;
+				probe.interval.has = 1;
+				probe.interval.value = number;
 			}
 		} else if (strcmp(key, "timeout") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &number)) {
-				probe.timeout = number;
+				probe.timeout.has = 1;
+				probe.timeout.value = number;
 			}
 		} else if (strcmp(key, "down_after") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &number)) {
-				probe.down_after = number;
+				probe.down_after.has = 1;
+				probe.down_after.value = number;
 			}
 		} else if (strcmp(key, "up_after") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &number)) {
-				probe.up_after = number;
+				probe.up_after.has = 1;
+				probe.up_after.value = number;
 			}
 		} else if (strcmp(key, "hold_down") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &number)) {
-				probe.hold_down = number;
+				probe.hold_down.has = 1;
+				probe.hold_down.value = number;
 			}
 		} else if (strcmp(key, "require_lease") == 0) {
 			/* Default on, and named for what it requires rather than for what
 			 * it switches off: `require_lease = false` reads as a decision,
 			 * where `skip_lease_check = true` reads as a workaround (0191). */
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
-				probe.require_lease = flag;
+				probe.require_lease.has = 1;
+				probe.require_lease.value = flag;
 			}
 		} else {
 			ncfg_diag(ctx, assignment->span, "`%s` is not valid inside `probe`", key);
@@ -170,13 +174,13 @@ static int lower_probe(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	}
 	/* A zero count would mean "change my mind on no evidence", which is not a
 	 * faster failover, it is none of the hysteresis the counts exist for. */
-	if (probe.down_after == 0 || probe.up_after == 0) {
+	if (ncfg_probe_down_after(&probe) == 0 || ncfg_probe_up_after(&probe) == 0) {
 		ncfg_diag(ctx, block->span,
 		    "`up_after` and `down_after` have to be at least 1: they are consecutive-result "
 		    "counts; zero would switch on no result");
 		goto drop;
 	}
-	if (probe.interval == 0) {
+	if (ncfg_probe_interval(&probe) == 0) {
 		ncfg_diag(ctx, block->span, "`interval` has to be at least 1 second");
 		goto drop;
 	}

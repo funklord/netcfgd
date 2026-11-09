@@ -12684,34 +12684,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.767 Open: a profile saves a probe's chosen default as no choice at all
+## 10.767 A probe's chosen default survives a save
 
 Reported by claude-guidelines 2026-11-09, against the holder's rule of 2026-11-06 in
-`working-practice.md` (*A config file records choices, not values*): a configuration must keep
+`working-practice.md` (*A config file records choices, not values*): a configuration keeps
 "follow the default" apart from "this value, chosen", because somebody who picks today's
 default does so knowingly and loses that intent when the default moves.
 
-`render_probe` (`c/src/compile/render_link.c`) writes `interval`, `timeout`, `down_after`,
-`up_after` and `hold_down` only where they differ from the parser's default, and
-`require_lease` only when false -- `render.c`'s stated convention, "a value equal to the
-parser's default is not written". `profile save` renders through it, so a probe that says
-`down_after = 3` comes back without the line. `gui/src/interface_dialog.cpp` copies the rule
-(`!= 3`, `!= 2`), with spin boxes seeded at 3 and 2 and no unset state.
+**What was wrong.** The compiler filled a probe's `interval`, `timeout`, `down_after`,
+`up_after`, `hold_down` and `require_lease` with their defaults, and the renderer wrote each
+only where it differed from one -- `render.c`'s own convention then, "a value equal to the
+parser's default is not written". So `profile save` dropped `down_after = 3`, and the GUI's
+interface dialog, which copied the rule and had no unset state, did the same on every Save.
+Neither half could be fixed alone: both read the compiled document, which held values only.
 
-**Measured, and why it is not fixed in passing.** Both halves need the same thing, which
-neither has: whether a field was written. The renderer works from the compiled document,
-which keeps values only; the side table that records where fields came from (`ncfg_record`)
-holds the planner's subjects -- `mtu`, `dns`, `routes` -- and nothing inside a probe. And the
-GUI cannot be fixed alone: it loads its spin boxes from that same document, so an unset state
-there would either show a written `3` as unset and drop it, or pin every probe it touches at
-today's default -- the opposite failure the rule names first. The fix is presence carried in
-the model for these six fields (optional in the document, rendered whenever present, an unset
-state in the dialog), which changes the document's JSON and so its frozen witnesses under
-`doc/schema/`, the ledger and every reader of a probe.
+**What it is now.** The six are `ncfg_optint_t` / `ncfg_optbool_t` in the model, optional in
+the document, recorded by the lowering only where written; what the daemon acts on comes from
+`ncfg_probe_interval()` and its five siblings, with the defaults as `NCFG_PROBE_*_DEFAULT`.
+The renderer writes what was given whatever it equals. The client library reads -1 for "not
+written". The dialog's lowest position on each control is "default (N)" and writes nothing --
+0 for the interval and the counts, where 0 is not a legal value, and -1 for the timeout and
+the hold, where 0 is -- and `require_lease` is a three-state box whose middle is the default.
+`render.c`'s header states the rule the other way round now; the probe was the one block
+whose numbers the compiler filled in, and the other renderer sites that compare with a
+default compare with an enum's own "default" member.
 
-Decided per the rule's own instruction -- the setting's owner decides, not the holder per
-setting: yes, worth doing, as its own change with a schema minor; the probe is where it bites
-because those defaults are tuning a person reaches for. Not yet started.
+The document's JSON changes only for a probe that left a value out, which no longer carries
+it; one read from an older document has every value present and is kept as chosen, the safe
+direction. 0038 pins the schema version until netcfgd ships, so no minor is bumped.
+
+**Verified.** `render_test` keeps a probe written entirely at today's defaults through a round
+trip, and fails both checks with the old rule put back; `lower_test` checks written apart from
+left out; `live_interface_dialog` chooses `up_after = 2` -- today's default, which the old Save
+dropped -- and fails its two checks with the old `!= 2` put back. `make check` exits 0, and
+`gui_wifi.sh`'s thirteen live GUI probes pass. `live_linkset` failed one run in four on the
+inventory not yet holding links just written, which this change does not touch (10.768).
 
 ## 10.766 vm-sandbox and vm-cluster on 9373e95b, and a log that put `target/` back
 

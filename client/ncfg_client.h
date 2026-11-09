@@ -1686,11 +1686,14 @@ typedef struct {
 	int   nat;
 	char *probe_command;
 	char *probe_args;
+	/* Every probe value is -1 where the document states none, which is "follow
+	 * the default" and not the default's value (10.767): a value somebody wrote
+	 * is kept apart from one they did not, so a Save writes the first whatever
+	 * it equals and never pins the second. `require_lease` is -1, 0 or 1. The
+	 * counts and whether a lease is needed first are 10.617's: a Save used to
+	 * drop all four. */
 	int   probe_interval;
 	int   probe_timeout;
-	/* How many results flip the link, how long it is held down, and whether a
-	 * lease is needed first (10.617): the parser's defaults, 3, 2, 0 and on,
-	 * where the document states none. A Save used to drop all four. */
 	int   probe_down_after;
 	int   probe_up_after;
 	int   probe_hold_down;

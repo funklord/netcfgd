@@ -1581,31 +1581,57 @@ typedef struct {
  * somebody wrote all agree that zero means it worked, and on a captive-portal
  * network the operator's definition of reachable is the one that matters. A
  * path with a timeout and never inline shell, the shape a hook already has.
+ *
+ * **Every tuning value is optional, and absent means "follow the default"**
+ * (10.767). A person who writes `down_after = 3` has chosen 3, and one who
+ * writes nothing has chosen whatever this build thinks best; the two read
+ * the same today and part company the day the default moves. Held as values
+ * filled in by the compiler, they could not be told apart, so a profile saved
+ * from the document dropped the written one -- against the rule that a
+ * configuration records a choice and not a value. So each is a `has` and a
+ * value, the document writes a field only where it was given, and what the
+ * daemon acts on comes from the `ncfg_probe_*` accessors below.
  */
 typedef struct {
-	char   *command; /* absolute */
-	char  **args;
-	size_t  arg_count;
-	int64_t interval;
-	int64_t timeout;
+	char         *command; /* absolute */
+	char        **args;
+	size_t        arg_count;
+	ncfg_optint_t interval;
+	ncfg_optint_t timeout;
 	/* Asymmetric with `up_after` on purpose: symmetric counts make a marginal
 	 * link oscillate at whatever period `interval` sets. One lost packet is
 	 * not an outage, so this is larger. Named `down_after` and not `down`
 	 * because the config language reserves `up` and `down` as hook phases. */
-	int64_t down_after;
+	ncfg_optint_t down_after;
 	/* Only where the interface asked for DHCP, and default on: an interface
 	 * configured for DHCP with no lease has nothing a probe could succeed
 	 * over. It is a precondition, not a verdict -- a lease says a DHCP server
 	 * answered, which a local server on a network with a dead uplink does
 	 * happily (0191). */
-	int     require_lease;
-	int64_t up_after;
+	ncfg_optbool_t require_lease;
+	ncfg_optint_t  up_after;
 	/* Seconds a verdict must stand before it may change again; 0 for none.
 	 * The counts are the first brake and not the whole one: a link that
 	 * alternates in runs -- three bad, two good, three bad -- satisfies both
 	 * and moves the default route on every cycle, just at a longer period. */
-	int64_t hold_down;
+	ncfg_optint_t hold_down;
 } ncfg_probe_policy_t;
+
+/* What a probe value is when it was not written: this build's defaults. */
+#define NCFG_PROBE_INTERVAL_DEFAULT      30
+#define NCFG_PROBE_TIMEOUT_DEFAULT       5
+#define NCFG_PROBE_DOWN_AFTER_DEFAULT    3
+#define NCFG_PROBE_UP_AFTER_DEFAULT      2
+#define NCFG_PROBE_HOLD_DOWN_DEFAULT     0
+#define NCFG_PROBE_REQUIRE_LEASE_DEFAULT 1
+
+/* The value a probe acts on: the one written, or the default where none was. */
+int64_t ncfg_probe_interval(const ncfg_probe_policy_t *probe);
+int64_t ncfg_probe_timeout(const ncfg_probe_policy_t *probe);
+int64_t ncfg_probe_down_after(const ncfg_probe_policy_t *probe);
+int64_t ncfg_probe_up_after(const ncfg_probe_policy_t *probe);
+int64_t ncfg_probe_hold_down(const ncfg_probe_policy_t *probe);
+int     ncfg_probe_require_lease(const ncfg_probe_policy_t *probe);
 
 typedef struct ncfg_interface {
 	char                  *name; /* the sorting key */

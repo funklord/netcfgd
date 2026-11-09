@@ -1380,7 +1380,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->probe_down_after = found.probe_down_after;
 	out->probe_up_after = found.probe_up_after;
 	out->probe_hold_down = found.probe_hold_down;
-	out->probe_require_lease = found.probe_require_lease != 0;
+	out->probe_require_lease = found.probe_require_lease;
 	out->dhcp_server = found.dhcp_server != 0;
 	out->dhcp_range = from_c(found.dhcp_range);
 	out->dhcp_lease = found.dhcp_lease;

@@ -1789,6 +1789,27 @@ static void a_bare_probe_round_trips(void)
 	check(holds(rendered, "require_lease = false"),
 	    "and says so, because absence means it does require one");
 	free(rendered);
+
+	/*
+	 * **A value that equals today's default is still a choice** (10.767,
+	 * the holder's rule that a configuration records a choice and not a
+	 * value). Every number here is the parser's own default and
+	 * `require_lease = true` is too; each was dropped by the renderer, so a
+	 * profile saved from this probe followed whatever the defaults later
+	 * became. The round trip cannot see it -- both forms compile to the same
+	 * behaviour -- which is why the text is asserted.
+	 */
+	text = "interface eth2 {\n\tconfig = \"dhcp\"\n\tprobe {\n"
+	    "\t\tcommand = \"/usr/bin/true\"\n\t\tinterval = 30\n\t\ttimeout = 5\n"
+	    "\t\tdown_after = 3\n\t\tup_after = 2\n\t\thold_down = 0\n"
+	    "\t\trequire_lease = true\n\t}\n}\n";
+	round_trips(text, "a probe that writes today's defaults round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "interval = 30") && holds(rendered, "timeout = 5") &&
+	    holds(rendered, "down_after = 3") && holds(rendered, "up_after = 2") &&
+	    holds(rendered, "hold_down = 0") && holds(rendered, "require_lease = true"),
+	    "and keeps every one of them, each being somebody's choice");
+	free(rendered);
 }
 
 /*
@@ -3289,13 +3310,16 @@ static void a_probe_count_below_the_floor_is_refused(void)
 		 * `a_bare_probe_round_trips` asserts directly. */
 		switch (floors[which].at) {
 		case 0:
-			document->interfaces[0].probe->interval = 0;
+			document->interfaces[0].probe->interval.has = 1;
+			document->interfaces[0].probe->interval.value = 0;
 			break;
 		case 1:
-			document->interfaces[0].probe->down_after = 0;
+			document->interfaces[0].probe->down_after.has = 1;
+			document->interfaces[0].probe->down_after.value = 0;
 			break;
 		default:
-			document->interfaces[0].probe->up_after = 0;
+			document->interfaces[0].probe->up_after.has = 1;
+			document->interfaces[0].probe->up_after.value = 0;
 			break;
 		}
 		ncfg_buf_init(&out, 0);

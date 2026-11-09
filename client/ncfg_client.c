@@ -5060,9 +5060,13 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	memset(out, 0, sizeof(*out));
 	out->preference = -1;
 	out->enabled = 1;
-	out->probe_down_after = 3;
-	out->probe_up_after = 2;
-	out->probe_require_lease = 1;
+	/* Not written, until the document says otherwise (10.767). */
+	out->probe_interval = -1;
+	out->probe_timeout = -1;
+	out->probe_down_after = -1;
+	out->probe_up_after = -1;
+	out->probe_hold_down = -1;
+	out->probe_require_lease = -1;
 
 	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
 	if (!doc) {
@@ -5117,15 +5121,24 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	uint32_t probe = ncfg_json_member(doc, found, "probe");
 	if (probe != NCFG_JSON_NONE) {
 		out->probe_command = member_text(doc, probe, "command");
-		out->probe_interval = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "interval"), 0);
-		out->probe_timeout = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "timeout"), 0);
+		/* Absent stays -1: the document writes a probe value only where the
+		 * configuration did. */
+		out->probe_interval =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "interval"), -1);
+		out->probe_timeout =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "timeout"), -1);
 		out->probe_down_after =
-		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "down_after"), 3);
-		out->probe_up_after = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "up_after"), 2);
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "down_after"), -1);
+		out->probe_up_after =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "up_after"), -1);
 		out->probe_hold_down =
-		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "hold_down"), 0);
-		out->probe_require_lease =
-		    ncfg_json_bool(doc, ncfg_json_member(doc, probe, "require_lease"), 1);
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "hold_down"), -1);
+		{
+			uint32_t lease = ncfg_json_member(doc, probe, "require_lease");
+
+			out->probe_require_lease = lease == NCFG_JSON_NONE ? -1 :
+			    ncfg_json_bool(doc, lease, 1);
+		}
 		uint32_t args = ncfg_json_member(doc, probe, "args");
 		uint32_t args_count = ncfg_json_count(doc, args);
 		char *joined = dup_string("");

@@ -492,14 +492,15 @@ static void render_eap(const ncfg_eap_config_t *eap, ncfg_buf_t *body)
 /*
  * How the link is judged to be working, as its own block.
  *
- * The numbers are omitted where they equal the parser's own defaults, which is
- * this module's convention. `command` is unconditional because a probe without
- * one is not a probe: the parser refuses the block outright, so a rendered
- * profile that left it out would be one that no longer compiles.
- *
- * `require_lease` is the exception and reads inverted: it is written only when
- * it is OFF, because its default is on. The reasoning is at the write itself,
- * along with how the omission was found.
+ * **Each tuning value is written where it was given, whatever it equals**,
+ * and left out where it was not (10.767). This was the module's convention of
+ * omitting a value equal to the parser's default, which could not tell
+ * `down_after = 3` written from 3 inherited, so a profile saved from a probe
+ * that chose today's default came back following whatever the default later
+ * became. The model now says which it was. `command` is unconditional because
+ * a probe without one is not a probe: the parser refuses the block outright,
+ * so a rendered profile that left it out would be one that no longer
+ * compiles.
  */
 static void render_probe(const ncfg_probe_policy_t *probe, const char *scope,
     const char *name, ncfg_buf_t *body, ncfg_unrenderable_t *missing)
@@ -517,11 +518,10 @@ static void render_probe(const ncfg_probe_policy_t *probe, const char *scope,
 	 */
 	static const struct {
 		const char *key;
-		int64_t     fallback;
 		int64_t     least;
-	} numbers[] = { { "interval", 30, 1 }, { "timeout", 5, 0 }, { "down_after", 3, 1 },
-		{ "up_after", 2, 1 }, { "hold_down", 0, 0 } };
-	int64_t            values[5];
+	} numbers[] = { { "interval", 1 }, { "timeout", 0 }, { "down_after", 1 },
+		{ "up_after", 1 }, { "hold_down", 0 } };
+	ncfg_optint_t      values[5];
 	/* Paired, as above. */
 	_Static_assert(NCFG_COUNT_OF(numbers) == NCFG_COUNT_OF(values),
 	    "a values per numbers");
@@ -553,16 +553,16 @@ static void render_probe(const ncfg_probe_policy_t *probe, const char *scope,
 	values[3] = probe->up_after;
 	values[4] = probe->hold_down;
 	for (i = 0; i < NCFG_COUNT_OF(numbers); i++) {
-		if (values[i] == numbers[i].fallback) {
+		if (!values[i].has) {
 			continue;
 		}
-		if (values[i] < numbers[i].least) {
+		if (values[i].value < numbers[i].least) {
 			ncfg_render_refuse(missing, scope, name, "a probe `%s` of %lld, which is"
 			    " below the %lld the language takes", numbers[i].key,
-			    (long long)values[i], (long long)numbers[i].least);
+			    (long long)values[i].value, (long long)numbers[i].least);
 			continue;
 		}
-		ncfg_buf_addf(body, "\t\t%s = %lld\n", numbers[i].key, (long long)values[i]);
+		ncfg_buf_addf(body, "\t\t%s = %lld\n", numbers[i].key, (long long)values[i].value);
 	}
 	/*
 	 * **The one field of nine this wrote nothing for**, and the only one whose
@@ -577,12 +577,12 @@ static void render_probe(const ncfg_probe_policy_t *probe, const char *scope,
 	 * lease, which is the probe's precondition inverted and nothing downstream
 	 * would report it.
 	 *
-	 * Written only when off, because absence means on -- 0191's reasoning, that
-	 * `require_lease = false` reads as a decision where `skip_lease_check =
-	 * true` reads as a workaround.
+	 * Written where it was given, either way, for the reason the numbers are:
+	 * absence means "on, unless the default moves" and `true` means on.
 	 */
-	if (!probe->require_lease) {
-		ncfg_buf_add_text(body, "\t\trequire_lease = false\n");
+	if (probe->require_lease.has) {
+		ncfg_buf_addf(body, "\t\trequire_lease = %s\n",
+		    probe->require_lease.value ? "true" : "false");
 	}
 	ncfg_buf_add_text(body, "\t}\n");
 }

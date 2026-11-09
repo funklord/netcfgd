@@ -166,13 +166,18 @@ int main(int argc, char **argv)
 	auto *hold_down = dialog.findChild<QSpinBox *>(QStringLiteral("iface_probe_hold_down"));
 	auto *require_lease =
 	    dialog.findChild<QCheckBox *>(QStringLiteral("iface_probe_require_lease"));
+	auto *timeout = dialog.findChild<QSpinBox *>(QStringLiteral("iface_probe_timeout"));
 	check("the probe's counting fields are there",
-	    down_after && up_after && hold_down && require_lease);
-	if (down_after && up_after && hold_down && require_lease) {
+	    down_after && up_after && hold_down && require_lease && timeout);
+	if (down_after && up_after && hold_down && require_lease && timeout) {
 		down_after->setValue(5);
-		up_after->setValue(4);
+		/* Today's default, chosen: the old Save dropped exactly this. */
+		up_after->setValue(2);
 		hold_down->setValue(60);
-		require_lease->setChecked(false);
+		require_lease->setCheckState(Qt::Unchecked);
+		/* **Today's default, chosen** (10.767): five seconds is what an
+		 * unwritten timeout means, and a person who picks it has picked it. */
+		timeout->setValue(5);
 	}
 	save->click();
 
@@ -202,14 +207,15 @@ int main(int argc, char **argv)
 		    text.contains(QStringLiteral("args = [\"gui-probe0\"]")), text);
 		check("and the script it was given",
 		    text.contains(script), text);
-		/* Defaults are not restated: interval and timeout were left alone. */
-		check("and does not restate the defaults it was not given",
-		    !text.contains(QStringLiteral("interval")) &&
-		        !text.contains(QStringLiteral("timeout")),
-		    text);
+		/* A default left alone is not written; one chosen is, whatever it
+		 * equals (10.767). */
+		check("and does not write the interval it was not given",
+		    !text.contains(QStringLiteral("interval")), text);
+		check("and writes a timeout chosen at today's default",
+		    text.contains(QStringLiteral("timeout = 5")), text);
 		check("and writes the counts it was given",
 		    text.contains(QStringLiteral("down_after = 5")) &&
-		        text.contains(QStringLiteral("up_after = 4")) &&
+		        text.contains(QStringLiteral("up_after = 2")) &&
 		        text.contains(QStringLiteral("hold_down = 60")) &&
 		        text.contains(QStringLiteral("require_lease = false")),
 		    text);
@@ -225,8 +231,9 @@ int main(int argc, char **argv)
 		ncfg_interface_config read;
 		check("and reads the probe's counts back as written",
 		    connection.interface_config(iface, &read, &error) && read.probe_down_after == 5 &&
-		        read.probe_up_after == 4 && read.probe_hold_down == 60 &&
-		        !read.probe_require_lease,
+		        read.probe_up_after == 2 && read.probe_hold_down == 60 &&
+		        read.probe_require_lease == 0 && read.probe_timeout == 5 &&
+		        read.probe_interval == -1,
 		    QStringLiteral("%1 %2 %3 %4 %5").arg(error).arg(read.probe_down_after)
 		        .arg(read.probe_up_after).arg(read.probe_hold_down)
 		        .arg(read.probe_require_lease));

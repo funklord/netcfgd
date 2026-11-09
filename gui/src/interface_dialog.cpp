@@ -283,13 +283,25 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	probe_args->setPlaceholderText(QStringLiteral("-fsS https://example.invalid"));
 	form->addRow(QStringLiteral("arguments"), probe_args);
 
+	/*
+	 * **Each control can say "default", and that is not the default's value**
+	 * (10.767, the holder's rule that a configuration records a choice and not
+	 * a value). The lowest position of each is "follow the default" and writes
+	 * nothing; every other position is written, including the one that equals
+	 * today's default. Where 0 is not a legal value -- the interval and the two
+	 * counts -- 0 is that position; where it is -- the timeout and the hold --
+	 * it is -1, and 0 means none.
+	 */
 	probe_interval = new QSpinBox(this);
+	probe_interval->setObjectName(QStringLiteral("iface_probe_interval"));
 	probe_interval->setRange(0, 3600);
 	probe_interval->setSpecialValueText(QStringLiteral("default (30s)"));
 	form->addRow(QStringLiteral("interval, seconds"), probe_interval);
 
 	probe_timeout = new QSpinBox(this);
-	probe_timeout->setRange(0, 600);
+	probe_timeout->setObjectName(QStringLiteral("iface_probe_timeout"));
+	probe_timeout->setRange(-1, 600);
+	probe_timeout->setValue(-1);
 	probe_timeout->setSpecialValueText(QStringLiteral("default (5s)"));
 	form->addRow(QStringLiteral("timeout, seconds"), probe_timeout);
 
@@ -299,22 +311,26 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	 * dropped them, so a probe tuned not to flap was reset to the defaults. */
 	probe_down_after = new QSpinBox(this);
 	probe_down_after->setObjectName(QStringLiteral("iface_probe_down_after"));
-	probe_down_after->setRange(1, 1000);
-	probe_down_after->setValue(3);
+	probe_down_after->setRange(0, 1000);
+	probe_down_after->setSpecialValueText(QStringLiteral("default (3)"));
 	form->addRow(QStringLiteral("failures before down"), probe_down_after);
 	probe_up_after = new QSpinBox(this);
 	probe_up_after->setObjectName(QStringLiteral("iface_probe_up_after"));
-	probe_up_after->setRange(1, 1000);
-	probe_up_after->setValue(2);
+	probe_up_after->setRange(0, 1000);
+	probe_up_after->setSpecialValueText(QStringLiteral("default (2)"));
 	form->addRow(QStringLiteral("passes before up"), probe_up_after);
 	probe_hold_down = new QSpinBox(this);
 	probe_hold_down->setObjectName(QStringLiteral("iface_probe_hold_down"));
-	probe_hold_down->setRange(0, 86400);
-	probe_hold_down->setSpecialValueText(QStringLiteral("none"));
+	probe_hold_down->setRange(-1, 86400);
+	probe_hold_down->setValue(-1);
+	probe_hold_down->setSpecialValueText(QStringLiteral("default (none)"));
 	form->addRow(QStringLiteral("held down, seconds"), probe_hold_down);
 	probe_require_lease = new QCheckBox(QStringLiteral("only count a pass once there is a lease"), this);
 	probe_require_lease->setObjectName(QStringLiteral("iface_probe_require_lease"));
-	probe_require_lease->setChecked(true);
+	/* Three states: partly checked is "the default (required)", which is
+	 * what a probe that never mentioned it has. */
+	probe_require_lease->setTristate(true);
+	probe_require_lease->setCheckState(Qt::PartiallyChecked);
 	form->addRow(QString(), probe_require_lease);
 
 	enabled = new QCheckBox(QStringLiteral("configure this interface"), this);
@@ -712,12 +728,17 @@ void ncfg_interface_dialog::load_existing()
 			probe_command->setText(existing.probe_command);
 			probe_args->setText(existing.probe_args);
 		}
-		probe_interval->setValue(existing.probe_interval);
+		/* -1 is "not written"; the interval and the counts show it as 0, the
+		 * position that says so for them. */
+		probe_interval->setValue(existing.probe_interval < 0 ? 0 : existing.probe_interval);
 		probe_timeout->setValue(existing.probe_timeout);
-		probe_down_after->setValue(existing.probe_down_after);
-		probe_up_after->setValue(existing.probe_up_after);
+		probe_down_after->setValue(existing.probe_down_after < 0 ? 0 :
+		    existing.probe_down_after);
+		probe_up_after->setValue(existing.probe_up_after < 0 ? 0 : existing.probe_up_after);
 		probe_hold_down->setValue(existing.probe_hold_down);
-		probe_require_lease->setChecked(existing.probe_require_lease);
+		probe_require_lease->setCheckState(existing.probe_require_lease < 0 ?
+		    Qt::PartiallyChecked :
+		    (existing.probe_require_lease ? Qt::Checked : Qt::Unchecked));
 	}
 }
 
@@ -1143,22 +1164,24 @@ QString ncfg_interface_dialog::block_text() const
 		if (probe_interval->value() > 0) {
 			body << QStringLiteral("\t\tinterval = %1").arg(probe_interval->value());
 		}
-		if (probe_timeout->value() > 0) {
+		/* Whatever was chosen, written, and nothing for "default" -- the
+		 * renderer's rule since 10.767, and the holder's. */
+		if (probe_timeout->value() >= 0) {
 			body << QStringLiteral("\t\ttimeout = %1").arg(probe_timeout->value());
 		}
-		/* Only what differs from the parser's default, as the renderer
-		 * writes a probe: `require_lease` therefore only when it is off. */
-		if (probe_down_after->value() != 3) {
+		if (probe_down_after->value() > 0) {
 			body << QStringLiteral("\t\tdown_after = %1").arg(probe_down_after->value());
 		}
-		if (probe_up_after->value() != 2) {
+		if (probe_up_after->value() > 0) {
 			body << QStringLiteral("\t\tup_after = %1").arg(probe_up_after->value());
 		}
-		if (probe_hold_down->value() > 0) {
+		if (probe_hold_down->value() >= 0) {
 			body << QStringLiteral("\t\thold_down = %1").arg(probe_hold_down->value());
 		}
-		if (!probe_require_lease->isChecked()) {
-			body << QStringLiteral("\t\trequire_lease = false");
+		if (probe_require_lease->checkState() != Qt::PartiallyChecked) {
+			body << QStringLiteral("\t\trequire_lease = %1").arg(
+			    probe_require_lease->checkState() == Qt::Checked ?
+			    QStringLiteral("true") : QStringLiteral("false"));
 		}
 		body << QStringLiteral("\t}");
 	}
