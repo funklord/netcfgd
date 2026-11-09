@@ -12684,6 +12684,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.767 Open: a profile saves a probe's chosen default as no choice at all
+
+Reported by claude-guidelines 2026-11-09, against the holder's rule of 2026-11-06 in
+`working-practice.md` (*A config file records choices, not values*): a configuration must keep
+"follow the default" apart from "this value, chosen", because somebody who picks today's
+default does so knowingly and loses that intent when the default moves.
+
+`render_probe` (`c/src/compile/render_link.c`) writes `interval`, `timeout`, `down_after`,
+`up_after` and `hold_down` only where they differ from the parser's default, and
+`require_lease` only when false -- `render.c`'s stated convention, "a value equal to the
+parser's default is not written". `profile save` renders through it, so a probe that says
+`down_after = 3` comes back without the line. `gui/src/interface_dialog.cpp` copies the rule
+(`!= 3`, `!= 2`), with spin boxes seeded at 3 and 2 and no unset state.
+
+**Measured, and why it is not fixed in passing.** Both halves need the same thing, which
+neither has: whether a field was written. The renderer works from the compiled document,
+which keeps values only; the side table that records where fields came from (`ncfg_record`)
+holds the planner's subjects -- `mtu`, `dns`, `routes` -- and nothing inside a probe. And the
+GUI cannot be fixed alone: it loads its spin boxes from that same document, so an unset state
+there would either show a written `3` as unset and drop it, or pin every probe it touches at
+today's default -- the opposite failure the rule names first. The fix is presence carried in
+the model for these six fields (optional in the document, rendered whenever present, an unset
+state in the dialog), which changes the document's JSON and so its frozen witnesses under
+`doc/schema/`, the ledger and every reader of a probe.
+
+Decided per the rule's own instruction -- the setting's owner decides, not the holder per
+setting: yes, worth doing, as its own change with a schema minor; the probe is where it bites
+because those defaults are tuning a person reaches for. Not yet started.
+
 ## 10.766 vm-sandbox and vm-cluster on 9373e95b, and a log that put `target/` back
 
 `make vm-sandbox`: `sandbox_writes.sh` passes under systemd 257, 31 checks. `make vm-cluster`:
