@@ -1015,9 +1015,11 @@ static void network_cases(void)
 	    "\twifi { psk = \"@secret:h\"; roam { } }\n}\n",
 	    "several access points may be roamed between");
 	if (document) {
-		check(document->networks[0].roam && document->networks[0].roam->signal == -70 &&
-		    document->networks[0].roam->interval == 30 &&
-		    document->networks[0].roam->slow_interval == 300,
+		check(document->networks[0].roam &&
+		    ncfg_roam_signal(document->networks[0].roam) == -70 &&
+		    ncfg_roam_interval(document->networks[0].roam) == 30 &&
+		    ncfg_roam_slow_interval(document->networks[0].roam) == 300 &&
+		    !document->networks[0].roam->interval.has,
 		    "  and a roam block has defaults worth having");
 		ncfg_document_free(document);
 	}

@@ -1730,15 +1730,32 @@ int ncfg_ssid_parse_hex(const char *text, size_t length, ncfg_ssid_t *out, char 
  * Stated as an intent rather than as `wpa_supplicant`'s string: a
  * `bgscan="simple:30:-70:300"` in a config file would be netcfgd asking the
  * operator to know which supplicant is underneath.
+ *
+ * **Each value is optional, and absent means "follow the default"** (10.769,
+ * as 10.767 for a probe): a roam block that says only `signal = -60` has not
+ * chosen 30 and 300, and a profile saved from it must not pin them. What the
+ * supplicant is given comes from the `ncfg_roam_*` accessors.
  */
 typedef struct {
-	int64_t signal;   /* dBm; below this the radio is weak enough to look */
-	int64_t interval; /* seconds between scans while below `signal` */
+	ncfg_optint_t signal;   /* dBm; below this the radio is weak enough to look */
+	ncfg_optint_t interval; /* seconds between scans while below `signal` */
 	/* Not zero and not absent: a station that stops looking once it is
 	 * comfortable never notices the access point it walked past, which is the
 	 * failure this whole policy exists to avoid. */
-	int64_t slow_interval;
+	ncfg_optint_t slow_interval;
 } ncfg_roam_policy_t;
+
+/* `wpa_supplicant`'s own documented example, rounded: -70 dBm is where a link
+ * is usually called poor, 30 s catches a walk down a corridor, 300 s is quiet
+ * enough not to cost airtime while sitting still. */
+#define NCFG_ROAM_SIGNAL_DEFAULT        (-70)
+#define NCFG_ROAM_INTERVAL_DEFAULT      30
+#define NCFG_ROAM_SLOW_INTERVAL_DEFAULT 300
+
+/* The value roaming acts on: the one written, or the default. */
+int64_t ncfg_roam_signal(const ncfg_roam_policy_t *roam);
+int64_t ncfg_roam_interval(const ncfg_roam_policy_t *roam);
+int64_t ncfg_roam_slow_interval(const ncfg_roam_policy_t *roam);
 
 typedef struct {
 	char       *id; /* the sorting key */

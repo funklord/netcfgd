@@ -1813,6 +1813,42 @@ static void a_bare_probe_round_trips(void)
 }
 
 /*
+ * **A roam block keeps what was written and pins nothing else** (10.769).
+ *
+ * It wrote all three values whenever the block existed, so a network that
+ * said only `signal = -60` came back from `profile save` with `interval = 30`
+ * and `slow_interval = 300` pinned -- values nobody chose, kept past any later
+ * change to the defaults. And one that said all three at their defaults keeps
+ * all three, for the probe's reason (10.767).
+ */
+static void a_roam_block_keeps_what_was_written(void)
+{
+	const char *text = "network \"Home\" {\n\twifi {\n\t\tpsk = \"@secret:h\"\n"
+	    "\t\troam { signal = -60 }\n\t}\n}\n";
+	char       *rendered;
+
+	round_trips(text, "a roam block with only its signal round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "signal = -60") && !holds(rendered, "slow_interval") &&
+	    !holds(rendered, "\t\t\tinterval"),
+	    "  and pins neither interval it did not choose");
+	free(rendered);
+
+	text = "network \"Home\" {\n\twifi {\n\t\tpsk = \"@secret:h\"\n"
+	    "\t\troam { signal = -70; interval = 30; slow_interval = 300 }\n\t}\n}\n";
+	round_trips(text, "a roam block written at today's defaults round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "signal = -70") && holds(rendered, "interval = 30") &&
+	    holds(rendered, "slow_interval = 300"),
+	    "  and keeps all three, each being somebody's choice");
+	free(rendered);
+
+	text = "network \"Home\" {\n\twifi {\n\t\tpsk = \"@secret:h\"\n"
+	    "\t\troam { }\n\t}\n}\n";
+	round_trips(text, "an empty roam block round trips, as something other than none");
+}
+
+/*
  * 802.1X on a wired port, which shares its eight keys with a wireless
  * network's EAP -- the parser shares `WifiKeys` between them, so the renderer
  * shares one function for the same reason.
@@ -4017,6 +4053,7 @@ int main(int argc, char **argv)
 	an_empty_dns_block_survives_where_it_means_something();
 	the_interface_keys_round_trip();
 	a_bare_probe_round_trips();
+	a_roam_block_keeps_what_was_written();
 	a_wired_dot1x_port_round_trips();
 	a_stored_certificate_stays_stored();
 	the_enterprise_networks_round_trip();

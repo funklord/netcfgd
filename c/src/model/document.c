@@ -2222,14 +2222,32 @@ static const ncfg_custom_t ssid_custom = { ssid_read, ssid_write, ssid_omit, NUL
  * to omit and the required check is the table's. */
 static const ncfg_custom_t ssid_required_custom = { ssid_read, ssid_write, NULL, NULL, NULL };
 
+/* Optional, as a probe's are, so a value written is told from one inherited
+ * (10.769). */
 static const ncfg_field_t roam_fields[] = {
-	{ .name = "signal", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_I32,
+	{ .name = "signal", .kind = NCFG_F_OPT_INT, R_I32,
 	    .offset = offsetof(ncfg_roam_policy_t, signal) },
-	{ .name = "interval", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	{ .name = "interval", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_roam_policy_t, interval) },
-	{ .name = "slow_interval", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	{ .name = "slow_interval", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_roam_policy_t, slow_interval) }
 };
+
+int64_t ncfg_roam_signal(const ncfg_roam_policy_t *roam)
+{
+	return roam->signal.has ? roam->signal.value : NCFG_ROAM_SIGNAL_DEFAULT;
+}
+
+int64_t ncfg_roam_interval(const ncfg_roam_policy_t *roam)
+{
+	return roam->interval.has ? roam->interval.value : NCFG_ROAM_INTERVAL_DEFAULT;
+}
+
+int64_t ncfg_roam_slow_interval(const ncfg_roam_policy_t *roam)
+{
+	return roam->slow_interval.has ? roam->slow_interval.value :
+	    NCFG_ROAM_SLOW_INTERVAL_DEFAULT;
+}
 static const ncfg_type_t roam_type = TYPE("roam policy", roam_fields);
 
 static const ncfg_field_t network_fields[] = {

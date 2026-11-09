@@ -293,9 +293,8 @@ static void lower_roam(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 {
 	size_t at;
 
-	roam->signal = -70;
-	roam->interval = 30;
-	roam->slow_interval = 300;
+	/* Nothing filled in: a value is recorded where it was written, and the
+	 * defaults are `ncfg_roam_*`'s (10.769). */
 
 	for (at = 0; at < block->items.count; at++) {
 		const ncfg_ast_item_t       *item = block->items.at[at];
@@ -318,7 +317,8 @@ static void lower_roam(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			/* A positive dBm would be a signal stronger than the transmitter,
 			 * and wpa_supplicant would scan for ever. */
 			if (ncfg_roam_signal_in_range(value)) {
-				roam->signal = value;
+				roam->signal.has = 1;
+				roam->signal.value = value;
 			} else {
 				ncfg_diag(ctx, assignment->span,
 				    "`%lld` is not a signal strength: dBm, negative, and between %d and "
@@ -327,11 +327,13 @@ static void lower_roam(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			}
 		} else if (strcmp(assignment->key, "interval") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &value)) {
-				roam->interval = value;
+				roam->interval.has = 1;
+				roam->interval.value = value;
 			}
 		} else if (strcmp(assignment->key, "slow_interval") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &value)) {
-				roam->slow_interval = value;
+				roam->slow_interval.has = 1;
+				roam->slow_interval.value = value;
 			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
@@ -342,7 +344,7 @@ static void lower_roam(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 
 	/* Looking *less* often when the signal is bad than when it is good is the
 	 * policy inverted, and it reads as a plausible pair of numbers. */
-	if (!ncfg_roam_intervals_ordered(roam->interval, roam->slow_interval)) {
+	if (!ncfg_roam_intervals_ordered(ncfg_roam_interval(roam), ncfg_roam_slow_interval(roam))) {
 		ncfg_diag(ctx, block->span,
 		    "`interval` is how often to look while the signal is weak, so it cannot be longer "
 		    "than `slow_interval`: the usual pair is a short interval and a long one: 30 and "

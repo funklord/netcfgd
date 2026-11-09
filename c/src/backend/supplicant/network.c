@@ -740,8 +740,9 @@ int ncfg_supplicant_settings(const ncfg_wifi_network_t *network,
 		char module[128];
 
 		(void)snprintf(module, sizeof(module), "\"simple:%lld:%lld:%lld\"",
-		    (long long)network->roam->interval, (long long)network->roam->signal,
-		    (long long)network->roam->slow_interval);
+		    (long long)ncfg_roam_interval(network->roam),
+		    (long long)ncfg_roam_signal(network->roam),
+		    (long long)ncfg_roam_slow_interval(network->roam));
 		built = add_plain(out, "bgscan", module, err, err_size);
 	}
 	if (built && network->metric.has) {

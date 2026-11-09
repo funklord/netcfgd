@@ -1143,9 +1143,12 @@ static void a_roaming_network_asks_the_supplicant_to_keep_looking(
 
 	a_network(&network, "test", "Corridor");
 	psk_security(&network.security, "pass", NCFG_PSK_PROTO_WPA2_WPA3);
-	roam.signal = -68;
-	roam.interval = 20;
-	roam.slow_interval = 240;
+	roam.signal.has = 1;
+	roam.signal.value = -68;
+	roam.interval.has = 1;
+	roam.interval.value = 20;
+	roam.slow_interval.has = 1;
+	roam.slow_interval.value = 240;
 	network.roam = &roam;
 	/* The order is the module's own: short interval, threshold, long
 	 * interval. Getting the first two the wrong way round is a station that

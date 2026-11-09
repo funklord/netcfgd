@@ -12684,6 +12684,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.769 A roam block pinned the values nobody wrote
+
+The next case of 10.767's shape, found by looking for others: the compiler filled a roam
+block's `signal`, `interval` and `slow_interval` with -70, 30 and 300, and the renderer wrote
+all three whenever the block existed -- so the opposite failure the holder's rule names first.
+A network that said only `roam { signal = -60 }` came back from `profile save` with
+`interval = 30` and `slow_interval = 300` pinned, kept past any later change to either default.
+The three are `ncfg_optint_t` now, the defaults `NCFG_ROAM_*_DEFAULT`, the supplicant's
+`bgscan` built from `ncfg_roam_*()`, and the renderer writes what was given; an empty block is
+still written, being a different document from none. `render_test` checks a signal-only block
+pins neither interval, a block at every default keeps all three, and an empty one round trips;
+writing all three again fails all three. Neither the GUI nor the client reads roam.
+
+**The profile header said more than was true.** "A value equal to a default is left out" is
+what 10.743 decided for `on_drift`, `autoconnect`, `networking` and the control and remote
+blocks, whose model cannot tell a written default from none, and is no longer what happens to a
+probe or a roam block. It says "what follows a default is left out" now, which holds for both.
+Whether those others want the same treatment is the question the rule asks per setting -- when
+the default changes, should this person get the new one? -- and for booleans whose defaults are
+not expected to move, 10.743's answer stands.
+
 ## 10.768 A write is answered with the machine observed after it
 
 `live_linkset` failed one run in four while 10.767 was being verified: it wrote two

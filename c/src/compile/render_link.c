@@ -1513,10 +1513,11 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 		ncfg_buf_add_text(&body, "\t\tautoconnect = false\n");
 	}
 	/* Also dropped in silence, and it lives inside `wifi` rather than beside
-	 * it. **Every value is written whenever the block exists**, because the
-	 * parser supplies its defaults when the block is *absent* -- a roam block
-	 * that rendered only its non-defaults could come back empty, and an empty
-	 * block is not the same document as no block at all. */
+	 * it. **The block whenever it exists, and in it what was written** (10.769):
+	 * this wrote every value whenever the block existed, which pinned the two a
+	 * person had not chosen at today's defaults -- the opposite failure from
+	 * the probe's, and the same rule. An empty block is still written, being
+	 * a different document from no block at all. */
 	if (network->roam) {
 		/*
 		 * **Both of the compiler's own tests, from the model**, because the
@@ -1531,23 +1532,32 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 		 * signal strength" and "cannot be longer than", so the grep that
 		 * enumerated the other six constraints by their wording missed both.
 		 */
-		if (!ncfg_roam_signal_in_range(network->roam->signal)) {
+		const ncfg_roam_policy_t *roam = network->roam;
+
+		if (!ncfg_roam_signal_in_range(ncfg_roam_signal(roam))) {
 			ncfg_render_refuse(missing, "network", id,
 			    "a roam signal of %lld, which is not dBm (%d to %d)",
-			    (long long)network->roam->signal, NCFG_ROAM_SIGNAL_MIN,
+			    (long long)ncfg_roam_signal(roam), NCFG_ROAM_SIGNAL_MIN,
 			    NCFG_ROAM_SIGNAL_MAX);
-		} else if (!ncfg_roam_intervals_ordered(network->roam->interval,
-		    network->roam->slow_interval)) {
+		} else if (!ncfg_roam_intervals_ordered(ncfg_roam_interval(roam),
+		    ncfg_roam_slow_interval(roam))) {
 			ncfg_render_refuse(missing, "network", id,
 			    "a roam `interval` of %lld longer than its `slow_interval` of %lld",
-			    (long long)network->roam->interval,
-			    (long long)network->roam->slow_interval);
+			    (long long)ncfg_roam_interval(roam), (long long)ncfg_roam_slow_interval(roam));
 		} else {
-			ncfg_buf_addf(&body,
-			    "\t\troam {\n\t\t\tsignal = %lld\n\t\t\tinterval = %lld\n"
-			    "\t\t\tslow_interval = %lld\n\t\t}\n",
-			    (long long)network->roam->signal, (long long)network->roam->interval,
-			    (long long)network->roam->slow_interval);
+			ncfg_buf_add_text(&body, "\t\troam {\n");
+			if (roam->signal.has) {
+				ncfg_buf_addf(&body, "\t\t\tsignal = %lld\n", (long long)roam->signal.value);
+			}
+			if (roam->interval.has) {
+				ncfg_buf_addf(&body, "\t\t\tinterval = %lld\n",
+				    (long long)roam->interval.value);
+			}
+			if (roam->slow_interval.has) {
+				ncfg_buf_addf(&body, "\t\t\tslow_interval = %lld\n",
+				    (long long)roam->slow_interval.value);
+			}
+			ncfg_buf_add_text(&body, "\t\t}\n");
 		}
 	}
 	ncfg_buf_add_text(&body, "\t}\n");

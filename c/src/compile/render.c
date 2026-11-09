@@ -766,18 +766,20 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 /*
  * The header the snapshot carries.
  *
- * **It says what is below it**: a value is written only where it differs from a
- * default, so `on_drift`, `autoconnect`, `networking`, the control and remote
- * blocks and the probe's numbers are left out when they are ordinary. That is
- * the file keeping "follow the default" apart from a chosen value, and the only
- * way it can: a written default compiles equal to an absent one, so writing them
- * all would pin defaults nobody chose. It said the opposite until 10.743.
+ * **It says what is below it**: what follows a default is left out, so it goes
+ * on following it. Where the model records whether a value was written -- a
+ * probe's numbers (10.767) and a roam block's (10.769) -- a written one is kept
+ * whatever it equals. Where it does not -- `on_drift`, `autoconnect`,
+ * `networking`, the control and remote blocks -- a value equal to the default
+ * cannot be told from none and is left out, which is 10.743's reasoning: writing
+ * them all would pin defaults nobody chose. The line says only what holds for
+ * both. It said the opposite of all of this until 10.743.
  */
 static const char header[] = "# Written by netcfgd from what this machine was running.\n"
     "#\n"
     "# This is ordinary netcfgd configuration: edit it, diff it, commit it.\n"
-    "# It is a snapshot rather than a hand-written profile: a value equal to\n"
-    "# a default is left out, so it goes on following the default.\n";
+    "# It is a snapshot rather than a hand-written profile: what follows a\n"
+    "# default is left out, so it goes on following the default.\n";
 
 /*
  * One `rule` block: a routing rule, as configuration text.
