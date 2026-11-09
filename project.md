@@ -12684,6 +12684,17 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.765 `make hull-mips` on 0a64eb68, and what the mips payload still copied
+
+VERDICT ok, exit 0: the MIPS build runs, 8789 ok lines, the six sections excused for
+qemu-user's netlink as designed, and the fleet 39 of 39 on one byte order and on two. The run
+also showed the payload's first `tar` naming `crates`, which 0317 deleted -- not fatal, since
+tar copies the rest and only then exits non-zero, and so not caught by the verdict. Dropped,
+and the module load now tries the guest's own `binfmt_misc` before the host's copy: hull's
+089facf boots its own kernel for a vm that names none, and a module built for the host's will
+not load into it. Two reruns on the change: VERDICT ok, 8792 ok lines (10.764's three checks),
+no `Cannot stat`.
+
 ## 10.764 A name with a colon was a command, for any `wifi`-tier caller
 
 A secret reference is `@secret:PROVIDER:NAME` or `@secret:NAME`, read up to its first colon,

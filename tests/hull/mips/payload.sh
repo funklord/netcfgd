@@ -14,7 +14,14 @@ out=/verdict/mips
 : > "$out"
 say() { echo "$*" >> "$out"; echo "mips: $*"; }
 
-insmod /payload/binfmt_misc.ko 2>> "$out"
+# The guest's own module first, and the host's copy only where it has none.
+# hull boots its own kernel for a vm that names none since its 089facf, and a
+# module built for the host's kernel will not load into that one; on the host's
+# kernel the guest has the host's modules, so `modprobe` finds the same file.
+# Built in is the third case, and the mount below is what each of them is for.
+if ! modprobe binfmt_misc 2>/dev/null; then
+	insmod /payload/binfmt_misc.ko 2>> "$out"
+fi
 mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>> "$out"
 # Debian's own line for this machine: big-endian ELF32, machine 8. F, so qemu is
 # opened now and works from any root.
@@ -34,7 +41,7 @@ mkdir -p /work
 (cd /repo && tar -cf - --exclude='*.o' --exclude='*.a' --exclude='*.d' \
 	--exclude=fuzznet-build --exclude='fuzznet/build*' --exclude=.git \
 	--exclude=fuzznet/qtty --exclude=target --exclude=.build-flags \
-	c client fuzznet doc packaging tests crates helper VERSION) | tar -xf - -C /work
+	c client fuzznet doc packaging tests helper VERSION) | tar -xf - -C /work
 # Whatever this tree last built, by name, so that nothing x86 is linked.
 (cd /work/c && make -s clean >/dev/null 2>&1)
 rm -f /work/c/netcfgd /work/c/ncfg
