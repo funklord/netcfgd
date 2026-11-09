@@ -793,7 +793,7 @@ static void the_status_and_the_document_are_the_witness_shape(void)
 	static const char *const document_witness =
 	    "{\"response\":\"document\",\"schema_version\":{\"major\":1,\"minor\":1},"
 	    "\"globals\":{\"dns\":{\"mode\":\"none\",\"servers\":[],\"search\":[],"
-	    "\"domains\":[],\"options\":[]},\"on_drift_default\":\"reconcile\","
+	    "\"domains\":[],\"options\":[]},"
 	    "\"confirm_default\":null,\"networking\":\"on\",\"hostname_policy\":\"none\","
 	    "\"control\":{\"observe\":\"root\",\"wifi\":\"root\",\"admin\":\"root\"},"
 	    "\"remote\":{\"observe\":false,\"wifi\":false,\"admin\":false,"

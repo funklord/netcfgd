@@ -5471,6 +5471,12 @@ int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, s
 	}
 	out->profile = member_text(doc, globals, "profile");
 	out->on_drift = member_text(doc, globals, "on_drift_default");
+	if (!out->on_drift[0]) {
+		/* Absent is "follow the default" (10.770), which is reconcile; shown
+		 * as such for the reason `networking` is above. */
+		free(out->on_drift);
+		out->on_drift = dup_string("reconcile");
+	}
 	out->confirm = (int)ncfg_json_int(doc, ncfg_json_member(doc, globals, "confirm_default"), 0);
 
 	/* Either the string "none"/"from_dhcp" or {"static":"name"}, which is the

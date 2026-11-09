@@ -164,7 +164,7 @@ ncfg_drift_policy_t ncfg_reconcile_policy_for(const ncfg_document_t *document,
 			break;
 		}
 	}
-	return (ncfg_drift_policy_t)document->globals.on_drift_default;
+	return (ncfg_drift_policy_t)ncfg_on_drift_default(&document->globals);
 }
 
 int ncfg_reconcile_host_wide(const ncfg_document_t *document)
@@ -172,7 +172,8 @@ int ncfg_reconcile_host_wide(const ncfg_document_t *document)
 	if (!document) {
 		return 0;
 	}
-	return document->globals.on_drift_default == (int)NCFG_DRIFT_POLICY_RECONCILE ? 1 : 0;
+	return ncfg_on_drift_default(&document->globals) == (int)NCFG_DRIFT_POLICY_RECONCILE ?
+	    1 : 0;
 }
 
 int ncfg_reconcile_reconciles(const ncfg_document_t *document, const ncfg_sims_t *sims,

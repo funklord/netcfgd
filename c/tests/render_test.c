@@ -2199,10 +2199,15 @@ static void the_globals_round_trip(void)
 	    "\tconfig = \"dhcp\"\n}\n", "and so does a profile that turns networking off");
 
 	rendered = rendering_of("global {\n\ton_drift = \"reconcile\"\n\tconfirm = 90\n}\n");
-	/* `reconcile` is the document's default and is *not* C's zero value, so a
-	 * renderer comparing against zero would write it. */
-	check(lacks(rendered, "on_drift") && holds(rendered, "\tconfirm = 90\n"),
-	    "and `reconcile`, being the default, is left unwritten");
+	/* `reconcile` is today's default, and written it is a choice: a profile
+	 * that dropped it would follow whatever the default later became
+	 * (10.770). Unwritten, it stays unwritten. */
+	check(holds(rendered, "\ton_drift = \"reconcile\"\n") &&
+	    holds(rendered, "\tconfirm = 90\n"),
+	    "and `reconcile` written at the default is kept");
+	free(rendered);
+	rendered = rendering_of("global {\n\tconfirm = 90\n}\n");
+	check(lacks(rendered, "on_drift"), "and one nobody wrote is not invented");
 	free(rendered);
 }
 

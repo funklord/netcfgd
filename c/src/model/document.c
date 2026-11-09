@@ -2732,12 +2732,13 @@ static const ncfg_type_t upnp_type = TYPE("upnp", upnp_fields);
 static const ncfg_field_t globals_fields[] = {
 	{ .name = "dns", .kind = NCFG_F_STRUCT, .type = &dns_policy_type,
 	    .offset = offsetof(ncfg_globals_t, dns) },
-	/* **`reconcile`, and it is not C's zero value.** A calloc'd document
-	 * would mean `report` -- a daemon that watches its configuration go
-	 * unimplemented and changes nothing, which is what every symptom of that
-	 * milestone looked like. */
-	{ .name = "on_drift_default", .kind = NCFG_F_ENUM, .choices = &drift_policy_set,
-	    .fallback = NCFG_DRIFT_POLICY_RECONCILE,
+	/* Optional, so that `reconcile` written is told from `reconcile`
+	 * inherited (10.770). It used to be a plain enum with `reconcile` as its
+	 * fallback, because C's zero value would have meant `report`; absent now
+	 * reads through `ncfg_on_drift_default`, so a zero cannot mean `report`
+	 * at all. An older document, which always carried the value, keeps it
+	 * as chosen. */
+	{ .name = "on_drift_default", .kind = NCFG_F_OPT_ENUM, .choices = &drift_policy_set,
 	    .offset = offsetof(ncfg_globals_t, on_drift_default) },
 	/* The one field in the model whose Rust counterpart has no
 	 * `skip_serializing_if`, so it is written as `null` rather than omitted.
@@ -2957,6 +2958,12 @@ ncfg_document_t *ncfg_document_new(char *err, size_t err_size)
 	document->schema_version.major = NCFG_SCHEMA_MAJOR;
 	document->schema_version.minor = NCFG_SCHEMA_MINOR;
 	return document;
+}
+
+int ncfg_on_drift_default(const ncfg_globals_t *globals)
+{
+	return globals->on_drift_default.has ? (int)globals->on_drift_default.value :
+	    NCFG_DRIFT_POLICY_RECONCILE;
 }
 
 void ncfg_document_free(ncfg_document_t *document)

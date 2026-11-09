@@ -12684,6 +12684,20 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.770 `on_drift = "reconcile"` survives a save
+
+The next case of 10.767's shape: the global drift policy was a plain enum with `reconcile` as
+its fallback, and the renderer left `reconcile` out as the default, so a profile saved from a
+configuration that chose it came back following whatever the default became. It is the one
+whose default has already moved once (0132, from `report`), so the pin is worth having. It is
+`ncfg_optint_t` now, read through `ncfg_on_drift_default()`; the renderer writes it where it
+was written; an empty document no longer carries `on_drift_default` on the wire, and the client
+shows absent as `reconcile`, as it does `networking`. The socket witness moved by that one key,
+blessed; the schema version stays pinned (0038). A side effect worth having: a zeroed document
+can no longer mean `report` by accident, which is why `ncfg_document_new` existed. 10.743's
+answer stands for `networking`, `autoconnect` and the control blocks; the connectivity `ignore`
+list is left as it is, its default being one an inheritor should follow when it grows.
+
 ## 10.769 A roam block pinned the values nobody wrote
 
 The next case of 10.767's shape, found by looking for others: the compiler filled a roam

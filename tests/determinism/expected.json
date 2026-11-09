@@ -11,7 +11,6 @@
       "domains": [],
       "options": []
     },
-    "on_drift_default": "reconcile",
     "confirm_default": null,
     "networking": "on",
     "hostname_policy": "none",

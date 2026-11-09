@@ -694,9 +694,12 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 		ncfg_buf_addf(&body, "\tconfirm = %lld\n",
 		    (long long)globals->confirm_default.value);
 	}
-	if (globals->on_drift_default != NCFG_DRIFT_POLICY_RECONCILE) {
+	/* Where it was written, whatever it says (10.770): this left out
+	 * `reconcile` as the default, so a profile saved from a document that
+	 * chose it came back following whatever the default later became. */
+	if (globals->on_drift_default.has) {
 		ncfg_buf_addf(&body, "\ton_drift = \"%s\"\n", ncfg_render_word_or_gap(
-		    ncfg_drift_policy_name(globals->on_drift_default)));
+		    ncfg_drift_policy_name((int)globals->on_drift_default.value)));
 	}
 	if (globals->networking != NCFG_NETWORKING_ON) {
 		ncfg_buf_add_text(&body, "\tnetworking = \"off\"\n");

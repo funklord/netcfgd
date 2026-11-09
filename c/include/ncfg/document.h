@@ -2497,8 +2497,11 @@ typedef struct {
 	/* The fallback DNS scope. Per-interface policies are scopes in their own
 	 * right rather than overlays on this one (`doc/decision/0007`). */
 	ncfg_dns_policy_t          dns;
-	/* **Defaults to reconcile, which is not C's zero value**; see value.h. */
-	int                        on_drift_default; /* ncfg_drift_policy_t */
+	/* ncfg_drift_policy_t where `has`. **Absent means "follow the default"**,
+	 * which is reconcile today (10.770, as 10.767 for a probe): a profile
+	 * saved from `on_drift = "reconcile"` must keep it if the default moves.
+	 * What the daemon acts on is `ncfg_on_drift_default`. */
+	ncfg_optint_t              on_drift_default;
 	ncfg_optint_t              confirm_default;  /* seconds */
 	int                        networking;       /* ncfg_networking_t */
 	/* **Absent is the default and is not a profile called "none"** (0151): a
@@ -2775,17 +2778,23 @@ typedef struct {
 /*
  * An empty document with every default in place.
  *
- * Worth having rather than a `calloc`, because two of the defaults are not the
- * zero value and one of them matters: `on_drift_default` is `reconcile`, and a
- * zeroed document means `report` -- a daemon that watches its configuration go
- * unimplemented and changes nothing. That default was changed by the copyright
- * holder for exactly that reason. `connectivity.ignore` is the other, and it
- * is five strings that have to be allocated, which is why this can fail.
+ * Worth having rather than a `calloc`, because a default is not the zero
+ * value: `connectivity.ignore` is five strings that have to be allocated,
+ * which is why this can fail. `on_drift_default` used to be the other, and
+ * the one that mattered -- a zeroed document meant `report`, a daemon that
+ * watches its configuration go unimplemented -- until it became optional
+ * with its default in `ncfg_on_drift_default` (10.770), where a zero is
+ * "not written" and so cannot mean `report` by accident.
  *
  * Allocated rather than filled in for a caller, so that there is one way to
  * free a document however it was made.
  */
 ncfg_document_t *ncfg_document_new(char *err, size_t err_size);
+
+/* The host-wide drift policy the daemon acts on: the one written, or
+ * `reconcile`, the default the copyright holder chose (0132). An
+ * `ncfg_drift_policy_t`. */
+int ncfg_on_drift_default(const ncfg_globals_t *globals);
 
 /*
  * Parse a document, **refusing anything this build cannot fully represent**,

@@ -753,13 +753,23 @@ static void global_cases(void)
 	document = compiles("interface eth0 { config = \"dhcp\" }\n",
 	    "the drift default is reconcile without being written");
 	if (document) {
-		check(document->globals.on_drift_default == NCFG_DRIFT_POLICY_RECONCILE,
-		    "  which is not the zero value");
+		check(ncfg_on_drift_default(&document->globals) == NCFG_DRIFT_POLICY_RECONCILE &&
+		    !document->globals.on_drift_default.has,
+		    "  which is followed rather than recorded");
 		ncfg_document_free(document);
 	}
 	document = compiles("global { on_drift = \"report\" }\n", "on_drift is sayable");
 	if (document) {
-		check(document->globals.on_drift_default == NCFG_DRIFT_POLICY_REPORT, "  as report");
+		check(ncfg_on_drift_default(&document->globals) == NCFG_DRIFT_POLICY_REPORT,
+		    "  as report");
+		ncfg_document_free(document);
+	}
+	document = compiles("global { on_drift = \"reconcile\" }\n",
+	    "on_drift written at the default");
+	if (document) {
+		check(document->globals.on_drift_default.has &&
+		    document->globals.on_drift_default.value == NCFG_DRIFT_POLICY_RECONCILE,
+		    "  is recorded as chosen");
 		ncfg_document_free(document);
 	}
 	refuses("global { on_drift = \"maybe\" }\n", "unknown drift policy",

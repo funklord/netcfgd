@@ -844,7 +844,8 @@ int main(int argc, char **argv)
 		 * that milestone looked like: a configuration written, a correct plan,
 		 * and nothing that ran it.
 		 */
-			check(document && document->globals.on_drift_default == NCFG_DRIFT_POLICY_RECONCILE,
+			check(document &&
+			    ncfg_on_drift_default(&document->globals) == NCFG_DRIFT_POLICY_RECONCILE,
 			    "and drift defaults to reconcile rather than to report");
 			check(document &&
 			    document->globals.connectivity.ignore_count ==
@@ -860,9 +861,9 @@ int main(int argc, char **argv)
 
 				ncfg_buf_init(&buf, 0);
 				check(ncfg_document_write(document, &buf, message, sizeof(message)) &&
-				    strstr(ncfg_buf_text(&buf), "\"on_drift_default\":\"reconcile\"") != NULL &&
+				    strstr(ncfg_buf_text(&buf), "\"on_drift_default\"") == NULL &&
 				    strstr(ncfg_buf_text(&buf), "\"connectivity\"") == NULL,
-				    "an empty document writes its defaults, and omits the one at its default");
+				    "an empty document writes no drift policy nobody chose");
 				ncfg_buf_free(&buf);
 			}
 		}

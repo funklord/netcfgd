@@ -408,7 +408,8 @@ void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 		int policy;
 
 		if (ncfg_as_drift(ctx, assignment->value, &policy)) {
-			globals->on_drift_default = policy;
+			globals->on_drift_default.has = 1;
+			globals->on_drift_default.value = policy;
 		}
 		return;
 	}

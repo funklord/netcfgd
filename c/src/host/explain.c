@@ -509,7 +509,7 @@ static void declared(builder_t *builder, const char *name, const ncfg_interface_
 		policy = ncfg_drift_policy_name((int)interface->on_drift.value);
 		add(builder, "drift", NULL, "on_drift is %s", policy ? policy : "unknown");
 	} else {
-		policy = ncfg_drift_policy_name(document->globals.on_drift_default);
+		policy = ncfg_drift_policy_name(ncfg_on_drift_default(&document->globals));
 		add(builder, "drift", NULL, "on_drift is %s (from globals)",
 		    policy ? policy : "unknown");
 	}
