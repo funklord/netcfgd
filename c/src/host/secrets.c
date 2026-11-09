@@ -690,6 +690,12 @@ int ncfg_secret_name_usable(const char *name, char *err, size_t err_size)
 		why = "it contains a quote or a backslash";
 	} else if (strchr(name, '/')) {
 		why = "it contains a path separator, and it names a file";
+	} else if (strchr(name, ':')) {
+		/* **A name is never a provider.** `@secret:NAME` is read up to its
+		 * first colon as `@secret:PROVIDER:NAME`, so `exec:reboot` written as a
+		 * name is the `exec` provider running `reboot`, as root. A `wifi_add`
+		 * turned an id into exactly that reference (10.764). */
+		why = "it contains a colon, which a reference reads as naming a provider";
 	} else if (strstr(name, "..") || name[0] == '.') {
 		why = "it would name a hidden file or one outside the directory";
 	} else {

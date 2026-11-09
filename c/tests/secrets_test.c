@@ -111,6 +111,7 @@ static void a_name_has_to_be_usable_three_ways(void)
 		{ "say \"what\"", "quote or a backslash" },
 		{ "back\\slash", "quote or a backslash" },
 		{ "bell\7here", "control character" },
+		{ "exec:reboot", "colon" },
 		{ "0123456789012345678901234567890123456789012345678901234567890123456789",
 		    "longer than 64 bytes" }
 	};

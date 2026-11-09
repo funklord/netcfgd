@@ -1452,6 +1452,12 @@ static int stored_reference(ncfg_proto_str_t name, const char *what, char *out, 
 	if (!text_of(name, what, scratch, sizeof(scratch), &plain, err, err_size)) {
 		return 0;
 	}
+	/* The store's own rule for a name, asked here because nothing else is
+	 * between this name and a reference: `exec:...` would otherwise be read
+	 * as the command provider (10.764). */
+	if (!ncfg_secret_name_usable(plain, err, err_size)) {
+		return 0;
+	}
 	if ((size_t)snprintf(out, out_size, "@secret:%s", plain) >= out_size) {
 		ncfg_error_set(err, err_size, "the `%s` in this request is too long a name", what);
 		return 0;

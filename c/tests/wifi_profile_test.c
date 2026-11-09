@@ -204,7 +204,7 @@ static void a_name_is_three_things_at_once(void)
 	char *path;
 	size_t at;
 	static const char *const refused[] = { "", "../escape", "with/slash", ".hidden",
-		"we\"ird", "back\\slash", "new\nline" };
+		"we\"ird", "back\\slash", "new\nline", "exec:reboot" };
 
 	printf("\n-- an id is a block label, a filename and a credential's name\n");
 	for (at = 0; at < sizeof(refused) / sizeof(refused[0]); at++) {
@@ -212,6 +212,11 @@ static void a_name_is_three_things_at_once(void)
 		    at == 0 ? "an empty id is refused" : "  and so is one that is not a name");
 		(void)kept(err);
 	}
+	/* The id becomes its passphrase's reference, `@secret:<id>`, and a colon
+	 * there would be read as a provider -- `exec` runs the rest (10.764). */
+	check(!ncfg_wifi_profile_usable_id("exec:reboot", err, sizeof(err)) &&
+	    strstr(kept(err), "colon") != NULL,
+	    "  and an id that would read as a secret provider is refused for its colon");
 	for (at = 0; at < NCFG_WIFI_PROFILE_ID_MAX; at++) {
 		longest[at] = 'a';
 	}

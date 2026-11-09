@@ -1472,6 +1472,28 @@ static void adding_a_network_is_bounded_by_its_shape(void)
 	        sizeof(err)) && strstr(kept(err), "`proto` was given with an `eap` block") != NULL,
 	    "an enterprise network negotiates its own generation, so `proto` beside it is refused");
 
+	/*
+	 * **A name is a name and never a provider.** A reference is
+	 * `@secret:PROVIDER:NAME` or `@secret:NAME`, so a name carrying a colon is
+	 * read as a provider -- and `exec` runs its name as a command, as root.
+	 * Both routes a `wifi_add` has to one were open: the network's id becomes
+	 * its passphrase's reference, and a certificate's name becomes `ca_cert`.
+	 * A `wifi`-tier caller could have the daemon run a program (10.764). The
+	 * id is the installer's to check and `wifi_profile_test.c` holds it; this
+	 * recording installer stands in for that one, so the certificate is the
+	 * route this file can see.
+	 */
+	memset(&installed, 0, sizeof(installed));
+	wanted_reset(&wanted);
+	wanted.passphrase = ncfg_proto_str(CANARY);
+	wanted.eap.present = 1;
+	wanted.eap.method = ncfg_proto_str("peap");
+	wanted.eap.identity = ncfg_proto_str("you@corp.example");
+	wanted.eap.ca_cert = ncfg_proto_str("exec:reboot");
+	check(!ncfg_wifi_configure_network(NULL, &wanted, recording_install, NULL, &out, err,
+	        sizeof(err)) && strstr(kept(err), "colon") != NULL && installed.calls == 0u,
+	    "a certificate name that would read as a secret provider is refused, unwritten");
+
 	wanted_reset(&wanted);
 	wanted.passphrase = ncfg_proto_str(CANARY);
 	wanted.eap.present = 1;

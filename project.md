@@ -12684,6 +12684,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.764 A name with a colon was a command, for any `wifi`-tier caller
+
+A secret reference is `@secret:PROVIDER:NAME` or `@secret:NAME`, read up to its first colon,
+and `exec` runs its name as a command, as root. `ncfg_secret_name_usable` refused quotes,
+slashes, dots and control characters and not a colon. Two routes from a `wifi_add`, which needs
+only the `wifi` tier, wrote a name into a reference: the network's id becomes its passphrase's
+`@secret:<id>`, and a certificate's name became `ca_cert = "@secret:<name>"` through
+`stored_reference`, which asked no rule at all. So `wifi add --id exec:reboot` with a
+passphrase, or an enterprise network naming its CA `exec:reboot`, configured a network whose
+credential was `reboot`, run by the daemon at the next apply. The content gate never saw it:
+it reads `config_put`, and this was the daemon writing configuration on a caller's behalf.
+
+Fixed at the rule rather than at the routes: a colon is refused in every secret name, since
+no name containing one can be referred to as itself anyway -- it would parse as a provider --
+and `stored_reference` now asks that rule. `secrets_test`, `wifi_profile_test` (the id, which
+the real installer checks) and `daemon_wifi_test` (the certificate, refused before anything
+reaches the installer) each failed before and pass now.
+
+**The cost, stated rather than found later:** a network whose SSID contains a colon can no
+longer be added under its SSID as its label, and needs `--id`. The message says the colon is
+why. Spelling the provider out (`@secret:file:<name>`) everywhere a reference is built would
+have kept such labels, and meant changing the round-trip comparison and every place a
+reference is matched as text -- more surface for a security fix than one rule.
+
+Found by asking of today's other privilege fixes' shape (10.760, 10.761) where else a caller's
+text becomes configuration without passing the content gate.
+
 ## 10.763 What the Rust's `live.rs` asked, asked of the C
 
 `backend/netcfgd-supplicant/tests/live.rs` sent the Rust's supplicant settings to a real
