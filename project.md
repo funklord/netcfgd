@@ -12684,6 +12684,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.768 A write is answered with the machine observed after it
+
+`live_linkset` failed one run in four while 10.767 was being verified: it wrote two
+`interface` blocks for links that do not exist and asked for the inventory at once, and the
+inventory held neither. The inventory -- every link the machine has and every one the
+document names -- lives in the observation, which `ncfg_daemon_state_reload` leaves alone
+until the next pass. The write wakes that pass within milliseconds, so on an idle machine the
+next request finds it done; under load (that run followed a rebuild of the GUI probes) the
+client asked first. Six more runs did not fail, which is what a window that narrow does.
+
+`wrote_configuration` now observes again and publishes, as a pass does, before the answer
+goes -- for every writer that goes through it: `config put` and `delete`, `wifi add` and
+`forget`, `profile set` and `save`. A failed observation keeps the previous one, as it does in
+a pass.
+
+**The live script written first proved nothing and was deleted.** It used `--poll-config` to
+hold the pass off, and passed with the fix taken out: the write wakes a pass whichever way the
+directory is watched. `answer_test` asks with no loop at all and a counting observer, so the
+answer is the only thing that can observe: one observation per write with the fix, none
+without it.
+
 ## 10.767 A probe's chosen default survives a save
 
 Reported by claude-guidelines 2026-11-09, against the holder's rule of 2026-11-06 in

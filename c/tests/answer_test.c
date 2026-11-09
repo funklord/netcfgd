@@ -301,6 +301,58 @@ static void a_kind_the_table_answers_has_an_arm(void)
  * The arms that write something
  * ------------------------------------------------------------------------ */
 
+/* How many times the daemon asked to observe, and what it was given. */
+static unsigned observations;
+
+static int counting_observer(void *context, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size)
+{
+	(void)context;
+	(void)desired;
+	observations++;
+	*out = ncfg_observed_read("{}", 2u, err, err_size);
+	return *out != NULL;
+}
+
+/*
+ * **A write is answered with the machine observed after it** (10.768).
+ *
+ * The inventory -- every link the document names, present or not -- lives in
+ * the observation, and a reload leaves that alone until the next pass. So a
+ * client that wrote two `interface` blocks and asked at once saw neither when
+ * the pass the write woke had not yet come round: `live_linkset` did, once in
+ * four runs, under load. A live script cannot hold that window open, since
+ * the pass lands milliseconds after the write on an idle machine; here there
+ * is no loop at all, so the answer is the only thing that can observe.
+ */
+static void a_write_is_answered_with_the_machine_observed_after_it(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	ncfg_daemon_observe_fn kept = state.observe;
+	unsigned             before;
+
+	state.observe = counting_observer;
+	observations = 0u;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_CONFIG_PUT;
+	request.u.put.name = ncfg_proto_str("eleven-ghost");
+	request.u.put.text = ncfg_proto_str("interface ghost0 {\n\tconfig = \"null\"\n}\n");
+	before = observations;
+	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out), "a write is answered");
+	ncfg_buf_free(&out);
+	check(observations == before + 1u,
+	    "  and the machine is observed again before the answer, not at the next pass");
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_CONFIG_DELETE;
+	request.u.name = ncfg_proto_str("eleven-ghost");
+	(void)ask(&request, &out, err, sizeof(err));
+	ncfg_buf_free(&out);
+	state.observe = kept;
+}
+
 static void a_drop_in_is_written_and_taken_away(void)
 {
 	ncfg_proto_request_t request;
@@ -1728,6 +1780,7 @@ int main(void)
 	a_refusal_names_the_request_it_refused();
 	a_kind_the_table_answers_has_an_arm();
 	a_drop_in_is_written_and_taken_away();
+	a_write_is_answered_with_the_machine_observed_after_it();
 	a_write_takes_the_machine_off_its_profile();
 	a_secret_is_stored_and_removed();
 	a_network_block_is_written_for_a_client_that_may_not();

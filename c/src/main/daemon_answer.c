@@ -1266,6 +1266,22 @@ static int wrote_configuration(ncfg_main_desk_t *desk, int answered)
 	if (!ncfg_daemon_state_reload(desk->state, why, sizeof(why))) {
 		ncfg_log_emitf("config", NCFG_LOG_WARNING,
 		    "the write succeeded and re-reading the configuration did not: %s", why);
+		return answered;
+	}
+	/*
+	 * **And observed again, before the answer goes**, so a caller that wrote
+	 * something and asks next sees it (10.768). The inventory, and so every
+	 * link the document names and the machine does not have, lives in the
+	 * observation, which a reload leaves alone until the next pass. A client
+	 * that wrote two `interface` blocks and asked for the inventory at once
+	 * found neither -- once in four runs of `live_linkset`, which is how long a
+	 * pass took to come round under load. Published as a pass publishes, since
+	 * a client reads the status through fuzznet first. A failed observation
+	 * keeps the one there was, as it does in a pass.
+	 */
+	why[0] = '\0';
+	if (ncfg_daemon_state_reobserve(desk->state, NULL, why, sizeof(why))) {
+		ncfg_daemon_state_publish(desk->state);
 	}
 	return answered;
 }
