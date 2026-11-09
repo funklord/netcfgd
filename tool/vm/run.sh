@@ -364,11 +364,12 @@ done
 # run -- a line in `git status` that nobody put there, which is how a blanket
 # `git add` sweeps up something nobody meant to commit. `build/` is already
 # ignored, so this costs no ignore rule and leaves the tree as it was found.
-# `target/` because it is the one directory `.gitignore` covers at the root --
-# `build/` is NOT ignored in this tree, only `gui/build/` and `dist/` are, so
-# defaulting there would have reintroduced the untracked file by a new route.
-# Checked with `git check-ignore` rather than assumed from the name.
-out=${VM_LOG:-$repo/target/vm-console.log}
+# `dist/` because `.gitignore` covers it and `make clean` already owns it --
+# `build/` is NOT ignored in this tree, only `gui/build/` and `dist/` are.
+# Checked with `git check-ignore` rather than assumed from the name. It was
+# `target/` until 0317 retired the Rust whose directory that was, and writing
+# there afterwards brought back a 7 GB directory's name for one log file.
+out=${VM_LOG:-$repo/dist/vm-console.log}
 mkdir -p "$(dirname "$out")"
 : > "$out"
 failed=0

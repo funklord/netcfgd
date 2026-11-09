@@ -12684,6 +12684,14 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.766 vm-sandbox and vm-cluster on 9373e95b, and a log that put `target/` back
+
+`make vm-sandbox`: `sandbox_writes.sh` passes under systemd 257, 31 checks. `make vm-cluster`:
+three guests, every pair reachable. `make hull-malta` on the same commit is VERDICT ok too.
+The cluster run wrote its consoles to `target/vm-console.log` -- a directory that after 0317
+existed only to hold that one log, the same afternoon its 7 GB were cleared on request. It
+goes to `dist/` now, which `.gitignore` covers and `make clean` owns; rerun, same verdict.
+
 ## 10.765 `make hull-mips` on 0a64eb68, and what the mips payload still copied
 
 VERDICT ok, exit 0: the MIPS build runs, 8789 ok lines, the six sections excused for
