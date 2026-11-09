@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 #
 # The version comes from the VERSION file at the root; `make version-check`
-# gates debian/changelog and Cargo.toml against it.
+# gates debian/changelog against it.
 #
 # Only the systemd glue is packaged here. install-openrc and install-procd
 # exist for Alpine and OpenWrt, which have their own packaging under

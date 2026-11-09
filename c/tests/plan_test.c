@@ -1830,7 +1830,7 @@ static void nothing_the_document_asks_for_is_passed_over_in_silence(void)
 	    "a rule block is acted on rather than named");
 	/* And link-local, which was the last arm of `warn_unbuilt` and is a pass
 	 * now. Turned round for the two above's reason rather than deleted. */
-	check(plan && !warned_about(plan, "nothing acts on it in the Rust either"),
+	check(plan && !warned_about(plan, "Nothing in netcfgd acts on it"),
 	    "and link-local is acted on rather than named as nobody's gap");
 	release(plan, document, observed);
 }

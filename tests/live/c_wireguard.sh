@@ -1,5 +1,5 @@
 #!/bin/sh
-# The C port creating a WireGuard device, against a real kernel.
+# netcfgd creating a WireGuard device, against a real kernel.
 #
 #     unshare -rn sh tests/live/c_wireguard.sh
 #
@@ -21,12 +21,11 @@
 # identical either way, because the defect is in what the executor does with
 # one. A namespace is what makes it askable at all.
 #
-# `wg` is not needed and is used if it is there: the independent reader here is
-# **the Rust `ncfg`**, observing the same kernel through its own generic
-# netlink code and its own record reader. Two implementations agreeing about a
-# device one of them configured is the check section 9 asks for -- netcfgd
-# agreeing with itself would be reading the port's observation of the port's
-# own work.
+# **The independent reader is `wg`**, observing the same kernel through its
+# own generic netlink code. netcfgd agreeing with itself would be reading its
+# own observation of its own work, which section 9 warns about. Until 0317 the
+# reader was the Rust `ncfg`; `wg` asks more of the kernel than that did, since
+# it prints the private key the device holds and this compares it whole.
 #
 # The private key is generated here, never leaves the work directory, and the
 # directory is deleted on exit.
@@ -53,9 +52,8 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 # `not found` from the shell, because the ELF interpreter it names is absent.
 # So the skip never fired, and a comparison binary that could not run reported
 # as a missing file several checks later.
-if ! [ -x "$repo/target/debug/ncfg" ] || ! "$repo/target/debug/ncfg" --version >/dev/null 2>&1; then
-	skip "the Rust ncfg is not built here, or will not run, and it is the reader (a glibc build on musl)"
-fi
+"$repo/c/ncfg" --version >/dev/null 2>&1 || skip "the C ncfg will not run here (a glibc build on musl)"
+command -v wg >/dev/null 2>&1 || skip "no wg(8), which is the reader (wireguard-tools)"
 # A kernel without the module has no device to configure, and that is a skip
 # rather than a failure -- the call `wireguard.sh` and `strand.sh` both make.
 ip link add wgprobe type wireguard 2>/dev/null || skip "this kernel has no wireguard support"
@@ -69,7 +67,6 @@ mkdir -p "$work/etc/secrets" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 c_ncfg="$repo/c/ncfg"
-rust_ncfg="$repo/target/debug/ncfg"
 
 failures=0
 check() {
@@ -85,8 +82,7 @@ check() {
 
 # Thirty-two octets of kernel randomness, which is what a WireGuard private key
 # is. `wg genkey` clamps; the kernel clamps what it is given, so an unclamped
-# key is accepted and derives a public key exactly the same way -- and not
-# needing `wg` is what lets this run where that package is absent. Generated
+# key is accepted and derives a public key exactly the same way. Generated
 # rather than written down, so a key in a repository stays a thing that has not
 # happened.
 #
@@ -137,33 +133,28 @@ check "  which is not the key" \
 check "  in a file nobody else can read" \
 	"$(stat -c '%a' "$record")" "600"
 
-# ------------------------------------- what the other implementation sees
+# ------------------------------------------------- what `wg` sees in the kernel
 
-# The Rust reading the same kernel and the same record. `key_matches` is the
-# answer that needs both halves to have happened: the device holds the key the
-# store names, and the record says which key that was.
-seen() {
-	"$rust_ncfg" status --json 2>/dev/null | python3 -c 'import json,sys
-document = json.load(sys.stdin)
-for link in document.get("links", []):
-	if link.get("name") == "wg0":
-		print(json.dumps(link.get("wireguard", {}).get(sys.argv[1])))
-		break
-else:
-	print("null")' "$1"
-}
-
-check "the Rust sees the listen port the C sent" "$(seen listen_port)" "51820"
-check "and the firewall mark" "$(seen fwmark)" "42"
-check "and says the key in the kernel is the one the store holds" \
-	"$(seen key_matches)" "true"
+check "\`wg\` sees the listen port netcfgd sent" "$(wg show wg0 listen-port 2>/dev/null)" "51820"
+check "and the firewall mark" "$(wg show wg0 fwmark 2>/dev/null)" "0x2a"
+# The key the device holds, against the key the store holds, clamped the way
+# the kernel clamps one: three low bits of the first octet cleared, the top bit
+# of the last cleared and the one below it set. Equal is the whole key reaching
+# the kernel; the fixture's low end octets are where a trimmed one would show.
+clamped=$(python3 -c 'import base64, sys
+key = bytearray(base64.b64decode(open(sys.argv[1]).read().strip()))
+key[0] &= 248
+key[31] = (key[31] & 127) | 64
+sys.stdout.write(base64.b64encode(bytes(key)).decode())' "$work/etc/secrets/wg0")
+check "and holds the key the store holds" "$(wg show wg0 private-key 2>/dev/null)" "$clamped"
 # A public key at all means the private key reached the kernel: the kernel
-# derives it, and a device that was never given one reports zeros.
+# derives it, and a device that was never given one reports none.
 check "which it could not do for a device carrying no key" \
-	"$(seen public_key | tr -d '"' | grep -c '^AAAAAAAA' || true)" "0"
+	"$(wg show wg0 public-key 2>/dev/null | grep -c '^[A-Za-z0-9+/]\{43\}=$' || true)" "1"
 
-# The port's own observation of the same thing, which must not disagree with
-# the reader above -- two programs pointed at one kernel.
+# netcfgd's own observation of the same thing: the device holds the key the
+# store names, and the record says which key that was. It needs both halves to
+# have happened, and must not disagree with the reader above.
 c_seen=$("$c_ncfg" status --json 2>/dev/null | python3 -c 'import json,sys
 document = json.load(sys.stdin)
 for link in document.get("links", []):
@@ -172,7 +163,7 @@ for link in document.get("links", []):
 		break
 else:
 	print("null")')
-check "and the C answers the same question the same way" "$c_seen" "true"
+check "and netcfgd says the key in the kernel is the one the store holds" "$c_seen" "true"
 
 # ----------------------------------------------- and taking the device away
 

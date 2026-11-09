@@ -91,17 +91,18 @@ fi
 # back, and it is the natural thing for somebody to add: a second directory
 # the daemon writes to looks like an omission. This is the check that says
 # no. It belongs here rather than beside the code because the mistake is made
-# in the unit, not in Rust.
+# in the unit, not in C.
 check "the unit does not hand the confirm directory to systemd to delete" \
 	"$(grep -c '^RuntimeDirectory=netcfgd-confirm$' "$unit")" "0"
 
 # And the guard above is only worth having if the directory it protects is
-# still the one the code writes to. A rename in Rust with this line left
+# still the one the code writes to. A rename in the code with this line left
 # behind would be a check guarding a path nobody uses -- green, and guarding
-# nothing.
-source_dir="$repo/crates/netcfgd-host/src/confirm.rs"
+# nothing. `confirm_test.c` asserts what `ncfg_confirm_dir` composes from the
+# default run directory, so a rename fails there unless the test moves too,
+# and this reads the name the test holds the code to.
 check "and the name it guards is the one the code composes" \
-	"$(grep -c 'sibling.push("-confirm");' "$source_dir")" "1"
+	"$(grep -c 'strcmp(out, "/run/netcfgd-confirm") == 0' "$repo/c/tests/confirm_test.c")" "2"
 
 echo
 if [ "$failures" -eq 0 ]; then

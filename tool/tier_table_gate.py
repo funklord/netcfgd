@@ -53,7 +53,6 @@ DOC = pathlib.Path("doc/socket-protocol.md")
 ENUM = pathlib.Path("c/include/ncfg/proto.h")
 NAMES = pathlib.Path("c/src/proto/request.c")
 AUTHORIZE = pathlib.Path("c/src/daemon/authorize.c")
-FROZEN = pathlib.Path("crates/netcfgd-proto/tests/frozen.rs")
 
 
 def wire_names():

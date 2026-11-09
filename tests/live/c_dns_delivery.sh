@@ -1,5 +1,5 @@
 #!/bin/sh
-# What each DNS mode delivers, from both implementations.
+# What each DNS mode delivers, to the byte.
 #
 #     unshare -rmn sh tests/live/c_dns_delivery.sh
 #
@@ -26,13 +26,18 @@
 #   harmless. Where a machine does have them, those two cases are skipped and
 #   say so. A check that cannot be made safely is not made.
 #
-# WHAT IS COMPARED
+# WHAT IS CHECKED
 #   Every mode that produces something a third party reads: the file for
 #   `write_resolv_conf`, the drop-in for `dnsmasq` and `unbound`, and the
-#   arguments and standard input handed to `resolvconf`, `openresolv` and a
-#   script of the operator's under `exec`. The last three are a fake on `PATH`
-#   that records what it was given, which is the only way to compare a delivery
-#   whose other end is somebody else's program.
+#   arguments and standard input handed to `resolvconf` and `openresolv`. The
+#   last two are a fake on `PATH` that records what it was given, which is the
+#   only way to see a delivery whose other end is somebody else's program.
+#
+#   Until 0317 each record was compared against the Rust's for the same
+#   document. The records below are the C's on the day the Rust was retired,
+#   when that comparison passed -- so each is what two implementations written
+#   apart delivered alike. They are whole records rather than the lines that
+#   looked interesting, for the reason `delivered` gives.
 
 set -eu
 
@@ -55,9 +60,7 @@ skip() {
 # `not found` from the shell, because the ELF interpreter it names is absent.
 # So the skip never fired, and a comparison binary that could not run reported
 # as a missing file several checks later.
-if ! [ -x "$repo/target/debug/ncfg" ] || ! "$repo/target/debug/ncfg" --version >/dev/null 2>&1; then
-	skip "the Rust ncfg is not built here, or will not run, and it is the comparison (a glibc build on musl)"
-fi
+"$repo/c/ncfg" --version >/dev/null 2>&1 || skip "the C ncfg will not run here (a glibc build on musl)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-c-dns.XXXXXX")
 cleanup() { rm -rf "$work"; }
@@ -126,11 +129,11 @@ cp "$work/bin/resolvconf" "$work/bin/handover"
 PATH="$work/bin:$PATH"
 export PATH
 
-# ------------------------------------------------------------- the compare
+# ----------------------------------------------------------------- the check
 
-# One mode, both programs, and what each delivered. The recorded output goes to
-# a file per program so that a delivery which runs a helper and one which
-# writes a file are compared the same way.
+# One mode and what it delivered. The recorded output goes to one file so that
+# a delivery which runs a helper and one which writes a file are read the same
+# way.
 delivered() {
 	which="$1"
 	binary="$2"
@@ -138,11 +141,10 @@ delivered() {
 	tree="$work/$which"
 	rm -rf "$tree"
 	mkdir -p "$tree/etc" "$tree/run"
-	# **Before, not after.** The two programs run one after the other against
-	# the same namespace, so the second one has to find the machine the first
-	# one found. Removing the device after both had run left the second
-	# planning nothing to create, and every case failed on the difference
-	# between `link.create` and its absence.
+	# **Before, not after.** Every mode runs against the same namespace, so
+	# each has to find the machine the first one found. Removing the device
+	# afterwards left a run planning nothing to create, and every case failed
+	# on the difference between `link.create` and its absence.
 	ip link del f0 2>/dev/null || true
 	cat > "$tree/etc/netcfgd.conf" <<CONF
 global {
@@ -163,9 +165,9 @@ CONF
 		timeout 60 "$binary" apply > "$tree/apply.out" 2>&1 || true
 	# **The whole of what the apply said**, rather than the lines this script
 	# thought were interesting. A grep for `dns.apply` and `argv:` was the
-	# first version, and it turned a configuration both programs *refused*
-	# into two identical records of nothing -- a vacuous pass that the length
-	# floor below was too generous to catch. What a delivery does is visible
+	# first version, and it turned a configuration both implementations
+	# *refused* into two identical records of nothing -- a vacuous pass that a
+	# length floor was too generous to catch. What a delivery does is visible
 	# in its output or it is not visible at all; the helper writes to the same
 	# stream, which is `deliver.c`'s arrangement and is why this works.
 	{
@@ -178,48 +180,70 @@ CONF
 			fi
 		done
 	} > "$tree/delivered" 2>&1
-	sed "s|$tree|<tree>|g" "$tree/delivered"
+	# Trailing blanks dropped: the fake prints `stdin: ` before an empty
+	# input, and the expected records below carry no trailing whitespace.
+	sed -e "s|$tree|<tree>|g" -e 's/[[:space:]]*$//' "$tree/delivered"
 }
 
-compare() {
+# The record a mode must deliver is read from standard input.
+expect() {
 	what="$1"
 	mode="$2"
-	extra="${3:-}"
-	rust=$(delivered rust "$repo/target/debug/ncfg" "$mode" "$extra")
-	c=$(delivered c "$repo/c/ncfg" "$mode" "$extra")
-	# **Not vacuous**, and asked about the subject rather than about the
-	# length: the record has to mention the mode by name, which it does
-	# whether the mode was delivered (`dns.apply  dns: dnsmasq`) or refused
-	# (`unknown dns mode \`exec\``). Two identical records of nothing pass a
-	# length floor and fail this.
-	case "$rust" in
-	*"$mode"*) ;;
-	*)
-		echo "FAIL $what: neither program mentioned \`$mode\`, so nothing was compared"
-		printf '%s\n' "$rust" | head -3 | sed 's/^/       /'
-		failures=$((failures + 1))
-		return
-		;;
-	esac
-	check "$what" "$c" "$rust"
-	if [ -n "${NCFG_SHOW:-}" ]; then printf '%s\n' "$rust" | sed 's/^/       | /'; fi
+	wanted=$(cat)
+	said=$(delivered c "$repo/c/ncfg" "$mode" "")
+	check "$what" "$said" "$wanted"
 }
 
-compare "\`none\` delivers nothing, in both" "none"
-compare "\`write_resolv_conf\` writes the same file" "write_resolv_conf"
-compare "\`resolvconf\` is handed the same arguments and input" "resolvconf"
-compare "\`openresolv\` likewise" "openresolv"
-# **`exec` is refused by both, deliberately.** The mode exists in the model and
-# the configuration language has no way to write the command it would run, so
+expect "\`none\` delivers nothing" "none" <<'DELIVERED'
+== what the apply said
+ok   link.create f0  kind: dummy (was <absent>)
+ok   link.up f0  enabled: true (was false)
+ok   addr.add f0  addressing[0]: 10.9.130.1/24 (was <absent>)
+ok   dns.apply f0  dns: none (was <absent>)
+DELIVERED
+expect "\`write_resolv_conf\` writes the file" "write_resolv_conf" <<'DELIVERED'
+== what the apply said
+ok   link.create f0  kind: dummy (was <absent>)
+ok   link.up f0  enabled: true (was false)
+ok   addr.add f0  addressing[0]: 10.9.130.1/24 (was <absent>)
+ok   dns.apply  dns: write_resolv_conf (was <absent>)
+ok   dns.apply f0  dns: write_resolv_conf (was <absent>)
+== resolv.conf
+# Generated by netcfgd. Edits will be overwritten.
+search corp.example lab.example
+nameserver 10.9.130.53
+nameserver 2001:db8:130::53
+DELIVERED
+for mode in resolvconf openresolv; do
+	expect "\`$mode\` is handed its arguments and input" "$mode" <<DELIVERED
+== what the apply said
+argv: -a lo.netcfgd
+stdin:
+argv: -a f0.netcfgd
+stdin: search corp.example lab.example
+nameserver 10.9.130.53
+nameserver 2001:db8:130::53
+
+argv: -a lo.netcfgd
+stdin:
+argv: -a f0.netcfgd
+stdin: search corp.example lab.example
+nameserver 10.9.130.53
+nameserver 2001:db8:130::53
+
+ok   link.create f0  kind: dummy (was <absent>)
+ok   link.up f0  enabled: true (was false)
+ok   addr.add f0  addressing[0]: 10.9.130.1/24 (was <absent>)
+ok   dns.apply  dns: $mode (was <absent>)
+ok   dns.apply f0  dns: $mode (was <absent>)
+DELIVERED
+done
+# **`exec` is refused, deliberately.** The mode exists in the model and the
+# configuration language has no way to write the command it would run, so
 # accepting the word would compile a mode with nothing to run --
-# `lower_global.c` says so where it refuses it. What is compared here is that
-# refusal, which is the one place the reader is narrower than the enum.
-#
-# **Compared as a prefix, which is `agree_gate.py`'s rule and 0263's**: the C
-# folds a diagnostic's help onto one line where the Rust prints it as a `help:`
-# continuation, so the Rust's first line is the beginning of the C's. Deliberately
-# strict about the part that is shared -- a refusal reworded in one program is a
-# refusal that has to be reworded in the other.
+# `lower_global.c` says so where it refuses it. The refusal is checked as a
+# prefix: the line below is the Rust's, and the C folds the diagnostic's help
+# onto the same line where the Rust printed a `help:` continuation (0263).
 refusal_of() {
 	tree="$work/$1"
 	rm -rf "$tree"
@@ -229,30 +253,57 @@ refusal_of() {
 		NCFG_RESOLV_CONF="$tree/resolv.conf" \
 		timeout 60 "$2" apply 2>&1 | grep -m1 '^ncfg: ' | sed "s|$tree|<tree>|g"
 }
-rust_refusal=$(refusal_of rust "$repo/target/debug/ncfg")
 c_refusal=$(refusal_of c "$repo/c/ncfg")
-case "$rust_refusal" in
-*"unknown dns mode"*) ;;
-*)
-	echo "FAIL \`exec\`: the Rust no longer refuses it, so this compares nothing"
-	failures=$((failures + 1))
-	;;
-esac
 case "$c_refusal" in
-"$rust_refusal"*)
-	echo "ok   \`exec\` is refused by both, the Rust's words beginning the C's"
+'ncfg: <tree>/etc/netcfgd.conf:2:13: unknown dns mode `exec`'*)
+	echo "ok   \`exec\` is refused, where it was written"
 	;;
 *)
-	echo "FAIL \`exec\` is refused differently"
-	echo "       rust: $rust_refusal"
-	echo "       c   : $c_refusal"
+	echo "FAIL \`exec\` is not refused as it was"
+	echo "       said: $c_refusal"
 	failures=$((failures + 1))
 	;;
 esac
 
 if [ "$forwarders_safe" = yes ]; then
-	compare "\`dnsmasq\` gets the same drop-in" "dnsmasq"
-	compare "\`unbound\` gets the same drop-in" "unbound"
+	expect "\`dnsmasq\` gets its drop-in" "dnsmasq" <<'DELIVERED'
+== what the apply said
+ok   link.create f0  kind: dummy (was <absent>)
+ok   link.up f0  enabled: true (was false)
+ok   addr.add f0  addressing[0]: 10.9.130.1/24 (was <absent>)
+ok   dns.apply  dns: dnsmasq (was <absent>)
+ok   dns.apply f0  dns: dnsmasq (was <absent>)
+== dnsmasq.conf
+# Generated by netcfgd. Edits will be overwritten.
+
+# scope: globals
+
+# scope: f0
+server=10.9.130.53
+server=2001:db8:130::53
+domain=corp.example
+domain=lab.example
+DELIVERED
+	expect "\`unbound\` gets its drop-in" "unbound" <<'DELIVERED'
+== what the apply said
+ok   link.create f0  kind: dummy (was <absent>)
+ok   link.up f0  enabled: true (was false)
+ok   addr.add f0  addressing[0]: 10.9.130.1/24 (was <absent>)
+ok   dns.apply  dns: unbound (was <absent>)
+ok   dns.apply f0  dns: unbound (was <absent>)
+== unbound.conf
+# Generated by netcfgd. Edits will be overwritten.
+
+# scope: globals
+forward-zone:
+	name: "."
+
+# scope: f0
+forward-zone:
+	name: "."
+	forward-addr: 10.9.130.53
+	forward-addr: 2001:db8:130::53
+DELIVERED
 fi
 
 # ------------------------------------------------------- the guard, again

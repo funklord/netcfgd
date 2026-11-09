@@ -80,7 +80,7 @@ skip() {
 supplicant=$(find_in_sbin wpa_supplicant) || skip "wpa_supplicant is not installed"
 iw=$(find_in_sbin iw) || skip "iw is not installed (apt install iw | apk add iw)"
 ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work around"
-[ -x "$build/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
+[ -x "$build/ncfg" ] || skip "netcfgd is not built (make)"
 
 # The AP side is wpa_supplicant in AP mode rather than hostapd, so this needs
 # no package the station side did not already need. That requires the binary to

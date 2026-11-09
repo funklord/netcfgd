@@ -1,50 +1,25 @@
 #!/bin/sh
-# Both daemons, one client, the same requests.
+# Every request the command line makes, against a running daemon with no node.
 #
 #     unshare -rn sh tests/live/c_daemon_answers.sh
 #
-# `tool/ledger_gate.py` says the two request taxonomies are whole -- thirty-two
-# names, none either way. It says nothing about the **answers**, and the daemon
-# is the last thing in `doc/c-transition.md`'s porting order, "last, because
-# they are what the others are for".
+# `tool/ledger_gate.py` says the request taxonomy is whole. It says nothing
+# about the **answers**: whether each verb reaches the daemon over its socket,
+# gets something back, and leaves the daemon standing for the next one.
 #
-# So this asks both daemons the same questions and compares what comes back.
-# The client is the C `ncfg` in both cases, deliberately: one client against two
-# daemons means a difference is the daemon's, where two clients against two
-# daemons would leave it ambiguous. `NCFG_RUN_DIR` is what selects which daemon
-# is answering, there being no `--socket` on the client.
+# Until 0317 this asked the C daemon and the Rust one the same questions and
+# compared the answers byte for byte, one client against two daemons so that a
+# difference was the daemon's. That comparison is what it was for, and it went
+# with the Rust. What is left is the half that needs one daemon: each verb is
+# answered, a writing verb leaves the file it had to write, and the daemon is
+# still there at the end.
 #
-# TWO PHASES, AND WHY THEY ARE NOT ONE
-#   **Reading, with both daemons up at once.** They share a configuration
-#   directory, neither changes the machine, and the answers must be identical
-#   byte for byte.
-#
-#   **Writing, one daemon at a time.** Each gets its own configuration
-#   directory, is asked to write into it, and what it leaves behind is
-#   compared. Separate directories because a drop-in written through one daemon
-#   would otherwise be read by the other.
-#
-# WHAT IS DELIBERATELY NOT COMPARED, AND WHAT IT COST TO LEARN
-#   Nothing here runs `ncfg apply`, and that is the whole reason the comparison
-#   is stable.
-#
-#   The first version did, and `status --json` then disagreed about
-#   `hook_state`: one daemon recorded `link.create: kind is <absent>` and the
-#   other `link.up: enabled is false`. It looked like a defect and was
-#   deterministic across three runs. It is a race, and it is in both: the drift
-#   pass reports on an observation taken **without the apply lock** -- which is
-#   deliberate and documented, "a pass that only observes never takes it" -- so
-#   while a third process is changing the machine, what the daemon sees is
-#   whatever instant it sampled. Measured: the C produced the mid-apply value
-#   in four runs of six, the Rust in one of eight. Same behaviour, different
-#   odds.
-#
-#   So `hook_state` is not a thing two daemons can be held to agree on while
-#   something else is applying, and the answer is not to filter the field but
-#   to stop moving the machine underneath the question. A link's index and MAC
-#   are the same kind of value and disappear for the same reason: with no
-#   apply, neither daemon creates anything.
-
+# WHY NOTHING HERE APPLIES
+#   The comparison learned it: `hook_state` disagreed between the two daemons
+#   while a third process applied, because the drift pass observes without the
+#   apply lock -- deliberately, "a pass that only observes never takes it" --
+#   and so reports whichever instant it sampled. Nothing here moves the
+#   machine underneath a question.
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -67,20 +42,15 @@ skip() {
 # `not found` from the shell, because the ELF interpreter it names is absent.
 # So the skip never fired, and a comparison binary that could not run reported
 # as a missing file several checks later.
-if ! [ -x "$repo/target/debug/netcfgd" ] || ! "$repo/target/debug/netcfgd" --version >/dev/null 2>&1; then
-	skip "the Rust daemon is not built here, or will not run (a glibc build on musl)"
-fi
+"$repo/c/netcfgd" --version >/dev/null 2>&1 || skip "the C daemon will not run here (a glibc build on musl)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-c-daemon-answers.XXXXXX")
-rust_pid=""
 c_pid=""
 cleanup() {
-	[ -n "$rust_pid" ] && kill "$rust_pid" 2>/dev/null || true
 	[ -n "$c_pid" ] && kill "$c_pid" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
 	# stopped writing, and the `rm` below then races it (project.md 10.476).
-	wait "$rust_pid" 2>/dev/null || true
-	wait "$c_pid" 2>/dev/null || true
+	[ -n "$c_pid" ] && wait "$c_pid" 2>/dev/null || true
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -97,9 +67,8 @@ check() {
 	fi
 }
 
-# A document with nothing in it that needs hardware, so that both daemons see
-# the same machine: an interface that does not exist, which is a state they can
-# both describe without either of them creating anything.
+# A document with nothing in it that needs hardware: an interface that does not
+# exist, which is a state the daemon can describe without creating anything.
 document() {
 	cat <<'CONF'
 device dd0 { kind = "dummy" }
@@ -122,41 +91,30 @@ bound() {
 	return 1
 }
 
-# ----------------------------------------------------- reading, both at once
+# ---------------------------------------------------------------- reading
 
-mkdir -p "$work/etc" "$work/run-rust" "$work/run-c"
+mkdir -p "$work/etc" "$work/run"
 document > "$work/etc/netcfgd.conf"
 export NCFG_CONFIG_DIR="$work/etc"
+export NCFG_RUN_DIR="$work/run"
 
-NCFG_RUN_DIR="$work/run-rust" "$repo/target/debug/netcfgd" --no-apply-on-start \
-	> "$work/rust.log" 2>&1 &
-rust_pid=$!
-# No node: the Rust daemon has none, and this compares the two over the socket.
-NCFG_RUN_DIR="$work/run-c" "$repo/c/netcfgd" --fuzznet-dir "" --no-apply-on-start \
-	> "$work/c.log" 2>&1 &
+# No node, so the daemon binds its own socket and this asks over it.
+"$repo/c/netcfgd" --fuzznet-dir "" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 c_pid=$!
-
-if ! bound "$work/run-rust/netcfgd.sock"; then
-	echo "FAIL the Rust daemon never bound its socket"
-	tail -3 "$work/rust.log" | sed 's/^/       /'
+if ! bound "$work/run/netcfgd.sock"; then
+	echo "FAIL the daemon never bound its socket"
+	tail -3 "$work/daemon.log" | sed 's/^/       /'
 	exit 1
 fi
-if ! bound "$work/run-c/netcfgd.sock"; then
-	echo "FAIL the C daemon never bound its socket"
-	tail -3 "$work/c.log" | sed 's/^/       /'
-	exit 1
-fi
-echo "ok   both daemons bind a socket and answer"
+echo "ok   the daemon binds a socket"
 
 ask() {
-	run_dir="$1"
-	shift
-	NCFG_RUN_DIR="$run_dir" timeout 30 "$repo/c/ncfg" "$@" 2>&1 || true
+	timeout 30 "$repo/c/ncfg" "$@" 2>&1 || true
 }
 
 # Each of these reaches the daemon and each says something: an answer, or a
-# refusal with a reason. A verb that produced the same empty string from both
-# would be comparing nothing, so the length is checked too.
+# refusal with a reason. Ten characters is short enough for the shortest real
+# answer and long enough that an empty one, or a bare `ncfg:`, fails.
 for verb in \
 	"status --json" "show --json" "plan --json" "status" "plan" \
 	"explain interface dd0" "explain address dd0 10.9.120.1/24" \
@@ -166,106 +124,76 @@ for verb in \
 	"config rm nothing" "wifi forget nothing"
 do
 	# shellcheck disable=SC2086
-	rust_said=$(ask "$work/run-rust" $verb)
-	# shellcheck disable=SC2086
-	c_said=$(ask "$work/run-c" $verb)
-	if [ "${#rust_said}" -lt 10 ]; then
-		echo "FAIL \`ncfg $verb\`: the answer is too short to be comparing anything"
+	said=$(ask $verb)
+	if [ "${#said}" -lt 10 ]; then
+		echo "FAIL \`ncfg $verb\`: the answer is too short to be one"
+		printf '%s\n' "$said" | head -2 | sed 's/^/       /'
 		failures=$((failures + 1))
 		continue
 	fi
-	check "\`ncfg $verb\`: both daemons answer alike" "$c_said" "$rust_said"
+	echo "ok   \`ncfg $verb\` is answered"
 done
+# **Answered is not reached.** Most of these verbs work with no daemon at all
+# -- the client observes and compiles for itself -- so the loop above cannot
+# tell a daemon that answered from one that was never asked. A reload is the
+# daemon's alone, and so is the word for it.
+check "and a reload is the daemon's" "$(ask reload | grep -c '^reloaded' || true)" "1"
+check "and the daemon is still running after all of them" \
+	"$(tr '\0' ' ' < "/proc/$c_pid/cmdline" 2>/dev/null | grep -c netcfgd || true)" "1"
 
-kill "$rust_pid" 2>/dev/null || true
 kill "$c_pid" 2>/dev/null || true
-rust_pid=""
+wait "$c_pid" 2>/dev/null || true
 c_pid=""
 
-# ---------------------------------------------- writing, one daemon at a time
+# ----------------------------------------------------------------- writing
 
-# What each daemon is asked to write, and then what it left behind. Its own
-# configuration directory, because a drop-in written through one would
-# otherwise be read by the other.
-writes() {
-	which="$1"
-	shift
-	mkdir -p "$work/$which/etc/secrets" "$work/$which/run"
-	document > "$work/$which/etc/netcfgd.conf"
-	NCFG_CONFIG_DIR="$work/$which/etc" NCFG_RUN_DIR="$work/$which/run" \
-		"$@" --no-apply-on-start > "$work/$which/daemon.log" 2>&1 &
-	pid=$!
-	if ! bound "$work/$which/run/netcfgd.sock"; then
-		echo "FAIL the $which daemon never bound its socket for the writing pass"
-		tail -3 "$work/$which/daemon.log" | sed 's/^/       /'
-		failures=$((failures + 1))
-		kill "$pid" 2>/dev/null || true
-		return 1
-	fi
-	say() {
-		printf '>>> %s\n' "$*"
-		NCFG_CONFIG_DIR="$work/$which/etc" NCFG_RUN_DIR="$work/$which/run" \
-			timeout 30 "$repo/c/ncfg" "$@" 2>&1 || true
-	}
-	{
-		printf 'device extra0 { kind = "dummy" }\n' | say config put extra
-		say config rm extra
-		printf 'device extra0 { kind = "dummy" }\n' | say config put extra
-		printf 'hunter2hunter2' | say secret set dd-secret
-		say wifi add TestNet --open
-		say profile save saved
-		say profile list
-	} > "$work/$which.answers" 2>&1
-	kill "$pid" 2>/dev/null || true
-	waited=0
-	while [ "$waited" -lt 50 ] && kill -0 "$pid" 2>/dev/null; do
-		sleep 0.1
-		waited=$((waited + 1))
-	done
-	# The work directory is in every path the daemon prints, and it is a
-	# different directory for each of the two. Taken out by name rather than by
-	# a pattern over paths, so that a path which differs for any other reason
-	# still shows.
-	sed "s|$work/$which|<work>|g" "$work/$which.answers" > "$work/$which.said"
-	{
-		cd "$work/$which/etc" || exit 1
-		find . -type f | sort | while read -r file; do
-			echo "--- $file"
-			cat "$file"
-		done
-	} > "$work/$which.tree" 2>&1
-	return 0
-}
-
-if writes rust "$repo/target/debug/netcfgd" &&
-	writes c "$repo/c/netcfgd" --fuzznet-dir ""
-then
-	check "the writing verbs answer alike" \
-		"$(cat "$work/c.said")" "$(cat "$work/rust.said")"
-	check "and leave the same configuration directory behind" \
-		"$(cat "$work/c.tree")" "$(cat "$work/rust.tree")"
-	# **Not vacuous**, and named rather than counted: two empty trees compare
-	# equal, and a count is a number somebody fitted to the output once. Each
-	# of these is the file one of the verbs above had to write -- the drop-in
-	# from `config put`, the credential from `secret set`, and the profile from
-	# `profile save` with the selection drop-in that choosing it leaves.
-	for wanted in \
-		"--- ./conf.d/extra.conf" \
-		"--- ./secrets/dd-secret" \
-		"--- ./profile/saved/00-saved.conf" \
-		"--- ./conf.d/90-profile.conf"
-	do
-		check "  and \`${wanted#--- ./}\` is there, so the comparison had something in it" \
-			"$(grep -cxF -e "$wanted" "$work/rust.tree" || true)" "1"
-	done
-	# `wifi add` is the one verb here that cannot succeed in a namespace: there
-	# is no radio, and both daemons refuse it. That refusal is still compared
-	# above and is still worth comparing -- it names the device it looked for,
-	# so the two have to agree about what they found and did not find.
-	check "  and the one verb that cannot work here was refused by both" \
-		"$(grep -c "is not a radio on this machine" "$work/rust.said" || true)" \
-		"$(grep -c "is not a radio on this machine" "$work/c.said" || true)"
+# A configuration directory of its own, so that what is found afterwards is
+# what these verbs wrote and nothing the reading pass left.
+mkdir -p "$work/w/etc/secrets" "$work/w/run"
+document > "$work/w/etc/netcfgd.conf"
+export NCFG_CONFIG_DIR="$work/w/etc"
+export NCFG_RUN_DIR="$work/w/run"
+"$repo/c/netcfgd" --fuzznet-dir "" --no-apply-on-start > "$work/w/daemon.log" 2>&1 &
+c_pid=$!
+if ! bound "$work/w/run/netcfgd.sock"; then
+	echo "FAIL the daemon never bound its socket for the writing pass"
+	tail -3 "$work/w/daemon.log" | sed 's/^/       /'
+	exit 1
 fi
+{
+	printf 'device extra0 { kind = "dummy" }\n' | ask config put extra
+	ask config rm extra
+	printf 'device extra0 { kind = "dummy" }\n' | ask config put extra
+	printf 'hunter2hunter2' | ask secret set dd-secret
+	ask wifi add TestNet --open
+	ask profile save saved
+	ask profile list
+} > "$work/w/answers" 2>&1
+
+# Named rather than counted: each is the file one of the verbs above had to
+# write -- the drop-in from `config put`, the credential from `secret set`,
+# and the profile from `profile save` with the selection drop-in that choosing
+# it leaves.
+for wanted in conf.d/extra.conf secrets/dd-secret profile/saved/00-saved.conf \
+	conf.d/90-profile.conf
+do
+	check "\`$wanted\` was written" \
+		"$([ -f "$work/w/etc/$wanted" ] && echo yes || echo no)" "yes"
+done
+check "  and the credential is the one that was given" \
+	"$(cat "$work/w/etc/secrets/dd-secret" 2>/dev/null)" "hunter2hunter2"
+check "  in a file nobody else can read" \
+	"$(stat -c '%a' "$work/w/etc/secrets/dd-secret" 2>/dev/null)" "600"
+check "  and the drop-in says what was put" \
+	"$(cat "$work/w/etc/conf.d/extra.conf" 2>/dev/null)" 'device extra0 { kind = "dummy" }'
+# The configuration is root's here, so `wifi add` goes through the daemon
+# rather than straight to a file, and says so. (Both daemons refused it with
+# "is not a radio on this machine" while the comparison ran; adding a network
+# no longer needs the radio present.)
+check "\`wifi add\` went through the daemon" \
+	"$(grep -c "added \`TestNet\` through netcfgd" "$work/w/answers" || true)" "1"
+check "  and left its drop-in" \
+	"$([ -f "$work/w/etc/conf.d/wifi-TestNet.conf" ] && echo yes || echo no)" "yes"
 
 if [ "$failures" -eq 0 ]; then
 	echo "c_daemon_answers.sh: all checks passed"

@@ -31,7 +31,8 @@
 #       then cannot refill it. An unchanged resolver beats an empty one.
 #
 # WHAT IT DELIBERATELY DOES NOT COVER
-#   Which files netcfgd writes -- `tool/write_gate.py` has the inventory --
+#   Which files netcfgd writes -- `tool/write_gate.py` kept that inventory
+#   for the Rust and went with it (0317); the C has none yet --
 #   and whether `/run` is `noexec`, which is `hooks.sh`'s question. The tmpfs
 #   here is mounted without it on purpose: this script has to be able to watch
 #   a hook run, and a fixture that models two hazards at once cannot say which

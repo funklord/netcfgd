@@ -5,15 +5,14 @@
 # `make check` is what CI runs and what to run before committing.
 #
 # TARGETS
-#   make               -- build the workspace and link the `ncfg` name
+#   make               -- the C daemon and its client, `netcfgd` and `ncfg`
 #   make gui           -- the Qt client, which nothing else builds
 #   make tde           -- the TDE control module and tray, likewise
 #   make tde-container -- compile those where TDE's headers are: a container
 #   make nm            -- the NetworkManager shim, likewise. `make adapters`
 #                         built it until 0276 retired the Rust one, and the
 #                         suite that skips without it says `make nm` now
-#   make cross         -- the cross-compilation check
-#   make test          -- the test suite alone
+#   make c-test        -- the C unit tests alone
 #   make check         -- every gate; the one to run before a commit
 #   make check-ci      -- check minus the budgets, which a rented VM cannot
 #                         measure honestly
@@ -51,21 +50,11 @@
 #                         `hull-image` builds the images, which is the only
 #                         part needing the internet, and `hull-clean` untags
 #                         them
-#   make fuzz          -- the C parsers, fuzzed; `fuzz-rust` for the other
-#                         implementation's targets. The committed corpus is
+#   make fuzz          -- the C parsers, fuzzed. The committed corpus is
 #                         replayed by `make c-test` with no clang needed
-#   make conformance   -- the two client implementations, asked the same
-#                         questions
-#   make nm-containment -- assert the core's manifest has gained no entry
 #   make linkage       -- what the shipped binaries are allowed to link
 #   make style         -- the shared source gate, plus project.md held to the
 #                         tree it describes
-#   make fmt           -- rustfmt, checking only; `fmt-fix` rewrites. Skips
-#                         loudly where rustfmt is not installed
-#   make clippy        -- clippy across the workspace; skips loudly where it
-#                         is not installed
-#   make deny          -- supply chain; reports rather than fails where the
-#                         tools are not installed
 #   make size          -- the installed-size ratchet
 #   make footprint     -- an unused optional feature must leave no trace
 #   make rss           -- the resident-memory budget
@@ -83,8 +72,8 @@
 #   make apk-container -- the same, built by `abuild` inside Alpine
 #   make apk-source    -- the tarball an APKBUILD builds from
 #   make schema-bless  -- re-bless the four frozen witnesses
-#   make version-check -- VERSION is the source; debian/changelog and
-#                         Cargo.toml are held to it
+#   make version-check -- VERSION is the source; debian/changelog is held
+#                         to it
 #   make hooks         -- install the git hooks from tool/hooks/
 #   make clean         -- remove build products
 #   make veryclean     -- clean, plus the build directories
@@ -92,63 +81,21 @@
 #   make help          -- this list
 #
 
-CARGO ?= cargo
-
-# Is the optional component here? Asked in two places, so spelled once: the
-# `fmt` and `clippy` gates.
-#
-# There was a third, and it is worth knowing why it was the easy one to miss:
-# `adapters` held each adapter's own cargo workspace to the same bar as the
-# core, so it ran both tools again from a `cd` rather than from a gate with the
-# tool's name on it. Forgetting it there left `make check` stopping dead exactly
-# as before, only later and after a full build. 0276 retired the one Rust
-# adapter and the target with it.
-#
-# Asking cargo whether the subcommand runs, rather than looking for a binary by
-# name: rustup and Debian put the shim in different places, and the only thing
-# being asked is whether the next line will work.
-FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
-CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
-# And the second C compiler, for the `clang` gate. A program rather than a
-# subcommand, so the question is whether it is on PATH.
+# The second C compiler, for the `clang` gate. Asked of PATH, so a machine
+# without it still runs the rest of `check` and the skip says what is missing.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde tde-container install-tde deb-tde help
+.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build gui c-test claims installed-diff icons icon-check install-icons uninstall-icons FORCE shell packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz clean veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks linkage linkage-one live-container tde tde-container install-tde deb-tde help
 
 all: build
 
-# **The C port is what this builds and what this ships** (0266). The Rust is
-# still here and still built by the gates that compare the two programs --
-# `agree`, `conformance`, `test` and the budget gates each build what they need
-# -- but it is no longer what `make` produces or what `make install` installs.
-#
-# `linkage` was in that list and is not any more: it reads the shipped
-# binaries' NEEDED lists, so pointing it at the Rust made it a gate about an
-# artifact nobody installs.
-#
-# `make rust` is the old behaviour, for anyone who wants the other binary
-# without going through a gate.
+# **The C is what this builds and what this ships** (0266), and since 0317 it
+# is the only implementation in the tree: the Rust that proved it was retired
+# with every gate that built or compared it.
 build:
 	@$(MAKE) --no-print-directory -C c
 
-rust:
-	$(CARGO) build --workspace
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
-
-# `ncfg` is the second name of the one binary. Cargo cannot make a symlink, so
-# it is made here -- and it is made in the build tree as well as on install,
-# because the tests invoke `target/*/ncfg` and would otherwise be running the
-# daemon under a client's arguments.
-ncfg-link:
-	@if [ -f target/$(PROFILE)/netcfgd ]; then \
-		ln -sf netcfgd target/$(PROFILE)/ncfg; \
-	fi
-
 # Ordered cheapest first, so a formatting slip does not wait on a full test run.
-# `nm-containment` is early and costs nothing: it reads two text files, and it
-# is the one gate that fails if an adapter's dependencies have leaked into the
-# core -- which is the kind of thing that is trivial to prevent and miserable to
-# unpick later.
 #
 # Split into two lists rather than two target lists, so they cannot drift: a
 # gate added to PORTABLE_GATES is in both `check` and `check-ci` by
@@ -158,10 +105,9 @@ ncfg-link:
 # on**. Everything in PORTABLE_GATES gives the same answer on any machine that
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
-PORTABLE_GATES = style fmt ascii shell clippy clang default-goal unsafe-policy \
-                 executor-policy nm-containment packaging claims client-test \
-                 conformance test example gui linkage c-test agree ledger \
-                 module-order registry bridge-test nm-c-test bss
+PORTABLE_GATES = style ascii shell clang default-goal packaging claims \
+                 client-test example gui linkage c-test ledger module-order \
+                 registry bridge-test nm-c-test bss
 BUDGET_GATES   = size footprint rss rss-node
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -186,61 +132,6 @@ check: $(PORTABLE_GATES) $(BUDGET_GATES)
 # over a suite that skipped everything is the vacuous pass this tree keeps
 # finding, and the live scripts are most of the evidence this project has.
 check-ci: $(PORTABLE_GATES)
-
-# Design section 9.2 asks for this in as many words: "a mechanically checkable
-# CI assertion" that the core's dependency manifest has not gained an entry.
-#
-# It is not a grep for `zbus`. Naming the thing to keep out only keeps *that*
-# thing out, and the next adapter brings something else. Instead the core's
-# lockfile is checked against `deny.toml`'s allow list, which is the written
-# form of constraint 3 -- so any new core dependency fails this, whether an
-# adapter brought it or not.
-#
-# The second half is the gate checking itself. "The core does not have the
-# adapter's dependencies" is worth nothing if no adapter has any, which is the
-# vacuous pass this project keeps finding -- so it also asserts that the thing
-# being contained exists.
-#
-# **What it asserts changed when 0276 retired the Rust shim, and the claim got
-# stronger rather than weaker.** It used to count the adapter's own lockfile and
-# require at least twenty entries, on the grounds that a D-Bus stack is not
-# small. There is no lockfile to count now: the shim is C over `libdbus-1`, so
-# the stack it contains is a system library and no Rust crate for it can appear
-# in any lockfile here. The two things checked are therefore that the shim still
-# gets D-Bus from outside cargo, and that no adapter has quietly acquired a
-# lockfile again -- which is the only way the old leak could come back.
-nm-containment:
-	@allowed=$$(sed -n 's/.*{ crate = "\([^"]*\)".*/\1/p' deny.toml | sort -u); \
-	present=$$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.lock | grep -v '^netcfgd' | sort -u); \
-	leaked=""; \
-	for crate in $$present; do \
-		echo "$$allowed" | grep -qx "$$crate" || leaked="$$leaked $$crate"; \
-	done; \
-	if [ -n "$$leaked" ]; then \
-		echo "nm-containment: the core workspace has dependencies deny.toml does not allow:"; \
-		echo "nm-containment:  $$leaked"; \
-		echo "nm-containment: constraint 3 and design section 9.2 -- an adapter's"; \
-		echo "nm-containment: dependencies belong to its own workspace, and a new core"; \
-		echo "nm-containment: dependency is a decision, not a lockfile update"; \
-		exit 1; \
-	fi; \
-	if ! grep -q 'pkg-config --libs dbus-1' adapter/netcfgd-nm/c/Makefile; then \
-		echo "nm-containment: the shim no longer links libdbus-1 from the system,"; \
-		echo "nm-containment: so nothing here is containing a D-Bus stack and the"; \
-		echo "nm-containment: check above proved nothing -- find where the stack went"; \
-		exit 1; \
-	fi; \
-	strays=$$(find adapter -name Cargo.lock -print 2>/dev/null); \
-	if [ -n "$$strays" ]; then \
-		echo "nm-containment: an adapter has a cargo lockfile again:"; \
-		echo "nm-containment:  $$strays"; \
-		echo "nm-containment: 0276 retired the one that existed. A new one is a"; \
-		echo "nm-containment: decision, and this gate's second half was written for"; \
-		echo "nm-containment: the arrangement it replaces -- revisit both"; \
-		exit 1; \
-	fi; \
-	echo "nm-containment: ok, $$(echo "$$present" | wc -w) core dependencies, all allowed"; \
-	echo "nm-containment:   and the shim's D-Bus stack is libdbus-1, outside cargo"
 
 # The shell netcfgd ships. A helper is a program somebody installs and runs as
 # root against their modem, so a syntax error in one is not a smaller problem
@@ -281,52 +172,6 @@ shell:
 	@# gate of its own: it asks about the same files for the same reason, and
 	@# the one thing `shell` could honestly claim was that they parse.
 	@python3 tool/heredoc_gate.py $(SHELL_SCRIPTS)
-
-# rustfmt and clippy, skipped loudly rather than failed when absent -- the rule
-# `gui` and `deny` already follow, and for the same reason each states: a gate
-# nobody can run locally is a gate that rots.
-#
-# Neither ships with a distro rustc, and this tree is developed on one (no
-# rustup, per section 10's cross-build note). So `make check` stopped at the
-# second of its seventeen gates with `error: no such command: fmt` and never
-# reached the other fifteen -- which is the failure `.github/workflows/
-# check.yml` names when it installs both by name, "fails in a way that reads
-# like a code problem", solved there and left standing here.
-#
-# Two things keep the skip from being a vacuous pass. CI installs both, so the
-# real check runs where a regression would be published; and `make style`
-# gates indentation in this tree regardless, so a skipped `fmt` is not an
-# unchecked tree -- rustfmt.toml's `hard_tabs` is load-bearing for what the
-# tool *writes*, not for what is verified.
-#
-# The probe asks cargo whether the subcommand runs rather than looking for a
-# binary by name, because rustup and Debian put the shim in different places
-# and the question is only ever "will the next line work".
-fmt:
-	@if $(FMT_OK); then \
-		$(CARGO) fmt --check; \
-	else \
-		echo "fmt: rustfmt not installed, skipping"; \
-		echo "fmt:   apt install rustfmt, or rustup component add rustfmt"; \
-	fi
-
-# Hard failure rather than a skip, matching `apk`: this one is asked for
-# deliberately and its whole purpose is to rewrite files, so doing nothing
-# quietly is the one answer that would be wrong.
-fmt-fix:
-	@$(FMT_OK) || { \
-		echo "fmt-fix: rustfmt is not installed, so there is nothing to rewrite"; \
-		echo "fmt-fix:   apt install rustfmt, or rustup component add rustfmt"; \
-		exit 1; }
-	$(CARGO) fmt
-
-clippy:
-	@if $(CLIPPY_OK); then \
-		$(CARGO) clippy --workspace --all-targets -- -D warnings; \
-	else \
-		echo "clippy: not installed, skipping"; \
-		echo "clippy:   apt install rust-clippy, or rustup component add clippy"; \
-	fi
 
 # What a second C compiler sees, and gcc does not.
 #
@@ -481,118 +326,7 @@ bridge-test:
 nm-c-test:
 	@$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c test
 
-# The two client implementations, asked the same questions.
-#
-# The only gate here that compares two *clients*. Every other one reads the
-# schema witness from one side: it pins what netcfgd sends, and nothing pinned
-# what a second implementation made of it -- which is how one access point's
-# name came to be spelled three ways, with the TUI's spelling losing the
-# network's identity entirely.
-#
-# In `check` and before `test`, because `test` runs the same comparison as part
-# of the workspace and needs the binary to exist. The Rust side *fails* rather
-# than skips when it is absent, so a missing binary is a red gate rather than a
-# green one that compared nothing.
-# Both depend on `build`, and on the debug binaries rather than on cargo
-# having compiled something. `cargo test --workspace` builds every test
-# harness and does not relink `target/debug/netcfgd`, and `target/debug/ncfg`
-# is a symlink `ncfg-link` makes rather than an artifact cargo knows about --
-# so a test that runs the program runs whatever the last `make build` left.
-# Measured: `a_reader_that_goes_away_is_not_a_crash` failed against a binary
-# three weeks older than the fix it asserts, reporting the CLI as crashing on
-# a closed pipe. The test does assert the binary exists, which catches the
-# absent case loudly and cannot see a stale one -- and a stale pass or a
-# stale failure both read as a verdict on the source.
-conformance: build client/tests/client_test
-	$(CARGO) test -p netcfgd-cli both_client_implementations_extract_the_same_facts
-
-test: client/tests/client_test
-	@# **The `ncfg` symlink first**, for the reason `agree` grew the same two
-	@# lines in 0266: `cargo test` builds the binaries but cannot make a
-	@# symlink, and the one in `target/debug` used to come from `build`, which
-	@# no longer produces the Rust at all. Without this, a `netcfgd-cli` test
-	@# that refuses to test nothing fails with "ncfg is not built" -- correctly,
-	@# and for a reason that has nothing to do with the code under test.
-	$(CARGO) build --workspace --quiet
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
-	$(CARGO) test --workspace
-
 FORCE:
-
-# section 1 constraint 4: forbid(unsafe_code) holds everywhere except netcfgd-sys,
-# which is the sole audited exception. Checked by reading the crate roots rather
-# than by trusting that nobody removed the attribute, since its absence is
-# silent -- the code still compiles, it just stops being checked.
-# Every crate root in the workspace, not just the ones under crates/. This
-# globbed `crates/*` alone until M5, so `backend/netcfgd-supplicant` went
-# unchecked from the day it was written -- and it was missing the attribute. A
-# policy gate that cannot see half the tree enforces nothing, so it now counts
-# what it found and fails if that number collapses.
-# The directories every crate root lives under. Named once so that the gate
-# and its existence check cannot disagree about what is being read.
-POLICY_ROOTS = crates backend
-
-unsafe-policy:
-	@for path in $(POLICY_ROOTS); do \
-		[ -d "$$path" ] || { \
-			echo "unsafe-policy: $$path does not exist, so this gate would"; \
-			echo "unsafe-policy:   check only part of the tree and still say ok"; \
-			exit 1; \
-		}; \
-	done
-	@fail=0; \
-	roots=$$(find $(POLICY_ROOTS) -name lib.rs -o -name main.rs | grep '/src/' | sort); \
-	if [ "$$(echo "$$roots" | wc -l)" -lt 10 ]; then \
-		echo "unsafe-policy: found $$(echo "$$roots" | wc -l) crate roots, expected more"; \
-		exit 1; \
-	fi; \
-	for root in $$roots; do \
-		[ -f "$$root" ] || continue; \
-		crate=$$(basename $$(dirname $$(dirname "$$root"))); \
-		if [ "$$crate" = "netcfgd-sys" ]; then \
-			continue; \
-		fi; \
-		if ! head -n 1 "$$root" | grep -q '^#!\[forbid(unsafe_code)\]$$'; then \
-			echo "unsafe-policy: $$root does not open with #![forbid(unsafe_code)]"; \
-			fail=1; \
-		fi; \
-	done; \
-	if [ ! -d crates/netcfgd-sys ]; then \
-		:; \
-	elif ! grep -q 'SAFETY:' -r crates/netcfgd-sys/src 2>/dev/null; then \
-		echo "unsafe-policy: netcfgd-sys has no SAFETY comments"; \
-		fail=1; \
-	fi; \
-	[ $$fail -eq 0 ] && echo "unsafe-policy: ok"; \
-	exit $$fail
-
-# An executor built without the current document silently loses things: DNS
-# stops flattening across scopes, a supplicant gets started with no networks,
-# and the run directory reverts to the compiled-in default. Nothing fails; the
-# apply just does less than it said.
-#
-# Four call sites in the daemon used to construct one and exactly one
-# remembered `with_context`, so the same apply behaved differently depending on
-# whether it arrived at startup, over the socket, from drift, or from a revert.
-# `State::executor` is now the only place that may build one, and this is what
-# keeps it that way -- a fifth call site is a one-line diff that would
-# otherwise be invisible in review.
-executor-policy:
-	@sites=$$(grep -rn 'KernelExecutor::new' crates/netcfgd-daemon/src \
-		--include='*.rs' | grep -v ':[0-9]*:[[:space:]]*//'); \
-	count=$$(printf '%s\n' "$$sites" | grep -c . || true); \
-	if [ "$$count" != "1" ]; then \
-		echo "executor-policy: $$count places build a KernelExecutor, expected 1"; \
-		printf '%s\n' "$$sites"; \
-		echo "executor-policy: use State::executor, which supplies the document"; \
-		exit 1; \
-	fi; \
-	if ! grep -v '^[[:space:]]*//' crates/netcfgd-daemon/src/state.rs \
-		| grep -q 'with_context'; then \
-		echo "executor-policy: State::executor no longer supplies the document"; \
-		exit 1; \
-	fi; \
-	echo "executor-policy: ok"
 
 DESTDIR ?=
 PREFIX  ?= /usr
@@ -1135,19 +869,14 @@ deb: version-check
 	echo "deb: $$seen packages, $$checked with a postinst, none enables, starts or stops anything"
 	@ls -1 $(DIST)/*.deb
 
-# VERSION is the source; debian/changelog and Cargo.toml are held to it.
+# VERSION is the source; debian/changelog is held to it.
 version-check:
 	@file=$$(cat VERSION); \
 	changelog=$$(dpkg-parsechangelog -SVersion 2>/dev/null); \
-	cargo=$$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1); \
 	rc=0; \
 	if [ -n "$$changelog" ] && [ "$$file" != "$$changelog" ]; then \
 		echo "version-check: VERSION says $$file, debian/changelog says $$changelog"; rc=1; \
 	fi; \
-	case "$$cargo" in \
-	"$$file"|"$$file".*) ;; \
-	*) echo "version-check: VERSION says $$file, Cargo.toml says $$cargo"; rc=1 ;; \
-	esac; \
 	[ $$rc -eq 0 ] && echo "version-check: $$file, in step"; \
 	exit $$rc
 
@@ -1403,26 +1132,6 @@ packaging:
 	@# One program icon, and every front end naming it rather than borrowing
 	@# a generic one from whatever theme is installed.
 	@python3 tool/icon_gate.py
-	@# Every setting netcfgd hands a supplicant has a real one behind it.
-	@# The measurements kept being made by hand and thrown away; this is
-	@# what stops the next round having to make them again. 0240.
-	@python3 tool/supplicant_coverage_gate.py
-	@# Every config key the compiler accepts is classified, so that a key
-	@# added later cannot default to "a client may send this". 0127.
-	@python3 tool/privilege_gate.py
-	@# Every op the plan can name is built by the planner and run by the
-	@# executor, or named as one that is not. Three were neither, and the
-	@# worse direction -- planned with no executor arm -- is a reconcile that
-	@# fails every time that op appears.
-	@python3 tool/op_gate.py
-	@# Neither program prints with `println!`, which panics when the reader
-	@# of a pipe goes away. A print site is never wrong, only absent from the
-	@# path a test drives. 0261.
-	@python3 tool/print_gate.py
-	@# No test disarms the process its siblings are in, and no test spawns a
-	@# shell it cannot kill as a group. Both cost thirty seconds a run and
-	@# said nothing about the cause. 0262.
-	@python3 tool/disarm_gate.py
 	@# Every module of the C port is reached by a test. 0263 says a module
 	@# whose tests are to follow has not been ported; this is that sentence
 	@# with something behind it.
@@ -1462,10 +1171,6 @@ packaging:
 	@# already had, so any translation unit including both failed to compile --
 	@# and none did, so the module built and its tests passed.
 	@python3 tool/headers_compose_gate.py
-	@# A doc comment written twice on one line, which an edit that pastes over
-	@# itself leaves behind and nothing else notices. Four of the wrong-item
-	@# kind turned up in one day; this covers the half that needs no judgement.
-	@python3 tool/doc_comment_gate.py
 	@# Section 4 of the socket protocol against `tier_of`. The table said 23
 	@# requests while the code classified 32, and section 2's three honest
 	@# things see bytes, shapes and members -- never a tier.
@@ -1475,15 +1180,6 @@ packaging:
 	@# NetworkManager's own policy file is absent -- which is the machine the
 	@# shim exists for.
 	@python3 tool/dbus_policy_gate.py
-	@# Every /etc path netcfgd writes against what its own systemd unit allows.
-	@# A disagreement is EROFS at run time on a packaged install and in no test,
-	@# because every test writes into a temp directory. 0127's writes were
-	@# refused by netcfgd's own sandbox this way.
-	@python3 tool/sandbox_gate.py
-	@# The tag-implies-origin inference in netcfgd-observe is sound only while
-	@# the tag has one producer. That is a property of the tree, so it is
-	@# checked here rather than trusted there.
-	@python3 tool/tag_producer_gate.py
 	@# Only a declared writer takes `/run/netcfgd/reported/<interface>`. That
 	@# file belongs to whatever brought the interface up, and a second writer
 	@# replaces it rather than joining it -- which cost a cellular link its
@@ -1540,12 +1236,6 @@ packaging:
 	@# nothing to clean up. It also refuses to name a program netcfgd runs
 	@# itself, which would be netcfgd disabling its own tools. 0168.
 	@python3 tool/select_gate.py
-	@# Every write in the shipped crates, against what happens when it fails.
-	@# Four records were written with `let _ =` -- a considered decision in each
-	@# case, and completely silent in all four, which is how a full /run would
-	@# have stopped netcfgd noticing a rotated key or an edited .ovpn without
-	@# one word anywhere. 0180.
-	@python3 tool/write_gate.py
 	@# `kill %1` needs job control, which a non-interactive shell does not
 	@# have, so it does nothing and reads as cleanup. Four netcfgd daemons
 	@# outlived their probes that way before this existed, and the leak
@@ -1573,7 +1263,7 @@ packaging:
 			debian/postrm; do \
 		[ -x "$$script" ] || { echo "packaging: $$script is not executable, so dpkg would not run it"; fail=1; }; \
 	done; \
-	if grep -q 'fn chown_group' crates/netcfgd-daemon/src/server.rs; then \
+	if grep -q 'chown(path, (uid_t)-1, gid)' c/src/daemon/server.c; then \
 		for field in CapabilityBoundingSet AmbientCapabilities; do \
 			if ! grep -q "^$$field=.*CAP_CHOWN" packaging/systemd/netcfgd.service; then \
 				echo "packaging: the daemon chowns the control socket and $$field"; \
@@ -1583,7 +1273,7 @@ packaging:
 			fi; \
 		done; \
 	else \
-		echo "packaging: chown_group is gone from server.rs; this check is stale"; \
+		echo "packaging: the socket chown is gone from server.c; this check is stale"; \
 		fail=1; \
 	fi; \
 	if command -v systemd-analyze >/dev/null 2>&1; then \
@@ -1640,7 +1330,7 @@ packaging:
 # was written. `adapters` and `helpers` were both outside it -- the same shape
 # as the unsafe-policy gate globbing only `crates/*` and missing a whole backend
 # for a milestone.
-ASCII_PATHS  = crates backend adapter helper tests c client Cargo.toml Makefile
+ASCII_PATHS  = adapter helper tests c client bridge Makefile
 # `netcfgd-*` catches an installed helper, which is a script with no extension
 # because it ends up on a PATH. Filtering by extension alone would have skipped
 # the entire helpers directory while appearing to cover it.
@@ -1662,7 +1352,7 @@ ASCII_PATHS  = crates backend adapter helper tests c client Cargo.toml Makefile
 # calls a file binary when it holds NUL bytes, and a source file with an em
 # dash in it holds none -- so exactly the files this gate exists to catch are
 # still read.
-ASCII_KINDS  = -I --include='*.rs' --include='*.toml' --include='*.sh' \
+ASCII_KINDS  = -I --include='*.toml' --include='*.sh' \
 	--include='*.c' --include='*.h' \
 	--include='netcfgd-*' --exclude-dir=target
 
@@ -1684,98 +1374,6 @@ ascii:
 	fi; \
 	echo "ascii: ok"
 
-# Cross-compiling, which is the one thing on `What would prove it` that needs
-# no hardware at all.
-#
-# That list says netcfgd "has never run on the class of device it was designed
-# for", and that mips and arm "have not merely failed, they have not been
-# attempted" -- because there was no target here to attempt them with. This is
-# that target. It does not prove anything runs; it proves the tree builds for a
-# machine that is not this one, which is the step before anybody can try.
-#
-# Deliberately NOT in PORTABLE_GATES, and deliberately not skipping. `gui` and
-# `deny` skip when their tool is absent because they run inside `check` on
-# machines that are not desktops, and a gate demanding Qt on a router is a gate
-# people delete. This is the opposite case: nobody runs `make cross` by
-# accident, so a skip would answer the question it was asked with silence. It
-# fails, and it names the package that would fix it.
-CROSS_TARGET ?= aarch64-unknown-linux-gnu
-# The linker for a triple, since cargo will not find one by itself.
-#
-# A table and not a rule, because the mechanical derivation is wrong and was
-# measured to be. Dropping the vendor field turns aarch64-unknown-linux-gnu
-# into aarch64-linux-gnu-gcc correctly, and turns armv7-unknown-linux-gnueabihf
-# into `armv7-linux-gnueabihf-gcc` -- which does not exist, because Debian
-# spells that architecture `arm` where Rust spells it `armv7`. The first draft
-# of this target advised `apt install gcc-armv7-linux-gnueabihf`, and no such
-# package is in the archive.
-#
-# A diagnostic that confidently names a package nobody can install is worse
-# than one that says less, so an unknown triple gets told it is unknown rather
-# than getting a guess wearing the same voice as the two entries that are
-# right. Add a row when a triple is actually tried.
-CROSS_GNU_aarch64-unknown-linux-gnu      = aarch64-linux-gnu
-CROSS_GNU_armv7-unknown-linux-gnueabihf  = arm-linux-gnueabihf
-CROSS_GNU_arm-unknown-linux-gnueabi      = arm-linux-gnueabi
-CROSS_GNU_mips-unknown-linux-gnu         = mips-linux-gnu
-CROSS_GNU_mipsel-unknown-linux-gnu       = mipsel-linux-gnu
-CROSS_GNU_riscv64gc-unknown-linux-gnu    = riscv64-linux-gnu
-CROSS_GNU = $(CROSS_GNU_$(CROSS_TARGET))
-CROSS_CC ?= $(if $(CROSS_GNU),$(CROSS_GNU)-gcc,)
-# Cargo takes the linker from an environment variable named after the triple.
-CROSS_LINKER_VAR = CARGO_TARGET_$(shell echo $(CROSS_TARGET) | tr 'a-z-' 'A-Z_')_LINKER
-
-cross:
-	@std=$$(rustc --print sysroot)/lib/rustlib/$(CROSS_TARGET); \
-	skipped=0; \
-	if [ -z "$(CROSS_CC)" ]; then \
-		echo "cross: no linker known for $(CROSS_TARGET)"; \
-		echo "cross:   set CROSS_CC=<triple>-gcc, and add a CROSS_GNU_ row to"; \
-		echo "cross:   the Makefile once it is known to be the right one"; \
-		skipped=1; \
-	elif ! command -v $(CROSS_CC) >/dev/null 2>&1; then \
-		echo "cross: no linker $(CROSS_CC) on PATH"; \
-		echo "cross:   apt install gcc-$(CROSS_GNU)"; \
-		echo "cross:   the workspace also needs the target's ncurses --"; \
-		echo "cross:   dpkg --add-architecture, then libncurses-dev:<arch>,"; \
-		echo "cross:   or build --no-default-features, which links neither"; \
-		skipped=1; \
-	else \
-		echo "cross: client/ for $(CROSS_TARGET) via $(CROSS_CC)"; \
-		$(MAKE) --no-print-directory -C client clean >/dev/null 2>&1; \
-		if $(MAKE) --no-print-directory -C client \
-			CC=$(CROSS_CC) AR=$(CROSS_GNU)-ar >/dev/null; then \
-			printf 'cross:   libncfg_client.a %s bytes\n' \
-				"$$(stat -c%s client/libncfg_client.a)"; \
-		else \
-			echo "cross:   client/ FAILED to build for $(CROSS_TARGET)"; \
-			$(MAKE) --no-print-directory -C client clean >/dev/null 2>&1; \
-			exit 1; \
-		fi; \
-		$(MAKE) --no-print-directory -C client clean >/dev/null 2>&1; \
-	fi; \
-	if [ ! -d "$$std" ]; then \
-		echo "cross: no Rust standard library for $(CROSS_TARGET)"; \
-		echo "cross:   rustup target add $(CROSS_TARGET)"; \
-		echo "cross:   (this toolchain is $$(rustc -vV | awk '/^host/ {print $$2}') and has"; \
-		echo "cross:    no rustup; a distro rustc ships one target and cannot add another)"; \
-		echo "cross:   a container is the way round it, and has been done:"; \
-		echo "cross:     docker run --rm -v \$$PWD:/src:ro rust:1-slim-trixie"; \
-		echo "cross:   see section 10, which records what aarch64 measured"; \
-		skipped=1; \
-	else \
-		echo "cross: workspace for $(CROSS_TARGET) via $(CROSS_CC)"; \
-		$(CROSS_LINKER_VAR)=$(CROSS_CC) \
-			$(CARGO) build --release --target $(CROSS_TARGET) || exit 1; \
-		printf 'cross:   netcfgd %s bytes, against %s on x86_64\n' \
-			"$$(stat -c%s target/$(CROSS_TARGET)/release/netcfgd)" \
-			"$$(awk '/^total/ {print $$2}' size-budget.txt)"; \
-	fi; \
-	if [ "$$skipped" -ne 0 ]; then \
-		echo "cross: $(CROSS_TARGET) was NOT fully attempted -- see above"; \
-		exit 1; \
-	fi
-
 # The live suite with the things this machine cannot give it.
 #
 # `make live` skipped six of its thirty-eight scripts here, for two different
@@ -1792,7 +1390,10 @@ cross:
 #
 # Deliberately not part of `check` or `live`: it pulls an image, installs a
 # dozen packages and takes minutes. Nobody should get that by accident.
-LIVE_IMAGE ?= rust:1-slim-trixie
+#
+# Plain Debian since 0317. It was the Rust image while the suite built the Rust
+# workspace; `build-essential` in the packages below is all the C needs.
+LIVE_IMAGE ?= debian:trixie-slim
 # Everything a live script asks for. `dhcpcd-base` was missing from the first
 # version, so `dhcpcd.sh` skipped inside the container while passing on the
 # host -- a container run that covers *less* than the host is worse than none,
@@ -1812,7 +1413,7 @@ LIVE_IMAGE ?= rust:1-slim-trixie
 # quiet and an abort is loud, but both end with a container that covered less
 # than the host, and the run above it printed 362 passing checks on the way to
 # covering a third of the suite.
-LIVE_PACKAGES = build-essential libncurses-dev iproute2 iputils-ping dnsmasq \
+LIVE_PACKAGES = build-essential iproute2 iputils-ping dnsmasq \
                 dhcpcd-base hostapd wpasupplicant openvpn wireguard-tools \
                 ppp pppoe iw kmod python3 python3-dbus socat unbound \
                 network-manager libdbus-1-dev pkg-config bc uidmap
@@ -1955,8 +1556,6 @@ live-container:
 		'printf "root:100000:65536\\n" > /etc/subuid' \
 		'printf "root:100000:65536\\n" > /etc/subgid' \
 		'cp -a /src /work && cd /work' \
-		'cargo build --workspace --quiet' \
-		'make ncfg-link PROFILE=debug >/dev/null' \
 		'# **Built in here, not inherited, and cleaned first or it is' \
 		'# neither.** The copy above brings the host tree with whatever' \
 		'# binaries were sitting in it, and the live scripts drive' \
@@ -3298,17 +2897,11 @@ hull-clean:
 #
 #   **The default is the C build and this block said the opposite.** Counted
 #   2026-10-10 across the 83 scripts: 69 take `$${NCFG_LIVE_BUILD:-$$repo/c}`,
-#   none defaults to `target/debug`, and 14 need no binary. So pointing the
-#   suite at the Rust is now the thing that takes a variable:
-#
-#       make live                                            the C
-#       NCFG_LIVE_BUILD=$$PWD/target/debug make live         the Rust
-#
-#   The `live` target still builds the Rust workspace, because the three test
-#   binaries it runs beside the scripts -- `wg-*`, `netcfgd_sys-*`, `live-*` --
-#   are Rust ones. The scripts themselves need neither cargo nor that target: a
-#   script is standalone shell and runs under `unshare -rn` on its own, which
-#   is how 10.467 came to measure all 83 of them.
+#   none defaults to `target/debug`, and 14 need no binary. Since 0317 there
+#   is no other build to point it at: the Rust, and the three Rust test
+#   binaries this target ran beside the scripts, are retired. A script is
+#   standalone shell and runs under `unshare -rn` on its own, which is how
+#   10.467 came to measure all 83 of them.
 # How long any one live script may run before the suite stops waiting for it.
 #
 # **The target had no bound at all on any of its 85 invocations**, so a script
@@ -3340,26 +2933,13 @@ LIVE_TIMEOUT ?= 600
 
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
-	$(CARGO) build --workspace
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
-	$(CARGO) build --tests -p netcfgd-supplicant -p netcfgd-sys
-	@# WireGuard needs CAP_NET_ADMIN and the module; it skips without either.
-	@binary=$$(ls -t target/debug/deps/wg-* 2>/dev/null | grep -v '\.d$$' | head -1); \
-	if [ -n "$$binary" ]; then \
-		timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
-	fi
-	@# netcfgd-sys's own unit tests, and this is the only place they can say
-	@# anything. `shed()` is observable only from a process that has something
-	@# to give up, so under `cargo test` as a person they skip -- which is how
-	@# the half that asserted the wrong thing about a uid broadcast survived
-	@# until a root run met it. `unshare -r` is the full set they need.
-	@binary=$$(ls -t target/debug/deps/netcfgd_sys-* 2>/dev/null | grep -v '\.d$$' | head -1); \
-	if [ -n "$$binary" ]; then \
-		timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
-	fi
-	@binary=$$(ls -t target/debug/deps/live-* 2>/dev/null | grep -v '\.d$$' | head -1); \
-	if [ -z "$$binary" ]; then echo "live: no test binary was built"; exit 1; fi; \
-	timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1" || { \
+	@$(MAKE) --no-print-directory -C c all tests/shed_test
+	@# Shedding privilege, from a process that has some to shed. `c-test` runs
+	@# this as a person, where the effective set is already empty and the test
+	@# says so rather than claiming a drop it did not make; `unshare -r` is the
+	@# full set, and this is the only place the drop itself is asserted. The
+	@# Rust's `netcfgd-sys` tests were run here for that reason until 0317.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "cd c && ./tests/shed_test" || { \
 		echo "live: if this failed to unshare, the kernel may have"; \
 		echo "live:   user namespaces restricted; run as root instead"; \
 		exit 1; \
@@ -3862,21 +3442,6 @@ fuzz:
 	@echo "fuzz:   c/fuzz/corpus/<target>/ and committed**, which is what makes"
 	@echo "fuzz:   it replay for everybody afterwards"
 
-fuzz-rust:
-	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
-		echo "fuzz-rust: cargo-fuzz is not installed"; \
-		echo "fuzz-rust:   cargo install cargo-fuzz   (needs a nightly toolchain)"; \
-		echo "fuzz-rust: targets are in fuzz/fuzz_targets/, and the randomised"; \
-		echo "fuzz-rust: tests in crates/*/tests/random.rs run on stable meanwhile"; \
-		exit 1; \
-	fi
-	@[ -n "$(FUZZ_TARGET)" ] || { \
-		echo "fuzz-rust: name one with FUZZ_TARGET=<name>. They are:"; \
-		ls fuzz/fuzz_targets | sed 's/\.rs$$//' | sed 's/^/fuzz-rust:   /'; \
-		exit 2; \
-	}
-	$(CARGO) fuzz run $(FUZZ_TARGET) -- $(FUZZ_ARGS)
-
 # The Qt client, which nothing else builds.
 #
 # `client/` is built by `conformance`, so a change that breaks the C library is
@@ -3901,21 +3466,6 @@ gui:
 		echo "gui: qmake6 not installed, skipping (apt install qt6-base-dev)"; \
 	fi
 
-# Supply chain. Both are optional installs, so this reports rather than failing
-# when they are absent -- a gate nobody can run locally is a gate that rots.
-deny:
-	@command -v cargo-deny >/dev/null 2>&1 && $(CARGO) deny check || \
-		echo "deny: cargo-deny not installed, skipping"
-	@command -v cargo-audit >/dev/null 2>&1 && $(CARGO) audit || \
-		echo "deny: cargo-audit not installed, skipping"
-	@# One workspace, since 0276. There was a loop here over each adapter's own
-	@# deny.toml, because a separate workspace is invisible to a `cargo deny` run
-	@# in the root -- which was the point of the containment and also the way an
-	@# adapter's supply chain would have gone unchecked forever. The shim is C
-	@# now and has no cargo dependencies to check; `nm-containment` asserts that
-	@# no adapter has acquired a lockfile again, which is what would make this
-	@# loop necessary a second time.
-
 # `clean` removes what it names. `dist/` is the one directory cleared wholesale,
 # and only because the build creates it: `deb` and `apk-source` make it, nothing
 # else writes there, and it is disposable by construction.
@@ -3926,18 +3476,6 @@ deny:
 # for being non-empty and relative before anything is removed, and the packages
 # are listed rather than swept silently.
 clean:
-	@# **Skipped loudly where cargo is absent, since 0276.** The Rust core is
-	@# still in the tree and `cargo clean` is how its `target/` goes, but the
-	@# Debian build reaches this through `dh_auto_clean` -- and retiring the
-	@# Rust shim took the Rust toolchain out of `debian/control` entirely, so
-	@# the one remaining cargo call in a package build would be this line.
-	@# `if cond; then run; fi` rather than `cond && run || echo`, which would
-	@# report the skip for a cargo that IS there and failed.
-	@if command -v $(CARGO) >/dev/null 2>&1; then \
-		$(CARGO) clean; \
-	else \
-		echo "clean: cargo not installed, leaving target/ alone"; \
-	fi
 # **`$(KERNEL_OUT)` is kept, and the guest images are no longer here to keep.**
 # Until 2026-10-25 `$(DIST)/hull` held four `docker export` trees, spared
 # because rebuilding one cost docker, a network and minutes where everything
@@ -4008,25 +3546,6 @@ example:
 	@$(MAKE) --no-print-directory -C c
 	@python3 tool/example_gate.py
 
-# The two programs compile the same configuration to the same document.
-#
-# After `c-test` in the gate list, because it needs both binaries and that
-# target is what builds the C one. The comparison is `tool/agree_gate.py`'s and
-# the argument for it being `show` and nothing else is in that file's header:
-# every other verb observes the machine, so two runs of it are answering
-# questions about two moments.
-agree: c-test
-	@# **Both programs built here rather than trusted**, which is `linkage`'s
-	@# reason and became this gate's on the day `build` stopped producing the
-	@# Rust one (0266). `c-test` above builds the C. The Rust binary and the
-	@# `ncfg` symlink beside it were made by `build`; nothing in `check` makes
-	@# them before this runs now, and the gate fails rather than skips when a
-	@# binary is missing -- so without these two lines a clean tree would go red
-	@# here for a reason that has nothing to do with the two programs agreeing.
-	@$(CARGO) build --release --quiet
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
-	@python3 tool/agree_gate.py
-
 # What the C build carries out, against the frozen witnesses.
 #
 # `doc/c-transition.md` section 5 asks for a completeness ledger and forbids it
@@ -4058,8 +3577,10 @@ registry:
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`
 # adds editor and tool droppings. Each names what it removes.
+#
+# `target/` is what the retired Rust (0317) built into, and nothing writes it
+# now; a tree that built the Rust before then still has one, so it goes here.
 veryclean: clean
-	$(CARGO) clean
 	rm -rf target
 
 # **`distclean` no longer sweeps the tree for editor droppings.** `*~`,

@@ -455,14 +455,15 @@ static void warn_unmanaged(ncfg_builder_t *builder)
  * which is a warning at the full set and, worse, an invitation for the next arm
  * to reach for a sentence whose promise nobody has checked.
  *
- * A feature the Rust has not built either is not a port gap at all, and telling
+ * A feature nothing has built is not a gap an upgrade will close, and telling
  * somebody to wait for something that is not coming is worse than saying
  * nothing: they keep the block, re-read the release notes, and are still
  * holding a configuration that means nothing. So a block gets this sentence
- * once it has been checked against `crates/` and *not* found there, and the
- * wording below is the Rust's own, which says the same thing about itself. A
- * block that is a real port gap gets a sentence naming what is missing, in the
- * arm itself, where a reader can check it against the pass that will fill it.
+ * when nothing in the tree acts on it. It said "nothing acts on it in the Rust
+ * either" while there were two implementations, each checked against the
+ * other; 0317 retired the Rust and the sentence with it. A block that is a
+ * real gap gets a sentence naming what is missing, in the arm itself, where a
+ * reader can check it against the pass that will fill it.
  *
  * **Published in `plan_internal.h` rather than kept here**, because the wifi
  * passes draw the same distinction about the four halves of a `network` block
@@ -472,9 +473,8 @@ static void warn_unmanaged(ncfg_builder_t *builder)
 void ncfg_plan_warn_unbuilt(ncfg_builder_t *builder, const char *interface, const char *block)
 {
 	ncfg_plan_warnf(builder->plan, interface,
-	    "%s. That is not this port catching up: nothing acts on it in the Rust either, "
-	    "so there is nothing to wait for. The block is kept so a configuration written "
-	    "now still means this when the code arrives",
+	    "%s. Nothing in netcfgd acts on it, so there is nothing to wait for. The block "
+	    "is kept so a configuration written now still means this when the code arrives",
 	    block);
 }
 

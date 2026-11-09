@@ -262,9 +262,8 @@ static inline int planfix_whole(const char *message, const char *ending)
  * port. Found by sabotage: putting the old wording back turned nothing red.
  */
 #define PLANFIX_UNBUILT_TAIL \
-	". That is not this port catching up: nothing acts on it in the Rust either, " \
-	"so there is nothing to wait for. The block is kept so a configuration written " \
-	"now still means this when the code arrives"
+	". Nothing in netcfgd acts on it, so there is nothing to wait for. The block " \
+	"is kept so a configuration written now still means this when the code arrives"
 
 /* Whether any warning, reason or refusal anywhere in the plan contains this
  * text. What a secret must never appear in. */

@@ -10,13 +10,12 @@
  *   forgot to supply them would not compile rather than reading the
  *   developer's `/run`.
  *
- *   Nothing here reads `/run`, `/proc` or `/etc`. The only thing outside this
- *   test's own directory that it opens is `crates/netcfgd-host/tests/networkd/`,
- *   read-only: three link state files copied verbatim from a running
- *   `systemd-networkd`. They are read from where they already are rather than
- *   copied in, because a second copy of a fixture is a second thing that can
+ *   Nothing here reads `/run`, `/proc` or `/etc`. The only fixture it opens is
+ *   `tests/networkd/`, read-only: three link state files copied verbatim from
+ *   a running `systemd-networkd`. One copy, read where it is rather than
+ *   embedded, because a second copy of a fixture is a second thing that can
  *   drift from what networkd really writes -- and what is being matched is
- *   exactly that.
+ *   exactly that. They lived beside the Rust's detector until 0317.
  *
  * WHAT THE CASES CARRY ACROSS
  *   Each is one of `crates/netcfgd-host/tests/contention.rs`'s, and three of
@@ -211,7 +210,7 @@ static char *captured(const char *sample)
 {
 	char path[PATH_BYTES];
 
-	(void)snprintf(path, sizeof(path), "../crates/netcfgd-host/tests/networkd/%s", sample);
+	(void)snprintf(path, sizeof(path), "tests/networkd/%s", sample);
 	return testdir_read(path, NULL);
 }
 

@@ -21,8 +21,8 @@
  * WHY EVERY CHILD IS IN ITS OWN GROUP, AND EVERY WAIT HAS A CEILING
  *   A `sh -c 'sleep 30'` orphan holding this binary's stderr cost the Rust
  *   suite thirty seconds on every run, after the last assertion, for tests that
- *   had already passed -- see `tool/disarm_gate.py`, which is a gate rather
- *   than a test because the failure never mentions its cause. So: every child
+ *   had already passed, and the failure never mentions its cause (0262; the
+ *   gate that held the Rust to it went with the Rust in 0317). So: every child
  *   is spawned into a group of its own, every one is registered before it can
  *   be lost, every wait is a bounded poll rather than a blocking `waitpid`, and
  *   the last check in this file is that nothing of this test's is still

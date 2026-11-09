@@ -519,43 +519,32 @@ ncfg status                # what the machine looks like now
 **To build the daemon and the CLI** — Debian and derivatives:
 
 ```sh
-sudo apt install build-essential libncurses-dev pkgconf python3
+sudo apt install build-essential pkgconf python3
 ```
 
 The daemon and the CLI are **C** since 0266, so there is no toolchain here
 beyond a C compiler, and the shipped package depends on `libc6` alone --
 `ncfg tui` writes its own escape sequences rather than binding ncurses, and
-`c/src/cli/tui_term.c` says why. `libncurses-dev` is for the Rust that
-remains as a test instrument, whose `ncfg tui` does bind it. `python3` runs
-the style gate and several test scripts, not the daemon.
+`c/src/cli/tui_term.c` says why. `python3` runs the style gate and several
+test scripts, not the daemon.
 
 **`libdbus-1-dev` is needed for `adapter/netcfgd-nm`**, the shim that serves
-NetworkManager's own D-Bus API. It is C over `libdbus-1` since 0276, which
-retired the Rust one, so **nothing this tree builds or packages needs a Rust
-toolchain** -- `debian/control` names neither `cargo` nor `rustc`.
+NetworkManager's own D-Bus API. It is C over `libdbus-1` since 0276.
 
 **`clang` is optional and is what `make fuzz` needs**, libFuzzer coming with
 it. Without clang the fuzz targets' committed corpus still runs: `make check`
 replays every input through the same target functions with the ordinary
 compiler, which is the half that catches a regression (0277).
 
-`cargo` and `rustc` (1.85 or newer) are still wanted for `make check`: the Rust
-implementation of the daemon remains in the tree as the instrument the gates
-compare the C against, `make agree` being the main one. Nothing ships it, and
-`make build`, `make install` and `make deb` do not need it -- `make clean`
-calls `cargo clean` where cargo is there and says it is skipping where it is
-not, which is the one place a package build would have met it.
+**Nothing here needs a Rust toolchain**, `make check` included. netcfgd was
+first written in Rust and the C port replaced it; the Rust stayed in the tree
+as the instrument that proved the C, and 0317 retired it with every gate that
+built or compared it.
 
 **To build the Qt client**, additionally `qt6-base-dev`. Note that the Qt
 client links `libQt6DBus`, so the "no D-Bus" property above is the *core's*
 and not the GUI's — that is Qt's own dependency rather than a choice made
 here. The client is not in any package yet; `make install-gui` is opt-in.
-
-**To cross-compile** (`make cross`), the linker for the target —
-`gcc-aarch64-linux-gnu`, `gcc-arm-linux-gnueabihf` or `gcc-mips-linux-gnu` —
-plus `rustup target add <triple>`, which a distro `rustc` cannot do. That
-target still cross-compiles the Rust; it has not been pointed at the C build
-since 0266.
 
 ## What you need at run time, and only if you use it
 

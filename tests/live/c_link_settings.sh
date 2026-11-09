@@ -21,18 +21,18 @@
 # creates a bridge -- in either implementation, and correctly, because a create
 # carries its whole configuration -- so nothing else was going to reach it.
 #
-# **The reader is `ip -d`, and the comparison is against the Rust.** Reading
-# the state back through `ncfg status` would prove only that netcfgd agrees
-# with itself, which is what section 9 warns about; `ip` is a third program
-# with its own netlink code. The two implementations are given the same
-# document in the same namespace, one after the other, and what the kernel
-# holds afterwards has to be the same both times.
+# **The reader is `ip -d`.** Reading the state back through `ncfg status`
+# would prove only that netcfgd agrees with itself, which is what section 9
+# warns about; `ip` is a third program with its own netlink code. Every
+# setting is asserted against the number the document asked for, in the
+# kernel's units.
 #
-# Agreeing is not enough on its own -- two programs can be wrong alike -- so
-# the bridge's four settings are also asserted against the numbers the
-# document asked for. The kinds that ride along are here to keep it that way:
-# bond, vxlan, vlan and macvlan were all identical when the bridge was not, and
-# a future change that moves one of them off the create path would show here.
+# Until 0317 each device was also compared whole against what the Rust made
+# from the same document. That comparison found the bridge; the assertions
+# here are what it found it with, and they need nothing but the C. The kinds
+# that ride along stay for the reason they were added: bond, vxlan, vlan and
+# macvlan were right when the bridge was not, and a change that moved one of
+# them off the create path would show here.
 
 set -eu
 
@@ -56,9 +56,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 # `not found` from the shell, because the ELF interpreter it names is absent.
 # So the skip never fired, and a comparison binary that could not run reported
 # as a missing file several checks later.
-if ! [ -x "$repo/target/debug/ncfg" ] || ! "$repo/target/debug/ncfg" --version >/dev/null 2>&1; then
-	skip "the Rust ncfg is not built here, or will not run, and it is the comparison (a glibc build on musl)"
-fi
+"$repo/c/ncfg" --version >/dev/null 2>&1 || skip "the C ncfg will not run here (a glibc build on musl)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-c-link-settings.XXXXXX")
 cleanup() { rm -rf "$work"; }
@@ -76,49 +74,16 @@ check() {
 	fi
 }
 
-# The kind line `ip -d` prints for a device, with what changes between runs
-# taken out: the MAC is generated per link and the queue and offload numbers
-# are the kernel's, not netcfgd's.
-#
-# **And a bridge's line carries clocks.** `hello_timer`, `gc_timer`,
-# `tcn_timer` and `topology_change_timer` are the running state of a bridge
-# that is up, and they tick -- so comparing the whole line compares when the
-# two applies happened. This script did, and failed about twice in sixty-five
-# runs with `hello_timer 0.99` against `1.00`: rare enough to look like a
-# defect somewhere else, and reproducible in fifteen runs once the machine was
-# made busy enough to put a hundredth of a second between them.
-#
-# Dropped by name rather than by rounding. What is left is the kind and its
-# settings, which is what netcfgd put there.
-kind_line() {
-	ip -d link show "$1" 2>/dev/null | sed -n '3p' |
-		sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-		    -e 's/ addrgenmode.*//' \
-		    -e 's/ [a-z_]*_timer  *[0-9.]*//g'
+# One setting of a device as `ip -d` prints it: the word after KEY on the
+# kind line. `ip -d` prints `key value` pairs, so splitting on space and
+# taking what follows the key reads one without depending on the order or
+# on what else this iproute2 prints beside it.
+value_of() {
+	ip -d link show "$1" 2>/dev/null | sed -n '3p' | tr -s ' \t' '\n' |
+		grep -A1 -x -- "$2" | sed -n '2p'
 }
 
-# Wait for a device to be gone, bounded, and say so if it is not.
-#
-# The two programs are given the same document one after the other in one
-# namespace, so the second one's create happens where the first one's device
-# was. `ip link del` returns when the request is accepted rather than when the
-# link is torn down, and a create that lands in that window fails `EEXIST` --
-# which is the script reporting a defect that is its own. Fifty tenths of a
-# second is far past what a link teardown takes and far short of hanging.
-gone() {
-	waited=0
-	while [ "$waited" -lt 50 ]; do
-		ip link show "$1" >/dev/null 2>&1 || return 0
-		sleep 0.1
-		waited=$((waited + 1))
-	done
-	echo "FAIL $1 was still there five seconds after it was deleted"
-	failures=$((failures + 1))
-	return 1
-}
-
-# One program, one document, in this namespace. Each gets its own directories
-# so that neither reads what the other recorded as owned.
+# The C, one document, in this namespace, with directories of its own.
 apply_with() {
 	tree="$work/$2"
 	mkdir -p "$tree/etc" "$tree/run"
@@ -131,33 +96,19 @@ apply_with() {
 	return 1
 }
 
-# Both programs, the same document, and what the kernel holds after each.
-# Written twice into the same namespace with the devices removed in between,
-# which is what makes the two answers comparable rather than two machines'.
-compare() {
+# Apply a document and check each named device exists afterwards.
+apply_c() {
 	what="$1"
 	devices="$2"
-	document="$3"
-
-	printf '%s\n' "$document" | apply_with "$repo/target/debug/ncfg" "rust" || return 0
-	rust_says=""
+	printf '%s\n' "$3" | apply_with "$repo/c/ncfg" "$4" || return 1
 	for device in $devices; do
-		rust_says="$rust_says|$(kind_line "$device")"
+		if ! ip link show "$device" >/dev/null 2>&1; then
+			echo "FAIL $what: $device was not created"
+			failures=$((failures + 1))
+			return 1
+		fi
 	done
-	for device in $devices; do
-		ip link del "$device" 2>/dev/null || true
-	done
-	for device in $devices; do
-		gone "$device" || return 0
-	done
-
-	printf '%s\n' "$document" | apply_with "$repo/c/ncfg" "c" || return 0
-	c_says=""
-	for device in $devices; do
-		c_says="$c_says|$(kind_line "$device")"
-	done
-
-	check "$what" "$c_says" "$rust_says"
+	echo "ok   $what"
 }
 
 # ------------------------------------------------- the kind that was wrong
@@ -178,17 +129,11 @@ interface br0 {
 	config = "10.9.0.1/24"
 }'
 
-compare "a bridge comes up carrying what the document says" "br0" "$BRIDGE"
-
-# And against the numbers themselves, because two programs agreeing is one
-# witness when the same hand wrote both. These are the kernel's units.
-bridge_value() {
-	ip -d link show br0 2>/dev/null | tr -s ' \n' '\n' | grep -A1 "^$1\$" | tail -1
-}
-check "  with STP on, which it is not by default" "$(bridge_value stp_state)" "1"
-check "  a forward delay of 4s and not 15" "$(bridge_value forward_delay)" "400"
-check "  a hello time of 1s and not 2" "$(bridge_value hello_time)" "100"
-check "  and the priority it was given, not 32768" "$(bridge_value priority)" "4096"
+apply_c "a bridge comes up" "br0" "$BRIDGE" bridge
+check "  with STP on, which it is not by default" "$(value_of br0 stp_state)" "1"
+check "  a forward delay of 4s and not 15" "$(value_of br0 forward_delay)" "400"
+check "  a hello time of 1s and not 2" "$(value_of br0 hello_time)" "100"
+check "  and the priority it was given, not 32768" "$(value_of br0 priority)" "4096"
 ip link del br0 2>/dev/null || true
 
 # ------------------------------------------- the kinds that ride along
@@ -197,7 +142,7 @@ ip link del br0 2>/dev/null || true
 # and they were identical while the bridge was not. A change that moved any of
 # them onto a second message would land here rather than in somebody's bridge.
 
-compare "a bond carries its mode and its link monitoring" "bond0" 'device bond0 {
+apply_c "a bond comes up" "bond0" 'device bond0 {
 	bond {
 		mode   = "802.3ad"
 		miimon = 250
@@ -205,10 +150,12 @@ compare "a bond carries its mode and its link monitoring" "bond0" 'device bond0 
 }
 interface bond0 {
 	config = "10.9.1.1/24"
-}'
+}' bond
+check "  in 802.3ad" "$(value_of bond0 mode)" "802.3ad"
+check "  monitoring its links every 250ms" "$(value_of bond0 miimon)" "250"
 ip link del bond0 2>/dev/null || true
 
-compare "a vxlan carries its id, its endpoints and its port" "vx0" 'device vx0 {
+apply_c "a vxlan comes up" "vx0" 'device vx0 {
 	vxlan {
 		vni    = 42
 		local  = "10.9.2.1"
@@ -218,14 +165,18 @@ compare "a vxlan carries its id, its endpoints and its port" "vx0" 'device vx0 {
 }
 interface vx0 {
 	config = "10.9.2.1/24"
-}'
+}' vxlan
+check "  with its id" "$(value_of vx0 id)" "42"
+check "  its local end" "$(value_of vx0 local)" "10.9.2.1"
+check "  its remote end" "$(value_of vx0 remote)" "10.9.2.2"
+check "  and its port" "$(value_of vx0 dstport)" "4789"
 ip link del vx0 2>/dev/null || true
 
 # Both over one parent, which is also the only case here where a device the
 # document creates is another device's parent -- so the order the plan puts
-# them in is part of what is being compared.
-compare "a vlan and a macvlan carry theirs, over a parent made in the same plan" \
-	"vl0 mv0" 'device base0 { kind = "dummy" }
+# them in is part of what is being checked.
+apply_c "a vlan and a macvlan come up over a parent made in the same plan" \
+	"base0 vl0 mv0" 'device base0 { kind = "dummy" }
 device vl0 {
 	vlan {
 		parent = "base0"
@@ -246,7 +197,10 @@ interface vl0 {
 }
 interface mv0 {
 	config = "10.9.5.1/24"
-}'
+}' stacked
+check "  the vlan with its id" "$(value_of vl0 id)" "101"
+check "  the macvlan in bridge mode" "$(value_of mv0 mode)" "bridge"
+check "  the vlan over base0" "$(ip -o link show vl0 2>/dev/null | sed -n 's/.*: vl0@\([^:]*\):.*/\1/p')" "base0"
 for device in mv0 vl0 base0; do
 	ip link del "$device" 2>/dev/null || true
 done

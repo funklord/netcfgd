@@ -104,11 +104,21 @@ def main():
 		return 1
 
 	cached = {}
-	checked = fail = 0
+	checked = fail = retired = 0
 	for doc in present:
 		for line, named, text in quotes(doc):
 			checked += 1
 			source = pathlib.Path(named)
+			# **A quotation from a tree that has been removed is history**, not
+			# a wrong claim: 0317 deleted the Rust, and a decision record is
+			# not edited once accepted, so the records quoting `crates/` and
+			# `backend/` cannot follow it. Decided by the top directory, which
+			# is `style_gate.py docs`' rule for a backticked path: a path under
+			# a directory that does not exist describes a layout. A file gone
+			# from a directory that is still here is a rename, and still fails.
+			if not source.is_file() and not pathlib.Path(source.parts[0]).exists():
+				retired += 1
+				continue
 			if not source.is_file():
 				print(f"cited-quote: {doc}:{line}: quotes `{named}`, which is not a file")
 				fail = 1
@@ -126,8 +136,8 @@ def main():
 
 	if not fail:
 		print(
-			f"cited-quote: {checked} marked quotation(s) across {len(present)} document(s), "
-			"each still in the file it names"
+			f"cited-quote: {checked - retired} marked quotation(s) across {len(present)} "
+			f"document(s), each still in the file it names; {retired} from a retired tree"
 		)
 	return fail
 

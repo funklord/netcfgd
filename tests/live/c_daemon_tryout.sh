@@ -199,7 +199,7 @@ restore() {
 		kill -KILL "$c_pid" 2>/dev/null || true
 	fi
 	if [ "$was_active" = active ]; then
-		say "starting the Rust daemon again"
+		say "starting the installed daemon again"
 		systemctl start netcfgd || say "WARNING: systemctl start netcfgd failed"
 		if took=$(wait_for_net 60); then
 			say "the network is back and steady after ${took}s"
@@ -254,8 +254,8 @@ if ! kill -0 "$c_pid" 2>/dev/null; then
 	exit 1
 fi
 say "the C daemon is running as pid $c_pid"
-# **The C binaries, by path.** `/usr/bin/ncfg` is the *Rust* one on a machine
-# with the package installed, and it speaks the same protocol -- so it will
+# **The build tree's binaries, by path.** `/usr/bin/ncfg` is the installed
+# one, and it speaks the same protocol -- so it will
 # talk to the C daemon happily, and `ncfg apply` without a window will not
 # reach the daemon at all: that path applies in the client's own process and
 # takes the apply lock itself. What releases this daemon's `--no-apply-on-start`
@@ -294,7 +294,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 		missed=$((missed + 1))
 		say "no network ($missed of $failures)"
 		if [ "$missed" -ge "$failures" ]; then
-			say "handing the machine back to the Rust daemon"
+			say "handing the machine back to the installed daemon"
 			exit 1
 		fi
 	fi

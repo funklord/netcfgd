@@ -7,7 +7,7 @@
 #
 # That script is a safety net, and a safety net nobody has dropped anything
 # into is a claim. What it promises is narrow and checkable: when the network
-# stops answering it stops the C daemon, starts the Rust one, and says so --
+# stops answering it stops the C daemon, starts the installed one, and says so --
 # and when the network is fine it does none of that. Both halves are decisions
 # made from the output of `ping`, `getent` and `systemctl`, so both can be
 # driven by putting this test's own versions of those three in front.
@@ -126,7 +126,7 @@ case "$1" in
 is-active) cat "$NCFG_WATCH_WORK/active" ;;
 stop)      echo down > "$NCFG_WATCH_WORK/active" ;;
 start)     echo active > "$NCFG_WATCH_WORK/active"
-           # Starting the Rust daemon is what brings the network back, which
+           # Starting the installed daemon is what brings the network back, which
            # is the whole point of the fallback -- so the stub says so.
            echo up > "$NCFG_WATCH_WORK/net" ;;
 esac
@@ -173,11 +173,11 @@ if sh "$repo/tests/live/c_daemon_tryout.sh" --interval 1 --failures 2 --minutes 
 	:
 fi
 check 0 "a tryout with the network up runs and returns"
-grep -q "stopping netcfgd.service" "$say_out" && check 0 "  it stopped the Rust daemon" ||
-	check 1 "  it stopped the Rust daemon"
+grep -q "stopping netcfgd.service" "$say_out" && check 0 "  it stopped the installed daemon" ||
+	check 1 "  it stopped the installed daemon"
 grep -q "the C daemon is running" "$say_out" && check 0 "  and started the C one" ||
 	check 1 "  and started the C one"
-grep -q "starting the Rust daemon again" "$say_out" &&
+grep -q "starting the installed daemon again" "$say_out" &&
 	check 0 "  and handed the machine back when the time was up" ||
 	check 1 "  and handed the machine back when the time was up"
 grep -q "^stop netcfgd$" "$work/systemctl.log" && check 0 "  through systemctl stop" ||
@@ -208,8 +208,8 @@ grep -q "no network (2 of 2)" "$down_out" &&
 grep -q "handing the machine back" "$down_out" && check 0 "  and said so" ||
 	check 1 "  and said so"
 grep -q "^start netcfgd$" "$work/systemctl.log" &&
-	check 0 "  and started the Rust daemon, which is the fallback" ||
-	check 1 "  and started the Rust daemon, which is the fallback"
+	check 0 "  and started the installed daemon, which is the fallback" ||
+	check 1 "  and started the installed daemon, which is the fallback"
 grep -q "is back and steady after" "$down_out" &&
 	check 0 "  and waited for the network rather than claiming it was back" ||
 	check 1 "  and waited for the network rather than claiming it was back"
@@ -329,7 +329,7 @@ grep -q "no network" "$work/switch-long.out" &&
 grep -q "the network answered again after" "$work/switch-long.out" &&
 	check 0 "  and said when it came back, which is the switch completing" ||
 	check 1 "  and said when it came back, which is the switch completing"
-grep -q "handing the machine back to the Rust daemon" "$work/switch-long.out" &&
+grep -q "handing the machine back to the installed daemon" "$work/switch-long.out" &&
 	check 1 "  without handing anything back" ||
 	check 0 "  without handing anything back"
 # And the C daemon is still the one holding the machine at the end of it.

@@ -103,7 +103,7 @@ find_in_sbin() {
 # ---------------------------------------------------------------- preflight
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$build/ncfg" ] || skip "ncfg is not built (cargo build --workspace)"
+[ -x "$build/ncfg" ] || skip "ncfg is not built (make)"
 dhcpcd=$(find_in_sbin dhcpcd) || skip "dhcpcd is not installed (apt install dhcpcd-base | apk add dhcpcd)"
 command -v hostname >/dev/null 2>&1 || skip "no hostname(1), which is how the counter-proof is measured"
 

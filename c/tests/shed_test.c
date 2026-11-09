@@ -13,8 +13,10 @@
  *   **thirty seconds on the clock of every run of that crate's tests** -- a
  *   `kill` of a root-owned child returning `EPERM` after the broadcast, leaving
  *   a `wait` blocked on a `sleep 30` that nothing could signal. Neither failure
- *   mentions privilege. Decision 0262, and `tool/disarm_gate.py` is the gate
- *   that keeps it from coming back.
+ *   mentions privilege. Decision 0262. `tool/disarm_gate.py` kept it from
+ *   coming back in the Rust and went with it (0317); here it is this file
+ *   being a binary of its own, and `ncfg_privilege_shed` having no other test
+ *   caller.
  *
  *   So: one file, one subject. Everything else about `process.h` is in
  *   `process_test.c`, which stays root for as long as it needs to signal its

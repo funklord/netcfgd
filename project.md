@@ -611,12 +611,12 @@ the whole value of this target is telling somebody what to install.
 | Size budget | `make size`. **Total installed size, not per binary** — merging two binaries that each link most of the workspace makes the one binary bigger and the install a megabyte smaller, so a per-binary gate points the wrong way. It **ratchets**: the limit is the last measured size, and `size-budget.txt` carries a line per feature saying what it bought. The 3% tolerance is for compiler-version noise; spend it on a feature and the next feature fails the gate for the wrong reason. Design §10.2's 1 MB embedded target was measured as unreachable ([0021](doc/decision/0021-no-nano-tier.md), [0024](doc/decision/0024-one-binary-and-what-a-megabyte-would-actually-cost.md)) |
 | RSS budget | `make rss`, `VmHWM` of the **release** daemon — what ships. It measured the debug one until [0098](doc/decision/0098-a-supplicant-that-bound-its-socket-and-stopped-answering.md), which made it sensitive to something it is not about: an *unused* dependency edge moved the debug figure ~190 KB while the release build stayed byte-for-byte identical. `size` already builds release and runs first, so this costs nothing. A **ratchet on a measurement**, not a tier target: §10.4's "< 4 MB RSS steady-state" is written *for nano*, and [0021](doc/decision/0021-no-nano-tier.md) dropped that tier — the same distinction `size-budget.txt` has carried since M5 and this gate had not ([0104](doc/decision/0104-the-four-megabytes-belonged-to-a-tier-that-was-dropped.md)). On **musl**, which is what the size posture targets and what the apk ships, the daemon peaks at **~2.9 MB** with ~205 kB of it anonymous; the glibc figure is ~4.2 MB because glibc is bigger. The gate prints all three numbers and pins VmHWM. **It is noisy in a way the size gate is not** — runs of an *identical* binary spread by hundreds of KB — so the limit carries a full noise band above the observed peak, and the measurements are in the Makefile so the next person can tell drift from spread |
 | Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
-| Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-sys` |
+| ~~Unsafe policy~~ | retired with the Rust it read ([0317](doc/decision/0317-the-rust-is-retired.md)) |
 | Linkage | `make linkage`: the shipped binaries' `NEEDED` lists against two allow-lists — the daemon's is constraint 3 (libc and the kernel, one entry as built), the shim's is 0264's containment (libc plus `libdbus-1`, with libdbus *required* so the check cannot pass for the boring reason). Constraint 3 and the README's headline both promise the core needs nothing beyond libc and the kernel, and until this nothing checked it. It read `target/release/netcfgd` until 10.506, which made it a gate about an artifact nobody installs; ncurses and libgcc_s came off the list in the same change, being the Rust's and not the C's |
-| Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
+| ~~Supply chain~~ | `cargo-deny` and `cargo-audit` over the Rust lockfile; retired with it ([0317](doc/decision/0317-the-rust-is-retired.md)). The C links libc and the kernel, which `linkage` holds it to, and vendors fuzznet at a pinned commit |
 | Packaging | `make packaging`: every path an init script names is a path that gets installed, every maintainer script parses **and is executable** (dpkg silently skips one that is not), and every `@TOKEN@` in a package template is one a recipe substitutes. `make deb` and `make apk-container` build real packages, with dependencies derived from the ELF by `dpkg-shlibdeps` and `abuild` rather than typed out ([0099](doc/decision/0099-a-package-installs-netcfgd-and-changes-nothing.md)) |
-| Adapter containment | `make nm-containment`: every crate in the core lockfile appears in `deny.toml`'s allow list, so an adapter's dependencies cannot reach the core. Design §9.2 asks for exactly this assertion; [0027](doc/decision/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md) |
-| Fuzzing | five `cargo-fuzz` targets — `config_parse`, `document_json`, `netlink_wire`, `socket_message`, `backend_ipc` — plus randomised tests in `crates/*/tests/random.rs` that run on stable. **Not in CI**, and that row said it was: `cargo-fuzz` needs nightly, which the workflow does not install. Run in a container instead ([§10](#10-where-this-is-now-and-what-to-pick-up-next)), which is how `netlink_wire` produced its first crash |
+| Adapter containment | `make linkage` since [0317](doc/decision/0317-the-rust-is-retired.md): the daemon's `NEEDED` list against constraint 3 and the shim's with `libdbus-1` required, so an adapter's dependencies cannot reach the core. Design §9.2 asks for exactly this assertion; [0027](doc/decision/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md). `make nm-containment` asked it of the Rust lockfile until then |
+| Fuzzing | `make fuzz`: the C parsers under libFuzzer and clang, with the committed corpus in `c/fuzz/corpus/` replayed by `make c-test` on any compiler ([0277](doc/decision/0277-a-fuzz-target-is-replayed-as-well-as-fuzzed.md)). The five `cargo-fuzz` targets and the Rust's randomised tests went with the Rust ([0317](doc/decision/0317-the-rust-is-retired.md)) |
 | Determinism | same config compiles to byte-identical document across runs and platforms. `sh tests/determinism.sh` cross-builds and runs `ncfg show --json` on **x86_64, aarch64 and s390x**, all byte-identical (md5 `dccacd09181d5903e5eda91db2183207`). The platforms half had never been checked against a second platform at all; s390x is the one that counts, being the only big-endian of the three |
 | Plan idempotence | applying a plan twice produces an empty second plan |
 
@@ -693,20 +693,20 @@ The design doc's remaining open questions (§19.2) are not blocking and can wait
 
 ### Code style
 
-Three rules, applying to every crate in the workspace — pure core, netlink, binaries, backends and adapters alike:
+Three rules, applying to all of it — the C of the daemon, the CLI, the client, the bridge, the helpers and the adapters, and the C++ of the GUI:
 
-- **`snake_case`, not `camelCase`,** for identifiers this project defines. Rust's own lints give most of this for free; what they do not give is the rest of the rule — no abbreviations, and one word per concept everywhere. Model field names become JSON keys, `/run` filenames and the dotted paths in a `Reason`, so a name invented inside a struct ends up in somebody's grep and can no longer be changed.
+- **`snake_case`, not `camelCase`,** for identifiers this project defines, and with it the rest of the rule — no abbreviations, and one word per concept everywhere. Model field names become JSON keys, `/run` filenames and the dotted paths in a `Reason`, so a name invented inside a struct ends up in somebody's grep and can no longer be changed.
 - **Tabs for indentation, spaces for alignment** — one tab per nesting level, spaces after the tabs for anything lined up within a line, so alignment survives at any tab width. No tab width is prescribed.
-- **Lowercase filenames.** `snake_case.rs` for modules, kebab-case for prose, except where a tool insists otherwise (`Cargo.toml`, `README.md`).
+- **Lowercase filenames.** `snake_case.c` for sources, kebab-case for prose, except where a tool insists otherwise (`Makefile`, `README.md`).
 
 Source, comments and commit messages are **ASCII**; write `--` where prose would use an em dash. Markdown documents are exempt and this one already is. That governs the repository, not the wire — an SSID is arbitrary octets (§2.1) and the parser must keep treating it that way.
 
-**Full detail is in `code-style.md` at the repo root**, including why `rustfmt` *is* used here when the sibling C and Python projects ban their formatters: `hard_tabs` is a stable option and the default block indent style leaves nothing to align, so the rule survives the tool. `rustfmt.toml` is load-bearing — dropping `hard_tabs` converts the entire tree to spaces on the next `cargo fmt` and buries whatever change it rode in on.
+**Full detail is in `code-style.md` at the repo root**, including why no formatter is run: `clang-format` rewrites tabs to spaces and cannot be configured out of it. `rustfmt` was used while the Rust was here, and went with it ([0317](doc/decision/0317-the-rust-is-retired.md)).
 
 ### Build and commit conventions
 
-- **`cargo fmt --check` and `cargo clippy -- -D warnings` before committing**, alongside the §6 gates. They are cheap and they are the two that produce noise in someone else's diff when skipped.
-- **Kernel commit format**, stated in full in `code-style.md` §8 and in the global source it copies. The subject is `subsystem: summary`, imperative, no trailing period, 75 columns, where the subsystem is the crate or adapter with a slash for nesting — `netcfgd-plan:`, `adapter/nm:`, `tests/live:`. Body is prose wrapped at 75 explaining *why* the change is right and what was learned making it — including wrong turns, tests that passed for the wrong reason, and numbers that turned out to be guessed. `git diff` already lists what changed.
+- **`make check` before committing.** `make style` alone is the cheap half, and the one that produces noise in someone else's diff when skipped.
+- **Kernel commit format**, stated in full in `code-style.md` §8 and in the global source it copies. The subject is `subsystem: summary`, imperative, no trailing period, 75 columns, where the subsystem is the part of the tree with a slash for nesting — `plan:`, `nm:`, `tests/live:`. Body is prose wrapped at 75 explaining *why* the change is right and what was learned making it — including wrong turns, tests that passed for the wrong reason, and numbers that turned out to be guessed. `git diff` already lists what changed.
 - **A trailer naming an artifact is content; one naming a person is theirs.** `Fixes:` and `Link:` point at a commit or a URL, assert nothing about anybody, and may be written freely. `Signed-off-by:`, `Reviewed-by:` and `Tested-by:` are statements a person makes about their own involvement, and are added by that person. Tooling or assistant attribution is refused outright, by `tool/hooks/commit-msg` as well as by the rule.
 - **No docs-only commits.** Documentation rides along with the code commit it describes. Folding an accumulated session's findings back into this file is the standing exception.
 - **Stage named paths; never `git add -A`.** That is the mechanism by which local editor state, scratch files and untracked notes end up in history. `.gitignore` covers the predictable cases and is not a substitute for reading `git status --short`.
@@ -1013,8 +1013,9 @@ them because no test had ever carried those keys.
      publishes into fuzznet's per-node events, `ncfg monitor --at` reads them
      from a cursor, and the GUI and TUI follow a node by it;
    - **the control socket is only a no-node daemon's now** (0309, 10.738): a
-     daemon with a node binds none. Its code goes with the Rust that four
-     scripts compare it against;
+     daemon with a node binds none. The Rust comparisons that used it went
+     with the Rust (0317); whether a daemon whose node will not open stops or
+     keeps the socket is the holder's (10.738);
    - **beyond the simple case** (partial authority, callers who are not
      operators), which is the holder's, as 0311 left it.
 
@@ -12730,6 +12731,56 @@ C's lowering (10.759's open list) printed `agent` among 43 keys nobody had class
 
 Fixed by the row and a case in `the_content_gate_refuses_each_privileged_production`, which
 failed before the row and passes with it. The other 42 keys are the gate's port to classify.
+
+## 10.759 The Rust is retired, and what `make live` said the day before
+
+[0317](doc/decision/0317-the-rust-is-retired.md) is the decision, on the holder's word: retire
+the Rust that blocks work or causes extra work. All of it did -- `make check` built the
+workspace twice, every shared message was written twice or declared a difference -- and every
+gate that read it read only it, measured before anything went. 106,000 lines, 166 files,
+eleven make gates -- fmt, clippy, unsafe-policy, executor-policy, test, conformance, agree,
+deny, cross, fuzz-rust, nm-containment -- and the nine Python gates 0317 lists.
+
+**`make live` on dcbc20ee, the last run with the Rust in it:** 0 failures; 90 scripts passed;
+the Rust test binaries 5, 31 and 17. Six skips, each needing real root, hardware or `nmcli`,
+which 10.758's `vm-skipped` covers. It stops at `sandbox_writes.sh` refusing on this sysvinit
+machine, by design and last for that reason; `vm-sandbox` runs it under systemd 257.
+
+**What took the Rust's place in the live scripts** is in 0317. Two things went further than
+replacing it. `c_wireguard.sh` reads the kernel with `wg` and compares the whole private key
+the device holds against the store's, clamped, where the Rust reported only `key_matches`. And
+`c/tests/shed_test` now runs in `make live` under `unshare -rn`: its own header says the drop
+is observable only from a process with something to shed, `c-test` runs it as a person, and so
+the C's privilege drop had never been asserted anywhere. The Rust's `netcfgd-sys` tests were
+in `make live` for that reason and the C's equivalent was not.
+
+**A sentence the C printed to operators went with it.** `ncfg_plan_warn_unbuilt` said "That is
+not this port catching up: nothing acts on it in the Rust either" -- true and checked against
+`crates/` while there were two, meaningless with one. It says "Nothing in netcfgd acts on it,
+so there is nothing to wait for" now. Its negative checks in `plan_test.c` and
+`plan_gaps_test.c` moved to the new words: left on the old ones they could never fail again.
+
+**`c_daemon_answers.sh` showed that "answered" is not "reached".** With the comparison gone,
+the first rewrite checked each verb got a non-empty answer, which the client gives with no
+daemon running at all -- it observes and compiles for itself. A reload is the daemon's alone
+(`cannot reach the daemon ... this command is answered by netcfgd` without one), so that is
+the check that a daemon was there. The same run found `wifi add` now goes through the daemon
+and succeeds in a namespace, where both daemons once refused it as "not a radio on this
+machine".
+
+**Open, from what went:**
+- Five deleted gates held properties the C should hold and has no gate for: every `/etc` path
+  written is one the systemd unit grants (`sandbox`), every op the planner can emit has an
+  executor arm (`op`), every supplicant setting has a real one behind it
+  (`supplicant_coverage`), every config key is classified for privilege (`privilege`), and no
+  write failure is dropped silently (`write`). Each read `crates/` and never the C.
+- Under `resolvconf` and `openresolv`, one interface's delivery runs the helper four times,
+  twice with an empty `lo.netcfgd` record. Both implementations did it, so the comparison could
+  not see it, and `c_dns_delivery.sh` now pins it. Read since: `dns.apply` and `dns.apply f0`
+  each deliver every scope, global included, so the second delivery repeats the first.
+  Redundant and idempotent; not worth a change on its own.
+- `make live-container` now uses `debian:trixie-slim` rather than the Rust image, and the CI
+  workflow's jobs build the C; neither has run since (the workflow is off, 2026-09-01).
 
 ## 10.758 `make vm-skipped` is green: seven of seven, the shim being the C
 

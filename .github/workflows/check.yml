@@ -34,14 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # rustfmt and clippy by name: `make check` runs both and a toolchain
-      # without them fails in a way that reads like a code problem.
-      - name: Install the toolchain
-        run: |
-          rustup toolchain install stable --profile minimal \
-            --component rustfmt --component clippy
-          rustup default stable
+        with:
+          submodules: true
 
       # Qt, because `make gui` skips loudly rather than failing when qmake is
       # absent -- which is right on the routers this mostly builds for, and
@@ -50,30 +44,13 @@ jobs:
       - name: Install Qt
         run: sudo apt-get update && sudo apt-get install -y qt6-base-dev
 
-      # Three gates turn into a skip when their tool is absent -- fmt, clippy
-      # and gui -- which is right on a machine with no rustup and no desktop,
-      # and wrong here. This is the runner that must actually run them, so a
-      # component that failed to install has to fail the job rather than
-      # quietly shorten the gate list: a skip nobody reads is the vacuous pass
-      # this project keeps finding, and the install steps above are the only
-      # thing standing between the two.
-      #
-      # After both installs rather than inside either, so the list is in one
-      # place and is keyed to the gates rather than to the packages.
+      # `gui` turns into a skip when qmake is absent, which is right on a
+      # machine with no desktop and wrong here. This is the runner that must
+      # actually run it, so a package that failed to install has to fail the
+      # job rather than quietly shorten the gate list: a skip nobody reads is
+      # the vacuous pass this project keeps finding.
       - name: Check the toolchain has what the gates need
-        run: |
-          cargo fmt --version
-          cargo clippy --version
-          command -v qmake6
-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
+        run: command -v qmake6
 
       # `check-ci` is `check` minus the budget gates, and the Makefile says
       # why: they are ratchets on a measurement, and a rented VM measures the
@@ -96,20 +73,16 @@ jobs:
     container: alpine:latest
     steps:
       - name: Install the toolchain
-        run: apk add --no-cache rust cargo make gcc musl-dev python3 git
+        run: apk add --no-cache make build-base linux-headers python3 git
 
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       # Not `make check`: the conventions it enforces are platform-independent
       # and the job above already ran them, so repeating them here would spend
       # minutes to learn nothing. What is not platform-independent is whether
       # this builds and passes its tests against musl, which is what this asks.
-      #
-      # Alpine's packaged rustc lags, so `--locked` is deliberately absent: a
-      # lockfile needing a newer toolchain should fail as a version error here
-      # rather than as a resolution one.
-      - name: cargo test
-        run: cargo test --workspace
-
-      - name: cargo build --release
-        run: cargo build --release
+      # The C since 0317; this ran `cargo test` while the Rust was in the tree.
+      - name: make c-test
+        run: make c-test

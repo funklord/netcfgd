@@ -4,14 +4,13 @@
 
 # code-style.md
 
-Code style for this project. Applies to every crate in the workspace — the
-pure core (`netcfgd-model`, `netcfgd-compile`, `netcfgd-plan`), the crates
-that touch the kernel (`netcfgd-sys`, `netcfgd-observe`,
-`netcfgd-apply`), the binaries (`netcfgd`, `ncfg`), the backends and the
-adapters alike — **and to `client/` in C and `gui/` in C++**, which are not
-crates and are not exempt. Those two are where several of the rules below
-actually bite, because Rust supplies for free what C and C++ do not. `project.md` §9 states the rules in brief and points here
-for the detail; where the two ever disagree, project.md wins.
+Code style for this project. Applies to the C of the daemon and the CLI
+(`c/`), the client library (`client/`), the bridge, the helpers and the
+adapters, and to the C++ of `gui/`. netcfgd was first written in Rust, and
+several sections below were written for it; 0317 retired the Rust, and what
+those sections now say is about the C. `project.md` §9 states the rules in
+brief and points here for the detail; where the two ever disagree,
+project.md wins.
 
 **Above both sits the global source**, `~/.claude/guidelines/code-style.md`,
 which applies to every private project. Where this file or `project.md`
@@ -21,9 +20,9 @@ genuine divergence needs a technical reason and is signalled to the list in
 when a conflict between the three actually comes up, stop and ask instead
 of picking a winner.
 
-Everything specific to Rust and to this project -- section 2's `rustfmt`
-verdict and sections 4 and 6 through 8 -- is this project's own, and is not
-in the source. The numbering skips 5 deliberately: that section was *Line
+Everything specific to this project -- section 2's formatter verdict and
+sections 4 and 6 through 8 -- is this project's own, and is not in the
+source. The numbering skips 5 deliberately: that section was *Line
 length*, withdrawn as a rule nobody had asked for, and the sections after it
 kept their numbers so that the references `project.md` and the decision
 records already carry keep resolving.
@@ -45,19 +44,13 @@ passing.
 
 ## 1. Naming
 
-Rust already gets most of rule 1 for free: `non_snake_case` and
-`non_camel_case_types` are on by default, so functions, variables, modules
-and fields are `snake_case`, types and variants are `PascalCase`, constants
-are `SCREAMING_SNAKE_CASE`, and none of that needs restating. What the
-lints do not cover is the part that matters:
+Functions, variables, types and fields are `snake_case`; a type ends in
+`_t` where the C does (`ncfg_plan_t`), constants and enum members are
+`SCREAMING_SNAKE_CASE`. Nothing in C enforces any of it, so all of it is
+review. Beyond the spelling:
 
-- **Crate names are `netcfgd-`-prefixed and kebab-cased** in `Cargo.toml`
-  (`netcfgd-model`), which Rust reads back as `netcfgd_model` in a `use`
-  path. The two spellings of one crate are the toolchain's doing, not a
-  choice; do not invent a third by naming the directory differently from the
-  package.
 - **No abbreviations that are not already vocabulary.** `observed`, not
-  `obs`; `interface`, not `iff`. This is stricter than ordinary Rust taste
+  `obs`; `interface`, not `iff`. This is stricter than ordinary C taste
   for a specific reason: this project's struct field names *are* its JSON
   field names *are* its `/run` file names *are* the dotted paths in a
   `Reason` (§4). An abbreviation invented inside a struct definition ends up
@@ -78,8 +71,8 @@ lints do not cover is the part that matters:
 **A toolkit whose own API is `camelCase` does not pull your names across.**
 Call the foreign API exactly as it is spelled -- `setParent`, `addWidget`,
 `setEnabled` -- because that is not a violation, it is the API's name. But
-names *you* introduce stay `snake_case` on the same line. This is Rust's rule
-for free and C++'s not at all, so `gui/` is where it has to be held
+names *you* introduce stay `snake_case` on the same line. Qt is the
+`camelCase` toolkit here, so `gui/` is where it has to be held
 deliberately: `ncfg_apply_dialog::build_consent` calling
 `consent_box->setVisible` is both halves correct, and neither half should
 drift toward the other.
@@ -95,14 +88,12 @@ they follow **visibility** rather than a mechanical rule:
 - **Module-private symbols are left unprefixed**, so that the absence of a
   prefix reads as "this does not leave the module."
 
-Rust settles the middle case by itself: `pub` and the module tree decide what
-escapes, and the crate name is already the prefix at every call site. **C and
-C++ do not**, which is why this section exists now that `client/` and `gui/`
-are here. A symbol that is internal by intent but still reaches the linker --
+**C and C++ do not settle the middle case for you**: anything not `static`
+reaches the linker. A symbol that is internal by intent but still reaches it --
 cross-file within a library, not `static`, not part of the API -- is not
-private for this purpose. Prefix it. `client/` already does: everything it
-exports is `ncfg_client_*` or `ncfg_json_*`, and `gui/` names its own types
-`ncfg_apply_dialog` and the like.
+private for this purpose. Prefix it. The daemon's library is `ncfg_*`
+throughout, `client/` exports `ncfg_client_*` and `ncfg_json_*`, and `gui/`
+names its own types `ncfg_apply_dialog` and the like.
 
 **A deliberate parallel copy of a function in two libraries needs a distinct
 name**, not the same name in both on the assumption that nothing will ever
@@ -120,21 +111,17 @@ leading tabs, so it survives at any tab width, and no tab width is
 prescribed anywhere. The viewer decides. If two lines are short enough to
 merge rather than align, merge them.
 
-In practice Rust reaches for alignment far less often than C does, because
-`rustfmt`'s default block style breaks a long signature onto its own
-indented lines instead of lining arguments up under the open paren:
+The daemon's C continues a long signature on an indented line rather than
+lining arguments up under the open paren, which keeps alignment out of most
+of the tree:
 
-```rust
-fn plan_for(
-→   desired: &Document,
-→   observed: &Observed,
-→   opts: &Options,
-) -> Result<Plan, Error> {
-→   if desired.interfaces.is_empty() {
-→   →   return Ok(Plan::empty());
+```c
+int ncfg_openvpn_command(ncfg_openvpn_management_t *management, const char *command,
+→   char *reply, size_t reply_size, char *err, size_t err_size)
+{
+→   if (!management || !command) {
+→   →   return 0;
 →   }
-→   Ok(Plan { actions: collect_actions(desired, observed, opts)? })
-}
 ```
 
 (`→` marks a tab.) Every leading column there is a tab and nothing is
@@ -149,28 +136,12 @@ whitespace raises `TabError`, so a file that looks right refuses to run.
 Continuation lines inside brackets are not indentation-significant there at
 all, which is why PEP 8's preference for spaces does not reach this rule.
 
-### rustfmt *is* used here — unlike the sibling projects
+### rustfmt was used here, and went with the Rust
 
-The C and Python projects next door ban their formatters outright, because
-`clang-format` and `black` rewrite tabs to spaces unconditionally and cannot
-be configured out of it. That reasoning does not carry over. `rustfmt` has a
-stable `hard_tabs` option, and with the default `indent_style = "Block"`
-there is no visual alignment for it to fight over. The rule survives the
-tool, so the tool stays.
-
-`rustfmt.toml` at the workspace root holds exactly the settings that follow
-from the rules above and nothing decorative:
-
-```toml
-hard_tabs     = true
-max_width     = 100
-newline_style = "Unix"
-```
-
-`cargo fmt --check` is a CI gate, alongside `cargo clippy -- -D warnings`.
-Run both before committing. If `hard_tabs` is ever dropped from the config,
-the whole tree converts to spaces on the next format and the diff will bury
-whatever change it rode in on — treat that file as load-bearing.
+While the daemon was Rust, `rustfmt` was used and gated: it has a stable
+`hard_tabs` option, so the rule survived the tool. 0317 retired the Rust,
+and `rustfmt.toml` and the `fmt` gate with it. The C has no formatter, for
+the reason below.
 
 ### Settled exceptions to the tab rule
 
@@ -197,7 +168,7 @@ mentioned**: signal it to the list in `claude-guidelines`'
 `project.md`, follow the rule meanwhile, and it gets settled and added
 here in a pass.
 
-### No formatter for `client/` and `gui/`
+### No formatter for the C and the C++
 
 `clang-format` is **not run here, not even ad hoc on a single file**, for the
 reason the sibling C projects recorded: it rewrites tabs to spaces
@@ -206,8 +177,9 @@ gap, which is disqualifying rather than something to work around — the
 failure mode is a silent conversion of files that were already correct,
 found later as a reverted commit rather than as an error.
 
-This is the same evaluation `rustfmt` passed and it fails: the rule has to
-survive the tool, and here it does not.
+This is the same evaluation `rustfmt` passed while the Rust was here, and it
+fails: the rule has to survive the tool, and here it does not. `make style`
+gates indentation and alignment instead.
 
 Naming and filename rules are review items, not automated ones.
 
@@ -215,15 +187,14 @@ Naming and filename rules are review items, not automated ones.
 
 Lowercase for everything this project names itself.
 
-- Rust sources are `snake_case.rs`, matching the module path:
-  `desired_state.rs`, not `DesiredState.rs` or `desired-state.rs`.
+- C and C++ sources are `snake_case`: `wifi_profile.c`, not
+  `WifiProfile.c` or `wifi-profile.c`.
 - Markdown and other prose files are kebab-cased: `code-style.md`,
   `netcfgd-design.md`.
 - Config fixtures and test data follow the thing they describe.
 
 The exception is a name a tool will not accept lowercased or in another
-shape: `Cargo.toml`, `Cargo.lock`, `README.md`, `LICENSE`, `Makefile`, and
-`VERSION`. That last one is this workspace's own rather than the wider
+shape: `README.md`, `LICENSE`, `Makefile`, and `VERSION`. That last one is this workspace's own rather than the wider
 world's, and is settled by use: a project that packages or ships a version
 tracks one, and a build reads it for the package version and for whatever
 the program prints, so the number lives in exactly one place.
@@ -289,25 +260,14 @@ the project carrying it, so that the next reader does not reopen it. Measured
 
 | directory | what breaks without it |
 |---|---|
-| `crates/*/tests/` | Cargo's integration-test discovery |
 | `.github/workflows/` | GitHub reads no other path |
 | `tool/hooks/` | mirrors `.git/hooks/`, which git names |
 
-**Settled by an ecosystem, so a convention rather than a requirement:**
+**Settled by an ecosystem**: none since 0317. `crates/` and
+`fuzz/fuzz_targets/` were the two, the Cargo workspace convention and where
+`cargo fuzz add` writes, and both went with the Rust.
 
-| directory | measured against |
-|---|---|
-| `crates/` | the Cargo workspace convention the source already names |
-| `fuzz/fuzz_targets/` | `cargo fuzz add` writes here |
-
-**`fuzz_targets/` is the one worth stating precisely, because it looks like
-the first kind and is the second.** `fuzz/Cargo.toml` names every target with
-an explicit `path = "fuzz_targets/..."`, so nothing in the build breaks if the
-directory is renamed -- but `cargo fuzz add` would write the next target into
-`fuzz_targets/` regardless, leaving a tree with both spellings. The cost of
-renaming it is not a broken build, it is a directory that silently comes back.
-
-**Everything else is singular already**: `adapter/`, `backend/`, `client/`,
+**Everything else is singular already**: `adapter/`, `bridge/`, `client/`,
 `doc/`, `doc/decision/`, `gui/`, `helper/`, `packaging/`, `tool/`. `debian/`
 and `packaging/dbus/` are not plurals, and `debian/rules` is a file whose name
 Debian requires.
@@ -491,9 +451,8 @@ library lexes them. That is what makes the UI exception above enforceable
 rather than merely stated: a glyph inside a `gui/` string literal passes and
 an em dash in the comment above it does not.
 
-Rust and everything else get a whole-file byte check, there being no lexer
-here for them, and so does a file in either lexed language that will not
-parse: a file nobody can read is not a file that has been cleared. Markdown
+Everything else gets a whole-file byte check, there being no lexer here for
+it, and so does a file in either lexed language that will not parse: a file nobody can read is not a file that has been cleared. Markdown
 is out of the check entirely, which is the documentation exception.
 
 That distinction is the rule above expressed mechanically — the text this
@@ -506,46 +465,51 @@ being enforced.**
 
 ## 6. Modules and comments
 
-Every module opens with a `//!` doc comment stating its single
-responsibility. If that comment needs two sentences joined by "and", the
-module wants splitting.
+Every source file opens with a comment naming itself and its single
+responsibility -- `management.c -- OpenVPN's text control protocol, on a
+unix stream socket.` If that comment needs two sentences joined by "and",
+the file wants splitting.
 
-This has teeth here rather than being a nicety. `project.md` §5 requires
-`netcfgd-model`, `netcfgd-compile` and `netcfgd-plan` to be pure and
-hardware-free, which is what makes the entire planner unit-testable against
-fixtures. A module whose stated responsibility has quietly grown a second
-half is how I/O first appears in a crate that is supposed to have none.
+This has teeth here rather than being a nicety. `project.md` §5 requires the
+model, the compiler and the planner (`c/src/model`, `c/src/compile`,
+`c/src/plan`) to be pure and hardware-free, which is what makes the entire
+planner unit-testable against fixtures. A file whose stated responsibility
+has quietly grown a second half is how I/O first appears in a part that is
+supposed to have none.
 
 Comments explain **why**. The what is in the code and stays there; a comment
 restating a line is one more thing to keep true. Comment density should
 match the surrounding file. The places worth a paragraph are the ones where
 the obvious implementation is wrong: ordering edges in the planner (§4),
 anything touching `rtm_protocol` and object ownership (§2.3), and every
-`unsafe` block.
+cast or length at a trust boundary.
 
 ## 7. `unsafe`
 
-`#![forbid(unsafe_code)]` is the **first line** of every crate root, written
-identically in each, so its absence is visible at a glance rather than by
-grepping. `netcfgd-sys` is the sole exception (§1.4) and says so in its
-crate-level doc comment, immediately above the `#![allow(unsafe_code)]` that
-replaces it.
+This section held the Rust's rule -- `#![forbid(unsafe_code)]` in every
+crate root, `netcfgd-sys` the one audited exception, a `// SAFETY:` comment
+on every block -- and went with the Rust (0317). It keeps its number because
+`project.md` and the decision records cite the sections after it.
 
-Inside that one crate, every `unsafe` block carries a `// SAFETY:` comment
-naming the invariant that makes it sound and what upholds it. A block
-without one does not merit review time.
+C has no such boundary to draw, so what stands in for it is where the input
+comes from: a length or an offset read off the wire, from netlink, a
+supplicant's control socket or a configuration file, is checked against the
+buffer before it is used, and the comment beside it says which bound holds
+it. The fuzz targets under `c/fuzz/` exist for those parsers.
 
 ## 8. Commit messages
 
 Kernel format. See `~/.claude/guidelines/build-and-commit.md` for the full
 statement; what is specific here is the subsystem name.
 
-    netcfgd-plan: fix the ordering edge for a renamed link
-    adapters/nm: rework the containment check as one pass
+    plan: fix the ordering edge for a renamed link
+    nm: rework the containment check as one pass
 
-The crate or adapter comes first, followed by a colon, with a slash for
-nesting. `git log --grep '^netcfgd-plan:'` then answers what has happened to
-the planner without naming paths, and keeps answering after files move.
+The subsystem or adapter comes first, followed by a colon, with a slash for
+nesting. `git log --grep '^plan:'` then answers what has happened to the
+planner without naming paths, and keeps answering after files move. Commits
+from the Rust's time name crates (`netcfgd-plan:`), which is why a search
+over the whole history wants both spellings.
 
 Subject at 75 columns, imperative mood, no trailing period. The body
 explains why rather than what, wrapped at 75. Length is not a constraint:

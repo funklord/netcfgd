@@ -62,7 +62,7 @@ skip() {
 [ "$(id -u)" = 0 ] || skip "needs real root (/dev/vhci is root-only)"
 [ -c /dev/vhci ] || skip "no /dev/vhci on this kernel"
 command -v python3 >/dev/null 2>&1 || skip "python3 is not installed"
-[ -x "$build/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
+[ -x "$build/ncfg" ] || skip "netcfgd is not built (make)"
 
 before=$(ls /sys/class/bluetooth 2>/dev/null | sort | tr '\n' ' ')
 

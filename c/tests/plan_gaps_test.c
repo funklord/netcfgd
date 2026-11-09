@@ -542,7 +542,7 @@ static void a_bluetooth_block_is_not_something_to_wait_for(void)
 	 * names a decision, and the check follows it rather than being deleted --
 	 * which is this file's rule for the link-local pass one entry over.
 	 */
-	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
+	check(plan && !planfix_warned(plan, "Nothing in netcfgd acts on it"),
 	    "a `bluetooth` block is no longer reported as anybody's unbuilt work");
 	check(plan && planfix_warned(plan, "by decision rather than for want of a pass"),
 	    "  but as a decision, so an operator is not waiting for a release");
@@ -873,7 +873,7 @@ static void what_a_network_states_and_nothing_reads_is_not_something_to_wait_for
 
 	check(plan && planfix_warned(plan, "states addressing, `routes` and a `dns` policy,"),
 	    "a network's inert halves are named, and its hooks are not among them");
-	check(plan && planfix_warned(plan, "nothing acts on it in the Rust either"),
+	check(plan && planfix_warned(plan, "Nothing in netcfgd acts on it"),
 	    "and reported as a product gap rather than as a port gap");
 	check(planfix_whole(planfix_warning_with(plan, "states addressing"),
 	    "still means this when the code arrives"),
@@ -924,7 +924,7 @@ static void a_network_that_asks_for_none_of_it_says_nothing(void)
 	    "{\"id\":\"home\",\"security\":{\"type\":\"open\"}}", "", "\"links\":[]",
 	    &document, &observed);
 
-	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
+	check(plan && !planfix_warned(plan, "Nothing in netcfgd acts on it"),
 	    "a network stating none of the inert halves is not warned about");
 	check(plan && !planfix_warned(plan, "does not apply it"),
 	    "and a network with no metric is not told about the metric that is missing");
