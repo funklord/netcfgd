@@ -12706,6 +12706,11 @@ arm for `file`, `path`, `config`, `command` and the like: `openvpn { config, fil
 `probe { command }` were privileged already, and `block_list { file }` was the one that was
 not.
 
+**A relative `file` is left to the compiler**, which refuses it as "not an absolute path". The
+first version called it privileged, and `make gui`'s `block_list_load` -- "a relative file is
+refused", expecting the compiler's sentence -- got one about root instead. It names nothing
+root would open, and a typo deserves the message that says what is wrong with it.
+
 ## 10.760 `remote { agent }` was ordinary, so a client could open the remote socket
 
 0127 lets a caller who is not root send configuration and refuses the productions that grant

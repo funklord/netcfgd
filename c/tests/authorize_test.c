@@ -963,6 +963,14 @@ static void a_block_list_file_is_ordinary_only_in_its_own_directory(void)
 	check(all_refused, "a block list file that leaves netcfgd's directory needs root");
 	{
 		ncfg_proto_request_t request = config_put(
+		    "block_list \"x\" {\n\tfile = \"ads.txt\"\n}\n");
+		char                 err[NCFG_ERROR_MAX];
+
+		check(ncfg_authz_check_content(NCFG_ARRIVED_LOCAL, &member, &request, err,
+		    sizeof(err)), "  and a relative one is left to the compiler, which refuses it");
+	}
+	{
+		ncfg_proto_request_t request = config_put(
 		    "block_list \"x\" {\n\tfile = [\"/var/lib/netcfgd/block/a.txt\", "
 		    "\"/etc/cron.d/x\"]\n}\n");
 		char                 err[NCFG_ERROR_MAX];

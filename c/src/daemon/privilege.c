@@ -213,8 +213,17 @@ static int block_file_outside(const ncfg_ast_value_t *value)
 		return 0;
 	}
 	if (value->kind != NCFG_AST_STRING || !value->string ||
-	    memchr(value->string, '\0', value->string_length) ||
-	    !string_starts_with(value, dir)) {
+	    memchr(value->string, '\0', value->string_length)) {
+		return 1;
+	}
+	/* **A relative path is the compiler's to refuse**, which it does -- "a
+	 * `file` is an absolute path" -- and it names nothing root would open.
+	 * Calling it privileged answered a typo with a sentence about root, and
+	 * the GUI's check that a relative file is refused said so (10.761). */
+	if (value->string_length == 0u || value->string[0] != '/') {
+		return 0;
+	}
+	if (!string_starts_with(value, dir)) {
 		return 1;
 	}
 	/* Each component after the directory: none may be empty, `.` or `..`. */
