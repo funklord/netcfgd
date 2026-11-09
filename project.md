@@ -12684,6 +12684,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.762 Two gates the Rust's retirement took, ported to the C
+
+0317 deleted nine Python gates that parsed `crates/`. Two held properties the C needs:
+
+- **`tool/privilege_gate.py`** reads the C lowering's keys through `key_coverage_gate.py`'s
+  reader -- imported, so the two gates cannot disagree about what the language is -- against
+  `privileged[]` and `tool/privilege-ordinary.txt`. Ported, it found 43 keys nobody had
+  classified; `remote { agent }` was privileged (10.760), and the other 42 -- the DHCP server,
+  DNS records, firewall rule matches, access-point roaming, port forwards, UPnP, `locked`,
+  `on_unmanage`, `phy`, and a block list's `url` -- are configuring a network and are listed,
+  grouped by what they configure. The 37 value words the Rust's reader had taken from its
+  match arms (`peap`, `wpa3`, `auto`) are gone. 182 keys, 13 privileged. Removing `width` from
+  the list fails it. Its blind spot is in the list's header: it matches names, which is how
+  `block_list { file }` hid behind `openvpn { file }` (10.761).
+- **`tool/sandbox_gate.py`** reads `c/src` and `c/include` -- the headers are where most of
+  the C's `/etc` paths are defined, and reading `c/src` alone found three of nine -- with a C
+  comment scanner in place of the Rust's `//` split. It found `/etc/machine-id`, which UPnP
+  reads for its uuid, and lists it as read-only. Its other half is not about either language:
+  that `debian/postinst` reloads the unit before restarting the daemon, which the deletion had
+  taken with it. Narrowing the unit to `ReadWritePaths=/etc/netcfgd` fails it on three paths,
+  and moving the reload after the restart fails it twice.
+
+Not ported: `op_gate` -- the C's executor switches have no `default`, so `-Wswitch` under the
+`clang` gate's `-Werror` refuses a planned op with no arm, and its other direction is dead
+weight; `print`, `disarm`, `doc_comment` and `tag_producer`, which were about Rust; and
+`supplicant_coverage` and `write`, which are open: the first would map the C's supplicant
+settings onto the live scripts that drive a real `wpa_supplicant`, the second needs a way to
+read a dropped write failure out of C.
+
+Also from today, for the hull tiers: hull 089facf boots its own kernel for a vm that names
+none, with a module set that covers every module these rigs name. A rig needing a host module
+outside it says `(tuning (vm (profile full)))`.
+
 ## 10.761 A block list's `file` chose where root's fetch writes
 
 The second gap behind 10.760, and the one the gate could never have shown: it matches key

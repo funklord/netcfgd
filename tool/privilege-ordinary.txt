@@ -1,0 +1,224 @@
+# Config keys reviewed and found ordinary -- safe for a client that is not
+# root to send, under decision 0127.
+#
+# This file is an acknowledgement, not a permission list. Nothing reads it at
+# run time; `c/src/daemon/privilege.c` decides what is privileged and
+# everything else is ordinary by construction. What this exists for is the
+# gap that leaves: a key added to the compiler later would be ordinary
+# because nobody looked at it. `tool/privilege_gate.py` refuses a key that is
+# in neither this file nor `privileged[]`, so adding one costs somebody a
+# decision.
+#
+# Review it as a list of things a desktop user may set on this machine's
+# network. The question for each is not "is this sensitive" but "does this
+# grant more than configuring the network" -- a wifi passphrase is sensitive
+# and ordinary; `tun { owner }` is neither sensitive nor ordinary, because it
+# hands a device to somebody.
+#
+# Keys that are privileged in ANY block are absent here and live in
+# `privileged[]` instead, even where the same word is ordinary elsewhere:
+# `config` is an addressing list in an interface and an .ovpn path in an
+# openvpn block, and the gate matches on the name. `privilege.c` keeps the
+# block-sensitive answer; this file keeps the coverage. That is also the
+# gate's blind spot, and it hid `block_list { file }` behind `openvpn { file }`
+# until 10.761 -- a new key whose NAME is already privileged somewhere is not
+# asked about here, so ask about it when adding it.
+#
+# Reread for the C on 2026-11-09 (0317): the Rust's reader also took value
+# words from its match arms (`auto`, `peap`, `wpa3`), which the C's does not,
+# so those are gone; the keys below the blank line are the ones the C
+# accepts and nobody had classified, and `remote { agent }` among them was
+# privileged and went to the table instead (10.760).
+
+ac
+action
+address
+ageing_time
+allow
+allowed_ips
+anonymous_identity
+apn
+autoconnect
+autoneg
+backend
+band
+bandwidth
+bssid
+channel
+confirm
+deny
+dev
+device
+dns
+dns_domains
+dns_mode
+dns_search
+domain_suffix_match
+domains
+down_after
+duplex
+eap
+enabled
+endpoint
+family
+forward_delay
+forwarding
+from
+fwmark
+fwmask
+gro
+gso
+guard
+hello_time
+hidden
+hold_down
+hostname
+id
+identity
+ignore
+iif
+ingress_bandwidth
+interval
+invert
+ipv6_token
+keepalive
+key
+kind
+l3mdev
+lifetime
+listen_port
+local
+lookup
+mac
+mac_policy
+managed
+master
+members
+metered
+metric
+miimon
+mode
+mtu
+nat
+networking
+oif
+on_drift
+open
+other
+other_config
+owe
+parent
+password
+peer
+phase2
+port
+portal_check
+powersave
+preference
+prefix
+prefixes
+preshared_key
+priority
+profile
+proto
+protocol
+psk
+public_key
+qdisc
+regdom
+remote
+require_lease
+requires
+routes
+rx_checksum
+rx_ring
+scan_randomization
+search
+servers
+service
+signal
+sim
+slow_interval
+speed
+ssid
+stp
+suppress_prefixlength
+table
+timeout
+to
+tso
+ttl
+tx_checksum
+tx_ring
+up_after
+user
+username
+vlan_filtering
+vlans
+vni
+wol
+
+# Classified 2026-11-09, by what they configure.
+#
+# The DHCP server and what it hands out (0300s): ranges, leases, options, a
+# relay, its DNS forwarding and interception, PXE boot settings.
+block
+boot_file
+boot_server
+code
+dns_forward
+dns_intercept
+domain
+gateway
+lease
+ntp
+range
+range6
+relay
+tftp_server
+wpad
+#
+# The local DNS records a server answers with.
+cname
+forward
+mx
+srv
+txt
+weight
+#
+# A firewall rule's match: when, on which interface, in which state, and
+# the translated form.
+days
+hours
+interface
+out_interface
+state
+translated
+#
+# An access point's roaming, isolation and width, and four-address mode.
+fast_roaming
+isolate_stations
+mobility_domain
+neighbour_reports
+roaming_key
+wds
+width
+#
+# A port forward's target and hairpin.
+hairpin
+to_port
+#
+# UPnP: which side is the LAN and which the uplink.
+lan
+uplink
+#
+# What netcfgd may not set (0290), what leaving a device does, and which
+# radio a radio block means.
+locked
+on_unmanage
+phy
+#
+# Where a block list is fetched from. Its `file` is not here: it is
+# privileged outside netcfgd's own directory, and `file` is a privileged
+# name (10.761).
+url

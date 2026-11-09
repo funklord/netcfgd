@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""Every /etc path netcfgd writes must be writable under its own systemd unit.
+
+The two lists are kept in step by memory otherwise, which is the failure this
+tree keeps finding -- `install` against `uninstall`, the shim's interfaces
+against its bus policy, five documents against a field that never existed.
+This is the same shape and it has already cost the worst outcome of the three.
+
+**What it costs when they disagree.** `ProtectSystem=full` mounts /etc
+read-only for the service, so a path netcfgd writes and the unit does not
+allow-list fails with EROFS -- at run time, on a packaged install, and never in
+a test, because every test writes into a temp directory. It happened: the unit
+carried `ReadOnlyPaths=/etc/netcfgd` with a comment saying "netcfgd never
+writes to it", which decision 0127 reversed by making netcfgd the *only*
+writer of its own configuration. Every client write the socket exists to carry
+was refused by netcfgd's own sandbox, on every systemd machine, and it surfaced
+as a desktop client relaying a message about a file it had never touched.
+
+The same unit had a second copy of the mistake in the other direction: its
+comment chose `ProtectSystem=full` to *avoid* /etc being read-only, which is
+what `full` does. So the DNS backends -- the reason the comment gave -- could
+not write /etc/resolv.conf either.
+
+**A granted file is not a granted directory, and this gate could not see the
+difference until it had cost something.** netcfgd replaces a config file by
+staging a dotfile beside it and renaming -- which needs write permission on the
+*parent*, not on the target. `ReadWritePaths=-/etc/resolv.conf` grants the
+file, so this gate said "allowed" and the write failed with EROFS anyway. It
+asked whether the path was permitted when the code's requirement was whether
+its directory was. Decision 0161; the writers fall back to an in-place write
+now, so a file-granted path works and is no longer atomic. That is a real
+property and it is reported rather than buried.
+
+**What this does not check.** Whether a path is writable in fact: that needs
+the unit running as root under systemd, which is not a thing a static gate can
+do. `tests/live/sandbox_writes.sh` gets closer by making the same mounts in a
+namespace. What this checks is that the two lists name the same paths, and now
+also how each one will be written.
+
+Static: it reads the sources and one unit file, so it runs anywhere.
+
+**It reads the C since 0317.** It was written against the Rust and read
+`crates/` and `backend/` until the Rust was retired, which deleted it with
+the rest -- and with it the postinst half below, which is about the package
+rather than about either language. Restored the same day reading `c/src`,
+the daemon's whole source with its headers, where most of the paths are
+defined; `c/tests` is not read, its paths being fixtures.
+"""
+
+import pathlib
+import re
+import sys
+
+UNIT = pathlib.Path("packaging/systemd/netcfgd.service")
+SOURCES = [pathlib.Path("c/src"), pathlib.Path("c/include")]
+
+# Paths under /etc that netcfgd reads and never writes. Naming them is the
+# point of the list: an unclassified /etc path is a new one, and a new one is
+# either a write the unit has to allow or a read somebody should say is a read.
+READ_ONLY = {
+	"/etc/passwd",  # resolving a hook's `run_as`
+	"/etc/group",   # the same, for a group
+	# Certificates an operator names in their own configuration. netcfgd opens
+	# these to read, and for the supplicant's three it does not open them at
+	# all -- it passes the path and wpa_supplicant opens it, in its own
+	# namespace, which this unit does not bound.
+	"/etc/ssl",
+	"/etc/cert",
+	# The operator's dhcpcd configuration. netcfgd never opens it: it creates a
+	# symlink under its own run directory pointing here and passes that path to
+	# dhcpcd with `-f`, so that a running client can be asked later which
+	# config it was started with (0143). dhcpcd is what opens the target, in
+	# its own privilege-separated sandbox, which this unit does not bound --
+	# the same shape as the supplicant's certificates above. A dangling symlink
+	# is not an error: dhcpcd logs and applies its defaults, measured, which is
+	# exactly what it already does on a machine with no such file.
+	"/etc/dhcpcd.conf",
+	# The seed of the UPnP device's uuid, so that it is the same across
+	# restarts. Read once with `fopen(..., "r")` in `backend/upnp/upnp.c`; a
+	# write here would change the machine's identity for everything else.
+	"/etc/machine-id",
+}
+
+
+def unit_allows(text):
+	"""The paths the unit marks writable, with any `-` prefix stripped."""
+	allowed = set()
+	for line in text.splitlines():
+		line = line.strip()
+		if line.startswith("ReadWritePaths="):
+			for path in line.split("=", 1)[1].split():
+				allowed.add(path.lstrip("-"))
+	return allowed
+
+
+def covers(allowed, path):
+	"""Whether an allow-listed path permits writing `path`.
+
+	Prefix matching, because that is what a bind mount does:
+	`ReadWritePaths=/etc/dnsmasq.d` makes everything under it writable, so
+	naming the directory is enough and naming the file would be a promise
+	about a filename the backend is free to change. Compared component-wise
+	rather than by string prefix, so `/etc/netcfgd` does not appear to cover
+	`/etc/netcfgd-other`.
+	"""
+	a = [p for p in allowed.split("/") if p]
+	b = [p for p in path.split("/") if p]
+	return b[: len(a)] == a
+
+
+def strip_comments(text):
+	"""C source with its comments removed and its string literals kept.
+
+	Comments carry example paths -- a header shows what an operator might
+	write -- and a gate that read those would report a path nothing opens.
+	That is the noise that gets a gate ignored, and this tree has already
+	decided once that the answer is to ask a narrower question rather than to
+	keep an ignore list.
+
+	**A scanner rather than a pattern**, because the two kinds of text hide
+	each other: `"/etc/*"` is a string containing a comment opener, and
+	`/* "/etc/x" */` is a comment containing a string. Each is read in the
+	state the one before it left.
+	"""
+	out = []
+	i, n = 0, len(text)
+	while i < n:
+		c = text[i]
+		if c == "/" and text.startswith("/*", i):
+			end = text.find("*/", i + 2)
+			i = n if end < 0 else end + 2
+			out.append(" ")
+		elif c == "/" and text.startswith("//", i):
+			end = text.find("\n", i)
+			i = n if end < 0 else end
+		elif c in "\"'":
+			j = i + 1
+			while j < n and text[j] != c:
+				j += 2 if text[j] == "\\" else 1
+			out.append(text[i:j + 1])
+			i = j + 1
+		else:
+			out.append(c)
+			i += 1
+	return "".join(out)
+
+
+def etc_paths_in_sources():
+	"""Every `/etc/...` literal in the daemon's source, outside comments."""
+	found = {}
+	for root in SOURCES:
+		# A source root that is not there reads as zero paths, and this gate
+		# turns zero paths into "the unit allows something no code needs" --
+		# three false findings, not a quiet pass. Either way it is a gate
+		# reporting on a tree it never read, so it refuses instead. Found when
+		# `backends/` was renamed to `backend/` and the gate blamed the unit.
+		if not root.is_dir():
+			raise SystemExit(
+			    f"sandbox: {root} is not a directory, so this gate would read "
+			    f"no source and blame the unit for every path it allows"
+			)
+		for path in sorted(root.rglob("*")):
+			if path.suffix not in (".c", ".h"):
+				continue
+			text = path.read_text(encoding="utf-8", errors="replace")
+			for literal in re.findall(r'"(/etc/[A-Za-z0-9._/-]*)"', strip_comments(text)):
+				found.setdefault(literal, set()).add(str(path))
+	return found
+
+
+def strip_shell_comments(text):
+	"""A maintainer script with its comment lines removed.
+
+	**Not `strip_comments`, which strips C comments and leaves `#` alone.**
+	Using it here made both checks below read the comment that explains them:
+	the paragraph above the reload names `daemon-reload` and `try-restart`, in
+	that order, dozens of lines before the code does -- so "is there a reload"
+	was satisfied by prose, and "is it before the restart" compared two
+	sentences. Caught by moving the real reload to the end of the script and
+	watching this gate stay green.
+
+	Whole lines only. A `#` inside a command is a shell comment too, but it is
+	also a character that appears inside quotes, and dropping from the first
+	`#` would eat `chmod 0700 "#name"`. Every comment in these scripts is on
+	its own line.
+	"""
+	return "\n".join(
+		line for line in text.splitlines() if not line.lstrip().startswith("#")
+	)
+
+
+POSTINST = pathlib.Path("debian/postinst")
+
+
+def maintainer_script_puts_the_unit_in_force():
+	"""The unit systemd is RUNNING has to be the one the package just wrote.
+
+	**A correct unit that is not loaded costs exactly what a wrong unit
+	costs**, which is why this lives beside the checks above rather than in a
+	packaging gate of its own: the symptom is the same EROFS, at run time, on
+	a packaged install, and in no test.
+
+	`debian/rules` passes `dh_installsystemd --no-enable --no-start`, and
+	debhelper reads `--no-start` as "emit no postinst systemd snippet at all"
+	-- `RESTART_AFTER_UPGRADE` defaults to true only when `--no-start` is
+	absent, so both branches that would have written one are skipped. What
+	those snippets carry, besides the start this package does not want, is
+	`systemctl --system daemon-reload`.
+
+	So an upgrade wrote a new unit, systemd went on running the old one, and
+	the postinst's own `try-restart` re-executed the daemon under the stale
+	sandbox. Reported from an install whose netcfgd refused every write with
+	"Read-only file system" naming `/etc/netcfgd/conf.d`, months after the
+	unit on disk started granting `/etc`.
+
+	Two things are asserted, and the second is the one a rewrite would lose:
+	that the reload is there at all, and that it comes **before** anything
+	that starts or restarts the service. A reload after a restart reloads for
+	next time.
+	"""
+	if not POSTINST.is_file():
+		print(f"sandbox: {POSTINST} is missing, so nothing reloads the unit")
+		return 1
+
+	text = POSTINST.read_text()
+	body = strip_shell_comments(text)
+	failures = 0
+
+	reload_at = body.find("daemon-reload")
+	if reload_at < 0:
+		print("sandbox: debian/postinst never runs `systemctl daemon-reload`, so a")
+		print("sandbox:   changed unit is written and never loaded -- and the restart")
+		print("sandbox:   below it re-executes the daemon under the old sandbox.")
+		print("sandbox:   dh_installsystemd emits no snippet under --no-start")
+		failures += 1
+
+	for verb in ("try-restart", "invoke-rc.d"):
+		at = body.find(verb)
+		if at < 0 or reload_at < 0:
+			continue
+		if at < reload_at:
+			print(f"sandbox: debian/postinst runs `{verb}` before the daemon-reload,")
+			print("sandbox:   so the restart uses the unit systemd already had")
+			failures += 1
+
+	# **Applied every time, which is the half an install-time guard loses.**
+	# dpkg sets modes for files the package ships and knows nothing about the
+	# ones netcfgd creates as it runs -- and an older version's mistake
+	# outlives the version that made it.
+	if "/etc/netcfgd/secrets" not in body:
+		print("sandbox: debian/postinst does not correct the credential store's mode,")
+		print("sandbox:   so a directory an older netcfgd left readable stays readable")
+		failures += 1
+	else:
+		guard = body.find('[ -z "$2" ]')
+		secrets = body.find("/etc/netcfgd/secrets")
+		if 0 <= guard < secrets:
+			print("sandbox: the permissions block sits after the first-install guard,")
+			print("sandbox:   so an upgrade -- the case an old mode survives -- skips it")
+			failures += 1
+	return failures
+
+
+# What each `ProtectSystem=` level remounts read-only. systemd.exec(5), and
+# every row below was confirmed by running the real thing under `systemd-run`
+# rather than read off the page -- see `readwritepaths_are_not_inert`.
+PROTECT_SYSTEM_READ_ONLY = {
+	"no": (),
+	"yes": ("/usr", "/boot", "/efi"),
+	"true": ("/usr", "/boot", "/efi"),
+	"full": ("/usr", "/boot", "/efi", "/etc"),
+	"strict": ("/",),
+}
+
+
+def protect_system_level(text):
+	"""The last `ProtectSystem=` the unit sets, or None."""
+	level = None
+	for line in text.splitlines():
+		line = line.strip()
+		if line.startswith("ProtectSystem="):
+			level = line.split("=", 1)[1].strip()
+	return level
+
+
+def readwritepaths_are_not_inert(level, allowed):
+	"""A grant naming exactly what `ProtectSystem=` protects grants nothing.
+
+	**This is the check whose absence cost the most, and it is purely static
+	-- it needed no systemd and no root, only the question nobody asked.**
+
+	`ProtectSystem=` applies its read-only remount *after* the
+	`ReadWritePaths=` bind mounts, so an entry naming the very path being
+	remounted is covered straight back over. A *subpath* survives, because the
+	remount of the parent does not reach into a mount nested below it.
+	Measured on systemd 257, one `systemd-run` per row, each with a control:
+
+	    full   + ReadWritePaths=/etc          -> /etc ro,  write EROFS
+	    full   + ReadWritePaths=/etc/netcfgd  -> /etc ro,  subpath writable
+	    yes    + ReadWritePaths=/etc          -> /etc rw
+	    strict + ReadWritePaths=/etc          -> /etc rw
+	    no     + ReadWritePaths=/etc          -> /etc rw
+
+	The rule fits all five: an entry equal to a protected path is inert, an
+	entry strictly below one is granted. Under `strict` the only protected
+	path is `/`, so every entry is strictly below it and every entry works --
+	which is why `strict` is not the odd one out it looks like.
+
+	What it cost. 0131 allow-listed four narrow paths under `full` and they
+	worked, being subpaths. 0164 consolidated them into the single
+	`ReadWritePaths=/etc` -- and consolidating a set of working subpath grants
+	into their common parent turned all four inert at once. From then on
+	netcfgd could write nothing under /etc: not `/etc/netcfgd`, so every
+	client write 0127 built was refused, and not the `/etc` directory, so
+	`write_resolv_conf` could not stage. The daemon reported it correctly on
+	every start and named `ReadWritePaths=` as the remedy; the path was
+	already named, so the report read as already-actioned and the machine went
+	on failing. **Nothing here could see it**: the unit named the path, the
+	sources named the path, so both directions of the comparison above agreed
+	-- they were checking that two lists match, and the lists did match. What
+	neither asked was whether the line does anything.
+	"""
+	protected = PROTECT_SYSTEM_READ_ONLY.get(level)
+	if protected is None:
+		print(f"sandbox: the unit sets ProtectSystem={level!r}, which this gate")
+		print("sandbox:   does not know -- add it to PROTECT_SYSTEM_READ_ONLY with")
+		print("sandbox:   a measurement rather than letting it through unchecked")
+		return 1
+
+	failures = 0
+	for path in sorted(allowed):
+		normalised = "/" + "/".join(p for p in path.split("/") if p)
+		if normalised in protected:
+			print(f"sandbox: ReadWritePaths={path} is inert -- ProtectSystem={level}")
+			print(f"sandbox:   remounts {path} read-only after the grant is applied,")
+			print("sandbox:   so it grants nothing. Name a subpath, or lower")
+			print("sandbox:   ProtectSystem= to a level that does not hold it")
+			failures += 1
+	return failures
+
+
+def main():
+	if not UNIT.exists():
+		print(f"sandbox: {UNIT} is missing, so this gate is checking nothing")
+		return 1
+
+	text = UNIT.read_text(encoding="utf-8")
+	level = protect_system_level(text)
+	if level is None:
+		print("sandbox: the unit sets no ProtectSystem= at all; was that meant?")
+		return 1
+
+	allowed = unit_allows(text)
+	if not allowed:
+		print("sandbox: the unit allow-lists nothing, so the extraction below "
+		      "cannot fail -- and netcfgd cannot write /etc at all")
+		return 1
+
+	found = etc_paths_in_sources()
+	if not found:
+		print("sandbox: no /etc paths found in the sources, so this gate is "
+		      "checking nothing")
+		return 1
+
+	failures = 0
+	in_place = []
+	for path in sorted(found):
+		if any(covers(known, path) for known in READ_ONLY):
+			continue
+		if any(covers(known, path) for known in allowed):
+			# **Granted, and now: granted how?** A stage-and-rename needs the
+			# parent writable. Where only the file itself is granted the write
+			# still lands -- 0161 -- but in place, so a reader can catch it
+			# half-done. Not a failure, and not something to leave unsaid
+			# either: it is a durability property of a config file, decided by
+			# a line in a unit rather than by any code.
+			parent = str(pathlib.PurePosixPath(path).parent)
+			if any(covers(known, parent) for known in allowed):
+				continue
+			# A path with a descendant in this set is a directory netcfgd
+			# writes *into*, so its children stage inside it and the parent
+			# grant is irrelevant -- `/etc/netcfgd` against
+			# `/etc/netcfgd/secrets`. One with no descendant is written as a
+			# file. The discriminator is derived from the set rather than
+			# guessed from the name, and where it is wrong it over-reports: a
+			# granted directory that nothing else in the sources names would
+			# be listed. This prints rather than fails, so that is the right
+			# way to be wrong.
+			if any(other != path and covers(path, other) for other in found):
+				continue
+			in_place.append(path)
+			continue
+		where = ", ".join(sorted(found[path])[:3])
+		print(f"sandbox: {path} appears in the sources and the unit neither "
+		      f"allows it nor is it classified read-only ({where})")
+		failures += 1
+
+	# The other direction: an allow-list entry nothing uses is usually the
+	# residue of a backend that was removed, and it widens the sandbox for
+	# nothing.
+	for path in sorted(allowed):
+		if not any(covers(path, seen) for seen in found):
+			print(f"sandbox: the unit makes {path} writable and no source "
+			      f"names it -- residue, or a path spelled differently?")
+			failures += 1
+
+	failures += readwritepaths_are_not_inert(level, allowed)
+	failures += maintainer_script_puts_the_unit_in_force()
+
+	if failures:
+		print(f"sandbox: {failures} disagreement(s) between the unit and the code")
+		return 1
+	for path in in_place:
+		print(f"sandbox: {path} is granted as a file and not through its "
+		      f"directory, so netcfgd writes it in place rather than "
+		      f"atomically (0161)")
+	print(f"sandbox: {len(found)} /etc path(s) in the code, all allowed or "
+	      f"classified read-only; {len(in_place)} written in place; "
+	      f"ProtectSystem={level} with no inert grant; the "
+	      f"postinst reloads before it restarts")
+	return 0
+
+
+if __name__ == "__main__":
+	sys.exit(main())

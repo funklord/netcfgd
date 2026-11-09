@@ -1132,6 +1132,17 @@ packaging:
 	@# One program icon, and every front end naming it rather than borrowing
 	@# a generic one from whatever theme is installed.
 	@python3 tool/icon_gate.py
+	@# Every config key the compiler accepts is classified, so that a key
+	@# added later cannot default to "a client may send this". 0127. It read
+	@# the Rust until 0317 and so never held the C: ported, it found
+	@# `remote { agent }` (10.760) among 43 keys nobody had classified.
+	@python3 tool/privilege_gate.py
+	@# Every /etc path the daemon names against what its own systemd unit
+	@# allows, and the postinst reloading that unit before it restarts the
+	@# daemon. A disagreement is EROFS at run time on a packaged install and
+	@# in no test, because every test writes into a temp directory. 0127's
+	@# writes were refused by netcfgd's own sandbox this way.
+	@python3 tool/sandbox_gate.py
 	@# Every module of the C port is reached by a test. 0263 says a module
 	@# whose tests are to follow has not been ported; this is that sentence
 	@# with something behind it.

@@ -45,10 +45,11 @@
  *
  * Every key the compiler accepts is classified, here or in
  * `tool/privilege-ordinary.txt`, and `tool/privilege_gate.py` fails when one
- * is neither. That gate reads the Rust, so what keeps *this* copy honest is
- * `authorize_test.c`, which pins the table entry for entry against the list the
- * Rust holds -- a table that quietly lost a row would otherwise let a
- * production through with nothing said.
+ * is neither. It matches on the key's name, so a key whose name is privileged
+ * in some other block passes it unasked -- `block_list { file }` did, behind
+ * `openvpn { file }` (10.761) -- and `authorize_test.c` is what pins each row
+ * by block. Until 0317 the gate read the Rust, and nothing held this copy's
+ * coverage at all.
  */
 static const struct {
 	const char             *block;
