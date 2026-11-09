@@ -32,6 +32,7 @@
  *   about.
  */
 #include "ncfg/daemon.h"
+#include "ncfg/dhcp_server.h"
 
 #include "ncfg/parse.h"
 
@@ -70,6 +71,15 @@ static const struct {
 	{ "wifi", "ca_cert", NCFG_PRIV_PATH },
 	{ "wifi", "client_cert", NCFG_PRIV_PATH },
 	{ "wifi", "private_key", NCFG_PRIV_PATH },
+	/* A block list's `file` is read by the daemon, and `ncfg block fetch`
+	 * renames what it downloads onto it at 0644 once the download holds one
+	 * name. An operator or a timer runs that fetch, as root, so a caller who
+	 * chose the path chose where root writes -- and `authorized_keys`, for
+	 * one, ignores the lines it cannot read. **Privileged only outside
+	 * `NCFG_BLOCK_LIST_DIR`**, which is where the GUI puts one, so a desktop
+	 * user can still keep a list. The `url` is ordinary: it chooses what goes
+	 * into a file, and the file is what this guards (10.760). */
+	{ "block_list", "file", NCFG_PRIV_PATH },
 	/* The authorization policy itself, local and remote. Everything that
 	 * decides who may do what is decided by root and nobody else, or the
 	 * tiers below it mean nothing. */
@@ -172,6 +182,70 @@ static int cert_is_a_path(const ncfg_ast_value_t *value)
 		return 1;
 	}
 	return !string_starts_with(value, "@secret:");
+}
+
+/*
+ * Whether a block list's `file` value names somewhere outside netcfgd's own
+ * block-list directory.
+ *
+ * Every string in it is checked, a list being the usual form. Inside means
+ * under `NCFG_BLOCK_LIST_DIR` with no `.` or `..` component anywhere after
+ * it, so `/var/lib/netcfgd/block/../../../root/x` is outside -- the string
+ * test alone would call it inside. Only root writes that directory, so
+ * nothing in it can be a link a caller planted. A value that is not a string
+ * or a list of them is outside, which is the safe direction: it will not
+ * compile anyway.
+ */
+static int block_file_outside(const ncfg_ast_value_t *value)
+{
+	static const char dir[] = NCFG_BLOCK_LIST_DIR "/";
+	size_t            at;
+
+	if (!value) {
+		return 1;
+	}
+	if (value->kind == NCFG_AST_LIST) {
+		for (at = 0; at < value->entries.count; at++) {
+			if (block_file_outside(value->entries.at[at])) {
+				return 1;
+			}
+		}
+		return 0;
+	}
+	if (value->kind != NCFG_AST_STRING || !value->string ||
+	    memchr(value->string, '\0', value->string_length) ||
+	    !string_starts_with(value, dir)) {
+		return 1;
+	}
+	/* Each component after the directory: none may be empty, `.` or `..`. */
+	{
+		const char *from = value->string + sizeof(dir) - 1u;
+		const char *end = value->string + value->string_length;
+
+		if (from == end) {
+			return 1;
+		}
+		while (from < end) {
+			const char *slash = memchr(from, '/', (size_t)(end - from));
+			size_t      length = (size_t)((slash ? slash : end) - from);
+
+			if (length == 0u || (length == 1u && from[0] == '.') ||
+			    (length == 2u && from[0] == '.' && from[1] == '.')) {
+				return 1;
+			}
+			from += length + (slash ? 1u : 0u);
+		}
+	}
+	return 0;
+}
+
+/* Whether a `NCFG_PRIV_PATH` entry's value really names a path root opens. */
+static int path_is_privileged(const char *block, const ncfg_ast_value_t *value)
+{
+	if (strcmp(block, "block_list") == 0) {
+		return block_file_outside(value);
+	}
+	return cert_is_a_path(value);
 }
 
 /*
@@ -301,9 +375,9 @@ static int walk_item(const ncfg_ast_item_t *item, const char *block,
 
 		if (item->as.assignment.key &&
 		    assignment_reason(block, item->as.assignment.key, &reason)) {
-			/* The one entry in the table that is conditional, and it is
+			/* The entries in the table that are conditional, and they are
 			 * conditional on the value rather than the key. */
-			if (reason != NCFG_PRIV_PATH || cert_is_a_path(value)) {
+			if (reason != NCFG_PRIV_PATH || path_is_privileged(block, value)) {
 				if (!record(out, reason,
 				        joined(block, item->as.assignment.key),
 				        item->as.assignment.span)) {

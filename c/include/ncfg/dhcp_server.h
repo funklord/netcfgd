@@ -38,6 +38,12 @@
 #define NCFG_BLOCK_NAMES_MAX 1048576
 #define NCFG_BLOCK_FILE_MAX (64ull * 1024ull * 1024ull)
 
+/* Where a block list's files are kept when nobody privileged chose otherwise.
+ * A `file` under it is ordinary for any caller; one anywhere else names where
+ * root's fetch writes and is root's to name (privilege.c, 10.760). The GUI
+ * offers it. */
+#define NCFG_BLOCK_LIST_DIR "/var/lib/netcfgd/block"
+
 /* `<run>/dhcp-server/<iface>.block`, the names the server refuses (0305). */
 int ncfg_dhcp_server_block_path(const char *run, const char *iface, char *out,
     size_t out_size, char *err, size_t err_size);

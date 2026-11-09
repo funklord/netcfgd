@@ -854,6 +854,9 @@ static void the_content_gate_refuses_each_privileged_production(void)
 		    "a control-policy widening", "who may ask" },
 		{ "global {\n\tremote {\n\t\tagent = \"any\"\n\t}\n}\n",
 		    "a remote-agent widening", "who may ask" },
+		{ "block_list \"ads\" {\n\tfile = \"/root/.ssh/authorized_keys\"\n\t"
+		  "url = \"https://example.org/hosts.txt\"\n}\n",
+		    "a block list's file", "names a path" },
 		{ "interface tun0 {\n\topenvpn {\n\t\tconfig = \"/etc/openvpn/c.conf\"\n\t}\n}\n",
 		    "another program's configuration file", "as root" },
 		{ "include \"/etc/netcfgd/site.conf\"\n", "an include", "another file" },
@@ -899,7 +902,12 @@ static void an_ordinary_configuration_is_not_privileged(void)
 		"interface eth0 {\n\tprobe {\n\t\tinterval = 30\n\t}\n}\n",
 		/* A vxlan `group` is a multicast address and shares the word with
 		 * the tun key that gives a device away. */
-		"interface vx0 {\n\tvxlan {\n\t\tid = 100\n\t\tgroup = \"239.1.1.1\"\n\t}\n}\n"
+		"interface vx0 {\n\tvxlan {\n\t\tid = 100\n\t\tgroup = \"239.1.1.1\"\n\t}\n}\n",
+		/* A block list kept where the GUI keeps one, fetched or not. */
+		("block_list \"ads\" {\n\tfile = \"/var/lib/netcfgd/block/ads.txt\"\n\t"
+		 "url = \"https://example.org/hosts.txt\"\n}\n"),
+		("block_list \"two\" {\n\tfile = [\"/var/lib/netcfgd/block/a.txt\", "
+		 "\"/var/lib/netcfgd/block/sub/b.txt\"]\n}\n")
 	};
 	ncfg_peer_t member = peer_of(1000, 1000, NULL, 0);
 	size_t      at;
@@ -917,6 +925,53 @@ static void an_ordinary_configuration_is_not_privileged(void)
 		}
 	}
 	check(all_ordinary, "an ordinary configuration is sent by a caller who is not root");
+}
+
+/*
+ * A block list's file is ordinary only inside netcfgd's own directory, and
+ * the ways a string can start there and end somewhere else are each refused.
+ */
+static void a_block_list_file_is_ordinary_only_in_its_own_directory(void)
+{
+	static const char *const outside[] = {
+		"/var/lib/netcfgd/block/../../../root/.ssh/authorized_keys",
+		"/var/lib/netcfgd/block/./x",
+		"/var/lib/netcfgd/block//x",
+		"/var/lib/netcfgd/block/",
+		"/var/lib/netcfgd/blocklist.txt",
+		"/var/lib/netcfgd/block"
+	};
+	ncfg_peer_t member = peer_of(1000, 1000, NULL, 0);
+	ncfg_peer_t root = peer_of(0, 0, NULL, 0);
+	size_t      at;
+	int         all_refused = 1;
+
+	for (at = 0; at < sizeof(outside) / sizeof(outside[0]); at++) {
+		char                 text[256];
+		ncfg_proto_request_t request;
+		char                 err[NCFG_ERROR_MAX];
+
+		(void)snprintf(text, sizeof(text), "block_list \"x\" {\n\tfile = \"%s\"\n}\n",
+		    outside[at]);
+		request = config_put(text);
+		if (ncfg_authz_check_content(NCFG_ARRIVED_LOCAL, &member, &request, err,
+		        sizeof(err))) {
+			all_refused = 0;
+			detail("let through", outside[at]);
+		}
+	}
+	check(all_refused, "a block list file that leaves netcfgd's directory needs root");
+	{
+		ncfg_proto_request_t request = config_put(
+		    "block_list \"x\" {\n\tfile = [\"/var/lib/netcfgd/block/a.txt\", "
+		    "\"/etc/cron.d/x\"]\n}\n");
+		char                 err[NCFG_ERROR_MAX];
+
+		check(!ncfg_authz_check_content(NCFG_ARRIVED_LOCAL, &member, &request, err,
+		    sizeof(err)), "  and one bad path in a list is enough");
+		check(ncfg_authz_check_content(NCFG_ARRIVED_LOCAL, &root, &request, err,
+		    sizeof(err)), "  while root may name any path");
+	}
 }
 
 /*
@@ -1152,6 +1207,7 @@ int main(void)
 	a_hook_never_arrives_from_off_the_machine();
 	the_content_gate_refuses_each_privileged_production();
 	an_ordinary_configuration_is_not_privileged();
+	a_block_list_file_is_ordinary_only_in_its_own_directory();
 	config_is_privileged_in_openvpn_and_ordinary_in_an_interface();
 	a_certificate_path_is_privileged_and_stored_content_is_not();
 	a_probe_script_needs_root_whatever_is_in_it();

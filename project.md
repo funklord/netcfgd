@@ -12683,6 +12683,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.761 A block list's `file` chose where root's fetch writes
+
+The second gap behind 10.760, and the one the gate could never have shown: it matches key
+*names*, and `file` is privileged in `openvpn`, so `block_list { file }` read as classified.
+It was ordinary. `ncfg block fetch` (0305) downloads each list's `url` and renames the
+download onto its `file` at 0644 once it holds one name; an operator or a timer runs it, as
+root. So a caller who is not root could name both -- `file = "/root/.ssh/authorized_keys"` and
+a URL serving one hostname and one key -- and the next root fetch wrote it there.
+`authorized_keys` ignores the line it cannot read.
+
+**Privileged outside `NCFG_BLOCK_LIST_DIR` (`/var/lib/netcfgd/block`) and ordinary inside it**,
+which is the certificates' shape: conditional on the value, where `@secret:` is ordinary and a
+path is not. The directory is where the GUI offers to keep a list, so a desktop user keeps the
+feature. Inside means no empty, `.` or `..` component after the prefix -- the string test alone
+calls `/var/lib/netcfgd/block/../../../root/x` inside, and the test that says so failed when
+the `..` arm was taken out. `url` stays ordinary: it chooses what goes into a file, and the
+file is what is guarded.
+
+Searched for the rest of the shape -- a key that takes an absolute path -- by every lowering
+arm for `file`, `path`, `config`, `command` and the like: `openvpn { config, file }` and
+`probe { command }` were privileged already, and `block_list { file }` was the one that was
+not.
+
 ## 10.760 `remote { agent }` was ordinary, so a client could open the remote socket
 
 0127 lets a caller who is not root send configuration and refuses the productions that grant
