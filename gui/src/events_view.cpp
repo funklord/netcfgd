@@ -9,6 +9,7 @@
 #include <QFontDatabase>
 #include <QListWidget>
 #include <QScrollBar>
+#include <QTime>
 #include <QVBoxLayout>
 
 namespace {
@@ -143,7 +144,15 @@ void ncfg_events_view::append(const QString &line, const QString &raw)
 	QScrollBar *bar = lines->verticalScrollBar();
 	const bool following = bar->value() >= bar->maximum() - 2;
 
-	auto *item = new QListWidgetItem(line, lines);
+	/* **When it was heard** (10.789): a pane of what happened since you looked
+	 * that never said when was a list nobody could set against anything else
+	 * -- the journal, a cable pulled, a lid opened. This client's clock at
+	 * arrival, which is what it can vouch for; the event itself carries
+	 * none. */
+	auto *item = new QListWidgetItem(
+	    QStringLiteral("%1  %2").arg(QTime::currentTime().toString(QStringLiteral("HH:mm:ss")),
+	                                 line),
+	    lines);
 	if (!raw.isEmpty()) {
 		/* The whole event, on hover. netcfgd may grow a field on an
 		 * event kind after this client was built, and a pane that only

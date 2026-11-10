@@ -20,6 +20,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -120,9 +121,16 @@ int main(int argc, char **argv)
 					}
 				}
 			}
-			check(lines != nullptr && lines->item(lines->count() - 1)->text() ==
-			                              QStringLiteral("drift (on node %1)").arg(key),
-			      "the node's events cursor lists its event, by the node's whole key");
+			/* After the time it was heard, which every line leads with
+			 * (10.789): `HH:mm:ss` and two spaces. */
+			const QString last = lines ? lines->item(lines->count() - 1)->text() : QString();
+			check(lines != nullptr &&
+			          QRegularExpression(QStringLiteral("^\\d\\d:\\d\\d:\\d\\d  "))
+			              .match(last)
+			              .hasMatch() &&
+			          last.mid(10) == QStringLiteral("drift (on node %1)").arg(key),
+			      "the node's events cursor lists its event, by the node's whole key, with "
+			      "the time it was heard");
 		} else {
 			check(false, "a fake fuzznetd for the cursor listens");
 		}
