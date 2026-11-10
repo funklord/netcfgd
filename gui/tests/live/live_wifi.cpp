@@ -549,6 +549,40 @@ int main(int argc, char **argv)
 			    view.refresh();
 			    return saved->rowCount() == before - 1;
 		    }));
+
+		/* 10.786: a network the scan shows, forgotten, no longer reads as
+		 * configured in the scan -- it did until the next scan, with `join`
+		 * still offered. Cafe is the one 4b added. */
+		int cafe = -1;
+		for (int i = 0; i < saved->rowCount(); i++) {
+			if (saved->item(i, 0) && saved->item(i, 0)->text() == QStringLiteral("Cafe")) {
+				cafe = i;
+			}
+		}
+		check("the network added from the scan is saved", cafe >= 0);
+		if (cafe >= 0) {
+			/* A fresh scan first: section 6 took the daemon away, and the
+			 * table is whatever the last scan before it left. */
+			view.refresh();
+			scan->click();
+			QCoreApplication::processEvents();
+			bool named_before = false;
+			for (int i = 0; i < table->rowCount(); i++) {
+				named_before = named_before ||
+				    (table->item(i, 3) && table->item(i, 3)->text() == QStringLiteral("Cafe"));
+			}
+			check("  which the scan shows as configured, so the next check means something",
+			    named_before);
+			saved->selectRow(cafe);
+			answer_modal(QMessageBox::Yes);
+			forget->click();
+			bool named = false;
+			for (int i = 0; i < table->rowCount(); i++) {
+				named = named ||
+				    (table->item(i, 3) && table->item(i, 3)->text() == QStringLiteral("Cafe"));
+			}
+			check("and once forgotten the scan no longer names it", !named);
+		}
 	}
 
 	printf("\n");

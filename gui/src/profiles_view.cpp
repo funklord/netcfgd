@@ -46,8 +46,13 @@ ncfg_profiles_view::ncfg_profiles_view(ncfg_connection *connection, QWidget *par
 	connect(use_button, &QPushButton::clicked, this, &ncfg_profiles_view::use_selected);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_profiles_view::save_current);
 	connect(table, &ncfg_table_view::activated, this, &ncfg_profiles_view::use_selected);
-	connect(table, &ncfg_table_view::selection_changed, this,
-	    [this]() { use_button->setEnabled(table->selected_row() >= 0); });
+	/* Not for the profile already in use (10.786): it asked "Switch to the
+	 * `home` profile?" of the one the machine was on, a question whose only
+	 * honest answer is that nothing would change. */
+	connect(table, &ncfg_table_view::selection_changed, this, [this]() {
+		use_button->setEnabled(table->selected_row() >= 0 &&
+		                       table->selected_cell(2) != QStringLiteral("yes"));
+	});
 }
 
 void ncfg_profiles_view::refresh()
@@ -96,7 +101,9 @@ void ncfg_profiles_view::refresh()
 void ncfg_profiles_view::use_selected()
 {
 	const QString chosen = table->selected_cell(0);
-	if (chosen.isEmpty()) {
+	/* A double-click reaches here as well as the button, and the profile in
+	 * use is no switch (10.786). */
+	if (chosen.isEmpty() || table->selected_cell(2) == QStringLiteral("yes")) {
 		return;
 	}
 	/* The first row is the default state, and `profile_set` spells that as an

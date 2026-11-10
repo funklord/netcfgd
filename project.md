@@ -12686,6 +12686,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.786 A forgotten network leaves the scan, and the profile in use is not offered again
+
+Two more of 10.778's list. **After forgetting a network the scan still named it**: the
+`configured` column comes from the last scan, so it went on reading `Cafe` with `join` still
+offered until somebody scanned again -- a refresh did not clear it. What a forget changes is
+known exactly, so the rows that named it are cleared there, without asking the radio.
+`live_wifi` forgets the network 4b added through the button and asks the scan no longer
+names it, after first asking that it did -- which caught the check passing on a table
+section 6 had left stale, before a rescan was added; with the fix out it fails. **And `use`
+was offered for the profile already in use**, asking "Switch to the `home` profile?" of the
+one the machine was on; it is offered for the others only, and a double-click on the current
+one does nothing.
+
 ## 10.785 A standing drift is announced once, not on every pass
 
 From 10.778's list. The GUI walk's events tab held ninety-one identical lines -- `drift br0:
@@ -12817,13 +12830,12 @@ offered: writing `override` from the GUI, which would be a client replacing what
 wrote by hand -- the thing 9.4 refuses. `live_config` holds the test and the dialog's shape,
 and fails with `written_by_hand` answering false; seen on screen for `eth0`.
 
-**The walk's findings not acted on**, kept so they are not found twice (10.784 and 10.785
-have since taken the plan's warnings, the narrow dialogs and the repeated drift): the events
-tab shows no time on an event; the scan list keeps a forgotten
-network's `configured` until a scan; a renamed DNS record's read-only name field looks
+**The walk's findings not acted on**, kept so they are not found twice (10.784 to 10.786
+have since taken the plan's warnings, the narrow dialogs, the repeated drift, the stale scan
+and the profile offered twice): the events
+tab shows no time on an event; a renamed DNS record's read-only name field looks
 editable and says nothing; the selection moves to the next row after a delete; UPnP asks to
-confirm before checking its input; `use` is offered for the profile already in use, and no
-profile can be deleted; the hooks tab cannot start a hook and does not say where one is
+confirm before checking its input; no profile can be deleted; the hooks tab cannot start a hook and does not say where one is
 added; the access tab says "requires root" beside a connection holding `admin`; device
 dialogs have no delete; and backticks, `ncfg` commands and op names reach a person's eye
 in many help lines. Each is small, and each is what a laptop's owner meets.

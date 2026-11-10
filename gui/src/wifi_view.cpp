@@ -488,6 +488,20 @@ void ncfg_wifi_view::forget_selected()
 	 * Found by a probe reading the status after the click and getting
 	 * `radio0: COMPLETED on ...`. */
 	refresh();
+	/* **And the scan's rows that named it** (10.786). The `configured`
+	 * column comes from the last scan, so after a forget it still named the
+	 * network and `join` stayed offered for it -- a refresh did not clear it,
+	 * only another scan. What the forget changed is known here exactly, so
+	 * it is put right without asking the radio again. */
+	for (int row = 0; row < scanned.size() && row < table->rowCount(); row++) {
+		if (scanned.at(row).configured == id) {
+			scanned[row].configured.clear();
+			if (QTableWidgetItem *cell = table->item(row, 3)) {
+				cell->setText(QString());
+			}
+		}
+	}
+	selection_changed();
 	const QString said = QStringLiteral("forgot `%1`").arg(id);
 	status->setText(said);
 	emit reported(said);
