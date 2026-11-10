@@ -131,7 +131,19 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	table->setSelectionMode(QAbstractItemView::SingleSelection);
 	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	table->horizontalHeader()->setStretchLastSection(true);
-	layout->addWidget(table);
+	/* **The scan gets the room** (10.776): with the three tables stretched
+	 * alike, a laptop-sized window showed two networks of the six in range
+	 * while the access points this machine offers -- none, on most laptops --
+	 * kept a third of the tab. What is in range is what somebody opens this
+	 * tab to see, then what they saved, then what this machine serves. */
+	layout->addWidget(table, 3);
+	/* And five rows at the least, because a stretch only shares out height
+	 * the window has spare, and at a laptop's size it has none: measured on
+	 * an 880 by 560 window, the weights alone moved the scan from two rows to
+	 * three. */
+	table->setMinimumHeight(table->horizontalHeader()->sizeHint().height() +
+	                        5 * table->verticalHeader()->defaultSectionSize() +
+	                        2 * table->frameWidth());
 
 	/* Below the scan and clearly its own list, because the two answer
 	 * different questions: the table above is what is around this machine,
@@ -173,7 +185,7 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	saved_table->setSelectionMode(QAbstractItemView::SingleSelection);
 	saved_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	saved_table->horizontalHeader()->setStretchLastSection(true);
-	layout->addWidget(saved_table);
+	layout->addWidget(saved_table, 2);
 
 	/* A third list, below the saved networks and clearly its own: a saved
 	 * network is somewhere this machine joins and an access point is a network
@@ -204,7 +216,7 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	ap_table->setSelectionMode(QAbstractItemView::SingleSelection);
 	ap_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	ap_table->horizontalHeader()->setStretchLastSection(true);
-	layout->addWidget(ap_table);
+	layout->addWidget(ap_table, 1);
 
 	connect(ap_edit_button, &QPushButton::clicked, this,
 	    &ncfg_wifi_view::edit_access_point);

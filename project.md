@@ -12686,6 +12686,15 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.776 The wifi tab gives the scan the room
+
+10.774's walk found the wifi tab's three tables stretched alike, so an 880 by 560 window
+showed two of the six networks in range while the access points this machine offers -- none,
+on most laptops -- held a third of the tab. Weighting them 3, 2 and 1 moved the scan to three
+rows, since a stretch shares only the height a window has spare; a minimum of five rows for
+the scan table is what showed five, and grows the window from 560 to 620 pixels, inside a
+768-line screen. Seen on Xvfb against the walk's scratch daemon, before and after.
+
 ## 10.775 Signal as the strength a person reads, on NetworkManager's curve
 
 The tray listed networks as `HomeFiber  (-53 dBm)`, and the wifi tab's column the same. A
@@ -12719,7 +12728,7 @@ taken out it fails.
 editor -- closer to nm-connection-editor than to an applet -- and the tray is the laptop
 owner's way in, so the rest weighs less: the wifi tab prints the supplicant's own state word
 (`COMPLETED`), which `ncfg_client.h` keeps on purpose so every tool names a state alike;
-signal was in dBm where the three above draw bars (10.775 changes that); the scan table shows two rows while the
+signal was in dBm where the three above draw bars (10.775 changes that); the scan table showed two rows (10.776 gives it five) while the
 access points this machine offers, which a laptop rarely has, keep the most room; and the
 links tab lists the kernel's fallback tunnels (`gre0`, `sit0`, `erspan0`) beside the
 interfaces the machine uses. Each is a choice somebody could reasonably make the other way.
