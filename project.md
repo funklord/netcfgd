@@ -12788,6 +12788,18 @@ offered: writing `override` from the GUI, which would be a client replacing what
 wrote by hand -- the thing 9.4 refuses. `live_config` holds the test and the dialog's shape,
 and fails with `written_by_hand` answering false; seen on screen for `eth0`.
 
+**The walk's findings not acted on**, kept so they are not found twice: the plan and apply
+dialogs show a line and a half of warnings and outcomes, cut short; the interface and network
+dialogs open too narrow, their address fields squashed to "192...."; the events tab repeats
+an unapplied drift every few seconds, with no time on it; the scan list keeps a forgotten
+network's `configured` until a scan; a renamed DNS record's read-only name field looks
+editable and says nothing; the selection moves to the next row after a delete; UPnP asks to
+confirm before checking its input; `use` is offered for the profile already in use, and no
+profile can be deleted; the hooks tab cannot start a hook and does not say where one is
+added; the access tab says "requires root" beside a connection holding `admin`; device
+dialogs have no delete; and backticks, `ncfg` commands and op names reach a person's eye
+in many help lines. Each is small, and each is what a laptop's owner meets.
+
 ## 10.777 The tray said "offline" for a machine on a network, and was first seen running
 
 **The tray had never been on a screen.** `tray.h` says as much: `create` returns nullptr
