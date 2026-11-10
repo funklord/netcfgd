@@ -97,6 +97,32 @@ static int quiet(const ncfg_plan_t *plan)
  * The start
  * ------------------------------------------------------------------------ */
 
+/* 10.792: an access point on a radio that is switched off is not started --
+ * hostapd failed on it every pass, stopping the plan -- and is once the switch
+ * is back. */
+static void an_access_point_on_a_radio_switched_off_waits_for_it(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(PLAIN_DEVICE, ADDRESSED_INTERFACE, "", ACCESS_POINT,
+	    "\"links\":[{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,\"up\":false,"
+	    "\"carrier\":false,\"ownership\":\"unknown\",\"wireless\":true,"
+	    "\"rfkill\":{\"switch\":\"phy0\",\"soft\":true,\"hard\":false}}]",
+	    &document, &observed);
+	const ncfg_action_t *start = plan ? planfix_action(plan, "backend.start") : NULL;
+
+	check(plan && !start, "an access point on a radio switched off is not started");
+	check(plan && planfix_warned(plan, "switched off"), "  and the plan says the radio is off");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(PLAIN_DEVICE, ADDRESSED_INTERFACE, "", ACCESS_POINT,
+	    "\"links\":[" DOWN_RADIO_LINK "]", &document, &observed);
+	start = plan ? planfix_action(plan, "backend.start") : NULL;
+	check(start && start->op.u.backend.kind == NCFG_BACKEND_ACCESS_POINT,
+	    "  and is, once the switch is back");
+	planfix_release(plan, document, observed);
+}
+
 static void a_radio_the_machine_has_gets_a_supplicant(void)
 {
 	ncfg_document_t     *document;
@@ -473,6 +499,7 @@ static void the_radio_this_build_does_start_one_for_is_not_warned_about(void)
 
 int main(void)
 {
+	an_access_point_on_a_radio_switched_off_waits_for_it();
 	a_radio_the_machine_has_gets_a_supplicant();
 	a_radio_given_to_a_mesh_gets_a_supplicant();
 	a_repeater_radio_is_four_address_before_it_is_bridged();

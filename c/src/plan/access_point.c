@@ -127,6 +127,24 @@ void ncfg_plan_access_point(ncfg_builder_t *builder, const ncfg_interface_t *int
 		}
 	}
 	/*
+	 * **Not on a radio that is switched off** (10.792), for 10.791's reason.
+	 * hostapd cannot beacon on a blocked radio: it failed with "Could not
+	 * connect to kernel driver", nine times in forty seconds in a hull guest,
+	 * each failure stopping the rest of the plan and none naming the switch.
+	 * `warn_blocked_radios` already says the radio is off and where; the next
+	 * observation after the unblock plans the start. Nothing is stopped for
+	 * it either: taking a supplicant down for an access point that cannot
+	 * come up is the radio left with neither (10.783's shape).
+	 */
+	{
+		const ncfg_observed_link_t *radio =
+		    ncfg_observed_link(builder->observed, interface->name);
+
+		if (radio && radio->rfkill && ncfg_rfkill_blocked(radio->rfkill)) {
+			return;
+		}
+	}
+	/*
 	 * Through the same function a DHCP client is started by, which is what
 	 * carries 0079's restart limit and rule 3's wait for `link.up` here
 	 * without a second copy of either. A radio hostapd is already running on

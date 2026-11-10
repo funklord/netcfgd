@@ -12688,6 +12688,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.792 An access point on a radio that is switched off waits for the switch
+
+10.791's shape, looked for at once beside it. An access point on a radio whose rfkill switch
+was set had its `backend.start` planned every pass, and hostapd failed it with "Failed to set
+beacon parameters; Could not connect to kernel driver" -- nine times in forty seconds in a
+hull guest, each one stopping the rest of the plan and none naming the switch. The access
+point walk now plans nothing for a radio the observation reports blocked -- not the start,
+and not the supplicant's stop that a change of role brings, since taking a station down for
+an access point that cannot come up is the radio left with neither. `warn_blocked_radios`
+already names the switch. Measured the same way after: no error in fifty seconds, and hostapd
+started on the first pass after the unblock. `plan_radio_test` holds both halves and fails
+with the guard taken out.
+
 ## 10.791 A radio that is switched off is not brought up
 
 Found by 10.790's rig on its first run, with the radio's rfkill switch set from sysfs. The
