@@ -101,9 +101,15 @@ ncfg_access_view::ncfg_access_view(ncfg_connection *connection, QWidget *parent)
 	 * half that is easy to leave out: the *unprivileged* state says so, in a
 	 * frame of its own and deliberately without colour. Only the privileged
 	 * frame is red, so red keeps meaning one thing. */
+	/* **Whatever this connection holds** (10.788): the walk read "require
+	 * root" beside "this connection holds: observe wifi admin" as a
+	 * contradiction. It is not one -- who may ask netcfgd for what is
+	 * outside what `admin` may write -- but nothing on the tab said so. */
 	notice = new QLabel(
-	    QStringLiteral("<b>Changes here require root.</b><br>Click "
-	               "\"Administrator Mode\" to start a privileged helper and edit them."),
+	    QStringLiteral("<b>Changes here require root, whatever this connection holds.</b><br>"
+	               "Who may ask netcfgd for what is root's to decide, and `admin` cannot "
+	               "widen its own reach. Click \"Administrator Mode\" to start a "
+	               "privileged helper and edit them."),
 	    this);
 	notice->setFrameShape(QFrame::Box);
 	notice->setFrameShadow(QFrame::Raised);

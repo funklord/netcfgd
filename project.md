@@ -12686,6 +12686,13 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.788 The access tab says why `admin` is not enough
+
+From 10.778's list. The tab read "Changes here require root" beside "this connection holds:
+observe wifi admin", which the walk took for a contradiction. It is not one -- the `control`
+policy, who may ask netcfgd for what, is outside what `admin` may write, so a tier cannot
+widen its own reach -- but nothing on the tab said so. The banner says it now.
+
 ## 10.787 UPnP's form is checked before the question about opening the router
 
 From 10.778's list. `turn UPnP on` asked "Turn on UPnP and NAT-PMP?" -- a question about
@@ -12843,7 +12850,7 @@ have since taken the plan's warnings, the narrow dialogs, the repeated drift, th
 the profile offered twice and UPnP's order): the events
 tab shows no time on an event; a renamed DNS record's read-only name field looks
 editable and says nothing; the selection moves to the next row after a delete; no profile can be deleted; the hooks tab cannot start a hook and does not say where one is
-added; the access tab says "requires root" beside a connection holding `admin`; device
+added; device
 dialogs have no delete; and backticks, `ncfg` commands and op names reach a person's eye
 in many help lines. Each is small, and each is what a laptop's owner meets.
 
