@@ -2737,6 +2737,33 @@ hull-mips:
 	sed 's/^/mips: /' tests/hull/mips/verdict/mips; \
 	grep -q '^VERDICT ok' tests/hull/mips/verdict/mips
 
+# netcfgd across a real suspend and resume (project.md 10.790): a laptop's lid,
+# with a station joined and leased, a confirm window open and the rfkill watcher
+# listening. **Needs a hull whose vm guest wakes on its RTC alarm with its
+# devices intact** -- 50071a9 does not (10.773), and the holder has said hull
+# will. So it is not in `hull`, and until then it ends at this timeout, which is
+# that answer rather than a hang: the guest suspends itself and nothing wakes it.
+hull-suspend:
+	@$(call hull_says,netcfgd/hwsim)
+	@$(call hull_image,hwsim)
+	@$(MAKE) --no-print-directory -C c netcfgd ncfg
+	@rm -f tests/hull/suspend/verdict/suspend tests/hull/suspend/verdict/log \
+		tests/hull/suspend/verdict/pm_test
+	@mkdir -p tests/hull/suspend/verdict
+	@# A pm_test level makes it a rig check rather than a lid: the kernel goes
+	@# that far and comes straight back, which this hull can already do.
+	@if [ -n "$(SUSPEND_TEST)" ]; then echo "$(SUSPEND_TEST)" > tests/hull/suspend/verdict/pm_test; fi
+	@timeout -k 30 900 $(HULL) run -f tests/hull/suspend/hull.conf || true
+	@if [ ! -f tests/hull/suspend/verdict/suspend ]; then \
+		echo "suspend: no verdict -- the guest never came back from its sleep, or never ran"; \
+		if [ -f tests/hull/suspend/verdict/log ]; then \
+			sed 's/^/suspend: /' tests/hull/suspend/verdict/log | tail -15; \
+		fi; \
+		exit 1; \
+	fi; \
+	sed 's/^/suspend: /' tests/hull/suspend/verdict/suspend; \
+	grep -q '^VERDICT ok' tests/hull/suspend/verdict/suspend
+
 # OpenWrt's own big-endian MIPS kernel and rootfs in qemu-system-mips, in 128 MB,
 # netcfgd built with OpenWrt's toolchain: what `hull-openwrt` runs, on the kind of
 # machine it stands in for (10.742). Not in `hull`, being two emulators deep.
@@ -2890,7 +2917,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

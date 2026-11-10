@@ -12699,6 +12699,33 @@ observation reports blocked, and the next observation after the unblock plans it
 watched the link come back. `plan_kind_test` holds both halves and fails with the condition
 taken out.
 
+## 10.790 A suspend rig, ready for the hull that can wake a guest
+
+The holder has said hull will implement suspend and resume for testing (2026-11-11), which
+is what 10.773 found missing. netcfgd's half is written now so the two meet without a round
+trip: `tests/live/suspend.sh`, run by `tests/hull/suspend/hull.conf` through `make
+hull-suspend`, measures the register's four questions on a real sleep. A station joined to an
+access point on `mac80211_hwsim`, leased by dnsmasq for two minutes, with a confirm window of
+120 seconds open over a change, suspends for 150 seconds -- so the lease and the window's
+wall-clock deadline both run out asleep -- and is then asked: associated again within two
+minutes, how long it took; the lease renewed (a dnsmasq expiry granted after the wake), not
+held stale; the window paused, so the change still stands and can be confirmed (10.665); and
+the rfkill watcher still hearing a block.
+
+**The wake is the guest's own**, the RTC alarm and `/sys/power/state` that `rtcwake` uses,
+so nothing in the rig is hull's syntax: hull's part is that the alarm wakes the guest and the
+devices and shares survive, listed in its inbox (20261110T2300Z). Until then a run ends at the
+target's timeout with "no verdict", which is that answer; it is not in `make hull`.
+`SUSPEND_TEST=freezer` runs it as a check of itself, at the pm_test level this hull already
+returns from -- labelled a rig check, since nothing expires in five seconds.
+
+**The rig check found a fault on its first run**, and it was not in the rig: 10.791.
+`make hull-suspend SUSPEND_TEST=freezer` passes every check now, labelled a rig check. The
+rfkill check asks the daemon, through `ncfg wifi status` and the link coming back up, rather
+than grepping its log -- the first version grepped for `rfkill` and the executor says
+`RF-kill`.
+
+
 ## 10.789 Each event says when it was heard
 
 From 10.778's list: the events tab -- "what has happened since you looked" -- never said when,
