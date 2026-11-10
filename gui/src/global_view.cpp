@@ -311,6 +311,16 @@ void ncfg_global_view::toggle_upnp()
 	 * turning it off takes away mappings clients asked for, which they ask
 	 * for again where they still want them. */
 	if (!upnp_on) {
+		/* The fields first, then the question (10.787): asked the other
+		 * way, somebody agreed to open their router and was told only then
+		 * that the form was not filled in. */
+		if (upnp_uplink->text().trimmed().isEmpty() ||
+		    upnp_lan->text().split(QLatin1Char(','), Qt::SkipEmptyParts).isEmpty() ||
+		    upnp_lan->text().trimmed().isEmpty()) {
+			emit reported(QStringLiteral("UPnP needs the uplink it maps on and at least one "
+			                             "LAN interface"));
+			return;
+		}
 		const QMessageBox::StandardButton answer = QMessageBox::question(this,
 		    QStringLiteral("netcfgd"), QString::fromLatin1(upnp_warning),
 		    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);

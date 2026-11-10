@@ -19,10 +19,12 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QMetaObject>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 
 #include <cstdio>
 
@@ -195,6 +197,28 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	upnp_view.refresh();
+	/* 10.787: an empty form is said before the question, not after it. A
+	 * question that did come up is answered No by the timer, so the old
+	 * order fails this check rather than hanging on a box nobody closes. */
+	{
+		bool asked = false;
+		QTimer poll;
+		poll.setInterval(20);
+		QObject::connect(&poll, &QTimer::timeout, [&asked]() {
+			if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+				asked = true;
+				box->reject();
+			}
+		});
+		poll.start();
+		uplink->setText(QStringLiteral("wan0"));
+		lans->setText(QString());
+		QMetaObject::invokeMethod(&upnp_view, "toggle_upnp");
+		QApplication::processEvents();
+		poll.stop();
+		check(asked ? QStringLiteral("asked") : QStringLiteral("told"), QStringLiteral("told"),
+		    "a form with no LAN is refused before anybody is asked to open the router");
+	}
 	uplink->setText(QStringLiteral("wan0"));
 	lans->setText(QStringLiteral(" lan0 ,"));
 	QMetaObject::invokeMethod(&upnp_view, "write_upnp");

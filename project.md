@@ -12686,6 +12686,14 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.787 UPnP's form is checked before the question about opening the router
+
+From 10.778's list. `turn UPnP on` asked "Turn on UPnP and NAT-PMP?" -- a question about
+opening the router to the LAN's devices -- and only after a Yes said the form needed a LAN
+interface. The fields are checked first now. `global_load` presses it with the LAN empty and
+asks that no question came up; a timer answers any that does, so the old order fails the
+check rather than hanging on a box nobody closes.
+
 ## 10.786 A forgotten network leaves the scan, and the profile in use is not offered again
 
 Two more of 10.778's list. **After forgetting a network the scan still named it**: the
@@ -12830,12 +12838,11 @@ offered: writing `override` from the GUI, which would be a client replacing what
 wrote by hand -- the thing 9.4 refuses. `live_config` holds the test and the dialog's shape,
 and fails with `written_by_hand` answering false; seen on screen for `eth0`.
 
-**The walk's findings not acted on**, kept so they are not found twice (10.784 to 10.786
-have since taken the plan's warnings, the narrow dialogs, the repeated drift, the stale scan
-and the profile offered twice): the events
+**The walk's findings not acted on**, kept so they are not found twice (10.784 to 10.787
+have since taken the plan's warnings, the narrow dialogs, the repeated drift, the stale scan,
+the profile offered twice and UPnP's order): the events
 tab shows no time on an event; a renamed DNS record's read-only name field looks
-editable and says nothing; the selection moves to the next row after a delete; UPnP asks to
-confirm before checking its input; no profile can be deleted; the hooks tab cannot start a hook and does not say where one is
+editable and says nothing; the selection moves to the next row after a delete; no profile can be deleted; the hooks tab cannot start a hook and does not say where one is
 added; the access tab says "requires root" beside a connection holding `admin`; device
 dialogs have no delete; and backticks, `ncfg` commands and op names reach a person's eye
 in many help lines. Each is small, and each is what a laptop's owner meets.
