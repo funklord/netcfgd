@@ -789,7 +789,11 @@ void ncfg_wifi_view::scan()
 			joinable++;
 		}
 		const QString cells[column_count] = {
-			QStringLiteral("%1 dBm").arg(point.signal),
+			/* The strength first, on NM's curve, and the dBm beside it
+			 * for whoever is placing an access point (10.775). */
+			QStringLiteral("%1%  (%2 dBm)")
+			    .arg(ncfg_signal_percent(point.signal))
+			    .arg(point.signal),
 			point.display,
 			/* Four words, not two. "secured" on a corporate network
 			 * tells an operator to look for a passphrase they do not

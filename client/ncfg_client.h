@@ -862,6 +862,17 @@ void ncfg_new_choices_free(ncfg_new_choices_t *choices);
 char *ncfg_connectivity_notice(ncfg_rung_t before, const char *before_label, ncfg_rung_t after,
                                const char *after_label);
 
+/*
+ * A signal in dBm as the 0-100 strength a person reads, on NetworkManager's
+ * curve (`nm_wifi_utils_level_to_quality`): -40 dBm or better is 100, -100 or
+ * worse is 0, linear between and truncated -- so -53 is 79, the figure a real
+ * NM gave for it (project.md 10.775). That curve rather than the
+ * `2 * (dBm + 100)` everybody writes, because every applet's bars are
+ * calibrated against NM's numbers and a laptop's owner has met those. Here
+ * for the reason the rules above are: both trays show it.
+ */
+int ncfg_signal_percent(int dbm);
+
 void ncfg_links_free(ncfg_links_t *links);
 void ncfg_inventory_free(ncfg_inventory_t *inventory);
 void ncfg_linksets_free(ncfg_linksets_t *linksets);

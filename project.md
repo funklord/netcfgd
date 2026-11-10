@@ -12686,6 +12686,20 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.775 Signal as the strength a person reads, on NetworkManager's curve
+
+The tray listed networks as `HomeFiber  (-53 dBm)`, and the wifi tab's column the same. A
+laptop's owner has no sense of a dBm and every applet they have used draws bars from a 0-100
+strength, so 10.774's walk recorded it and this changes it. `ncfg_signal_percent` in the
+client library, beside the tray's other shared rules so the TDE tray can show the same, is
+NetworkManager's `nm_wifi_utils_level_to_quality` -- 100 at -40 dBm, 0 at -100, linear and
+truncated between -- because 10.399's oracle found the obvious `2 * (dBm + 100)` disagreeing
+with a real NM by fifteen points at -53. The tray shows the percentage alone; the wifi tab,
+being where somebody places an access point, shows `79%  (-53 dBm)`. `client_test` holds
+the ends, the clamps, -53 as 79 and -70 as 50, and fails two with the linear formula. The
+stations tab and the roam and steering settings stay in dBm: they are thresholds an operator
+types, and those are dBm in hostapd and the supplicant alike.
+
 ## 10.774 Adding a network from the window joins it, as the tray does
 
 Found by walking the desktop aim with the GUI on a screen (Xvfb, a scratch daemon over
@@ -12705,7 +12719,7 @@ taken out it fails.
 editor -- closer to nm-connection-editor than to an applet -- and the tray is the laptop
 owner's way in, so the rest weighs less: the wifi tab prints the supplicant's own state word
 (`COMPLETED`), which `ncfg_client.h` keeps on purpose so every tool names a state alike;
-signal is in dBm where the three above draw bars; the scan table shows two rows while the
+signal was in dBm where the three above draw bars (10.775 changes that); the scan table shows two rows while the
 access points this machine offers, which a laptop rarely has, keep the most room; and the
 links tab lists the kernel's fallback tunnels (`gre0`, `sit0`, `erspan0`) beside the
 interfaces the machine uses. Each is a choice somebody could reasonably make the other way.

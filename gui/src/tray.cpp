@@ -434,7 +434,9 @@ void ncfg_tray::rebuild_join(const QString &current)
 		}
 		for (const ncfg_tray_choice &choice : found) {
 			QAction *action = join_menu->addAction(
-			    QStringLiteral("%1  (%2 dBm)").arg(choice.label).arg(choice.signal));
+			    QStringLiteral("%1  (%2%)")
+			        .arg(choice.label)
+			        .arg(ncfg_signal_percent(choice.signal)));
 			action->setCheckable(true);
 			action->setChecked(choice.current);
 			/* The one already joined is ticked and does nothing: asking the
@@ -465,9 +467,11 @@ void ncfg_tray::rebuild_join(const QString &current)
 			                     : choice.secured  ? QStringLiteral("passphrase")
 			                     : choice.owe      ? QStringLiteral("encrypted")
 			                                       : QStringLiteral("open");
-			QAction *action = join_menu->addAction(QStringLiteral("%1  (%2 dBm, %3)...")
+			/* A percentage on NetworkManager's curve, which is the scale a
+			 * laptop's owner has met in every other applet (10.775). */
+			QAction *action = join_menu->addAction(QStringLiteral("%1  (%2%, %3)...")
 			                                           .arg(choice.label)
-			                                           .arg(choice.signal)
+			                                           .arg(ncfg_signal_percent(choice.signal))
 			                                           .arg(kind));
 			connect(action, &QAction::triggered, this, [this, choice] { add_network(choice); });
 		}

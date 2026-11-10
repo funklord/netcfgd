@@ -2009,6 +2009,19 @@ static char *notice_printf(const char *format, const char *label)
 	return text;
 }
 
+int ncfg_signal_percent(int dbm)
+{
+	int level = dbm < 0 ? -dbm : dbm;
+
+	if (level <= 40) {
+		return 100;
+	}
+	if (level >= 100) {
+		return 0;
+	}
+	return 100 - (100 * (level - 40)) / 60;
+}
+
 char *ncfg_connectivity_notice(ncfg_rung_t before, const char *before_label, ncfg_rung_t after,
                                const char *after_label)
 {

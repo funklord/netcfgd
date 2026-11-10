@@ -2906,6 +2906,18 @@ static void notice_is(const char *what, char *got, const char *wanted)
 	free(got);
 }
 
+/* The strength a tray shows, on NetworkManager's curve (10.775). */
+static void a_signal_reads_as_networkmanager_reads_it(void)
+{
+	ok("-40 dBm is full strength", ncfg_signal_percent(-40) == 100, NULL);
+	ok("and anything stronger is too", ncfg_signal_percent(-20) == 100, NULL);
+	ok("-100 dBm is nothing", ncfg_signal_percent(-100) == 0, NULL);
+	ok("and anything weaker is too", ncfg_signal_percent(-110) == 0, NULL);
+	ok("-53 dBm is 79, as a real NetworkManager said", ncfg_signal_percent(-53) == 79,
+	    NULL);
+	ok("-70 dBm is half", ncfg_signal_percent(-70) == 50, NULL);
+}
+
 static void a_tray_says_when_the_network_moves(void)
 {
 	notice_is("joining says where",
@@ -3412,6 +3424,7 @@ int main(int argc, char **argv)
 	join_choices_are_the_saved_networks_heard();
 	new_choices_are_the_unsaved_networks_heard();
 	a_tray_says_when_the_network_moves();
+	a_signal_reads_as_networkmanager_reads_it();
 	a_switched_off_radio_says_so();
 	a_status_says_what_is_not_being_tried();
 	credentials_and_eap_are_read_as_written();
