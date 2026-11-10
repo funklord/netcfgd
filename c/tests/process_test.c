@@ -483,6 +483,57 @@ int main(void)
 	}
 
 	/* ---------------------------------------------------------------
+	 * A process part way through exiting is still there (10.772): its
+	 * command line goes empty before it is a zombie, and a stop that took
+	 * that for gone returned beside a daemon still holding its sockets.
+	 * Asked as the stops ask, polling until it reads as gone, and then
+	 * whether it is reapable yet -- which it has to be. With the command
+	 * line alone this failed every time it was measured.
+	 * --------------------------------------------------------------- */
+	{
+		int runs;
+		int early = 0;
+		int started = 1;
+
+		(void)snprintf(marker, sizeof(marker),
+		    "/run/netcfgd-test-%ld-exiting/hostapd/x.pid", (long)getpid());
+		for (runs = 0; runs < 200; runs++) {
+			int   status;
+			pid_t child;
+
+			fflush(NULL);
+			child = fork();
+			if (child < 0) {
+				started = 0;
+				break;
+			}
+			if (child == 0) {
+				execlp("sh", "sh", "-c", "sleep 0.01", marker, (char *)NULL);
+				_exit(122);
+			}
+			/* Until it has exec'd it carries this test's command line and
+			 * no marker, which is not the exit being asked about. */
+			{
+				int waited;
+
+				for (waited = 0; waited < PATIENCE_MS &&
+				    !ncfg_process_still(child, marker); waited++) {
+					sleep_ms(1);
+				}
+			}
+			while (ncfg_process_still(child, marker)) {
+			}
+			if (waitpid(child, &status, WNOHANG) != child) {
+				early++;
+				(void)waitpid(child, &status, 0);
+			}
+		}
+		check(started, "two hundred children can be started");
+		check(early == 0,
+		    "a process reads as gone only once it has gone, not while it is exiting");
+	}
+
+	/* ---------------------------------------------------------------
 	 * The signals, and the guards on what may be signalled.
 	 * --------------------------------------------------------------- */
 	{

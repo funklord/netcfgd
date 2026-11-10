@@ -162,7 +162,10 @@ static int wait_for_exit(const char *const *marker, pid_t pid, int patience_ms)
 	for (;;) {
 		struct timespec step;
 
-		if (ncfg_process_pid_by_markers(marker, 2u) != pid) {
+		/* And not part way through exiting, whose command line already
+		 * reads as nobody's (10.772). */
+		if (ncfg_process_pid_by_markers(marker, 2u) != pid &&
+		    !ncfg_process_still(pid, marker[0])) {
 			return 1;
 		}
 		if (waited >= patience_ms) {

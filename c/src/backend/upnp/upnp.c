@@ -282,16 +282,19 @@ pid_t ncfg_upnp_running_pid(const char *run)
 int ncfg_upnp_stop(const char *run, char *err, size_t err_size)
 {
 	char  pid_file[NCFG_UPNP_PATH_MAX];
+	char  config[NCFG_UPNP_PATH_MAX];
 	pid_t pid = ncfg_upnp_running_pid(run);
 	int   waited = 0;
 
 	if (pid <= 0) {
 		return 1;
 	}
-	if (!ncfg_process_terminate(pid, err, err_size)) {
+	if (!ncfg_upnp_config_path(run, config, sizeof(config), err, err_size) ||
+	    !ncfg_process_terminate(pid, err, err_size)) {
 		return 0;
 	}
-	while (ncfg_upnp_running_pid(run) > 0) {
+	/* The pid signalled, followed to its end, for dnsmasq's reason (10.772). */
+	while (ncfg_process_still(pid, config)) {
 		struct timespec step;
 
 		if (waited >= UPNP_STOP_PATIENCE_MS) {

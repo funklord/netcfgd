@@ -1340,7 +1340,10 @@ static int stop_recorded(const char *run, const char *program, const char *iface
 	{
 		int waited = 0;
 
-		while (ncfg_process_pid_of(pid_path, pid_path) > 0) {
+		/* The pid signalled rather than the file re-read: the file asked
+		 * the command line alone, which goes empty part way through an
+		 * exit, before the client has finished it (10.772). */
+		while (ncfg_process_still(pid, pid_path)) {
 			struct timespec step;
 
 			if (waited >= patience) {

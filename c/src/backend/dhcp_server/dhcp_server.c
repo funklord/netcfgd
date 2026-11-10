@@ -684,16 +684,21 @@ pid_t ncfg_dhcp_server_running_pid(const char *run, const char *iface)
 int ncfg_dhcp_server_stop(const char *run, const char *iface, char *err, size_t err_size)
 {
 	char  pid_file[NCFG_DHCP_SERVER_PATH_MAX];
+	char  config[NCFG_DHCP_SERVER_PATH_MAX];
 	pid_t pid = ncfg_dhcp_server_running_pid(run, iface);
 	int   waited = 0;
 
 	if (pid <= 0) {
 		return 1;
 	}
-	if (!ncfg_process_terminate(pid, err, err_size)) {
+	if (!ncfg_dhcp_server_config_path(run, iface, config, sizeof(config), err, err_size) ||
+	    !ncfg_process_terminate(pid, err, err_size)) {
 		return 0;
 	}
-	while (ncfg_dhcp_server_running_pid(run, iface) > 0) {
+	/* The pid signalled, followed to its end: re-reading the pid file asked
+	 * the command line alone, which goes empty part way through an exit
+	 * (10.772), so the wait said "gone" of one still holding its sockets. */
+	while (ncfg_process_still(pid, config)) {
 		struct timespec step;
 
 		if (waited >= DHCP_SERVER_STOP_PATIENCE_MS) {

@@ -161,6 +161,10 @@ pid_t ncfg_process_pid_of(const char *path, const char *marker);
  * instead. A zombie's command line is empty, so one reads as gone, which is
  * what it is to everything but its parent; and a pid reused by something
  * without the marker reads as gone too, because the one asked about is.
+ *
+ * **A process part way through exiting is still there** (10.772): its command
+ * line goes empty before its descriptors close, so the marker alone said
+ * "gone" of a daemon still holding its control socket and its interface.
  */
 int ncfg_process_still(pid_t pid, const char *marker);
 

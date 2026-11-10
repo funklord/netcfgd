@@ -12684,6 +12684,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.772 A stop waited for the command line to empty, not for the process to go
+
+`make hull-mips` on b838b06e failed one check nothing excuses, `service_test`'s *the stop
+returns only once it has gone, so a start cannot meet it*, where 10.765's three runs had passed
+it. The stops 10.649 and 10.661 made wait ask `ncfg_process_still`, which asked only whether the
+pid's command line still carried the marker. **A process's command line goes empty part way
+through its exit**: `exit_mm` releases the memory it is read from before `exit_files` closes the
+descriptors and before `exit_notify` makes it a zombie. Measured on this machine: a parent
+polling an exiting child's command line until it read empty found the child not yet reapable
+2000 times in 2000. So a wait landing in that stretch said "gone" of a hostapd still holding its
+control socket, and the 25 ms step made it rare rather than impossible -- a loaded guest is where
+it showed. `ncfg_process_still` now also counts a process the kernel has marked `PF_EXITING`
+and that is not yet a zombie, read from `/proc/<pid>/stat`; a zombie is still gone, as before.
+Every stop that waits by pid gets it: hostapd, wpa_supplicant, radvd, openvpn, pppd. Four more
+waited by re-reading the pid file, which asks the same command line through
+`ncfg_process_pid_of` -- dnsmasq, miniupnpd, the DHCP clients (odhcp6c's release among them)
+and avahi-autoipd -- and now follow the pid they signalled through `ncfg_process_still`, as
+10.661 made the first five do.
+`process_test` polls two hundred exiting children the way the stops do and asks that each be
+reapable once it reads as gone; with the old rule put back it fails. That this is what the mips
+run hit is inferred, not watched: it is the one way the check can fail with the stop reporting
+success.
+
 ## 10.771 The polling watcher missed a file rewritten inside one clock tick
 
 `make live` on d48f9fda failed two checks in `config_arrives.sh`'s mtime-polling run, after
