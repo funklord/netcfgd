@@ -12718,6 +12718,28 @@ planner compares selectors as addresses for exactly that route; `plan_tc_test` s
 a first version refused a non-canonical one. `lower_test` and `plan_kind_test` hold the
 four; taken out together they fail five.
 
+## 10.778 A hand-written block opens read-only, rather than refusing its save
+
+**The window was walked whole for the first time**, every tab and dialog on Xvfb against a
+scratch daemon, by a subagent that created, saved, reopened and deleted what each dialog
+makes. Twenty-two findings came back; this is the first. Opening `configure` on `eth0`,
+`radio0` or `HomeFiber` -- all three in the machine's own `netcfgd.conf` -- gave an editable
+dialog that took every change and then refused Save with the compiler's "`interface eth0` is
+already defined ... write `override interface eth0` to replace it". A client writes
+`conf.d/interface-eth0.conf`, the name already exists, and nothing in the dialog said so
+before the typing. So on a machine configured by hand, the GUI could edit nothing it found.
+
+**The rule is not new**: design section 9.4 keeps hand-written blocks read-only to clients,
+and 0030 enforced it for the NetworkManager shim by asking the filesystem whether the file
+named for the block exists. `ncfg_connection::written_by_hand` asks the same of the daemon's
+file list, for a block that exists; `hand_written.h` turns the dialog into a viewer -- Save
+and Delete hidden rather than disabled, since a dialog re-enables Save as it validates, Cancel
+named Close, and a sentence at the top saying where to change it. The interface, device,
+network and access point dialogs ask, from the links, devices, hooks and wifi tabs. Not
+offered: writing `override` from the GUI, which would be a client replacing what somebody
+wrote by hand -- the thing 9.4 refuses. `live_config` holds the test and the dialog's shape,
+and fails with `written_by_hand` answering false; seen on screen for `eth0`.
+
 ## 10.777 The tray said "offline" for a machine on a network, and was first seen running
 
 **The tray had never been on a screen.** `tray.h` says as much: `create` returns nullptr

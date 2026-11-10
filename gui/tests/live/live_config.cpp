@@ -17,11 +17,14 @@
  *   header records.
  */
 #include "../../src/config_view.h"
+#include "../../src/hand_written.h"
 #include "../../src/ncfg_connection.h"
 #include "../../src/table_view.h"
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDialogButtonBox>
+#include <QVBoxLayout>
 #include <QElapsedTimer>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -127,10 +130,33 @@ int main(int argc, char **argv)
 	 * write configuration (0127) -- so what the tab lists is a file netcfgd
 	 * filed rather than one this probe dropped somewhere. */
 	QString why;
+	check("before it is filed, the block it would hold reads as written by hand",
+	    connection.written_by_hand(QStringLiteral("live-config")));
 	check("a drop-in can be filed to list",
 	    connection.config_put(QStringLiteral("live-config"),
 	        QStringLiteral("# a probe wrote this\nglobal { }\n"), true, &why),
 	    why);
+	/* 10.778: a block whose drop-in is not among the files was written
+	 * somewhere else, and a dialog on it shows rather than edits. */
+	check("once it is, it is a client's to change",
+	    !connection.written_by_hand(QStringLiteral("live-config")));
+	{
+		QDialog dialog;
+		auto *layout = new QVBoxLayout(&dialog);
+		auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, &dialog);
+		QPushButton *save = buttons->addButton(QStringLiteral("Save"),
+		    QDialogButtonBox::AcceptRole);
+		QPushButton *remove = buttons->addButton(QStringLiteral("Delete"),
+		    QDialogButtonBox::DestructiveRole);
+		layout->addWidget(buttons);
+		ncfg_show_read_only(&dialog, QStringLiteral("`interface eth0`"));
+		check("a hand-written block's dialog offers no Save and no Delete",
+		    save->isHidden() && remove->isHidden());
+		check("and closes rather than cancels",
+		    buttons->button(QDialogButtonBox::Cancel)->text() == QStringLiteral("Close"));
+		check("and says why, before anybody types",
+		    dialog.findChild<QLabel *>(QStringLiteral("hand_written")) != nullptr);
+	}
 
 	QString reported;
 	ncfg_config_view view(&connection);

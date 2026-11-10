@@ -3,6 +3,7 @@
  */
 #include "devices_view.h"
 
+#include "hand_written.h"
 #include "device_dialog.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
@@ -111,6 +112,13 @@ void ncfg_devices_view::configure_selected()
 	}
 
 	ncfg_device_dialog dialog(connection, name, this);
+	for (const ncfg_device_row &device : rows) {
+		if (device.name == name && device.configured &&
+		    connection->written_by_hand(QStringLiteral("device-%1").arg(name))) {
+			ncfg_show_read_only(&dialog, QStringLiteral("`device %1`").arg(name));
+			break;
+		}
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

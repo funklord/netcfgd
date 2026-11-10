@@ -1307,6 +1307,23 @@ public:
 	 * sorting by name. */
 	bool configs(QList<ncfg_config_row> *out, QString *error);
 	/*
+	 * Whether an existing block is one a client may change: false where the
+	 * drop-in named for it is among the configuration files, true where it is
+	 * not -- so the block was written somewhere else, by hand (10.778).
+	 *
+	 * **Hand-written blocks stay read-only to clients**, design section 9.4,
+	 * which decision 0030 enforced for the NetworkManager shim by the same
+	 * test: the file a client writes is named for the block, so its absence
+	 * is the answer and nothing has to remember who wrote what. Without it a
+	 * dialog opened on `interface eth0` from `netcfgd.conf` took every edit
+	 * and then refused the save with the compiler's "already defined".
+	 *
+	 * Asked only of a block that exists: a new one has no file yet and is
+	 * the client's to write. False where the daemon cannot be asked, so a
+	 * blip leaves a dialog editable rather than read-only for no reason.
+	 */
+	bool written_by_hand(const QString &drop_in);
+	/*
 	 * Write a link-detection script, through the daemon.
 	 *
 	 * Needs root on this machine, not merely `admin`: a probe is a program

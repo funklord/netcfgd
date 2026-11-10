@@ -2267,6 +2267,21 @@ bool ncfg_connection::configs(QList<ncfg_config_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::written_by_hand(const QString &drop_in)
+{
+	QList<ncfg_config_row> files;
+	if (!configs(&files, nullptr)) {
+		return false;
+	}
+	const QString file = QStringLiteral("conf.d/%1.conf").arg(drop_in);
+	for (const ncfg_config_row &row : files) {
+		if (row.name == drop_in || row.file == file) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool ncfg_connection::config_delete(const QString &name, QString *error)
 {
 	if (!client) {

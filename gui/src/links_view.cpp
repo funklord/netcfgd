@@ -3,6 +3,7 @@
  */
 #include "links_view.h"
 
+#include "hand_written.h"
 #include "explain_dialog.h"
 #include "interface_dialog.h"
 #include "linkset_dialog.h"
@@ -360,6 +361,13 @@ void ncfg_links_view::configure_selected()
 	}
 
 	ncfg_interface_dialog dialog(connection, name, this);
+	for (const ncfg_inventory_row &known : rows_known) {
+		if (known.name == name && known.configured &&
+		    connection->written_by_hand(QStringLiteral("interface-%1").arg(name))) {
+			ncfg_show_read_only(&dialog, QStringLiteral("`interface %1`").arg(name));
+			break;
+		}
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}
@@ -402,6 +410,9 @@ void ncfg_links_view::configure_network(const QString &id)
 			continue;
 		}
 		ncfg_network_dialog dialog(connection, network, this);
+		if (connection->written_by_hand(QStringLiteral("wifi-%1").arg(network.id))) {
+			ncfg_show_read_only(&dialog, QStringLiteral("`network \"%1\"`").arg(network.id));
+		}
 		if (dialog.exec() != QDialog::Accepted) {
 			return;
 		}

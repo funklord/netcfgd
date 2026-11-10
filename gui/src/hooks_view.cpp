@@ -7,6 +7,7 @@
  */
 #include "hooks_view.h"
 
+#include "hand_written.h"
 #include "interface_dialog.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
@@ -45,6 +46,9 @@ void ncfg_hooks_view::edit_selected()
 		return;
 	}
 	ncfg_interface_dialog dialog(connection, rows.at(row).interface, this);
+	if (connection->written_by_hand(QStringLiteral("interface-%1").arg(rows.at(row).interface))) {
+		ncfg_show_read_only(&dialog, QStringLiteral("`interface %1`").arg(rows.at(row).interface));
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}

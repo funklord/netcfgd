@@ -3,6 +3,7 @@
  */
 #include "wifi_view.h"
 
+#include "hand_written.h"
 #include "access_point_dialog.h"
 #include "network_dialog.h"
 
@@ -312,6 +313,10 @@ void ncfg_wifi_view::edit_access_point()
 		return;
 	}
 	ncfg_access_point_dialog dialog(connection, offered.at(row), this);
+	if (connection->written_by_hand(QStringLiteral("access-point-%1").arg(offered.at(row).id))) {
+		ncfg_show_read_only(&dialog,
+		    QStringLiteral("`access_point \"%1\"`").arg(offered.at(row).id));
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}
@@ -407,6 +412,10 @@ void ncfg_wifi_view::update_saved()
 void ncfg_wifi_view::edit_network(const ncfg_saved_network_row &existing)
 {
 	ncfg_network_dialog dialog(connection, existing, this);
+	if (!existing.id.isEmpty() &&
+	    connection->written_by_hand(QStringLiteral("wifi-%1").arg(existing.id))) {
+		ncfg_show_read_only(&dialog, QStringLiteral("`network \"%1\"`").arg(existing.id));
+	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}
