@@ -17,7 +17,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QHeaderView>
 #include <QListWidget>
 #include <QSpinBox>
@@ -580,6 +583,23 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	scroll->setFrameShape(QFrame::NoFrame);
 	scroll->setWidget(holder);
 	layout->addWidget(scroll, 1);
+	/* **As wide as the form, from the start** (10.784). A scroll area asks
+	 * for little width, so the dialog opened narrower than its form: the
+	 * address fields read "192...." and "opti...", a routes column "ta", and a
+	 * horizontal scroll bar under it all. Capped at the screen, since the
+	 * scroll area is there for a form taller than a laptop's. */
+	{
+		const int wanted = holder->sizeHint().width() +
+		    scroll->verticalScrollBar()->sizeHint().width() + 2 * layout->contentsMargins().left();
+		const QScreen *screen = QGuiApplication::primaryScreen();
+		const QSize room = screen ? screen->availableGeometry().size() - QSize(40, 40)
+		                          : QSize(wanted, sizeHint().height());
+		/* Tall enough for the form's first screenful -- the size hint is
+		 * the scroll area's, which is short -- and no taller than the
+		 * screen. `height()` is no help: in the constructor it is the
+		 * default before any layout. */
+		resize(qMin(wanted, room.width()), qMin(qMax(sizeHint().height(), 600), room.height()));
+	}
 
 	/* Constructed near the top rather than here; see the comment there. */
 	note->setTextInteractionFlags(Qt::TextSelectableByMouse);

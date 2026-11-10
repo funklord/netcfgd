@@ -4,6 +4,7 @@
 #include "plan_view.h"
 #include "counted.h"
 
+#include <QBoxLayout>
 #include <QBrush>
 #include <QColor>
 #include <QFont>
@@ -212,6 +213,22 @@ void ncfg_plan_view::show_plan(const ncfg_plan_data &plan)
 	}
 	notes->setVisible(notes->rowCount() > 0);
 	tidy(notes);
+	/* **Read, not scrolled** (10.784). The message and the remedy are
+	 * sentences, and sized to their content they made the table as wide as
+	 * the longest one: each warning one cut line, read by scrolling sideways,
+	 * in a strip a line and a half high. Capped and wrapped, each row as tall
+	 * as its sentence; and where nothing is about to happen, the notes are
+	 * the plan and get its room. */
+	notes->setWordWrap(true);
+	for (const int prose : { 2, 5 }) {
+		if (notes->columnWidth(prose) > 360) {
+			notes->setColumnWidth(prose, 360);
+		}
+	}
+	notes->resizeRowsToContents();
+	if (auto *box = qobject_cast<QBoxLayout *>(layout())) {
+		box->setStretchFactor(notes, plan.actions.isEmpty() ? 3 : 1);
+	}
 
 	actions->setRowCount(plan.actions.size());
 	for (int row = 0; row < plan.actions.size(); row++) {

@@ -12686,6 +12686,22 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.784 The plan's warnings are read rather than scrolled, and two dialogs open at their form's width
+
+Two of 10.778's list, taken because they sit on the GUI's one promise -- show the plan before
+changing anything. **The plan's warnings** were a strip a line and a half high whose message
+column took the width of its longest sentence, so each warning was one cut line read by
+scrolling sideways, in the apply dialog and the plan tab alike. The message and remedy columns
+are capped and wrap now, each row as tall as its sentence, and a plan with nothing to do --
+where the warnings are the plan -- gives them the room. `plan_notes`, a new probe, renders one
+long warning and fails two checks with the change taken out.
+
+**The interface and network dialogs** opened narrower than their forms, because a scroll
+area asks for little width: the address fields read "192....", a routes column "ta", the
+button after `remove` was cut, all under a horizontal scroll bar. Each is sized to its
+form's width at construction now, capped by the screen, with a first screenful of height --
+913 by 600 and 906 by 600 on Xvfb, every field readable, where they were 634 by 541.
+
 ## 10.783 Open: a plan stops what is running before it finds the secret the replacement needs
 
 **Measured in the GUI walk, not yet changed.** An access point `TestAP` on `radio0`, whose
@@ -12788,9 +12804,8 @@ offered: writing `override` from the GUI, which would be a client replacing what
 wrote by hand -- the thing 9.4 refuses. `live_config` holds the test and the dialog's shape,
 and fails with `written_by_hand` answering false; seen on screen for `eth0`.
 
-**The walk's findings not acted on**, kept so they are not found twice: the plan and apply
-dialogs show a line and a half of warnings and outcomes, cut short; the interface and network
-dialogs open too narrow, their address fields squashed to "192...."; the events tab repeats
+**The walk's findings not acted on**, kept so they are not found twice (10.784 has since
+taken the plan's warnings and the narrow dialogs): the events tab repeats
 an unapplied drift every few seconds, with no time on it; the scan list keeps a forgotten
 network's `configured` until a scan; a renamed DNS record's read-only name field looks
 editable and says nothing; the selection moves to the next row after a delete; UPnP asks to
