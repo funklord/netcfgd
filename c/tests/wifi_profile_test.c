@@ -749,6 +749,27 @@ static void the_daemon_s_seam_writes_the_same_file(void)
 	ncfg_wifi_installed_free(&installer.installed);
 	ncfg_buf_free(&out);
 
+	/* 10.780: a passphrase the supplicant would refuse is refused here, before
+	 * the block or the secret is written -- the window's walk stored `abc`. */
+	fresh_tree();
+	memset(&installer, 0, sizeof(installer));
+	installer.config_dir = config_dir;
+	installer.factory_dir = factory_dir;
+	memset(&wanted, 0, sizeof(wanted));
+	wanted.ssid = ncfg_proto_str("53686f7274");
+	wanted.passphrase = ncfg_proto_str("abc");
+	ncfg_buf_init(&out, 0);
+	err[0] = '\0';
+	ok = ncfg_wifi_configure_network(NULL, &wanted, ncfg_wifi_profile_installer, &installer,
+	    &out, err, sizeof(err));
+	check(!ok && strstr(kept(err), "8 to 63 octets") != NULL,
+	    "a three-octet passphrase is refused, saying the rule");
+	check(strstr(err, "abc") == NULL, "  without naming it");
+	check(!testdir_exists(in(in(config_dir, "secrets"), "Short")) &&
+	    installer.installed.file == NULL, "  and nothing is written");
+	ncfg_wifi_installed_free(&installer.installed);
+	ncfg_buf_free(&out);
+
 	/* A caller with no directories is refused by name rather than writing
 	 * somewhere this module chose. */
 	ncfg_buf_init(&out, 0);

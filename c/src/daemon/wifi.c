@@ -1656,6 +1656,31 @@ int ncfg_wifi_configure_network(const ncfg_document_t *document,
 			}
 		}
 	} else if (wanted->passphrase.bytes) {
+		size_t octet;
+
+		/* **Refused before anything is written** (10.780): the supplicant
+		 * refuses the same at apply, after the block and the secret were
+		 * stored and the client had said "added" -- a window's walk saved
+		 * `abc` for a network and heard about it afterwards, or not at all.
+		 * `ncfg wifi add` has made this check since it was written; the
+		 * socket verb every other client uses had not. Octets, as the
+		 * supplicant and hostapd count (0229); the value is never named. */
+		if (wanted->passphrase.length < 8u || wanted->passphrase.length > 63u) {
+			ncfg_error_set(err, err_size,
+			    "a WPA passphrase is 8 to 63 octets and that one is %zu -- a character "
+			    "outside ASCII counts as more than one", wanted->passphrase.length);
+			return 0;
+		}
+		for (octet = 0; octet < wanted->passphrase.length; octet++) {
+			unsigned char one = (unsigned char)wanted->passphrase.bytes[octet];
+
+			if (one < 0x20u || one == 0x7fu) {
+				ncfg_error_set(err, err_size,
+				    "a WPA passphrase is printable characters, and this one carries a "
+				    "control character at octet %zu", octet + 1u);
+				return 0;
+			}
+		}
 		profile.security = NCFG_WIFI_SECURITY_PSK;
 	} else if (profile.proto) {
 		/* An open network with a passphrase is refused rather than quietly

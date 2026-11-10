@@ -12686,6 +12686,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.780 A WPA passphrase the supplicant would refuse is refused before it is stored
+
+The walk added a hidden network with the passphrase `abc`: the block and the secret were
+written, the dialog closed, and only afterwards did the status line say "a WPA2 passphrase is
+8 to 63 octets". Through `add by hand` nothing said it at all, and the plan reported nothing
+to do. `ncfg wifi add` has checked this since it was written; `wifi_add`, the socket verb the
+tray and the window use, had not, and `add by hand` stores through `secret_put`, which no
+length check reaches. `wifi_add` now refuses outside 8 to 63 octets or with a control
+character, naming the length and never the value, before anything is written, and the
+network dialog checks before it stores. `wifi_profile_test` and `live_network_dialog` hold
+both.
+
 ## 10.779 A rule selector or a MAC that is no address is refused at compile, and a MAC in capitals is no drift
 
 The walk saved a rule with `from = "300.1.1.1"` and a bridge with `mac = "zz:zz:zz"`; both

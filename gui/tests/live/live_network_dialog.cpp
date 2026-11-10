@@ -27,6 +27,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
@@ -117,6 +118,38 @@ int main(int argc, char **argv)
 		    written.security);
 		check("and the generation it was pinned to", written.proto == QStringLiteral("wpa3"),
 		    written.proto);
+	}
+
+	/* 1b. A passphrase the supplicant would refuse is refused before it is
+	 *     stored (10.780): this dialog stores through `secret_put`, where the
+	 *     daemon's `wifi_add` check does not reach. */
+	{
+		ncfg_network_dialog dialog(&connection, ncfg_saved_network_row());
+		auto *id = dialog.findChild<QLineEdit *>(QStringLiteral("network_id"));
+		auto *security = dialog.findChild<QComboBox *>(QStringLiteral("network_security"));
+		auto *credential =
+		    dialog.findChild<QLineEdit *>(QStringLiteral("network_credential"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("network_save"));
+		if (id && security && credential && save) {
+			id->setText(QStringLiteral("too-short"));
+			security->setCurrentIndex(security->findData(QStringLiteral("psk")));
+			credential->setText(QStringLiteral("abc"));
+			save->click();
+			ncfg_saved_network_row written;
+			check("a three-character passphrase is not saved",
+			    !saved_named(&connection, QStringLiteral("too-short"), &written));
+			check("  and the dialog says the rule",
+			    dialog.findChildren<QLabel *>().size() > 0 && [&dialog]() {
+				    for (QLabel *label : dialog.findChildren<QLabel *>()) {
+					    if (label->text().contains(QStringLiteral("8 to 63 octets"))) {
+						    return true;
+					    }
+				    }
+				    return false;
+			    }());
+		} else {
+			check("the dialog has the fields it needs, again", false);
+		}
 	}
 
 	/* 2. Opening it again and changing one thing, with the passphrase left

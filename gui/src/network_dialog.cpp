@@ -613,6 +613,18 @@ void ncfg_network_dialog::submit()
 		 * reference to the keyring or to `pass` is somebody else's store, which
 		 * netcfgd reads and does not write, so a new passphrase for one is set
 		 * there rather than here. */
+		/* A passphrase the supplicant would refuse, refused before it is
+		 * stored (10.780) -- this path is `secret_put`, not `wifi_add`, so the
+		 * daemon's own check for that verb does not see it. Octets, as the
+		 * supplicant counts them. */
+		const qsizetype octets = credential->text().toUtf8().size();
+		if (security->currentData().toString() == QLatin1String("psk") &&
+		    (octets < 8 || octets > 63)) {
+			note->setText(QStringLiteral("a WPA passphrase is 8 to 63 octets and this one is "
+			              "%1 -- a character outside ASCII counts as more than one")
+			                  .arg(octets));
+			return;
+		}
 		const QString reference = credential_reference();
 		const QString stored = reference.mid(QStringLiteral("@secret:").size());
 		if (!reference.startsWith(QStringLiteral("@secret:")) || stored.contains(QLatin1Char(':'))) {
