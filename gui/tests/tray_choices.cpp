@@ -159,6 +159,18 @@ int main(int argc, char **argv)
 	check(ncfg_tray::notice_for(off, off).isEmpty() && ncfg_tray::notice_for(home, home).isEmpty(),
 	    "and nothing when nothing moved");
 
+	/* The line at the top of the menu, where the daemon names no link: it
+	 * does that wherever no default route runs (10.777), and the line said
+	 * "offline" for a machine with an address on a network. */
+	check(ncfg_tray::line_for(at(ncfg_rung_local, "")) ==
+	          QStringLiteral("connected, no default route"),
+	    "an address and no route, with no link named, is not offline");
+	check(ncfg_tray::line_for(at(ncfg_rung_routed, "")) == QStringLiteral("connected"),
+	    "nor is routed with none named, which an address requirement gives");
+	check(ncfg_tray::line_for(off) == QStringLiteral("offline"), "offline still is");
+	check(ncfg_tray::line_for(home_local) == QStringLiteral("home -- no default route"),
+	    "and a named link keeps its name");
+
 	/* The radio's line, which the wifi tab draws: a radio switched off says
 	 * so, because otherwise it reads as one in range of nothing. */
 	ncfg_wifi_status_row status;

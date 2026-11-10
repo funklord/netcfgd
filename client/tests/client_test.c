@@ -2920,6 +2920,13 @@ static void a_signal_reads_as_networkmanager_reads_it(void)
 
 static void a_tray_says_when_the_network_moves(void)
 {
+	/* Nothing named, which the daemon does where no default route runs
+	 * (10.777): said without a name, never as "to ." */
+	notice_is("routed with no link named is said without a name",
+	    ncfg_connectivity_notice(ncfg_rung_offline, "", ncfg_rung_routed, ""), "Connected.");
+	notice_is("and losing the route with none named too",
+	    ncfg_connectivity_notice(ncfg_rung_routed, "", ncfg_rung_local, ""),
+	    "No default route: connected, and nowhere to send traffic.");
 	notice_is("joining says where",
 	    ncfg_connectivity_notice(ncfg_rung_offline, "", ncfg_rung_routed, "home"),
 	    "Connected to home.");

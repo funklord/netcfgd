@@ -2028,12 +2028,17 @@ char *ncfg_connectivity_notice(ncfg_rung_t before, const char *before_label, ncf
 	const char *was = before_label ? before_label : "";
 	const char *now = after_label ? after_label : "";
 
+	/* A label may be empty: the daemon names a link only where a default
+	 * route runs, and `requires = "address"` reaches `routed` without one
+	 * (10.777). Those are said without a name rather than as "to ." */
 	if (rung_routes(after) && (!rung_routes(before) || strcmp(was, now) != 0)) {
-		return notice_printf("Connected to %s.", now);
+		return *now ? notice_printf("Connected to %s.", now) : dup_string("Connected.");
 	}
 	if (after == ncfg_rung_local && rung_routes(before)) {
-		return notice_printf("%s has no default route: connected, and nowhere to send "
-		                     "traffic.", now);
+		return *now ? notice_printf("%s has no default route: connected, and nowhere to "
+		                            "send traffic.", now)
+		            : dup_string("No default route: connected, and nowhere to send "
+		                         "traffic.");
 	}
 	if (after == ncfg_rung_offline && before != ncfg_rung_offline) {
 		return *was ? notice_printf("Disconnected from %s.", was) : dup_string("Disconnected.");

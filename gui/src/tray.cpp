@@ -275,8 +275,23 @@ ncfg_reach ncfg_tray::reach_of(ncfg_rung_t rung)
  */
 QString ncfg_tray::line_for(const ncfg_connectivity_row &state)
 {
+	/* **No link named is not the same as offline** (10.777). The daemon
+	 * names a primary only where a default route runs, so a machine with an
+	 * address and no route -- a network handing out no gateway, a static
+	 * address written without one -- is `local` with nothing to name, and
+	 * `requires = "address"` makes the same machine `routed`. This said
+	 * "offline" for both, beside an icon drawn from the rung that did not. */
 	if (state.label.isEmpty()) {
-		return QStringLiteral("offline");
+		switch (state.rung) {
+		case ncfg_rung_online:
+		case ncfg_rung_routed:
+			return QStringLiteral("connected");
+		case ncfg_rung_local:
+			return QStringLiteral("connected, no default route");
+		case ncfg_rung_offline:
+		default:
+			return QStringLiteral("offline");
+		}
 	}
 	switch (state.rung) {
 	case ncfg_rung_online:

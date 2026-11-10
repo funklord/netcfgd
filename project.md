@@ -12686,6 +12686,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.777 The tray said "offline" for a machine on a network, and was first seen running
+
+**The tray had never been on a screen.** `tray.h` says as much: `create` returns nullptr
+without a notification host, "which is every machine this has been built on", so its menu was
+known only through the rules `tray_choices` checks. A sixty-line XEmbed system tray -- it
+owns `_NET_SYSTEM_TRAY_S0` on Xvfb and docks what asks, the protocol TDE's own tray speaks --
+put it there, against a scratch daemon over `fake_supplicant.py`. Docking, the menu, `Scan for
+networks`, the `Connect to` list with strengths, joining a new network through the add
+dialog (one `SELECT_NETWORK`), `Profile` and `Show window` all worked.
+
+**The state line did not.** On HomeFiber with 192.0.2.20/24 and no default route it said
+`offline`. The daemon names a primary link only where a default route runs, so that machine
+is `local` with nothing to name -- and `line_for` returned "offline" for any empty label
+before it looked at the rung, beside an icon drawn from the rung, which said otherwise. A
+network that hands out no gateway, or a static address written without one, is that case;
+and `requires = "address"` makes the same machine `routed`, which read as offline too. The
+shared notice had the same blind spot and would have said "Connected to ." It now says
+`connected, no default route` and `connected` where no link is named, and the notices drop
+the name rather than leaving a hole. `tray_choices` and `client_test` hold both; with the old
+`line_for` back, two fail.
+
+**What still differs from nm-applet, by decision rather than fault:** the `Connect to` list
+is empty until somebody chooses `Scan for networks`, because `tray.h` holds that nothing scans
+on a timer or on the menu opening.
+
 ## 10.776 The wifi tab gives the scan the room
 
 10.774's walk found the wifi tab's three tables stretched alike, so an 880 by 560 window
