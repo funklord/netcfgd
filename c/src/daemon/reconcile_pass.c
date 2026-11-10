@@ -86,6 +86,28 @@ void ncfg_daemon_announce(const ncfg_reconcile_world_t *world, const ncfg_proto_
 	}
 }
 
+/* One drift as the event it is announced as: interface, summary and action,
+ * FNV-1a over the three with a separator, so the same text is the same drift
+ * and any change in what is said is a new one (10.785). */
+static uint64_t drift_fingerprint(const ncfg_drift_t *drift)
+{
+	const char *const parts[3] = { drift->interface, drift->summary, drift->action };
+	uint64_t          hash = 1469598103934665603ull;
+	size_t            part;
+
+	for (part = 0; part < 3u; part++) {
+		const unsigned char *at = (const unsigned char *)(parts[part] ? parts[part] : "");
+
+		for (; *at; at++) {
+			hash ^= *at;
+			hash *= 1099511628211ull;
+		}
+		hash ^= 0x1fu;
+		hash *= 1099511628211ull;
+	}
+	return hash;
+}
+
 /* An `observed` event, which is what a client redraws on. */
 static void announce_summary(const ncfg_reconcile_world_t *world, const char *summary)
 {
@@ -1401,11 +1423,26 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 	}
 	ncfg_reconcile_drift(plan, loop->state->desired, drifts);
 	report->drift_count = drifts->count;
-	for (at = 0; at < drifts->count; at++) {
-		ncfg_proto_event_t event;
+	{
+		uint64_t now[NCFG_DRIFT_MAX];
+		size_t   seen;
 
-		ncfg_drift_event(&drifts->at[at], &event);
-		ncfg_daemon_announce(&loop->world, &event);
+		for (at = 0; at < drifts->count; at++) {
+			ncfg_proto_event_t event;
+			int                before = 0;
+
+			now[at] = drift_fingerprint(&drifts->at[at]);
+			for (seen = 0; seen < loop->drift_announced_count && !before; seen++) {
+				before = loop->drift_announced[seen] == now[at];
+			}
+			if (before) {
+				continue;
+			}
+			ncfg_drift_event(&drifts->at[at], &event);
+			ncfg_daemon_announce(&loop->world, &event);
+		}
+		memcpy(loop->drift_announced, now, drifts->count * sizeof(now[0]));
+		loop->drift_announced_count = drifts->count;
 	}
 	if (drifts->total > drifts->count) {
 		ncfg_log_emitf("apply", NCFG_LOG_NOTE,

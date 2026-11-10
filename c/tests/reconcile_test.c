@@ -1351,6 +1351,10 @@ static void the_order_of_one_pass_is_the_contract(const char *base)
 	    sizeof(err));
 	check(step_at(&harness.world, "hook:drift") < 0,
 	    "the same drift on the next pass tells the hook nothing");
+	/* 10.785: nor the event stream, which held ninety identical lines for
+	 * one unapplied bridge in the GUI walk's events tab. */
+	check(step_at(&harness.world, "event:drift") < 0,
+	    "and announces no second drift event for it");
 	check(step_at(&harness.world, "portal:") < 0,
 	    "and the portal, already answered for, is not asked again");
 	check(step_at(&harness.world, "op:link.set_mtu") >= 0,

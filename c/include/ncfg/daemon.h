@@ -3043,6 +3043,19 @@ typedef struct {
 	 * recovery sayable too.
 	 */
 	char     said[NCFG_LOG_MAX];
+	/*
+	 * The drift events the last pass announced, by fingerprint (10.785).
+	 *
+	 * A drift nobody is putting back stands for as long as it stands, and
+	 * every pass announced it again: the GUI walk's events tab held ninety
+	 * identical lines for one unapplied bridge, which buried everything else
+	 * that happened. The log and the drift hook already said it once, by the
+	 * record in `/run`; the event stream is "what happened since you looked",
+	 * and a drift starting or changing is what happened. What stands is in the
+	 * status and the plan, for a client that connects later.
+	 */
+	uint64_t drift_announced[NCFG_DRIFT_MAX];
+	size_t   drift_announced_count;
 } ncfg_reconcile_t;
 
 /* What one pass did. For a caller that wants to say so, and for a test that

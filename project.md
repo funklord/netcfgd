@@ -12686,6 +12686,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.785 A standing drift is announced once, not on every pass
+
+From 10.778's list. The GUI walk's events tab held ninety-one identical lines -- `drift br0:
+link.create: kind is <absent> but should be bridge` -- one per pass for as long as a bridge
+waited for Apply, with whatever else had happened somewhere among them. The log line and the
+`drift` hook already said a standing drift once, by the record in `/run`; the event every
+client follows (`ncfg monitor`, the TUI, the GUI's events tab) said it every pass. The loop
+now keeps a fingerprint of each drift it announced on the last pass -- interface, summary
+and action -- and announces only one that is new or reads differently, so a drift starting,
+changing or coming back after it cleared is still news. What stands is in the status and the
+plan for a client that connects later. `reconcile_test` runs the same drift twice and asks
+for one event, and fails with the check taken out.
+
 ## 10.784 The plan's warnings are read rather than scrolled, and two dialogs open at their form's width
 
 Two of 10.778's list, taken because they sit on the GUI's one promise -- show the plan before
@@ -12804,9 +12817,9 @@ offered: writing `override` from the GUI, which would be a client replacing what
 wrote by hand -- the thing 9.4 refuses. `live_config` holds the test and the dialog's shape,
 and fails with `written_by_hand` answering false; seen on screen for `eth0`.
 
-**The walk's findings not acted on**, kept so they are not found twice (10.784 has since
-taken the plan's warnings and the narrow dialogs): the events tab repeats
-an unapplied drift every few seconds, with no time on it; the scan list keeps a forgotten
+**The walk's findings not acted on**, kept so they are not found twice (10.784 and 10.785
+have since taken the plan's warnings, the narrow dialogs and the repeated drift): the events
+tab shows no time on an event; the scan list keeps a forgotten
 network's `configured` until a scan; a renamed DNS record's read-only name field looks
 editable and says nothing; the selection moves to the next row after a delete; UPnP asks to
 confirm before checking its input; `use` is offered for the profile already in use, and no
