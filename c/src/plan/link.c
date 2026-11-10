@@ -951,7 +951,19 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 		}
 	}
 
-	bringing_up = interface->enabled && (cycling || !link || !link->up);
+	/*
+	 * **Not on a radio that is switched off** (10.791). The kernel refuses
+	 * `link.up` there with ERFKILL, and a failed action stops the rest of the
+	 * plan -- so with airplane mode on, every other change on the machine was
+	 * skipped on every pass, with two error lines each time, measured in the
+	 * suspend rig. `warn_blocked_radios` already says netcfgd configures such
+	 * a radio anyway and that it comes up when the switch does: the next
+	 * observation after the unblock plans the bring-up, and nothing else here
+	 * waits on one that cannot happen. The block is somebody's act and is
+	 * never undone (0062).
+	 */
+	bringing_up = interface->enabled && (cycling || !link || !link->up) &&
+	    !(link && link->rfkill && ncfg_rfkill_blocked(link->rfkill));
 
 	ncfg_plan_ids_extend(builder->plan, &up_deps, &base);
 	if (bringing_up) {

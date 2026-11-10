@@ -12686,6 +12686,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.791 A radio that is switched off is not brought up
+
+Found by 10.790's rig on its first run, with the radio's rfkill switch set from sysfs. The
+kernel refuses `link.up` on a blocked radio with ERFKILL, and a failed action stops the rest
+of the plan: so with airplane mode on, every other change on the machine was skipped on every
+pass, two error lines each time -- eight in fifteen seconds in the rig. `warn_blocked_radios`
+already said netcfgd configures such a radio anyway and that it associates when the switch
+comes back (0062: the block is somebody's act and is never undone); the bring-up was the one
+part that did not follow it. The interface walk no longer plans `link.up` for a radio the
+observation reports blocked, and the next observation after the unblock plans it -- the rig
+watched the link come back. `plan_kind_test` holds both halves and fails with the condition
+taken out.
+
 ## 10.789 Each event says when it was heard
 
 From 10.778's list: the events tab -- "what has happened since you looked" -- never said when,

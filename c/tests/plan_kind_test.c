@@ -351,6 +351,33 @@ static void a_mac_in_capitals_is_the_same_address(void)
 	planfix_release(plan, document, observed);
 }
 
+/* 10.791: a radio switched off is not brought up -- the kernel refuses with
+ * ERFKILL and a failed action stopped the whole plan on every pass -- and is
+ * the moment the switch comes back. */
+#define DOWN_RADIO(rfkill) \
+	"{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":false,\"carrier\":false," \
+	"\"ownership\":\"unknown\",\"wireless\":true" rfkill "}"
+
+static void a_radio_switched_off_is_not_brought_up(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("{\"name\":\"wlan0\"}",
+	    "{\"name\":\"wlan0\",\"addressing\":[]}", "", "",
+	    "\"links\":[" DOWN_RADIO(",\"rfkill\":{\"switch\":\"phy0\",\"soft\":true,"
+	    "\"hard\":false}") "]", &document, &observed);
+
+	check(plan && !planfix_action(plan, "link.up"),
+	    "a radio switched off is not brought up, which the kernel would refuse");
+	check(plan && planfix_warned(plan, "switched off"), "  and the plan says why");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan("{\"name\":\"wlan0\"}", "{\"name\":\"wlan0\",\"addressing\":[]}",
+	    "", "", "\"links\":[" DOWN_RADIO("") "]", &document, &observed);
+	check(plan && planfix_action(plan, "link.up"), "  and is, once the switch is back");
+	planfix_release(plan, document, observed);
+}
+
 /* ------------------------------------------------------------------------ *
  * A macvlan
  * ------------------------------------------------------------------------ */
@@ -924,6 +951,7 @@ int main(void)
 	a_vlan_on_the_bridge_itself_is_a_self_operation();
 	a_converged_port_plans_nothing();
 	a_mac_in_capitals_is_the_same_address();
+	a_radio_switched_off_is_not_brought_up();
 
 	printf("plan_kind_test: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
