@@ -12686,6 +12686,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.782 An access point or a mesh can be given a passphrase from the window
+
+The walk could not make an access point with a passphrase at all: the dialog took only
+`@secret:NAME` and refused anything else with "`ncfg secret set` puts one there", and the
+secrets tab can forget a secret but not set one. The mesh dialog was the same. The network
+dialog beside them had stored a typed passphrase through `secret_put` since 10.611, which is
+the shape both now follow: checked as the supplicant will (8 to 63 printable octets), stored
+first under the name the existing reference held or `ap-`/`mesh-` and the block's name with
+what a secret name cannot carry made a dash, and the block given the reference -- so the
+document still never holds a passphrase. Typed text is hidden; a reference, which is no
+secret, is shown. `live_access_point` asked that a typed passphrase be refused and now asks
+that a short one is and a good one is stored with the reference left in the field.
+
 ## 10.781 A status line wraps rather than widening the window, and "1 rules" is "1 rule"
 
 Two of the walk's smaller findings. The wifi tab's status line and the window's status bar

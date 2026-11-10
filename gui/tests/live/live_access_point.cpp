@@ -98,14 +98,23 @@ int main(int argc, char **argv)
 		device->setCurrentText(QStringLiteral("radio0"));
 		security->setCurrentIndex(security->findData(QStringLiteral("psk")));
 
-		/* A passphrase typed where a reference belongs: refused here, beside
-		 * the field, because the document type cannot hold one. */
-		credential->setText(QStringLiteral("hunter2hunter2"));
+		/* A passphrase typed rather than a reference (10.782): checked here,
+		 * stored through `secret_put`, and the block given the reference --
+		 * the document still holds no passphrase. It used to be refused, so an
+		 * access point with a passphrase could not be made from the window. */
+		credential->setText(QStringLiteral("abc"));
 		save->click();
-		check("a passphrase typed instead of a reference is refused here",
-		    note && note->text().startsWith(
-		                QStringLiteral("the passphrase is a reference, not the passphrase")),
+		check("a passphrase the supplicant would refuse is refused here",
+		    note && note->text().contains(QStringLiteral("8 to 63 printable octets")),
 		    note ? note->text() : QString());
+		credential->setText(QStringLiteral("hunter2hunter2"));
+		check("  and one being typed is not shown",
+		    credential->echoMode() == QLineEdit::Password);
+		save->click();
+		check("a typed passphrase is stored and the field holds its reference",
+		    credential->text() == QStringLiteral("@secret:ap-gui-ap"), credential->text());
+		check("  which is shown, being no secret",
+		    credential->echoMode() == QLineEdit::Normal);
 
 		credential->setText(QStringLiteral("@secret:gui-ap"));
 		/* An empty station list with a policy says something, and what it says

@@ -95,8 +95,17 @@ ncfg_mesh_dialog::ncfg_mesh_dialog(ncfg_connection *connection, const ncfg_mesh_
 
 	credential = new QLineEdit(existing.credential, this);
 	credential->setObjectName(QStringLiteral("mesh_credential"));
-	credential->setPlaceholderText(
-	    QStringLiteral("@secret:mesh -- `ncfg secret set mesh` stores it"));
+	/* A password or a reference, as the access point dialog's (10.782). */
+	credential->setPlaceholderText(QStringLiteral("8 to 63 characters, or @secret:NAME"));
+	credential->setEchoMode(existing.credential.isEmpty() ||
+	                                existing.credential.startsWith(QLatin1Char('@'))
+	                            ? QLineEdit::Normal
+	                            : QLineEdit::Password);
+	connect(credential, &QLineEdit::textChanged, this, [this](const QString &text) {
+		credential->setEchoMode(text.startsWith(QLatin1Char('@')) || text.isEmpty()
+		                            ? QLineEdit::Normal
+		                            : QLineEdit::Password);
+	});
 	form->addRow(QStringLiteral("password"), credential);
 	layout->addLayout(form);
 
@@ -141,7 +150,9 @@ void ncfg_mesh_dialog::submit()
 	if (!before.unmodelled.isEmpty()) {
 		return;
 	}
-	for (const QLineEdit *value : { id, device, credential }) {
+	/* A typed password never reaches the block, and may hold a quote. */
+	const bool typed = !credential->text().trimmed().startsWith(QLatin1Char('@'));
+	for (const QLineEdit *value : { id, device, typed ? id : credential }) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash or a "
 			              "newline"));
@@ -165,14 +176,44 @@ void ncfg_mesh_dialog::submit()
 		              "than searching for each other"));
 		return;
 	}
-	if (mesh.security == QLatin1String("psk") &&
-	    !mesh.credential.startsWith(QLatin1String("@secret:"))) {
-		note->setText(QStringLiteral("the password is a reference, `@secret:NAME`, never the "
-		              "password itself: `ncfg secret set NAME` stores it"));
-		return;
+	QString error;
+	/* **Stored first, the reference written after** (10.782): it used to be
+	 * refused unless it was a reference, so a mesh with a password could not
+	 * be made from this window. */
+	if (mesh.security == QLatin1String("psk") && typed) {
+		const QByteArray octets = credential->text().toUtf8();
+		bool printable = true;
+		for (const char one : octets) {
+			const unsigned char at = static_cast<unsigned char>(one);
+			printable = printable && at >= 0x20u && at != 0x7fu;
+		}
+		if (octets.size() < 8 || octets.size() > 63 || !printable) {
+			note->setText(QStringLiteral("a mesh password is 8 to 63 printable octets and this "
+			              "one is %1 -- or write @secret:NAME for one stored already")
+			                  .arg(octets.size()));
+			return;
+		}
+		QString stored = before.credential.startsWith(QStringLiteral("@secret:"))
+		    ? before.credential.mid(QStringLiteral("@secret:").size())
+		    : QString();
+		if (stored.isEmpty() || stored.contains(QLatin1Char(':'))) {
+			stored = QStringLiteral("mesh-") + mesh.id;
+			for (QChar &one : stored) {
+				if (one == QLatin1Char('"') || one == QLatin1Char('\\') ||
+				    one == QLatin1Char('/') || one == QLatin1Char(':') ||
+				    one == QLatin1Char('.')) {
+					one = QLatin1Char('-');
+				}
+			}
+		}
+		if (!connection->secret_put(stored, credential->text(), true, &error)) {
+			note->setText(error);
+			return;
+		}
+		mesh.credential = QStringLiteral("@secret:") + stored;
+		credential->setText(mesh.credential);
 	}
 
-	QString error;
 	if (!connection->config_put(QStringLiteral("mesh-%1").arg(mesh.id), ncfg_mesh_block(mesh),
 	        true, &error)) {
 		note->setText(error);

@@ -228,8 +228,18 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 
 	credential = new QLineEdit(this);
 	credential->setObjectName(QStringLiteral("ap_credential"));
-	credential->setPlaceholderText(QStringLiteral("@secret:ap -- `ncfg secret set ap` "
-	            "puts one there"));
+	/* **A passphrase or a reference** (10.782). It took only `@secret:NAME`,
+	 * with `ncfg secret set` to put the passphrase there, so an access point
+	 * with a passphrase could not be made from this window at all -- while the
+	 * network dialog beside it stores one through `secret_put`. Typed, it is
+	 * stored the same way and the block gets the reference; it is hidden as it
+	 * is typed, and a reference, which is no secret, is shown. */
+	credential->setPlaceholderText(QStringLiteral("8 to 63 characters, or @secret:NAME"));
+	connect(credential, &QLineEdit::textChanged, this, [this](const QString &text) {
+		credential->setEchoMode(text.startsWith(QLatin1Char('@')) || text.isEmpty()
+		                            ? QLineEdit::Normal
+		                            : QLineEdit::Password);
+	});
 	form->addRow(QStringLiteral("passphrase"), credential);
 
 	proto = new QComboBox(this);
@@ -530,7 +540,11 @@ void ncfg_access_point_dialog::submit()
 		        .arg(before.unmodelled, before.id));
 		return;
 	}
-	const QLineEdit *values[] = { id, credential, regdom, stations, mobility_domain, roaming_key };
+	/* The passphrase is not one of these: it never reaches the block, and a
+	 * quote is a fine character in one. A reference is, and is checked. */
+	const bool typed = !credential->text().trimmed().startsWith(QLatin1Char('@'));
+	const QLineEdit *values[] = { id, typed ? id : credential, regdom, stations,
+		                      mobility_domain, roaming_key };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
@@ -566,11 +580,20 @@ void ncfg_access_point_dialog::submit()
 		note->setText(QStringLiteral("an access point needs the radio that runs it"));
 		return;
 	}
-	if (security->currentData().toString() == QLatin1String("psk")
-	    && !credential->text().trimmed().startsWith(QLatin1String("@secret:"))) {
-		note->setText(QStringLiteral("the passphrase is a reference, not the passphrase: "
-		              "`@secret:ap`, with `ncfg secret set ap` to put one there"));
-		return;
+	const bool psk = security->currentData().toString() == QLatin1String("psk");
+	if (psk && typed) {
+		const QByteArray octets = credential->text().toUtf8();
+		bool printable = true;
+		for (const char one : octets) {
+			const unsigned char at = static_cast<unsigned char>(one);
+			printable = printable && at >= 0x20u && at != 0x7fu;
+		}
+		if (octets.size() < 8 || octets.size() > 63 || !printable) {
+			note->setText(QStringLiteral("a WPA passphrase is 8 to 63 printable octets and this "
+			              "one is %1 -- or write @secret:NAME for one stored already")
+			                  .arg(octets.size()));
+			return;
+		}
 	}
 	if (!regdom->text().trimmed().isEmpty() && regdom->text().trimmed().size() != 2) {
 		note->setText(QStringLiteral("a regulatory domain is a two-letter country code, "
@@ -586,6 +609,30 @@ void ncfg_access_point_dialog::submit()
 
 	QString error;
 	const QString name = id->text().trimmed();
+	/* The passphrase first, so the block never names a secret that is not
+	 * there -- the network dialog's order. Under the name the reference held
+	 * where there was one, otherwise `ap-` and the access point's name with
+	 * what a secret's name cannot carry made a dash. */
+	if (psk && typed) {
+		QString stored = before.credential.startsWith(QStringLiteral("@secret:"))
+		    ? before.credential.mid(QStringLiteral("@secret:").size())
+		    : QString();
+		if (stored.isEmpty() || stored.contains(QLatin1Char(':'))) {
+			stored = QStringLiteral("ap-") + name;
+			for (QChar &one : stored) {
+				if (one == QLatin1Char('"') || one == QLatin1Char('\\') ||
+				    one == QLatin1Char('/') || one == QLatin1Char(':') ||
+				    one == QLatin1Char('.')) {
+					one = QLatin1Char('-');
+				}
+			}
+		}
+		if (!connection->secret_put(stored, credential->text(), true, &error)) {
+			note->setText(error);
+			return;
+		}
+		credential->setText(QStringLiteral("@secret:") + stored);
+	}
 	if (!connection->config_put(QStringLiteral("access-point-%1").arg(name), block_text(), true,
 	        &error)) {
 		note->setText(error);
