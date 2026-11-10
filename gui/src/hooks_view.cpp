@@ -86,7 +86,8 @@ void ncfg_hooks_view::refresh()
 	if (cells_by_row.isEmpty()) {
 		table->set_note(QStringLiteral(
 		    "No interface declares a hook. A hook is a program netcfgd runs at a named "
-		    "moment -- pre_up, up, post_up, lease, carrier, drift and the rest."));
+		    "moment -- pre_up, up, post_up, lease, carrier, drift and the rest. One is "
+		    "added to an interface: the links tab, configure, then hooks."));
 		emit reported(QStringLiteral("no hooks configured"));
 		return;
 	}
