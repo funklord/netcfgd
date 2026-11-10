@@ -325,6 +325,33 @@ static void a_mode_netcfgd_cannot_name_is_not_corrected(void)
 }
 
 /* ------------------------------------------------------------------------ *
+ * A hardware address
+ * ------------------------------------------------------------------------ */
+
+/* 10.779: the kernel prints a MAC lowercase and a document from the socket may
+ * not, and comparing them as text planned `link.set_mac` on every pass. */
+static void a_mac_in_capitals_is_the_same_address(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("{\"name\":\"eth0\",\"mac\":\"02:AA:BB:CC:DD:EE\"}",
+	    "{\"name\":\"eth0\",\"addressing\":[]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"mac\":\"02:aa:bb:cc:dd:ee\"") "]", &document,
+	    &observed);
+
+	check(plan && !planfix_action(plan, "link.set_mac"),
+	    "a hardware address in capitals is the one the kernel prints in lowercase");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan("{\"name\":\"eth0\",\"mac\":\"02:AA:BB:CC:DD:EF\"}",
+	    "{\"name\":\"eth0\",\"addressing\":[]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"mac\":\"02:aa:bb:cc:dd:ee\"") "]", &document,
+	    &observed);
+	check(plan && planfix_action(plan, "link.set_mac"), "  and a different one is still set");
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
  * A macvlan
  * ------------------------------------------------------------------------ */
 
@@ -896,6 +923,7 @@ int main(void)
 	vlans_on_a_device_in_no_bridge_are_said_once();
 	a_vlan_on_the_bridge_itself_is_a_self_operation();
 	a_converged_port_plans_nothing();
+	a_mac_in_capitals_is_the_same_address();
 
 	printf("plan_kind_test: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

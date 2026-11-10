@@ -26,6 +26,7 @@
 #include "ncfg/document.h"
 
 #include "ncfg/base.h"
+#include "ncfg/ops.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -745,6 +746,46 @@ int ncfg_document_validate(const ncfg_document_t *document, char *err, size_t er
 	if (!check_unique("device", keys, document->device_count, err, err_size)) {
 		free(keys);
 		return 0;
+	}
+	/* A rule's selectors are addresses or prefixes (10.779), which is all
+	 * `kernel_rule.c` reads. Any spelling of one: the planner compares them
+	 * as addresses, for a rule that reaches it other than through the
+	 * compiler, which writes the kernel's. */
+	for (i = 0; i < document->rule_count; i++) {
+		const char *selectors[2] = { document->rules[i].from, document->rules[i].to };
+		size_t      at;
+
+		for (at = 0; at < 2u; at++) {
+			char shown[NCFG_ADDRESS_MAX];
+
+			if (!selectors[at]) {
+				continue;
+			}
+			if (!ncfg_address_canonical(selectors[at], shown, sizeof(shown), NULL, 0)) {
+				ncfg_error_set(err, err_size,
+				    "rule %s has `%s` %s, which is not an address or a prefix",
+				    document->rules[i].id ? document->rules[i].id : "",
+				    at == 0 ? "from" : "to", selectors[at]);
+				free(keys);
+				return 0;
+			}
+		}
+	}
+	/* A device's `mac` is a hardware address (10.779), which is all
+	 * `kernel.c` can set. Asked here because a document also arrives over the
+	 * socket, where nothing compiled it; either case, since the plan compares
+	 * them as the same address. */
+	for (i = 0; i < document->device_count; i++) {
+		const char *mac = document->devices[i].mac;
+		uint8_t     octets[6];
+
+		if (!mac) {
+			continue;
+		}
+		if (!ncfg_ops_parse_mac(mac, octets, err, err_size)) {
+			free(keys);
+			return 0;
+		}
 	}
 	for (i = 0; i < document->interface_count; i++) {
 		keys[i] = document->interfaces[i].name;

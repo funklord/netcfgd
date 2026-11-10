@@ -20,7 +20,40 @@
 #include "lower_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/ops.h"
 #include "ncfg/value.h"
+
+/*
+ * A device's `mac`, read the way the executor will read it and written the
+ * way the kernel prints it (10.779).
+ *
+ * **Lowercase, because the plan compares it with the kernel's text**: a link
+ * at `02:aa:bb:cc:dd:ee` under `mac = "02:AA:BB:CC:DD:EE"` was planned a
+ * `link.set_mac` on every pass, which is a hardware address set again for
+ * ever under `on_drift = "reconcile"`. And **refused here when it is not one**,
+ * because `ncfg_ops_parse_mac` would refuse it at apply, after the actions
+ * before it had run -- the GUI's walk saved `zz:zz:zz` and nothing said so.
+ */
+static char *device_mac(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment)
+{
+	char    *text = ncfg_as_string(ctx, assignment->value);
+	char     why[NCFG_ERROR_MAX];
+	char     shown[18];
+	uint8_t  octets[6];
+
+	if (!text) {
+		return NULL;
+	}
+	if (!ncfg_ops_parse_mac(text, octets, why, sizeof(why))) {
+		ncfg_diag(ctx, assignment->span, "%s", why);
+		free(text);
+		return NULL;
+	}
+	free(text);
+	(void)snprintf(shown, sizeof(shown), "%02x:%02x:%02x:%02x:%02x:%02x", octets[0],
+	    octets[1], octets[2], octets[3], octets[4], octets[5]);
+	return ncfg_dup(ctx, shown);
+}
 
 /* ------------------------------------------------------------------------ *
  * Queueing
@@ -963,7 +996,7 @@ int ncfg_lower_device(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
 				ncfg_as_u32_opt(ctx, assignment->value, &device.mtu);
 			} else if (strcmp(key, "mac") == 0) {
 				free(device.mac);
-				device.mac = ncfg_as_string(ctx, assignment->value);
+				device.mac = device_mac(ctx, assignment);
 			} else {
 				ncfg_diag(ctx, assignment->span, "unknown device key `%s`", key);
 			}

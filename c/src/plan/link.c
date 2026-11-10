@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* ------------------------------------------------------------------------ *
  * Whether a name is worth planning against at all
@@ -274,7 +275,10 @@ void ncfg_plan_link_attributes(ncfg_builder_t *builder, const ncfg_interface_t *
 		    link ? &inverse : NULL);
 	}
 
-	if (device->mac && (!link || !link->mac || strcmp(link->mac, device->mac) != 0)) {
+	/* Either case is one address (10.779): the kernel prints lowercase and a
+	 * document from the socket may not, and comparing them as text was a
+	 * `link.set_mac` on every pass. */
+	if (device->mac && (!link || !link->mac || strcasecmp(link->mac, device->mac) != 0)) {
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_LINK_SET_MAC;
 		op.u.set_mac.name = interface->name;

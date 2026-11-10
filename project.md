@@ -12686,6 +12686,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.779 A rule selector or a MAC that is no address is refused at compile, and a MAC in capitals is no drift
+
+The walk saved a rule with `from = "300.1.1.1"` and a bridge with `mac = "zz:zz:zz"`; both
+compiled. `rule_selector` passed text that was no address through untouched -- the Rust's
+`unwrap_or`, so "a selector this build does not understand still reaches the place that can
+say so" -- but that place is `kernel_rule.c`, which reads an address and nothing else, at
+apply, after the actions before it had run. A device's `mac` was taken as any string, with
+the same result in `kernel.c`. Both are refused at compile now, with the line, and the
+document reader refuses the same for a document from the socket.
+
+**Looking at the MAC found a worse fault beside it.** The plan compared a device's `mac`
+with the kernel's text, and the kernel prints lowercase: a link at `02:aa:bb:cc:dd:ee` under
+`mac = "02:AA:BB:CC:DD:EE"` was planned `link.set_mac` on every pass, measured in a
+namespace -- a hardware address set again for ever under `on_drift = "reconcile"`. The
+compiler writes it lowercase now and the plan compares without case, which also covers a
+socket document. The document check accepts any spelling of a selector, because 10.200's
+planner compares selectors as addresses for exactly that route; `plan_tc_test` said so when
+a first version refused a non-canonical one. `lower_test` and `plan_kind_test` hold the
+four; taken out together they fail five.
+
 ## 10.777 The tray said "offline" for a machine on a network, and was first seen running
 
 **The tray had never been on a screen.** `tray.h` says as much: `create` returns nullptr

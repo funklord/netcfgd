@@ -35,13 +35,19 @@ static void rule_free(ncfg_routing_rule_t *rule)
  * Canonicalised for the same reason an interface address is: the plan compares
  * these against the kernel's own rendering, so `2001:0DB8::/32` was a rule torn
  * down and reinstalled on every apply, with a window in between where it did
- * not exist. Text that is not an address at all passes through untouched,
- * which is the Rust's `unwrap_or(text)` and is how a selector this build does
- * not understand still reaches the place that can say so.
+ * not exist.
+ *
+ * **Text that is not an address is refused here** (10.779). It used to pass
+ * through untouched, the Rust's `unwrap_or(text)`, so that "a selector this
+ * build does not understand still reaches the place that can say so" -- but
+ * that place is `kernel_rule.c`'s `selector`, which reads an address and
+ * nothing else, at apply, after the actions before it had run. So
+ * `from = "300.1.1.1"` compiled, planned a `rule.add`, and failed on the
+ * machine. There is no other spelling for it to have been.
  */
-static char *rule_selector(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value)
+static char *rule_selector(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment)
 {
-	char *text = ncfg_as_string(ctx, value);
+	char *text = ncfg_as_string(ctx, assignment->value);
 	char *canonical;
 
 	if (!text) {
@@ -49,7 +55,11 @@ static char *rule_selector(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value)
 	}
 	canonical = ncfg_canonical_address(ctx, text);
 	if (!canonical) {
-		return text;
+		ncfg_diag(ctx, assignment->span,
+		    "`%s` is not an address or a prefix: a rule's `%s` is one, such as "
+		    "`10.0.0.0/8` or `2001:db8::/32`", text, assignment->key);
+		free(text);
+		return NULL;
 	}
 	free(text);
 	return canonical;
@@ -168,10 +178,10 @@ int ncfg_lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
 			ncfg_as_u32_opt(ctx, assignment->value, &priority);
 		} else if (strcmp(key, "from") == 0) {
 			free(rule.from);
-			rule.from = rule_selector(ctx, assignment->value);
+			rule.from = rule_selector(ctx, assignment);
 		} else if (strcmp(key, "to") == 0) {
 			free(rule.to);
-			rule.to = rule_selector(ctx, assignment->value);
+			rule.to = rule_selector(ctx, assignment);
 		} else if (strcmp(key, "iif") == 0) {
 			free(rule.iif);
 			rule.iif = ncfg_as_interface_name(ctx, assignment->value);

@@ -2063,6 +2063,20 @@ static void device_cases(void)
 	 */
 	refuses("device \"../../etc/evil\" { kind = \"dummy\" }\n", "is not an interface name",
 	    "a device label that is a path is refused");
+
+	/* 10.779: the plan compares a `mac` with the kernel's lowercase text, so
+	 * an uppercase one was a `link.set_mac` on every pass; and one that is not
+	 * a hardware address failed only at apply. */
+	document = compiles("device d0 { mac = \"02:AA:BB:CC:DD:EE\" }\n",
+	    "a hardware address in capitals");
+	if (document) {
+		check(document->device_count == 1 && document->devices[0].mac &&
+		    strcmp(document->devices[0].mac, "02:aa:bb:cc:dd:ee") == 0,
+		    "  is kept as the kernel prints it");
+		ncfg_document_free(document);
+	}
+	refuses("device d0 { mac = \"zz:zz:zz\" }\n", "not two hex digits",
+	    "a `mac` that is no hardware address is refused");
 	refuses("device \"abcdefghijklmnopq\" { kind = \"dummy\" }\n",
 	    "at most 15 characters", "a device label too long for the kernel is refused");
 	refuses("device br0 { bridge { members = [\"eth0/x\"] } }\n", "cannot contain `/`",
@@ -2547,6 +2561,12 @@ static void rule_cases(void)
 		    "  into the kernel's spelling");
 		ncfg_document_free(document);
 	}
+	/* 10.779: text that is no address went through to apply, which reads an
+	 * address and nothing else, and failed there after the actions before it. */
+	refuses("rule \"a\" { from = \"300.1.1.1\"; lookup = 100; priority = 100 }\n",
+	    "is not an address or a prefix", "a selector that is no address is refused");
+	refuses("rule \"a\" { to = \"elsewhere\"; lookup = 100; priority = 100 }\n",
+	    "is not an address or a prefix", "  in `to` as well");
 	document = compiles("rule \"q\" { from = \"192.168.99.0/24\"; action = \"unreachable\"; "
 	    "priority = 1100 }\n", "a rule can refuse traffic rather than redirect it");
 	if (document) {
