@@ -12686,6 +12686,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.783 Open: a plan stops what is running before it finds the secret the replacement needs
+
+**Measured in the GUI walk, not yet changed.** An access point `TestAP` on `radio0`, whose
+passphrase reference named a secret nobody had stored, was saved while `radio0` was a station
+joined to `HomeFiber`. The daemon reconciled at once: `backend.stop` took the supplicant down,
+then `backend.start` for hostapd failed on `secret ap was not found`, and the radio was left
+with neither -- the client connection lost by saving a dialog, until the access point was
+deleted and the supplicant came back thirty seconds later. Secrets are resolved by the action
+that needs them, at apply, and the executor stops at the first failure with everything before
+it already done.
+
+**Two ways to close it, and they differ in what else stops.**
+
+- **Before action 0, ask every action that needs a secret whether it is there**, and run
+  nothing if one is not. Simplest, and the radio keeps its connection -- but one network block
+  with a missing secret then holds back every unrelated change in the same plan, a rule or a
+  firewall included, where today the ones before the failure land.
+- **Ask per interface, and skip only that interface's actions**, the rest of the plan
+  running. Keeps unrelated changes flowing; it is a new shape for the executor, whose stop is
+  whole-plan today, and 0293's optional actions are the only precedent for carrying on past a
+  failure.
+
+**The holder's to choose**, being the executor's failure semantics; the guess is the second.
+The GUI half is already closed for its own dialogs (10.782: a passphrase typed there is stored
+before the block names it), so what remains is a reference written by hand, or by a client,
+to a secret that is not there.
+
 ## 10.782 An access point or a mesh can be given a passphrase from the window
 
 The walk could not make an access point with a passphrase at all: the dialog took only
