@@ -7,6 +7,7 @@
  */
 #include "secrets_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
 
@@ -169,6 +170,6 @@ void ncfg_secrets_view::refresh()
 	                  "Values are never shown here or sent over the socket -- only names. "
 	                  "`stored, unused` is a credential left behind after whatever referred "
 	                  "to it was deleted; choose it and press forget."));
-	emit reported(missing ? QStringLiteral("%1 secrets, %2 missing").arg(rows.size()).arg(missing)
-	                      : QStringLiteral("%1 secrets").arg(rows.size()));
+	emit reported(missing ? QStringLiteral("%1, %2 missing").arg(ncfg_counted(rows.size(), "secret", "secrets")).arg(missing)
+	                      : ncfg_counted(rows.size(), "secret", "secrets"));
 }

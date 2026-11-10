@@ -3,6 +3,7 @@
  */
 #include "host_lists_view.h"
 
+#include "counted.h"
 #include "host_list_dialog.h"
 #include "table_view.h"
 
@@ -85,5 +86,5 @@ void ncfg_host_lists_view::refresh()
 	table->set_note(QStringLiteral(
 	    "Named elsewhere as @host_list:NAME -- in an access point's access_control and in "
 	    "a firewall rule's `mac`."));
-	emit reported(QStringLiteral("%1 host lists").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "host list", "host lists"));
 }

@@ -3,6 +3,7 @@
  */
 #include "events_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 
 #include <QFontDatabase>
@@ -122,7 +123,7 @@ void ncfg_events_view::arrived(const ncfg_event_row &event)
 
 	append(line, event.raw);
 	counted++;
-	emit reported(QStringLiteral("%1 events").arg(counted));
+	emit reported(ncfg_counted(counted, "event", "events"));
 }
 
 void ncfg_events_view::ended(const QString &reason)

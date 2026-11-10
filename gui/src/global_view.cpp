@@ -3,6 +3,7 @@
  */
 #include "global_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 
 #include <QHBoxLayout>
@@ -162,7 +163,7 @@ void ncfg_global_view::refresh()
 		            : QStringLiteral("off") },
 		{ QStringLiteral("on drift"), globals.on_drift },
 		{ QStringLiteral("confirm window"),
-		    globals.confirm ? QStringLiteral("%1 seconds").arg(globals.confirm)
+		    globals.confirm ? ncfg_counted(globals.confirm, "second", "seconds")
 		                    : QStringLiteral("none") },
 		{ QStringLiteral("observe"), globals.control_observe },
 		{ QStringLiteral("wifi"), globals.control_wifi },

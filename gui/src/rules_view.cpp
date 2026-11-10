@@ -7,6 +7,7 @@
  */
 #include "rules_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 #include "rule_dialog.h"
 #include "table_view.h"
@@ -109,5 +110,5 @@ void ncfg_rules_view::refresh()
 	    "The order is the priority: the kernel consults a lower number first. This "
 	    "is the configuration rather than what the kernel has now -- the plan tab is "
 	    "where the difference shows."));
-	emit reported(QStringLiteral("%1 rules").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "rule", "rules"));
 }

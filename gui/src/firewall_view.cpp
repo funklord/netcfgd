@@ -3,6 +3,7 @@
  */
 #include "firewall_view.h"
 
+#include "counted.h"
 #include "firewall_dialog.h"
 #include "table_view.h"
 
@@ -171,7 +172,7 @@ void ncfg_firewall_view::refresh()
 	    "chain's policy. This is the configuration rather than what nftables has now -- the "
 	    "plan tab is where the difference shows, and where a policy that would cut off "
 	    "this machine's own replies is warned about."));
-	emit reported(QStringLiteral("%1 firewall rules").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "firewall rule", "firewall rules"));
 }
 
 void ncfg_firewall_view::write(const ncfg_firewall_settings &next, const QString &said)

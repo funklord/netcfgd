@@ -7,6 +7,7 @@
  */
 #include "bluetooth_view.h"
 
+#include "counted.h"
 #include "bluetooth_dialog.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
@@ -109,5 +110,5 @@ void ncfg_bluetooth_view::refresh()
 	    "`autoconnect` is whether netcfgd would connect this device without being asked. "
 	    "This build acts on none of it: the block is kept so a configuration written now "
 	    "still means this when the backends arrive, and `ncfg plan` says so per device."));
-	emit reported(QStringLiteral("%1 devices").arg(cells_by_row.size()));
+	emit reported(ncfg_counted(cells_by_row.size(), "device", "devices"));
 }

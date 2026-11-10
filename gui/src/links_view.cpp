@@ -3,6 +3,7 @@
  */
 #include "links_view.h"
 
+#include "counted.h"
 #include "hand_written.h"
 #include "explain_dialog.h"
 #include "interface_dialog.h"
@@ -305,9 +306,9 @@ void ncfg_links_view::redraw()
 		emit reported(hidden ? QStringLiteral("no %1 links (%2 hidden)").arg(wanted).arg(hidden)
 		                     : QStringLiteral("no links reported"));
 	} else if (hidden) {
-		emit reported(QStringLiteral("%1 links, %2 hidden").arg(rows.size()).arg(hidden));
+		emit reported(QStringLiteral("%1, %2 hidden").arg(ncfg_counted(rows.size(), "link", "links")).arg(hidden));
 	} else {
-		emit reported(QStringLiteral("%1 links").arg(rows.size()));
+		emit reported(ncfg_counted(rows.size(), "link", "links"));
 	}
 }
 

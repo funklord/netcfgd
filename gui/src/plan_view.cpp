@@ -2,6 +2,7 @@
  * plan_view.cpp -- the plan pane described in plan_view.h.
  */
 #include "plan_view.h"
+#include "counted.h"
 
 #include <QBrush>
 #include <QColor>
@@ -271,7 +272,7 @@ void ncfg_plan_view::report()
 		 * has to work out that they mean the same. */
 		parts << QStringLiteral("nothing to do -- the machine matches the configuration");
 	} else {
-		parts << QStringLiteral("%1 actions").arg(current.actions.size());
+		parts << ncfg_counted(current.actions.size(), "action", "actions");
 	}
 	if (!current.refusals.isEmpty()) {
 		parts << QStringLiteral("%1 refused").arg(current.refusals.size());
@@ -280,7 +281,7 @@ void ncfg_plan_view::report()
 		parts << QStringLiteral("%1 stranded credential(s)").arg(current.stranded.size());
 	}
 	if (!current.warnings.isEmpty()) {
-		parts << QStringLiteral("%1 warnings").arg(current.warnings.size());
+		parts << ncfg_counted(current.warnings.size(), "warning", "warnings");
 	}
 
 	QString summary = parts.join(QStringLiteral(", "));

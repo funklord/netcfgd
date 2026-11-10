@@ -3,6 +3,7 @@
  */
 #include "leases_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
 
@@ -50,5 +51,5 @@ void ncfg_leases_view::refresh()
 	table->set_note(QStringLiteral(
 	    "From each DHCP server's lease file. The name is the one the client sent, left "
 	    "blank where it is not a plain host name."));
-	emit reported(QStringLiteral("%1 leases").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "lease", "leases"));
 }

@@ -3,6 +3,7 @@
  */
 #include "block_lists_view.h"
 
+#include "counted.h"
 #include "block_list_dialog.h"
 #include "table_view.h"
 
@@ -92,5 +93,5 @@ void ncfg_block_lists_view::refresh()
 	table->set_note(QStringLiteral(
 	    "Applied by each DHCP server that names the list in `block`; the plan says so where "
 	    "none does, or where a file is not there yet."));
-	emit reported(QStringLiteral("%1 block lists").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "block list", "block lists"));
 }

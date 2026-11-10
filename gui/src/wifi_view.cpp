@@ -107,6 +107,10 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	/* Selectable because it carries the daemon's refusals, and a sentence
 	 * naming the tier somebody lacks is one they will want to paste. */
 	status->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	/* Wrapped, because unwrapped its whole text is the tab's minimum width:
+	 * the supplicant's refusal widened the window from 1400 pixels to 1514,
+	 * past the screen it was on (10.781). */
+	status->setWordWrap(true);
 	layout->addWidget(status);
 
 	/* Above the table and hard to miss, because what it says explains every

@@ -7,6 +7,7 @@
  */
 #include "hooks_view.h"
 
+#include "counted.h"
 #include "hand_written.h"
 #include "interface_dialog.h"
 #include "ncfg_connection.h"
@@ -101,5 +102,5 @@ void ncfg_hooks_view::refresh()
 	    "language has no key to ask for either, so these two columns cannot yet say "
 	    "anything else. A `run_as=` line inside a hook body is a shell assignment and "
 	    "does nothing."));
-	emit reported(QStringLiteral("%1 hooks").arg(cells_by_row.size()));
+	emit reported(ncfg_counted(cells_by_row.size(), "hook", "hooks"));
 }

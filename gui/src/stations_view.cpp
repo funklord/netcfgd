@@ -7,6 +7,7 @@
  */
 #include "stations_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
 
@@ -142,5 +143,5 @@ void ncfg_stations_view::refresh()
 	    "it identifies nothing. Idle is seconds since hostapd last heard from the "
 	    "station; one silent for more than 30 s is never steered.");
 	table->set_note(note);
-	emit reported(QStringLiteral("%1 stations").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "station", "stations"));
 }

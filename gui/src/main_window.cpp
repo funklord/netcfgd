@@ -377,7 +377,11 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	follow_node();
 
 	status = new QLabel(this);
-	statusBar()->addWidget(status);
+	/* Wrapped, for the wifi tab's reason (10.781): a long refusal here was
+	 * the window's minimum width, and a status line is where the daemon's
+	 * sentences land. A taller bar for a moment beats a window off-screen. */
+	status->setWordWrap(true);
+	statusBar()->addWidget(status, 1);
 
 	resize(880, 560);
 

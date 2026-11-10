@@ -3,6 +3,7 @@
  */
 #include "meshes_view.h"
 
+#include "counted.h"
 #include "mesh_dialog.h"
 #include "table_view.h"
 
@@ -90,5 +91,5 @@ void ncfg_meshes_view::refresh()
 	table->set_note(QStringLiteral(
 	    "Each radio here is given to its mesh and does nothing else. Every node of a mesh "
 	    "needs the same ID, channel and security."));
-	emit reported(QStringLiteral("%1 meshes").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "mesh", "meshes"));
 }

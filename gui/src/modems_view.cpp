@@ -7,6 +7,7 @@
  */
 #include "modems_view.h"
 
+#include "counted.h"
 #include "ncfg_connection.h"
 #include "table_view.h"
 
@@ -114,5 +115,5 @@ void ncfg_modems_view::refresh()
 	    "are used -- the mux shows the module one SIM at a time, so the only way to "
 	    "learn what is in the other socket is to switch to it, and a source with no "
 	    "card listed is one netcfgd has not been on."));
-	emit reported(QStringLiteral("%1 modems").arg(rows.size()));
+	emit reported(ncfg_counted(rows.size(), "modem", "modems"));
 }

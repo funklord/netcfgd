@@ -12686,6 +12686,14 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.781 A status line wraps rather than widening the window, and "1 rules" is "1 rule"
+
+Two of the walk's smaller findings. The wifi tab's status line and the window's status bar
+did not wrap, so a long refusal was the window's minimum width: the supplicant's sentence
+took it from 1400 pixels to 1514 and a passphrase refusal to 1580, past the screen. Both
+wrap now. And every view's count said `%1 rules`, so one rule read "1 rules"; `counted.h`
+says which, for the sixteen counts that had the shape.
+
 ## 10.780 A WPA passphrase the supplicant would refuse is refused before it is stored
 
 The walk added a hidden network with the passphrase `abc`: the block and the secret were
