@@ -5549,7 +5549,9 @@ the sentence that disposes of an alternative in half a line.
      and dismissed. **Absence of a finding here is absence of looking, not
      evidence of working.** One resume has been watched since, on the holder's
      laptop (10.338), and a hull vm cannot suspend its devices to measure more
-     (10.773).
+     (10.773). **The rig that measures all four questions below is written and
+     passes as a check of itself (10.790); it waits on hull's suspend, which the
+     holder has said is coming. Its first run already found one fault (10.791).**
 
      Much of what it needs exists by construction, which is why this is a
      verification item rather than a feature. A resume brings the link down and
