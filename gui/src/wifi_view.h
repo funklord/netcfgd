@@ -68,6 +68,9 @@ private slots:
 	 * tier, as `add` is -- "add by hand" writes a whole block and needs
 	 * `admin`, which a laptop's owner usually does not hold. */
 	void add_hidden();
+	/* Join the network just added, once the daemon has loaded it: the tray's
+	 * `join_added`, for the window (10.774). */
+	void join_added();
 	void leave();
 	void activate();
 	void selection_changed();
@@ -124,6 +127,14 @@ private:
 	 * and `add` needs the exact SSID octets as hex. Re-drawing from a QString
 	 * would mean parsing back what was formatted for a person. */
 	QList<ncfg_access_point_row> scanned;
+	/* The network just added, by SSID as hex, while this waits for the
+	 * daemon to load it; the id is the dialog's, or empty where the daemon
+	 * chose it, which is why the wait looks by SSID. As the tray's. */
+	QString          added_ssid;
+	QString          added_id;
+	QString          added_label;
+	int              added_looks = 0;
+	void             begin_join(const QString &ssid, const QString &id, const QString &label);
 
 	/*
 	 * The networks the document configures, which is a different list from

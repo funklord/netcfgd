@@ -138,6 +138,44 @@ static void answer_modal(QMessageBox::StandardButton which, int tries = 100)
 	});
 }
 
+/* Press `Add` in the add-network dialog the next time one is up, the way
+ * `answer_modal` answers a question box: the dialog is built and `exec`'d
+ * inside the slot, so it is found rather than held. */
+static void accept_add_dialog(int tries = 100)
+{
+	QTimer::singleShot(0, [tries]() {
+		QWidget *modal = QApplication::activeModalWidget();
+		if (modal && !qobject_cast<QMessageBox *>(modal)) {
+			for (QPushButton *press : modal->findChildren<QPushButton *>()) {
+				if (press->text().remove(QLatin1Char('&')) == QStringLiteral("Add") &&
+				    press->isEnabled()) {
+					press->click();
+					return;
+				}
+			}
+		}
+		if (tries > 0) {
+			accept_add_dialog(tries - 1);
+		}
+	});
+}
+
+/* How many joins the daemon has asked the supplicant for, read from the
+ * daemon's log, where the fake supplicant prints each command it is sent.
+ * -1 where the script running this named no log. */
+static int selects_in_daemon_log()
+{
+	const QString path = QString::fromUtf8(qgetenv("NCFG_TEST_DAEMON_LOG"));
+	if (path.isEmpty()) {
+		return -1;
+	}
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return -1;
+	}
+	return QString::fromUtf8(file.readAll()).count(QStringLiteral("SELECT_NETWORK "));
+}
+
 static bool settles(const std::function<bool()> &done, int milliseconds = 8000)
 {
 	QElapsedTimer clock;
@@ -254,6 +292,37 @@ int main(int argc, char **argv)
 	check("selecting an unconfigured network offers to add it", add->isEnabled());
 	check("and does not offer to join what the config does not describe",
 	    !join->isEnabled());
+
+	/* 4b. Adding a network from the window joins it, as the tray's does
+	 * (10.774). It wrote the block, re-scanned and stopped, so the operator
+	 * who picked a network and pressed Add was left where they were with a
+	 * `join` button still to find. The open network in range is the one
+	 * with no passphrase to type; the join is read where it lands, as the
+	 * `SELECT_NETWORK` the daemon sends the supplicant. */
+	{
+		int open_row = -1;
+		for (int i = 0; i < table->rowCount(); i++) {
+			const QTableWidgetItem *security = table->item(i, 2);
+			const QTableWidgetItem *configured = table->item(i, 3);
+			if (security && security->text() == QStringLiteral("open") &&
+			    (!configured || configured->text().isEmpty())) {
+				open_row = i;
+				break;
+			}
+		}
+		const int before = selects_in_daemon_log();
+		check("the script names the daemon's log, so a join can be seen", before >= 0);
+		check("an open network nothing names yet is in range", open_row >= 0);
+		if (open_row >= 0 && before >= 0) {
+			table->setCurrentCell(open_row, 0);
+			QCoreApplication::processEvents();
+			accept_add_dialog();
+			add->click();
+			check("adding it from the window asks the daemon to join it",
+			    settles([&] { return selects_in_daemon_log() > before; }, 15000),
+			    QStringLiteral("status was: %1").arg(reported));
+		}
+	}
 
 	/* 5. Another manager on the radio, which is the condition that makes
 	 * everything else on this tab behave oddly -- and which the view never

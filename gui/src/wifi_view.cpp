@@ -16,6 +16,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -487,6 +488,75 @@ void ncfg_wifi_view::add_hidden()
 	}
 	refresh();
 	emit changed();
+	begin_join(ssid_hex, dialog.chosen_id(), shown);
+}
+
+/*
+ * **Adding a network joins it, here as in the tray** (10.774). The tray has
+ * since 10.652; this window's `add` wrote the block, re-scanned and stopped,
+ * so somebody who picked the cafe and typed its passphrase was left on the
+ * network they were on, with a `join` button to find. nm-applet, plasma-nm
+ * and GNOME's panel all connect on that one act, and nothing here argued for
+ * the second step: a block `wifi_add` wrote is one the operator asked to use.
+ */
+void ncfg_wifi_view::begin_join(const QString &ssid, const QString &id, const QString &label)
+{
+	added_ssid = ssid;
+	added_id = id;
+	added_label = label;
+	added_looks = 0;
+	const QString said = QStringLiteral("joining %1...").arg(label);
+	status->setText(said);
+	emit reported(said);
+	join_added();
+}
+
+void ncfg_wifi_view::join_added()
+{
+	const QString interface = chosen_interface();
+	if (added_ssid.isEmpty() || interface.isEmpty()) {
+		added_ssid.clear();
+		return;
+	}
+	/* The write is answered before the watcher has re-read the
+	 * configuration, and `wifi_connect` joins only networks the loaded
+	 * document names -- so look among the saved ones, and ask again shortly
+	 * while it is not there. Twenty looks half a second apart, the tray's
+	 * bound, after which the operator is told where it is. */
+	QList<ncfg_saved_network_row> saved;
+	QString error;
+	QString found;
+	if (connection->saved_networks(&saved, &error)) {
+		for (const ncfg_saved_network_row &network : saved) {
+			if (network.ssid == added_ssid &&
+			    (added_id.isEmpty() || network.id == added_id)) {
+				found = network.id;
+				break;
+			}
+		}
+	}
+	if (found.isEmpty() && ++added_looks < 20) {
+		QTimer::singleShot(500, this, &ncfg_wifi_view::join_added);
+		return;
+	}
+	const QString label = added_label;
+	added_ssid.clear();
+	if (found.isEmpty()) {
+		const QString said =
+		    error.isEmpty()
+		        ? QStringLiteral("%1 was added and is not loaded yet; join it from the "
+		                         "list once it is").arg(label)
+		        : error;
+		status->setText(said);
+		emit reported(said);
+		return;
+	}
+	if (!connection->wifi_connect(interface, found, &error)) {
+		status->setText(error);
+		emit reported(error);
+		return;
+	}
+	update_status();
 }
 
 void ncfg_wifi_view::add_manually()
@@ -927,5 +997,10 @@ void ncfg_wifi_view::add()
 	/* Re-scan rather than patching the row: the daemon has re-read its
 	 * configuration, so `configured` has changed for this access point and
 	 * possibly for others, and asking is cheaper than being clever. */
+	/* Copied first: the scan rebuilds the table, and with it the item and
+	 * the row the two below were read from. */
+	const QString ssid = point.ssid;
+	const QString label = shown->text();
 	scan();
+	begin_join(ssid, dialog.chosen_id(), label);
 }

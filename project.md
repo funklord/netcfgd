@@ -5547,7 +5547,9 @@ the sentence that disposes of an alternative in half a line.
      mentions suspend or hibernate at all, the only `resume` in it is a partial
      plan being re-run, there is no test, and no record says it was considered
      and dismissed. **Absence of a finding here is absence of looking, not
-     evidence of working.**
+     evidence of working.** One resume has been watched since, on the holder's
+     laptop (10.338), and a hull vm cannot suspend its devices to measure more
+     (10.773).
 
      Much of what it needs exists by construction, which is why this is a
      verification item rather than a feature. A resume brings the link down and
@@ -12683,6 +12685,45 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.774 Adding a network from the window joins it, as the tray does
+
+Found by walking the desktop aim with the GUI on a screen (Xvfb, a scratch daemon over
+`fake_supplicant.py`): picking a network in the wifi tab and pressing `add` wrote its block,
+re-scanned and stopped. The machine stayed on the network it was on, and joining meant
+finding the row again and pressing `join` -- a second step the tray dropped in 10.652, which
+joins once the daemon has loaded the block. nm-applet, plasma-nm and GNOME's network panel
+all connect on the one act, and nothing recorded argued for the window keeping two: a block
+`wifi_add` writes from a scan row is a network the operator asked to use. The window's `add`
+and `hidden network...` now join the same way, by SSID among the saved networks, twenty looks
+half a second apart, and say so when the block is not loaded in that time. `live_wifi` adds
+the open network in range through the button and asks that the daemon send the supplicant a
+`SELECT_NETWORK`, read from the daemon's log, which `gui_wifi.sh` now names; with the join
+taken out it fails.
+
+**What else the walk showed, recorded rather than changed.** The window is the full
+editor -- closer to nm-connection-editor than to an applet -- and the tray is the laptop
+owner's way in, so the rest weighs less: the wifi tab prints the supplicant's own state word
+(`COMPLETED`), which `ncfg_client.h` keeps on purpose so every tool names a state alike;
+signal is in dBm where the three above draw bars; the scan table shows two rows while the
+access points this machine offers, which a laptop rarely has, keep the most room; and the
+links tab lists the kernel's fallback tunnels (`gre0`, `sit0`, `erspan0`) beside the
+interfaces the machine uses. Each is a choice somebody could reasonably make the other way.
+
+## 10.773 Suspend in a hull vm stops at the device step
+
+The register's suspend item wants a lid measured -- a lease across the sleep, the
+supplicant's association, the rfkill watcher -- and `tests/live/` cannot suspend the machine
+it runs on. A hull vm can suspend its own kernel, so the hwsim image was tried. With
+`/sys/power/pm_test` at `freezer`, both `freeze` and `mem` return after the test delay; at
+`devices`, and in a real s2idle woken by the RTC, nothing more is heard from the guest: no
+output, no write to its rw 9p volume, until the outer timeout. Whether the guest dies or only
+its channels do is not established, since its console does not reach the host afterwards.
+The guest's `rtc_cmos` routes its alarm through the HPET, a known way for an alarm not to
+wake s2idle, and hull offers no kernel argument to change that. Signalled to hull with the
+reproduction (its inbox, 20261110T1922Z). The register's "never been run" was already not
+quite true: 10.338's afternoon is a resume on the holder's laptop, the radio dropping and
+netcfgd carrying on, and that is all that has been watched.
 
 ## 10.772 A stop waited for the command line to empty, not for the process to go
 

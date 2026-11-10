@@ -217,6 +217,9 @@ exit 0
 PROBE
 chmod +x "$NCFG_CONFIG_DIR/probe/example"
 
+# Named for the probes, which read the joins the fake supplicant prints
+# into it: `live_wifi` asks that adding a network joins it (10.774).
+export NCFG_TEST_DAEMON_LOG="$work/daemon.log"
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
