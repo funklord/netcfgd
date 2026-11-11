@@ -59,6 +59,14 @@ public:
 	 * four cases; see gui/tests/apply_actionable.cpp. */
 	static bool actionable(const ncfg_plan_data &plan);
 
+	/* What went wrong in an apply the daemon carried out, as a sentence, or
+	 * empty when every action that ran stood. The daemon answers an apply
+	 * that stopped -- or never started, for a secret nobody stored (10.796)
+	 * -- with a journal rather than an error, so "Applied" read off the
+	 * call's success alone told a person a change stands that never ran.
+	 * Public for the same probe as `actionable`. */
+	static QString trouble(const QList<ncfg_record_row> &journal);
+
 signals:
 	/* Something changed on the machine. The window behind this reloads what
 	 * it is showing, because a table that still described the state before

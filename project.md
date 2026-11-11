@@ -12688,6 +12688,20 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.799 The apply dialog said "Applied" for an apply that did not stand
+
+**Found reading how the GUI meets 10.796.** The daemon answers an apply that stopped -- or,
+since 10.796, never started for a credential nobody stored -- with a journal, not an error;
+the error path is for an apply it could not attempt. The dialog read success off the call
+alone and said "Applied. No confirm window was armed, so this stands." over a journal whose
+only action was `failed`. The CLI never had this: it counts the journal, `unmet` included (`c/src/cli/run.c`).
+
+`ncfg_apply_dialog::trouble` reads the journal: nothing done is "Nothing was applied", some
+done is "Applied in part: N of M actions ran", each naming the first action that did not
+stand and the daemon's sentence for it; with a window armed it adds that Revert undoes what
+did run. `unmet` (0293) now gets a failure's ink in the table, where it had none.
+`gui/tests/apply_actionable.cpp` states the three cases; emptying `trouble` fails two.
+
 ## 10.798 A tunnel's credentials are asked before the first action too
 
 **10.796's shape, looked for again: a credential resolved only by the action that needs it.**

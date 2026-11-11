@@ -78,5 +78,32 @@ int main(int argc, char **argv)
 	check(!ncfg_apply_dialog::actionable(warned),
 	    "a plan with only a warning is not actionable");
 
+	/* What the daemon answers an apply that did not start with: a journal,
+	 * not an error (10.796). "Applied" would be a lie about it. */
+	QList<ncfg_record_row> journal;
+	ncfg_record_row row;
+	row.op = QStringLiteral("backend.start");
+	row.interface = QStringLiteral("wlan0");
+	row.outcome = QStringLiteral("failed");
+	row.detail = QStringLiteral("not started: secret `ap` was not found");
+	journal.append(row);
+	row.op = QStringLiteral("link.up");
+	row.outcome = QStringLiteral("skipped");
+	row.detail = QString();
+	journal.append(row);
+	const QString none = ncfg_apply_dialog::trouble(journal);
+	check(none.startsWith(QStringLiteral("Nothing was applied")) &&
+	    none.contains(QStringLiteral("secret `ap` was not found")),
+	    "an apply that never started says nothing was applied, and why");
+
+	journal[1].outcome = QStringLiteral("done");
+	journal[0].outcome = QStringLiteral("unmet");
+	check(ncfg_apply_dialog::trouble(journal).startsWith(QStringLiteral("Applied in part")),
+	    "one that ran in part says so, counting unmet as not standing");
+
+	journal[0].outcome = QStringLiteral("done");
+	check(ncfg_apply_dialog::trouble(journal).isEmpty(),
+	    "and one where everything stood has nothing to add");
+
 	return failures ? 1 : 0;
 }

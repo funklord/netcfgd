@@ -276,11 +276,53 @@ void ncfg_apply_dialog::run_apply()
 	show_journal(records);
 	emit changed();
 
+	const QString wrong = trouble(records);
 	if (seconds > 0) {
 		arm(seconds);
+		if (!wrong.isEmpty()) {
+			say(wrong + QStringLiteral(" A confirm window is armed: Revert undoes what did "
+			                           "run."));
+		}
+	} else if (!wrong.isEmpty()) {
+		say(wrong);
 	} else {
 		say(QStringLiteral("Applied. No confirm window was armed, so this stands."));
 	}
+}
+
+QString ncfg_apply_dialog::trouble(const QList<ncfg_record_row> &journal)
+{
+	const ncfg_record_row *first = nullptr;
+	int done = 0;
+	int wrong = 0;
+
+	for (const ncfg_record_row &record : journal) {
+		if (record.outcome == QStringLiteral("done")) {
+			done++;
+		} else if (record.outcome == QStringLiteral("failed") ||
+		           record.outcome == QStringLiteral("unmet")) {
+			wrong++;
+			if (!first) {
+				first = &record;
+			}
+		}
+	}
+	if (!first) {
+		return QString();
+	}
+	const QString what = QStringLiteral("%1 on %2: %3")
+	                         .arg(first->op, first->interface.isEmpty()
+	                                             ? QStringLiteral("this machine")
+	                                             : first->interface,
+	                              first->detail);
+	if (done == 0) {
+		return QStringLiteral("Nothing was applied. %1").arg(what);
+	}
+	return QStringLiteral("Applied in part: %1 of %2 actions ran, and %3 did not. %4")
+	    .arg(done)
+	    .arg(journal.size())
+	    .arg(wrong)
+	    .arg(what);
 }
 
 void ncfg_apply_dialog::show_journal(const QList<ncfg_record_row> &records)
@@ -303,15 +345,17 @@ void ncfg_apply_dialog::show_journal(const QList<ncfg_record_row> &records)
 		 * thing is how a person ends up unsure whether the GUI's "error"
 		 * and the CLI's "failed" are the same event. Only the weight of
 		 * the ink is this screen's decision. */
-		if (record.outcome == QStringLiteral("failed") ||
-		    record.outcome == QStringLiteral("skipped")) {
+		/* `unmet` is 0293's red: an action that ran, or was not started,
+		 * and did not stand while the plan went on. It is a failure in the
+		 * CLI's count and gets a failure's ink here. */
+		const bool failed = record.outcome == QStringLiteral("failed") ||
+		                    record.outcome == QStringLiteral("unmet");
+		if (failed || record.outcome == QStringLiteral("skipped")) {
 			QTableWidgetItem *item = journal->item(row, 3);
 			QFont font = item->font();
 			font.setBold(true);
 			item->setFont(font);
-			item->setForeground(QBrush(record.outcome == QStringLiteral("failed")
-			                   ? failed_colour
-			                   : skipped_colour));
+			item->setForeground(QBrush(failed ? failed_colour : skipped_colour));
 		}
 	}
 	journal->resizeColumnsToContents();
