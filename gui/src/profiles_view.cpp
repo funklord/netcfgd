@@ -107,7 +107,7 @@ void ncfg_profiles_view::refresh()
 	    "setting by hand takes the machine off its profile without changing what is "
 	    "running -- the profile's files are folded into conf.d in the same step."));
 	emit reported(chosen.isEmpty() ? QStringLiteral("no profile chosen")
-	                               : QStringLiteral("on the `%1` profile").arg(chosen));
+	                               : QStringLiteral("on the \"%1\" profile").arg(chosen));
 }
 
 void ncfg_profiles_view::use_selected()
@@ -130,7 +130,7 @@ void ncfg_profiles_view::use_selected()
 	 * can take down the link the operator is connected over. */
 	const QString what = name.isEmpty()
 	    ? QStringLiteral("Stop using a profile, and run this machine's own configuration?")
-	    : QStringLiteral("Switch to the `%1` profile?").arg(name);
+	    : QStringLiteral("Switch to the \"%1\" profile?").arg(name);
 	const QMessageBox::StandardButton answer = QMessageBox::question(this,
 	    QStringLiteral("netcfgd"),
 	    what + QStringLiteral("\n\nThe network is reconfigured as soon as this is "
@@ -202,7 +202,7 @@ void ncfg_profiles_view::save_current()
 	QString error;
 	if (connection->profile_save(name, false, &error)) {
 		emit reported(
-		    QStringLiteral("saved what is running as `%1`, and switched to it").arg(name));
+		    QStringLiteral("saved what is running as \"%1\", and switched to it").arg(name));
 		refresh();
 		emit changed();
 		return;
@@ -220,7 +220,7 @@ void ncfg_profiles_view::save_current()
 
 	const QMessageBox::StandardButton answer = QMessageBox::question(this,
 	    QStringLiteral("netcfgd"),
-	    QStringLiteral("`%1` already exists. Overwrite it with what this machine is "
+	    QStringLiteral("\"%1\" already exists. Overwrite it with what this machine is "
 	                   "running?\n\nWhat is in that profile now is replaced.")
 	        .arg(name),
 	    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
@@ -232,7 +232,7 @@ void ncfg_profiles_view::save_current()
 		emit reported(error);
 		return;
 	}
-	emit reported(QStringLiteral("saved what is running as `%1`, and switched to it").arg(name));
+	emit reported(QStringLiteral("saved what is running as \"%1\", and switched to it").arg(name));
 	refresh();
 	emit changed();
 }

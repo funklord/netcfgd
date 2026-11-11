@@ -731,7 +731,7 @@ void ncfg_tray::choose_profile(const QString &name)
 	 * caution: it can take down the link the operator is connected over. */
 	const QString what = name.isEmpty()
 	    ? QStringLiteral("Stop using a profile, and run this machine's own configuration?")
-	    : QStringLiteral("Switch to the `%1` profile?").arg(name);
+	    : QStringLiteral("Switch to the \"%1\" profile?").arg(name);
 	const QMessageBox::StandardButton answer = QMessageBox::question(nullptr,
 	    QStringLiteral("netcfgd"),
 	    what + QStringLiteral("\n\nThe network is reconfigured as soon as this is "

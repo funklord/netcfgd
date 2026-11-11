@@ -191,7 +191,7 @@ void ncfg_dns_record_dialog::submit()
 void ncfg_dns_record_dialog::remove()
 {
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"),
-	    QStringLiteral("Delete the DNS record `%1`?\n\nThe LAN stops resolving it on the next "
+	    QStringLiteral("Delete the DNS record \"%1\"?\n\nThe LAN stops resolving it on the next "
 	                   "apply.").arg(before),
 	    QMessageBox::Cancel | QMessageBox::Yes, this);
 	box.setDefaultButton(QMessageBox::Cancel);

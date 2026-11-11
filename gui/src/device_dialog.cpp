@@ -265,7 +265,7 @@ QString ncfg_device_name_refusal(const QString &name)
 		              "the kernel takes");
 	}
 	if (trimmed == QLatin1String(".") || trimmed == QLatin1String("..")) {
-		return QStringLiteral("`%1` is a directory, not a name").arg(trimmed);
+		return QStringLiteral("\"%1\" is a directory, not a name").arg(trimmed);
 	}
 	for (const QChar &character : trimmed) {
 		if (character.isSpace() || character == QLatin1Char('/')) {
@@ -1438,7 +1438,7 @@ void ncfg_device_dialog::remove()
 {
 	const QString device = name->text().trimmed();
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"),
-	    QStringLiteral("Delete the device `%1`?\n\nIts configuration goes; what netcfgd "
+	    QStringLiteral("Delete the device \"%1\"?\n\nIts configuration goes; what netcfgd "
 	                   "made for it, it takes away on the next apply.")
 	        .arg(device),
 	    QMessageBox::Cancel | QMessageBox::Yes, this);
@@ -1569,7 +1569,7 @@ void ncfg_device_dialog::submit()
 		const QString vids =
 		    vlans->item(row, 0) ? vlans->item(row, 0)->text().trimmed() : QString();
 		if (!is_vlan_run(vids)) {
-			note->setText(QStringLiteral("`%1` is not a vlan: an id such as 10, or a "
+			note->setText(QStringLiteral("\"%1\" is not a vlan: an id such as 10, or a "
 			              "range such as 20-30").arg(vids));
 			return;
 		}
@@ -1616,7 +1616,7 @@ void ncfg_device_dialog::submit()
 		return;
 	}
 	summary = QStringLiteral("wrote device-%1: netcfgd re-read its configuration. "
-	              "Run apply to make the machine match it.")
+	              "netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(written);
 	accept();
 }

@@ -465,7 +465,7 @@ void ncfg_wifi_view::forget_selected()
 	}
 	const QString id = saved.at(row).id;
 	const QString question =
-	    QStringLiteral("Forget the network `%1`?\n\nIts configuration goes, and its stored "
+	    QStringLiteral("Forget the network \"%1\"?\n\nIts configuration goes, and its stored "
 	               "credential with it unless something else still refers to one.")
 	        .arg(id);
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"), question,
@@ -502,7 +502,7 @@ void ncfg_wifi_view::forget_selected()
 		}
 	}
 	selection_changed();
-	const QString said = QStringLiteral("forgot `%1`").arg(id);
+	const QString said = QStringLiteral("forgot \"%1\"").arg(id);
 	status->setText(said);
 	emit reported(said);
 }

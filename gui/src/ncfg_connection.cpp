@@ -346,10 +346,10 @@ QString ncfg_linkset_why(const QList<ncfg_linkset_row> &sets, const QString &nam
 		    ? QStringLiteral("every other member is ready")
 		    : lost.join(QStringLiteral(", "));
 		return known.active.isEmpty()
-		    ? QStringLiteral("`%1` has nothing it can use: %2").arg(name, because)
-		    : QStringLiteral("`%1` is using %2; %3").arg(name, known.active, because);
+		    ? QStringLiteral("\"%1\" has nothing it can use: %2").arg(name, because)
+		    : QStringLiteral("\"%1\" is using %2; %3").arg(name, known.active, because);
 	}
-	return QStringLiteral("netcfgd reports nothing about `%1`. A group it has not read "
+	return QStringLiteral("netcfgd reports nothing about \"%1\". A group it has not read "
 	              "yet, or a daemon older than this window.")
 	    .arg(name);
 }

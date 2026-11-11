@@ -182,7 +182,7 @@ void ncfg_firewall_view::write(const ncfg_firewall_settings &next, const QString
 		emit reported(error);
 		return;
 	}
-	emit reported(QStringLiteral("wrote %1: %2. Run apply to make the machine match it.")
+	emit reported(QStringLiteral("wrote %1: %2. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	                  .arg(QString::fromLatin1(ncfg_firewall_drop_in), said));
 	refresh();
 	emit changed();

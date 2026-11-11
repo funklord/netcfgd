@@ -255,8 +255,7 @@ void ncfg_global_view::toggle_networking()
 		return;
 	}
 
-	emit reported(QStringLiteral("wrote %1: networking is now `%2`. Run apply to make the "
-	                             "machine match it.")
+	emit reported(QStringLiteral("wrote %1: networking is now \"%2\". netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	        .arg(QString::fromLatin1(drop_in_name),
 	            networking_on ? QStringLiteral("off") : QStringLiteral("on")));
 	emit changed();
@@ -298,8 +297,7 @@ void ncfg_global_view::set_country()
 		emit reported(error);
 		return;
 	}
-	emit reported(QStringLiteral("wrote %1: the country is pinned to %2. Run apply to make "
-	                             "the machine match it.")
+	emit reported(QStringLiteral("wrote %1: the country is pinned to %2. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	        .arg(QString::fromLatin1(country_drop_in), chosen));
 	emit changed();
 	refresh();
@@ -346,8 +344,7 @@ void ncfg_global_view::write_upnp()
 			emit reported(error);
 			return;
 		}
-		emit reported(QStringLiteral("removed %1: UPnP is off. Run apply to make the "
-		                             "machine match it.")
+		emit reported(QStringLiteral("removed %1: UPnP is off. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 		        .arg(QString::fromLatin1(upnp_drop_in)));
 		emit changed();
 		refresh();
@@ -377,8 +374,7 @@ void ncfg_global_view::write_upnp()
 		emit reported(error);
 		return;
 	}
-	emit reported(QStringLiteral("wrote %1: UPnP is on, mapped on %2. Run apply to make "
-	                             "the machine match it.")
+	emit reported(QStringLiteral("wrote %1: UPnP is on, mapped on %2. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	        .arg(QString::fromLatin1(upnp_drop_in), uplink));
 	emit changed();
 	refresh();

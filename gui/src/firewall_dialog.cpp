@@ -356,7 +356,7 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 		bool      number = false;
 		const int port = text.toInt(&number);
 		if (!number || port < 1 || port > 65535) {
-			note->setText(QStringLiteral("`%1` is not a port: 1 to 65535").arg(text));
+			note->setText(QStringLiteral("\"%1\" is not a port: 1 to 65535").arg(text));
 			return false;
 		}
 		rule->ports << port;
@@ -426,7 +426,7 @@ void ncfg_firewall_rule_dialog::submit()
 	}
 	for (const ncfg_firewall_rule_row &other : target->rules) {
 		if (other.name == rule.name) {
-			note->setText(QStringLiteral("%1 already has a rule named `%2`: a name is a "
+			note->setText(QStringLiteral("%1 already has a rule named \"%2\": a name is a "
 			              "rule's identity in its chain").arg(target_name, rule.name));
 			return;
 		}
@@ -442,7 +442,7 @@ void ncfg_firewall_rule_dialog::submit()
 		note->setText(error);
 		return;
 	}
-	summary = QStringLiteral("wrote %1: rule %2/%3. Run apply to make the machine match it.")
+	summary = QStringLiteral("wrote %1: rule %2/%3. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	              .arg(QString::fromLatin1(ncfg_firewall_drop_in), target_name, rule.name);
 	accept();
 }
@@ -456,7 +456,7 @@ void ncfg_firewall_rule_dialog::remove()
 	}
 	const QString rule_name = source->rules.at(index).name;
 	const QString question =
-	    QStringLiteral("Delete the firewall rule `%1/%2`?\n\nWhat it matched falls through to "
+	    QStringLiteral("Delete the firewall rule \"%1/%2\"?\n\nWhat it matched falls through to "
 	                   "the rules below it, and then to the chain's policy.")
 	        .arg(original_chain, rule_name);
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"), question,
@@ -472,8 +472,7 @@ void ncfg_firewall_rule_dialog::remove()
 		note->setText(error);
 		return;
 	}
-	summary = QStringLiteral("wrote %1: removed rule %2/%3. Run apply to make the machine "
-	              "match it.")
+	summary = QStringLiteral("wrote %1: removed rule %2/%3. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	              .arg(QString::fromLatin1(ncfg_firewall_drop_in), original_chain, rule_name);
 	accept();
 }

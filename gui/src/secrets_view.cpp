@@ -89,7 +89,7 @@ void ncfg_secrets_view::forget_selected()
 	 *
 	 * 0042 is why the wording is blunt: a private key nobody has a copy of
 	 * cannot be got back, and the protocol adds no second question of its own. */
-	QString question = QStringLiteral("Forget the credential `%1`?").arg(secret.name);
+	QString question = QStringLiteral("Forget the credential \"%1\"?").arg(secret.name);
 	if (secret.used_by.isEmpty()) {
 		question += QStringLiteral(
 		    "\n\nNothing in the configuration refers to it. The value is gone for good; "
@@ -118,7 +118,7 @@ void ncfg_secrets_view::forget_selected()
 	 * forget learned: `refresh` writes its own summary and would overwrite
 	 * this one within a turn of the event loop. */
 	refresh();
-	const QString said = QStringLiteral("forgot the credential `%1`").arg(secret.name);
+	const QString said = QStringLiteral("forgot the credential \"%1\"").arg(secret.name);
 	emit reported(said);
 }
 

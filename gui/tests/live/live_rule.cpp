@@ -124,10 +124,14 @@ int main(int argc, char **argv)
 		save->click();
 		check("and a whole rule is written", dialog.outcome().contains(name),
 		    QStringLiteral("%1 / %2").arg(dialog.outcome(), note->text()));
-		/* Configuration is not the kernel: netcfgd re-read the document, and
-		 * the machine still has whatever rules it had a moment ago. */
-		check("and the outcome says apply is what changes the machine",
-		    dialog.outcome().contains(QStringLiteral("apply")), dialog.outcome());
+		/* Configuration is not the kernel, and the next pass is what puts it
+		 * there: by itself where the interface reconciles, which is the
+		 * default, and through Apply where it holds back (10.806). The
+		 * sentence once said "Run apply", which was wrong in the default. */
+		check("and the outcome says netcfgd puts it in effect, and where to look if not",
+		    dialog.outcome().contains(QStringLiteral("puts it in effect itself")) &&
+		        dialog.outcome().contains(QStringLiteral("Apply...")),
+		    dialog.outcome());
 	}
 
 	{

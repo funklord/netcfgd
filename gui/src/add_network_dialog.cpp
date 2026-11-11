@@ -316,7 +316,7 @@ QString ncfg_add_network_dialog::store_certificate(const QString &role)
 
 	QString error;
 	if (connection->secret_put(name, QString::fromUtf8(content), false, &error)) {
-		note->setText(QStringLiteral("stored as `%1`").arg(name));
+		note->setText(QStringLiteral("stored as \"%1\"").arg(name));
 		return name;
 	}
 
@@ -325,15 +325,15 @@ QString ncfg_add_network_dialog::store_certificate(const QString &role)
 	 * question and never a default. The daemon's own refusal is what asks
 	 * it, because only the daemon knows the name is taken. */
 	const QMessageBox::StandardButton answer = QMessageBox::question(this,
-	    QStringLiteral("Replace `%1`?").arg(name),
-	    QStringLiteral("%1\n\nReplace what is stored under `%2`?").arg(error, name),
+	    QStringLiteral("Replace \"%1\"?").arg(name),
+	    QStringLiteral("%1\n\nReplace what is stored under \"%2\"?").arg(error, name),
 	    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
 	if (answer != QMessageBox::Yes) {
 		note->setText(error);
 		return QString();
 	}
 	if (connection->secret_put(name, QString::fromUtf8(content), true, &error)) {
-		note->setText(QStringLiteral("replaced `%1`").arg(name));
+		note->setText(QStringLiteral("replaced \"%1\"").arg(name));
 		return name;
 	}
 	note->setText(error);

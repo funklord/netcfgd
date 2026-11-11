@@ -94,7 +94,7 @@ void ncfg_host_list_dialog::submit()
 	static const QRegularExpression station(QStringLiteral("^[0-9A-Fa-f:*]+$"));
 	for (const QString &one : list.mac) {
 		if (!station.match(one).hasMatch()) {
-			note->setText(QStringLiteral("`%1` is not a station address").arg(one));
+			note->setText(QStringLiteral("\"%1\" is not a station address").arg(one));
 			return;
 		}
 	}
@@ -114,7 +114,7 @@ void ncfg_host_list_dialog::submit()
 void ncfg_host_list_dialog::remove()
 {
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"),
-	    QStringLiteral("Delete the host list `%1`?\n\nAn access point or firewall rule that "
+	    QStringLiteral("Delete the host list \"%1\"?\n\nAn access point or firewall rule that "
 	                   "still names it keeps the configuration from compiling, so netcfgd "
 	                   "refuses the delete until nothing does.")
 	        .arg(before),

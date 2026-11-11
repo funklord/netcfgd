@@ -197,7 +197,7 @@ void ncfg_linkset_dialog::load()
 		}
 		return;
 	}
-	note->setText(QStringLiteral("netcfgd reports no group called `%1`. It may have been "
+	note->setText(QStringLiteral("netcfgd reports no group called \"%1\". It may have been "
 	              "removed since this list was drawn.")
 	          .arg(existing));
 }
@@ -334,7 +334,7 @@ void ncfg_linkset_dialog::submit()
 		return;
 	}
 	summary = QStringLiteral("wrote linkset-%1: netcfgd re-read its configuration. "
-	              "Run apply to make the machine match it.")
+	              "netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(name->text());
 	accept();
 }
@@ -342,7 +342,7 @@ void ncfg_linkset_dialog::submit()
 void ncfg_linkset_dialog::remove()
 {
 	const QString question =
-	    QStringLiteral("Delete the group `%1`?\n\nThe links in it stay configured. What "
+	    QStringLiteral("Delete the group \"%1\"?\n\nThe links in it stay configured. What "
 	               "goes is the grouping -- so each of them keeps its own routes "
 	               "again, and nothing chooses between them.")
 	        .arg(existing);
@@ -359,7 +359,7 @@ void ncfg_linkset_dialog::remove()
 		return;
 	}
 	summary = QStringLiteral("removed linkset-%1: netcfgd re-read its configuration. "
-	              "Run apply to make the machine match it.")
+	              "netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(existing);
 	accept();
 }

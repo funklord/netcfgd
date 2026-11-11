@@ -263,7 +263,7 @@ QString ncfg_hooks_editor::load(ncfg_connection *connection, const QString &name
 			 * block back would write an empty body over it. */
 			unknown = true;
 			return QStringLiteral("netcfgd could not read %1, the script behind this "
-			                      "%2's `%3` hook")
+			                      "%2's \"%3\" hook")
 			    .arg(script.path, noun, script.phase);
 		}
 		scripts.append(script);

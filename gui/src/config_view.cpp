@@ -137,9 +137,9 @@ void ncfg_config_view::remove_selected()
 			break;
 		}
 	}
-	QString question = QStringLiteral("Remove the drop-in `%1`?").arg(file.name);
+	QString question = QStringLiteral("Remove the drop-in \"%1\"?").arg(file.name);
 	if (!first.isEmpty()) {
-		question += QStringLiteral("\n\nIt begins `%1`.").arg(first);
+		question += QStringLiteral("\n\nIt begins \"%1\".").arg(first);
 	}
 	question += QStringLiteral(
 	    "\n\nnetcfgd re-reads its configuration afterwards, so whatever this file "
@@ -161,6 +161,6 @@ void ncfg_config_view::remove_selected()
 	/* The refresh first and the sentence after it, for the reason the wifi
 	 * view's forget learned: refresh writes its own summary. */
 	refresh();
-	emit reported(QStringLiteral("removed `%1`").arg(file.name));
+	emit reported(QStringLiteral("removed \"%1\"").arg(file.name));
 	emit changed();
 }

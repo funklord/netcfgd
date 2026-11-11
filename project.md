@@ -12688,6 +12688,32 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.806 The GUI said "Run apply" for a change netcfgd makes by itself
+
+Sixteen sentences, one after every save -- a device, a network, an interface, a rule, the
+firewall, DNS, UPnP, the country -- said "Run apply to make the machine match it". That is
+wrong in the ordinary case: a write reloads the configuration, and the next pass reconciles
+it on every interface whose `on_drift` is `reconcile`, which is the default
+(`ncfg_on_drift_default`); 10.783's access point was reconciled at once on its
+save. A person told to run something that has already happened either does it for nothing
+or concludes the save did not take. They now say netcfgd puts it in effect itself and that
+`Apply...` shows anything it holds back -- an interface set to `report`, an action not
+reconciled in isolation, a daemon holding with `--no-apply-on-start` -- which is where those
+cases are explained. The DNS tab's "`ncfg apply` is what does it", inside a window with an
+Apply button, points at the button.
+
+## 10.804 The GUI quotes a name with quotes, not backticks
+
+**Half of 10.778's last finding: backticks reach a person's eye.** Thirty-nine sentences in
+`gui/src` -- every delete and forget question, the profile switch, the notes under a field
+-- wrapped the name they were about in backticks, markdown's mark for code, which a Qt
+dialog draws as two stray accents: "Delete the DNS record `nas.home.lan`?". A name is now
+in plain double quotes. What stays in backticks is what genuinely is syntax or a command a
+person would type -- `@secret:wg0`, `ncfg secret set wg0`, a `device` block -- and the
+other half of the finding, commands and op names in help lines meant for somebody who will
+never open a terminal, is still open: it is wording to rewrite one sentence at a time, not a
+substitution.
+
 ## 10.803 A name that cannot change no longer looks like a box to type in
 
 **From 10.778's list: a renamed DNS record's read-only name field looks editable and says
@@ -13108,7 +13134,7 @@ the profile offered twice, UPnP's order, the access tab's banner, the events' ti
 hooks tab saying where a hook is added -- the links tab, configure, then hooks): a
 renamed DNS record's read-only name field looks editable and says nothing (~~fixed~~, 10.803); the selection
 moves to the next row after a delete (~~fixed~~, 10.802); ~~no profile can be deleted~~ (10.801); the hooks tab
-cannot itself start a hook; and backticks,
+cannot itself start a hook; and backticks (~~around names~~, 10.804),
 `ncfg` commands and op names reach a person's eye in many help lines. Each is small, and
 each is what a laptop's owner meets.
 

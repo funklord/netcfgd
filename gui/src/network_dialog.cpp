@@ -667,7 +667,7 @@ void ncfg_network_dialog::submit()
 	}
 
 	summary = QStringLiteral("wrote wifi-%1: netcfgd re-read its configuration. "
-	              "Run apply to make the machine match it.")
+	              "netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(name);
 	accept();
 }

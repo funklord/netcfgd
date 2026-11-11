@@ -647,7 +647,7 @@ void ncfg_access_point_dialog::submit()
 	 * nothing through. */
 	summary = QStringLiteral("wrote access-point-%1: give %2 an address and a dhcp_server "
 	              "in its interface if it has none -- stations associate and still need "
-	              "one. Run apply.")
+	              "one. netcfgd starts it itself.")
 	          .arg(name, device->currentText().trimmed());
 	accept();
 }
@@ -655,7 +655,7 @@ void ncfg_access_point_dialog::submit()
 void ncfg_access_point_dialog::remove()
 {
 	const QString question =
-	    QStringLiteral("Delete the access point `%1`?\n\nThe radio stays configured; what "
+	    QStringLiteral("Delete the access point \"%1\"?\n\nThe radio stays configured; what "
 	               "goes is the network it offers.")
 	        .arg(before.id);
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"), question,
@@ -671,7 +671,7 @@ void ncfg_access_point_dialog::remove()
 		return;
 	}
 	summary = QStringLiteral("removed access-point-%1: netcfgd re-read its configuration. "
-	              "Run apply to make the machine match it.")
+	              "netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(before.id);
 	accept();
 }

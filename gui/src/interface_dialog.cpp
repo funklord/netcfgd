@@ -1365,7 +1365,7 @@ void ncfg_interface_dialog::submit()
 	}
 
 	summary = QStringLiteral("wrote interface-%1: netcfgd re-read its configuration. "
-	              "Run apply to make the machine match it.")
+	              "netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(interface);
 	accept();
 }

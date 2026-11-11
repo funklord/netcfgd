@@ -140,7 +140,7 @@ void ncfg_block_list_dialog::submit()
 void ncfg_block_list_dialog::remove()
 {
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"),
-	    QStringLiteral("Delete the block list `%1`?\n\nA DHCP server that still names it in "
+	    QStringLiteral("Delete the block list \"%1\"?\n\nA DHCP server that still names it in "
 	                   "`block` is refused until it no longer does.").arg(before),
 	    QMessageBox::Cancel | QMessageBox::Yes, this);
 	box.setDefaultButton(QMessageBox::Cancel);

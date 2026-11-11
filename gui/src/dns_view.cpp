@@ -113,7 +113,7 @@ void ncfg_dns_view::refresh()
 	 * document asks for something the machine is not doing. */
 	if (!row.mode.isEmpty() && row.mode != QStringLiteral("none") && !row.managing) {
 		parts << QStringLiteral("netcfgd holds no resolver state, so this has not taken "
-		           "effect -- `ncfg apply` is what does it");
+		           "effect yet -- Apply... shows why");
 	}
 	detail->setText(parts.join(QStringLiteral("\n")));
 
@@ -147,8 +147,7 @@ void ncfg_dns_view::apply_mode()
 		return;
 	}
 
-	emit reported(QStringLiteral("wrote %1: dns mode is now `%2`. Run apply to make the "
-	              "machine match it.")
+	emit reported(QStringLiteral("wrote %1: dns mode is now \"%2\". netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(QString::fromLatin1(drop_in_name), chosen));
 	emit changed();
 	refresh();

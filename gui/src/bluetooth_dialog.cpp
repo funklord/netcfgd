@@ -250,7 +250,7 @@ void ncfg_bluetooth_dialog::submit()
 void ncfg_bluetooth_dialog::remove()
 {
 	const QString question =
-	    QStringLiteral("Delete the bluetooth device `%1`?\n\nThe pairing stays where it "
+	    QStringLiteral("Delete the bluetooth device \"%1\"?\n\nThe pairing stays where it "
 	               "is: that is the adapter's own key store, and netcfgd does not "
 	               "own it.")
 	        .arg(before.id);

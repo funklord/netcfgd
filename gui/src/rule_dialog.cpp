@@ -326,8 +326,7 @@ void ncfg_rule_dialog::submit()
 		note->setText(error);
 		return;
 	}
-	summary = QStringLiteral("wrote rule-%1: netcfgd re-read its configuration. Run apply "
-	              "to make the machine match it.")
+	summary = QStringLiteral("wrote rule-%1: netcfgd re-read its configuration. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	          .arg(name);
 	accept();
 }
@@ -335,7 +334,7 @@ void ncfg_rule_dialog::submit()
 void ncfg_rule_dialog::remove()
 {
 	const QString question =
-	    QStringLiteral("Delete the rule `%1`?\n\nThe routes it sends traffic to stay where "
+	    QStringLiteral("Delete the rule \"%1\"?\n\nThe routes it sends traffic to stay where "
 	               "they are; what goes is the rule that sent it there.")
 	        .arg(before.id);
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"), question,

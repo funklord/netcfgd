@@ -220,8 +220,7 @@ void ncfg_mesh_dialog::submit()
 		note->setText(error);
 		return;
 	}
-	summary = QStringLiteral("wrote mesh-%1: netcfgd re-read its configuration. Run apply to "
-	              "make the machine match it.")
+	summary = QStringLiteral("wrote mesh-%1: netcfgd re-read its configuration. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	              .arg(mesh.id);
 	accept();
 }
@@ -229,7 +228,7 @@ void ncfg_mesh_dialog::submit()
 void ncfg_mesh_dialog::remove()
 {
 	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"),
-	    QStringLiteral("Delete the mesh `%1`?\n\nThis node leaves it on the next apply; the "
+	    QStringLiteral("Delete the mesh \"%1\"?\n\nThis node leaves it on the next apply; the "
 	                   "others keep meshing with each other.")
 	        .arg(before.id),
 	    QMessageBox::Cancel | QMessageBox::Yes, this);
