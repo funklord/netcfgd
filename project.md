@@ -12826,7 +12826,8 @@ neither supplicant nor access point. Now `ncfg_apply_as` takes a mode.
   cannot run is skipped too**: an action is skipped when it has dependants and every one of
   them is either not ready or itself skipped this way. That is what keeps 10.783's supplicant
   up -- the stop exists for hostapd's start, and doing it alone is the outage. An action
-  nothing depends on is never skipped this way; it was planned for its own sake.
+  nothing depends on is never skipped this way; it was planned for its own sake. The skip
+  is said on the log at `warning`, beside the unready action's own `error`.
 
 **Who gets which.** An apply somebody asked for -- `ncfg apply`, the GUI's apply, the CLI
 in-process -- is atomic, because the person is there to read why it did not start. The

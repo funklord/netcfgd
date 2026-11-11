@@ -592,6 +592,12 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 				/* Not marked blocked: each dependant is unready or skipped by
 				 * this same test, and the unready one should be reported for
 				 * what it lacks rather than as waiting on this. */
+				if (narrates) {
+					ncfg_log_aboutf("apply", record.interface, NCFG_LOG_WARNING,
+					    "%s is not done: everything that waits on it cannot run, and "
+					    "doing it alone would take something down for nothing",
+					    record.op);
+				}
 				ncfg_journal_push(journal, &record);
 				continue;
 			}

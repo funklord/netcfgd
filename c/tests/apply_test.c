@@ -1010,6 +1010,38 @@ static int ready_unless_1401(void *state, const ncfg_op_t *op, char *err, size_t
 	return 1;
 }
 
+static void apply_room_maker_narrated(void)
+{
+	ncfg_plan_t    *plan = chained_plan();
+	recorder_t      recorder;
+	ncfg_executor_t executor;
+	ncfg_journal_t  journal;
+	char            err[NCFG_ERROR_MAX];
+
+	memset(&executor, 0, sizeof(executor));
+	recorder_init(&recorder, &executor);
+	executor.ready = ready_unless_1401;
+	(void)ncfg_apply_as(plan, &executor, NCFG_APPLY_BEST_EFFORT, 1, &journal, err,
+	    sizeof(err));
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+static void the_skip_that_makes_no_room_is_on_the_log(void)
+{
+	char            said[4096];
+	ncfg_severity_t was = ncfg_log_accepted();
+
+	/* And the skip is said, at `warning`: a daemon pass that leaves a
+	 * supplicant alone for an access point with no passphrase is something
+	 * an operator reading the log needs to find. */
+	ncfg_log_accept(NCFG_LOG_WARNING);
+	check(said_while(apply_room_maker_narrated, said, sizeof(said)) &&
+	    strstr(said, "is not done: everything that waits on it cannot run") != NULL,
+	    "a best-effort skip of what makes room for the unready is on the log");
+	ncfg_log_accept(was);
+}
+
 static void a_best_effort_plan_does_not_make_room_for_what_cannot_come(void)
 {
 	ncfg_plan_t    *plan = chained_plan();
@@ -3209,6 +3241,7 @@ int main(void)
 	an_atomic_plan_with_a_prerequisite_missing_does_not_start();
 	a_best_effort_plan_skips_what_waits_and_runs_the_rest();
 	a_best_effort_plan_does_not_make_room_for_what_cannot_come();
+	the_skip_that_makes_no_room_is_on_the_log();
 	a_required_failure_still_stops_the_plan();
 	which_ops_may_be_left_unmet();
 	the_inverses_run_newest_first();
