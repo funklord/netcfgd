@@ -748,7 +748,12 @@ static void taking_a_radio_on_is_refused_rather_than_half_done(void)
 
 	/* The kernel has to call it a radio, or the refusal is about the name
 	 * rather than about the apply -- which would leave this check passing
-	 * against an answer that says nothing about the seam. */
+	 * against an answer that says nothing about the seam.
+	 *
+	 * **Whatever is there is freed first**: since a write re-observes before
+	 * it answers (dadbdae5) the test before this one leaves an observation
+	 * here, and assigning over it leaked one -- `make c-san` caught it. */
+	ncfg_observed_free(state.observed);
 	state.observed = ncfg_observed_read(machine, strlen(machine), err, sizeof(err));
 	if (!state.observed) {
 		detail("the radio fixture did not read", err);
