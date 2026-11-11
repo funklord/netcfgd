@@ -12735,7 +12735,8 @@ or concludes the save did not take. They now say netcfgd puts it in effect itsel
 `Apply...` shows anything it holds back -- an interface set to `report`, an action not
 reconciled in isolation, a daemon holding with `--no-apply-on-start` -- which is where those
 cases are explained. The DNS tab's "`ncfg apply` is what does it", inside a window with an
-Apply button, points at the button.
+Apply button, points at the button, and so do its warning and the Bluetooth tab's note, which
+named `ncfg plan` for what `Apply...` shows before anything is sent.
 
 ## 10.805 A VPN's password and a WireGuard key are typed in the device dialog
 

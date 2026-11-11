@@ -77,7 +77,7 @@ ncfg_dns_view::ncfg_dns_view(ncfg_connection *connection, QWidget *parent)
 	auto *warning = new QLabel(
 	    QStringLiteral("Setting a mode other than `none` makes netcfgd the owner of "
 	           "/etc/resolv.conf. Whatever writes it now will stop being "
-	           "authoritative. `ncfg plan` shows what would change before it does."),
+	           "authoritative. Apply... shows what would change before it does."),
 	    this);
 	warning->setWordWrap(true);
 	layout->addWidget(warning);

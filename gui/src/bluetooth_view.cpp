@@ -109,6 +109,6 @@ void ncfg_bluetooth_view::refresh()
 	table->set_note(QStringLiteral(
 	    "`autoconnect` is whether netcfgd would connect this device without being asked. "
 	    "This build acts on none of it: the block is kept so a configuration written now "
-	    "still means this when the backends arrive, and `ncfg plan` says so per device."));
+	    "still means this when the backends arrive, and Apply... says so per device."));
 	emit reported(ncfg_counted(cells_by_row.size(), "device", "devices"));
 }
