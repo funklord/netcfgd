@@ -5541,17 +5541,18 @@ the sentence that disposes of an alternative in half a line.
      to **181** after it. netcfgd tries five times and then stops and says so. What
      it deliberately does *not* stop is a daemon that comes up and dies later —
      each of those is a real event and restarting is the right answer.
-   - **Suspend and resume have never been designed for or run.** Closing the lid
-     is the most-exercised path a laptop has and the only item here that arrived
-     by *asking what was missing* rather than by a defect: nothing in the tree
-     mentions suspend or hibernate at all, the only `resume` in it is a partial
-     plan being re-run, there is no test, and no record says it was considered
-     and dismissed. **Absence of a finding here is absence of looking, not
-     evidence of working.** One resume has been watched since, on the holder's
-     laptop (10.338), and a hull vm cannot suspend its devices to measure more
-     (10.773). **The rig that measures all four questions below is written and
-     passes as a check of itself (10.790); it waits on hull's suspend, which the
-     holder has said is coming. Its first run already found one fault (10.791).**
+   - **Suspend and resume: measured on a real S3 since 2026-11-11 (10.809).**
+     Closing the lid is the most-exercised path a laptop has and the only item
+     here that arrived by *asking what was missing* rather than by a defect.
+     `make hull-suspend`, on hull's `(sleep true)`, now answers all four
+     questions below on a 150-second suspend to RAM: the station rejoins as fast
+     as a plain supplicant does, the lease that ran out asleep is renewed, the
+     rfkill watcher still hears, and the confirm window pauses (10.665). Its
+     rig check found one fault first (10.791). **What is still unmeasured**:
+     s2idle, which hull does not wake yet; hibernation, which hull can do and the
+     rig does not ask; a real radio rather than mac80211_hwsim, whose access
+     point stops beaconing across a resume (10.809); and the one resume watched
+     on the holder's laptop (10.338) stays the only one on hardware.
 
      Much of what it needs exists by construction, which is why this is a
      verification item rather than a feature. A resume brings the link down and
@@ -5574,7 +5575,7 @@ the sentence that disposes of an alternative in half a line.
      supplicant is still associated and, if not, how long netcfgd takes to notice;
      whether the rfkill watcher's blocking read survives the suspend or returns an
      error nothing handles; and what the confirm window does across the lid.
-     `tests/live/` cannot suspend a machine, so the first three want a real laptop.
+     `tests/live/` cannot suspend a machine; `make hull-suspend` does (10.809).
 
      ~~The fourth was a unit test on a clock somebody moves~~ — **done**, and it
      needed a seam before it needed a test. `expired` and `remaining` read
@@ -12687,6 +12688,69 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.809 The lid, measured: the window pauses, the station rejoins, the lease renews
+
+**hull answered 10.773** (its note 20261111T0501Z, recorded here and deleted): since hull
+f741a47 a machine with `(sleep true)` and `(projection block)` -- a block root, block volumes
+only -- does the guest's own suspend: S3 woken by the guest's RTC alarm or `hull wake ID`,
+S4 to a swap disk hull gives it, CLOCK_BOOTTIME ahead of CLOCK_MONOTONIC by the time asleep.
+Its three causes for 10.773's guest never returning were virtio-fs refusing to suspend,
+virtio-9p resuming with a dead root, and a vsock reset that the agent took for its host gone.
+s2idle is not woken yet; `mem` is, and the hwsim guest's `mem_sleep` is `deep`.
+
+**The rig moved to images.** `make hull-suspend` builds, without root, `repo.img` (the two
+binaries, `suspend.sh`, the dhcpcd hook and the payload, by `mkfs.ext4 -d`), the host
+kernel's modules once per release, and a fresh `verdict.img` the guest writes and the host
+reads back with `debugfs`. Two things are worked around rather than fixed here. hull at
+fede285 roots a stored image on qemu as composefs whatever the machine says, and then refuses
+composefs under a block projection, so `(sleep true)` cannot take a stored image at all;
+signalled to hull (its inbox 20261111T1210Z), and until it is answered the Makefile names the
+image's checkout in hull's store as a `dir:` source in a generated `run.conf`. And the hull
+binary netcfgd's `HULL` names was built on 2026-11-05, before the sleep work; the runs below
+used hull's pushed fede285 built from `git archive` in a scratch directory, with a private
+`XDG_RUNTIME_DIR` so that build's core ran them, `make hull-suspend HULL=...`.
+
+**What a real 150-second S3 found**, the station joined to an access point on
+`mac80211_hwsim`, leased by dnsmasq for two minutes, a 120-second confirm window open:
+
+- **The confirm window paused** (10.665): the change still stood on waking and could be
+  confirmed. The first run said otherwise, and it was the test's fault: it asked after
+  waiting up to six minutes for the station and the lease, all awake, by which time a
+  120-second window has rightly closed. The window is asked first now.
+- **The rfkill watcher held**: a block after the resume was heard, and the radio came up
+  again when the switch did.
+- **The station did not come back at first, and it was not netcfgd.** It sat in `SCANNING`
+  with an empty scan while the access point's side said `COMPLETED`, so the lease was not
+  renewed either. **The control** -- `make hull-suspend SUSPEND_CONTROL=1`, the same radios
+  and sleep with a plain `wpa_supplicant` as the station and no netcfgd -- failed the same
+  way, and its diagnostics showed why: the access point's radio had sent two frames since the
+  wake. mac80211_hwsim stops an access point's beacons across a resume. A laptop's access
+  point is another machine that never slept; here it shares the kernel, so `suspend.sh` now
+  restarts it on waking, as its power-on would, before asking the station anything. With
+  that the control's station was back in 13 seconds.
+- **Then, under netcfgd, every check passed**: associated again 13 seconds after the wake,
+  the same as the plain supplicant; the lease that ran out asleep renewed (dnsmasq's expiry
+  granted after the wake); the window still standing and confirmable; rfkill heard. So the
+  register's four questions are answered for a station on a radio that survives a resume,
+  and netcfgd adds no delay to the supplicant's own recovery.
+- **No verdict file** in the first runs: the log stopped after the summary, the test's cleanup
+  stuck in the kernel -- `ip netns delete` or `modprobe -r` on a radio the resume left odd,
+  which even `timeout` cannot end, a process in D state ignoring the signal. They run in the
+  background unwaited now, the machine being discarded anyway, and the payload runs the test
+  under a timeout so a verdict is written whatever happens.
+
+**The window's check was vacuous until a sabotage said so.** With the window made to ignore
+the sleep (`deadline_of` returning the bare deadline), the run passed: the check was asked
+within a second of the wake, before the daemon's next pass -- five seconds apart at most --
+had looked at the window at all. It waits ten seconds now, two passes; the same sabotage then
+fails both window checks and the log says `reverting ... (the window closed unconfirmed)`.
+
+**What it does not say.** One radio driver, simulated, and one sleep length; S3 only, s2idle
+not being woken by hull yet; a station whose link netcfgd found down after the wake and put
+up (`link.up ... was false`), which a real driver may or may not do. And the run takes about
+twenty-five minutes, most of it hull building the block root, so it stays out of `make hull`
+as 10.790 had it.
 
 ## 10.808 The hooks tab can start a hook
 

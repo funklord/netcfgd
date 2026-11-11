@@ -2747,22 +2747,61 @@ hull-suspend:
 	@$(call hull_says,netcfgd/hwsim)
 	@$(call hull_image,hwsim)
 	@$(MAKE) --no-print-directory -C c netcfgd ncfg
-	@rm -f tests/hull/suspend/verdict/suspend tests/hull/suspend/verdict/log \
-		tests/hull/suspend/verdict/pm_test
-	@mkdir -p tests/hull/suspend/verdict
-	@# A pm_test level makes it a rig check rather than a lid: the kernel goes
-	@# that far and comes straight back, which this hull can already do.
-	@if [ -n "$(SUSPEND_TEST)" ]; then echo "$(SUSPEND_TEST)" > tests/hull/suspend/verdict/pm_test; fi
-	@timeout -k 30 900 $(HULL) run -f tests/hull/suspend/hull.conf || true
-	@if [ ! -f tests/hull/suspend/verdict/suspend ]; then \
+	@# Block images, not shared directories: a guest that suspends cannot keep
+	@# a 9p or virtiofs share across it, and hull's (sleep true) refuses one
+	@# (10.809). Built without root: mkfs.ext4 -d fills an image from a
+	@# directory, and debugfs reads one back -- both in /sbin, which a user's
+	@# PATH may not hold. Every file is named, and each is
+	@# removed by name before it is written again.
+	@set -e; PATH=$$PATH:/usr/sbin:/sbin; dir=tests/hull/suspend/build; stage=$$dir/stage; \
+	mkdir -p $$stage/c $$stage/tests/live $$stage/packaging/hooks; \
+	rm -f $$stage/c/netcfgd $$stage/c/ncfg $$stage/tests/live/suspend.sh \
+		$$stage/packaging/hooks/dhcpcd-hook $$stage/payload.sh $$stage/pm_test $$stage/control \
+		$$dir/repo.img $$dir/verdict.img $$dir/log $$dir/suspend; \
+	cp c/netcfgd $$stage/c/netcfgd; ln -s netcfgd $$stage/c/ncfg; \
+	cp tests/live/suspend.sh $$stage/tests/live/suspend.sh; \
+	cp packaging/hooks/dhcpcd-hook $$stage/packaging/hooks/dhcpcd-hook; \
+	cp tests/hull/suspend/payload.sh $$stage/payload.sh; \
+	if [ -n "$(SUSPEND_TEST)" ]; then echo "$(SUSPEND_TEST)" > $$stage/pm_test; fi; \
+	if [ -n "$(SUSPEND_CONTROL)" ]; then echo 1 > $$stage/control; fi; \
+	mkfs.ext4 -q -d $$stage -L repo $$dir/repo.img 64M; \
+	mkfs.ext4 -q -L verdict $$dir/verdict.img 32M; \
+	release=$$(uname -r); \
+	if [ "$$(cat $$dir/modules.release 2>/dev/null)" != "$$release" ]; then \
+		echo "suspend: imaging /lib/modules for $$release, once per kernel"; \
+		rm -f $$dir/modules.img $$dir/modules.release; \
+		mkfs.ext4 -q -d /lib/modules -L modules $$dir/modules.img 512M; \
+		echo "$$release" > $$dir/modules.release; \
+	fi
+	@# **The root as the image's checkout, not the image** (10.809): hull at
+	@# fede285 roots a stored image on qemu as composefs whatever the machine
+	@# says, and its engine then refuses composefs under (projection block),
+	@# which (sleep true) needs. Signalled to hull; until it is answered the
+	@# run names the checkout hull keeps of the image, as a dir: source, in a
+	@# copy of the machine file beside it.
+	@set -e; digest=$$($(HULL) images 2>/dev/null | awk '$$1 == "netcfgd/hwsim" { print $$2 }'); \
+	checkout=$${XDG_DATA_HOME:-$$HOME/.local/share}/hull/store/checkouts/$$(printf '%s' "$$digest" | tr ':' '/'); \
+	if [ -z "$$digest" ] || [ ! -d "$$checkout" ]; then \
+		echo "suspend: netcfgd/hwsim has no checkout in hull's store ($$checkout)"; exit 1; \
+	fi; \
+	sed "s|(source \"netcfgd/hwsim\")|(source \"dir:$$checkout\")|" tests/hull/suspend/hull.conf \
+		> tests/hull/suspend/run.conf; \
+	grep -q "dir:$$checkout" tests/hull/suspend/run.conf
+	@# 1800, not 900: building a block root from the checkout is most of the
+	@# first 900, and the first run that slept ran out of it after the test
+	@# had finished, before its verdict was written (10.809).
+	@timeout -k 30 1800 $(HULL) run -f tests/hull/suspend/run.conf || true
+	@PATH=$$PATH:/usr/sbin:/sbin; dir=tests/hull/suspend/build; \
+	debugfs -R 'cat /log' $$dir/verdict.img > $$dir/log 2>/dev/null || true; \
+	debugfs -R 'cat /suspend' $$dir/verdict.img > $$dir/suspend 2>/dev/null || true; \
+	if ! grep -q '^VERDICT' $$dir/suspend; then \
 		echo "suspend: no verdict -- the guest never came back from its sleep, or never ran"; \
-		if [ -f tests/hull/suspend/verdict/log ]; then \
-			sed 's/^/suspend: /' tests/hull/suspend/verdict/log | tail -15; \
-		fi; \
+		sed 's/^/suspend: /' $$dir/log | tail -15; \
 		exit 1; \
 	fi; \
-	sed 's/^/suspend: /' tests/hull/suspend/verdict/suspend; \
-	grep -q '^VERDICT ok' tests/hull/suspend/verdict/suspend
+	sed 's/^/suspend: /' $$dir/log; \
+	sed 's/^/suspend: /' $$dir/suspend; \
+	grep -q '^VERDICT ok' $$dir/suspend
 
 # OpenWrt's own big-endian MIPS kernel and rootfs in qemu-system-mips, in 128 MB,
 # netcfgd built with OpenWrt's toolchain: what `hull-openwrt` runs, on the kind of

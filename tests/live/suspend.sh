@@ -12,10 +12,8 @@
 #
 # WHERE IT RUNS
 #   Only in a machine of its own that can suspend and be woken: `make
-#   hull-suspend`, which needs a hull whose vm guest wakes on its RTC alarm and
-#   whose devices survive the cycle. Asked of hull in its inbox,
-#   20261110T1922Z and
-#   20261110T2300Z. As root, with mac80211_hwsim, dnsmasq,
+#   hull-suspend`, on hull's (sleep true), which hull built at netcfgd's asking
+#   (f741a47; project.md 10.809). As root, with mac80211_hwsim, dnsmasq,
 #   wpa_supplicant and dhcpcd -- the hwsim image has all four.
 #
 # HOW IT IS WOKEN
@@ -80,12 +78,19 @@ work=$(mktemp -d /tmp/ncfg-suspend.XXXXXX)
 cleanup() {
 	status=$?
 	[ -n "${daemon_job:-}" ] && kill "$daemon_job" 2>/dev/null
+	[ -n "${control_job:-}" ] && kill "$control_job" 2>/dev/null
 	ip netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null
 	sleep 0.5
-	ip netns delete "$ns" 2>/dev/null
+	# **Every step bounded** (10.809): the first runs that slept ended here
+	# with no verdict, the log stopping after the summary -- a step that
+	# waits on a radio the resume left odd is a step that never returns.
 	[ -n "${daemon_job:-}" ] && { kill -9 "$daemon_job" 2>/dev/null; wait "$daemon_job" 2>/dev/null; }
-	ip link del sus0 2>/dev/null
-	modprobe -r mac80211_hwsim 2>/dev/null
+	timeout 10 ip link del sus0 2>/dev/null
+	# **Not waited for.** After a resume the namespace's delete and the
+	# module's removal have each sat in the kernel past any timeout -- a
+	# process in D state ignores the signal -- and the machine is discarded
+	# after this anyway. Started and left, so the test can end.
+	( ip netns delete "$ns"; modprobe -r mac80211_hwsim ) > /dev/null 2>&1 &
 	case "$work" in /tmp/ncfg-suspend.*) rm -rf "$work" ;; esac
 	exit "$status"
 }
@@ -156,8 +161,27 @@ network "$ssid" {
 CONF
 export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" NCFG_WPA_CTRL_DIR="$work/ctrl"
 export NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"
-"$build/netcfgd" > "$work/daemon.log" 2>&1 &
-daemon_job=$!
+# **The control** (10.809), `NCFG_SUSPEND_CONTROL=1`: the same radios and the
+# same sleep with a plain wpa_supplicant as the station and no netcfgd, asking
+# only whether it is associated again. It decides whose a station that does
+# not come back is: netcfgd's, or the simulated radio's across a resume.
+control="${NCFG_SUSPEND_CONTROL:-}"
+if [ -n "$control" ]; then
+	cat > "$work/sta.conf" <<CONF
+ctrl_interface=$work/ctrl
+network={
+	ssid="$ssid"
+	key_mgmt=WPA-PSK
+	psk="$passphrase"
+}
+CONF
+	ip link set "$sta_dev" up
+	wpa_supplicant -Dnl80211 -i "$sta_dev" -c "$work/sta.conf" > "$work/daemon.log" 2>&1 &
+	control_job=$!
+else
+	"$build/netcfgd" > "$work/daemon.log" 2>&1 &
+	daemon_job=$!
+fi
 
 station_address() {
 	ip -4 -o addr show dev "$sta_dev" 2>/dev/null | awk '/10\.77\.0\./ {print $4; exit}'
@@ -183,11 +207,16 @@ is_associated() { [ "$(associated)" = COMPLETED ]; }
 
 took=$(seconds_until 60 is_associated)
 [ "$took" -le 60 ] || { tail -20 "$work/daemon.log"; die "the station never associated"; }
-took=$(seconds_until 60 has_address)
-[ "$took" -le 60 ] || { tail -20 "$work/daemon.log"; die "the station never got a lease"; }
-echo "ok   the station is associated and leased: $(station_address)"
+if [ -z "$control" ]; then
+	took=$(seconds_until 60 has_address)
+	[ "$took" -le 60 ] || { tail -20 "$work/daemon.log"; die "the station never got a lease"; }
+	echo "ok   the station is associated and leased: $(station_address)"
+else
+	echo "ok   CONTROL: a plain wpa_supplicant is associated, with no netcfgd"
+fi
 
 # ------------------------------------------------- a confirm window, armed
+if [ -z "$control" ]; then
 ip link add sus0 type dummy
 cat > "$work/etc/conf.d/lid.conf" <<CONF
 interface sus0 {
@@ -199,6 +228,7 @@ CONF
 sleep 2
 check "a confirm window is armed over a change" \
 	"$(ip -4 -o addr show dev sus0 | grep -c 192.0.2.77)" 1
+fi
 
 # ------------------------------------------------------------- the lid
 before_asleep=$(asleep)
@@ -221,16 +251,59 @@ rc=$?
 [ -n "${NCFG_SUSPEND_TEST:-}" ] && echo none > /sys/power/pm_test
 woke=$(date +%s)
 slept=$(( $(asleep) - before_asleep ))
+# **The access point did not sleep; this one did** (10.809). A laptop's access
+# point is another machine, beaconing all the while. Here it shares the kernel
+# and mac80211_hwsim stops its beacons across the resume -- the control,
+# NCFG_SUSPEND_CONTROL=1, found a plain wpa_supplicant scanning an empty air
+# exactly as netcfgd's did, the access point's radio sending 2 frames after the
+# wake. So it is started again, as a power-on would, before the station is
+# asked anything: what is measured is the station's recovery.
+inns wpa_cli -p "$work/ap/ctrl" -i "$ap_dev" disable_network 0 > /dev/null 2>&1
+inns wpa_cli -p "$work/ap/ctrl" -i "$ap_dev" enable_network 0 > /dev/null 2>&1
 check "the machine came back from $state" "$rc" 0
 note "wall clock moved $((woke - started))s; asleep by the clocks ${slept}s"
 [ "$slept" -ge $((sleep_for - 10)) ] ||
 	note "the kernel counted less sleep than asked for -- a test level, or a wake before the alarm"
 
 # --------------------------------------------------------- what came back
+# **The window first, at once** (10.809). It has its 120 s less the two spent
+# before the sleep, so asked after the waits below -- up to six minutes awake
+# -- it has rightly closed, and the first run here read that as a window that
+# did not pause. Asked now, a window that did not pause has already reverted,
+# its deadline having passed while asleep; one that paused still stands.
+#
+# **After ten seconds, not at once.** The daemon looks at the window on its
+# next pass, five seconds apart at most, and asked within a second of the wake
+# a window that did not pause had not been looked at yet: a netcfgd whose
+# window ignored the sleep passed this check (10.809's sabotage). Ten seconds
+# is two passes, and leaves the paused window over a hundred.
+if [ -z "$control" ]; then
+sleep 10
+check "the confirm window paused while asleep: the change still stands" \
+	"$(ip -4 -o addr show dev sus0 | grep -c 192.0.2.77)" 1
+"$build/ncfg" confirm > "$work/confirm.log" 2>&1
+check "and it can still be confirmed" "$?" 0
+fi
+
 took=$(seconds_until 120 is_associated)
 note "associated again ${took}s after resume"
 check "the supplicant is associated again within two minutes" \
 	"$([ "$took" -le 120 ] && echo yes || echo no)" yes
+if [ "$took" -gt 120 ]; then
+	# Both ends, since either can be what did not come back.
+	note "station: $(wpa_cli -p "$work/ctrl" -i "$sta_dev" status 2>&1 | tr '\n' ' ')"
+	note "station link: $(iw dev "$sta_dev" link 2>&1 | tr '\n' ' ')"
+	note "access point: $(inns wpa_cli -p "$work/ap/ctrl" -i "$ap_dev" status 2>&1 | tr '\n' ' ')"
+	note "access point radio: $(inns iw dev "$ap_dev" info 2>&1 | tr '\n' ' ')"
+	note "scan: $(wpa_cli -p "$work/ctrl" -i "$sta_dev" scan_results 2>&1 | tr '\n' ' ')"
+	note "kernel: $(dmesg 2>/dev/null | tail -12 | tr '\n' '|')"
+fi
+if [ -n "$control" ]; then
+	echo
+	echo "suspend.sh: CONTROL ended, $failures failed: association only, no netcfgd"
+	[ "$failures" -eq 0 ] || exit 1
+	exit 0
+fi
 
 took=$(seconds_until 120 has_address)
 note "addressed ${took}s after resume: $(station_address)"
@@ -250,11 +323,6 @@ while [ "$waited" -le 120 ]; do
 	waited=$((waited + 1))
 done
 check "the lease that ran out while asleep is renewed, not held stale" "$renewed" yes
-
-check "the confirm window paused while asleep: the change still stands" \
-	"$(ip -4 -o addr show dev sus0 | grep -c 192.0.2.77)" 1
-"$build/ncfg" confirm > "$work/confirm.log" 2>&1
-check "and it can still be confirmed" "$?" 0
 
 # The rfkill watcher: does it still hear a block after the resume? Through
 # the kernel's own switch in sysfs, which needs no tool -- the hwsim image has
