@@ -2756,7 +2756,7 @@ hull-suspend:
 	@set -e; PATH=$$PATH:/usr/sbin:/sbin; dir=tests/hull/suspend/build; stage=$$dir/stage; \
 	mkdir -p $$stage/c $$stage/tests/live $$stage/packaging/hooks; \
 	rm -f $$stage/c/netcfgd $$stage/c/ncfg $$stage/tests/live/suspend.sh \
-		$$stage/packaging/hooks/dhcpcd-hook $$stage/payload.sh $$stage/pm_test $$stage/control \
+		$$stage/packaging/hooks/dhcpcd-hook $$stage/payload.sh $$stage/pm_test $$stage/control $$stage/state \
 		$$dir/repo.img $$dir/verdict.img $$dir/log $$dir/suspend; \
 	cp c/netcfgd $$stage/c/netcfgd; ln -s netcfgd $$stage/c/ncfg; \
 	cp tests/live/suspend.sh $$stage/tests/live/suspend.sh; \
@@ -2764,6 +2764,7 @@ hull-suspend:
 	cp tests/hull/suspend/payload.sh $$stage/payload.sh; \
 	if [ -n "$(SUSPEND_TEST)" ]; then echo "$(SUSPEND_TEST)" > $$stage/pm_test; fi; \
 	if [ -n "$(SUSPEND_CONTROL)" ]; then echo 1 > $$stage/control; fi; \
+	if [ -n "$(SUSPEND_STATE)" ]; then echo "$(SUSPEND_STATE)" > $$stage/state; fi; \
 	mkfs.ext4 -q -d $$stage -L repo $$dir/repo.img 64M; \
 	mkfs.ext4 -q -L verdict $$dir/verdict.img 32M; \
 	release=$$(uname -r); \

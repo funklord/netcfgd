@@ -15,8 +15,12 @@ level=
 [ -s /repo/pm_test ] && level=$(cat /repo/pm_test)
 control=
 [ -s /repo/control ] && control=1
+# `make hull-suspend SUSPEND_STATE=disk` for hibernation, which hull resumes
+# in a new qemu on the same disks; `mem` otherwise.
+state=mem
+[ -s /repo/state ] && state=$(cat /repo/state)
 # Bounded, so a verdict is written whatever the test does (10.809).
-NCFG_SUSPEND_TEST=$level NCFG_SUSPEND_CONTROL=$control NCFG_LIVE=1 NCFG_LIVE_BUILD=/repo/c \
+NCFG_SUSPEND_TEST=$level NCFG_SUSPEND_CONTROL=$control NCFG_SUSPEND_STATE=$state NCFG_LIVE=1 NCFG_LIVE_BUILD=/repo/c \
 	timeout -k 10 1200 sh /repo/tests/live/suspend.sh > /verdict/log 2>&1
 rc=$?
 sync

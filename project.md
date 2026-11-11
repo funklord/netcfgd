@@ -12746,8 +12746,15 @@ within a second of the wake, before the daemon's next pass -- five seconds apart
 had looked at the window at all. It waits ten seconds now, two passes; the same sabotage then
 fails both window checks and the log says `reverting ... (the window closed unconfirmed)`.
 
-**What it does not say.** One radio driver, simulated, and one sleep length; S3 only, s2idle
-not being woken by hull yet; a station whose link netcfgd found down after the wake and put
+**Hibernation too**, `make hull-suspend SUSPEND_STATE=disk`: the guest writes its image to the
+swap hull gives it, hull starts a new qemu on the same disks (its core log says so), and
+every check passes -- the window, the station, the lease, rfkill. **But hull restores at
+once**, so the guest was asleep three seconds, not 150: this says netcfgd and the station
+come through a hibernate and restore, and asks nothing about what expires while asleep, which
+the S3 run does.
+
+**What it does not say.** One radio driver, simulated, and one sleep length; s2idle not
+being woken by hull yet; a hibernation that is held for a while; a station whose link netcfgd found down after the wake and put
 up (`link.up ... was false`), which a real driver may or may not do. And the run takes about
 twenty-five minutes, most of it hull building the block root, so it stays out of `make hull`
 as 10.790 had it.
