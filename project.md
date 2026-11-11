@@ -12688,6 +12688,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.797 `ncfg tui` has to run where Qt cannot be linked, so it stays Qt-free
+
+**qtty asked (its note 20261111T0141Z, recorded here and deleted) whether netcfgd needs its
+terminal UI anywhere Qt Widgets cannot be linked -- its OQ-4.** Yes. netcfgd's first targets
+are OpenWrt routers, and the people it serves include whoever edits the configuration over a
+serial console on a machine with no network (the brief's *Who this is for*). `ncfg tui` is a subcommand of `ncfg`,
+and `c/Makefile` builds every source under `c/src` into it, the TUI included -- so the MIPS
+build `make hull-mips` cross-compiles carries it, linking libc and nothing else (10.795's
+`tui.c` and `tui_term.c`). So the answer qtty records is: netcfgd uses qtty for the GUI's
+screens where it chooses to (10.795), and keeps `ncfg tui` on its own escape sequences for
+every machine, which is qtty's 13.2 case. Not a complaint about qtty; a router has no Qt.
+
 ## 10.795 Nothing on qtty's side stands between `ncfg tui` and the GUI's screens
 
 **qtty measured `ncfg tui` against its own goal (its note 20261111T0100Z, recorded here and
