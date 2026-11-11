@@ -13,7 +13,9 @@
 #include "ncfg_connection.h"
 #include "table_view.h"
 
+#include <QInputDialog>
 #include <QPushButton>
+#include <QTimer>
 #include <QVBoxLayout>
 
 ncfg_hooks_view::ncfg_hooks_view(ncfg_connection *connection, QWidget *parent)
@@ -30,11 +32,21 @@ ncfg_hooks_view::ncfg_hooks_view(ncfg_connection *connection, QWidget *parent)
 	edit_button->setEnabled(false);
 	table->add_control(edit_button);
 
+	/* **Starting one here** (10.808). The tab could only edit an interface
+	 * that already had a hook, and its note sent a person to the links tab,
+	 * `configure`, then hooks. This asks which interface, opens the same
+	 * editor, and presses its own `new hook...` -- the hook still lives in
+	 * the interface's block, so there is still one form and one save. */
+	add_button = new QPushButton(QStringLiteral("new hook..."), this);
+	add_button->setObjectName(QStringLiteral("add_hook"));
+	table->add_control(add_button);
+
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
 	layout->addWidget(table);
 
 	connect(edit_button, &QPushButton::clicked, this, &ncfg_hooks_view::edit_selected);
+	connect(add_button, &QPushButton::clicked, this, &ncfg_hooks_view::add_hook);
 	connect(table, &ncfg_table_view::activated, this, &ncfg_hooks_view::edit_selected);
 	connect(table, &ncfg_table_view::selection_changed, this,
 	    [this]() { edit_button->setEnabled(table->selected_row() >= 0); });
@@ -49,6 +61,58 @@ void ncfg_hooks_view::edit_selected()
 	ncfg_interface_dialog dialog(connection, rows.at(row).interface, this);
 	if (connection->written_by_hand(QStringLiteral("interface-%1").arg(rows.at(row).interface))) {
 		ncfg_show_read_only(&dialog, QStringLiteral("`interface %1`").arg(rows.at(row).interface));
+	}
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	refresh();
+	emit changed();
+}
+
+void ncfg_hooks_view::add_hook()
+{
+	/* The inventory rather than the links, as the links tab has it: it says
+	 * which interfaces already have a block, and only those can be written
+	 * by hand -- `written_by_hand` answers for a block that exists, and asked
+	 * of one that does not it says yes (the probe for this found that). */
+	QList<ncfg_inventory_row> known;
+	QString error;
+	if (!connection->inventory(&known, &error)) {
+		emit reported(error);
+		return;
+	}
+	QStringList names;
+	QStringList configured;
+	for (const ncfg_inventory_row &row : known) {
+		/* Interfaces only: a network row has its own hooks, in its own dialog. */
+		if (row.subject != QStringLiteral("interface") || row.name.isEmpty() ||
+		    row.name == QStringLiteral("lo") || names.contains(row.name)) {
+			continue;
+		}
+		names << row.name;
+		if (row.configured) {
+			configured << row.name;
+		}
+	}
+	if (names.isEmpty()) {
+		emit reported(QStringLiteral("this machine has no interface to run a hook on"));
+		return;
+	}
+	bool chosen = false;
+	const QString interface = QInputDialog::getItem(this, QStringLiteral("netcfgd"),
+	    QStringLiteral("Run a hook when this interface changes:"), names, 0, false, &chosen);
+	if (!chosen || interface.isEmpty()) {
+		return;
+	}
+	ncfg_interface_dialog dialog(connection, interface, this);
+	if (configured.contains(interface) &&
+	    connection->written_by_hand(QStringLiteral("interface-%1").arg(interface))) {
+		/* Not editable here (10.778), so there is no form to open: the
+		 * dialog says where it is written instead. */
+		ncfg_show_read_only(&dialog, QStringLiteral("`interface %1`").arg(interface));
+	} else if (auto *start = dialog.findChild<QPushButton *>(QStringLiteral("iface_hook_add"))) {
+		QTimer::singleShot(0, start, &QPushButton::click);
 	}
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
@@ -87,7 +151,7 @@ void ncfg_hooks_view::refresh()
 		table->set_note(QStringLiteral(
 		    "No interface declares a hook. A hook is a program netcfgd runs at a named "
 		    "moment -- pre_up, up, post_up, lease, carrier, drift and the rest. One is "
-		    "added to an interface: the links tab, configure, then hooks."));
+		    "belongs to an interface: new hook... asks which, and opens its editor."));
 		emit reported(QStringLiteral("no hooks configured"));
 		return;
 	}

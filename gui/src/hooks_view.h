@@ -46,6 +46,8 @@ public slots:
 private slots:
 	/* Open the interface editor on the selected hook's interface. */
 	void edit_selected();
+	/* Choose an interface and open its editor at a new hook (10.808). */
+	void add_hook();
 
 signals:
 	void reported(const QString &summary);
@@ -58,6 +60,7 @@ private:
 	 * own interface rather than on a re-read of the table's strings. */
 	QList<ncfg_hook_row> rows;
 	QPushButton *edit_button;
+	QPushButton *add_button;
 	/* The shared read-only table: columns, rows, and the sentence underneath
 	 * that says why an empty one is empty. What is this view's own is turning
 	 * a row into strings, which is below. */

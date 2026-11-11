@@ -12688,6 +12688,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.808 The hooks tab can start a hook
+
+**The last of 10.778's list.** The hooks tab could open the editor of an interface that
+already had a hook, and nothing else; with none, its note said a hook is added from the
+links tab, `configure`, then hooks -- three places for the one thing the tab is named after.
+`new hook...` asks which interface, from the machine's links, `lo` left out, opens that
+interface's editor and presses the editor's own `new hook...`, so the form a person meets is
+the one they would have reached by the long way. The hook still lives in the interface's
+block, so there is still one form and one save, which is why the tab has no hook form of its
+own. A hand-written interface opens read-only, as 10.778 has it -- asked only of an interface
+that has a block, from the inventory as the links tab asks it: `written_by_hand` answers for
+a block that exists and says yes of one that does not, so the first version opened every
+unconfigured link read-only. `live_hooks_tab` found that, following the chain -- the question,
+the editor, the form opened over it -- and closes each.
+
 ## 10.807 A missing credential can be stored from the credentials tab
 
 **The credentials tab names the fault 10.796 now stops an apply for, and could not mend it.**
@@ -13172,7 +13187,7 @@ the profile offered twice, UPnP's order, the access tab's banner, the events' ti
 hooks tab saying where a hook is added -- the links tab, configure, then hooks): a
 renamed DNS record's read-only name field looks editable and says nothing (~~fixed~~, 10.803); the selection
 moves to the next row after a delete (~~fixed~~, 10.802); ~~no profile can be deleted~~ (10.801); the hooks tab
-cannot itself start a hook; and backticks (~~around names~~, 10.804),
+cannot itself start a hook (~~fixed~~, 10.808); and backticks (~~around names~~, 10.804),
 `ncfg` commands and op names reach a person's eye in many help lines. Each is small, and
 each is what a laptop's owner meets.
 

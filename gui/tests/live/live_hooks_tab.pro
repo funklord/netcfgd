@@ -1,0 +1,32 @@
+# gui/tests/live/live_hooks_tab.pro -- the hooks tab starting a hook (10.808).
+#
+# In `gui/tests/live/` rather than beside the headless probes, for the reason
+# live_network_dialog.pro gives: `make -C gui test` globs `tests/*.pro` and
+# would run this with no daemon to talk to.
+
+TEMPLATE = app
+TARGET = live_hooks_tab
+QT += widgets
+CONFIG += c++17 console
+CONFIG -= app_bundle
+
+QMAKE_CXXFLAGS_RELEASE -= -O2
+QMAKE_CXXFLAGS_RELEASE += -Os
+
+CLIENT_DIR = $$PWD/../../../client
+INCLUDEPATH += $$CLIENT_DIR $$PWD/../../src
+LIBS += $$CLIENT_DIR/libncfg_client.a
+# Relink when the client changes, for the reason the network dialog's project
+# records: without it the probe runs against the old C client.
+PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
+
+SOURCES += live_hooks_tab.cpp ../../src/ncfg_connection.cpp ../../src/hook_dialog.cpp \
+	../../src/hooks_view.cpp ../../src/table_view.cpp \
+	../../src/interface_dialog.cpp ../../src/probe_dialog.cpp
+HEADERS += ../../src/ncfg_connection.h ../../src/hook_dialog.h \
+	../../src/hooks_view.h ../../src/table_view.h \
+	../../src/interface_dialog.h ../../src/probe_dialog.h
+
+# The addressing list and route table both dialogs share (10.615).
+SOURCES += ../../src/address_editors.cpp
+HEADERS += ../../src/address_editors.h
