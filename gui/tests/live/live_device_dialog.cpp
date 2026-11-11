@@ -29,8 +29,10 @@
 #include <QPushButton>
 #include <QGroupBox>
 #include <QLabel>
+#include <QMessageBox>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTimer>
 
 #include <cstdio>
 
@@ -576,7 +578,32 @@ int main(int argc, char **argv)
 		 * vlan first -- it names the bridge, and a configuration naming a
 		 * parent that is not there does not compile. */
 		connection.config_delete(QStringLiteral("device-gui-br0.42"), &removed);
-		connection.config_delete(QStringLiteral("device-gui-br0"), &removed);
+		/* 10.794: through the dialog's own Delete, which a device made in the
+		 * GUI did not have -- it could leave only through the files tab. */
+		{
+			ncfg_device_dialog dialog(&connection, QStringLiteral("gui-br0"));
+			auto *drop = dialog.findChild<QPushButton *>(QStringLiteral("device_remove"));
+			check("a device made here offers to delete it", drop != nullptr);
+			if (drop) {
+				QTimer::singleShot(0, []() {
+					if (auto *box = qobject_cast<QMessageBox *>(
+					        QApplication::activeModalWidget())) {
+						box->button(QMessageBox::Yes)->click();
+					}
+				});
+				drop->click();
+				check("  and deleting it says so",
+				    dialog.outcome().contains(QStringLiteral("removed device-gui-br0")),
+				    dialog.outcome());
+			} else {
+				connection.config_delete(QStringLiteral("device-gui-br0"), &removed);
+			}
+		}
+		{
+			ncfg_device_dialog dialog(&connection, QStringLiteral("gui-none0"));
+			check("a device with no block of its own offers nothing to delete",
+			    dialog.findChild<QPushButton *>(QStringLiteral("device_remove")) == nullptr);
+		}
 		ncfg_device_config gone;
 		check("and the bridge with it",
 		    connection.device_config(QStringLiteral("gui-br0"), &gone, &error)

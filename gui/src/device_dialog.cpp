@@ -17,6 +17,7 @@
 #include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QScrollArea>
@@ -1071,6 +1072,16 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
 	save_button = buttons->addButton(QStringLiteral("Save"), QDialogButtonBox::AcceptRole);
 	save_button->setObjectName(QStringLiteral("device_save"));
+	/* **A device made here can be taken away here** (10.794): it could only
+	 * be removed from the files tab, by a drop-in name a person was not shown
+	 * -- the walk's br0 had no other way out. The mesh dialog's shape. */
+	if (!name.isEmpty() &&
+	    !connection->written_by_hand(QStringLiteral("device-%1").arg(name))) {
+		QPushButton *drop = buttons->addButton(QStringLiteral("delete"),
+		    QDialogButtonBox::DestructiveRole);
+		drop->setObjectName(QStringLiteral("device_remove"));
+		connect(drop, &QPushButton::clicked, this, &ncfg_device_dialog::remove);
+	}
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_device_dialog::submit);
 	connect(kind, &QComboBox::currentIndexChanged, this, &ncfg_device_dialog::kind_changed);
@@ -1420,6 +1431,29 @@ QString ncfg_device_dialog::block_text() const
 	settings.sim = sim->text().trimmed();
 	settings.apn = apn->text().trimmed();
 	return ncfg_device_block(name->text().trimmed(), settings);
+}
+
+void ncfg_device_dialog::remove()
+{
+	const QString device = name->text().trimmed();
+	QMessageBox box(QMessageBox::Question, QStringLiteral("netcfgd"),
+	    QStringLiteral("Delete the device `%1`?\n\nIts configuration goes; what netcfgd "
+	                   "made for it, it takes away on the next apply.")
+	        .arg(device),
+	    QMessageBox::Cancel | QMessageBox::Yes, this);
+	box.setDefaultButton(QMessageBox::Cancel);
+	if (box.exec() != QMessageBox::Yes) {
+		return;
+	}
+	QString error;
+	if (!connection->config_delete(QStringLiteral("device-%1").arg(device), &error)) {
+		note->setText(error);
+		return;
+	}
+	summary = QStringLiteral("removed device-%1: netcfgd re-read its configuration. Run "
+	                         "apply to make the machine match it.")
+	              .arg(device);
+	accept();
 }
 
 void ncfg_device_dialog::submit()

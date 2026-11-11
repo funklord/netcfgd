@@ -59,6 +59,10 @@ public:
 
 private slots:
 	void submit();
+	/* Take the device's drop-in away (10.794). Offered only where one is
+	 * named for it: a hand-written block opens read-only, and a device the
+	 * machine has with no block has nothing to delete. */
+	void remove();
 	/* Show the fields the chosen kind needs and hide the rest. A bridge's
 	 * members and a VLAN's id are not alternatives an operator should have to
 	 * read past each other. */

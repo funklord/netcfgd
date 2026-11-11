@@ -12688,6 +12688,16 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.794 A device made in the window can be deleted from it
+
+From 10.778's list. The walk's bridge `br0`, made with the device dialog, could only be
+removed from the files tab, by a drop-in name a person was never shown. The device dialog now
+offers `delete` where the drop-in named for the device exists -- the mesh dialog's shape,
+asked first -- and not for a hand-written block, which opens read-only (10.778), or for a
+device the machine has with no block of its own. `live_device_dialog` deletes its bridge
+through the button now, where it called `config_delete` itself, and fails with the button
+taken out.
+
 ## 10.793 qtty fixed two of the TUI's three faults; the pin moves to take them
 
 The three faults 10.777's walk sent qtty (its inbox, 20261110T2049Z) came back answered in
@@ -12937,7 +12947,7 @@ the profile offered twice, UPnP's order, the access tab's banner, the events' ti
 hooks tab saying where a hook is added -- the links tab, configure, then hooks): a
 renamed DNS record's read-only name field looks editable and says nothing; the selection
 moves to the next row after a delete; no profile can be deleted; the hooks tab cannot itself
-start a hook; device dialogs have no delete; and backticks,
+start a hook; and backticks,
 `ncfg` commands and op names reach a person's eye in many help lines. Each is small, and
 each is what a laptop's owner meets.
 
