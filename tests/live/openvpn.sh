@@ -486,6 +486,24 @@ FAKE_OPENVPN_FAILS=1 "$ncfg" apply > "$work/refused.txt" 2>&1 || true
 check "and a daemon that will not start is quoted rather than counted" \
 	"$(grep -c 'Options error' "$work/refused.txt" || true)" "1"
 
+# A password nobody stored (10.798). The executor resolves it when it opens and
+# gives the tunnel no entry, so its start would refuse -- after whatever came
+# before it. An apply somebody asked for is atomic: it is asked before the
+# first action, the journal says "not started", and no openvpn runs.
+cat > "$work/etc/netcfgd.conf" <<CONF
+device vpn0 {
+	openvpn {
+		config   = "$work/etc/work.ovpn"
+		username = "nabbe"
+		password = "@secret:vpn-never-stored"
+	}
+}
+CONF
+"$ncfg" apply > "$work/nopass.txt" 2>&1 && nopass=0 || nopass=1
+check "a tunnel whose password is not stored is not applied" "$nopass" "1"
+check "  and the journal says it was not started, before anything ran" \
+	"$(grep -c 'not started:.*no credentials' "$work/run/plan.last.json" 2>/dev/null || true)" "1"
+
 # ------------------------------------------------------------- the compiler
 
 check "a relative path is refused where the line is, not later" \

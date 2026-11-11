@@ -326,6 +326,66 @@ static void record_peer(ncfg_buf_t *record, const unsigned char *public_key,
 	ncfg_buf_add_char(record, '\n');
 }
 
+int ncfg_kernel_wg_ready(const ncfg_op_t *op, const ncfg_document_t *document,
+    const ncfg_secret_resolver_t *resolver, char *err, size_t err_size)
+{
+	unsigned char scratch[NCFG_KEY_LEN];
+	char          about[NCFG_ERROR_MAX];
+	size_t        i;
+	int           ok = 1;
+
+	if (!op || !document) {
+		return 1;
+	}
+	/* A create carries its whole configuration (`finish_create`), so a new
+	 * tunnel's keys are asked through the two ops `configure_new` sends. */
+	if (op->kind == NCFG_OP_LINK_CREATE) {
+		const ncfg_interface_kind_t *kind = op->u.link_create.kind;
+		ncfg_op_t                    part;
+
+		if (!kind || kind->kind != (int)NCFG_KIND_WIREGUARD) {
+			return 1;
+		}
+		memset(&part, 0, sizeof(part));
+		part.kind = NCFG_OP_WG_SET_DEVICE;
+		part.u.wg_device.iface = op->u.link_create.name;
+		if (!ncfg_kernel_wg_ready(&part, document, resolver, err, err_size)) {
+			return 0;
+		}
+		memset(&part, 0, sizeof(part));
+		part.kind = NCFG_OP_WG_SET_PEERS;
+		part.u.wg_peers.iface = op->u.link_create.name;
+		part.u.wg_peers.peers = kind->wireguard.peers;
+		part.u.wg_peers.peer_count = kind->wireguard.peer_count;
+		return ncfg_kernel_wg_ready(&part, document, resolver, err, err_size);
+	}
+	if (op->kind == NCFG_OP_WG_SET_DEVICE) {
+		const ncfg_secret_ref_t *reference = private_key_ref(document, op->u.wg_device.iface,
+		    op->u.wg_device.private_key_ref, err, err_size);
+
+		if (!reference) {
+			return 0;
+		}
+		(void)snprintf(about, sizeof(about), "%s: private key",
+		    op->u.wg_device.iface ? op->u.wg_device.iface : "?");
+		ok = key_of(resolver, reference, about, scratch, err, err_size);
+	} else if (op->kind == NCFG_OP_WG_SET_PEERS && op->u.wg_peers.peers) {
+		for (i = 0; ok && i < op->u.wg_peers.peer_count; i++) {
+			const ncfg_wg_peer_t *peer = &op->u.wg_peers.peers[i];
+
+			if (!peer->preshared_key) {
+				continue;
+			}
+			(void)snprintf(about, sizeof(about), "%s: peer `%s`",
+			    op->u.wg_peers.iface ? op->u.wg_peers.iface : "?",
+			    peer->name ? peer->name : "?");
+			ok = key_of(resolver, peer->preshared_key, about, scratch, err, err_size);
+		}
+	}
+	memset(scratch, 0, sizeof(scratch));
+	return ok;
+}
+
 int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, ncfg_buf_t *record,
     const ncfg_genl_family_t *family, uint32_t seq, const ncfg_op_t *op,
     const ncfg_document_t *document, const ncfg_secret_resolver_t *resolver, char *err,

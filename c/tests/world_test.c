@@ -1119,6 +1119,71 @@ static void an_access_point_without_its_passphrase_is_not_ready(void)
 	ncfg_document_free(state.desired);
 }
 
+/* The WireGuard half of `ready` (10.796): a private key that is stored is
+ * ready, one that is not is not, and the sentence names the device. */
+static void a_wireguard_key_not_stored_is_not_ready(void)
+{
+	ncfg_main_world_t       world;
+	ncfg_main_world_where_t where;
+	ncfg_daemon_state_t     state;
+	ncfg_executor_t         executor;
+	ncfg_op_t               op;
+	char                    message[NCFG_ERROR_MAX];
+	char                    err[NCFG_ERROR_MAX];
+	char                    run[512];
+	char                    secrets[512];
+	char                    path[640];
+	int                     opened;
+	static const char       key[] = "QFX7C0kXSvBS8k5WJkS6Km/8PFRqxLS3fqCpJZxnq0Q=";
+
+	(void)snprintf(run, sizeof(run), "%s/wgready-run", base);
+	testdir_mkdirp(run);
+	(void)snprintf(secrets, sizeof(secrets), "%s/wgready-secrets", base);
+	testdir_mkdirp(secrets);
+	(void)snprintf(path, sizeof(path), "%s/wg-here", secrets);
+	(void)testdir_write(path, key, strlen(key));
+	(void)chmod(path, (mode_t)0600);
+	memset(&where, 0, sizeof(where));
+	where.run_dir = run;
+	where.secrets_dir = secrets;
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[{\"name\":\"wg-here\","
+	    "\"kind\":{\"kind\":\"wire_guard\","
+	    "\"private_key\":{\"provider\":\"file\",\"name\":\"wg-here\"},\"peers\":[]}},"
+	    "{\"name\":\"wg-gone\",\"kind\":{\"kind\":\"wire_guard\","
+	    "\"private_key\":{\"provider\":\"file\",\"name\":\"wg-gone\"},\"peers\":[]}}],"
+	    "\"interfaces\":[{\"name\":\"wg-here\"},{\"name\":\"wg-gone\"}]");
+	check(state.desired != NULL, "the two-device wireguard fixture reads");
+	if (!state.desired) {
+		return;
+	}
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, &where, &state, NULL, NULL, err, sizeof(err));
+	memset(&executor, 0, sizeof(executor));
+	opened = ncfg_main_world_executor_open(&world, &executor, err, sizeof(err));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_WG_SET_DEVICE;
+	op.u.wg_device.iface = "wg-here";
+	op.u.wg_device.private_key_ref = "wg-here";
+	message[0] = '\0';
+	check(opened && executor.ready &&
+	    executor.ready(executor.state, &op, message, sizeof(message)),
+	    "a wireguard device whose private key is stored is ready");
+	op.u.wg_device.iface = "wg-gone";
+	op.u.wg_device.private_key_ref = "wg-gone";
+	message[0] = '\0';
+	check(opened && executor.ready &&
+	    !executor.ready(executor.state, &op, message, sizeof(message)) &&
+	    strstr(message, "wg-gone") != NULL,
+	    "  one whose key is not stored is not, and says which device");
+	if (opened) {
+		ncfg_main_world_executor_close(&world, &executor);
+	}
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
 static void an_executor_now_carries_a_service_context(void)
 {
 	ncfg_main_world_t   world;
@@ -2126,6 +2191,7 @@ int main(void)
 	an_executor_is_given_the_document_those_six_ops_need();
 	an_executor_resolves_secrets_where_the_world_was_pointed();
 	an_access_point_without_its_passphrase_is_not_ready();
+	a_wireguard_key_not_stored_is_not_ready();
 	a_sysctl_is_written_where_the_world_was_pointed();
 	the_service_carries_every_scope_and_not_the_one_the_op_names();
 	the_route_metric_a_dhcp_client_is_started_with();

@@ -12688,6 +12688,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.798 A tunnel's credentials are asked before the first action too
+
+**10.796's shape, looked for again: a credential resolved only by the action that needs it.**
+The access point and the supplicant were not the only ones. A WireGuard private key is read
+when the tunnel is configured, and a plan that creates a tunnel has no `wg.set_device` -- the
+create carries the whole configuration (`finish_create`) -- so the key was found missing
+inside `link.create`, after the link existed. Measured in a namespace before the change: an
+apply naming a key nobody stored failed at `link.create`, and `wg1` was left behind with no
+key, its address skipped.
+
+The kernel executor's `ready` now asks the WireGuard arm, with the document and resolver that
+arm is given: the private key for `wg.set_device`, each preshared key for `wg.set_peers`, and
+both for a `link.create` of a tunnel. `c/tests/world_test.c` asks it about a stored key and a
+missing one; `tests/live/c_wireguard.sh` applies a tunnel whose key was never stored and finds
+no device and "not started" in the journal -- the check that failed before.
+
+**And OpenVPN's and PPPoE's passwords**, which are resolved differently: when the executor is
+opened (`daemon_service.c`), where one that cannot be read is logged by name and its tunnel or
+session gets no entry, so `backend.start` refused it -- when its turn came, after whatever went
+before. `ready` now asks for the entry. `tests/live/openvpn.sh` applies a tunnel whose
+password was never stored and finds "not started" in the journal, which it did not before.
+The PPPoE half has no live run here (no pppd installed) and rests on the same lookup.
+
 ## 10.797 `ncfg tui` has to run where Qt cannot be linked, so it stays Qt-free
 
 **qtty asked (its note 20261111T0141Z, recorded here and deleted) whether netcfgd needs its

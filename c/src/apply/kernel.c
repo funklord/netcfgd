@@ -924,6 +924,35 @@ static int ready(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	const ncfg_document_t *document = service ? service->document : NULL;
 	size_t                 at;
 
+	/* The WireGuard arm's own document and resolver, as `execute` hands them
+	 * to it -- not the service's, which a WireGuard op does not read. */
+	if (kernel && (op->kind == NCFG_OP_WG_SET_DEVICE || op->kind == NCFG_OP_WG_SET_PEERS ||
+	    op->kind == NCFG_OP_LINK_CREATE)) {
+		return ncfg_kernel_wg_ready(op, kernel->document, kernel->secrets, err, err_size);
+	}
+	/*
+	 * A tunnel's and a PPPoE session's credentials were resolved when this
+	 * executor was opened, and one that could not be has no entry
+	 * (`ncfg_service_session_t`); the start would refuse it by name when its
+	 * turn came, after whatever went before it. The same refusal, asked first.
+	 */
+	if (service && op->kind == NCFG_OP_BACKEND_START && op->u.backend.iface &&
+	    (op->u.backend.kind == NCFG_BACKEND_OPENVPN || op->u.backend.kind == NCFG_BACKEND_PPPOE)) {
+		int openvpn = op->u.backend.kind == NCFG_BACKEND_OPENVPN;
+		size_t count = openvpn ? service->tunnel_count : service->session_count;
+
+		for (at = 0; at < count; at++) {
+			const char *iface = openvpn ? service->tunnels[at].iface : service->sessions[at].iface;
+
+			if (iface && strcmp(iface, op->u.backend.iface) == 0) {
+				return 1;
+			}
+		}
+		ncfg_error_set(err, err_size, "the %s on %s has no credentials this executor could "
+		    "read; the log says which secret", openvpn ? "openvpn tunnel" : "pppoe session",
+		    op->u.backend.iface);
+		return 0;
+	}
 	if (!document || !service->secrets) {
 		return 1;
 	}

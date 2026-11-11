@@ -180,6 +180,29 @@ check "and its record goes with it" \
 check "  leaving nothing behind under the run directory" \
 	"$(ls "$work/run/wireguard" 2>/dev/null | wc -l)" "0"
 
+# ---------------------------------------- a key nobody stored (10.796)
+#
+# An apply somebody asked for is atomic, so a private key that is not in the
+# store is found before the first action: no `wg1` is created to sit there
+# with no key and an address, which is what the executor's stop at the first
+# failure used to leave.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+device wg1 {
+	wireguard {
+		private_key = "@secret:wg1-never-stored"
+	}
+}
+interface wg1 {
+	config = "10.0.1.5/32"
+}
+CONF
+"$c_ncfg" apply > "$work/nokey.txt" 2>&1 && nokey=0 || nokey=1
+check "an apply whose wireguard key is not stored fails" "$nokey" "1"
+check "  having created no device" \
+	"$(ip link show wg1 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "  and saying which key, before anything ran" \
+	"$(grep -c 'not started:.*wg1' "$work/run/plan.last.json" 2>/dev/null || true)" "1"
+
 if [ "$failures" -eq 0 ]; then
 	echo "c_wireguard.sh: all checks passed"
 else

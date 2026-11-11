@@ -362,6 +362,16 @@ void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kin
  */
 void ncfg_kernel_wg_forget_records(const char *run_dir, const char *iface);
 
+/*
+ * Whether a WireGuard op's keys are in the store, asked before a plan starts
+ * (10.796): the private key for `wg.set_device`, each preshared key for
+ * `wg.set_peers`, and both for a `link.create` of a tunnel, which configures
+ * it in the same action -- resolved and parsed the way the build below does
+ * it and wiped at once. Every other op, and no document, is ready.
+ */
+int ncfg_kernel_wg_ready(const ncfg_op_t *op, const ncfg_document_t *document,
+    const ncfg_secret_resolver_t *resolver, char *err, size_t err_size);
+
 int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, ncfg_buf_t *record,
     const ncfg_genl_family_t *family, uint32_t seq, const ncfg_op_t *op,
     const ncfg_document_t *document, const ncfg_secret_resolver_t *resolver, char *err,
