@@ -235,6 +235,7 @@ static int recorded_open(void *context, const char *config_dir, const char *run_
 	recorder.opened++;
 	out->state = NULL;
 	out->execute = recorded_execute;
+	out->ready = NULL;
 	return 1;
 }
 

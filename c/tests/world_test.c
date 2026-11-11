@@ -1044,6 +1044,81 @@ static int execute_through(ncfg_main_world_t *world, const ncfg_op_t *op, char *
 	return ran;
 }
 
+/*
+ * The kernel executor's `ready` (10.796): an access point whose passphrase is
+ * not stored is not ready, which is what lets an atomic apply start nothing
+ * and a best-effort one leave the supplicant running (10.783). Then the
+ * secret is written, and the same question is answered yes -- the positive
+ * half, without which a `ready` that always refused would pass the first.
+ */
+static void an_access_point_without_its_passphrase_is_not_ready(void)
+{
+	ncfg_main_world_t       world;
+	ncfg_main_world_where_t where;
+	ncfg_daemon_state_t     state;
+	ncfg_executor_t         executor;
+	ncfg_op_t               op;
+	char                    message[NCFG_ERROR_MAX];
+	char                    err[NCFG_ERROR_MAX];
+	char                    run[512];
+	char                    secrets[512];
+	char                    path[640];
+	int                     opened;
+
+	(void)snprintf(run, sizeof(run), "%s/ap-run", base);
+	testdir_mkdirp(run);
+	(void)snprintf(secrets, sizeof(secrets), "%s/ap-secrets", base);
+	testdir_mkdirp(secrets);
+	memset(&where, 0, sizeof(where));
+	where.run_dir = run;
+	where.secrets_dir = secrets;
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[{\"name\":\"wlan0\","
+	    "\"kind\":{\"kind\":\"physical\"}}],"
+	    "\"interfaces\":[{\"name\":\"wlan0\",\"addressing\":[]}],"
+	    "\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"device\":\"wlan0\","
+	    "\"security\":{\"type\":\"psk\",\"passphrase\":{\"provider\":\"file\","
+	    "\"name\":\"ap-pass\"}}}]");
+	check(state.desired != NULL, "the access point fixture reads");
+	if (!state.desired) {
+		return;
+	}
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, &where, &state, NULL, NULL, err, sizeof(err));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_START;
+	op.u.backend.kind = NCFG_BACKEND_ACCESS_POINT;
+	op.u.backend.iface = "wlan0";
+
+	memset(&executor, 0, sizeof(executor));
+	opened = ncfg_main_world_executor_open(&world, &executor, err, sizeof(err));
+	check(opened && executor.ready != NULL, "the kernel executor can say what an action needs");
+	message[0] = '\0';
+	check(opened && executor.ready &&
+	    !executor.ready(executor.state, &op, message, sizeof(message)) &&
+	    strstr(message, "home") != NULL,
+	    "  an access point whose passphrase is not stored is not ready, and says which");
+	if (opened) {
+		ncfg_main_world_executor_close(&world, &executor);
+	}
+
+	(void)snprintf(path, sizeof(path), "%s/ap-pass", secrets);
+	(void)testdir_write(path, "correct horse", strlen("correct horse"));
+	(void)chmod(path, (mode_t)0600);
+	memset(&executor, 0, sizeof(executor));
+	opened = ncfg_main_world_executor_open(&world, &executor, err, sizeof(err));
+	message[0] = '\0';
+	check(opened && executor.ready &&
+	    executor.ready(executor.state, &op, message, sizeof(message)),
+	    "  and once it is stored, the same question is answered yes");
+	if (opened) {
+		ncfg_main_world_executor_close(&world, &executor);
+	}
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
 static void an_executor_now_carries_a_service_context(void)
 {
 	ncfg_main_world_t   world;
@@ -2050,6 +2125,7 @@ int main(void)
 	an_executor_now_carries_a_service_context();
 	an_executor_is_given_the_document_those_six_ops_need();
 	an_executor_resolves_secrets_where_the_world_was_pointed();
+	an_access_point_without_its_passphrase_is_not_ready();
 	a_sysctl_is_written_where_the_world_was_pointed();
 	the_service_carries_every_scope_and_not_the_one_the_op_names();
 	the_route_metric_a_dhcp_client_is_started_with();

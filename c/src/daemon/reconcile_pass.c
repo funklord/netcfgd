@@ -1077,7 +1077,11 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 	}
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
-	(void)ncfg_apply(restricted, &executor, &journal, message, sizeof(message));
+	/* Best-effort, being the daemon's own convergence (0286, 10.796): what
+	 * cannot happen, and what waits on it, is reported and the rest goes on
+	 * -- where one failure used to stop every other change on every pass. */
+	(void)ncfg_apply_as(restricted, &executor, NCFG_APPLY_BEST_EFFORT, 1, &journal, message,
+	    sizeof(message));
 	ncfg_daemon_record_what_ran(loop->state, "apply", restricted, &journal);
 	ncfg_daemon_close_executor(&loop->world, &executor);
 
@@ -1584,7 +1588,9 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	}
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
-	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	/* Best-effort, for the drift pass's reason above (10.796). */
+	(void)ncfg_apply_as(plan, &executor, NCFG_APPLY_BEST_EFFORT, 1, &journal, message,
+	    sizeof(message));
 	ncfg_daemon_record_what_ran(loop->state, "apply", plan, &journal);
 	ncfg_daemon_close_executor(&loop->world, &executor);
 
@@ -1817,7 +1823,8 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 	}
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
-	(void)ncfg_apply(wanted, &executor, &journal, message, sizeof(message));
+	(void)ncfg_apply_as(wanted, &executor, NCFG_APPLY_BEST_EFFORT, 1, &journal, message,
+	    sizeof(message));
 	ncfg_daemon_record_what_ran(loop->state, "activate", wanted, &journal);
 	ncfg_daemon_close_executor(&loop->world, &executor);
 	(void)ncfg_daemon_state_reobserve(loop->state, &moved, message, sizeof(message));

@@ -180,6 +180,7 @@ static void recorder_init(recorder_t *recorder, ncfg_executor_t *executor)
 	memset(recorder, 0, sizeof(*recorder));
 	executor->state = recorder;
 	executor->execute = recorder_execute;
+	executor->ready = NULL;
 }
 
 static void joined(const recorder_t *recorder, char *out, size_t out_size)

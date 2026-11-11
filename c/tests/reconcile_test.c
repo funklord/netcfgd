@@ -1028,6 +1028,7 @@ static int world_executor_open(void *context, ncfg_executor_t *out, char *err, s
 	step(world, "executor.open");
 	out->state = world;
 	out->execute = world_execute;
+	out->ready = NULL;
 	return 1;
 }
 
@@ -1269,8 +1270,10 @@ static void a_pass_says_under_run_where_it_got_to(const char *base)
 	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
 	    sizeof(err));
 	written = testdir_read(path, NULL);
-	check(written && strstr(written, "\"outcome\":\"failed\"") != NULL,
-	    "a pass that stopped at an action says so in the file rather than only in the log");
+	/* `unmet` rather than `failed`: the daemon's own passes are best-effort
+	 * (10.796), so the refusal held back what waits on it and nothing else. */
+	check(written && strstr(written, "\"outcome\":\"unmet\"") != NULL,
+	    "a pass refused at an action says so in the file rather than only in the log");
 	check(written && strstr(written, "told to refuse") != NULL,
 	    "  carrying the executor's own sentence, which is what an operator reads next");
 	free(written);

@@ -25,13 +25,16 @@
 #include "ncfg/apply.h"
 
 #include "kernel_internal.h"
+#include "service_internal.h"
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/log.h"
 #include "ncfg/netlink.h"
 #include "ncfg/ops.h"
+#include "ncfg/secrets.h"
 #include "ncfg/service.h"
+#include "ncfg/supplicant.h"
 #include "ncfg/value.h"
 #include "ncfg/wire.h"
 
@@ -903,6 +906,96 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	return 0;
 }
 
+/*
+ * Whether an action's credentials are stored, asked before anything runs
+ * (10.796). Only the ops that take a credential from the store, and each the
+ * way the op itself resolves it, so a "ready" here is the op's own answer
+ * given early: an access point's passphrase and roaming key as hostapd's
+ * start reads them, a radio's networks through `ncfg_supplicant_settings`,
+ * which resolves every credential and keeps none. A network named by a scan
+ * rather than written has no name to check without one and is left to the op.
+ * Nothing to ask with -- no service, document or resolver -- is ready: the op
+ * then says what it lacks, as it always has.
+ */
+static int ready(void *state, const ncfg_op_t *op, char *err, size_t err_size)
+{
+	const ncfg_kernel_t   *kernel = state;
+	const ncfg_service_t  *service = kernel ? kernel->service : NULL;
+	const ncfg_document_t *document = service ? service->document : NULL;
+	size_t                 at;
+
+	if (!document || !service->secrets) {
+		return 1;
+	}
+	if (op->kind == NCFG_OP_BACKEND_START && op->u.backend.kind == NCFG_BACKEND_ACCESS_POINT &&
+	    op->u.backend.iface) {
+		for (at = 0; at < document->access_point_count; at++) {
+			const ncfg_access_point_t *point = &document->access_points[at];
+			char                       why[NCFG_ERROR_MAX];
+			ncfg_secret_t             *secret;
+
+			if (!point->device || strcmp(point->device, op->u.backend.iface) != 0) {
+				continue;
+			}
+			if (point->security.kind == NCFG_SECURITY_PSK) {
+				why[0] = '\0';
+				secret = ncfg_secret_resolve(service->secrets, &point->security.psk.passphrase,
+				    NULL, why, sizeof(why));
+				if (!secret) {
+					ncfg_error_set(err, err_size, "access point `%s`: %s",
+					    point->id ? point->id : "", why);
+					return 0;
+				}
+				ncfg_secret_free(secret);
+			}
+			if (point->roaming_key && point->fast_roaming) {
+				why[0] = '\0';
+				secret = ncfg_secret_resolve(service->secrets, point->roaming_key, NULL, why,
+				    sizeof(why));
+				if (!secret) {
+					ncfg_error_set(err, err_size, "access point `%s`: %s",
+					    point->id ? point->id : "", why);
+					return 0;
+				}
+				ncfg_secret_free(secret);
+			}
+		}
+		return 1;
+	}
+	if (op->kind == NCFG_OP_WIFI_SET_PROFILES) {
+		/* A wired 802.1X port and a radio given to a mesh are configured
+		 * from their own block and never read the networks, so asking about
+		 * the networks would hold them back for nothing; their op says what
+		 * it lacks, as it always has. */
+		if (!op->u.set_profiles.device ||
+		    ncfg_service_dot1x_on(document, op->u.set_profiles.device) ||
+		    ncfg_document_mesh(document, op->u.set_profiles.device)) {
+			return 1;
+		}
+		for (at = 0; at < document->network_count; at++) {
+			const ncfg_wifi_network_t  *network = &document->networks[at];
+			ncfg_supplicant_settings_t  settings;
+			char                        why[NCFG_ERROR_MAX];
+
+			if (!network->ssid.has) {
+				continue;
+			}
+			memset(&settings, 0, sizeof(settings));
+			why[0] = '\0';
+			if (!ncfg_supplicant_settings(network, NULL, 0, service->secrets, &settings, why,
+			    sizeof(why))) {
+				ncfg_supplicant_settings_free(&settings);
+				ncfg_error_set(err, err_size, "could not give `%s` to %s: %s",
+				    network->id ? network->id : "?",
+				    op->u.set_profiles.device ? op->u.set_profiles.device : "?", why);
+				return 0;
+			}
+			ncfg_supplicant_settings_free(&settings);
+		}
+	}
+	return 1;
+}
+
 void ncfg_kernel_set_service(ncfg_kernel_t *kernel, const ncfg_service_t *service)
 {
 	if (kernel) {
@@ -917,4 +1010,5 @@ void ncfg_kernel_executor(ncfg_kernel_t *kernel, ncfg_executor_t *out)
 	}
 	out->state = kernel;
 	out->execute = execute;
+	out->ready = ready;
 }

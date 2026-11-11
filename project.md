@@ -12700,6 +12700,52 @@ build `make hull-mips` cross-compiles carries it, linking libc and nothing else 
 screens where it chooses to (10.795), and keeps `ncfg tui` on its own escape sequences for
 every machine, which is qtty's 13.2 case. Not a complaint about qtty; a router has no Qt.
 
+## 10.796 Atomic stops before it starts; best-effort does what it can
+
+**The holder, 2026-11-11: "A plan that is atomic needs to stop if it is missing
+pre-requisites, weren't we supposed to also have a non-atomic best-effort apply?"** Both were
+decided in 0286 (10.544) and neither was built for one host: the executor ran actions in order
+and stopped at the first failure, with everything before it done -- 10.783's radio left with
+neither supplicant nor access point. Now `ncfg_apply_as` takes a mode.
+
+- **An executor may say what an action needs before it runs**: `ready`, optional, beside
+  `execute`. The kernel executor's asks for the secrets a `backend.start` will resolve -- an
+  access point's passphrase and roaming key -- and whether a radio's networks can be written,
+  which reads every referenced passphrase. A wired 802.1X port and a radio given to a mesh are
+  configured from their own block and never read the networks, so they are left to their op.
+  It answers from the store and touches nothing.
+- **Atomic** asks every non-optional action first. One not ready fails with "not started:"
+  and what it lacks, every other action is skipped, and the machine is not touched. A
+  failure while running still stops the plan, as before.
+- **Best-effort** runs what it can. An action not ready, or one failing while it runs, is
+  `unmet`; whatever depends on it, directly or through others, is skipped saying which action
+  it waited on; everything else runs. **And what exists only to make room for an action that
+  cannot run is skipped too**: an action is skipped when it has dependants and every one of
+  them is either not ready or itself skipped this way. That is what keeps 10.783's supplicant
+  up -- the stop exists for hostapd's start, and doing it alone is the outage. An action
+  nothing depends on is never skipped this way; it was planned for its own sake.
+
+**Who gets which.** An apply somebody asked for -- `ncfg apply`, the GUI's apply, the CLI
+in-process -- is atomic, because the person is there to read why it did not start. The
+daemon's own passes -- drift repair, the pass at startup, a radio taken on, a revert -- are
+best-effort, because nobody is waiting on them and holding back an unrelated rule for a
+network block with no secret is the worse outage. That is 0286's rule that the mode follows
+the change rather than the operator, read at host scale: what decides it is whether there is
+somebody to answer.
+
+**Not built: choosing the mode at the apply button.** 10.544 keeps the override, and
+`ncfg apply --best-effort` is where it would go; it changes the request schema, so it waits
+until somebody needs it rather than arriving with the engine.
+
+`c/tests/world_test.c` asks the kernel executor about an access point with its passphrase
+missing and then stored. `c/tests/apply_test.c` holds the four engine cases -- atomic with a prerequisite missing starts
+nothing, best-effort skips what waits and runs the rest, a runtime failure takes its
+dependants and nothing else, and the stop that serves only the unready start is not done --
+and breaking either the preflight or the skip fails them. `tests/live/ap.sh` applies an access
+point whose passphrase was never stored, in a namespace: the apply fails, the dummy device it
+would have created first is not there, and `plan.last.json` says "not started" and names the
+secret. With the preflight taken out the device is made and the journal names nothing.
+
 ## 10.795 Nothing on qtty's side stands between `ncfg tui` and the GUI's screens
 
 **qtty measured `ncfg tui` against its own goal (its note 20261111T0100Z, recorded here and
@@ -12862,32 +12908,20 @@ button after `remove` was cut, all under a horizontal scroll bar. Each is sized 
 form's width at construction now, capped by the screen, with a first screenful of height --
 913 by 600 and 906 by 600 on Xvfb, every field readable, where they were 634 by 541.
 
-## 10.783 Open: a plan stops what is running before it finds the secret the replacement needs
+## 10.783 A plan stopped what was running before it found the secret the replacement needed
 
-**Measured in the GUI walk, not yet changed.** An access point `TestAP` on `radio0`, whose
+**Measured in the GUI walk; closed by 10.796.** An access point `TestAP` on `radio0`, whose
 passphrase reference named a secret nobody had stored, was saved while `radio0` was a station
 joined to `HomeFiber`. The daemon reconciled at once: `backend.stop` took the supplicant down,
 then `backend.start` for hostapd failed on `secret ap was not found`, and the radio was left
 with neither -- the client connection lost by saving a dialog, until the access point was
-deleted and the supplicant came back thirty seconds later. Secrets are resolved by the action
-that needs them, at apply, and the executor stops at the first failure with everything before
-it already done.
+deleted and the supplicant came back thirty seconds later. Secrets were resolved by the action
+that needed them, at apply, and the executor stopped at the first failure with everything
+before it already done.
 
-**Two ways to close it, and they differ in what else stops.**
-
-- **Before action 0, ask every action that needs a secret whether it is there**, and run
-  nothing if one is not. Simplest, and the radio keeps its connection -- but one network block
-  with a missing secret then holds back every unrelated change in the same plan, a rule or a
-  firewall included, where today the ones before the failure land.
-- **Ask per interface, and skip only that interface's actions**, the rest of the plan
-  running. Keeps unrelated changes flowing; it is a new shape for the executor, whose stop is
-  whole-plan today, and 0293's optional actions are the only precedent for carrying on past a
-  failure.
-
-**The holder's to choose**, being the executor's failure semantics; the guess is the second.
-The GUI half is already closed for its own dialogs (10.782: a passphrase typed there is stored
-before the block names it), so what remains is a reference written by hand, or by a client,
-to a secret that is not there.
+The two ways this entry weighed -- ask every action before the first and run nothing, or skip
+only what the missing secret holds back -- turned out to be 0286's two modes, already decided
+(10.544) and never built at host scale. 10.796 builds both and says which caller gets which.
 
 ## 10.782 An access point or a mesh can be given a passphrase from the window
 
@@ -23536,7 +23570,8 @@ constrains the other two.
 ### The modes, and who picks
 
 **Best-effort** is each node applying as it receives, doing what it can and
-reporting the rest -- which is what the host loop already does. **Atomic** is
+reporting the rest -- which the host loop did only in part until 10.796, its executor
+stopping at the first failure. **Atomic** is
 nothing applied until every node holds a resolved plan, then all at the named
 instant with each node's own revert timer armed.
 

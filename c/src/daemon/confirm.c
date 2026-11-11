@@ -676,7 +676,9 @@ static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executo
 		return;
 	}
 	ncfg_journal_init(&journal);
-	(void)ncfg_apply(plan, executor, &journal, why, sizeof(why));
+	/* Best-effort: a revert puts back as much as it can (10.796). One thing
+	 * that will not go back is no reason to leave the rest where it is. */
+	(void)ncfg_apply_as(plan, executor, NCFG_APPLY_BEST_EFFORT, 1, &journal, why, sizeof(why));
 	ncfg_daemon_record_what_ran(state, "confirm", plan, &journal);
 	failure = ncfg_journal_failure(&journal);
 	if (failure) {

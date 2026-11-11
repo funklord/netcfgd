@@ -24,6 +24,8 @@
 #include "ncfg/log.h"
 #include "ncfg/service.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------------ *
@@ -377,11 +379,117 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
  * action with its outcome and its error, so there the line is the same thing
  * said twice and said less well.
  */
-static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
-    ncfg_journal_t *journal, int narrates, char *err, size_t err_size)
+/* Whether an action waits on one that did not happen, best-effort (10.796):
+ * `blocked` is indexed by action id. */
+static const uint32_t *waits_on_blocked(const ncfg_action_t *action, const unsigned char *blocked,
+    size_t blocked_count)
 {
-	int    stopped = 0;
+	size_t at;
+
+	for (at = 0; at < action->depends_count; at++) {
+		if (action->depends_on[at] < blocked_count && blocked[action->depends_on[at]]) {
+			return &action->depends_on[at];
+		}
+	}
+	return NULL;
+}
+
+/*
+ * An atomic apply's question before it starts (10.796): is every action's
+ * prerequisite in place? The first that is not, by position, or the count of
+ * actions when all are. Optional actions are not asked -- their failure never
+ * stopped a plan, and 0293's reason for that holds for a missing prerequisite.
+ */
+static size_t first_unready(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    char *message, size_t message_size)
+{
 	size_t i;
+
+	if (!executor->ready) {
+		return plan->action_count;
+	}
+	for (i = 0; i < plan->action_count; i++) {
+		message[0] = '\0';
+		if (ncfg_apply_optional(&plan->actions[i].op)) {
+			continue;
+		}
+		if (!executor->ready(executor->state, &plan->actions[i].op, message, message_size)) {
+			return i;
+		}
+	}
+	return plan->action_count;
+}
+
+/*
+ * Best-effort's question before it starts (10.796): which actions exist only
+ * for others that cannot run? An action is marked when it has a dependant and
+ * every dependant is either missing a prerequisite or itself marked -- walked
+ * from the end, since a dependant comes after what it depends on. An action
+ * nothing depends on is never marked: it was planned for its own sake.
+ */
+static void mark_what_serves_only_the_unready(const ncfg_plan_t *plan,
+    const ncfg_executor_t *executor, unsigned char *serves_nothing, size_t count)
+{
+	unsigned char *unready;
+	size_t         i;
+	size_t         j;
+
+	if (!executor->ready || !count) {
+		return;
+	}
+	unready = calloc(count, 1u);
+	if (!unready) {
+		return;
+	}
+	for (i = 0; i < plan->action_count; i++) {
+		const ncfg_action_t *action = &plan->actions[i];
+		char                 ignored[NCFG_ERROR_MAX];
+
+		if (action->id < count && !ncfg_apply_optional(&action->op) &&
+		    !executor->ready(executor->state, &action->op, ignored, sizeof(ignored))) {
+			unready[action->id] = 1;
+		}
+	}
+	for (i = plan->action_count; i-- > 0;) {
+		const ncfg_action_t *action = &plan->actions[i];
+		size_t               dependants = 0;
+		size_t               cannot = 0;
+
+		if (action->id >= count || unready[action->id]) {
+			continue;
+		}
+		for (j = i + 1u; j < plan->action_count; j++) {
+			const ncfg_action_t *later = &plan->actions[j];
+			size_t               at;
+
+			for (at = 0; at < later->depends_count; at++) {
+				if (later->depends_on[at] != action->id) {
+					continue;
+				}
+				dependants++;
+				if (later->id < count && (unready[later->id] || serves_nothing[later->id])) {
+					cannot++;
+				}
+				break;
+			}
+		}
+		if (dependants > 0 && dependants == cannot) {
+			serves_nothing[action->id] = 1;
+		}
+	}
+	free(unready);
+}
+
+static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_apply_mode_t mode, ncfg_journal_t *journal, int narrates, char *err, size_t err_size)
+{
+	int            stopped = 0;
+	size_t         i;
+	size_t         unready;
+	unsigned char *blocked = NULL;
+	unsigned char *serves_nothing = NULL;
+	size_t         blocked_count = 0;
+	char           missing[NCFG_ERROR_MAX];
 
 	if (!plan || !executor || !executor->execute || !journal) {
 		ncfg_error_set(err, err_size,
@@ -402,20 +510,122 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 		return 0;
 	}
 
+	/*
+	 * **Atomic: a missing prerequisite is a reason not to start** (0286,
+	 * 10.796). Nothing runs; the action that wanted it is the failure, and
+	 * every other is skipped.
+	 */
+	unready = plan->action_count;
+	if (mode == NCFG_APPLY_ATOMIC) {
+		unready = first_unready(plan, executor, missing, sizeof(missing));
+	}
+	if (mode == NCFG_APPLY_BEST_EFFORT) {
+		for (i = 0; i < plan->action_count; i++) {
+			if (plan->actions[i].id >= blocked_count) {
+				blocked_count = (size_t)plan->actions[i].id + 1u;
+			}
+		}
+		blocked = blocked_count ? calloc(blocked_count, 1u) : NULL;
+		if (blocked_count && !blocked) {
+			ncfg_error_set(err, err_size, "not enough memory to apply; nothing was applied");
+			return 0;
+		}
+		serves_nothing = blocked_count ? calloc(blocked_count, 1u) : NULL;
+		if (blocked_count && !serves_nothing) {
+			free(blocked);
+			ncfg_error_set(err, err_size, "not enough memory to apply; nothing was applied");
+			return 0;
+		}
+		mark_what_serves_only_the_unready(plan, executor, serves_nothing, blocked_count);
+	}
+
 	for (i = 0; i < plan->action_count; i++) {
 		const ncfg_action_t *action = &plan->actions[i];
 		ncfg_record_t        record;
 		char                 message[NCFG_ERROR_MAX];
+		char                 why[NCFG_ERROR_MAX + 32];
 
 		memset(&record, 0, sizeof(record));
 		record.id = action->id;
 		record.op = ncfg_op_name(&action->op);
 		record.interface = ncfg_op_interface(&action->op);
 		record.reason = action->reason;
+		if (unready < plan->action_count) {
+			if (i == unready) {
+				(void)snprintf(why, sizeof(why), "not started: %s",
+				    missing[0] ? missing : "a prerequisite is missing");
+				record.outcome = NCFG_OUTCOME_FAILED;
+				record.error = why;
+				if (narrates) {
+					ncfg_log_aboutf("apply", record.interface, NCFG_LOG_ERROR,
+					    "%s cannot run: %s -- the plan is atomic, so nothing in it was "
+					    "started", record.op, missing[0] ? missing : "a prerequisite is "
+					    "missing");
+				}
+			} else {
+				record.outcome = NCFG_OUTCOME_SKIPPED;
+			}
+			ncfg_journal_push(journal, &record);
+			continue;
+		}
 		if (stopped) {
 			record.outcome = NCFG_OUTCOME_SKIPPED;
 			ncfg_journal_push(journal, &record);
 			continue;
+		}
+		/*
+		 * **Best-effort: what waits on something that did not happen is
+		 * skipped, and nothing else is** (10.796).
+		 */
+		if (blocked) {
+			const uint32_t *waits = waits_on_blocked(action, blocked, blocked_count);
+
+			/* What exists only to make room for actions that cannot run --
+			 * a supplicant stopped for an access point whose passphrase is
+			 * not stored -- is not done either: done, it is the radio left
+			 * with neither (10.783). */
+			if (action->id < blocked_count && serves_nothing[action->id]) {
+				(void)snprintf(why, sizeof(why),
+				    "everything that waits on it cannot run, so it is not done either");
+				record.outcome = NCFG_OUTCOME_SKIPPED;
+				record.error = why;
+				/* Not marked blocked: each dependant is unready or skipped by
+				 * this same test, and the unready one should be reported for
+				 * what it lacks rather than as waiting on this. */
+				ncfg_journal_push(journal, &record);
+				continue;
+			}
+
+			if (waits) {
+				(void)snprintf(why, sizeof(why), "waits on action %u, which did not happen",
+				    (unsigned)*waits);
+				record.outcome = NCFG_OUTCOME_SKIPPED;
+				record.error = why;
+				if (action->id < blocked_count) {
+					blocked[action->id] = 1;
+				}
+				ncfg_journal_push(journal, &record);
+				continue;
+			}
+			message[0] = '\0';
+			if (executor->ready && !ncfg_apply_optional(&action->op) &&
+			    !executor->ready(executor->state, &action->op, message, sizeof(message))) {
+				(void)snprintf(why, sizeof(why), "not started: %s",
+				    message[0] ? message : "a prerequisite is missing");
+				record.outcome = NCFG_OUTCOME_UNMET;
+				record.error = why;
+				if (action->id < blocked_count) {
+					blocked[action->id] = 1;
+				}
+				if (narrates) {
+					ncfg_log_aboutf("apply", record.interface, NCFG_LOG_ERROR,
+					    "%s cannot run: %s -- what depends on it waits, and the rest of the "
+					    "plan continues", record.op, message[0] ? message : "a prerequisite "
+					    "is missing");
+				}
+				ncfg_journal_push(journal, &record);
+				continue;
+			}
 		}
 		message[0] = '\0';
 		if (executor->execute(executor->state, &action->op, message, sizeof(message))) {
@@ -490,10 +700,16 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 			 * depended on this one fails on its own account, with the
 			 * kernel's own reason, rather than being guessed at here.
 			 */
-			int optional = ncfg_apply_optional(&action->op);
+			/* Best-effort carries on past any failure, as 0293 lets an
+			 * optional action's; what depends on this one is skipped above
+			 * when its turn comes. */
+			int optional = ncfg_apply_optional(&action->op) || blocked != NULL;
 
 			stopped = optional ? stopped : 1;
 			record.outcome = optional ? NCFG_OUTCOME_UNMET : NCFG_OUTCOME_FAILED;
+			if (blocked && action->id < blocked_count) {
+				blocked[action->id] = 1;
+			}
 			/* An executor that failed without saying why is a defect in that
 			 * executor, and a journal entry reading `"error":null` beside
 			 * `"outcome":"failed"` is what makes it visible instead of
@@ -517,6 +733,8 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 		ncfg_journal_push(journal, &record);
 	}
 
+	free(blocked);
+	free(serves_nothing);
 	if (journal->failed) {
 		ncfg_error_set(err, err_size,
 		    "the plan ran, and the journal ran out of memory recording it; "
@@ -529,13 +747,20 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
     ncfg_journal_t *journal, char *err, size_t err_size)
 {
-	return run_plan(plan, executor, journal, 1, err, err_size);
+	return run_plan(plan, executor, NCFG_APPLY_ATOMIC, journal, 1, err, err_size);
 }
 
 int ncfg_apply_silently(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
     ncfg_journal_t *journal, char *err, size_t err_size)
 {
-	return run_plan(plan, executor, journal, 0, err, err_size);
+	return run_plan(plan, executor, NCFG_APPLY_ATOMIC, journal, 0, err, err_size);
+}
+
+int ncfg_apply_as(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_apply_mode_t mode, int narrates, ncfg_journal_t *journal, char *err,
+    size_t err_size)
+{
+	return run_plan(plan, executor, mode, journal, narrates, err, err_size);
 }
 
 /* ------------------------------------------------------------------------ *

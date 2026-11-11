@@ -168,6 +168,7 @@ static void recorder_init(recorder_t *recorder, ncfg_executor_t *executor)
 	recorder->fail_at = -1;
 	executor->state = recorder;
 	executor->execute = recorder_execute;
+	executor->ready = NULL;
 }
 
 /* What it saw, joined, so a mismatch prints as one line. */
@@ -890,6 +891,150 @@ static ncfg_plan_t *two_actions(const ncfg_op_t *first)
 	reason.field = "mtu";
 	(void)ncfg_plan_add(plan, &second, &reason, NULL, 0, NULL);
 	return plan;
+}
+
+/* ------------------------------------------------------------------------ *
+ * The two modes (0286 at host scale, 10.796)
+ * ------------------------------------------------------------------------ */
+
+/* Not ready for an MTU of 1400, which stands for "its secret is not stored". */
+static int ready_unless_1400(void *state, const ncfg_op_t *op, char *err, size_t err_size)
+{
+	(void)state;
+	if (op->kind == NCFG_OP_LINK_SET_MTU && op->u.set_mtu.mtu == 1400) {
+		ncfg_error_set(err, err_size, "secret `ap` was not found");
+		return 0;
+	}
+	return 1;
+}
+
+/* A, then B which depends on A, then C which depends on nothing. */
+static ncfg_plan_t *chained_plan(void)
+{
+	char          message[NCFG_ERROR_MAX];
+	ncfg_plan_t  *plan = ncfg_plan_new(message, sizeof(message));
+	ncfg_reason_t reason;
+	ncfg_op_t     op;
+	uint32_t      a;
+
+	if (!plan) {
+		return NULL;
+	}
+	memset(&reason, 0, sizeof(reason));
+	reason.interface = "e0";
+	reason.field = "mtu";
+	mtu_op(&op, 1400);
+	a = ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
+	mtu_op(&op, 1401);
+	(void)ncfg_plan_add(plan, &op, &reason, &a, 1, NULL);
+	mtu_op(&op, 1402);
+	(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
+	return plan;
+}
+
+static void an_atomic_plan_with_a_prerequisite_missing_does_not_start(void)
+{
+	ncfg_plan_t    *plan = chained_plan();
+	recorder_t      recorder;
+	ncfg_executor_t executor;
+	ncfg_journal_t  journal;
+	char            err[NCFG_ERROR_MAX];
+
+	memset(&executor, 0, sizeof(executor));
+	recorder_init(&recorder, &executor);
+	executor.ready = ready_unless_1400;
+	err[0] = '\0';
+	(void)ncfg_apply_as(plan, &executor, NCFG_APPLY_ATOMIC, 0, &journal, err, sizeof(err));
+	check(recorder.count == 0, "an atomic plan with a prerequisite missing starts nothing");
+	check(journal.record_count == 3 && journal.records[0].outcome == NCFG_OUTCOME_FAILED &&
+	    journal.records[0].error && strstr(journal.records[0].error, "not found") != NULL,
+	    "  and names what was missing, on the action that wanted it");
+	check(journal.record_count == 3 && journal.records[1].outcome == NCFG_OUTCOME_SKIPPED &&
+	    journal.records[2].outcome == NCFG_OUTCOME_SKIPPED,
+	    "  and records every other action as skipped, the independent one included");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+static void a_best_effort_plan_skips_what_waits_and_runs_the_rest(void)
+{
+	ncfg_plan_t    *plan = chained_plan();
+	recorder_t      recorder;
+	ncfg_executor_t executor;
+	ncfg_journal_t  journal;
+	char            err[NCFG_ERROR_MAX];
+
+	memset(&executor, 0, sizeof(executor));
+	recorder_init(&recorder, &executor);
+	executor.ready = ready_unless_1400;
+	err[0] = '\0';
+	(void)ncfg_apply_as(plan, &executor, NCFG_APPLY_BEST_EFFORT, 0, &journal, err,
+	    sizeof(err));
+	sequence_is(&recorder, "link.set_mtu e0 1402",
+	    "best-effort runs the action that waits on nothing missing, and only that");
+	check(journal.record_count == 3 && journal.records[0].outcome == NCFG_OUTCOME_UNMET,
+	    "  the one missing its prerequisite is unmet, not run");
+	check(journal.record_count == 3 && journal.records[1].outcome == NCFG_OUTCOME_SKIPPED &&
+	    journal.records[1].error && strstr(journal.records[1].error, "waits on action 0"),
+	    "  what depends on it is skipped, saying which it waits on");
+	check(journal.record_count == 3 && journal.records[2].outcome == NCFG_OUTCOME_DONE,
+	    "  and the independent action is done");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+
+	/* The same for a failure while running rather than a prerequisite. */
+	plan = chained_plan();
+	memset(&executor, 0, sizeof(executor));
+	recorder_init(&recorder, &executor);
+	recorder.fail_at = 0;
+	(void)ncfg_apply_as(plan, &executor, NCFG_APPLY_BEST_EFFORT, 0, &journal, err,
+	    sizeof(err));
+	sequence_is(&recorder, "link.set_mtu e0 1400,link.set_mtu e0 1402",
+	    "a failure while running takes its dependants with it and nothing else");
+	check(journal.record_count == 3 && journal.records[0].outcome == NCFG_OUTCOME_UNMET &&
+	    journal.records[1].outcome == NCFG_OUTCOME_SKIPPED &&
+	    journal.records[2].outcome == NCFG_OUTCOME_DONE,
+	    "  unmet, skipped, done");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+/* 1401 waits on 1400; 1400 is ready, 1401 is not, 1402 is independent. */
+static int ready_unless_1401(void *state, const ncfg_op_t *op, char *err, size_t err_size)
+{
+	(void)state;
+	if (op->kind == NCFG_OP_LINK_SET_MTU && op->u.set_mtu.mtu == 1401) {
+		ncfg_error_set(err, err_size, "the passphrase is not stored");
+		return 0;
+	}
+	return 1;
+}
+
+static void a_best_effort_plan_does_not_make_room_for_what_cannot_come(void)
+{
+	ncfg_plan_t    *plan = chained_plan();
+	recorder_t      recorder;
+	ncfg_executor_t executor;
+	ncfg_journal_t  journal;
+	char            err[NCFG_ERROR_MAX];
+
+	memset(&executor, 0, sizeof(executor));
+	recorder_init(&recorder, &executor);
+	executor.ready = ready_unless_1401;
+	err[0] = '\0';
+	(void)ncfg_apply_as(plan, &executor, NCFG_APPLY_BEST_EFFORT, 0, &journal, err,
+	    sizeof(err));
+	sequence_is(&recorder, "link.set_mtu e0 1402",
+	    "best-effort does not run what exists only for an action that cannot run (10.783)");
+	check(journal.record_count == 3 && journal.records[0].outcome == NCFG_OUTCOME_SKIPPED &&
+	    journal.records[0].error && strstr(journal.records[0].error, "cannot run"),
+	    "  it is skipped, saying everything waiting on it cannot run");
+	check(journal.record_count == 3 && journal.records[1].outcome == NCFG_OUTCOME_UNMET,
+	    "  the action missing its prerequisite is unmet");
+	check(journal.record_count == 3 && journal.records[2].outcome == NCFG_OUTCOME_DONE,
+	    "  and the independent action, nothing depending on it, is done");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
 }
 
 static void an_optional_failure_leaves_the_rest_of_the_plan_running(void)
@@ -3061,6 +3206,9 @@ int main(void)
 
 	only_done_actions_with_an_inverse_are_undone();
 	an_optional_failure_leaves_the_rest_of_the_plan_running();
+	an_atomic_plan_with_a_prerequisite_missing_does_not_start();
+	a_best_effort_plan_skips_what_waits_and_runs_the_rest();
+	a_best_effort_plan_does_not_make_room_for_what_cannot_come();
 	a_required_failure_still_stops_the_plan();
 	which_ops_may_be_left_unmet();
 	the_inverses_run_newest_first();

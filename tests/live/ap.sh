@@ -365,6 +365,39 @@ CONF
 check "an empty allow list is warned about, not refused" \
 	"$(grep -c 'no station can associate' "$work/empty.log" || true)" "1"
 
+# ------------------------------------- a passphrase nobody stored (10.796)
+#
+# **An apply somebody asked for is atomic: a missing prerequisite is a reason
+# not to start.** Before 10.796 the executor ran in order and stopped at the
+# first failure, so everything ahead of hostapd -- the device, its address, a
+# supplicant's stop on a real radio -- was done, and then the access point was
+# not (10.783). Now the secret is asked for before the first action, and the
+# machine is not touched. A device of its own, so nothing above made it first.
+mkdir -p "$work/nosecret"
+cat > "$work/nosecret/netcfgd.conf" <<'CONF'
+device ap7 {
+	kind   = "dummy"
+}
+interface ap7 {
+	config = "192.168.7.1/24"
+}
+
+access_point "nobody" {
+	device  = "ap7"
+	channel = 6
+	wifi    { psk = "@secret:never-stored"; proto = "wpa2" }
+}
+CONF
+NCFG_CONFIG_DIR="$work/nosecret" "$ncfg" apply --oneshot > "$work/nosecret.log" 2>&1 &&
+	nosecret=0 || nosecret=1
+check "an apply whose access point has no stored passphrase fails" "$nosecret" "1"
+check "  having made nothing: the device it would have created is not there" \
+	"$(ip link show ap7 >/dev/null 2>&1 && echo there || echo absent)" "absent"
+check "  and written no hostapd configuration" \
+	"$([ -f "$work/run/hostapd/ap7.conf" ] && echo written || echo none)" "none"
+check "  and the journal says it did not start, and why" \
+	"$(grep -c 'not started:.*never-stored' "$work/run/plan.last.json" 2>/dev/null || true)" "1"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "ap.sh: all checks passed"

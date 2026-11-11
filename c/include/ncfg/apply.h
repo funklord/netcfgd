@@ -92,7 +92,39 @@ typedef struct {
 	 * names what failed rather than restating the action.
 	 */
 	int (*execute)(void *state, const ncfg_op_t *op, char *err, size_t err_size);
+	/*
+	 * Whether one action's prerequisites are in place, without changing
+	 * anything: 1, or 0 with a sentence naming what is missing. Optional --
+	 * NULL is "always ready", which is every executor that has no
+	 * prerequisite to ask about (10.796).
+	 *
+	 * **Asked before anything runs**, because a prerequisite found missing by
+	 * the action that needs it is found after the actions before it ran: an
+	 * access point whose passphrase was not stored stopped the radio's
+	 * supplicant and then could not start, leaving it with neither (10.783).
+	 */
+	int (*ready)(void *state, const ncfg_op_t *op, char *err, size_t err_size);
 } ncfg_executor_t;
+
+/*
+ * How an apply treats a part that cannot happen (0286, at host scale, 10.796).
+ *
+ * **Atomic** asks every action's prerequisites first, and a plan with one
+ * missing does not start: nothing changes, and the journal names what was
+ * missing. A failure while running stops it there, as it always has, and a
+ * confirm window puts back what ran. This is the operator's apply: a change
+ * made as a whole or not at all.
+ *
+ * **Best-effort** does what it can and reports the rest. An action whose
+ * prerequisites are missing, or which fails, is `UNMET`; everything that
+ * depends on it is `SKIPPED`, naming it; everything else runs. This is the
+ * daemon's own convergence, which 0286 calls "what the host loop already
+ * does" -- and which it did not, stopping the whole plan at one failure.
+ */
+typedef enum {
+	NCFG_APPLY_ATOMIC,
+	NCFG_APPLY_BEST_EFFORT
+} ncfg_apply_mode_t;
 
 /* ------------------------------------------------------------------------ *
  * The journal
@@ -102,9 +134,11 @@ typedef struct {
 typedef enum {
 	/* It ran and the kernel accepted it. */
 	NCFG_OUTCOME_DONE,
-	/* It ran and failed. Execution stopped here. */
+	/* It ran and failed, or -- in an atomic apply -- its prerequisites were
+	 * missing and nothing was started. Execution stopped here. */
 	NCFG_OUTCOME_FAILED,
-	/* It never ran, because something before it failed. */
+	/* It never ran: something before it failed, or -- best-effort -- an
+	 * action it depends on did not happen. */
 	NCFG_OUTCOME_SKIPPED,
 	/*
 	 * It ran and failed, and the plan went on without it.
@@ -126,6 +160,10 @@ typedef enum {
 	 * It is not a success: the apply's exit status is a failure and the
 	 * journal counts it, for the reason `evidence.md` gives about a check
 	 * whose pass includes the failure.
+	 *
+	 * **In a best-effort apply every failure is this** (10.796), and so is an
+	 * action whose prerequisites were missing, which did not run; what
+	 * depends on it is `SKIPPED`.
 	 */
 	NCFG_OUTCOME_UNMET,
 	/*
@@ -308,6 +346,14 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
  */
 int ncfg_apply_silently(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
     ncfg_journal_t *journal, char *err, size_t err_size);
+
+/*
+ * Either, in a mode the caller names. `ncfg_apply` and `ncfg_apply_silently`
+ * are this, atomic; `narrates` is the difference between those two.
+ */
+int ncfg_apply_as(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_apply_mode_t mode, int narrates, ncfg_journal_t *journal, char *err,
+    size_t err_size);
 
 /*
  * Put back what this apply did, newest first.
