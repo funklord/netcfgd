@@ -52,6 +52,23 @@ static void check(const char *what, bool condition, const QString &detail = QStr
 	fflush(stdout);
 }
 
+/* Whether the daemon's secret store holds this name (10.805). Asked of the
+ * daemon: the value is never readable in this direction, only its presence. */
+static bool stored_secret(ncfg_connection *connection, const QString &name)
+{
+	QList<ncfg_secret_row> rows;
+	QString why;
+	if (!connection->secrets(&rows, &why)) {
+		return false;
+	}
+	for (const ncfg_secret_row &row : rows) {
+		if (row.name == name) {
+			return row.stored;
+		}
+	}
+	return false;
+}
+
 int main(int argc, char **argv)
 {
 	QApplication app(argc, argv);
@@ -288,22 +305,21 @@ int main(int argc, char **argv)
 		kind->setCurrentIndex(kind->findData(QStringLiteral("wireguard")));
 		listen->setValue(51820);
 
-		/* A key pasted where a reference belongs: refused here, beside the
-		 * field, because the document type cannot hold key material at all. */
-		key->setText(QStringLiteral("QF4lQ0Iw6cP7f0cQDZQwqz0m0h2wJ3vJ7l5b1kR9Umc="));
+		/* Something that is not a key: refused here, beside the field, in the
+		 * dialog's own sentence -- netcfgd would only find out at apply. The
+		 * dialog's words rather than a word netcfgd also uses, which is how
+		 * the vlan-parent check above was once found vacuous. */
+		key->setText(QStringLiteral("not-a-key"));
 		save->click();
-		/* **The dialog's own sentence, not the word "reference".** netcfgd
-		 * refuses a pasted key too and says so with that word in it, so an
-		 * assertion on the word passes whether this check exists or not --
-		 * which is exactly how the vlan-parent check above was found to be
-		 * vacuous. Twice in one campaign is a pattern, not an accident: a
-		 * refusal test has to name whose refusal it is. */
-		check("a private key pasted instead of a reference is refused here",
+		check("something that is not a wireguard key is refused here",
 		    note && note->text().startsWith(
-		                QStringLiteral("the private key is a reference, not the key")),
+		                QStringLiteral("that is not a wireguard private key")),
 		    note ? note->text() : QString());
 
-		key->setText(QStringLiteral("@secret:gui-wg0"));
+		/* A key pasted as `wg genkey` printed it (10.805): stored, and the
+		 * block names it. It once had to be a reference, with a terminal to
+		 * put the key in the store. */
+		key->setText(QStringLiteral("QF4lQ0Iw6cP7f0cQDZQwqz0m0h2wJ3vJ7l5b1kR9Umc="));
 		add->click();
 		peers->setItem(0, 0, new QTableWidgetItem(QStringLiteral("office")));
 		peers->setItem(0, 1, new QTableWidgetItem(
@@ -323,8 +339,10 @@ int main(int argc, char **argv)
 		    connection.device_config(QStringLiteral("gui-wg0"), &wg, &error), error);
 		check("as wireguard, spelled as the language spells it",
 		    wg.kind == QStringLiteral("wireguard"), wg.kind);
-		check("with the private key as a reference",
-		    wg.private_key == QStringLiteral("@secret:gui-wg0"), wg.private_key);
+		check("with the pasted key stored and named, never written",
+		    wg.private_key == QStringLiteral("@secret:wg-gui-wg0"), wg.private_key);
+		check("  and the store holds it",
+		    stored_secret(&connection, QStringLiteral("wg-gui-wg0")));
 		check("and its listen port", wg.listen_port == 51820,
 		    QString::number(wg.listen_port));
 		check("and the peer", wg.peers.size() == 1,
@@ -370,16 +388,16 @@ int main(int argc, char **argv)
 		kind->setCurrentIndex(kind->findData(QStringLiteral("pppoe")));
 		parent->setText(QStringLiteral("gui-set-a"));
 		user->setText(QStringLiteral("user@isp.example"));
-		/* A password typed where a reference belongs, refused beside the
-		 * field: the document type cannot hold one. */
-		secret->setText(QStringLiteral("hunter2"));
+		/* No password at all is refused beside the field. */
+		secret->clear();
 		save->click();
-		check("a pppoe password typed instead of a reference is refused here",
+		check("a pppoe session with no password is refused here",
 		    note && note->text().startsWith(
-		                QStringLiteral("the password is a reference, not the password")),
+		                QStringLiteral("a pppoe session needs the password")),
 		    note ? note->text() : QString());
 
-		secret->setText(QStringLiteral("@secret:gui-isp"));
+		/* Typed, it is stored and the block names it (10.805). */
+		secret->setText(QStringLiteral("hunter2"));
 		save->click();
 		check("and a whole session is written",
 		    dialog.outcome().contains(QStringLiteral("gui-ppp0")),
@@ -392,10 +410,46 @@ int main(int argc, char **argv)
 		check("as pppoe on its parent", written.kind == QStringLiteral("pppoe")
 		        && written.parent == QStringLiteral("gui-set-a"),
 		    QStringLiteral("%1 on %2").arg(written.kind, written.parent));
-		check("with the login and the password as a reference",
+		check("with the login and the typed password stored and named",
 		    written.username == QStringLiteral("user@isp.example")
-		        && written.password == QStringLiteral("@secret:gui-isp"),
+		        && written.password == QStringLiteral("@secret:ppp-gui-ppp0"),
 		    written.password);
+		check("  and the store holds it",
+		    stored_secret(&connection, QStringLiteral("ppp-gui-ppp0")));
+	}
+
+	/* **Replacing a stored credential is asked** (0042, 10.805): the same
+	 * device saved with another password finds `ppp-gui-ppp0` there. No keeps
+	 * what is stored and writes nothing; Yes replaces it. */
+	for (const QMessageBox::StandardButton reply : { QMessageBox::No, QMessageBox::Yes }) {
+		ncfg_device_dialog dialog(&connection, QStringLiteral("gui-ppp0"));
+		auto *secret = dialog.findChild<QLineEdit *>(QStringLiteral("device_password"));
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+		if (!secret || !save) {
+			check("the pppoe session reopens", false);
+			break;
+		}
+		bool asked = false;
+		secret->setText(QStringLiteral("another-password"));
+		QTimer::singleShot(0, [reply, &asked]() {
+			if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+				asked = true;
+				box->button(reply)->click();
+			}
+		});
+		save->click();
+		if (reply == QMessageBox::No) {
+			check("a stored password is not replaced without asking", asked);
+			check("  and answering no writes nothing",
+			    dialog.outcome().isEmpty() && note &&
+			        note->text().contains(QStringLiteral("already exists")),
+			    note ? note->text() : QString());
+		} else {
+			check("  and answering yes replaces it and saves",
+			    asked && dialog.outcome().contains(QStringLiteral("gui-ppp0")),
+			    QStringLiteral("%1 / %2").arg(dialog.outcome(), note ? note->text() : QString()));
+		}
 	}
 
 	{
@@ -570,6 +624,10 @@ int main(int argc, char **argv)
 		connection.config_delete(QStringLiteral("device-gui-ppp0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-tun0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-wg0"), &removed);
+		/* And the two credentials the dialog stored (10.805), for the same
+		 * reason: a shared daemon's store is every later probe's. */
+		connection.secret_delete(QStringLiteral("wg-gui-wg0"), &removed);
+		connection.secret_delete(QStringLiteral("ppp-gui-ppp0"), &removed);
 		check("the block can be removed again",
 		    connection.config_delete(QStringLiteral("device-%1").arg(name), &removed),
 		    removed);

@@ -12702,6 +12702,24 @@ reconciled in isolation, a daemon holding with `--no-apply-on-start` -- which is
 cases are explained. The DNS tab's "`ncfg apply` is what does it", inside a window with an
 Apply button, points at the button.
 
+## 10.805 A VPN's password and a WireGuard key are typed in the device dialog
+
+**From the help lines 10.804 left open.** The device dialog's private key and password
+fields took only `@secret:NAME`, and their placeholders and refusals told a person to run
+`ncfg secret set` in a terminal -- for a VPN password, a PPPoE login from the provider, a
+WireGuard key `wg genkey` printed. 10.782 had already settled the shape for access points:
+a typed credential goes to the store through `secret_put`, and the block names it. The device
+dialog does the same now, under `wg-`, `ppp-` or `vpn-` and the device's name, before the
+block is written so it never names a secret that is not there -- without `replace` first, and
+when one is there the dialog asks, since a WireGuard key nobody else has cannot be got back
+(0042; the add-network dialog's question). A reference still works, the
+fields echo only while edited, and a WireGuard key is checked as 32 octets of base64 beside
+the field, since netcfgd would only find out at apply. The old comment's worry -- inviting
+somebody to paste a key into a configuration file -- does not arise: what is pasted never
+reaches the file. `live_device_dialog` refuses a non-key, then stores a pasted key and a typed
+PPPoE password and finds both in the store and named by the block, then saves the session with
+another password: No keeps the stored one and writes nothing, Yes replaces it.
+
 ## 10.804 The GUI quotes a name with quotes, not backticks
 
 **Half of 10.778's last finding: backticks reach a person's eye.** Thirty-nine sentences in

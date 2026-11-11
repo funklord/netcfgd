@@ -186,6 +186,40 @@ bool safe_value(const QString &text)
 	       !text.contains(QLatin1Char('\n'));
 }
 
+/* A credential field holding the credential itself rather than a reference to
+ * one (10.805). It goes to the secret store, never into the block. */
+bool typed_credential(const QLineEdit *field)
+{
+	const QString text = field->text().trimmed();
+	return !text.isEmpty() && !text.startsWith(QLatin1String("@secret:"));
+}
+
+/* A WireGuard key as `wg genkey` prints it: 32 octets of base64. Checked here
+ * because the daemon would only find out at apply, and the person pasting it
+ * is looking at this field now. */
+bool wireguard_key(const QString &text)
+{
+	const QByteArray ascii = text.trimmed().toLatin1();
+	const QByteArray::FromBase64Result decoded =
+	    QByteArray::fromBase64Encoding(ascii, QByteArray::AbortOnBase64DecodingErrors);
+	return ascii.size() == 44 && decoded && decoded.decoded.size() == 32;
+}
+
+/* The secret a typed credential is stored under: `prefix-` and the device's
+ * name, with what a secret's name cannot carry made a dash -- the access
+ * point dialog's rule (10.782). */
+QString stored_name(const QString &prefix, const QString &device)
+{
+	QString stored = prefix + QLatin1Char('-') + device;
+	for (QChar &one : stored) {
+		if (one == QLatin1Char('"') || one == QLatin1Char('\\') || one == QLatin1Char('/') ||
+		    one == QLatin1Char(':') || one == QLatin1Char('.')) {
+			one = QLatin1Char('-');
+		}
+	}
+	return stored;
+}
+
 /* A rate as the language writes one: kbit where it is whole, so the block
  * reads as somebody would type it, and bits where it is not, so nothing is
  * rounded on the way back (10.613). */
@@ -748,15 +782,18 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	tunnel_key->setValue(-1);
 	form->addRow(QStringLiteral("tunnel key"), tunnel_key);
 
-	/* **The private key is a reference, not a key.** netcfgd's document type
-	 * cannot hold key material at all (0042's rule, and the reason a document
-	 * is safe to write to /run), so what this field holds is `@secret:wg0` --
-	 * the name of something the secret store keeps. A password box here would
-	 * be inviting somebody to paste a key into a configuration file. */
+	/* **The key goes to the secret store, never into the block.** netcfgd's
+	 * document type cannot hold key material at all (0042's rule, and the
+	 * reason a document is safe to write to /run). So a key pasted here is
+	 * stored through `secret_put` and the block names it -- the access point
+	 * dialog's arrangement (10.782, 10.805) -- and `@secret:NAME` names one
+	 * stored already. The field once took only the reference and told a
+	 * person to open a terminal. */
 	private_key = new QLineEdit(this);
 	private_key->setObjectName(QStringLiteral("device_private_key"));
-	private_key->setPlaceholderText(QStringLiteral("@secret:wg0 -- `ncfg secret set wg0` "
-	            "puts one there"));
+	private_key->setEchoMode(QLineEdit::PasswordEchoOnEdit);
+	private_key->setPlaceholderText(QStringLiteral("the key `wg genkey` printed, or "
+	            "@secret:NAME"));
 	form->addRow(QStringLiteral("private key"), private_key);
 
 	listen_port = new QSpinBox(this);
@@ -816,13 +853,12 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	username->setPlaceholderText(QStringLiteral("user@isp.example"));
 	form->addRow(QStringLiteral("username"), username);
 
-	/* A reference, like every other credential here: the document type cannot
-	 * hold the password itself. `ncfg secret set isp` is what puts one in the
-	 * store, and this names it. */
+	/* The password, or a reference to one stored already; typed, it is stored
+	 * and the block names it, as the private key above (10.805). */
 	password = new QLineEdit(this);
 	password->setObjectName(QStringLiteral("device_password"));
-	password->setPlaceholderText(QStringLiteral("@secret:isp -- `ncfg secret set isp` "
-	            "puts one there"));
+	password->setEchoMode(QLineEdit::PasswordEchoOnEdit);
+	password->setPlaceholderText(QStringLiteral("the password, or @secret:NAME"));
 	form->addRow(QStringLiteral("password"), password);
 
 	service = new QLineEdit(this);
@@ -1513,9 +1549,9 @@ void ncfg_device_dialog::submit()
 			              "provider gave you"));
 			return;
 		}
-		if (!password->text().trimmed().startsWith(QLatin1String("@secret:"))) {
-			note->setText(QStringLiteral("the password is a reference, not the password: "
-			              "`@secret:isp`, with `ncfg secret set isp` to put one there"));
+		if (password->text().trimmed().isEmpty()) {
+			note->setText(QStringLiteral("a pppoe session needs the password the "
+			              "provider gave you"));
 			return;
 		}
 	}
@@ -1528,21 +1564,16 @@ void ncfg_device_dialog::submit()
 			              "the .ovpn file OpenVPN reads"));
 			return;
 		}
-		if (!password->text().trimmed().isEmpty()
-		    && !password->text().trimmed().startsWith(QLatin1String("@secret:"))) {
-			note->setText(QStringLiteral("the password is a reference, not the password: "
-			              "`@secret:vpn`, with `ncfg secret set vpn` to put one there"));
-			return;
-		}
 	}
 	if (chosen == QLatin1String("wireguard")) {
-		/* **A reference, and it has to look like one.** The document type
-		 * cannot hold key material at all, so a key pasted here would be
-		 * refused by the compiler with a message about a secret name -- said
-		 * beside the field instead, where the mistake is. */
-		if (!private_key->text().trimmed().startsWith(QLatin1String("@secret:"))) {
-			note->setText(QStringLiteral("the private key is a reference, not the key: "
-			              "`@secret:wg0`, with `ncfg secret set wg0` to put one there"));
+		if (private_key->text().trimmed().isEmpty()) {
+			note->setText(QStringLiteral("a wireguard tunnel needs its private key: the "
+			              "one `wg genkey` printed, or @secret:NAME for one stored already"));
+			return;
+		}
+		if (typed_credential(private_key) && !wireguard_key(private_key->text())) {
+			note->setText(QStringLiteral("that is not a wireguard private key: one is 44 "
+			              "characters of base64, as `wg genkey` prints it"));
 			return;
 		}
 		for (int row = 0; row < peers->rowCount(); row++) {
@@ -1557,6 +1588,11 @@ void ncfg_device_dialog::submit()
 		peer, local, remote, private_key, username, password, service, ac, config, owner,
 		group, master };
 	for (const QLineEdit *value : values) {
+		/* A typed credential never reaches the block, so what it may carry is
+		 * the store's business rather than the language's. */
+		if ((value == password || value == private_key) && typed_credential(value)) {
+			continue;
+		}
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
 			              "or a newline"));
@@ -1610,6 +1646,48 @@ void ncfg_device_dialog::submit()
 
 	QString error;
 	const QString written = name->text().trimmed();
+	/* The credential first, so the block never names a secret that is not
+	 * there -- the access point dialog's order (10.782). Only the field the
+	 * chosen kind writes: a password typed under one kind and left behind when
+	 * the kind changed is not stored for nothing. */
+	struct {
+		QLineEdit  *field;
+		const char *kind;
+		const char *prefix;
+	} const credentials[] = {
+		{ private_key, "wireguard", "wg" },
+		{ password, "pppoe", "ppp" },
+		{ password, "openvpn", "vpn" },
+	};
+	for (const auto &one : credentials) {
+		if (chosen != QLatin1String(one.kind) || !typed_credential(one.field)) {
+			continue;
+		}
+		const QString stored = stored_name(QString::fromLatin1(one.prefix), written);
+		const QString value = one.field->text().trimmed();
+		/* Without `replace` first, and asked when something is there: 0042's
+		 * rule, since a WireGuard key nobody else has a copy of cannot be got
+		 * back, and the add-network dialog's way of putting the question. */
+		if (!connection->secret_put(stored, value, false, &error)) {
+			/* Only the refusal that is a question: anything else -- a tier, a
+			 * store that cannot be written -- is the answer. */
+			if (!error.contains(QStringLiteral("already exists"))) {
+				note->setText(error);
+				return;
+			}
+			const QMessageBox::StandardButton answer = QMessageBox::question(this,
+			    QStringLiteral("Replace \"%1\"?").arg(stored),
+			    QStringLiteral("%1\n\nReplace what is stored under \"%2\"? What is there "
+			                   "now cannot be got back.").arg(error, stored),
+			    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+			if (answer != QMessageBox::Yes ||
+			    !connection->secret_put(stored, value, true, &error)) {
+				note->setText(error);
+				return;
+			}
+		}
+		one.field->setText(QStringLiteral("@secret:") + stored);
+	}
 	if (!connection->config_put(QStringLiteral("device-%1").arg(written), block_text(), true,
 	        &error)) {
 		note->setText(error);
