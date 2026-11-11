@@ -95,6 +95,8 @@ int main(int argc, char **argv)
 	check(none.startsWith(QStringLiteral("Nothing was applied")) &&
 	    none.contains(QStringLiteral("secret `ap` was not found")),
 	    "an apply that never started says nothing was applied, and why");
+	check(none.contains(QStringLiteral("secrets tab")),
+	    "  and, being a missing secret, says which tab stores one");
 
 	journal[1].outcome = QStringLiteral("done");
 	journal[0].outcome = QStringLiteral("unmet");

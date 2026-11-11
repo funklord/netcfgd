@@ -12,6 +12,8 @@
 #include "table_view.h"
 
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -55,7 +57,23 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 	}
 	table->add_control(forget_button);
 
+	/* **Storing the one the configuration is missing** (10.807). Since 10.796
+	 * a missing credential stops an apply before it starts, and the only way
+	 * to mend it from here was a terminal. The value is asked for in a
+	 * password field and goes to `secret_put` at once, which is what the
+	 * network, access point and device dialogs already do (10.782, 10.805). */
+	store_button = new QPushButton(QStringLiteral("store..."), this);
+	store_button->setObjectName(QStringLiteral("store_secret"));
+	store_button->setEnabled(false);
+	if (connection->tiers().admin == 0) {
+		store_button->setToolTip(
+		    QStringLiteral("storing a credential needs the admin tier, which this "
+		               "connection does not have"));
+	}
+	table->add_control(store_button);
+
 	connect(forget_button, &QPushButton::clicked, this, &ncfg_secrets_view::forget_selected);
+	connect(store_button, &QPushButton::clicked, this, &ncfg_secrets_view::store_selected);
 	connect(table, &ncfg_table_view::selection_changed, this, [this, connection]() {
 		const int row = table->selected_row();
 		/* **Only a stored one, and only with the tier.** A row that is
@@ -65,6 +83,11 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 		 */
 		const bool stored = row >= 0 && row < shown.size() && shown.at(row).stored;
 		forget_button->setEnabled(stored && connection->tiers().admin != 0);
+		/* And the other half: a MISSING row is what `store` mends. A stored
+		 * one is replaced by forgetting it first, so a value nobody else has
+		 * is never overwritten by a click (0042). */
+		store_button->setEnabled(row >= 0 && row < shown.size() && !stored &&
+		                         connection->tiers().admin != 0);
 	});
 
 	auto *layout = new QVBoxLayout(this);
@@ -122,6 +145,32 @@ void ncfg_secrets_view::forget_selected()
 	emit reported(said);
 }
 
+void ncfg_secrets_view::store_selected()
+{
+	const int row = table->selected_row();
+	if (row < 0 || row >= shown.size() || shown.at(row).stored) {
+		return;
+	}
+	const ncfg_secret_row secret = shown.at(row);
+	bool given = false;
+	const QString value = QInputDialog::getText(this, QStringLiteral("netcfgd"),
+	    QStringLiteral("The value for \"%1\", which %2 refers to:")
+	        .arg(secret.name, secret.used_by.isEmpty() ? QStringLiteral("the configuration")
+	                                                  : secret.used_by),
+	    QLineEdit::Password, QString(), &given);
+	if (!given || value.isEmpty()) {
+		return;
+	}
+	QString error;
+	if (!connection->secret_put(secret.name, value, false, &error)) {
+		table->show_error(error);
+		emit reported(error);
+		return;
+	}
+	refresh();
+	emit reported(QStringLiteral("stored the credential \"%1\"").arg(secret.name));
+}
+
 void ncfg_secrets_view::refresh()
 {
 	QList<ncfg_secret_row> found;
@@ -151,8 +200,8 @@ void ncfg_secrets_view::refresh()
 	if (rows.isEmpty()) {
 		table->set_note(QStringLiteral(
 		    "This machine holds no credentials and its configuration refers to none. A "
-		    "passphrase is stored with `ncfg secret set NAME`, which asks for the value "
-		    "at a prompt, and the configuration refers to it as @secret:NAME."));
+		    "passphrase typed in a network's or a device's dialog is stored here, and the "
+		    "configuration refers to it as @secret:NAME."));
 		emit reported(QStringLiteral("no secrets"));
 		return;
 	}
@@ -163,8 +212,8 @@ void ncfg_secrets_view::refresh()
 	    missing ? QStringLiteral(
 	                  "%1 referred to by the configuration and not stored. A network whose "
 	                  "passphrase is missing never joins, and it fails with an error about "
-	                  "the radio rather than about the credential -- `ncfg secret set NAME` "
-	                  "stores one. Values are never shown here or sent over the socket.")
+	                  "the radio rather than about the credential -- choose it and press "
+	                  "store. Values are never shown here, and only sent to be stored.")
 	                  .arg(missing)
 	            : QStringLiteral(
 	                  "Values are never shown here or sent over the socket -- only names. "

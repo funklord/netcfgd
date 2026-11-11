@@ -315,14 +315,21 @@ QString ncfg_apply_dialog::trouble(const QList<ncfg_record_row> &journal)
 	                                             ? QStringLiteral("this machine")
 	                                             : first->interface,
 	                              first->detail);
+	/* The daemon's sentence for a missing credential ends in the command that
+	 * stores one, which is the CLI's remedy; in this window it is the
+	 * secrets tab (10.807). */
+	const QString remedy = first->detail.contains(QStringLiteral("was not found"))
+	        && first->detail.contains(QStringLiteral("secret"))
+	    ? QStringLiteral(" The secrets tab can store it.")
+	    : QString();
 	if (done == 0) {
-		return QStringLiteral("Nothing was applied. %1").arg(what);
+		return QStringLiteral("Nothing was applied. %1%2").arg(what, remedy);
 	}
-	return QStringLiteral("Applied in part: %1 of %2 actions ran, and %3 did not. %4")
+	return QStringLiteral("Applied in part: %1 of %2 actions ran, and %3 did not. %4%5")
 	    .arg(done)
 	    .arg(journal.size())
 	    .arg(wrong)
-	    .arg(what);
+	    .arg(what, remedy);
 }
 
 void ncfg_apply_dialog::show_journal(const QList<ncfg_record_row> &records)

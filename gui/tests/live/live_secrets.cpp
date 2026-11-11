@@ -32,6 +32,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
@@ -207,6 +208,47 @@ int main(int argc, char **argv)
 	check("and the view says so",
 	    reported.contains(QStringLiteral("forgot the credential")),
 	    QStringLiteral("status was: %1").arg(reported));
+
+	/* **Storing a MISSING one** (10.807): a network that names a credential
+	 * nobody stored, which since 10.796 stops an apply before it starts. The
+	 * value is typed into the password prompt the button opens. */
+	QString wrote;
+	check("a network naming a credential nobody stored can be written",
+	    connection.config_put(QStringLiteral("live-secrets-missing"),
+	        QStringLiteral("network \"LiveSecretsMissing\" {\n\twifi {\n\t\tpsk = "
+	                       "\"@secret:live-secrets-missing\"\n\t}\n}\n"),
+	        true, &wrote),
+	    wrote);
+	view.refresh();
+	QPushButton *store = button(&view, "store...");
+	const int missing = [&]() {
+		for (int i = 0; i < grid->rowCount(); i++) {
+			if (grid->item(i, 0) &&
+			    grid->item(i, 0)->text() == QStringLiteral("live-secrets-missing")) {
+				return i;
+			}
+		}
+		return -1;
+	}();
+	check("the missing credential is listed", missing >= 0);
+	if (store && missing >= 0) {
+		grid->selectRow(missing);
+		QCoreApplication::processEvents();
+		check("choosing a missing row offers store", store->isEnabled());
+		QTimer::singleShot(0, []() {
+			if (auto *ask = qobject_cast<QInputDialog *>(QApplication::activeModalWidget())) {
+				ask->setTextValue(QStringLiteral("correct-horse-battery"));
+				ask->accept();
+			}
+		});
+		store->click();
+		check("typing a value stores it",
+		    settles([&] { return stored(&connection, QStringLiteral("live-secrets-missing")); }));
+	} else {
+		check("the view has a store button", store != nullptr);
+	}
+	connection.config_delete(QStringLiteral("live-secrets-missing"), &wrote);
+	connection.secret_delete(QStringLiteral("live-secrets-missing"), &wrote);
 
 	printf("\n");
 	if (failures) {

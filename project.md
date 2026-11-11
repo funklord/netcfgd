@@ -12688,6 +12688,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.807 A missing credential can be stored from the credentials tab
+
+**The credentials tab names the fault 10.796 now stops an apply for, and could not mend it.**
+A network, access point or tunnel naming a secret nobody stored shows there as MISSING;
+since 10.796 an apply someone asks for does not start over it, and the tab's note said
+`ncfg secret set NAME` stores one -- a terminal, for the people the GUI is for. Its header
+held that a GUI field would be a value in a process that did not need one, a position the
+project left when the network and access point dialogs began storing what is typed (10.782)
+and the device dialog joined them (10.805). So the decision was already taken elsewhere, and
+this tab was the one place still obeying the old one.
+
+`store...` is offered for a MISSING row with the `admin` tier, asks for the value in a
+password field, and sends it to `secret_put` without `replace`. A stored one is not offered:
+replacing goes through `forget` first, so a value nobody else has is never overwritten by a
+click (0042). Nothing is read back, which is the half of the header that stands.
+`live_secrets` writes a network naming a missing credential, stores it through the button,
+and finds it stored. The apply dialog's "Nothing was applied" (10.799), when the failure is
+a secret that was not found, now ends by saying the secrets tab can store it -- the daemon's
+own sentence names `ncfg secret set`, which is the CLI's remedy and not this window's.
+
 ## 10.806 The GUI said "Run apply" for a change netcfgd makes by itself
 
 Sixteen sentences, one after every save -- a device, a network, an interface, a rule, the
