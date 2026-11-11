@@ -12688,6 +12688,29 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.793 qtty fixed two of the TUI's three faults; the pin moves to take them
+
+The three faults 10.777's walk sent qtty (its inbox, 20261110T2049Z) came back answered in
+this tree's inbox (20261110T2226Z and 2310Z, recorded here and deleted). **Headings elided
+while their columns fit** was a one-day-old regression of qtty's own, a separator cell added
+to an item view's size hint and not to `CT_HeaderSection`'s, fixed in qtty 35a09d9 -- found
+from the capture, whose two unelided headings dated it. **The stray rule under a table** was
+a titled `QGroupBox` caching its contents margins once, at construction, while still too
+small to hold a title, so the table started on the title row and lost its bottom edge; fixed
+in qtty 6db49b3. **The doubled frame corner** is nested frames one cell apart on a grid,
+already in qtty's open register and reserved for the copyright holder there; its cheapest
+answer cannot tell nesting from two adjacent framed widgets.
+
+The pin moves from aed244c to qtty's master to take both, 884 commits, and both show in
+netcfgd's own TUI: the saved networks' headings whole and their table's bottom edge drawn,
+captured in tmux against a scratch daemon; all 27 GUI test programs pass against it. That is which is the price
+fdbe571b named -- "a bump whenever qtty moves, paid deliberately" -- paid for a reason.
+
+Also from the inbox, information only: hull before 1ecd97c stored a file owned by uid 1000
+inside an image as root, when the user running hull is uid 1000 too (20261110T2056Z). None of
+netcfgd's ten images has a uid-1000 owner (`hull manifest show REF`, counted), so nothing here
+needs building again.
+
 ## 10.792 An access point on a radio that is switched off waits for the switch
 
 10.791's shape, looked for at once beside it. An access point on a radio whose rfkill switch
