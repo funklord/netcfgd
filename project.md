@@ -12688,6 +12688,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.800 The log named fuzznetd for what is the daemon's own fuzznet node
+
+**The holder, 2026-11-11: "What is a fuzznet node? Isn't fuzznet linked into netcfgd?"** It
+is, since 0313: the daemon runs a fuzznet node in-process -- its identity key, its store, and
+the `fuzznet.sock` other hosts and clients reach it on -- and nobody installs fuzznetd. But
+four messages still said "fuzznetd": the seen-hosts writer's refusal, its listing error and
+its "answers at", and the estate secret's "a fuzznetd beside this daemon did not answer". In
+the daemon those are answered by its own node, so the log sent a reader looking for a
+program that is not there. They say "the fuzznet node" now, which is true in-process and of
+a separate fuzznetd alike. `seen.c`'s comment that linking fuzznet "is what 0269 refuses"
+was older than 0313 and says what the default socket path is for instead.
+
 ## 10.799 The apply dialog said "Applied" for an apply that did not stand
 
 **Found reading how the GUI meets 10.796.** The daemon answers an apply that stopped -- or,

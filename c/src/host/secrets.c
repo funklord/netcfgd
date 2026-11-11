@@ -496,8 +496,8 @@ static ncfg_secret_t *read_estate(const char *name, ncfg_secret_error_t *why, ch
 		fail(why, NCFG_SECRET_FAILED);
 		ncfg_error_set(err, err_size,
 		    "secret `%s` could not be read: it is sealed to a key this host lacks, which an "
-		    "operator mends with `ncfg hosts member HOST GROUP` and sealing it again, or a "
-		    "fuzznetd beside this daemon did not answer", name);
+		    "operator mends with `ncfg hosts member HOST GROUP` and sealing it again, or the "
+		    "fuzznet node did not answer", name);
 		return NULL;
 	}
 	if (answer == 0) {

@@ -88,8 +88,9 @@ ncfg_seen_t *ncfg_seen_new(const char *socket_path)
 	if (socket_path) {
 		wrote = snprintf(seen->socket_path, sizeof(seen->socket_path), "%s", socket_path);
 	} else {
-		/* fuzznetd's own default, `fzn_socket_default_path`, written again
-		 * here because linking fuzznet to ask it is what 0269 refuses. */
+		/* fuzznetd's own default, `fzn_socket_default_path`, for a node that
+		 * is not this process: in-process the face is asked directly
+		 * (`ncfg_seen_in_process`, 10.676). */
 		run = getenv("XDG_RUNTIME_DIR");
 		wrote = run && run[0] == '/'
 		    ? snprintf(seen->socket_path, sizeof(seen->socket_path),
@@ -242,7 +243,7 @@ static int add_record(const ncfg_seen_t *seen, const char *key, const char *valu
 	if (strcmp(reply, "ok") == 0) {
 		return 1;
 	}
-	(void)snprintf(why, why_size, "fuzznetd refused %s: %s", key, reply);
+	(void)snprintf(why, why_size, "the fuzznet node refused %s: %s", key, reply);
 	return 0;
 }
 
@@ -354,7 +355,8 @@ static int consider(ncfg_seen_t *seen, const char *interface, const char *mac,
 	}
 	if (seen->said_silent) {
 		ncfg_log_emitf("seen", NCFG_LOG_NOTE,
-		    "fuzznetd answers at %s, and the hosts this machine sees are written there",
+		    "the fuzznet node answers at %s, and the hosts this machine sees are written "
+		    "there",
 		    seen->socket_path);
 		seen->said_silent = 0;
 	}
@@ -589,7 +591,7 @@ void ncfg_seen_read(ncfg_seen_t *seen, uint64_t now)
 		listed = ncfg_seen_parse_listing(reply, seen->reading, &seen->reading_count,
 		    NCFG_SEEN_STATIONS_MAX, &more);
 		if (listed < 0) {
-			(void)snprintf(why, sizeof(why), "fuzznetd answered `%.80s`", reply);
+			(void)snprintf(why, sizeof(why), "the fuzznet node answered `%.80s`", reply);
 			listing_stopped(seen, now, why);
 			return;
 		}
