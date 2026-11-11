@@ -1426,6 +1426,9 @@ public:
 	 * daemon reconciles a changed configuration on its own -- so ask first.
 	 */
 	bool profile_set(const QString &name, QString *error);
+	/* Delete a profile that `profile_save` made (10.801). Needs `admin`; the
+	 * daemon refuses the one in use, a shipped one, and one written by hand. */
+	bool profile_delete(const QString &name, QString *error);
 
 	/*
 	 * Apply, with a confirm window in seconds or 0 for none.

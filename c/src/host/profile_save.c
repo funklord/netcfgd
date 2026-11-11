@@ -49,6 +49,7 @@
 #include "ncfg/render.h"
 #include "ncfg_json.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -620,4 +621,120 @@ int ncfg_profile_save(const char *config_dir, const char *factory_dir, const cha
 	free(snapshot);
 	free(directory);
 	return ok;
+}
+
+/*
+ * Whether `directory` holds the snapshot and nothing else. A file beside it
+ * was put there by somebody, and taking the directory would take it too.
+ */
+static int only_the_snapshot(const char *directory)
+{
+	DIR           *listing = opendir(directory);
+	struct dirent *entry;
+	int            alone = 1;
+
+	if (!listing) {
+		return 0;
+	}
+	while ((entry = readdir(listing)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 ||
+		    strcmp(entry->d_name, SNAPSHOT_LEAF) == 0) {
+			continue;
+		}
+		alone = 0;
+		break;
+	}
+	(void)closedir(listing);
+	return alone;
+}
+
+int ncfg_profile_delete(const char *config_dir, const char *factory_dir, const char *name,
+    const char *chosen, int *removed, int *denied, char *err, size_t err_size)
+{
+	int                   shipped = 0;
+	struct stat           about;
+	char                 *profile_root;
+	char                 *directory;
+	char                 *snapshot;
+	int                   failure;
+
+	if (denied) {
+		*denied = 0;
+	}
+	if (removed) {
+		*removed = 0;
+	}
+	if (!ncfg_profile_name_usable(name, err, err_size)) {
+		return 0;
+	}
+	/* The one in use is refused rather than taken from under the machine: its
+	 * selection would name a directory that is gone, and the next reload
+	 * would fail on it. Switching away first is the remedy, and it is a
+	 * decision about what the machine runs, which a delete should not make. */
+	if (chosen && strcmp(chosen, name) == 0) {
+		ncfg_error_set(err, err_size,
+		    "`%s` is the profile in use; switch to another, or to none, before deleting it",
+		    name);
+		return 0;
+	}
+	profile_root = ncfg_host_join(config_dir, "profile", err, err_size);
+	directory = profile_root ? ncfg_host_join(profile_root, name, err, err_size) : NULL;
+	free(profile_root);
+	if (!directory) {
+		return 0;
+	}
+	if (stat(directory, &about) != 0 || !S_ISDIR(about.st_mode)) {
+		if (factory_dir && factory_dir[0] != '\0') {
+			char  quiet[NCFG_ERROR_MAX];
+			char *factory_root = ncfg_host_join(factory_dir, "profile", quiet,
+			    sizeof(quiet));
+			char *factory = factory_root ? ncfg_host_join(factory_root, name, quiet,
+			    sizeof(quiet)) : NULL;
+
+			shipped = factory && stat(factory, &about) == 0 && S_ISDIR(about.st_mode);
+			free(factory);
+			free(factory_root);
+		}
+		free(directory);
+		if (shipped) {
+			ncfg_error_set(err, err_size,
+			    "`%s` came with this machine, so there is nothing of yours to delete", name);
+			return 0;
+		}
+		/* Absent is the end state asked for, as `config_delete` has it:
+		 * deleting twice leaves it deleted. `removed` says which it was. */
+		return 1;
+	}
+	snapshot = ncfg_host_join(directory, SNAPSHOT_LEAF, err, err_size);
+	if (!snapshot) {
+		free(directory);
+		return 0;
+	}
+	/* 9.4's rule from this side: what netcfgd did not write, it does not
+	 * delete. A saved profile is its snapshot and nothing else. */
+	if (stat(snapshot, &about) != 0 || !only_the_snapshot(directory)) {
+		ncfg_error_set(err, err_size,
+		    "`%s` was written by hand (%s), so it is not netcfgd's to delete; remove that "
+		    "directory yourself if it should go", name, directory);
+		free(snapshot);
+		free(directory);
+		return 0;
+	}
+	if (unlink(snapshot) != 0 || rmdir(directory) != 0) {
+		failure = errno;
+		if (denied && (failure == EACCES || failure == EPERM || failure == EROFS)) {
+			*denied = 1;
+		}
+		ncfg_error_set(err, err_size, "could not delete `%s` (%s): %s", name, directory,
+		    strerror(failure));
+		free(snapshot);
+		free(directory);
+		return 0;
+	}
+	free(snapshot);
+	free(directory);
+	if (removed) {
+		*removed = 1;
+	}
+	return 1;
 }

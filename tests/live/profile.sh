@@ -324,6 +324,20 @@ missing "which is not silently the other one" "$snapshot" "allow = ["
 again=$("$ncfg" profile save weekend 2>&1 || true)
 contains "saving over one that exists is refused" "$again" "already exists"
 
+# --- deleting (10.801), through the daemon like every verb here
+
+# `weekend` is the one in use, having just been saved and selected.
+inuse=$("$ncfg" profile delete weekend 2>&1 || true)
+contains "the profile in use is not deleted" "$inuse" "is the profile in use"
+check "  and is still there" \
+	"$([ -d "$work/etc/profile/weekend" ] && echo yes || echo no)" "yes"
+shipped=$("$ncfg" profile delete offline 2>&1 || true)
+contains "nor the one that came with the machine" "$shipped" "came with this machine"
+byhand=$("$ncfg" profile delete office 2>&1 || true)
+contains "nor one written by hand" "$byhand" "written by hand"
+check "  whose file is left alone" \
+	"$([ -f "$work/etc/profile/office/10-office.conf" ] && echo yes || echo no)" "yes"
+
 # --- unsetting
 
 "$ncfg" profile unset > "$work/unset.log" 2>&1 ||
@@ -336,6 +350,15 @@ mtu=$("$ncfg" show 2>/dev/null |
 	python3 -c 'import sys,json; print(json.load(sys.stdin)["devices"][0].get("mtu"))' 2>/dev/null ||
 	echo "unreadable")
 check "and the machine's own configuration is back" "$mtu" "1500"
+
+"$ncfg" profile delete weekend > "$work/delete.log" 2>&1 ||
+	{ echo "FAIL could not delete weekend"; cat "$work/delete.log"; failures=$((failures + 1)); }
+check "a saved profile no longer in use is deleted" \
+	"$([ -d "$work/etc/profile/weekend" ] && echo there || echo gone)" "gone"
+missing "and is no longer listed" "$("$ncfg" profile list 2>&1)" "weekend"
+typo=$("$ncfg" profile delete weekend 2>&1 || true)
+contains "deleting it again says there is none, rather than succeeding" "$typo" \
+	"no profile called"
 
 if [ "$failures" -eq 0 ]; then
 	echo

@@ -329,6 +329,8 @@ typedef enum {
 	NCFG_PROTO_REQ_AP_STATIONS,
 	NCFG_PROTO_REQ_RADIOS,
 	NCFG_PROTO_REQ_RADIO_SET,
+	/* `name` in `u.name`, required (10.801). */
+	NCFG_PROTO_REQ_PROFILE_DELETE,
 	/* Not a request. The bound every exhaustive walk in this module uses in
 	 * place of the `match` the Rust gets checked for it. */
 	NCFG_PROTO_REQ_COUNT

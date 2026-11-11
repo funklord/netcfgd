@@ -705,4 +705,18 @@ int ncfg_profile_save(const char *config_dir, const char *factory_dir, const cha
     int replace, const ncfg_document_t *running, const char *how_to_replace, char **path_out,
     int *denied, char *err, size_t err_size);
 
+/*
+ * Delete a profile `ncfg_profile_save` wrote (10.801).
+ *
+ * Refused for the profile in use (`chosen`, which the caller knows from what
+ * it compiled or from the daemon's document; NULL is none), for one shipped
+ * with the machine and not the operator's, and for a directory holding
+ * anything but the snapshot -- written by hand, which 9.4 keeps from
+ * clients. A profile that is not there is success with `removed` 0, as
+ * `config_delete` has it. `denied` says a refusal was the filesystem's
+ * permission, so the CLI can say to ask the daemon. Either may be NULL.
+ */
+int ncfg_profile_delete(const char *config_dir, const char *factory_dir, const char *name,
+    const char *chosen, int *removed, int *denied, char *err, size_t err_size);
+
 #endif /* NCFG_CONFIG_H */

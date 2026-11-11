@@ -9,7 +9,7 @@
  *   what it cannot say is that this build can PRODUCE the file.
  *
  * WHAT IT DOES
- *   Writes all 67 lines, in the file's order, each through the encoder the
+ *   Writes all 68 lines, in the file's order, each through the encoder the
  *   daemon answers with -- and compares what it wrote against what is
  *   committed, so the comparison and the bless are the same program. Four
  *   groups:
@@ -38,7 +38,7 @@
  * TERMINATION, SINCE THIS FORKS
  *   Three python fakes, each under `timeout 60`, started once and stopped on
  *   every exit path including the failing ones. No loop over anything but the
- *   67 lines. `fakewifi.h` carries the detail and the reason the kill has to
+ *   68 lines. `fakewifi.h` carries the detail and the reason the kill has to
  *   reach a process group.
  */
 #include "fakewifi.h"
@@ -86,9 +86,9 @@ static void detail(const char *what, const char *why)
 #define LINE_MAX      131072u
 #define WITNESS_LINES 128u
 /* What the file holds, and what this must therefore produce. Asserted rather
- * than assumed: a builder that wrote 61 lines over a 67-line file would be a
+ * than assumed: a builder that wrote 61 lines over a 68-line file would be a
  * silent truncation of the frozen surface. */
-#define WITNESS_COUNT 67u
+#define WITNESS_COUNT 68u
 
 static char  *lines[WITNESS_LINES];
 /* What this build produced, in the order it produced it. The file is written
@@ -249,7 +249,7 @@ static void the_requests(void)
 		ncfg_buf_free(&out);
 		ncfg_proto_message_free(&message);
 	}
-	check(made_count == 41u, "the first 41 lines are requests, each re-encoded here");
+	check(made_count == 42u, "the first 42 lines are requests, each re-encoded here");
 	for (; at < line_count; at++) {
 		if (strncmp(lines[at], "{\"request\":", 11u) == 0) {
 			check(0, "and no request line sits below them, which the order needs");
@@ -991,7 +991,7 @@ int main(int argc, char **argv)
 	stop_fakes();
 	testdir_remove(testdir_path);
 
-	check(made_count == WITNESS_COUNT, "this build produces all 67 lines of the witness");
+	check(made_count == WITNESS_COUNT, "this build produces all 68 lines of the witness");
 	if (made_count != WITNESS_COUNT) {
 		printf("  %zu produced, %zu in the file\n", made_count, line_count);
 	}

@@ -234,6 +234,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_CONFIG_PUT:
 	case NCFG_PROTO_REQ_PROFILE_SAVE:
 	case NCFG_PROTO_REQ_PROFILE_SET:
+	case NCFG_PROTO_REQ_PROFILE_DELETE:
 	case NCFG_PROTO_REQ_SECRET_PUT:
 	case NCFG_PROTO_REQ_CONFIG_DELETE:
 	case NCFG_PROTO_REQ_SECRET_DELETE:
@@ -596,6 +597,28 @@ static int answer_profile_set(ncfg_main_desk_t *desk, ncfg_proto_str_t which, nc
 	}
 	if (!ncfg_profile_set(desk->state->paths.config, desk->state->paths.factory, name,
 	    NULL, &denied, err, err_size)) {
+		return 0;
+	}
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+/*
+ * Delete a saved profile (10.801). Not a configuration write: a profile
+ * directory is read only while it is the chosen one, and the chosen one is
+ * refused -- by the name in the document this daemon is running, which is the
+ * selection that matters here rather than one written and not yet loaded.
+ */
+static int answer_profile_delete(ncfg_main_desk_t *desk, ncfg_proto_str_t which,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	char        name[NAME_MAX_BYTES];
+	const char *chosen = desk->state->desired ? desk->state->desired->globals.profile : NULL;
+
+	if (!name_of(which, "profile name", name, sizeof(name), err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_profile_delete(desk->state->paths.config, desk->state->paths.factory, name,
+	    chosen, NULL, NULL, err, err_size)) {
 		return 0;
 	}
 	return ncfg_daemon_ok_encode(out, err, err_size);
@@ -1394,6 +1417,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_PROFILE_SAVE:
 		return wrote_configuration(desk,
 		    answer_profile_save(desk, &request->u.profile_save, out, err, err_size));
+	case NCFG_PROTO_REQ_PROFILE_DELETE:
+		return answer_profile_delete(desk, request->u.name, out, err, err_size);
 	/*
 	 * Every kind `ncfg_main_answer_unported` answered with a sentence, listed
 	 * so that `-Wswitch` notices a request added to the protocol and reaching

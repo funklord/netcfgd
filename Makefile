@@ -942,14 +942,14 @@ apk-source:
 # is the one built from values in a test, as it was in the Rust.
 #
 # `socket.json` is a generator, `c/tests/socket_witness_test.c`, and it is the
-# only one of the four that is a message set rather than one value: 67 lines,
+# only one of the four that is a message set rather than one value: 68 lines,
 # each written by the encoder the daemon answers with, in an order the builder
 # owns rather than reads. Six of them are the wifi answers and are produced by
 # asking the repository's fake supplicant and fake hostapd, which is why this
 # target forks three python processes; 0281 re-authored those six lines to what
 # the fakes answer, since no fixture here could produce what they used to say.
 #
-# It compares as well as writes, so `make check` holds all 67 lines byte for
+# It compares as well as writes, so `make check` holds all 68 lines byte for
 # byte and this target is the deliberate way to move them.
 schema-bless:
 	@$(MAKE) --no-print-directory -C c tests/observed_test tests/document_test \

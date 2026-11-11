@@ -623,12 +623,80 @@ static int unset(const ncfg_cli_options_t *options, char *err, size_t err_size)
 	return 1;
 }
 
+/*
+ * Delete a profile `save` made (10.801). The name is checked against the
+ * list first, so a typo is said rather than taken as a profile already gone;
+ * the rest -- the one in use, a shipped one, one written by hand -- is the
+ * library's refusal, asked of the daemon where one listens.
+ */
+static int delete_profile(const char **rest, size_t count, const ncfg_cli_options_t *options,
+    char *err, size_t err_size)
+{
+	char        socket_path[NCFG_CLI_PATH_MAX];
+	char        config_dir[NCFG_CLI_PATH_MAX];
+	char        factory_dir[NCFG_CLI_PATH_MAX];
+	char        said[NCFG_ERROR_MAX];
+	listing_t   found;
+	const char *name;
+	char       *chosen = NULL;
+	int         denied = 0;
+	int         ok;
+
+	if (count == 0) {
+		ncfg_error_set(err, err_size,
+		    "`ncfg profile delete` needs a name; `ncfg profile list` shows them");
+		return 0;
+	}
+	name = rest[0];
+	if (!profile_dirs(options, &found, err, err_size)) {
+		listing_free(&found);
+		return 0;
+	}
+	if (!is_known(&found, name)) {
+		listing_free(&found);
+		ncfg_error_set(err, err_size, "no profile called `%s`", name);
+		return 0;
+	}
+	listing_free(&found);
+	if (!ncfg_cli_daemon_socket(options, socket_path, sizeof(socket_path))) {
+		ncfg_error_set(err, err_size,
+		    "the run directory makes a socket path too long to connect to");
+		return 0;
+	}
+	if (ncfg_cli_daemon_listening(socket_path)) {
+		ncfg_proto_request_t request;
+
+		memset(&request, 0, sizeof(request));
+		request.kind = NCFG_PROTO_REQ_PROFILE_DELETE;
+		request.u.name = ncfg_proto_str(name);
+		if (!ncfg_cli_ask_ok(socket_path, &request, err, err_size)) {
+			return 0;
+		}
+	} else {
+		if (!active(options, &chosen, err, err_size)) {
+			return 0;
+		}
+		(void)ncfg_config_resolve_dir(options->config_dir, config_dir, sizeof(config_dir));
+		(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
+		    sizeof(factory_dir));
+		ok = ncfg_profile_delete(config_dir, factory_dir, name, chosen, NULL, &denied, said,
+		    sizeof(said));
+		free(chosen);
+		if (!ok) {
+			ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
+			return 0;
+		}
+	}
+	ncfg_out_writef("deleted the profile `%s`\n", name);
+	return 1;
+}
+
 int ncfg_cli_profile(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
 	if (count == 0) {
 		ncfg_error_set(err, err_size,
-		    "`ncfg profile` takes `get`, `set`, `save`, `unset` or `list`");
+		    "`ncfg profile` takes `get`, `set`, `save`, `unset`, `delete` or `list`");
 		return 0;
 	}
 	if (strcmp(positional[0], "get") == 0) {
@@ -646,8 +714,12 @@ int ncfg_cli_profile(const ncfg_cli_options_t *options, const char **positional,
 	if (strcmp(positional[0], "unset") == 0) {
 		return unset(options, err, err_size);
 	}
+	if (strcmp(positional[0], "delete") == 0) {
+		return delete_profile(positional + 1, count - 1, options, err, err_size);
+	}
 	ncfg_error_set(err, err_size,
-	    "unknown profile subcommand `%.*s`; it is `get`, `set`, `save`, `unset` or `list`",
+	    "unknown profile subcommand `%.*s`; it is `get`, `set`, `save`, `unset`, `delete` or "
+	    "`list`",
 	    (int)NCFG_CLI_TEXT_MAX, positional[0]);
 	return 0;
 }

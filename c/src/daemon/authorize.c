@@ -164,6 +164,8 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	 * because a caller asking to delete has already said it once. What guards
 	 * it is this tier and nothing else. */
 	[NCFG_PROTO_REQ_CONFIG_DELETE] = NCFG_TIER_ADMIN,
+	/* As `profile_save`, which made what this takes away. */
+	[NCFG_PROTO_REQ_PROFILE_DELETE] = NCFG_TIER_ADMIN,
 	[NCFG_PROTO_REQ_SECRET_DELETE] = NCFG_TIER_ADMIN
 };
 

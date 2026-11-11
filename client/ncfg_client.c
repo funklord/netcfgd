@@ -6992,6 +6992,16 @@ int ncfg_client_config_delete(ncfg_client_t *client, const char *name, char *err
 	return delete_by_name(client, "config_delete", name, err, err_size);
 }
 
+int ncfg_client_profile_delete(ncfg_client_t *client, const char *name, char *err,
+                   size_t err_size)
+{
+	if (!name || !*name) {
+		set_error(err, err_size, "no profile to delete");
+		return 0;
+	}
+	return delete_by_name(client, "profile_delete", name, err, err_size);
+}
+
 int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err,
                   size_t err_size)
 {

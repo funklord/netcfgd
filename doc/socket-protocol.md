@@ -145,7 +145,7 @@ reach.
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `probe_put` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
 
 **All thirty-two, and it stayed at twenty-three for a long time.** The nine
 that were missing -- the five listings, `radio_set`, and the three that write a
@@ -294,6 +294,12 @@ first glance:
   a caller asking to delete has said it once already. What guards it is the
   `admin` tier and nothing else, which is worth knowing before a client offers
   a button for it.
+
+- **`profile_delete` is `profile_save` undone**, at its tier (10.801). It
+  takes only what `save` wrote -- a directory holding its snapshot and nothing
+  else -- and refuses the profile the running document has chosen, a shipped
+  one, and one written by hand. A profile already gone is success, as for
+  `config_delete`.
 
 ## Local and remote
 

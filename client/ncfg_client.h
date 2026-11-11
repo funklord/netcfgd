@@ -2270,6 +2270,14 @@ int ncfg_client_profile_set(ncfg_client_t *client, const char *name, char *err,
                             size_t err_size);
 
 /*
+ * Delete a profile `ncfg_client_profile_save` made (10.801). Needs `admin`.
+ * The daemon refuses the one in use, a shipped one and one written by hand;
+ * one already gone is success, as for config_delete.
+ */
+int ncfg_client_profile_delete(ncfg_client_t *client, const char *name, char *err,
+                   size_t err_size);
+
+/*
  * The link-detection scripts netcfgd can see. Needs `observe`.
  *
  * **Asked of the daemon rather than read off the disk, and that is the whole

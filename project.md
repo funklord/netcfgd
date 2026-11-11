@@ -12688,6 +12688,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.801 A saved profile can be deleted
+
+**From 10.778's list: no profile could be deleted** -- not from the GUI's profiles tab and
+not from `ncfg`, though both could save one. A profile saved by mistake, or for a place
+somebody no longer goes, stayed in the list for good unless somebody went to
+`/etc/netcfgd/profile` by hand, which is what the GUI exists to spare a person.
+
+`ncfg_profile_delete` takes only what `ncfg_profile_save` wrote: a directory under the
+operator's `profile/` holding its `00-saved.conf` and nothing else. It refuses the profile in
+use -- its selection would name a directory that is gone and the next load would fail; the
+remedy is switching away, which is a decision about what the machine runs and not one a
+delete should make -- one shipped with the machine, which has nothing of the operator's, and
+one written by hand, which 9.4 keeps from clients. One already gone is success, as for
+`config_delete`, so `profile_delete` is idempotent in `idempotence.c`'s table; `ncfg profile delete`
+checks the list first so that a typo is still "no profile called".
+
+**A new request, `profile_delete`**, at `admin` like `profile_save`, answered by the
+daemon against the profile its running document has chosen. It is additive -- a client
+older than this daemon never sends it -- and `doc/schema/socket.json` gains its line (68).
+The GUI's profiles tab has `delete`, offered only for this machine's own profile that is not
+in use, asked first. `tests/live/profile.sh` holds the refusals and the delete through a
+running daemon; `gui/tests/live/live_profiles.cpp` presses the button, No then Yes, and
+asserts the daemon's list.
+
 ## 10.800 The log named fuzznetd for what is the daemon's own fuzznet node
 
 **The holder, 2026-11-11: "What is a fuzznet node? Isn't fuzznet linked into netcfgd?"** It
@@ -13052,8 +13076,8 @@ have since taken the plan's warnings, the narrow dialogs, the repeated drift, th
 the profile offered twice, UPnP's order, the access tab's banner, the events' time and the
 hooks tab saying where a hook is added -- the links tab, configure, then hooks): a
 renamed DNS record's read-only name field looks editable and says nothing; the selection
-moves to the next row after a delete; no profile can be deleted; the hooks tab cannot itself
-start a hook; and backticks,
+moves to the next row after a delete; ~~no profile can be deleted~~ (10.801); the hooks tab
+cannot itself start a hook; and backticks,
 `ncfg` commands and op names reach a person's eye in many help lines. Each is small, and
 each is what a laptop's owner meets.
 

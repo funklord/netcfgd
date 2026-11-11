@@ -39,12 +39,18 @@ ncfg_profiles_view::ncfg_profiles_view(ncfg_connection *connection, QWidget *par
 	save_button->setObjectName(QStringLiteral("save_profile"));
 	table->add_control(save_button);
 
+	delete_button = new QPushButton(QStringLiteral("delete"), this);
+	delete_button->setObjectName(QStringLiteral("delete_profile"));
+	delete_button->setEnabled(false);
+	table->add_control(delete_button);
+
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
 	layout->addWidget(table);
 
 	connect(use_button, &QPushButton::clicked, this, &ncfg_profiles_view::use_selected);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_profiles_view::save_current);
+	connect(delete_button, &QPushButton::clicked, this, &ncfg_profiles_view::delete_selected);
 	connect(table, &ncfg_table_view::activated, this, &ncfg_profiles_view::use_selected);
 	/* Not for the profile already in use (10.786): it asked "Switch to the
 	 * `home` profile?" of the one the machine was on, a question whose only
@@ -52,6 +58,12 @@ ncfg_profiles_view::ncfg_profiles_view(ncfg_connection *connection, QWidget *par
 	connect(table, &ncfg_table_view::selection_changed, this, [this]() {
 		use_button->setEnabled(table->selected_row() >= 0 &&
 		                       table->selected_cell(2) != QStringLiteral("yes"));
+		/* Only this machine's own, and not the one in use (10.801): a shipped
+		 * profile has nothing of the operator's to delete, and the daemon
+		 * refuses the one in use. One written by hand is refused by the
+		 * daemon with the sentence that says where it is. */
+		delete_button->setEnabled(deletable(table->selected_cell(0), table->selected_cell(1),
+		    table->selected_cell(2)));
 	});
 }
 
@@ -138,6 +150,38 @@ void ncfg_profiles_view::use_selected()
 	}
 	refresh();
 	emit changed();
+}
+
+bool ncfg_profiles_view::deletable(const QString &name, const QString &source,
+    const QString &in_use)
+{
+	return !name.isEmpty() && name != QString::fromLatin1(none_chosen) &&
+	       source == QStringLiteral("this machine's") && in_use != QStringLiteral("yes");
+}
+
+void ncfg_profiles_view::delete_selected()
+{
+	const QString name = table->selected_cell(0);
+	if (!deletable(name, table->selected_cell(1), table->selected_cell(2))) {
+		return;
+	}
+	const QMessageBox::StandardButton answer = QMessageBox::question(this,
+	    QStringLiteral("netcfgd"),
+	    QStringLiteral("Delete the profile \"%1\"?\n\nWhat it saved is gone; the "
+	                   "network is not changed, since it is not in use.")
+	        .arg(name),
+	    QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+	if (answer != QMessageBox::Yes) {
+		return;
+	}
+	QString error;
+	if (!connection->profile_delete(name, &error)) {
+		QMessageBox::warning(this, QStringLiteral("netcfgd"), error);
+		emit reported(error);
+		return;
+	}
+	emit reported(QStringLiteral("deleted the profile \"%1\"").arg(name));
+	refresh();
 }
 
 void ncfg_profiles_view::save_current()

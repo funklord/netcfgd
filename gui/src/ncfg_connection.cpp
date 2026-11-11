@@ -973,6 +973,26 @@ bool ncfg_connection::probes(QList<ncfg_probe_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::profile_delete(const QString &name, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray which = name.toUtf8();
+	if (!ncfg_client_profile_delete(client, which.constData(), message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::profile_set(const QString &name, QString *error)
 {
 	if (!client) {

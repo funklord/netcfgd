@@ -51,12 +51,20 @@ private slots:
 	 * effective document rendered back out, which only the machine holding
 	 * it can produce -- this client does not have the text. */
 	void save_current();
+	/* Delete the selected profile, asking first. Needs `admin` (10.801). */
+	void delete_selected();
+
+public:
+	/* Whether a row may be offered for deletion: this machine's own, and not
+	 * the one in use. Public for the headless probe. */
+	static bool deletable(const QString &name, const QString &source, const QString &in_use);
 
 private:
 	ncfg_connection *connection;
 	ncfg_table_view *table;
 	QPushButton     *use_button;
 	QPushButton     *save_button;
+	QPushButton     *delete_button;
 };
 
 #endif /* NCFG_PROFILES_VIEW_H */

@@ -77,6 +77,7 @@ static const struct {
 	{ NCFG_PROTO_REQ_WIFI_ADD, NCFG_ORDER_IDEMPOTENT, "the block is present" },
 	{ NCFG_PROTO_REQ_WIFI_FORGET, NCFG_ORDER_IDEMPOTENT, "the block is absent" },
 	{ NCFG_PROTO_REQ_PROFILE_SET, NCFG_ORDER_IDEMPOTENT, "that profile is selected" },
+	{ NCFG_PROTO_REQ_PROFILE_DELETE, NCFG_ORDER_IDEMPOTENT, "deleted twice is deleted" },
 	{ NCFG_PROTO_REQ_RADIO_SET, NCFG_ORDER_IDEMPOTENT, "the radio is in that state" },
 	{ NCFG_PROTO_REQ_APPLY, NCFG_ORDER_IDEMPOTENT, "convergence converges" },
 	{ NCFG_PROTO_REQ_RELOAD, NCFG_ORDER_IDEMPOTENT, "re-reading reads the same" },
