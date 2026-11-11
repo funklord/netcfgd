@@ -12688,6 +12688,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.802 After a delete, nothing is selected rather than the next row
+
+**From 10.778's list: the selection moved to the next row after a delete.** Every tab is an
+`ncfg_table_view`, and every refresh replaced its rows with `setRowCount` and new items,
+which keeps the current row's *number*. Delete the second of three and the third became
+current -- highlighted, and `selected_row()` answering for it -- so the tab's delete button
+stayed live on an item nobody had chosen, one more press from going too. Every tab whose
+buttons ask `selected_row()` or `selected_cell()` had it.
+
+`show_rows` now keeps the choice on the item rather than the index: it remembers the chosen
+row's first column, and after the refresh selects the row with it, wherever it moved, or
+nothing when it is gone, then tells the view so its buttons follow. A first column that
+repeats picks its first row, which is no worse than before. `gui/tests/table_selection.cpp`
+states the cases; the old `show_rows` fails three of them.
+
 ## 10.801 A saved profile can be deleted
 
 **From 10.778's list: no profile could be deleted** -- not from the GUI's profiles tab and
@@ -13076,7 +13091,7 @@ have since taken the plan's warnings, the narrow dialogs, the repeated drift, th
 the profile offered twice, UPnP's order, the access tab's banner, the events' time and the
 hooks tab saying where a hook is added -- the links tab, configure, then hooks): a
 renamed DNS record's read-only name field looks editable and says nothing; the selection
-moves to the next row after a delete; ~~no profile can be deleted~~ (10.801); the hooks tab
+moves to the next row after a delete (~~fixed~~, 10.802); ~~no profile can be deleted~~ (10.801); the hooks tab
 cannot itself start a hook; and backticks,
 `ncfg` commands and op names reach a person's eye in many help lines. Each is small, and
 each is what a laptop's owner meets.

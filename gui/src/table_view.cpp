@@ -6,6 +6,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QSignalBlocker>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -44,15 +45,43 @@ ncfg_table_view::ncfg_table_view(const QStringList &columns, const QString &obje
 void ncfg_table_view::show_rows(const QList<QStringList> &rows)
 {
 	const int columns = table->columnCount();
-	table->setRowCount(rows.size());
-	for (int row = 0; row < rows.size(); row++) {
-		const QStringList &cells = rows.at(row);
-		for (int column = 0; column < columns; column++) {
-			table->setItem(row, column, new QTableWidgetItem(cells.value(column)));
+	/*
+	 * **The selection follows the item, not the index** (10.802). Qt keeps the
+	 * current row's number when the rows are replaced, so after a delete the
+	 * row below the deleted one became current -- and every button that asks
+	 * `selected_row()` stayed live on an item nobody chose, one press from
+	 * deleting it too. The item is found again by its first column; one that
+	 * is gone leaves nothing selected.
+	 */
+	const QString kept = table->currentRow() >= 0 && table->selectionModel() &&
+	                             table->selectionModel()->hasSelection()
+	                         ? selected_cell(0)
+	                         : QString();
+	int found = -1;
+
+	{
+		const QSignalBlocker quiet(table);
+		table->setRowCount(rows.size());
+		for (int row = 0; row < rows.size(); row++) {
+			const QStringList &cells = rows.at(row);
+			for (int column = 0; column < columns; column++) {
+				table->setItem(row, column, new QTableWidgetItem(cells.value(column)));
+			}
+			if (found < 0 && !kept.isEmpty() && cells.value(0) == kept) {
+				found = row;
+			}
+		}
+		table->clearSelection();
+		if (found >= 0) {
+			table->setCurrentCell(found, 0);
+			table->selectRow(found);
+		} else {
+			table->setCurrentCell(-1, -1);
 		}
 	}
 	table->resizeColumnsToContents();
 	table->horizontalHeader()->setStretchLastSection(true);
+	emit selection_changed();
 }
 
 void ncfg_table_view::show_error(const QString &error)
