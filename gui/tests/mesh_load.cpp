@@ -155,6 +155,10 @@ int main(int argc, char **argv)
 		auto *id = dialog.findChild<QLineEdit *>(QStringLiteral("mesh_id"));
 		check(id && id->isReadOnly() ? QStringLiteral("fixed") : QStringLiteral("editable"),
 		    QStringLiteral("fixed"), "  its ID is fixed, since every node shares it");
+		check(id && !id->hasFrame() && id->toolTip().contains(QStringLiteral("rename"))
+		        ? QStringLiteral("says so")
+		        : QStringLiteral("silent"),
+		    QStringLiteral("says so"), "  drawn without a box, and saying how to rename");
 		check(save(&dialog), QStringLiteral("saved"), "  and it saves unchanged");
 	}
 	check(listed(&connection), before, "  and netcfgd compiles back the same mesh");

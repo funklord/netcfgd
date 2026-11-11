@@ -9,6 +9,7 @@
  * without a daemon.
  */
 #include "device_dialog.h"
+#include "fixed_name.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -641,7 +642,7 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	/* Fixed once there is something to edit: the name is the block's and the
 	 * drop-in's filename, so changing it would write a second device and leave
 	 * the first. */
-	this->name->setReadOnly(!name.isEmpty());
+	ncfg_fix_name(this->name, !name.isEmpty(), QStringLiteral("device"));
 	this->name->setPlaceholderText(QStringLiteral("br0, bond0, eth0.42"));
 	form->addRow(QStringLiteral("name"), this->name);
 

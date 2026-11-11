@@ -2,6 +2,7 @@
  * host_list_dialog.cpp -- the editor described in host_list_dialog.h.
  */
 #include "host_list_dialog.h"
+#include "fixed_name.h"
 
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -40,7 +41,7 @@ ncfg_host_list_dialog::ncfg_host_list_dialog(ncfg_connection *connection,
 	name = new QLineEdit(existing.name, this);
 	name->setObjectName(QStringLiteral("host_list_name"));
 	name->setPlaceholderText(QStringLiteral("family -- named as @host_list:family"));
-	name->setReadOnly(!before.isEmpty());
+	ncfg_fix_name(name, !before.isEmpty(), QStringLiteral("host list"));
 	form->addRow(QStringLiteral("name"), name);
 
 	members = new QPlainTextEdit(existing.mac.join(QLatin1Char('\n')), this);

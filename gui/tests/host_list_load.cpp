@@ -156,6 +156,12 @@ int main(int argc, char **argv)
 		auto *name = dialog.findChild<QLineEdit *>(QStringLiteral("host_list_name"));
 		check(name && name->isReadOnly() ? QStringLiteral("fixed") : QStringLiteral("editable"),
 		    QStringLiteral("fixed"), "  its name is fixed, since other blocks name it");
+		/* 10.803: and it says so, rather than drawing as a box that ignores
+		 * typing. */
+		check(name && !name->hasFrame() && name->toolTip().contains(QStringLiteral("rename"))
+		        ? QStringLiteral("says so")
+		        : QStringLiteral("silent"),
+		    QStringLiteral("says so"), "  drawn without a box, and saying how to rename");
 		check(save(&dialog), QStringLiteral("saved"), "  and it saves unchanged");
 	}
 	check(listed(&connection), before, "  and netcfgd compiles back the same list");

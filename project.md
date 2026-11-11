@@ -12688,6 +12688,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.803 A name that cannot change no longer looks like a box to type in
+
+**From 10.778's list: a renamed DNS record's read-only name field looks editable and says
+nothing.** The shape was ten dialogs wide, not one: device, network, access point, mesh,
+rule, link set, host list, block list, DNS record and Bluetooth each make the name or id
+read-only when editing an existing block -- since it is what the block is called, and a
+change would write a second one and leave the first -- and a read-only `QLineEdit` still
+draws as an ordinary field. A person types, nothing happens, nothing says why.
+
+`gui/src/fixed_name.h`'s `ncfg_fix_name` draws it on the window's colour without a frame,
+as a label reads, keeps it selectable for copying, and says on hover that a rename is adding
+one under the new name and deleting this one. Ten call sites, one helper, so the next dialog
+with an identity field gets the same. `host_list_load` and `mesh_load` assert both halves;
+with the frame left on, `mesh_load` fails.
+
 ## 10.802 After a delete, nothing is selected rather than the next row
 
 **From 10.778's list: the selection moved to the next row after a delete.** Every tab is an
@@ -13090,7 +13105,7 @@ and fails with `written_by_hand` answering false; seen on screen for `eth0`.
 have since taken the plan's warnings, the narrow dialogs, the repeated drift, the stale scan,
 the profile offered twice, UPnP's order, the access tab's banner, the events' time and the
 hooks tab saying where a hook is added -- the links tab, configure, then hooks): a
-renamed DNS record's read-only name field looks editable and says nothing; the selection
+renamed DNS record's read-only name field looks editable and says nothing (~~fixed~~, 10.803); the selection
 moves to the next row after a delete (~~fixed~~, 10.802); ~~no profile can be deleted~~ (10.801); the hooks tab
 cannot itself start a hook; and backticks,
 `ncfg` commands and op names reach a person's eye in many help lines. Each is small, and

@@ -2,6 +2,7 @@
  * dns_record_dialog.cpp -- the editor described in dns_record_dialog.h.
  */
 #include "dns_record_dialog.h"
+#include "fixed_name.h"
 
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -101,7 +102,7 @@ ncfg_dns_record_dialog::ncfg_dns_record_dialog(ncfg_connection *connection,
 		form->addRow(QString::fromLatin1(label), *field);
 	};
 	text(&name, "record_name", "name", existing.name, "nas.home.lan");
-	name->setReadOnly(!before.isEmpty());
+	ncfg_fix_name(name, !before.isEmpty(), QStringLiteral("DNS record"));
 	text(&address, "record_address", "addresses", existing.address,
 	    "IPv4 and IPv6 addresses, separated by spaces");
 	text(&cname, "record_cname", "alias for", existing.cname,

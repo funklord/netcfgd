@@ -8,6 +8,7 @@
  * invisible in a screenshot and checkable without a daemon.
  */
 #include "linkset_dialog.h"
+#include "fixed_name.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -86,7 +87,7 @@ ncfg_linkset_dialog::ncfg_linkset_dialog(ncfg_connection *connection, const QStr
 	 * the first. `uplink` is the one name that means something on its own --
 	 * it carries the default route and is what "connected" refers to -- and
 	 * the placeholder says so rather than leaving it folklore. */
-	name->setReadOnly(!existing.isEmpty());
+	ncfg_fix_name(name, !existing.isEmpty(), QStringLiteral("link set"));
 	name->setPlaceholderText(QStringLiteral("uplink, for the one that carries the "
 	            "default route"));
 	form->addRow(QStringLiteral("name"), name);

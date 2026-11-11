@@ -2,6 +2,7 @@
  * block_list_dialog.cpp -- the editor described in block_list_dialog.h.
  */
 #include "block_list_dialog.h"
+#include "fixed_name.h"
 
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -70,7 +71,7 @@ ncfg_block_list_dialog::ncfg_block_list_dialog(ncfg_connection *connection,
 		form->addRow(QString::fromLatin1(label), *field);
 	};
 	text(&name, "block_list_name", "name", existing.name, "ads");
-	name->setReadOnly(!before.isEmpty());
+	ncfg_fix_name(name, !before.isEmpty(), QStringLiteral("block list"));
 	text(&file, "block_list_file", "files", existing.file,
 	    "/var/lib/netcfgd/block/ads.txt -- hosts, plain or adblock lists, by spaces");
 	text(&url, "block_list_url", "fetched from", existing.url,

@@ -2,6 +2,7 @@
  * rule_dialog.cpp -- the editor described in rule_dialog.h.
  */
 #include "rule_dialog.h"
+#include "fixed_name.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -142,7 +143,7 @@ ncfg_rule_dialog::ncfg_rule_dialog(ncfg_connection *connection, const ncfg_rule_
 
 	id = new QLineEdit(existing.id, this);
 	id->setObjectName(QStringLiteral("rule_id"));
-	id->setReadOnly(editing);
+	ncfg_fix_name(id, editing, QStringLiteral("rule"));
 	id->setPlaceholderText(QStringLiteral("a name for this rule -- vpn, guest, mgmt"));
 	form->addRow(QStringLiteral("name"), id);
 

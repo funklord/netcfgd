@@ -2,6 +2,7 @@
  * bluetooth_dialog.cpp -- the editor described in bluetooth_dialog.h.
  */
 #include "bluetooth_dialog.h"
+#include "fixed_name.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -108,7 +109,7 @@ ncfg_bluetooth_dialog::ncfg_bluetooth_dialog(ncfg_connection *connection,
 	/* The block's label and the drop-in's filename, so an existing one cannot
 	 * be renamed here: that is a delete and a write, and doing it silently
 	 * would leave the old file behind. */
-	id->setReadOnly(editing);
+	ncfg_fix_name(id, editing, QStringLiteral("Bluetooth device"));
 	id->setPlaceholderText(QStringLiteral("what you call it -- headphones, phone, car"));
 	form->addRow(QStringLiteral("name"), id);
 

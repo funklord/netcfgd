@@ -2,6 +2,7 @@
  * access_point_dialog.cpp -- the editor described in access_point_dialog.h.
  */
 #include "access_point_dialog.h"
+#include "fixed_name.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -212,7 +213,7 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	/* The id is the SSID as written and the block's name and the drop-in's
 	 * filename, which is why it is fixed once there is something to edit:
 	 * changing it would write a second access point and leave the first. */
-	id->setReadOnly(editing);
+	ncfg_fix_name(id, editing, QStringLiteral("access point"));
 	id->setPlaceholderText(QStringLiteral("the network name to broadcast"));
 	form->addRow(QStringLiteral("name"), id);
 

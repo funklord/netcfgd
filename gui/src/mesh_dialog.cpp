@@ -2,6 +2,7 @@
  * mesh_dialog.cpp -- the editor described in mesh_dialog.h.
  */
 #include "mesh_dialog.h"
+#include "fixed_name.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -59,7 +60,7 @@ ncfg_mesh_dialog::ncfg_mesh_dialog(ncfg_connection *connection, const ncfg_mesh_
 	id = new QLineEdit(existing.id, this);
 	id->setObjectName(QStringLiteral("mesh_id"));
 	id->setPlaceholderText(QStringLiteral("backhaul -- the same on every node"));
-	id->setReadOnly(!before.id.isEmpty());
+	ncfg_fix_name(id, !before.id.isEmpty(), QStringLiteral("mesh"));
 	form->addRow(QStringLiteral("mesh ID"), id);
 
 	device = new QLineEdit(existing.device, this);

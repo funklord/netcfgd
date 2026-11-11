@@ -1,4 +1,5 @@
 #include "network_dialog.h"
+#include "fixed_name.h"
 
 #include "address_editors.h"
 #include "hook_dialog.h"
@@ -99,7 +100,7 @@ ncfg_network_dialog::ncfg_network_dialog(ncfg_connection *connection,
 	/* The id is the block's name and the drop-in's filename. Changing it on an
 	 * existing network would write a second one and leave the first, so it is
 	 * fixed once there is something to edit. */
-	id->setReadOnly(editing);
+	ncfg_fix_name(id, editing, QStringLiteral("network"));
 	form->addRow(QStringLiteral("name"), id);
 
 	ssid_hex = new QLineEdit(this);
