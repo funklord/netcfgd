@@ -12688,6 +12688,17 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.795 Nothing on qtty's side stands between `ncfg tui` and the GUI's screens
+
+**qtty measured `ncfg tui` against its own goal (its note 20261111T0100Z, recorded here and
+deleted).** qtty means to put the existing terminal implementations behind one backend, and
+read `c/src/cli/tui.c` and `tui_term.c` -- raw termios, poll and hand-written ANSI -- for what
+they do that qtty cannot: nothing. Terminal open and restore, SIGWINCH, key decoding and
+SIGTSTP/SIGCONT are all qtty's already, and the one thing untested, an application's own
+socket notifier still firing once qtty owns the event loop, is tested now (qtty d5aca3e). So
+moving `ncfg tui` onto the GUI's screens through qtty has no blocker on qtty's side; whether
+and when is netcfgd's, and qtty is not asking.
+
 ## 10.794 A device made in the window can be deleted from it
 
 From 10.778's list. The walk's bridge `br0`, made with the device dialog, could only be
