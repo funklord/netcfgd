@@ -12690,6 +12690,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.822 A router's IPv6 default route, from the ISP's advertisement
+
+**Every netcfgd router given a prefix had no IPv6 default route.** An IPv6 default route only
+ever comes from a router advertisement -- DHCPv6 has no router option -- and on a router
+nothing took it: the kernel ignores advertisements on an interface that forwards unless
+`accept_ra` is 2, and decision 0073 sets 2 only for an interface that asks for SLAAC; a WAN
+written `config = "dhcp6 pd_length 56"`, as every document here writes it, does not. When a
+prefix is delegated netcfgd's client is odhcp6c (0050), which hears the advertisement in
+userspace and hands it to its script as `RA_ROUTES` -- and netcfgd's hook took only
+`PREFIXES`. The delegation tests checked the LAN's address and never the way out. Measured
+on `hull-armsr`, with radvd on the ISP's tap advertising a managed default router as an ISP
+that delegates does: no default route on `isp6`, and `accept_ra` 0 there besides, netifd
+having zeroed it on `eth0` before the rename.
+
+**The hook now installs it**, as the udhcpc script installs IPv4's for the same reason --
+the client has no configuration step of its own: the `::/0` entry of `RA_ROUTES` becomes
+`ip -6 route replace default via <router> dev <uplink>`, the router recorded as
+`.<uplink>.router` beside the prefixes (the reader skips a leading dot, 0113), and when an
+advertisement names another router or none -- the ISP withdrawing it, or the lease going --
+that route and no other is removed. `dhcp_test.c` runs the hook against a stand-in `ip`
+through a router advertised, changed and withdrawn; matching on anything but `::/0` fails
+four of its checks. On `hull-armsr`, 2026-11-12: `default via fe80::... dev isp6` at once,
+with `accept_ra` still 0.
+
+**0073's open item, answered by another mechanism than the one it foresaw.** It measured
+`dhcpcd -6` handling advertisements itself and wrote that if some other client turned out to
+depend on the kernel's own processing, its pass would grow the case. odhcp6c is that
+client, but setting `accept_ra=2` would have fought netifd on OpenWrt, which zeroes it, and
+the advertisement is already in hand in the script, where IPv4's gateway is handled too.
+
 ## 10.821 The stock services restarted under netcfgd
 
 **What LuCI's "Save & Apply" does a dozen times a day**: `network`, `firewall` and

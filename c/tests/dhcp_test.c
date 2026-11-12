@@ -580,6 +580,123 @@ static void the_prefix_hook_writes_what_the_observer_reads(void)
 	    "a hook asked for with no interface is refused with a sentence");
 }
 
+/* Run the prefix hook once with odhcp6c's environment; 1 if it exited 0. */
+static int run_pd_hook(const char *script, const char *env_path, const char *prefixes,
+    const char *routes)
+{
+	pid_t child = fork();
+	int   status = 0;
+
+	if (child == 0) {
+		const char *argv[4];
+		const char *envp[4];
+
+		argv[0] = script;
+		argv[1] = "ra-updated";
+		argv[2] = "eth9";
+		argv[3] = NULL;
+		envp[0] = env_path;
+		envp[1] = prefixes;
+		envp[2] = routes;
+		envp[3] = NULL;
+		execve(script, (char *const *)(const void *)argv, (char *const *)(const void *)envp);
+		_exit(127);
+	}
+	while (child > 0 && waitpid(child, &status, 0) < 0 && errno == EINTR) {
+		continue;
+	}
+	return child > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+/*
+ * The ISP's router from its advertisement, which is the uplink's only IPv6
+ * default route (project.md 10.822). Run against a stand-in `ip` through the
+ * three things an advertisement does: name a router, name another, and take it
+ * away -- and what is asserted is what the kernel would have been asked, which
+ * a reading of the text could not tell from a script that never got there.
+ */
+static void the_prefix_hook_takes_the_router_from_the_advertisement(const char *base)
+{
+	char  dir[512];
+	char  bin[768];
+	char  fake_ip[1024];
+	char  ip_log[1024];
+	char  prefixes_dir[1024];
+	char  target[1100];
+	char  router[1100];
+	char  script[1024];
+	char  message[NCFG_ERROR_MAX];
+	char  body[2048];
+	char  env_path[2048];
+	char *text;
+	char *seen;
+
+	(void)testdir_in(base, "pdrun", dir, sizeof(dir));
+	check(mkdir(dir, 0755) == 0 || errno == EEXIST, "a directory for the hook to run in");
+	(void)testdir_in(dir, "bin", bin, sizeof(bin));
+	check(mkdir(bin, 0755) == 0 || errno == EEXIST, "and one for the stand-in ip");
+	(void)testdir_in(bin, "ip", fake_ip, sizeof(fake_ip));
+	(void)testdir_in(dir, "ip.log", ip_log, sizeof(ip_log));
+	(void)snprintf(body, sizeof(body), "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexit 0\n",
+	    ip_log);
+	write_fake(fake_ip, body);
+	(void)testdir_in(dir, "prefixes", prefixes_dir, sizeof(prefixes_dir));
+	check(mkdir(prefixes_dir, 0755) == 0 || errno == EEXIST, "and the prefixes directory");
+	(void)snprintf(target, sizeof(target), "%s/eth9", prefixes_dir);
+	(void)snprintf(router, sizeof(router), "%s/.eth9.router", prefixes_dir);
+	(void)testdir_in(dir, "pd-eth9", script, sizeof(script));
+	message[0] = '\0';
+	text = ncfg_dhcp_pd_script("eth9", target, message, sizeof(message));
+	check(text != NULL && testdir_write(script, text, strlen(text)) && chmod(script, 0755) == 0,
+	    "the prefix hook is written where odhcp6c would run it");
+	free(text);
+	(void)snprintf(env_path, sizeof(env_path), "PATH=%s:/usr/bin:/bin", bin);
+
+	check(run_pd_hook(script, env_path, "PREFIXES=2001:db8:1234::/56,3600,7200",
+	          "RA_ROUTES=2001:db8:aaaa::/64,::,600,256 ::/0,fe80::1,1800,512"),
+	    "an advertisement naming a router: the hook exits zero");
+	seen = testdir_read(ip_log, NULL);
+	check_text(seen, "-6 route replace default via fe80::1 dev eth9\n",
+	    "  the default route is the advertised router's, and the on-link route is not touched");
+	free(seen);
+	seen = testdir_read(router, NULL);
+	check_text(seen, "fe80::1", "  and the router installed is recorded under a leading dot");
+	free(seen);
+	seen = testdir_read(target, NULL);
+	check_text(seen, "2001:db8:1234::/56\n", "  the prefix is reported as before");
+	free(seen);
+
+	(void)unlink(ip_log);
+	check(run_pd_hook(script, env_path, "PREFIXES=2001:db8:1234::/56,3600,7200",
+	          "RA_ROUTES=::/0,fe80::2,1800,512"),
+	    "another router advertised: the hook exits zero");
+	seen = testdir_read(ip_log, NULL);
+	check_text(seen,
+	    "-6 route del default via fe80::1 dev eth9\n"
+	    "-6 route replace default via fe80::2 dev eth9\n",
+	    "  the old router's route goes before the new one's is installed");
+	free(seen);
+
+	(void)unlink(ip_log);
+	check(run_pd_hook(script, env_path, "PREFIXES=", "RA_ROUTES="),
+	    "the router and the lease gone: the hook exits zero");
+	seen = testdir_read(ip_log, NULL);
+	check_text(seen, "-6 route del default via fe80::2 dev eth9\n",
+	    "  the route it installed is withdrawn, and only that one");
+	free(seen);
+	check(!testdir_exists(router), "  and its record with it");
+
+	(void)unlink(ip_log);
+	check(run_pd_hook(script, env_path, "PREFIXES=", "RA_ROUTES="),
+	    "nothing advertised and nothing held: the hook exits zero");
+	check(!testdir_exists(ip_log), "  and asks the kernel for nothing");
+
+	message[0] = '\0';
+	check(ncfg_dhcp_pd_script("et'h9", target, message, sizeof(message)) == NULL &&
+	        strstr(message, "single quote") != NULL,
+	    "an interface carrying a single quote is refused, the name now being in the script");
+}
+
 static void what_dhcpcd_is_started_with(void)
 {
 	ncfg_dhcp_args_t args;
@@ -1914,6 +2031,7 @@ int main(void)
 
 	the_script_touches_nothing_it_does_not_own();
 	the_script_does_what_it_says(base);
+	the_prefix_hook_takes_the_router_from_the_advertisement(base);
 
 	a_running_dhcpcd_is_asked_whose_it_is();
 	a_client_is_recognised_by_the_path_it_carries();

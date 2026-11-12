@@ -174,6 +174,22 @@ until ip -o -6 addr show dev tap0 scope link 2>/dev/null | grep -v tentative | g
 done
 kea-dhcp6 -c /run/kea/kea.json > /run/kea/kea.log 2>&1 &
 kea=$!
+# **And the ISP's router advertisement**, which is where an IPv6 default route
+# comes from: DHCPv6 has no router option. Managed, as an ISP that delegates sends
+# it, with no prefix to build an address from (10.822).
+cat > /run/radvd.conf <<'RADVD'
+interface tap0 {
+	AdvSendAdvert on;
+	AdvManagedFlag on;
+	AdvOtherConfigFlag on;
+	AdvDefaultLifetime 1800;
+	MinRtrAdvInterval 3;
+	MaxRtrAdvInterval 10;
+};
+RADVD
+# radvd will not advertise from a machine that does not forward, and the ISP does.
+sysctl -q -w net.ipv6.conf.all.forwarding=1
+radvd -C /run/radvd.conf -p /run/radvd.pid -m stderr > /run/radvd.log 2>&1
 ip -6 route add 2001:db8:1234::/56 via fe80::5054:ff:fe12:3456 dev tap0 2>> "$out"
 ip link set tap2 netns home 2>> "$out"
 ip netns exec home sh -c 'ip link set lo up; sysctl -q -w net.ipv6.conf.tap2.accept_ra=2;
@@ -211,7 +227,7 @@ say "pppoe-server $(dpkg-query -W -f='${Version}' pppoe 2>/dev/null) on tap1, pl
 ) > /run/home.log 2>&1 &
 wait $qemu
 ran=$?
-kill $kea $ac $capture $icmp0 $icmp2 2>/dev/null
+kill $kea $ac $capture $icmp0 $icmp2 $(cat /run/radvd.pid 2>/dev/null) 2>/dev/null
 wait $kea 2>/dev/null
 wait $ac 2>/dev/null
 pkill -f '^pppd .*rp-pppoe' 2>/dev/null

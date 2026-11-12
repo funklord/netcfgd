@@ -107,6 +107,17 @@ if [ -z "$delegated" ]; then
 		tr '\n' ' ' | sed 's/^/  forwarding (isp6, all): /' >> "$out"
 	echo >> "$out"
 else
+	# The router's own way out: an IPv6 default route on the uplink, from the
+	# ISP's advertisement. A router forwards, so the kernel's own processing
+	# ignores the advertisement, and odhcp6c hears it and hands it to netcfgd's
+	# hook, which installs it (10.822).
+	n=0
+	until ip -6 route show default dev isp6 2>/dev/null | grep -q default || [ $n -gt 30 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	say "isp6's default route after $n s: $(ip -6 route show default dev isp6 2>/dev/null | head -1 | cut -c1-90)$(ip -6 route show default dev isp6 2>/dev/null | grep -q . || echo none); accept_ra $(cat /proc/sys/net/ipv6/conf/isp6/accept_ra), forwarding $(cat /proc/sys/net/ipv6/conf/isp6/forwarding)"
+	ip -6 route show default dev isp6 2>/dev/null | grep -q 'via fe80::' || failed=1
 	# Relational, as cpe.sh's: lan6's network is the delegated one's.
 	network=${delegated%%::*}
 	n=0

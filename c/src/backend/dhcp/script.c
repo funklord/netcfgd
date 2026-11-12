@@ -51,6 +51,7 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 {
 	ncfg_buf_t buf;
 	char       staged[NCFG_DHCP_PATH_MAX];
+	char       router[NCFG_DHCP_PATH_MAX];
 	char      *out;
 
 	if (!iface || !target) {
@@ -58,9 +59,21 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 		    "a prefix hook was rendered with no interface or nowhere to report to");
 		return NULL;
 	}
-	if (!staged_path(target, staged, sizeof(staged))) {
+	/* `.<iface>.router` beside `.<iface>.tmp`: the staged name less its
+	 * suffix, so it shares the leading dot the reader skips. */
+	if (!staged_path(target, staged, sizeof(staged)) || strlen(staged) < 4u ||
+	    snprintf(router, sizeof(router), "%.*s.router", (int)(strlen(staged) - 4u), staged) >=
+	        (int)sizeof(router)) {
 		ncfg_error_set(err, err_size,
 		    "the staging name beside %s is longer than this build will build", target);
+		return NULL;
+	}
+	/* The interface goes into the script inside single quotes now, as the
+	 * udhcpc script's does, so it is refused there for the same reason. */
+	if (strchr(iface, '\'') || strchr(target, '\'')) {
+		ncfg_error_set(err, err_size,
+		    "the prefix hook for %s would carry a single quote, which would end the "
+		    "quoting around a name and run what follows it", iface);
 		return NULL;
 	}
 	ncfg_buf_init(&buf, SCRIPT_MAX);
@@ -101,6 +114,49 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 	    "done\n"
 	    "mv '%s' \"$out\"\n",
 	    iface, target, staged, staged, staged);
+	/*
+	 * **And the ISP's router, which is the uplink's IPv6 default route.** An
+	 * IPv6 default route only ever comes from a router advertisement --
+	 * DHCPv6 has no router option -- and odhcp6c hears the advertisement in
+	 * userspace and hands it to this script as `RA_ROUTES`, one
+	 * `prefix/len,gateway,valid,priority` each. Nothing installed it: the
+	 * kernel's own processing is off on an interface that forwards unless
+	 * `accept_ra` is 2, a router forwards, and OpenWrt's netifd had zeroed it
+	 * besides. So a router given a prefix had no way out (project.md 10.822).
+	 * The udhcpc script installs IPv4's default route for the same reason:
+	 * the client has no configuration step of its own.
+	 *
+	 * The gateway installed is recorded beside the prefixes under a leading
+	 * dot, which the report reader skips (0113), so withdrawing it removes
+	 * that route and no other: the ISP's advertisement taking the router away,
+	 * or the lease going, both arrive here with no `::/0` in the list.
+	 */
+	ncfg_buf_addf(&buf,
+	    "\n"
+	    "iface='%s'\n"
+	    "router='%s'\n"
+	    "gateway=\n"
+	    "for r in ${RA_ROUTES:-}; do\n"
+	    "\tcase \"$r\" in\n"
+	    "\t::/0,*)\n"
+	    "\t\tgateway=${r#::/0,}\n"
+	    "\t\tgateway=${gateway%%%%,*}\n"
+	    "\t\tbreak\n"
+	    "\t\t;;\n"
+	    "\tesac\n"
+	    "done\n"
+	    "held=\n"
+	    "[ -r \"$router\" ] && held=$(cat \"$router\")\n"
+	    "if [ -n \"$held\" ] && [ \"$held\" != \"$gateway\" ]; then\n"
+	    "\tip -6 route del default via \"$held\" dev \"$iface\" 2>/dev/null || true\n"
+	    "\trm -f \"$router\"\n"
+	    "fi\n"
+	    "if [ -n \"$gateway\" ]; then\n"
+	    "\tip -6 route replace default via \"$gateway\" dev \"$iface\" &&\n"
+	    "\t\tprintf '%%s' \"$gateway\" > \"$router\"\n"
+	    "fi\n"
+	    "exit 0\n",
+	    iface, router);
 	if (ncfg_buf_failed(&buf)) {
 		ncfg_error_set(err, err_size,
 		    "the prefix hook for %s is larger than this build will render", iface);
