@@ -652,9 +652,10 @@ other-config flag and takes only a /64, so a document asking for those is refuse
 rather than advertised as something else.
 
 **The LAN's name server is OpenWrt's own dnsmasq**, which answers DNS on every address the
-router has, the LAN's included. So leave `dns_forward` off in a `dhcp_server` block there --
-netcfgd's dnsmasq for that LAN could not bind port 53 beside it and would not start, its DHCP
-included -- and offer the router instead:
+router has, the LAN's included. So `dns_forward` in a `dhcp_server` block cannot be had beside
+it: netcfgd's forwarder for that LAN cannot bind port 53, and the server runs DHCP alone,
+offering the router's address, while `ncfg plan` warns that the forwarder is not running. Say
+so in the document instead -- leave `dns_forward` off and offer the router:
 
 ```
 dhcp_server {

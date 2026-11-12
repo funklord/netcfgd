@@ -1227,6 +1227,10 @@ typedef struct {
 	/* What a running DHCP server's file says it serves (0297): the line
 	 * `ncfg_dhcp_server_summary` writes, compared against the document's. */
 	char  *served;
+	/* Why a running DHCP server's forwarder was left out (10.827): dnsmasq's
+	 * line about port 53, which another server held. NULL where it runs as
+	 * the document says. */
+	char  *forwarder_off;
 	/* Who holds which address from a running DHCP server (0303), read from
 	 * its lease file: UniFi's client list, and the greppable record 0297
 	 * put under /run, read back. Unexpired leases only. */

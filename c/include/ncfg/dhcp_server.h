@@ -94,6 +94,12 @@ int ncfg_dhcp_server_summary(const ncfg_document_t *document, const ncfg_interfa
 /* The summary a running server's file carries, into `out`; 0 for none. */
 int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, size_t out_size);
 
+/* Why a running server's file says its forwarder was left out (10.827) --
+ * dnsmasq's own line about port 53 -- into `out`, cut to fit; 0 where it was
+ * not. */
+int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out,
+    size_t out_size);
+
 /*
  * dnsmasq's configuration for one interface. Pure, so what is served can be
  * checked without serving it. Allocated; free with `free`. NULL with a
@@ -103,6 +109,13 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
  * with `conf-file=`; NULL for none (0305). */
 char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
     const char *leases_path, const char *block_path, char *err, size_t err_size);
+
+/* The same, with `dns_forward` left out because port 53 could not be had:
+ * DHCP alone, offering the interface's own address as the resolver, and a
+ * line carrying `why` for the plan to read back (10.827). */
+char *ncfg_dhcp_server_render_without_forwarder(const ncfg_document_t *document,
+    const ncfg_interface_t *interface, const char *leases_path, const char *block_path,
+    const char *why, char *err, size_t err_size);
 
 /*
  * Start serving on one interface. `program` is the dnsmasq to run, or NULL

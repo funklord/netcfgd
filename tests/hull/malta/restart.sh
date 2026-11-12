@@ -76,3 +76,27 @@ say "the router offered as the LAN's resolver after $n s: $offered lease(s); loc
 grep -q 'dhcp-option=.*6,192.168.7.1\|option:dns-server,192.168.7.1' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null ||
 	say "  lan4.conf offers: $(grep -i 'dhcp-option' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | tr '\n' ' ')"
 [ "$offered" -ge 1 ] && [ "$answer" = 127.0.0.1 ] && whole || failed=1
+
+# And `dns_forward` there after all, as the holder decided (10.827): its forwarder
+# cannot have port 53 beside the stock dnsmasq, and where that took the LAN's DHCP
+# down with it, the server now comes back without the forwarder, offers the
+# router's address -- the stock dnsmasq answers it -- and the plan says so.
+sed -i 's/dns = \["192.168.7.1"\]/dns_forward = true/' /etc/netcfgd/netcfgd.conf
+n=0
+until grep -q '^# forwarder off: ' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null && whole ||
+	[ $n -gt 30 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+printf '#!/bin/sh\n[ "$1" = bound ] && echo "offered dns $dns"\nexit 0\n' > /tmp/show-dns
+chmod 755 /tmp/show-dns
+offered=$(udhcpc -i client4 -n -q -t 6 -T 2 -s /tmp/show-dns -O dns 2>&1 |
+	sed -n 's/^offered dns //p' | tail -1)
+warned=$(/usr/bin/ncfg plan 2>&1 | grep -c 'DNS forwarder on lan4 is not running')
+say "dns_forward beside the stock dnsmasq, after $n s: $(sed -n 's/^# forwarder off: //p' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | cut -c1-90); offered dns ${offered:-nothing}; plan warns: $warned"
+rm -f /tmp/show-dns
+[ "$offered" = 192.168.7.1 ] && [ "$warned" -ge 1 ] && whole || {
+	failed=1
+	tail -4 /run/netcfgd/dhcp-server/lan4.log 2>/dev/null | sed 's/^/  dnsmasq: /' >> "$out"
+	/usr/bin/ncfg plan 2>&1 | head -12 | cut -c1-160 | sed 's/^/  plan: /' >> "$out"
+}

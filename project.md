@@ -12690,6 +12690,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.827 DHCP is served without a forwarder that cannot have port 53
+
+**The holder's word, 2026-11-12: serve DHCP without the forwarder, and warn in the plan.**
+That settles the question 10.825 left open. A `dhcp_server` with `dns_forward = true`, started
+where another server holds port 53 on its address -- OpenWrt's stock dnsmasq on every router --
+used to fail whole, so one feature that could not be had cost every host its address.
+
+Now `ncfg_dhcp_server_start` reads dnsmasq's output when it fails, and where it says `Address in
+use` it renders the file again without the forwarder and starts once more: `port=0`, no
+records, no block lists, no `local=` for the domain, and -- where the block names no `dns` --
+`dhcp-option=6` offering the interface's own address, which the server holding port 53 there
+answers, as 10.825's `dns = [router]` does by hand. The file carries a `# forwarder off:` line
+quoting dnsmasq; observation reads it into the backend's `forwarder_off`, and every plan warns
+of it, saying what is not answered and what to do on OpenWrt.
+
+**The summary line stays the document's**, so the plan sees nothing to change and does not
+restart the server to try again: a retry on every pass would take the LAN's DHCP down every
+five seconds, which is the fault being fixed. The forwarder is tried again when the
+`dhcp_server` block changes. A second failure is DHCP's own and is reported as before.
+
+**Rejected:** checking port 53 at plan time and planning DHCP alone from the start. dnsmasq's
+own failure is the one witness that cannot disagree with dnsmasq -- `bind-dynamic` binds an
+address as it appears, so a reading taken at plan time can be wrong a second later -- and the
+plan still warns, one pass after the start, from what the file records.
+
+`dhcp_server_test.c` has a stand-in dnsmasq that fails on `port=53` as the real one did; with
+the retry removed its three checks go red. `plan_dhcp_server_test.c` holds the warning and the
+plan that does nothing. `restart.sh` turns `lan4` to `dns_forward = true` beside the stock
+dnsmasq on both OpenWrt tiers and asks for a lease, the DNS server it offers, and the warning.
+
 ## 10.826 IPv6 over a PPPoE session
 
 **A DSL line's IPv6 arrives by DHCPv6 over the PPPoE session**, its delegated prefix above
@@ -12726,12 +12756,8 @@ the socket.
 both OpenWrt tiers -- the lease made with the router offered, and a name answered at it --
 and the router guide says it.
 
-**Open, for the holder:** whether a forwarder that cannot bind should take its interface's
-DHCP down with it, as it does, or whether the DHCP should be served without it and the plan
-say why. Serving DHCP regardless keeps the LAN's addresses while DNS is somebody else's; the
-cost is a `dns_forward` that is quietly not in force, against 0301's word, and against this
-project's habit of refusing by name rather than substituting. A plan-time warning when another
-process already holds port 53 on the interface's address would serve either answer.
+**Settled by the holder in 10.827:** a forwarder that cannot bind no longer takes its
+interface's DHCP down; the DHCP is served without it and the plan says why.
 
 ## 10.824 WireGuard on the router
 

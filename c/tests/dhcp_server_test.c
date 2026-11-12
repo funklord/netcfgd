@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -135,6 +136,67 @@ static void a_stop_waits_for_dnsmasq_to_go(const char *run)
 		(void)waitpid(leaving, &status, 0);
 	}
 	(void)unlink(pid_file);
+}
+
+/*
+ * **DHCP without the forwarder** (10.827). A stand-in dnsmasq that, given
+ * `port=53`, says what the real one said beside OpenWrt's stock dnsmasq and
+ * fails; given `port=0` it succeeds. The start has to come back serving, the
+ * file has to carry DHCP alone and why, and the summary has to be the
+ * document's, so the plan does not restart it on every pass.
+ */
+static void port_53_taken_serves_dhcp_alone(const char *run, ncfg_interface_t *lan)
+{
+	static const char script[] =
+	    "#!/bin/sh\n"
+	    "if grep -qx 'port=53' \"$2\"; then\n"
+	    "\techo 'dnsmasq: failed to create listening socket for 192.168.1.1: Address in use' >&2\n"
+	    "\texit 2\n"
+	    "fi\n"
+	    "exit 0\n";
+	char   program[512];
+	char   config[NCFG_DHCP_SERVER_PATH_MAX];
+	char   why[256];
+	char   summary[NCFG_DHCP_SERVER_SUMMARY_MAX];
+	char   recorded[NCFG_DHCP_SERVER_SUMMARY_MAX];
+	char   message[NCFG_ERROR_MAX];
+	char  *text;
+	size_t dns_count;
+	int    started;
+
+	(void)snprintf(program, sizeof(program), "%s/fake-dnsmasq", run);
+	(void)testdir_write(program, script, strlen(script));
+	(void)chmod(program, 0755);
+	dns_count = lan->dhcp_server->dns_count;
+	lan->dhcp_server->dns_count = 0;
+	lan->dhcp_server->dns_forward = 1;
+	message[0] = '\0';
+	started = ncfg_dhcp_server_start(run, NULL, lan, program, message, sizeof(message));
+	check(started, "a forwarder that cannot have port 53 still serves DHCP");
+	if (!started) {
+		printf("  said: %s\n", message);
+	}
+	(void)ncfg_dhcp_server_config_path(run, lan->name, config, sizeof(config), NULL, 0);
+	text = testdir_read(config, NULL);
+	check(text && has_line(text, "port=0") && !has_line(text, "port=53") &&
+	        has_line(text, "dhcp-option=6,192.168.1.1"),
+	    "  without the forwarder, offering its own address to whoever holds 53");
+	free(text);
+	check(ncfg_dhcp_server_forwarder_off(run, lan->name, why, sizeof(why)) &&
+	        strstr(why, "Address in use") != NULL,
+	    "  and its file says why, for the plan to read back");
+	check(ncfg_dhcp_server_summary(NULL, lan, summary, sizeof(summary)) &&
+	        ncfg_dhcp_server_recorded(run, lan->name, recorded, sizeof(recorded)) &&
+	        strcmp(summary, recorded) == 0,
+	    "  under the document's summary, so no pass restarts it to try again");
+
+	lan->dhcp_server->dns_forward = 0;
+	message[0] = '\0';
+	check(ncfg_dhcp_server_start(run, NULL, lan, program, message, sizeof(message)) &&
+	        !ncfg_dhcp_server_forwarder_off(run, lan->name, why, sizeof(why)),
+	    "control: a server with no forwarder starts, and carries no such line");
+	lan->dhcp_server->dns_count = dns_count;
+	(void)unlink(program);
 }
 
 int main(void)
@@ -739,6 +801,7 @@ int main(void)
 	}
 
 	a_stop_waits_for_dnsmasq_to_go(run);
+	port_53_taken_serves_dhcp_alone(run, &lan);
 
 	testdir_remove(run);
 	if (failures) {

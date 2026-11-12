@@ -28,6 +28,7 @@ static const char *const DHCP_SERVER_MARKERS[] = { "dnsmasq:", "failed", "bad", 
 	"unknown", "cannot" };
 
 static const char SUMMARY_PREFIX[] = "# serves: ";
+static const char FORWARDER_OFF_PREFIX[] = "# forwarder off: ";
 
 /*
  * The user dnsmasq drops to once it holds its sockets, which every
@@ -301,6 +302,37 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
 	return 1;
 }
 
+int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out,
+    size_t out_size)
+{
+	char        path[NCFG_DHCP_SERVER_PATH_MAX];
+	char       *text;
+	const char *line;
+	size_t      length;
+
+	if (!ncfg_dhcp_server_config_path(run, iface, path, sizeof(path), NULL, 0)) {
+		return 0;
+	}
+	text = ncfg_backend_read_file(path, NULL, DHCP_SERVER_CONFIG_MAX);
+	if (!text) {
+		return 0;
+	}
+	line = strstr(text, FORWARDER_OFF_PREFIX);
+	if (!line || (line != text && line[-1] != '\n')) {
+		free(text);
+		return 0;
+	}
+	line += strlen(FORWARDER_OFF_PREFIX);
+	length = strcspn(line, "\n");
+	if (length >= out_size) {
+		length = out_size - 1u;
+	}
+	memcpy(out, line, length);
+	out[length] = '\0';
+	free(text);
+	return 1;
+}
+
 /*
  * One custom option (0303), encoded by its type rather than left to dnsmasq's
  * guess. dnsmasq sends a bare decimal in the fewest bytes that hold it:
@@ -406,10 +438,16 @@ static void render_records(ncfg_buf_t *buf, const ncfg_document_t *document)
 	}
 }
 
-char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
-    const char *leases_path, const char *block_path, char *err, size_t err_size)
+/*
+ * The file, with the forwarder or without it. `forwarder_off` is why it was
+ * left out, or NULL to render what the document says (10.827).
+ */
+static char *render(const ncfg_document_t *document, const ncfg_interface_t *interface,
+    const char *leases_path, const char *block_path, const char *forwarder_off, char *err,
+    size_t err_size)
 {
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
+	int                       forward = server && server->dns_forward && !forwarder_off;
 	char                      start[NCFG_ADDRESS_MAX];
 	char                      end[NCFG_ADDRESS_MAX];
 	char                      own[NCFG_ADDRESS_MAX];
@@ -433,7 +471,13 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 	ncfg_buf_addf(&buf,
 	    "# Written by netcfgd for %s (decision 0297). Do not edit; it is rewritten on apply.\n"
 	    "%s%s\n", interface->name, SUMMARY_PREFIX, summary);
-	if (server->dns_forward) {
+	if (forwarder_off) {
+		/* The summary line above is still the document's, so the plan
+		 * does not restart the server on every pass; this line is what
+		 * tells the plan the forwarder is not there (10.827). */
+		ncfg_buf_addf(&buf, "%s%s\n", FORWARDER_OFF_PREFIX, forwarder_off);
+	}
+	if (forward) {
 		/* **A forwarder on this interface alone** (0301). `except-interface=lo`
 		 * because `interface=` also binds loopback, measured against 2.91:
 		 * without it this failed beside a resolver on 127.0.0.1:53 and two
@@ -464,7 +508,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 		for (at = 0; at < server->relay_count; at++) {
 			ncfg_buf_addf(&buf, "dhcp-relay=%s,%s\n", own, server->relay[at]);
 		}
-		if (server->dns_forward) {
+		if (forward) {
 			render_records(&buf, document);
 			render_blocks(&buf, server, block_path);
 		}
@@ -506,6 +550,17 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 			ncfg_buf_addf(&buf, ",%s", server->dns[at]);
 		}
 		ncfg_buf_add_char(&buf, '\n');
+	} else if (server->dns_forward && !forward) {
+		/* The forwarder could not have port 53 because another server
+		 * holds it on this address -- on OpenWrt the stock dnsmasq -- so
+		 * the hosts are offered this address, and that server answers
+		 * them, as the router guide's `dns = [router]` does (10.825). */
+		char *slash = strchr(own, '/');
+
+		if (slash) {
+			*slash = '\0';
+		}
+		ncfg_buf_addf(&buf, "dhcp-option=6,%s\n", own);
 	}
 	/* The standard options (0303), each checked by `ncfg_dhcp_server_range`
 	 * above: no quote, comma or newline reaches a line it could end. */
@@ -517,7 +572,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 		 * forwarder on, the domain is the LAN's own: answered here, never
 		 * asked upstream. */
 		ncfg_buf_addf(&buf, "domain=%s\n", server->domain);
-		if (server->dns_forward) {
+		if (forward) {
 			ncfg_buf_addf(&buf, "local=/%s/\n", server->domain);
 		}
 	}
@@ -543,7 +598,7 @@ char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interf
 	for (at = 0; at < server->option_count; at++) {
 		render_custom_option(&buf, &server->options[at]);
 	}
-	if (server->dns_forward) {
+	if (forward) {
 		render_records(&buf, document);
 		render_blocks(&buf, server, block_path);
 	}
@@ -557,6 +612,55 @@ rendered:
 	out = ncfg_buf_take(&buf, NULL);
 	ncfg_buf_free(&buf);
 	return out;
+}
+
+char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
+    const char *leases_path, const char *block_path, char *err, size_t err_size)
+{
+	return render(document, interface, leases_path, block_path, NULL, err, err_size);
+}
+
+char *ncfg_dhcp_server_render_without_forwarder(const ncfg_document_t *document,
+    const ncfg_interface_t *interface, const char *leases_path, const char *block_path,
+    const char *why, char *err, size_t err_size)
+{
+	return render(document, interface, leases_path, block_path, why ? why : "not started",
+	    err, err_size);
+}
+
+/*
+ * The line of dnsmasq's output saying port 53 was taken, cut to fit `out`
+ * and to one line; 0 where it said no such thing. Its words, measured on
+ * OpenWrt 25.12 beside the stock dnsmasq (10.825): "failed to create
+ * listening socket for 192.168.7.1: Address in use".
+ */
+static int port_taken(const char *log, char *out, size_t out_size)
+{
+	char       *text = ncfg_backend_read_file(log, NULL, 65536u);
+	const char *found;
+	const char *line;
+	size_t      length;
+
+	if (!text) {
+		return 0;
+	}
+	found = strstr(text, "Address in use");
+	if (!found) {
+		free(text);
+		return 0;
+	}
+	line = found;
+	while (line > text && line[-1] != '\n') {
+		line--;
+	}
+	length = strcspn(line, "\r\n");
+	if (length >= out_size) {
+		length = out_size - 1u;
+	}
+	memcpy(out, line, length);
+	out[length] = '\0';
+	free(text);
+	return 1;
 }
 
 int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
@@ -634,6 +738,31 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 	if (!ncfg_backend_run(program, argv, log, &exited_ok, &status, err, err_size)) {
 		free(found);
 		return 0;
+	}
+	/*
+	 * **DHCP is served without the forwarder, rather than not at all**
+	 * (10.827, the holder's word). A forwarder that cannot have port 53 --
+	 * another server holds it on this address, on OpenWrt the stock dnsmasq
+	 * -- took the LAN's DHCP down with it (10.825): one failed feature cost
+	 * every host its address. So it is started again without the forwarder,
+	 * offering this address as the LAN's resolver, and the file says why,
+	 * which the plan reads back and warns of. Once: the second start is
+	 * DHCP alone, and a failure there is DHCP's own.
+	 */
+	if (!exited_ok && interface->dhcp_server && interface->dhcp_server->dns_forward &&
+	    port_taken(log, said, sizeof(said))) {
+		text = ncfg_dhcp_server_render_without_forwarder(document, interface, leases, block,
+		    said, err, err_size);
+		if (!text) {
+			free(found);
+			return 0;
+		}
+		ok = ncfg_backend_write_file(config, text, strlen(text), 0644, err, err_size);
+		free(text);
+		if (!ok || !ncfg_backend_run(program, argv, log, &exited_ok, &status, err, err_size)) {
+			free(found);
+			return 0;
+		}
 	}
 	free(found);
 	if (!exited_ok) {

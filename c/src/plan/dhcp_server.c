@@ -132,6 +132,20 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 		}
 	}
 	running = running_server(builder->observed, interface->name);
+	/* **Served without its forwarder** (10.827): port 53 was another
+	 * server's when this one started, so DHCP runs alone and offers this
+	 * address, which that server answers. Not restarted on every pass to
+	 * try again, which would take the LAN's DHCP down each time; the next
+	 * start that a changed `dhcp_server` block makes tries again. */
+	if (running && running->forwarder_off && interface->dhcp_server->dns_forward) {
+		ncfg_plan_warnf(builder->plan, interface->name,
+		    "the DNS forwarder on %s is not running -- dnsmasq said \"%s\" -- so DHCP is "
+		    "served without it, offering %s's own address as the resolver to whatever "
+		    "server holds port 53 there; `dns_records` and block lists are not answered. "
+		    "On OpenWrt that server is the stock dnsmasq: stop it, or drop `dns_forward` and "
+		    "let it resolve. The forwarder is tried again when this `dhcp_server` block "
+		    "changes", interface->name, running->forwarder_off, interface->name);
+	}
 	if (running && running->served && strcmp(running->served, wanted) != 0) {
 		ncfg_op_t     stop;
 		ncfg_op_t     start;

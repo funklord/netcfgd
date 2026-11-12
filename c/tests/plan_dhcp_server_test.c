@@ -239,6 +239,34 @@ static void a_reservation_added_restarts_the_server(void)
 	planfix_release(plan, document, observed);
 }
 
+/* 10.827: a server started without its forwarder, because port 53 was
+ * another's, is warned of on every plan and not restarted to try again --
+ * its summary is the document's, so nothing differs. */
+#define FORWARDING "192.168.1.100-192.168.1.249, 43200 s, dns this router, forwarding dns"
+static void a_forwarder_left_out_is_said_and_not_retried(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "", "",
+	    "\"links\":[" LAN_UP "]," LAN_ADDRESS ","
+	    "\"backends\":[{\"kind\":\"dhcp_server\",\"interface\":\"br0\",\"running\":true,"
+	    "\"served\":\"" FORWARDING "\",\"forwarder_off\":\"dnsmasq: failed to create "
+	    "listening socket for 192.168.1.1: Address in use\"}]", &document, &observed);
+
+	check(plan && planfix_warned(plan, "DNS forwarder on br0 is not running") &&
+	        planfix_warned(plan, "Address in use") && planfix_warned(plan, "stock dnsmasq"),
+	    "a forwarder left out for want of port 53 is said, quoting dnsmasq");
+	check(plan && plan->action_count == 0u,
+	    "  and the server is not restarted to try again, which would drop DHCP");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(LAN_DEVICE, SERVING("\"dns_forward\":true"), "", "",
+	    "\"links\":[" LAN_UP "]," LAN_ADDRESS "," DNSMASQ(FORWARDING), &document, &observed);
+	check(plan && !planfix_warned(plan, "DNS forwarder on br0") && plan->action_count == 0u,
+	    "control: one running with its forwarder is not");
+	planfix_release(plan, document, observed);
+}
+
 static void a_server_the_document_dropped_is_stopped(void)
 {
 	ncfg_document_t *document;
@@ -324,6 +352,7 @@ int main(void)
 	a_server_serving_something_else_restarts();
 	a_reservation_added_restarts_the_server();
 	a_server_the_document_dropped_is_stopped();
+	a_forwarder_left_out_is_said_and_not_retried();
 	printf("plan_dhcp_server_test: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
 }

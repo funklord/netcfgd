@@ -1259,6 +1259,8 @@ static const ncfg_field_t observed_backend_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_backend_t, advertised_count) },
 	{ .name = "served", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_backend_t, served) },
+	{ .name = "forwarder_off", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_backend_t, forwarder_off) },
 	/* Absent where none (0303), so an observation without a DHCP server
 	 * is the one it was. */
 	{ .name = "leases", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
