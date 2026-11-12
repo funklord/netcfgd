@@ -565,7 +565,7 @@ show you both at once; this shows you both once both have been tried.
 ## 10. An OpenWrt router
 
 Everything here has been run on OpenWrt 24.10 in an emulator (`make hull-malta`), and
-on no real router yet. A router may have no console, so the rule above matters more:
+under 25.12's procd (`make hull-openwrt`), and on no real router yet. A router may have no console, so the rule above matters more:
 **leave the port you are connected through with netifd until the end.**
 
 Build the program with OpenWrt's toolchain for your target, then the package. The
@@ -582,6 +582,23 @@ Installing starts nothing and enables nothing, so nothing has changed yet:
 ```sh
 opkg install netcfgd.ipk
 ```
+
+**On OpenWrt 25.12 there is no `opkg`**: it installs apk packages, and netcfgd has
+no package for it yet. Put the same files where the package would, by hand -- the
+static program, `ncfg` as a link to it, the procd script, and the list that keeps
+them across a firmware upgrade -- which is what `make hull-openwrt` does on 25.12:
+
+```sh
+cp netcfgd-static /usr/sbin/netcfgd && chmod 755 /usr/sbin/netcfgd
+ln -sf /usr/sbin/netcfgd /usr/bin/ncfg
+cp netcfgd.procd /etc/init.d/netcfgd && chmod 755 /etc/init.d/netcfgd   # packaging/procd/netcfgd
+mkdir -p /etc/netcfgd /lib/upgrade/keep.d
+printf '%s\n' /etc/netcfgd/ /root/.local/share/fuzznet/ /usr/sbin/netcfgd \
+	/usr/bin/ncfg /etc/init.d/netcfgd /etc/rc.d/S21netcfgd /etc/rc.d/K89netcfgd \
+	> /lib/upgrade/keep.d/netcfgd
+```
+
+That starts and enables nothing either.
 
 Write `/etc/netcfgd/netcfgd.conf` for one port that you are **not** connected through,
 and read the plan. Where netifd is told of the same device, the plan says so:
