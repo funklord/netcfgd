@@ -2775,24 +2775,10 @@ hull-suspend:
 		mkfs.ext4 -q -d /lib/modules -L modules $$dir/modules.img 512M; \
 		echo "$$release" > $$dir/modules.release; \
 	fi
-	@# **The root as the image's checkout, not the image** (10.809): hull at
-	@# fede285 roots a stored image on qemu as composefs whatever the machine
-	@# says, and its engine then refuses composefs under (projection block),
-	@# which (sleep true) needs. Signalled to hull; until it is answered the
-	@# run names the checkout hull keeps of the image, as a dir: source, in a
-	@# copy of the machine file beside it.
-	@set -e; digest=$$($(HULL) images 2>/dev/null | awk '$$1 == "netcfgd/hwsim" { print $$2 }'); \
-	checkout=$${XDG_DATA_HOME:-$$HOME/.local/share}/hull/store/checkouts/$$(printf '%s' "$$digest" | tr ':' '/'); \
-	if [ -z "$$digest" ] || [ ! -d "$$checkout" ]; then \
-		echo "suspend: netcfgd/hwsim has no checkout in hull's store ($$checkout)"; exit 1; \
-	fi; \
-	sed "s|(source \"netcfgd/hwsim\")|(source \"dir:$$checkout\")|" tests/hull/suspend/hull.conf \
-		> tests/hull/suspend/run.conf; \
-	grep -q "dir:$$checkout" tests/hull/suspend/run.conf
 	@# 1800, not 900: building a block root from the checkout is most of the
 	@# first 900, and the first run that slept ran out of it after the test
 	@# had finished, before its verdict was written (10.809).
-	@timeout -k 30 1800 $(HULL) run -f tests/hull/suspend/run.conf || true
+	@timeout -k 30 1800 $(HULL) run -f tests/hull/suspend/hull.conf || true
 	@PATH=$$PATH:/usr/sbin:/sbin; dir=tests/hull/suspend/build; \
 	debugfs -R 'cat /log' $$dir/verdict.img > $$dir/log 2>/dev/null || true; \
 	debugfs -R 'cat /suspend' $$dir/verdict.img > $$dir/suspend 2>/dev/null || true; \

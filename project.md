@@ -12793,6 +12793,13 @@ once**, so the guest was asleep three seconds, not 150: this says netcfgd and th
 come through a hibernate and restore, and asks nothing about what expires while asleep, which
 the S3 run does.
 
+**hull fixed the stored image's refusal** (its note 20261112T0043Z, recorded here and deleted):
+since hull 5772098 a block projection takes the image's checkout, and the root's ext4 is built
+from a tar with the image's owners applied, so the guest's root files are root's as over 9p.
+The Makefile's checkout workaround and its generated `run.conf` are gone; the rig runs
+`hull.conf` as written and passes every check on hull's c7c7c6c. hull is looking at s2idle
+next.
+
 **What it does not say.** One radio driver, simulated, and one sleep length; s2idle not
 being woken by hull yet; a hibernation that is held for a while; a station whose link netcfgd found down after the wake and put
 up (`link.up ... was false`), which a real driver may or may not do. And the run takes about
