@@ -85,7 +85,7 @@
 # without it still runs the rest of `check` and the skip says what is missing.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build gui c-test claims installed-diff icons icon-check install-icons uninstall-icons FORCE shell packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz clean veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks linkage linkage-one live-container tde tde-container install-tde deb-tde help
+.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build gui c-test claims installed-diff icons icon-check install-icons uninstall-icons FORCE shell packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz clean veryclean distclean uninstall style style-source style-tool style-docs registry bridge-test nm-c-test hooks linkage linkage-one live-container tde tde-container install-tde deb-tde help
 
 all: build
 
@@ -3604,7 +3604,15 @@ clean:
 # a local change is lost the next time the copies are reconciled, and the
 # divergence is invisible until then. It refuses to run against a collapsed
 # file list, so a pass means it actually looked.
-style: style-source style-docs
+style: style-tool style-source style-docs
+
+# The style gate's own suite, run ahead of the gate's verdict. A checker
+# that has stopped inspecting anything passes exactly as loudly as one
+# that works, so its pass is worth reading only once its suite has.
+# tool/test_style_gate.py arrives beside tool/style_gate.py and was
+# carried here unrun until 2026-11-12, on the holder's word.
+style-tool:
+	python3 tool/test_style_gate.py
 
 style-source:
 	python3 tool/style_gate.py check
