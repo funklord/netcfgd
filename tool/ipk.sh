@@ -16,6 +16,11 @@
 # HOW IT STOPS: straight through. It writes into a directory of mktemp's, and takes
 # that away by the path it was given.
 set -eu
+# A system's own modes for what it lays down (10.813): a builder's umask of
+# 002 made what the package creates group-writable -- the keep list 0664, a
+# new directory 0775. (apk leaves a directory the router already has alone:
+# measured, /etc stayed 0755 under a package that carried it as 0775.)
+umask 022
 program=$1
 architecture=$2
 out=$3

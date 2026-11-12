@@ -182,3 +182,7 @@ bridge/tests/record_emit_test
 
 # A /go run's working state, per checkout.
 /.claude/go.md
+
+# What the top-level Makefile builds for itself: apk-tools (10.813) and the
+# packages made with it.
+/build/

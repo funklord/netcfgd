@@ -12689,6 +12689,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.813 A package OpenWrt 25.12 installs
+
+**The holder agreed (2026-11-12) to build apk-tools from source**, which 10.812 left with them.
+`make apk-tools` fetches Alpine's apk-tools 3.0.2 once into `build/apk-tools`, saying so,
+checks it against the pinned sha256 of its tarball, and builds it out of tree with meson --
+the docs, help, lua, python and tests left out, nothing installed. `tool/openwrt_apk.sh` then
+makes the apk-v3 package of the files `tool/ipk.sh` lays down -- the static program, `ncfg`,
+the procd script, the sysupgrade keep list -- with no scripts, so installing enables and
+starts nothing (10.750). `make openwrt-apk OPENWRT_ARCH=... CC=...` is the person's way to
+it, and the router guide says so.
+
+Two things it had to get right that nothing would have said:
+
+- **Owners.** `mkpkg` records each file's owner by name from the build directory, which is
+  the builder's own; run under `unshare -r`, where that user is uid 0, the package says root.
+- **Modes.** A builder's umask of 002 made what the package creates group-writable -- the
+  keep list 0664, every directory 0775 -- in this package and in `tool/ipk.sh`'s alike. Both
+  set `umask 022` now. The first guess, that a package carrying `/etc` as 0775 would loosen
+  the router's own, was tested and is wrong for apk: with the umask taken out, `/etc` stayed
+  0755. So the tier asks for the keep list's mode instead, which the same sabotage does change.
+
+`hull-openwrt` on 25.12 installs it with the guest's own `apk add --allow-untrusted
+--no-network` and asks apk and the files: listed, the program root's, the keep list
+`-rw-r--r--`, nothing in `/etc/rc.d`, nothing running; then every procd check as before; then
+`apk del` takes the program and init script and leaves the person's configuration. BusyBox there
+has no `stat -c`, which the first version of the mode check asked for.
+
+**Not yet:** `hull-malta`, the big-endian tier, is still 24.10 and opkg -- its kernel modules
+are apk-v3 packages on 25.12, and its guest builds the package, so it wants apk-tools there
+too. The package is unsigned: a feed with a key is the holder's, as 10.750 left the `.ipk`'s.
+
 ## 10.812 OpenWrt 25.12: netcfgd runs under its procd, and has no package it can install
 
 **OpenWrt 25.12.0, stable since 2026-03, replaced opkg with apk** (apk-tools 3), and 24.10's

@@ -52,9 +52,23 @@ insmod /payload/dummy.ko 2>> "$out"
 mkdir -p /etc/netcfgd
 printf 'device dummy0 {\n\tkind = "dummy"\n}\ninterface dummy0 {\n\tconfig = "192.0.2.1/32"\n}\n' \
 	> /etc/netcfgd/netcfgd.conf
-cp /payload/netcfgd /usr/sbin/netcfgd && chmod 755 /usr/sbin/netcfgd
-ln -sf /usr/sbin/netcfgd /usr/bin/ncfg
-cp /repo/packaging/procd/netcfgd /etc/init.d/netcfgd && chmod 755 /etc/init.d/netcfgd
+# **From the package, by the guest's own apk** (10.813): OpenWrt 25.12 has no
+# opkg, so this is the package a router on it installs. Unsigned, and from a
+# file, so `--allow-untrusted` and no network. What it must not do is enable
+# or start anything (10.750), and what it lays down is asked of apk itself.
+if apk add --allow-untrusted --no-network /payload/netcfgd.apk >> "$out" 2>&1; then
+	listed=$(apk info -e netcfgd 2>/dev/null)
+	owner=$(ls -ln /usr/sbin/netcfgd 2>/dev/null | awk '{print $3":"$4}')
+	keep=$(ls -l /lib/upgrade/keep.d/netcfgd 2>/dev/null | cut -c1-10)   # BusyBox: no stat -c
+	enabled=$(ls /etc/rc.d 2>/dev/null | grep -c netcfgd)
+	running=$(pidof netcfgd >/dev/null 2>&1 && echo yes || echo no)
+	say "installed by apk: listed ${listed:-not}; /usr/sbin/netcfgd owned $owner; keep list $keep; enabled $enabled; running $running"
+	[ "$listed" = netcfgd ] && [ "$owner" = 0:0 ] && [ "$keep" = -rw-r--r-- ] && [ "$enabled" = 0 ] &&
+		[ "$running" = no ] || failed=1
+else
+	say "VERDICT bad: apk would not install the package"
+	exit 0
+fi
 
 # Whether the program can be run at all on a machine this size, asked directly:
 # the kernel refuses a program whose segments outgrow the machine, and procd
@@ -155,6 +169,14 @@ noted=$(logread 2>/dev/null | grep -c 'no netfilter socket')
 say "the no-netfilter note: $noted line(s), $repeated process(es) saying it twice"
 [ -e /payload/kernel-has-netfilter ] || [ "$noted" -ge 1 ] || failed=1
 [ "$repeated" -eq 0 ] || failed=1
+
+# Removal takes what the package laid down and leaves the person's configuration,
+# which the package never carried (10.813).
+apk del netcfgd > /dev/null 2>&1
+gone=$( [ -e /usr/sbin/netcfgd ] || [ -e /etc/init.d/netcfgd ] && echo no || echo yes)
+kept=$( [ -s /etc/netcfgd/netcfgd.conf ] && echo yes || echo no)
+say "removed by apk: program and init script gone $gone; configuration kept $kept; listed $(apk info -e netcfgd 2>/dev/null | wc -l)"
+[ "$gone" = yes ] && [ "$kept" = yes ] || failed=1
 
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep -E 'netcfgd|procd|oom|Out of memory' |

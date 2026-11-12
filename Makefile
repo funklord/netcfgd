@@ -2691,9 +2691,55 @@ hull-upnp:
 # starting, respawning, reloading and stopping a statically linked daemon,
 # and an edit made as procd respawns it applied. The guest runs this host's
 # kernel with none of its modules, so it is handed the host's dummy module.
+# apk-tools 3, for the OpenWrt 25.12 package (project.md 10.813). OpenWrt's own
+# apk is built without `mkpkg`, so this builds Alpine's release from source, as
+# the holder agreed 2026-11-12: pinned by version and by the hash of its tarball,
+# fetched once into $(APK_TOOLS_DIR) and saying so, and built out of tree with
+# what it needs from this machine (meson, ninja, openssl, zlib, zstd). Nothing
+# is installed; `$(APK)` is used where it stands.
+APK_TOOLS_VERSION := 3.0.2
+APK_TOOLS_SHA256  := 987cef95e3b1cb3a365e016c9ab2566aaf440bccdc15a1650cdd0cd5ea3209e4
+APK_TOOLS_DIR     ?= build/apk-tools
+APK               ?= $(APK_TOOLS_DIR)/build/src/apk
+OPENWRT_ARCH      ?= x86_64
+
+apk-tools: $(APK)
+
+$(APK):
+	@set -e; dir=$(APK_TOOLS_DIR); tarball=$$dir/apk-tools-$(APK_TOOLS_VERSION).tar.gz; \
+	mkdir -p $$dir; \
+	if [ ! -f $$tarball ]; then \
+		echo "apk-tools: fetching $(APK_TOOLS_VERSION) from gitlab.alpinelinux.org"; \
+		curl -fsSL --max-time 120 -o $$tarball.part \
+			https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v$(APK_TOOLS_VERSION)/apk-tools-v$(APK_TOOLS_VERSION).tar.gz || \
+			{ rm -f $$tarball.part; echo "apk-tools: could not fetch it; no network?" >&2; exit 1; }; \
+		mv $$tarball.part $$tarball; \
+	fi; \
+	echo "$(APK_TOOLS_SHA256)  $$tarball" | sha256sum -c --quiet || \
+		{ echo "apk-tools: $$tarball is not the pinned release; remove it to fetch again" >&2; exit 1; }; \
+	tar -xzf $$tarball -C $$dir; \
+	meson setup --wipe $$dir/build $$dir/apk-tools-v$(APK_TOOLS_VERSION) \
+		-Ddocs=disabled -Dhelp=disabled -Dlua=disabled -Dpython=disabled -Dtests=disabled \
+		> $$dir/setup.log 2>&1 || { tail -20 $$dir/setup.log >&2; exit 1; }; \
+	ninja -C $$dir/build > $$dir/build.log 2>&1 || { tail -20 $$dir/build.log >&2; exit 1; }; \
+	echo "apk-tools: $(APK)"
+
+# The OpenWrt 25.12 package of the static program, for $(OPENWRT_ARCH): apk's
+# word for the router, `apk --print-arch` on it. CC as for `netcfgd-static`.
+openwrt-apk: $(APK)
+	@$(MAKE) --no-print-directory -C c netcfgd-static
+	@mkdir -p build
+	@APK=$(APK) sh tool/openwrt_apk.sh c/netcfgd-static $(OPENWRT_ARCH) \
+		build/netcfgd-$$(cat VERSION)-$(OPENWRT_ARCH).apk
+	@echo "openwrt-apk: build/netcfgd-$$(cat VERSION)-$(OPENWRT_ARCH).apk"
+
 hull-openwrt:
 	@$(MAKE) --no-print-directory -C c netcfgd-static
 	@cp c/netcfgd-static tests/hull/openwrt/netcfgd
+	@# The package a router on 25.12 installs, installed by the guest's own apk
+	@# (10.813), so what is tested is the package and not a copy beside it.
+	@$(MAKE) --no-print-directory $(APK)
+	@APK=$(APK) sh tool/openwrt_apk.sh c/netcfgd-static x86_64 tests/hull/openwrt/netcfgd.apk
 	@module=$$(find /lib/modules/$$(uname -r) -name 'dummy.ko*' | head -1); \
 	case "$$module" in \
 	"") echo "openwrt: this kernel has no dummy module to hand the guest" >&2; exit 1 ;; \
@@ -2944,7 +2990,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one
