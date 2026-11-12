@@ -12727,6 +12727,82 @@ Read from `uradvd.c` at the commit 25.12 builds (1e64364d), not from its usage l
 Installing the package enables its init script (`S50uradvd`), which does nothing:
 `/etc/config/uradvd` ships `enabled '0'`. The router guide says `apk add uradvd`.
 
+## 10.816 PPPoE through OpenWrt's own pppd
+
+**The other WAN most ISPs hand a router, and the one netcfgd drives through somebody else's
+pppd.** `tests/live/pppoe-session.sh` dials Debian's; `hull-armsr` now dials OpenWrt 25.12's
+own, pppd 2.5.2 with its `pppoe.so`, over the guest's second NIC to Debian's `pppoe-server`
+on a tap in the outer machine (`tests/hull/malta/pppoe.sh`, sourced where the payload says
+there is a concentrator). It dials: `ppp0` has IPCP's 10.64.0.100, the name server the
+server pushed reaches netcfgd's report, the report carries no address (0047), and taking the
+device out of the document takes `ppp0` and pppd with it. Nothing in netcfgd needed
+changing -- `plugin pppoe.so` and `nic-<parent>` are what 2.5.2 takes.
+
+What the rig needed: the outer machine on the host's kernel (`(tuning (vm (profile
+full)))`), since hull's own has no tun and ppp is modules there; `kmod` in the image to load
+`tun`, `ppp_generic` and `pppoe`; and the concentrator's pppd given a log file, without
+which an LCP timeout on the router's side was the only evidence -- the server's pppd had no
+`ppp_generic` to run on. pppd reports one pushed server as both DNS1 and DNS2, so the report
+names it twice.
+
+## 10.815 A delegated prefix on OpenWrt, and three faults in the rig on the way
+
+**What a router on a DHCPv6 ISP is for, run where routers are.** `hull-armsr` gives its
+guest a virtio NIC on a tap in the outer machine, where kea-dhcp6 delegates from
+2001:db8:1234::/48 at /56 as `tests/hull/delegation/isp.sh` does, and `tests/hull/malta/
+prefix.sh` (sourced where the payload says there is an ISP) has OpenWrt's own odhcp6c ask
+for a prefix under netcfgd and procd -- with nobody typing `ncfg apply` when it arrives --
+number a LAN out of it, and advertise it with uradvd (10.817) to `host6`, the far end of a
+veth pair and no interface of the document's, which has to take an address from the
+delegated network and the router as its default route.
+
+**It works, on OpenWrt 25.12.6 arm64, 2026-11-12:** kea delegated 2001:db8:1234::/56 in
+11 s, the daemon numbered `lan6` 2001:db8:1234::1/64 two seconds later with no apply asked
+for, and `host6` took 2001:db8:1234:0:...:a121/64 by SLAAC and a default route via `lan6`'s
+link-local, from uradvd. That is decision 0009's router story end to end on the release and
+architecture routers will have.
+
+**The prefix never came, and the client was right to refuse it.** With odhcp6c verbose
+(`-l7`) every SOLICIT drew an ADVERTISE it parsed with IA_NA and IA_PD and, a second later,
+one it parsed with IA_NA alone, after which it solicited again, for ever. A capture on the
+ISP's tap showed both ADVERTISEs carrying the /56 -- and every lifetime `pltime:3600
+vltime:600`. The kea configuration set `valid-lifetime` to 600 and left the preferred
+lifetime at kea's default of 3600, and RFC 8415 has a client discard a prefix whose
+preferred lifetime exceeds its valid one: odhcp6c does (`dhcpv6_parse_ia`, `if
+(entry.preferred > entry.valid) continue`). So the first candidate held no prefix, PD in
+`try` mode fell to `none`, the second ADVERTISE's IA_PD went unread, and the transaction
+restarted. All three kea configurations -- this one, `tests/hull/delegation/isp.sh` and
+`tests/live/delegation.sh` -- now set `preferred-lifetime` to 300. The check is not new
+(25.12.0's odhcp6c has it), and `hull-delegation`'s Debian CPE passes with the same
+configuration; that rig's ISP runs trixie's kea where this one runs bookworm's 2.2, which
+offered 3600 here, so the likely difference is kea's default -- likely, not measured. Either
+way an offer whose preferred lifetime exceeds its valid one is not one a client may take.
+
+**Tried first and wrong, kept so it is not tried again:** odhcp6c before 25.12.5 does read
+16 bytes past each IA of an ADVERTISE (fixed by b6f0c70f5f, 2026-06-03), and that fitted the
+symptom; moving the tier to 25.12.6 changed nothing, and the capture showed why. The tier
+stays on 25.12.6, the release a router flashed today runs.
+
+The rig's own faults, each of which read as a fault of netcfgd's for a run:
+
+- **A stale console passed a run.** The verdict volume outlives a run, and a qemu that
+  never started -- the tap it was given missing -- left the previous run's GUEST-END and
+  two `VERDICT ok` in `/verdict/console`, which the payload read as this run's. Both qemu
+  payloads (armsr, malta) now empty the console first and call a qemu that did not leave
+  cleanly bad. Seen red: the next run, with no tap, read `VERDICT bad`.
+- **An edited spec ran the old image.** `hull_image` built an image only when its ref was
+  missing, so kea added to `hull.conf` booted an image without kea (10.602's hwsim had no
+  hostapd the same way). It now keeps the spec's hash in `$(HULL_SPEC_DIR)` and rebuilds
+  when it moves; a ref with no stamp is taken as current, so adopting it rebuilt nothing.
+  The two delegation rigs carried their own copy of the old check and call it now.
+- **Renaming by MAC renamed the bridge.** netifd's `br-lan` takes its port's MAC, so the
+  guest's rename-by-MAC renamed the bridge to `isp6` and left the NIC down with no carrier;
+  it matches only devices with a `device` link now.
+
+And the outer machine runs the host's kernel (`(tuning (vm (profile full)))`): hull's own
+has no tun, and `tun` is a module on the host's, loaded with `kmod`, which the image now
+carries. virtio-net's option ROM is turned off (`romfile=`), there being no `ipxe-qemu`.
+
 ## 10.814 The router tier on arm64: `hull-armsr`
 
 **The routers coming are mostly arm64 on OpenWrt 25.12**, and every router tier so far was x86
@@ -12735,8 +12811,8 @@ or big-endian MIPS. `make hull-armsr` runs the same two documents on OpenWrt 25.
 payload (`tests/hull/openwrt/payload.sh`: apk install, procd, the fuzznet store, respawn,
 reload) and hull-malta's `guest.sh` (vlan, bridge, route, nftables, netifd beside it, a DHCP
 WAN under busybox udhcpc, the package taken out and put back through sysupgrade's keep list).
-Its image pins 25.12.0's kernel, the aarch64 musl toolchain (gcc 14.3.0), the dummy and veth
-module packages and apk-tools 3.0.2, all by sha256; the package arch is `aarch64_generic`.
+Its image pins 25.12.0's kernel (25.12.6's since 10.815), the aarch64 musl toolchain (gcc
+14.3.0), the dummy and veth module packages and apk-tools 3.0.2, all by sha256; the package arch is `aarch64_generic`.
 It is not in `make hull`, like the other qemu tiers. First run, 2026-11-12: both verdicts ok,
 the node key the same across a respawn and across the restore.
 

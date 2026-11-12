@@ -60,12 +60,20 @@ cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 printf '%s\n' '#!/bin/sh' 'sh /payload/guest.sh > /dev/console 2>&1 &' 'exit 0' > $top/etc/rc.local
 (cd $top && find . | cpio -o -H newc --quiet > /malta/overlay.cpio)
 
+# **The console from a run before this one is not this run's.** The verdict
+# volume outlives a run, and a qemu that never started -- the tap it was given
+# missing, as `hull-armsr` once was -- left the last run's GUEST-END in place
+# and the old guest's two VERDICT ok read as this one's (10.815). So it is
+# emptied first, and a qemu that did not leave cleanly is a bad run whatever
+# the console holds.
+: > /verdict/console
 say "booting"
 timeout -k 10 900 qemu-system-mips -M malta -cpu 24Kc -m 128 -display none -monitor none \
 	-no-reboot -nic none -vga none -serial file:/verdict/console -kernel /malta/vmlinux.elf \
 	-initrd /malta/overlay.cpio -append 'console=ttyS0,115200'
 ran=$?
 say "qemu left with $ran"
+[ "$ran" -eq 0 ] || say "VERDICT bad: qemu did not leave cleanly"
 grep -q 'GUEST-END' /verdict/console 2>/dev/null ||
 	{ tail -30 /verdict/console >> "$out"; say "VERDICT bad: the guest never finished"; exit 0; }
 sed -n '/GUEST-BEGIN/,/GUEST-END/p' /verdict/console | tr -d '\r' | grep -v 'GUEST-' >> "$out"

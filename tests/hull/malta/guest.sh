@@ -10,6 +10,40 @@
 #
 # HOW IT STOPS: the router test bounds its own waits, each wait here counts its
 # seconds, and `reboot -f` is unconditional.
+#
+# Where the payload gave the guest NICs with an ISP behind them (/payload/isp6,
+# /payload/pppoe), they are renamed first, found by the MAC the payload gave each:
+# OpenWrt's netifd puts `eth0` in its `lan` bridge at boot, and the netifd test
+# below needs `eth0` to be a name netifd claims and nothing holds.
+nic() {
+	for dev in /sys/class/net/*; do
+		# A NIC, not what carries its address: netifd's `br-lan` takes its
+		# port's MAC, and matching that renamed the bridge and left the port
+		# down (10.815).
+		[ -e "$dev/device" ] || continue
+		[ "$(cat "$dev/address" 2>/dev/null)" = "$1" ] || continue
+		ip link set "${dev##*/}" nomaster 2>/dev/null
+		ip link set "${dev##*/}" down
+		ip link set "${dev##*/}" name "$2"
+		# IPv6 back on: netifd switches it off on a port of its bridge, and
+		# whether it got to `eth0` before this did is a race -- one run had a
+		# link-local here and the next had none (10.815).
+		sysctl -q -w "net.ipv6.conf.$2.disable_ipv6=0" 2>/dev/null
+		sysctl -q -w "net.ipv6.conf.$2.accept_dad=0" 2>/dev/null
+		ip link set "$2" up
+		sleep 1
+		echo "$2 was ${dev##*/}: $(nic_state "$2")" >> /tmp/nic.log
+	done
+}
+nic_state() {
+	d=/sys/class/net/$1
+	echo "carrier $(cat $d/carrier 2>/dev/null), $(cat $d/operstate 2>/dev/null)," \
+		"master $(basename "$(readlink $d/master 2>/dev/null)" 2>/dev/null)," \
+		"rx $(cat $d/statistics/rx_packets 2>/dev/null) tx $(cat $d/statistics/tx_packets 2>/dev/null)," \
+		"flags $(cat $d/flags 2>/dev/null)"
+}
+[ -e /payload/isp6 ] && nic 52:54:00:12:34:56 isp6
+[ -e /payload/pppoe ] && nic 52:54:00:12:34:57 dsl0
 sh /payload/payload.sh
 
 out=/verdict/wider
@@ -105,6 +139,20 @@ say "dnsmasq gave: $(cut -d' ' -f3 /tmp/leases 2>/dev/null | tr '\n' ' ')"
 	logread | grep -E 'dnsmasq|udhcpc' | tail -10 | cut -c1-130 >> "$out"
 }
 [ -f /tmp/isp.pid ] && kill "$(cat /tmp/isp.pid)"
+
+# And IPv6 from the ISP, where there is one: prefix.sh, beside this file.
+if [ -e /payload/isp6 ]; then
+	. /payload/prefix.sh
+else
+	say "prefix delegation: not run, no ISP on this tier (hull-armsr runs it)"
+fi
+
+# And PPPoE, where there is a concentrator: pppoe.sh, beside this file.
+if [ -e /payload/pppoe ]; then
+	. /payload/pppoe.sh
+else
+	say "pppoe: not run, no access concentrator on this tier (hull-armsr runs it)"
+fi
 
 # And a radio, where the image has a wireless stack: radio.sh, beside this file.
 if [ -e /payload/no-radio ]; then

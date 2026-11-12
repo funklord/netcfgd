@@ -47,6 +47,7 @@ cat > /run/kea/kea.json <<'JSON'
   "interfaces-config": { "interfaces": [ "eth1" ] },
   "lease-database": { "type": "memfile", "persist": false },
   "valid-lifetime": 600,
+  "preferred-lifetime": 300,
   "subnet6": [ {
       "id": 1,
       "subnet": "2001:db8:aaaa::/48",

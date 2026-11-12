@@ -2207,6 +2207,7 @@ vm-image:
 # on rather than leaving a report to claim one.
 HULL           ?= $(HOME)/src/hull/build/hull
 HULL_TIMEOUT   ?= 900
+HULL_SPEC_DIR  ?= build/hull-spec
 
 # **The images are hull's, not this tree's, since 2026-10-25** (project.md
 # 10.558). Each rig's `hull.conf` carries a `(build ...)` form beside its
@@ -2262,13 +2263,31 @@ hull_verdict = if [ -d $(1) ] && [ ! -O $(1) ]; then \
 	fi; \
 	mkdir -p $(1)
 
-# Build a rig's image when the store has no ref for it. `hull build` is itself
-# cached per step, so asking again is cheap -- but asking only when the ref is
-# absent keeps a rig run from reaching the network at all on the common path.
-hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || \
-	{ echo "hull: netcfgd/$(1) is not in the store, building it from its spec"; \
-	  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$(1)/hull.conf \
-		netcfgd/$(1); }
+# Build a rig's image when the store has no ref for it, or when its spec has
+# changed since it was built here. `hull build` is itself cached per step, so
+# asking again is cheap -- but asking only then keeps a rig run from reaching
+# the network at all on the common path.
+#
+# **The spec's hash, and not only the ref.** A ref that is there says nothing of
+# which spec made it, so an edited `hull.conf` ran the old image: `hull-armsr`
+# gaining kea booted an image without it, and 10.602's hwsim had no hostapd
+# (10.815). The stamp under $(HULL_SPEC_DIR) is the hash of the spec the
+# image was last built from here; a ref with no stamp yet is taken as current,
+# so adopting this rebuilds nothing until a spec moves. The hash covers
+# `hull.conf` alone, which is all a rig's image is built from today.
+hull_image = stamp=$(HULL_SPEC_DIR)/$(1).sha256; mkdir -p $(HULL_SPEC_DIR); \
+	spec=$$(sha256sum < tests/hull/$(1)/hull.conf); \
+	if $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]"; then \
+		[ -f $$stamp ] || echo "$$spec" > $$stamp; \
+		[ "$$(cat $$stamp)" = "$$spec" ] || \
+		{ echo "hull: netcfgd/$(1)'s spec has changed since it was built, rebuilding it"; \
+		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$(1)/hull.conf \
+			netcfgd/$(1) && echo "$$spec" > $$stamp; }; \
+	else \
+		echo "hull: netcfgd/$(1) is not in the store, building it from its spec"; \
+		timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$(1)/hull.conf \
+			netcfgd/$(1) && echo "$$spec" > $$stamp; \
+	fi
 
 # **`timeout` is the right bound here and would not be for a container.** A
 # `(backend vm)` machine is qemu, a child of this shell, so a signal reaches
@@ -2293,10 +2312,7 @@ hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation 
 hull-delegation:
 	@$(MAKE) --no-print-directory -C c
 	@$(call hull_says,netcfgd/delegation)
-	@$(HULL) images 2>/dev/null | grep -q "^netcfgd/delegation[[:space:]]" || \
-		{ echo "hull: netcfgd/delegation is not in the store, building it"; \
-		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build \
-			-f tests/hull/delegation/hull.conf netcfgd/delegation; }
+	@$(call hull_image,delegation)
 	@rm -f tests/hull/delegation/verdict/isp tests/hull/delegation/verdict/cpe
 	@$(call hull_verdict,tests/hull/delegation/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/delegation/hull.conf || true
@@ -2326,10 +2342,7 @@ hull-delegation:
 hull-delegation-lossy:
 	@$(MAKE) --no-print-directory -C c
 	@$(call hull_says,netcfgd/delegation)
-	@$(HULL) images 2>/dev/null | grep -q "^netcfgd/delegation[[:space:]]" || \
-		{ echo "hull: netcfgd/delegation is not in the store, building it"; \
-		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build \
-			-f tests/hull/delegation/hull.conf netcfgd/delegation; }
+	@$(call hull_image,delegation)
 	@rm -f tests/hull/delegation/verdict/isp tests/hull/delegation/verdict/cpe
 	@$(call hull_verdict,tests/hull/delegation/verdict)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/delegation/lossy.conf || true
