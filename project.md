@@ -12690,6 +12690,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.826 IPv6 over a PPPoE session
+
+**A DSL line's IPv6 arrives by DHCPv6 over the PPPoE session**, its delegated prefix above
+all, and netcfgd's pppd options never asked for IPv6CP: no `+ipv6`, so `ppp0` had no
+link-local address and no DHCPv6 client could ask over it. The options now carry `+ipv6`,
+which OpenWrt's own PPPoE protocol passes by default; an ISP with no IPv6 rejects IPv6CP and
+IPv4 carries on. `tests/live/ppp.sh` has a real pppd take the options, and `pppoe_test.c` holds
+the text.
+
+On `hull-armsr`, 2026-11-12: the concentrator's pppd is told `+ipv6` too, a second kea serves
+its end of the session, and `pppoe.sh` turns `ppp0` to `dhcp6 pd_length 56` once it has
+dialled: `ppp0` took a link-local from IPv6CP and a /56 was delegated over the session in 12 s.
+
+**kea will not serve a point-to-point link as pppd numbers it**: the session's link-local is
+`inet6 <ours> peer <theirs>`, and kea bound the peer's address and failed ("Failed to bind
+socket ... to fe80::<peer>"), so it opened no socket at all. The rig gives the concentrator's
+`ppp0` an ordinary link-local of its own, `fe80::1/64`, which kea binds. That is the rig's ISP,
+not anything a router does.
+
 ## 10.825 The LAN's resolver on OpenWrt is OpenWrt's dnsmasq
 
 **`dns_forward` cannot be had beside OpenWrt's stock dnsmasq, and failing it takes the LAN's

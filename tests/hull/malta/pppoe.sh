@@ -55,6 +55,26 @@ if [ "$dialled" = no ]; then
 	ps w | grep '[p]ppd' | cut -c1-140 >> "$out"
 	logread | grep -E 'pppd|pppoe' | tail -12 | cut -c1-140 >> "$out"
 fi
+# And IPv6 over the session, as a DSL ISP delivers it: IPv6CP gives ppp0 a
+# link-local (pppd is told `+ipv6`), and DHCPv6 over it delegates a prefix
+# (10.826). The concentrator's end runs a kea of its own for this.
+say "ppp0's link-local: $(ip -6 -o addr show dev ppp0 scope link 2>/dev/null | awk '{print $4}' | head -1)"
+sed -i '/^interface ppp0 {/,/^}/ s/config = "null"/config = "dhcp6 pd_length 56"/' \
+	/etc/netcfgd/netcfgd.conf
+n=0
+until [ -s /run/netcfgd/prefixes/ppp0 ] || [ $n -gt 90 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+over=$(head -1 /run/netcfgd/prefixes/ppp0 2>/dev/null)
+say "delegated over the session after $n s: ${over:-nothing}"
+case "$over" in
+2001:db8:5678:*) ;;
+*)
+	failed=1
+	ps w | grep '[o]dhcp6c' | cut -c1-140 >> "$out"
+	;;
+esac
 # Hung up again, so the package half after this starts from a router with no session.
 sed -i '/^device ppp0 {/,/^}/d' /etc/netcfgd/netcfgd.conf
 n=0

@@ -128,6 +128,7 @@ lcp-echo-interval 10
 lcp-echo-failure 2
 ms-dns 192.0.2.53
 logfile /run/ac-pppd.log
++ipv6
 OPTIONS
 # The concentrator's own pppd needs ppp in this machine's kernel, the host's,
 # where it is modules (hull.conf).
@@ -229,6 +230,39 @@ say "kea $(dpkg-query -W -f='${Version}' kea-dhcp6-server 2>/dev/null) on tap0 a
 pppoe-server -I tap1 -L 10.64.0.1 -R 10.64.0.100 -N 1 -O /run/ac.options -g "$plugin" -k \
 	> /run/ac.log 2>&1 &
 ac=$!
+# **And DHCPv6 over the session**, as a DSL ISP delivers IPv6: a second kea on the
+# concentrator's own end of it, started once IPv6CP has given that end a
+# link-local, delegating from 2001:db8:5678::/48 (10.826). Watched for while qemu
+# lives, started once.
+cat > /run/kea/kea-ppp.json <<'JSON'
+{ "Dhcp6": {
+  "interfaces-config": { "interfaces": [ "ppp0" ] },
+  "lease-database": { "type": "memfile", "persist": false },
+  "valid-lifetime": 600,
+  "preferred-lifetime": 300,
+  "subnet6": [ {
+      "id": 2,
+      "subnet": "2001:db8:5678::/48",
+      "pd-pools": [ { "prefix": "2001:db8:5678::", "prefix-len": 48, "delegated-len": 56 } ],
+      "interface": "ppp0"
+  } ]
+} }
+JSON
+(
+	while [ -d /proc/$qemu ]; do
+		if [ ! -e /run/kea/ppp.pid ] &&
+			ip -6 -o addr show dev ppp0 scope link 2>/dev/null | grep -v tentative | grep -q fe80; then
+			# kea, given a point-to-point link, binds the address of its *peer*
+			# -- `inet6 <ours> peer <theirs>` -- and fails; an ordinary
+			# link-local of the concentrator's own is one it can bind.
+			ip -6 addr add fe80::1/64 dev ppp0 nodad 2>/dev/null
+			ip -o addr show dev ppp0 > /run/kea/ppp0.addr 2>&1
+			kea-dhcp6 -c /run/kea/kea-ppp.json > /run/kea/kea-ppp.log 2>&1 &
+			echo $! > /run/kea/ppp.pid
+		fi
+		sleep 2
+	done
+) &
 say "pppoe-server $(dpkg-query -W -f='${Version}' pppoe 2>/dev/null) on tap1, plugin ${plugin:-none}"
 # The home's host asks every five seconds while qemu lives, and the first answer
 # each way is kept: when, and from which address.
@@ -244,7 +278,8 @@ say "pppoe-server $(dpkg-query -W -f='${Version}' pppoe 2>/dev/null) on tap1, pl
 ) > /run/home.log 2>&1 &
 wait $qemu
 ran=$?
-kill $kea $ac $capture $icmp0 $icmp2 $(cat /run/radvd.pid 2>/dev/null) 2>/dev/null
+kill $kea $ac $capture $icmp0 $icmp2 $(cat /run/radvd.pid 2>/dev/null) $(cat /run/kea/ppp.pid 2>/dev/null) \
+	2>/dev/null
 wait $kea 2>/dev/null
 wait $ac 2>/dev/null
 pkill -f '^pppd .*rp-pppoe' 2>/dev/null
@@ -254,6 +289,12 @@ grep -iE 'error|fail|DHCP6_LEASE_PD|ADVERTISE_PD|leases' /run/kea/kea.log 2>/dev
 	sed 's/^[^]]*] //' | cut -c1-400 | sed 's/^/  kea: /' >> "$out"
 tail -8 /run/ac.log /run/ac-pppd.log 2>/dev/null | cut -c1-200 | sed 's/^/  concentrator: /' >> "$out"
 say "the tunnel's far end: $(wg show wgo latest-handshakes 2>/dev/null | awk '{print ($2 > 0 ? "a handshake" : "no handshake")}'), $(wg show wgo transfer 2>/dev/null | awk '{print $2" bytes in"}')"
+if grep -q 'delegated over the session after .*: nothing' /verdict/console 2>/dev/null; then
+	say "  the concentrator's kea on ppp0: $([ -e /run/kea/ppp.pid ] && echo started || echo never started)"
+	cut -c1-160 /run/kea/ppp0.addr 2>/dev/null | sed 's/^/  ppp0 here: /' >> "$out"
+	grep -iE 'error|fail|warn|LEASE|ADVERT|SOLICIT|socket' /run/kea/kea-ppp.log 2>/dev/null | head -6 |
+		sed 's/^[^]]*] //' | cut -c1-200 | sed 's/^/  kea-ppp: /' >> "$out"
+fi
 # The home's verdict is this machine's to give: the guest cannot see its host.
 say "the home reached the ISP: $(tr '\n' ';' < /run/home.log 2>/dev/null)"
 if ! grep -q '^v4 ' /run/home.log 2>/dev/null || ! grep -q '^v6 ' /run/home.log 2>/dev/null; then

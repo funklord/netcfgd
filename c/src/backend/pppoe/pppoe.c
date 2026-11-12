@@ -179,6 +179,11 @@ char *ncfg_pppoe_options(const char *iface, const ncfg_pppoe_config_t *config,
 	    "# one -- checked in ipcp.c rather than assumed, because this option was\n"
 	    "# left out for years on the belief that it rewrote /etc/resolv.conf.\n"
 	    "usepeerdns\n"
+	    "# IPv6CP as well, for a link-local address on the session: without one\n"
+	    "# no DHCPv6 client can ask over it, and a DSL line's IPv6 -- its\n"
+	    "# delegated prefix most of all -- arrives by DHCPv6. An ISP with no IPv6\n"
+	    "# rejects IPv6CP and IPv4 carries on. OpenWrt's own PPPoE asks the same.\n"
+	    "+ipv6\n"
 	    "# Two scripts rather than one told apart by its environment: pppd\n"
 	    "# leaves DNS1 and DNS2 set for the ip-down call as well, so a single\n"
 	    "# script would report the same servers as the session went away.\n");
