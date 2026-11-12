@@ -12689,6 +12689,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.811 A long hook path pushed udhcpc out of the "no DHCP client" sentence
+
+`make live` on 428a4c75, run with a TMPDIR longer than `/tmp`, failed `exec_refused.sh`'s
+"and accounts for udhcpc": the sentence for a machine with no usable DHCPv4 client ends at
+"would use this o". The three clients' reasons share one error of `NCFG_ERROR_MAX`, 512
+bytes, and the reason for a client installed in the sbins but not on PATH spent about 230 of
+them explaining why netcfgd searches PATH alone -- so a hook path of ordinary length, such as
+a packaged one, left no room for the last client's reason, which is the one 0182's case asks
+the sentence to carry. The explanation is `backend_internal.h`'s to give; the sentence now
+says where the client is, that it is not on PATH, and that an init's PATH would find it.
+`exec_refused.sh` passes with the long TMPDIR.
+
 ## 10.810 After a sleep, the DHCP clients are asked to renew
 
 **The wired half of the lid, which the radio could not ask.** 10.809's station re-asked for

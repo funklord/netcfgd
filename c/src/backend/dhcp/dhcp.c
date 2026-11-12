@@ -1159,12 +1159,14 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 			char *elsewhere = named ? NULL : ncfg_backend_find_program(name);
 
 			if (elsewhere) {
+				/* Short, because the three clients' reasons share one
+				 * 512-byte error and this one, at its first length, left no
+				 * room for the third: a long hook path pushed udhcpc's out
+				 * of the sentence (10.811). Why PATH alone is searched is
+				 * `backend_internal.h`'s to say, not every failure's. */
 				why_not(why, sizeof(why),
-				    "%s is installed at %s and is not on PATH, which is where "
-				    "netcfgd looks for a client so that one an operator puts in "
-				    "front of the packaged one wins; a netcfgd whose PATH carries "
-				    "the sbins, as an init gives it, would use this one", name,
-				    elsewhere);
+				    "%s is installed at %s and is not on PATH; an init's PATH, "
+				    "with the sbins, would find it", name, elsewhere);
 				found_any = 1;
 				free(elsewhere);
 			} else {
