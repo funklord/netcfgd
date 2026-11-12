@@ -52,8 +52,8 @@ say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /armsr/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /armsr/veth/lib/modules/*/veth.ko $top/payload/veth.ko
 cp /repo/tests/hull/malta/guest.sh /repo/tests/hull/malta/prefix.sh /repo/tests/hull/malta/pppoe.sh \
-	/repo/tests/hull/malta/lan.sh /repo/tests/hull/malta/restart.sh /repo/tests/hull/malta/wider.conf \
-	$top/payload/
+	/repo/tests/hull/malta/lan.sh /repo/tests/hull/malta/restart.sh /repo/tests/hull/malta/wg.sh \
+	/repo/tests/hull/malta/wider.conf $top/payload/
 # armsr's image carries no wireless stack, so guest.sh says the radio half was not
 # run and why, rather than failing it or passing over it.
 echo "armsr's image has no cfg80211, wpad or iw (hull-malta runs it)" > $top/payload/no-radio
@@ -63,6 +63,14 @@ cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 # And an ISP behind each of the guest's two NICs: DHCPv6 for prefix.sh (10.815),
 # PPPoE for pppoe.sh (10.816); and uradvd, for prefix.sh to advertise with (10.817).
 cp /armsr/uradvd.apk $top/payload/uradvd.apk
+# And WireGuard, for wg.sh (10.824): the module packages, this end's key and the
+# far peer's public one. The far peer is this machine, set up once qemu runs.
+mkdir -p $top/payload/wg
+cp /armsr/wg/kmod-*.apk $top/payload/wg/
+wg genkey > /run/wg-guest.key
+wg genkey > /run/wg-peer.key
+cp /run/wg-guest.key $top/payload/wg/guest.key
+wg pubkey < /run/wg-peer.key > $top/payload/wg/peer.pub
 : > $top/payload/isp6
 : > $top/payload/pppoe
 # And a home behind the router, on a third NIC, whose host is here (10.820).
@@ -192,6 +200,14 @@ RADVD
 sysctl -q -w net.ipv6.conf.all.forwarding=1
 radvd -C /run/radvd.conf -p /run/radvd.pid -m stderr > /run/radvd.log 2>&1
 ip -6 route add 2001:db8:1234::/56 via fe80::5054:ff:fe12:3456 dev tap0 2>> "$out"
+# The router's WireGuard peer, across the ISP's link: 10.99.0.1, listening on
+# 51820, expecting the router's key from 192.0.2.2:51821.
+modprobe wireguard 2>> "$out"
+ip link add wgo type wireguard 2>> "$out"
+wg set wgo private-key /run/wg-peer.key listen-port 51820 \
+	peer "$(wg pubkey < /run/wg-guest.key)" allowed-ips 10.99.0.2/32 endpoint 192.0.2.2:51821 2>> "$out"
+ip addr add 10.99.0.1/24 dev wgo 2>> "$out"
+ip link set wgo up 2>> "$out"
 ip link set tap2 netns home 2>> "$out"
 ip netns exec home sh -c 'ip link set lo up; sysctl -q -w net.ipv6.conf.tap2.accept_ra=2;
 	ip link set tap2 up; ip addr add 192.168.9.50/24 dev tap2' 2>> "$out"
@@ -237,6 +253,7 @@ say "qemu left with $ran"
 grep -iE 'error|fail|DHCP6_LEASE_PD|ADVERTISE_PD|leases' /run/kea/kea.log 2>/dev/null | head -6 |
 	sed 's/^[^]]*] //' | cut -c1-400 | sed 's/^/  kea: /' >> "$out"
 tail -8 /run/ac.log /run/ac-pppd.log 2>/dev/null | cut -c1-200 | sed 's/^/  concentrator: /' >> "$out"
+say "the tunnel's far end: $(wg show wgo latest-handshakes 2>/dev/null | awk '{print ($2 > 0 ? "a handshake" : "no handshake")}'), $(wg show wgo transfer 2>/dev/null | awk '{print $2" bytes in"}')"
 # The home's verdict is this machine's to give: the guest cannot see its host.
 say "the home reached the ISP: $(tr '\n' ';' < /run/home.log 2>/dev/null)"
 if ! grep -q '^v4 ' /run/home.log 2>/dev/null || ! grep -q '^v6 ' /run/home.log 2>/dev/null; then

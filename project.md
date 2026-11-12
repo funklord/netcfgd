@@ -12690,6 +12690,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.824 WireGuard on the router
+
+**The VPN a router is most often asked for**, run where routers are. `hull-armsr`'s image
+pins `kmod-wireguard` and the eight packages it depends on from 25.12.6's kmods feed --
+the image carries none of them -- and `tests/hull/malta/wg.sh` installs them as a person
+would, gives netcfgd a `wireguard` device with one peer, and pings the peer's tunnel
+address. The peer is the outer machine across the ISP's link (`wg` there, from
+`wireguard-tools`, which also makes both keys). 2026-11-12: `wg0` carried 10.99.0.2/24
+after 1 s, the far end saw a handshake, and it answered through the tunnel at once. Nothing
+in netcfgd needed changing; netcfgd speaks generic netlink to the module itself, so the
+router needs no `wireguard-tools`, which the guide now says beside `apk add kmod-wireguard`.
+
 ## 10.823 What a DHCPv6 lease gives the uplink itself
 
 **The next lens from 10.822: what else odhcp6c hands its script that the hook dropped.**

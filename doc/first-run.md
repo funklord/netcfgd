@@ -651,6 +651,9 @@ starts one for each interface it advertises on. uradvd sends neither the managed
 other-config flag and takes only a /64, so a document asking for those is refused under it
 rather than advertised as something else.
 
+**WireGuard needs its kernel module**, which the image does not carry: `apk add
+kmod-wireguard`. netcfgd speaks to the kernel itself, so `wireguard-tools` is not needed.
+
 **A firmware upgrade keeps netcfgd**, if you keep settings. The package lists its
 configuration, its store and the program itself for `sysupgrade`, because the new image
 holds no netcfgd and a port you took out of `/etc/config/network` would otherwise come back

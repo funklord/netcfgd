@@ -158,6 +158,13 @@ else
 	say "pppoe: not run, no access concentrator on this tier (hull-armsr runs it)"
 fi
 
+# And a WireGuard tunnel, where the payload brought the module: wg.sh.
+if [ -d /payload/wg ]; then
+	. /payload/wg.sh
+else
+	say "wireguard: not run, no module or peer on this tier (hull-armsr runs it)"
+fi
+
 # And the stock services restarted under all of it, on every tier: restart.sh.
 . /payload/restart.sh
 
