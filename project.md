@@ -12689,6 +12689,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.812 OpenWrt 25.12: netcfgd runs under its procd, and has no package it can install
+
+**OpenWrt 25.12.0, stable since 2026-03, replaced opkg with apk** (apk-tools 3), and 24.10's
+security updates end in 2026-09 -- so the routers expected next will most likely run 25.12.
+`hull-openwrt` moves to `docker.io/openwrt/rootfs:x86-64-25.12.0` and passes every check
+there: procd starts netcfgd and respawns it with the same node key, an edit alone, an edit
+as it respawns and a `reload` each apply, a stop holds. The verdict now names the release
+that ran, since the image is `netcfgd/openwrt` whatever its base and a store holding one built
+from 24.10 would keep running it.
+
+**The package does not reach it.** 10.750's `.ipk` is opkg's, and 25.12 installs apk-v3
+packages -- not Alpine's v2 `.apk` either, which `packaging/alpine` makes. Making one needs
+apk-tools 3's `mkpkg`, which OpenWrt's own apk 3.0.2 is built without (asked of the 25.12
+image). Building apk-tools 3.0.2 from Alpine's source here was refused by this session's
+permission check, as code from outside; the other road is the OpenWrt SDK. **The holder's**,
+being a build dependency fetched from outside. Until then a router on 25.12 takes netcfgd as
+a copied static binary and the procd script, which is what this tier does.
+
+**And a figure that looked alarming and is the rig's:** about 3 MB available while netcfgd
+runs, on 25.12 and on 24.10 alike (2.8 MB), netcfgd itself 5.8 MB resident in both. The tier
+runs the host's Debian kernel in 128 MB, which leaves 88 MB; OpenWrt's own kernel on malta
+left 51 MB of 118 (10.751). So it says nothing about a router, and malta is the tier to read
+memory from.
+
 ## 10.811 A long hook path pushed udhcpc out of the "no DHCP client" sentence
 
 `make live` on 428a4c75, run with a TMPDIR longer than `/tmp`, failed `exec_refused.sh`'s

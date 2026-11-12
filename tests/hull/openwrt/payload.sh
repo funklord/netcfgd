@@ -43,7 +43,7 @@ failed=0
 # What a machine this size has left, which fuzznet's pressure reads too.
 memory() { awk '/^(MemAvailable|Cached|Shmem|Slab):/ { printf "%s %d kB  ", $1, $2 }' /proc/meminfo; }
 
-say "pid 1 is $(cat /proc/1/comm); $(head -1 /etc/openwrt_release)"
+say "pid 1 is $(cat /proc/1/comm); $(grep DISTRIB_RELEASE /etc/openwrt_release)"
 n=0
 until ubus call service list >/dev/null 2>&1 || [ $n -gt 40 ]; do sleep 1; n=$((n + 1)); done
 ubus call service list >/dev/null 2>&1 || { say "VERDICT bad: procd's ubus never answered"; exit 0; }
