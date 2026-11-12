@@ -202,6 +202,9 @@ sleep 2
 tar czf /tmp/keep.tgz $(sysupgrade -l 2>/dev/null)
 say "sysupgrade kept: $(tar tzf /tmp/keep.tgz | grep -cE 'netcfgd|fuzznet|ncfg') of ours in $(tar tzf /tmp/keep.tgz | wc -l)"
 conf=$(tar tzf /tmp/keep.tgz | grep -c 'etc/netcfgd/')
+# What a new image is: no netcfgd in apk's database and none of its files, so the
+# package is taken away through apk and what apk leaves goes by hand.
+apk del netcfgd > /dev/null 2>&1
 rm -rf /etc/netcfgd /root/.local/share/fuzznet /usr/sbin/netcfgd /usr/bin/ncfg \
 	/etc/init.d/netcfgd /etc/rc.d/S21netcfgd /etc/rc.d/K89netcfgd
 tar xzf /tmp/keep.tgz -C /
@@ -216,6 +219,11 @@ say "after the restore: $(ls /etc/rc.d | grep -c netcfgd) start links, $(pidof n
 [ "$conf" -ge 1 ] && [ -n "$before" ] && [ "$before" = "$after" ] && [ -n "$(pidof netcfgd)" ] &&
 	[ -e /etc/rc.d/S21netcfgd ] || failed=1
 /etc/init.d/netcfgd stop
+# And the package installed again over what the upgrade kept, which apk has no
+# record of: what a person does next, and what the router guide has to tell them.
+readd=$(apk add --allow-untrusted --no-network --force-non-repository /payload/netcfgd.apk 2>&1 |
+	grep -v WARNING | tail -2 | cut -c1-140 | tr '\n' ';')
+say "apk add over the kept files: $readd listed $(apk info -e netcfgd 2>/dev/null | grep -c '^netcfgd$')"
 /etc/init.d/netcfgd disable
 apk del netcfgd > /dev/null 2>&1
 [ ! -e /usr/sbin/netcfgd ] && [ ! -e /etc/init.d/netcfgd ] || failed=1

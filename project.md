@@ -12690,6 +12690,16 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.818 After an upgrade, apk takes the package back over what was kept
+
+The tier's sysupgrade check deleted netcfgd's files and left apk's record of the package,
+which is not what an upgrade leaves: a new image's database has never heard of netcfgd
+while the keep list brings its files back. It now takes the package away through apk
+first, then restores. Measured on `hull-armsr` (25.12.6), 2026-11-12: the restored daemon
+starts as the same node, and `apk add` of the package over the kept, unowned files
+installs and lists it with no flag beyond the ramdisk's `--force-non-repository` -- where
+24.10's `opkg install` wanted `--force-overwrite`. The router guide says so.
+
 ## 10.817 Advertising on OpenWrt 25.12: uradvd
 
 **OpenWrt 25.12 carries no radvd in any feed**, measured 2026-11-12 against every feed's

@@ -653,7 +653,8 @@ configuration, its store and the program itself for `sysupgrade`, because the ne
 holds no netcfgd and a port you took out of `/etc/config/network` would otherwise come back
 with nothing running it. `sysupgrade -n`, which keeps nothing, loses it all along with the
 rest of the router's settings. What comes back is files the package manager no longer
-knows, so a later `opkg install` of netcfgd needs `--force-overwrite`.
+knows. On 25.12 a later `apk add` of the package takes them over as they are; on 24.10,
+`opkg install` needs `--force-overwrite`.
 
 ## When something goes wrong
 
