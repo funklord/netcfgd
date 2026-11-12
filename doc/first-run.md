@@ -564,9 +564,9 @@ show you both at once; this shows you both once both have been tried.
 
 ## 10. An OpenWrt router
 
-Everything here has been run on OpenWrt 25.12 in emulators -- big-endian MIPS on OpenWrt's
-own kernel (`make hull-malta`) and x86 (`make hull-openwrt`) -- earlier on 24.10, and on no
-real router yet. A router may have no console, so the rule above matters more:
+Everything here has been run on OpenWrt 25.12 in emulators -- arm64, as most routers sold
+now are (`make hull-armsr`), big-endian MIPS on OpenWrt's own kernel (`make hull-malta`) and
+x86 (`make hull-openwrt`) -- earlier on 24.10, and on no real router yet. A router may have no console, so the rule above matters more:
 **leave the port you are connected through with netifd until the end.**
 
 Build the program with OpenWrt's toolchain for your target, then the package. The
@@ -664,6 +664,55 @@ dhcp_server {
 
 **WireGuard needs its kernel module**, which the image does not carry: `apk add
 kmod-wireguard`. netcfgd speaks to the kernel itself, so `wireguard-tools` is not needed.
+
+**A whole router, as one document.** Each part of this is what `make hull-armsr` runs, on
+its own ports: a WAN asking DHCPv4 and DHCPv6 for an address and a delegated /56, NAT out
+of it, and a LAN bridge numbered from both and served -- addresses by DHCP, IPv6 by
+advertisement (uradvd, above), names by OpenWrt's own dnsmasq:
+
+```
+interface wan {
+	config = ["dhcp", "dhcp6 pd_length 56"]
+	nat    = true
+}
+
+device br-lan {
+	bridge {
+		members = ["lan1", "lan2", "lan3", "lan4"]
+	}
+}
+interface br-lan {
+	config     = ["192.168.1.1/24", "@pd:wan=::1/64"]
+	forwarding = true
+	advertise { prefixes = ["@pd:wan"] }
+	dhcp_server {
+		dns = ["192.168.1.1"]
+	}
+}
+```
+
+The WAN's IPv6 default route comes from the ISP's router advertisement, which odhcp6c hears
+and netcfgd installs; its own address and the ISP's name servers come from the same lease.
+On a DSL line the WAN is a PPPoE session over the port instead, and the same DHCPv6 runs
+over it:
+
+```
+device ppp0 {
+	pppoe {
+		parent   = "wan"
+		username = "you@isp.example"
+		password = "@secret:dsl"
+	}
+}
+interface ppp0 {
+	config = "dhcp6 pd_length 56"
+	routes = "default"
+	nat    = true
+}
+```
+
+with `@pd:ppp0` in place of `@pd:wan` on the LAN. IPv4 over a session is the address IPCP
+negotiates, which is pppd's, and its default route is the one `routes` names.
 
 **A firmware upgrade keeps netcfgd**, if you keep settings. The package lists its
 configuration, its store and the program itself for `sysupgrade`, because the new image
