@@ -29,6 +29,7 @@ static const char *const DHCP_SERVER_MARKERS[] = { "dnsmasq:", "failed", "bad", 
 
 static const char SUMMARY_PREFIX[] = "# serves: ";
 static const char FORWARDER_OFF_PREFIX[] = "# forwarder off: ";
+static const char DHCPV6_OFF_PREFIX[] = "# dhcpv6 off: ";
 
 /*
  * The user dnsmasq drops to once it holds its sockets, which every
@@ -302,7 +303,9 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
 	return 1;
 }
 
-int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out,
+/* The text after `prefix` on a line of a running server's file, cut to fit
+ * `out`; 0 where no line carries it. */
+static int recorded_line(const char *run, const char *iface, const char *prefix, char *out,
     size_t out_size)
 {
 	char        path[NCFG_DHCP_SERVER_PATH_MAX];
@@ -317,12 +320,12 @@ int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out
 	if (!text) {
 		return 0;
 	}
-	line = strstr(text, FORWARDER_OFF_PREFIX);
+	line = strstr(text, prefix);
 	if (!line || (line != text && line[-1] != '\n')) {
 		free(text);
 		return 0;
 	}
-	line += strlen(FORWARDER_OFF_PREFIX);
+	line += strlen(prefix);
 	length = strcspn(line, "\n");
 	if (length >= out_size) {
 		length = out_size - 1u;
@@ -331,6 +334,17 @@ int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out
 	out[length] = '\0';
 	free(text);
 	return 1;
+}
+
+int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out,
+    size_t out_size)
+{
+	return recorded_line(run, iface, FORWARDER_OFF_PREFIX, out, out_size);
+}
+
+int ncfg_dhcp_server_dhcpv6_off(const char *run, const char *iface, char *out, size_t out_size)
+{
+	return recorded_line(run, iface, DHCPV6_OFF_PREFIX, out, out_size);
 }
 
 /*
@@ -439,12 +453,13 @@ static void render_records(ncfg_buf_t *buf, const ncfg_document_t *document)
 }
 
 /*
- * The file, with the forwarder or without it. `forwarder_off` is why it was
- * left out, or NULL to render what the document says (10.827).
+ * The file, with each part the document asks for or without it.
+ * `forwarder_off` is why the forwarder was left out (10.827), `dhcpv6_off`
+ * why DHCPv6 was (10.828); NULL renders what the document says.
  */
 static char *render(const ncfg_document_t *document, const ncfg_interface_t *interface,
-    const char *leases_path, const char *block_path, const char *forwarder_off, char *err,
-    size_t err_size)
+    const char *leases_path, const char *block_path, const char *forwarder_off,
+    const char *dhcpv6_off, char *err, size_t err_size)
 {
 	const ncfg_dhcp_server_t *server = interface ? interface->dhcp_server : NULL;
 	int                       forward = server && server->dns_forward && !forwarder_off;
@@ -476,6 +491,9 @@ static char *render(const ncfg_document_t *document, const ncfg_interface_t *int
 		 * does not restart the server on every pass; this line is what
 		 * tells the plan the forwarder is not there (10.827). */
 		ncfg_buf_addf(&buf, "%s%s\n", FORWARDER_OFF_PREFIX, forwarder_off);
+	}
+	if (dhcpv6_off && server->range6_start) {
+		ncfg_buf_addf(&buf, "%s%s\n", DHCPV6_OFF_PREFIX, dhcpv6_off);
 	}
 	if (forward) {
 		/* **A forwarder on this interface alone** (0301). `except-interface=lo`
@@ -532,7 +550,7 @@ static char *render(const ncfg_document_t *document, const ncfg_interface_t *int
 	 * when dnsmasq starts, which is what follows a delegated prefix. No
 	 * `enable-ra`: router advertisements are radvd's (0009), and they are
 	 * what tells a host to ask. */
-	if (server->range6_start && server->range6_end) {
+	if (server->range6_start && server->range6_end && !dhcpv6_off) {
 		ncfg_buf_addf(&buf, "dhcp-range=%s,%s,constructor:%s,64,%lld\n",
 		    server->range6_start, server->range6_end, interface->name,
 		    server->lease.has ? (long long)server->lease.value
@@ -617,15 +635,43 @@ rendered:
 char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
     const char *leases_path, const char *block_path, char *err, size_t err_size)
 {
-	return render(document, interface, leases_path, block_path, NULL, err, err_size);
+	return render(document, interface, leases_path, block_path, NULL, NULL, err, err_size);
 }
 
-char *ncfg_dhcp_server_render_without_forwarder(const ncfg_document_t *document,
+char *ncfg_dhcp_server_render_without(const ncfg_document_t *document,
     const ncfg_interface_t *interface, const char *leases_path, const char *block_path,
-    const char *why, char *err, size_t err_size)
+    const char *forwarder_off, const char *dhcpv6_off, char *err, size_t err_size)
 {
-	return render(document, interface, leases_path, block_path, why ? why : "not started",
+	return render(document, interface, leases_path, block_path, forwarder_off, dhcpv6_off,
 	    err, err_size);
+}
+
+/*
+ * Whether `program` was built without DHCPv6, by its own `--version`, whose
+ * compile-time options say `no-DHCPv6`. OpenWrt's stock dnsmasq is built so,
+ * and given a DHCPv6 range it refuses its whole file -- "bad dhcp-range" --
+ * so the LAN's DHCPv4 went with it (10.828). Run into `log`, which the start
+ * truncates again. 0 where it says nothing of it, or could not be asked:
+ * then the start reports whatever dnsmasq says, as before.
+ */
+static int lacks_dhcpv6(const char *program, const char *log)
+{
+	const char *argv[3];
+	char       *text;
+	int         exited_ok = 0;
+	int         status = 0;
+	int         lacks;
+
+	argv[0] = program;
+	argv[1] = "--version";
+	argv[2] = NULL;
+	if (!ncfg_backend_run(program, argv, log, &exited_ok, &status, NULL, 0) || !exited_ok) {
+		return 0;
+	}
+	text = ncfg_backend_read_file(log, NULL, 65536u);
+	lacks = text && strstr(text, "no-DHCPv6") != NULL;
+	free(text);
+	return lacks;
 }
 
 /*
@@ -675,6 +721,7 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 	char        said[NCFG_ERROR_MAX];
 	char       *found = NULL;
 	char       *text;
+	const char *dhcpv6_off = NULL;
 	const char *argv[6];
 	int         exited_ok = 0;
 	int         status = 0;
@@ -703,15 +750,6 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 	    !ncfg_dhcp_server_block_write(document, interface->dhcp_server, block, err, err_size)) {
 		return 0;
 	}
-	text = ncfg_dhcp_server_render(document, interface, leases, block, err, err_size);
-	if (!text) {
-		return 0;
-	}
-	ok = ncfg_backend_write_file(config, text, strlen(text), 0644, err, err_size);
-	free(text);
-	if (!ok) {
-		return 0;
-	}
 	if (!program) {
 		found = ncfg_backend_find_program("dnsmasq");
 		if (!found) {
@@ -721,6 +759,25 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 			return 0;
 		}
 		program = found;
+	}
+	/* **DHCPv4 is served where this dnsmasq has no DHCPv6** (10.828), as a
+	 * forwarder that cannot bind is left out below: asked first, since the
+	 * range is a refusal of the whole file rather than a failure to bind. */
+	if (interface->dhcp_server && interface->dhcp_server->range6_start &&
+	    lacks_dhcpv6(program, log)) {
+		dhcpv6_off = "this dnsmasq was built without DHCPv6 (no-DHCPv6 in its --version)";
+	}
+	text = ncfg_dhcp_server_render_without(document, interface, leases, block, NULL,
+	    dhcpv6_off, err, err_size);
+	if (!text) {
+		free(found);
+		return 0;
+	}
+	ok = ncfg_backend_write_file(config, text, strlen(text), 0644, err, err_size);
+	free(text);
+	if (!ok) {
+		free(found);
+		return 0;
 	}
 	/*
 	 * **The path as an argument of its own**, `-C <path>` rather than
@@ -751,8 +808,8 @@ int ncfg_dhcp_server_start(const char *run, const ncfg_document_t *document,
 	 */
 	if (!exited_ok && interface->dhcp_server && interface->dhcp_server->dns_forward &&
 	    port_taken(log, said, sizeof(said))) {
-		text = ncfg_dhcp_server_render_without_forwarder(document, interface, leases, block,
-		    said, err, err_size);
+		text = ncfg_dhcp_server_render_without(document, interface, leases, block, said,
+		    dhcpv6_off, err, err_size);
 		if (!text) {
 			free(found);
 			return 0;

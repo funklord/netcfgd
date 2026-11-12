@@ -100,6 +100,9 @@ int ncfg_dhcp_server_recorded(const char *run, const char *iface, char *out, siz
 int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out,
     size_t out_size);
 
+/* And why its DHCPv6 range was left out (10.828); 0 where it was not. */
+int ncfg_dhcp_server_dhcpv6_off(const char *run, const char *iface, char *out, size_t out_size);
+
 /*
  * dnsmasq's configuration for one interface. Pure, so what is served can be
  * checked without serving it. Allocated; free with `free`. NULL with a
@@ -110,12 +113,14 @@ int ncfg_dhcp_server_forwarder_off(const char *run, const char *iface, char *out
 char *ncfg_dhcp_server_render(const ncfg_document_t *document, const ncfg_interface_t *interface,
     const char *leases_path, const char *block_path, char *err, size_t err_size);
 
-/* The same, with `dns_forward` left out because port 53 could not be had:
- * DHCP alone, offering the interface's own address as the resolver, and a
- * line carrying `why` for the plan to read back (10.827). */
-char *ncfg_dhcp_server_render_without_forwarder(const ncfg_document_t *document,
+/* The same, with a part left out and a line saying why, for the plan to
+ * read back: `forwarder_off` drops `dns_forward`, because port 53 could not
+ * be had, and offers the interface's own address as the resolver (10.827);
+ * `dhcpv6_off` drops `range6`, because this dnsmasq has no DHCPv6 (10.828).
+ * NULL keeps a part. */
+char *ncfg_dhcp_server_render_without(const ncfg_document_t *document,
     const ncfg_interface_t *interface, const char *leases_path, const char *block_path,
-    const char *why, char *err, size_t err_size);
+    const char *forwarder_off, const char *dhcpv6_off, char *err, size_t err_size);
 
 /*
  * Start serving on one interface. `program` is the dnsmasq to run, or NULL

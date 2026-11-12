@@ -12690,6 +12690,33 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.828 DHCPv4 is served where the dnsmasq has no DHCPv6
+
+**Found by deriving the next lens from 10.827**: one part of the LAN's dnsmasq failing took
+the whole server down, so the next question was which other part could. On `hull-armsr`,
+2026-11-12, `lan4` given an IPv6 address and `range6 = "::100-::1ff"`: OpenWrt's stock dnsmasq
+is built `no-DHCPv6` (its `--version` says so), it refused its whole file -- "bad dhcp-range at
+line 13" -- and the LAN's DHCPv4 went with it, every pass logging `backend.start failed`. The
+question the step was written to ask, whether odhcpd's port 547 collides, never got that far,
+and cannot on the stock build; it waits for a dnsmasq with DHCPv6 there.
+
+**The holder's word for 10.827 decides it**: serve what can be served and warn. When a
+`dhcp_server` has a `range6`, the start asks the dnsmasq's `--version` first; one saying
+`no-DHCPv6` gets the file without its DHCPv6 range and a `# dhcpv6 off:` line, read back as
+the backend's `dhcpv6_off`, and every plan warns that the server serves no IPv6 addresses and
+names `dnsmasq-full`, which has DHCPv6. Asked of `--version` rather than read from the
+failure, because "bad dhcp-range" is also what a range wrong in itself would say, and the
+compile-time options are a fact about the binary that cannot be mistaken for one.
+
+As with the forwarder, the summary stays the document's and the server is not restarted to
+try again: a different dnsmasq is a package change, and the range is tried at the next start a
+changed `dhcp_server` block makes.
+
+`dhcp_server_test.c`'s stand-in prints a `no-DHCPv6` `--version` and refuses a range6 as the
+real one did; with the check removed its three checks go red. `plan_dhcp_server_test.c` holds
+the warning and the plan that restarts nothing; `restart.sh` makes the change on both OpenWrt
+tiers and asks for a v4 lease and the warning.
+
 ## 10.827 DHCP is served without a forwarder that cannot have port 53
 
 **The holder's word, 2026-11-12: serve DHCP without the forwarder, and warn in the plan.**

@@ -199,6 +199,75 @@ static void port_53_taken_serves_dhcp_alone(const char *run, ncfg_interface_t *l
 	(void)unlink(program);
 }
 
+/*
+ * **DHCPv4 where the dnsmasq has no DHCPv6** (10.828). OpenWrt's stock build
+ * says `no-DHCPv6` in its `--version` and refuses a DHCPv6 range by refusing
+ * its whole file, "bad dhcp-range"; the stand-in does both. The start has to
+ * come back serving DHCPv4 alone, saying why.
+ */
+static void no_dhcpv6_serves_dhcpv4_alone(const char *run, ncfg_interface_t *lan)
+{
+	static const char script[] =
+	    "#!/bin/sh\n"
+	    "if [ \"$1\" = --version ]; then\n"
+	    "\techo 'Dnsmasq version 2.91'\n"
+	    "\techo 'Compile time options: IPv6 GNU-getopt no-DBus no-DHCPv6 no-Lua TFTP'\n"
+	    "\texit 0\n"
+	    "fi\n"
+	    "if grep -q 'constructor:' \"$2\"; then\n"
+	    "\techo 'dnsmasq: bad dhcp-range at line 9 of '\"$2\" >&2\n"
+	    "\texit 1\n"
+	    "fi\n"
+	    "exit 0\n";
+	char   program[512];
+	char   config[NCFG_DHCP_SERVER_PATH_MAX];
+	char   why[256];
+	char   message[NCFG_ERROR_MAX];
+	char                         start6[] = "::100";
+	char                         end6[] = "::1ff";
+	char                         v6[] = "fd00::1/64";
+	ncfg_address_source_t        sources[2];
+	ncfg_address_source_t       *kept = lan->addressing;
+	size_t                       kept_count = lan->addressing_count;
+	char                        *text;
+	int                          started;
+
+	(void)snprintf(program, sizeof(program), "%s/fake-dnsmasq", run);
+	(void)testdir_write(program, script, strlen(script));
+	(void)chmod(program, 0755);
+	sources[0] = kept[0];
+	memset(&sources[1], 0, sizeof(sources[1]));
+	sources[1].kind = NCFG_ADDRESS_SOURCE_STATIC;
+	sources[1].static_address.address = v6;
+	lan->addressing = sources;
+	lan->addressing_count = 2u;
+	lan->dhcp_server->range6_start = start6;
+	lan->dhcp_server->range6_end = end6;
+	message[0] = '\0';
+	started = ncfg_dhcp_server_start(run, NULL, lan, program, message, sizeof(message));
+	check(started, "a dnsmasq with no DHCPv6 still serves DHCPv4 when given a range6");
+	if (!started) {
+		printf("  said: %s\n", message);
+	}
+	(void)ncfg_dhcp_server_config_path(run, lan->name, config, sizeof(config), NULL, 0);
+	text = testdir_read(config, NULL);
+	check(text && !strstr(text, "constructor:") && strstr(text, "dhcp-range=br0,192.168.1."),
+	    "  its DHCPv4 range alone");
+	free(text);
+	check(ncfg_dhcp_server_dhcpv6_off(run, lan->name, why, sizeof(why)) &&
+	        strstr(why, "without DHCPv6") != NULL,
+	    "  and its file says why, for the plan to read back");
+	lan->dhcp_server->range6_start = NULL;
+	lan->dhcp_server->range6_end = NULL;
+	message[0] = '\0';
+	check(ncfg_dhcp_server_start(run, NULL, lan, program, message, sizeof(message)) &&
+	        !ncfg_dhcp_server_dhcpv6_off(run, lan->name, why, sizeof(why)),
+	    "control: a server with no range6 carries no such line");
+	lan->addressing = kept;
+	lan->addressing_count = kept_count;
+	(void)unlink(program);
+}
+
 int main(void)
 {
 	const char             *run = testdir_make("dhcp_server");
@@ -802,6 +871,7 @@ int main(void)
 
 	a_stop_waits_for_dnsmasq_to_go(run);
 	port_53_taken_serves_dhcp_alone(run, &lan);
+	no_dhcpv6_serves_dhcpv4_alone(run, &lan);
 
 	testdir_remove(run);
 	if (failures) {

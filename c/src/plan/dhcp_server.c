@@ -146,6 +146,16 @@ void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *inte
 		    "let it resolve. The forwarder is tried again when this `dhcp_server` block "
 		    "changes", interface->name, running->forwarder_off, interface->name);
 	}
+	/* And without its DHCPv6 range, where the dnsmasq has none (10.828):
+	 * OpenWrt's stock build, which refuses a range6 by refusing its whole
+	 * file. Not retried either: a different dnsmasq is a package change,
+	 * and the next start asks again. */
+	if (running && running->dhcpv6_off && interface->dhcp_server->range6_start) {
+		ncfg_plan_warnf(builder->plan, interface->name,
+		    "the DHCP server on %s serves no IPv6 addresses: %s, so its `range6` is left "
+		    "out and DHCPv4 is served alone. On OpenWrt, the `dnsmasq-full` package in place of "
+		    "`dnsmasq` has DHCPv6; it is tried again when this `dhcp_server` block changes", interface->name, running->dhcpv6_off);
+	}
 	if (running && running->served && strcmp(running->served, wanted) != 0) {
 		ncfg_op_t     stop;
 		ncfg_op_t     start;

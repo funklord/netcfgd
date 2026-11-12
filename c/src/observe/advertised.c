@@ -221,6 +221,16 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
 					return 0;
 				}
 			}
+			if (ncfg_dhcp_server_dhcpv6_off(run_dir, backend->interface, served,
+			        sizeof(served))) {
+				free(backend->dhcpv6_off);
+				backend->dhcpv6_off = observe_dup(served);
+				if (!backend->dhcpv6_off) {
+					ncfg_error_set(err, err_size,
+					    "out of memory reading what %s is serving", backend->interface);
+					return 0;
+				}
+			}
 			/* And who holds what from it (0303): the lease file, read
 			 * whole and bounded, unexpired leases only. A file that is not
 			 * there yet is a server that has leased nothing. */

@@ -9,6 +9,8 @@
  */
 #include "planfix.h"
 
+#include "ncfg/dhcp_server.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -267,6 +269,39 @@ static void a_forwarder_left_out_is_said_and_not_retried(void)
 	planfix_release(plan, document, observed);
 }
 
+/* 10.828: a server whose dnsmasq has no DHCPv6 serves DHCPv4 alone, said on
+ * every plan, and is not restarted to try again. */
+static void a_range6_left_out_is_said_and_not_retried(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	char             wanted[NCFG_DHCP_SERVER_SUMMARY_MAX];
+	char             backends[1024];
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE,
+	    SERVING6(STATIC6, ""),
+	    "", "", "\"links\":[" LAN_UP "]," LAN_ADDRESS, &document, &observed);
+
+	/* The summary the document gives, so the running server matches it. */
+	check(plan && document && ncfg_dhcp_server_summary(document, &document->interfaces[0],
+	                              wanted, sizeof(wanted)),
+	    "control: the document's summary is had");
+	planfix_release(plan, document, observed);
+	(void)snprintf(backends, sizeof(backends),
+	    "\"links\":[" LAN_UP "]," LAN_ADDRESS ",\"backends\":[{\"kind\":\"dhcp_server\","
+	    "\"interface\":\"br0\",\"running\":true,\"served\":\"%s\",\"dhcpv6_off\":"
+	    "\"this dnsmasq was built without DHCPv6\"}]", wanted);
+	plan = planfix_plan(LAN_DEVICE,
+	    SERVING6(STATIC6, ""),
+	    "", "", backends, &document, &observed);
+	check(plan && planfix_warned(plan, "serves no IPv6 addresses") &&
+	        planfix_warned(plan, "dnsmasq-full"),
+	    "a range6 left out for want of DHCPv6 is said, naming the package that has it");
+	check(plan && planfix_count(plan, "backend.stop") == 0u &&
+	        planfix_count(plan, "backend.start") == 0u,
+	    "  and the server is not restarted to try again");
+	planfix_release(plan, document, observed);
+}
+
 static void a_server_the_document_dropped_is_stopped(void)
 {
 	ncfg_document_t *document;
@@ -353,6 +388,7 @@ int main(void)
 	a_reservation_added_restarts_the_server();
 	a_server_the_document_dropped_is_stopped();
 	a_forwarder_left_out_is_said_and_not_retried();
+	a_range6_left_out_is_said_and_not_retried();
 	printf("plan_dhcp_server_test: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
 }

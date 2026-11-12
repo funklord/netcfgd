@@ -663,6 +663,11 @@ dhcp_server {
 }
 ```
 
+**DHCPv6 needs `dnsmasq-full`.** OpenWrt's stock dnsmasq is built without DHCPv6, so a
+`dhcp_server` with a `range6` serves DHCPv4 alone there and `ncfg plan` says so. Router
+advertisements, which is how most hosts take an IPv6 address, are `advertise`'s and need
+neither.
+
 **WireGuard needs its kernel module**, which the image does not carry: `apk add
 kmod-wireguard`. netcfgd speaks to the kernel itself, so `wireguard-tools` is not needed.
 

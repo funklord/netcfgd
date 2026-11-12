@@ -1231,6 +1231,9 @@ typedef struct {
 	 * line about port 53, which another server held. NULL where it runs as
 	 * the document says. */
 	char  *forwarder_off;
+	/* Why its DHCPv6 range was left out (10.828): the dnsmasq has none.
+	 * NULL where it serves the range. */
+	char  *dhcpv6_off;
 	/* Who holds which address from a running DHCP server (0303), read from
 	 * its lease file: UniFi's client list, and the greppable record 0297
 	 * put under /run, read back. Unexpired leases only. */

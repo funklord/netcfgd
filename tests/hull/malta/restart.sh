@@ -100,3 +100,27 @@ rm -f /tmp/show-dns
 	tail -4 /run/netcfgd/dhcp-server/lan4.log 2>/dev/null | sed 's/^/  dnsmasq: /' >> "$out"
 	/usr/bin/ncfg plan 2>&1 | head -12 | cut -c1-160 | sed 's/^/  plan: /' >> "$out"
 }
+
+# And DHCPv6 on the same LAN. OpenWrt's stock dnsmasq is built `no-DHCPv6`, and
+# given a `range6` refused its whole file ("bad dhcp-range"), so the LAN's DHCPv4
+# went with it -- the shape 10.827 fixed for port 53, found by this step. The
+# server now serves DHCPv4 alone and the plan says why (10.828).
+sed -i 's|config = "192.168.7.1/24"|config = ["192.168.7.1/24", "fd07::1/64"]|; s|dns_forward = true|dns_forward = true\n\t\trange6 = "::100-::1ff"|' /etc/netcfgd/netcfgd.conf
+n=0
+until grep -q '^# dhcpv6 off: \|^dhcp-range=.*constructor:lan4' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null &&
+	whole || [ $n -gt 30 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+leased=$(udhcpc -i client4 -n -q -t 6 -T 2 -s /bin/true 2>&1 |
+	sed -n 's/.*lease of \([0-9.]*\) obtained.*/\1/p' | tail -1)
+warned=$(/usr/bin/ncfg plan 2>&1 | grep -c 'serves no IPv6 addresses')
+say "range6 on the stock dnsmasq, after $n s: $(sed -n 's/^# dhcpv6 off: //p' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | cut -c1-80); v4 lease ${leased:-nothing}; plan warns: $warned"
+case "$leased" in
+192.168.7.*) [ "$warned" -ge 1 ] && whole || failed=1 ;;
+*) failed=1 ;;
+esac
+[ "$failed" = 0 ] || {
+	tail -3 /run/netcfgd/dhcp-server/lan4.log 2>/dev/null | cut -c1-160 | sed 's/^/  dnsmasq: /' >> "$out"
+	/usr/bin/ncfg plan 2>&1 | head -8 | cut -c1-160 | sed 's/^/  plan: /' >> "$out"
+}
