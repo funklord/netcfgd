@@ -694,6 +694,21 @@ int ncfg_dhcp6_start(const char *run, const char *iface, const char *request,
  *
  * Nothing running is the state this was asked to produce, so that is success.
  */
+/*
+ * Ask netcfgd's client on `iface` to renew its lease now (10.810).
+ *
+ * For after a sleep: a client's timers run on CLOCK_MONOTONIC, which stands
+ * still while the machine is suspended, so a lease that ran out asleep is held
+ * until the client's own clock catches up -- measured at over a minute and a
+ * half on a wired link, the address one the server could have given away.
+ * dhcpcd gets `-n` where its control socket says it is netcfgd's, udhcpc and
+ * odhcp6c get SIGUSR1 where netcfgd recorded their pid; a client that is not
+ * running, or not netcfgd's, is left alone and that is success. `asked` says
+ * whether one was asked; it may be NULL.
+ */
+int ncfg_dhcp_renew(const char *run, const char *iface, const char *family,
+    const ncfg_dhcp_machine_t *machine, int *asked, char *err, size_t err_size);
+
 int ncfg_dhcp_stop(const char *run, const char *iface, const char *family,
     const ncfg_dhcp_machine_t *machine, char *err, size_t err_size);
 

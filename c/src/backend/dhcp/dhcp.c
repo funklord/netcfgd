@@ -20,6 +20,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1361,6 +1362,87 @@ static int stop_recorded(const char *run, const char *program, const char *iface
 		}
 	}
 	(void)unlink(pid_path);
+	return 1;
+}
+
+int ncfg_dhcp_renew(const char *run, const char *iface, const char *family,
+    const ncfg_dhcp_machine_t *machine, int *asked, char *err, size_t err_size)
+{
+	char                log[NCFG_DHCP_PATH_MAX];
+	char                said[NCFG_ERROR_MAX];
+	char                dir[NCFG_DHCP_PATH_MAX];
+	ncfg_dhcp_args_t    args;
+	pid_t               pid;
+	int                 is_v4;
+
+	if (asked) {
+		*asked = 0;
+	}
+	if (!machine || !run || run[0] == '\0' || !iface || iface[0] == '\0' || !family ||
+	    (strcmp(family, NCFG_DHCP_FAMILY_V4) != 0 &&
+	    strcmp(family, NCFG_DHCP_FAMILY_V6) != 0)) {
+		ncfg_error_set(err, err_size,
+		    "a dhcp client was asked to renew without a machine, a run directory, an "
+		    "interface or a family of `4` or `6`");
+		return 0;
+	}
+	is_v4 = strcmp(family, NCFG_DHCP_FAMILY_V4) == 0;
+
+	/*
+	 * **dhcpcd only where its control socket says the client is netcfgd's.**
+	 * `-N` starts a dhcpcd where none is running, which would make a renew a
+	 * start; and one reciting another `-f` is somebody else's, 0141's rule.
+	 * So SILENT and THEIRS are both left alone.
+	 */
+	if (ncfg_dhcpcd_whose(run, iface, family, machine, NULL, 0) == NCFG_DHCPCD_OURS) {
+		char       *owned = NULL;
+		const char *program = program_for(machine->dhcpcd_program, "dhcpcd", &owned);
+
+		if (program) {
+			if (!ncfg_backend_join(dir, sizeof(dir), run, "dhcp", err, err_size) ||
+			    !ncfg_backend_make_dir(dir, 0755, err, err_size) ||
+			    !ncfg_dhcp_log_path(run, iface, family, log, sizeof(log), err, err_size) ||
+			    !ncfg_dhcp_dhcpcd_stop_args(program, family, iface, &args, err,
+			    err_size)) {
+				free(owned);
+				return 0;
+			}
+			/*
+			 * The stop's vector with `-k` made `-n`: the same program, family
+			 * and interface, which is the part that has to agree.
+			 *
+			 * **`-n`, rebind, not `-N`, renew** (10.810). Measured on the lid:
+			 * `-N` sent its REQUEST and the server, the lease gone, answered
+			 * NAK five times -- and dhcpcd, renewing, never saw one, retrying
+			 * the same request until its own clock ended the lease 111 s
+			 * after the wake. `-n` starts the interface again from its
+			 * saved lease, listening as a start does.
+			 */
+			args.argv[2] = "-n";
+			said[0] = '\0';
+			(void)ncfg_backend_run(program, args.argv, log, NULL, NULL, said, sizeof(said));
+			if (asked) {
+				*asked = 1;
+			}
+		}
+		free(owned);
+		return 1;
+	}
+
+	/* udhcpc and odhcp6c both renew on SIGUSR1, and each records a pid whose
+	 * process carries the pid file's path -- so the signal reaches netcfgd's
+	 * client and no other (`ncfg_dhcp_running_pid`). */
+	pid = ncfg_dhcp_running_pid(run, is_v4 ? "udhcpc" : "odhcp6c", iface);
+	if (pid > 0) {
+		if (kill(pid, SIGUSR1) != 0) {
+			ncfg_error_set(err, err_size, "could not ask %s on %s to renew: %s",
+			    is_v4 ? "udhcpc" : "odhcp6c", iface, strerror(errno));
+			return 0;
+		}
+		if (asked) {
+			*asked = 1;
+		}
+	}
 	return 1;
 }
 

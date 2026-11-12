@@ -79,6 +79,7 @@ cleanup() {
 	status=$?
 	[ -n "${daemon_job:-}" ] && kill "$daemon_job" 2>/dev/null
 	[ -n "${control_job:-}" ] && kill "$control_job" 2>/dev/null
+	[ -n "${timeline_job:-}" ] && kill "$timeline_job" 2>/dev/null
 	ip netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null
 	sleep 0.5
 	# **Every step bounded** (10.809): the first runs that slept ended here
@@ -145,6 +146,20 @@ inns dnsmasq --no-daemon --port=0 --interface="$ap_dev" --bind-interfaces \
 	--dhcp-range=10.77.0.50,10.77.0.99,2m --dhcp-leasefile="$work/ap/leases" \
 	--pid-file="$work/ap/dnsmasq.pid" > "$work/ap/dnsmasq.log" 2>&1 &
 
+# ----------------------------------------------- a dock: a wired link (10.810)
+# **The case the radio cannot ask.** A station's resume drops the association,
+# and the supplicant's reconnect makes the DHCP client ask again. A wire keeps
+# its carrier across a suspend -- a veth here, a dock or a cable on a laptop --
+# so nothing tells the client that the lease it holds ran out while its
+# monotonic clock stood still. Same namespace, same two-minute lease.
+ip link add sus-eth type veth peer name sus-dock netns "$ns" || die "no veth for the dock"
+inns ip addr add 10.78.0.1/24 dev sus-dock
+inns ip link set sus-dock up
+inns dnsmasq --no-daemon --port=0 --interface=sus-dock --bind-interfaces \
+	--dhcp-range=10.78.0.50,10.78.0.99,2m --dhcp-leasefile="$work/ap/wired.leases" \
+	${NCFG_SUSPEND_AUTHORITATIVE:+--dhcp-authoritative} --log-dhcp \
+	--pid-file="$work/ap/wired.pid" > "$work/ap/wired.log" 2>&1 &
+
 # ------------------------------------------------- netcfgd as the station
 printf '%s' "$passphrase" > "$work/etc/secrets/lid"
 chmod 600 "$work/etc/secrets/lid"
@@ -153,6 +168,9 @@ device $sta_dev {
 	wifi { backend = "wpa_supplicant"; autoconnect = true }
 }
 interface $sta_dev {
+	config = "dhcp"
+}
+interface sus-eth {
 	config = "dhcp"
 }
 network "$ssid" {
@@ -203,6 +221,15 @@ seconds_until() {
 	return 1
 }
 has_address() { [ -n "$(station_address)" ]; }
+wired_address() {
+	ip -4 -o addr show dev sus-eth 2>/dev/null | awk '{print $4; exit}'
+}
+has_wired_address() { [ -n "$(wired_address)" ]; }
+# The expiry dnsmasq granted last, from its lease file: what says whether the
+# client asked again after a time.
+granted() {
+	inns cat "$1" 2>/dev/null | awk 'NR==1 {print $1}'
+}
 is_associated() { [ "$(associated)" = COMPLETED ]; }
 
 took=$(seconds_until 60 is_associated)
@@ -211,6 +238,9 @@ if [ -z "$control" ]; then
 	took=$(seconds_until 60 has_address)
 	[ "$took" -le 60 ] || { tail -20 "$work/daemon.log"; die "the station never got a lease"; }
 	echo "ok   the station is associated and leased: $(station_address)"
+	took=$(seconds_until 60 has_wired_address)
+	[ "$took" -le 60 ] || { tail -20 "$work/daemon.log"; die "the dock never got a lease"; }
+	echo "ok   the dock is leased: $(wired_address)"
 else
 	echo "ok   CONTROL: a plain wpa_supplicant is associated, with no netcfgd"
 fi
@@ -251,6 +281,21 @@ rc=$?
 [ -n "${NCFG_SUSPEND_TEST:-}" ] && echo none > /sys/power/pm_test
 woke=$(date +%s)
 slept=$(( $(asleep) - before_asleep ))
+# The dock, second by second from the wake (10.810): whether it holds an
+# address, and the expiry dnsmasq granted last. A renewal that arrives is not
+# enough; a laptop with no address for a minute after the lid opens is the
+# fault the first dock run showed and its check did not.
+if [ -z "$control" ]; then
+	(
+		n=0
+		while [ "$n" -lt 150 ]; do
+			echo "$n $(wired_address) $(granted "$work/ap/wired.leases")"
+			sleep 1
+			n=$((n + 1))
+		done
+	) > "$work/dock.timeline" 2>&1 &
+	timeline_job=$!
+fi
 # **The access point did not sleep; this one did** (10.809). A laptop's access
 # point is another machine, beaconing all the while. Here it shares the kernel
 # and mac80211_hwsim stops its beacons across the resume -- the control,
@@ -323,6 +368,42 @@ while [ "$waited" -le 120 ]; do
 	waited=$((waited + 1))
 done
 check "the lease that ran out while asleep is renewed, not held stale" "$renewed" yes
+
+if [ -z "$control" ]; then
+	# The dock's lease ran out asleep too. Renewed means a grant from dnsmasq
+	# after the wake: an expiry more than 100 s past it on a 120 s lease.
+	wired_renewed=no
+	waited=0
+	while [ "$waited" -le 120 ]; do
+		expiry=$(granted "$work/ap/wired.leases")
+		if [ -n "$expiry" ] && [ "$expiry" -gt $((woke + 100)) ]; then
+			wired_renewed=yes
+			break
+		fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+	note "dock: renewed after ${waited}s; it holds $(wired_address)"
+	check "a wired lease that ran out while asleep is renewed, not held stale" \
+		"$wired_renewed" yes
+	[ -n "${timeline_job:-}" ] && wait "$timeline_job" 2>/dev/null
+	# Seconds after the wake with no address, and the first second a lease
+	# granted after the wake was seen.
+	gap=$(awk 'NF < 2 || $2 !~ /\// { n++ } END { print n + 0 }' "$work/dock.timeline")
+	first=$(awk -v w="$woke" 'NF >= 3 && $3 > w + 100 { print $1; exit }' "$work/dock.timeline")
+	note "dock: ${gap}s of the first 150 with no address; renewed at ${first:-never}s"
+	note "dock timeline: $(awk '{ printf "%s:%s ", $1, (NF >= 2 && $2 ~ /\//) ? "a" : "-" }' "$work/dock.timeline")"
+	note "dock's dhcp server: $(grep -E 'DHCP(DISCOVER|OFFER|REQUEST|ACK|NAK|RELEASE|DECLINE|INFORM)|ignor|lease not found' "$work/ap/wired.log" 2>/dev/null | tail -20 | tr '\n' '|')"
+	note "daemon after the wake: $(awk -v w="$woke" 'BEGIN{p=0} /suspending|resum|dhcp|lease|sus-eth/ {print}' "$work/daemon.log" | tail -15 | tr '\n' '|')"
+	check "the dock keeps an address, or has one again within 15 s of the wake" \
+		"$([ "$gap" -le 15 ] && echo yes || echo no)" yes
+	# **Asked again soon, not when its own clock runs out** (10.810). Before
+	# netcfgd asked its clients to renew after a sleep, the dock held the lease
+	# that ran out asleep for 103 s, its timers on a clock that had stood
+	# still, and asked again at 112 s.
+	check "the dock asks for its lease again within 30 s of the wake" \
+		"$([ -n "$first" ] && [ "$first" -le 30 ] && echo yes || echo no)" yes
+fi
 
 # The rfkill watcher: does it still hear a block after the resume? Through
 # the kernel's own switch in sysfs, which needs no tool -- the hwsim image has

@@ -12689,6 +12689,46 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.810 After a sleep, the DHCP clients are asked to renew
+
+**The wired half of the lid, which the radio could not ask.** 10.809's station re-asked for
+its lease because its association dropped and the supplicant's reconnect said so. A wire
+keeps its carrier across a suspend -- a dock, a cable -- so nothing tells the client that the
+lease it holds ran out while it slept. `tests/live/suspend.sh` now gives the station a veth
+to a second dnsmasq in the access point's namespace, same two-minute lease, and samples the
+dock every second for 150 s after the wake.
+
+**Measured before the change: held stale.** The dock kept its address for 103 s after the
+wake, though dnsmasq's lease had run out during the 150 s sleep; at 104 s it dropped it, and
+at 112 s it had one again, from a fresh request. A DHCP client's timers run on
+CLOCK_MONOTONIC, which stands still while the machine is suspended, so a lease is held until
+the client's own clock reaches its end -- for up to a whole lease, and the address is one the
+server is free to give to somebody else meanwhile. The register asked whether "a lease that
+expired during the suspend is renewed or silently stale"; on a wire, it was silently stale.
+
+**So the daemon notices a sleep and asks.** Each pass compares CLOCK_BOOTTIME less
+CLOCK_MONOTONIC -- the confirm window's measure (10.665) -- with the last pass's; grown by two
+seconds or more is a sleep, logged under `power`, and the reconcile world's new `slept` seam
+is called. The daemon's answers it by asking every DHCP client of netcfgd's on an interface
+the document names to renew, in both families: `ncfg_dhcp_renew` runs `dhcpcd -4|-6 -n IFACE`
+where dhcpcd's control socket says the client is netcfgd's -- `-n` starts a dhcpcd where none
+runs, so only then -- and sends SIGUSR1, the renew both clients take, to the udhcpc or
+odhcp6c whose pid netcfgd recorded.
+
+**`-n`, rebind, and not `-N`, renew, which was tried first and measured wrong.** With `-N` the
+dock's dhcpcd sent its REQUEST at the wake and dnsmasq, the lease gone, answered NAK "lease not
+found" -- five times; dhcpcd, renewing, never acted on one, retrying until its own clock ended
+the lease at 111 s, exactly as with no ask at all. The server's log, now in the rig's
+diagnostics, is what showed it. `-n` starts the interface again from its saved lease, and with
+it the dock was leased again 4 s after the wake with no second without an address. A client not running, or not netcfgd's, is left alone.
+NetworkManager does the same on resume; it is the one thing about a resume nothing else
+brings.
+
+`reconcile_test` fixes the sleep through the confirm module's seam: the first pass and a
+pass without sleep say nothing, a pass after 150 s calls `slept` once with 150; with the call
+taken out of the pass two checks fail. The rig asks that the dock has a lease granted after
+the wake within 30 s of it, which the run before the change -- 112 s -- fails.
+
 ## 10.809 The lid, measured: the window pauses, the station rejoins, the lease renews
 
 **hull answered 10.773** (its note 20261111T0501Z, recorded here and deleted): since hull

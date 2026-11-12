@@ -2975,6 +2975,13 @@ typedef struct {
 	/* The machine the resolv sweep asks about processes and signals. NULL
 	 * never sweeps, which that seam's own rule requires. */
 	const ncfg_resolv_machine_t *resolv;
+	/*
+	 * The machine slept `seconds` since the last pass (10.810): what a resume
+	 * needs that nothing else would bring. Today that is the DHCP clients,
+	 * whose timers ran on a clock that stood still, asked to renew. NULL does
+	 * nothing, which every test that does not ask about sleep wants.
+	 */
+	void (*slept)(void *context, ncfg_daemon_state_t *state, uint64_t seconds);
 } ncfg_reconcile_world_t;
 
 /*
@@ -3056,6 +3063,10 @@ typedef struct {
 	 */
 	uint64_t drift_announced[NCFG_DRIFT_MAX];
 	size_t   drift_announced_count;
+	/* The time asleep since boot that the last pass saw, CLOCK_BOOTTIME less
+	 * CLOCK_MONOTONIC (10.810); `has_asleep_seen` is false before the first. */
+	uint64_t asleep_seen;
+	int      has_asleep_seen;
 } ncfg_reconcile_t;
 
 /* What one pass did. For a caller that wants to say so, and for a test that

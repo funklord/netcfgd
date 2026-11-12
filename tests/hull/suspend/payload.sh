@@ -19,8 +19,11 @@ control=
 # in a new qemu on the same disks; `mem` otherwise.
 state=mem
 [ -s /repo/state ] && state=$(cat /repo/state)
+# `SUSPEND_AUTHORITATIVE=1`: the dock's dnsmasq answers as OpenWrt's does.
+authoritative=
+[ -s /repo/authoritative ] && authoritative=1
 # Bounded, so a verdict is written whatever the test does (10.809).
-NCFG_SUSPEND_TEST=$level NCFG_SUSPEND_CONTROL=$control NCFG_SUSPEND_STATE=$state NCFG_LIVE=1 NCFG_LIVE_BUILD=/repo/c \
+NCFG_SUSPEND_TEST=$level NCFG_SUSPEND_CONTROL=$control NCFG_SUSPEND_STATE=$state NCFG_SUSPEND_AUTHORITATIVE=$authoritative NCFG_LIVE=1 NCFG_LIVE_BUILD=/repo/c \
 	timeout -k 10 1200 sh /repo/tests/live/suspend.sh > /verdict/log 2>&1
 rc=$?
 sync

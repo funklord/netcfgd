@@ -1484,6 +1484,10 @@ void ncfg_main_world_expiry(void *context, uint32_t seconds);
  * back. It also asks whether this build's executor can carry out the stop
  * before taking the lock, which is the same ordering one step further.
  */
+/* The reconcile world's `slept` (10.810): every DHCP client of netcfgd's asked
+ * to renew, since its lease ran on a clock that stood still. */
+void ncfg_main_world_slept(void *context, ncfg_daemon_state_t *state, uint64_t seconds);
+
 int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state, char *err,
     size_t err_size);
 

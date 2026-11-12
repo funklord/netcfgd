@@ -952,6 +952,9 @@ typedef struct {
 	/* An op name the executor refuses, or NULL. */
 	const char           *refuse;
 	ncfg_executor_t       executor;
+	/* How many times `slept` was called, and with how long (10.810). */
+	int                   slept_calls;
+	uint64_t              slept_seconds;
 } world_t;
 
 static void step(world_t *world, const char *format, ...)
@@ -1087,6 +1090,15 @@ static uint64_t world_now(void *context)
 	return ((world_t *)context)->now;
 }
 
+static void world_slept(void *context, ncfg_daemon_state_t *state, uint64_t seconds)
+{
+	world_t *world = context;
+
+	(void)state;
+	world->slept_calls++;
+	world->slept_seconds = seconds;
+}
+
 static void world_install(world_t *world, ncfg_reconcile_world_t *seams)
 {
 	memset(seams, 0, sizeof(*seams));
@@ -1099,6 +1111,7 @@ static void world_install(world_t *world, ncfg_reconcile_world_t *seams)
 	seams->release_contended = world_release_contended;
 	seams->expiry = world_expiry;
 	seams->now = world_now;
+	seams->slept = world_slept;
 }
 
 /*
@@ -1278,6 +1291,45 @@ static void a_pass_says_under_run_where_it_got_to(const char *base)
 	    "  carrying the executor's own sentence, which is what an operator reads next");
 	free(written);
 
+	harness_stop(&harness);
+}
+
+/*
+ * A pass after a sleep says so to the world, once and with how long (10.810):
+ * what makes the daemon ask its DHCP clients to renew a lease that ran out on
+ * a clock that stood still. The sleep is the confirm module's own seam,
+ * CLOCK_BOOTTIME less CLOCK_MONOTONIC fixed to a value.
+ */
+static void a_pass_after_a_sleep_says_so(const char *base)
+{
+	harness_t             harness;
+	ncfg_reconcile_wake_t wake;
+	ncfg_reconcile_report_t report;
+	char                  err[NCFG_ERROR_MAX];
+
+	if (!harness_start(&harness, base, "slept")) {
+		check(0, "a loop over directories of this test's own, for the sleep");
+		harness_stop(&harness);
+		return;
+	}
+	memset(&wake, 0, sizeof(wake));
+	ncfg_reconcile_collapse(&wake, NCFG_WOKE_TICK);
+	ncfg_confirm_asleep_fix(1, 40u);
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(harness.world.slept_calls == 0, "the first pass has nothing to compare and says nothing");
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(harness.world.slept_calls == 0, "a pass with no sleep since says nothing");
+	ncfg_confirm_asleep_fix(1, 190u);
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(harness.world.slept_calls == 1 && harness.world.slept_seconds == 150u,
+	    "a pass after 150 s asleep tells the world, with how long");
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(harness.world.slept_calls == 1, "  and once, not on every pass after");
+	ncfg_confirm_asleep_fix(0, 0u);
 	harness_stop(&harness);
 }
 
@@ -2673,6 +2725,7 @@ int main(void)
 
 	the_order_of_one_pass_is_the_contract(base);
 	a_pass_says_under_run_where_it_got_to(base);
+	a_pass_after_a_sleep_says_so(base);
 	a_held_loop_still_observes_and_still_reports(base);
 	a_roam_is_told_before_anything_looks(base);
 	a_network_s_roam_hook_runs_on_its_radio(base);

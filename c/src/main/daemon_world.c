@@ -507,6 +507,7 @@ void ncfg_main_world_seams(ncfg_main_world_t *world, ncfg_reconcile_world_t *out
 	out->announce = ncfg_main_world_announce;
 	out->expiry = ncfg_main_world_expiry;
 	out->release_contended = ncfg_main_world_release_contended;
+	out->slept = ncfg_main_world_slept;
 }
 
 int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err, size_t err_size)
@@ -827,6 +828,49 @@ static void hand_back(const ncfg_daemon_state_t *state, const ncfg_contender_t *
 			    ncfg_backend_kind_name(backend->kind), interface, message);
 		}
 	}
+}
+
+void ncfg_main_world_slept(void *context, ncfg_daemon_state_t *state, uint64_t seconds)
+{
+	ncfg_main_world_t *world = context;
+	ncfg_executor_t    executor;
+	char               why[NCFG_ERROR_MAX];
+	size_t             at;
+	size_t             asked = 0;
+
+	(void)seconds;
+	if (!world || !state || !state->desired) {
+		return;
+	}
+	/* Opened for the service it builds -- the DHCP machine and the run
+	 * directory -- not to apply anything. */
+	why[0] = '\0';
+	if (!ncfg_main_world_executor_open(world, &executor, why, sizeof(why))) {
+		ncfg_log_emitf("power", NCFG_LOG_WARNING,
+		    "after the sleep, the DHCP clients could not be asked to renew: %s", why);
+		return;
+	}
+	/* Both families on every interface the document names: a client that is
+	 * not running, or not netcfgd's, is left alone by `ncfg_dhcp_renew`. */
+	for (at = 0; at < state->desired->interface_count; at++) {
+		const char *name = state->desired->interfaces[at].name;
+		const char *families[] = { NCFG_DHCP_FAMILY_V4, NCFG_DHCP_FAMILY_V6 };
+		size_t      which;
+
+		for (which = 0; name && which < 2u; which++) {
+			int one = 0;
+
+			why[0] = '\0';
+			if (!ncfg_dhcp_renew(world->service.run_dir, name, families[which],
+			    &world->service.dhcp, &one, why, sizeof(why))) {
+				ncfg_log_aboutf("power", name, NCFG_LOG_WARNING,
+				    "could not ask its DHCP client to renew: %s", why);
+			}
+			asked += one ? 1u : 0u;
+		}
+	}
+	ncfg_main_world_executor_close(world, &executor);
+	ncfg_log_emitf("power", NCFG_LOG_INFO, "asked %zu DHCP client(s) to renew", asked);
 }
 
 int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state, char *err,

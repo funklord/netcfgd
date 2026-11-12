@@ -1666,6 +1666,34 @@ int ncfg_reconcile_start(ncfg_reconcile_t *loop, int apply_on_start, int reverte
 	return ncfg_reconcile_converge(loop, NULL, err, err_size);
 }
 
+/*
+ * Whether the machine slept since the last pass, and what that needs (10.810).
+ *
+ * CLOCK_BOOTTIME counts a suspend and CLOCK_MONOTONIC does not, so the gap
+ * between them grows by exactly the time asleep -- the confirm window's own
+ * measure (10.665). A DHCP client's timers run on the second, so a lease that
+ * ran out asleep is held until the client's clock catches up: on a wired link
+ * the lid run measured 103 s of an address the server had taken back. Two
+ * seconds of growth is a sleep; less is a clock's rounding.
+ */
+static void after_sleep(ncfg_reconcile_t *loop)
+{
+	uint64_t asleep = ncfg_confirm_asleep();
+
+	if (loop->has_asleep_seen && asleep >= loop->asleep_seen + 2u) {
+		uint64_t slept = asleep - loop->asleep_seen;
+
+		ncfg_log_emitf("power", NCFG_LOG_NOTE,
+		    "the machine slept %llus; the DHCP clients are asked to renew, since their "
+		    "leases ran on a clock that stood still", (unsigned long long)slept);
+		if (loop->world.slept) {
+			loop->world.slept(loop->world.context, loop->state, slept);
+		}
+	}
+	loop->asleep_seen = asleep;
+	loop->has_asleep_seen = 1;
+}
+
 int ncfg_reconcile_pass(ncfg_reconcile_t *loop, const ncfg_reconcile_wake_t *wake,
     const ncfg_reconcile_roam_t *roams, size_t roam_count,
     const ncfg_proto_request_t *requests, size_t request_count,
@@ -1705,6 +1733,7 @@ int ncfg_reconcile_pass(ncfg_reconcile_t *loop, const ncfg_reconcile_wake_t *wak
 		config_is_new = reload(loop);
 		report->config_is_new = config_is_new;
 	}
+	after_sleep(loop);
 
 	message[0] = '\0';
 	if (loop->probes && !ncfg_probes_run_due(loop->probes, loop->state->desired,
