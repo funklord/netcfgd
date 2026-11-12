@@ -12690,6 +12690,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.821 The stock services restarted under netcfgd
+
+**What LuCI's "Save & Apply" does a dozen times a day**: `network`, `firewall` and
+`dnsmasq` restarted. `tests/hull/malta/restart.sh`, on both OpenWrt tiers, restarts each in
+turn and wants netcfgd's table, `lan4`'s address and its dnsmasq whole within 20 s, then
+stops the firewall again as the guide says and asks for a lease on `lan4` with OpenWrt's own
+dnsmasq running beside netcfgd's. 2026-11-12, `hull-armsr` and `hull-malta`: whole after
+every restart, the table back 2 and 4 s after the second `firewall stop` (0318), and the host
+leased an address from 192.168.7.1 with two sockets on port 67.
+
+**Concluded first and wrong, kept so it is not concluded again:** the first version asked for
+the lease straight after the restarts, got nothing, saw both dnsmasqs on 0.0.0.0:67 and read
+it as the stock one taking the DISCOVER. Setting `dhcp.lan.ignore=1` took the stock socket
+away and still no lease came -- because `firewall restart` had brought fw4 back, and fw4
+rejects input on a device with no zone, a DHCP server's included, which the guide already
+says and `ncfg plan` already warns of. With the firewall stopped the two dnsmasqs coexist: a
+broadcast reaches both, and the stock one has no range for `lan4`.
+
 ## 10.820 A home behind the router, and the NAT `fw4 flush` took away
 
 **A host behind the router, reaching past it**, which is what a router is for and what no

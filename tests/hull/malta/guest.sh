@@ -158,6 +158,9 @@ else
 	say "pppoe: not run, no access concentrator on this tier (hull-armsr runs it)"
 fi
 
+# And the stock services restarted under all of it, on every tier: restart.sh.
+. /payload/restart.sh
+
 # And a radio, where the image has a wireless stack: radio.sh, beside this file.
 if [ -e /payload/no-radio ]; then
 	say "radio: not run, $(cat /payload/no-radio)"
