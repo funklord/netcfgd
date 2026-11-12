@@ -535,7 +535,7 @@ to decide, not this tree's.
    **It builds and starts** (project.md 10.714), pairs by a code it scans or is
    typed (10.720, 10.722), and a change saved on it from the emulator was written
    into a paired host's configuration (10.728) -- not applied, that host being
-   unprivileged; a remote apply is `tests/live/node_fleet.sh`'s.
+   unprivileged; a remote apply is `c/tests/node_fleet.sh`'s.
 4. **Beyond a LAN, which is wanted** (2026-08-08). This read "if it is ever
    wanted" and is not an *if* any more. It stays last because the staging is
    right, but it is a destination rather than a maybe -- so item 2 must not
