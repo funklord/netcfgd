@@ -34,6 +34,24 @@ if [ -e /payload/uradvd.apk ]; then
 	say "uradvd: $(command -v uradvd || echo not installed), enabled by the package: $(ls /etc/rc.d | grep -c uradvd)"
 	advertise='	advertise { prefixes = ["@pd:isp6"] }'
 fi
+# And a home behind the router, where the payload put one on a third NIC
+# (/payload/home): its host is in the outer machine, so it is a stack of its own,
+# and reaching the ISP from it is the router forwarding -- IPv4 through `nat`,
+# IPv6 from the delegated prefix's second /64. The ISP's addresses are on the
+# WAN's link, 192.0.2.0/24 and 2001:db8:aaaa:ffff::/64, so no default route is
+# the question; the outer machine probes and says (10.820).
+uplink='	config = "dhcp6 pd_length 56"'
+home=
+if [ -e /payload/home ]; then
+	uplink='	config = ["dhcp6 pd_length 56", "192.0.2.2/24", "2001:db8:aaaa:ffff::2/64"]
+	forwarding = true
+	nat = true'
+	home="interface home0 {
+	config = [\"192.168.9.1/24\", \"@pd:isp6/1=::1/64\"]
+	forwarding = true
+	advertise { prefixes = [\"@pd:isp6/1\"] }
+}"
+fi
 cat >> /etc/netcfgd/netcfgd.conf <<CONF
 device lan6 {
 	veth {
@@ -41,8 +59,9 @@ device lan6 {
 	}
 }
 interface isp6 {
-	config = "dhcp6 pd_length 56"
+$uplink
 }
+$home
 interface lan6 {
 	config     = "@pd:isp6=::1/64"
 	forwarding = true
@@ -122,6 +141,23 @@ else
 		done
 		route=$(ip -6 route show default dev host6 2>/dev/null | head -1)
 		say "host6 took ${host:-nothing} after $n s, default route ${route:-none}, by $(pidof uradvd | wc -w) uradvd"
+		if [ -e /payload/home ]; then
+			# The uplink's masquerade, which the home's IPv4 needs: waited for and
+			# timed, since it has been seen to land well after the addresses.
+			say "home0: $(ip -o addr show dev home0 2>/dev/null | awk '{print $4}' | tr '\n' ' ')ip_forward $(cat /proc/sys/net/ipv4/ip_forward), v6 forwarding $(cat /proc/sys/net/ipv6/conf/all/forwarding)"
+			say "  the table now: $(nft list table inet netcfgd 2>/dev/null | grep -c .) line(s), $(nft list table inet netcfgd 2>/dev/null | grep -c masquerade) masquerade, $(nft list table inet netcfgd 2>/dev/null | grep -c 'dport 443') port-forward; plan: $(/usr/bin/ncfg plan 2>&1 | grep -E 'nftables' | tr -s ' ' | cut -c1-120)"
+			n=0
+			until nft list table inet netcfgd 2>/dev/null | grep -q 'oifname "isp6".*masquerade' ||
+				[ $n -gt 90 ]; do
+				sleep 1
+				n=$((n + 1))
+			done
+			say "  the uplink's masquerade after $n s more: $(nft list table inet netcfgd 2>/dev/null | grep 'masquerade' | grep -c isp6) rule(s), $(nft list table inet netcfgd 2>/dev/null | grep -c 'dport 443') port-forward line(s)"
+			nft list table inet netcfgd 2>/dev/null | grep -q 'oifname "isp6".*masquerade' || {
+				failed=1
+				nft list table inet netcfgd 2>/dev/null | grep -i masq | head -3 | sed 's/^[[:space:]]*/  nft: /' >> "$out"
+			}
+		fi
 		case "$host" in
 		"$network":*) [ -n "$route" ] || failed=1 ;;
 		*)

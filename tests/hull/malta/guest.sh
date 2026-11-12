@@ -44,6 +44,7 @@ nic_state() {
 }
 [ -e /payload/isp6 ] && nic 52:54:00:12:34:56 isp6
 [ -e /payload/pppoe ] && nic 52:54:00:12:34:57 dsl0
+[ -e /payload/home ] && nic 52:54:00:12:34:58 home0
 sh /payload/payload.sh
 
 out=/verdict/wider

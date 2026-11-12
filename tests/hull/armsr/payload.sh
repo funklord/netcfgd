@@ -64,6 +64,8 @@ cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 cp /armsr/uradvd.apk $top/payload/uradvd.apk
 : > $top/payload/isp6
 : > $top/payload/pppoe
+# And a home behind the router, on a third NIC, whose host is here (10.820).
+: > $top/payload/home
 # The root here is the initramfs, in RAM (see tests/hull/openwrt/payload.sh), and
 # guest.sh goes on with the package after the shared payload (10.813).
 : > $top/payload/ramdisk-root
@@ -92,6 +94,22 @@ ip tuntap add dev tap0 mode tap 2>> "$out" || {
 }
 ip tuntap add dev tap1 mode tap 2>> "$out" || say "note: no second tap, so pppoe.sh will find no server"
 ip link set tap1 up 2>/dev/null
+# **The home's host, in a namespace of its own on a third tap**, so what it sends
+# to the ISP's addresses -- this machine's, on tap0 -- has to be forwarded by the
+# router: IPv4 to 192.0.2.1 only returns through its masquerade, there being no
+# route here to 192.168.9.0/24, and IPv6 to 2001:db8:aaaa:ffff::1 only from the
+# delegated prefix, routed back through the router's link-local, which its MAC
+# makes. Its IPv6 address and default route come from the router's uradvd.
+#
+# **Moved into the namespace after qemu has opened it**, not before: qemu opens
+# `ifname=tap2` in its own namespace, so a tap moved away first is not found and
+# qemu makes another, and the one in the namespace is never attached (10.820).
+ip tuntap add dev tap2 mode tap 2>> "$out"
+ip netns add home 2>> "$out"
+ip addr add 192.0.2.1/24 dev tap0 2>> "$out"
+ip -6 addr add 2001:db8:aaaa:ffff::1/64 dev tap0 nodad 2>> "$out"
+# The two routes wait for qemu: a tap has no carrier until it holds it, and a
+# route through a link without one is refused ("Nexthop device is not up").
 # **And the access concentrator on the second**, as `tests/live/pppoe-session.sh`
 # runs it, with the plugin path given for the reason that file gives: Debian's is
 # not where pppoe-server looks by default.
@@ -143,6 +161,8 @@ timeout -k 10 1200 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 2 -m 256 -di
 	-device virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56,romfile= \
 	-netdev tap,id=dsl,ifname=tap1,script=no,downscript=no \
 	-device virtio-net-pci,netdev=dsl,mac=52:54:00:12:34:57,romfile= \
+	-netdev tap,id=home,ifname=tap2,script=no,downscript=no \
+	-device virtio-net-pci,netdev=home,mac=52:54:00:12:34:58,romfile= \
 	-initrd /armsr/overlay.cpio -append 'console=ttyAMA0,115200' &
 qemu=$!
 n=0
@@ -153,26 +173,44 @@ until ip -o -6 addr show dev tap0 scope link 2>/dev/null | grep -v tentative | g
 done
 kea-dhcp6 -c /run/kea/kea.json > /run/kea/kea.log 2>&1 &
 kea=$!
+ip -6 route add 2001:db8:1234::/56 via fe80::5054:ff:fe12:3456 dev tap0 2>> "$out"
+ip link set tap2 netns home 2>> "$out"
+ip netns exec home sh -c 'ip link set lo up; sysctl -q -w net.ipv6.conf.tap2.accept_ra=2;
+	ip link set tap2 up; ip addr add 192.168.9.50/24 dev tap2' 2>> "$out"
+n=0
+until ip netns exec home cat /sys/class/net/tap2/carrier 2>/dev/null | grep -q 1 || [ $n -gt 100 ]; do
+	sleep 0.2
+	n=$((n + 1))
+done
+ip netns exec home ip route add default via 192.168.9.1 2>> "$out"
 # Every DHCPv6 packet on the ISP's wire, decoded, for while it fails: what kea sent
 # is the question when a client keeps soliciting (10.815). Ends with qemu.
 timeout 1300 tcpdump -i tap0 -n -l -vv -s0 udp port 546 or udp port 547 > /run/dhcp6.txt 2>/dev/null &
 capture=$!
+timeout 1300 tcpdump -i tap0 -n -l icmp or icmp6 > /run/icmp0.txt 2>/dev/null &
+icmp0=$!
+ip netns exec home timeout 1300 tcpdump -i tap2 -n -l icmp or icmp6 > /run/icmp2.txt 2>/dev/null &
+icmp2=$!
 say "kea $(dpkg-query -W -f='${Version}' kea-dhcp6-server 2>/dev/null) on tap0 after $((n / 5)) s"
 pppoe-server -I tap1 -L 10.64.0.1 -R 10.64.0.100 -N 1 -O /run/ac.options -g "$plugin" -k \
 	> /run/ac.log 2>&1 &
 ac=$!
 say "pppoe-server $(dpkg-query -W -f='${Version}' pppoe 2>/dev/null) on tap1, plugin ${plugin:-none}"
-# The taps' state through the run, a line a minute while qemu lives: what the
-# guest's NIC reads as carrier is this end's doing (10.815).
+# The home's host asks every five seconds while qemu lives, and the first answer
+# each way is kept: when, and from which address.
 (
-	while [ -d /proc/$qemu ]; do
-		echo "$(date +%T) $(ip -br link show tap0 2>&1) / $(ip -br -6 addr show tap0 2>&1 | cut -c1-80)"
-		sleep 60
+	v4= v6=
+	while [ -d /proc/$qemu ] && { [ -z "$v4" ] || [ -z "$v6" ]; }; do
+		[ -n "$v4" ] || ! ip netns exec home ping -c 1 -W 1 192.0.2.1 > /dev/null 2>&1 ||
+			{ v4=$(date +%T); echo "v4 $v4"; }
+		[ -n "$v6" ] || ! ip netns exec home ping -6 -c 1 -W 1 2001:db8:aaaa:ffff::1 > /dev/null 2>&1 ||
+			{ v6=$(date +%T); echo "v6 $v6 from $(ip netns exec home ip -6 -o addr show dev tap2 scope global | awk '{print $4}' | tr '\n' ' ')"; }
+		sleep 5
 	done
-) > /run/taps.log 2>&1 &
+) > /run/home.log 2>&1 &
 wait $qemu
 ran=$?
-kill $kea $ac $capture 2>/dev/null
+kill $kea $ac $capture $icmp0 $icmp2 2>/dev/null
 wait $kea 2>/dev/null
 wait $ac 2>/dev/null
 pkill -f '^pppd .*rp-pppoe' 2>/dev/null
@@ -181,7 +219,18 @@ say "qemu left with $ran"
 grep -iE 'error|fail|DHCP6_LEASE_PD|ADVERTISE_PD|leases' /run/kea/kea.log 2>/dev/null | head -6 |
 	sed 's/^[^]]*] //' | cut -c1-400 | sed 's/^/  kea: /' >> "$out"
 tail -8 /run/ac.log /run/ac-pppd.log 2>/dev/null | cut -c1-200 | sed 's/^/  concentrator: /' >> "$out"
-sed 's/^/  tap: /' /run/taps.log >> "$out" 2>/dev/null
+# The home's verdict is this machine's to give: the guest cannot see its host.
+say "the home reached the ISP: $(tr '\n' ';' < /run/home.log 2>/dev/null)"
+if ! grep -q '^v4 ' /run/home.log 2>/dev/null || ! grep -q '^v6 ' /run/home.log 2>/dev/null; then
+	ip netns exec home sh -c 'ip -o addr show dev tap2; ip route; ip -6 route' 2>&1 |
+		cut -c1-160 | sed 's/^/  home: /' >> "$out"
+	grep -m 6 'echo' /run/icmp2.txt 2>/dev/null | cut -c1-160 | sed 's/^/  on the home tap: /' >> "$out"
+	grep -m 6 'echo' /run/icmp0.txt 2>/dev/null | cut -c1-160 | sed 's/^/  on the ISP tap: /' >> "$out"
+fi
+grep -q '^v4 ' /run/home.log 2>/dev/null ||
+	say "VERDICT bad: the home's host never reached 192.0.2.1 through the router's masquerade"
+grep -q '^v6 .* from 2001:db8:1234:' /run/home.log 2>/dev/null ||
+	say "VERDICT bad: the home's host never reached the ISP from the delegated prefix"
 if grep -q 'delegated on isp6 after .*: nothing' /verdict/console 2>/dev/null; then
 	grep -m 8 -E 'solicit|advertise|request|reply' /run/dhcp6.txt 2>/dev/null | cut -c1-700 |
 		sed 's/^/  wire: /' >> "$out"
