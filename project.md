@@ -1014,8 +1014,9 @@ them because no test had ever carried those keys.
      from a cursor, and the GUI and TUI follow a node by it;
    - **the control socket is only a no-node daemon's now** (0309, 10.738): a
      daemon with a node binds none. The Rust comparisons that used it went
-     with the Rust (0317); whether a daemon whose node will not open stops or
-     keeps the socket is the holder's (10.738);
+     with the Rust (0317). A daemon whose node will not open keeps serving:
+     it configures the network, binds the socket, and tries the store again
+     every few seconds (`open_node` in `c/src/main/daemon_main.c`; 10.738);
    - **beyond the simple case** (partial authority, callers who are not
      operators), which is the holder's, as 0311 left it.
 
@@ -14458,8 +14459,11 @@ first.
 **What is left of 0309, which is all in this tree:**
 - ~~`observe = "any"` needs fuzznet's held-stream right~~ -- not built there, and its
   direction is named users, so 10.739 serves that tier without one.
-- A daemon with no node has the socket as its only way in. A node that will not open
-  should say so and stop, or keep this; that is the decision left.
+- A daemon with no node has the socket as its only way in. ~~A node that will not open
+  should say so and stop, or keep this; that is the decision left.~~ **Answered by what
+  was built (recorded 2026-11-12):** it says so, keeps the socket and the network, and
+  tries the store again every few seconds, so a late mount does not leave the host
+  unreachable (`open_node` and its retry in `c/src/main/daemon_main.c`).
 - 42 live scripts and the unit tests wait on `netcfgd.sock` as "the daemon is up", and
   `doc/schema/socket.json` is the witness of what goes.
 
