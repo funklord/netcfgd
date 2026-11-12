@@ -899,12 +899,15 @@ else
 	# Establish that netcfgd has actually delivered the DNS, rather than
 	# assuming the daemon's own pass got that far. It often has not.
 	#
-	# Execution stops at the first failed action (section 4), and this fixture
-	# *guarantees* one: the `Prompted` network references a secret that does
-	# not exist, so `backend.start radio0` fails on every apply -- deliberately,
-	# because the secret-agent tests below are about exactly that. Every action
-	# ordered after it is skipped, and `dns.apply` is one of them. So a panel
-	# shows no nameservers because there are none: netcfgd never wrote them.
+	# This fixture *guarantees* a failing action: the `Prompted` network
+	# references a secret that does not exist, so `backend.start radio0` cannot
+	# run -- deliberately, because the secret-agent tests below are about
+	# exactly that. Until 10.796 execution stopped there and every action after
+	# it was skipped, `dns.apply` among them, so a panel showed no nameservers.
+	# The daemon's own passes are best-effort now and deliver the DNS beside
+	# the unmet start, so the loop below normally finds the file at once; it
+	# stays, as the bounded wait for the pass, and an `ncfg apply` is atomic
+	# and would not start over the missing secret at all.
 	#
 	# Section 4 also says what to do about it -- "the remainder is re-runnable:
 	# `ncfg apply` recomputes from current observed state and resumes cleanly"

@@ -740,16 +740,18 @@ check "and it says why" \
 	"$(said_count 'the last-good configuration is empty')" "1"
 check "and no window is armed against it" "$(window_open)" "no"
 sleep 6
-# The address is still the one from before the edit, and that is the assertion:
-# the edit itself cannot apply, because a failing action stops the rest of the
-# plan and the failing route above is deliberately in this fixture. What the
-# guard prevents is the address being *removed* -- with it taken out, this line
+# The address is the edit's, and that is the assertion. The daemon's own
+# passes are best-effort since 10.796, so the route that cannot be installed --
+# deliberately in this fixture -- is unmet and the address change beside it is
+# applied; before, a failing action stopped the plan and the old address stayed,
+# which this line used to expect. What the guard prevents is the address being
+# *removed*, by a revert to the empty last-good -- with it taken out, this line
 # reads empty rather than either address.
 #
 # `present` was the first thing asserted here and it only asks whether the link
 # exists, which stays true while the address goes away: it would have passed
 # against the very failure the case is named for.
-check "so nothing tears the machine down" "$(address_of)" "10.9.9.1/24"
+check "so nothing tears the machine down" "$(address_of)" "10.9.9.4/24"
 stop_daemon
 ip link del probe1 2>/dev/null || true
 
