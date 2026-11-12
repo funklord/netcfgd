@@ -140,6 +140,9 @@ say "dnsmasq gave: $(cut -d' ' -f3 /tmp/leases 2>/dev/null | tr '\n' ' ')"
 }
 [ -f /tmp/isp.pid ] && kill "$(cat /tmp/isp.pid)"
 
+# And a LAN served, on every tier: lan.sh, beside this file.
+. /payload/lan.sh
+
 # And IPv6 from the ISP, where there is one: prefix.sh, beside this file.
 if [ -e /payload/isp6 ]; then
 	. /payload/prefix.sh

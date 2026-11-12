@@ -52,7 +52,7 @@ say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /armsr/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /armsr/veth/lib/modules/*/veth.ko $top/payload/veth.ko
 cp /repo/tests/hull/malta/guest.sh /repo/tests/hull/malta/prefix.sh /repo/tests/hull/malta/pppoe.sh \
-	/repo/tests/hull/malta/wider.conf $top/payload/
+	/repo/tests/hull/malta/lan.sh /repo/tests/hull/malta/wider.conf $top/payload/
 # armsr's image carries no wireless stack, so guest.sh says the radio half was not
 # run and why, rather than failing it or passing over it.
 echo "armsr's image has no cfg80211, wpad or iw (hull-malta runs it)" > $top/payload/no-radio

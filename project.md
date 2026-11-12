@@ -12690,6 +12690,17 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.819 A LAN served by OpenWrt's own dnsmasq
+
+**The router tiers had never served a LAN.** Their only dnsmasq was the one the guest runs
+by hand as the WAN's ISP; `hull-dhcp-server`, which proves decision 0297's `dhcp_server`,
+runs Debian's. `tests/hull/malta/lan.sh`, sourced on both OpenWrt tiers, gives a veth pair
+netcfgd makes a `dhcp_server` block and has BusyBox's udhcpc ask on the far end, which is
+no interface of the document's. 2026-11-12: on `hull-armsr` (25.12.6, arm64) and
+`hull-malta` (25.12.0, big-endian MIPS) the stock dnsmasq -- built `no-DHCPv6`, which a
+DHCPv4 LAN does not need -- leased an address in 192.168.7.0/24, its lease file held it, and
+`ncfg status` showed it. Nothing in netcfgd needed changing.
+
 ## 10.818 After an upgrade, apk takes the package back over what was kept
 
 The tier's sysupgrade check deleted netcfgd's files and left apk's record of the package,

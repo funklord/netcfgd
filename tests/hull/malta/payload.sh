@@ -49,7 +49,7 @@ cp netcfgd-static $top/payload/netcfgd
 say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /malta/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /malta/veth/lib/modules/*/veth.ko $top/payload/veth.ko
-cp /payload/guest.sh /payload/radio.sh /payload/wider.conf $top/payload/
+cp /payload/guest.sh /payload/radio.sh /payload/lan.sh /payload/wider.conf $top/payload/
 cp /repo/tests/hull/openwrt/payload.sh $top/payload/payload.sh
 cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 : > $top/payload/kernel-has-netfilter
