@@ -56,7 +56,12 @@ printf 'device dummy0 {\n\tkind = "dummy"\n}\ninterface dummy0 {\n\tconfig = "19
 # opkg, so this is the package a router on it installs. Unsigned, and from a
 # file, so `--allow-untrusted` and no network. What it must not do is enable
 # or start anything (10.750), and what it lays down is asked of apk itself.
-if apk add --allow-untrusted --no-network /payload/netcfgd.apk >> "$out" 2>&1; then
+# A root in RAM is one apk will not add a package from a file to without being
+# told, since a reboot would lose it: hull-malta's initramfs. A router's root is
+# its flash, and this tier's is a block device, so neither needs it (10.813).
+force=
+[ -e /payload/ramdisk-root ] && force=--force-non-repository
+if apk add --allow-untrusted --no-network $force /payload/netcfgd.apk >> "$out" 2>&1; then
 	listed=$(apk info -e netcfgd 2>/dev/null)
 	owner=$(ls -ln /usr/sbin/netcfgd 2>/dev/null | awk '{print $3":"$4}')
 	keep=$(ls -l /lib/upgrade/keep.d/netcfgd 2>/dev/null | cut -c1-10)   # BusyBox: no stat -c
@@ -171,12 +176,15 @@ say "the no-netfilter note: $noted line(s), $repeated process(es) saying it twic
 [ "$repeated" -eq 0 ] || failed=1
 
 # Removal takes what the package laid down and leaves the person's configuration,
-# which the package never carried (10.813).
-apk del netcfgd > /dev/null 2>&1
-gone=$( [ -e /usr/sbin/netcfgd ] || [ -e /etc/init.d/netcfgd ] && echo no || echo yes)
-kept=$( [ -s /etc/netcfgd/netcfgd.conf ] && echo yes || echo no)
-say "removed by apk: program and init script gone $gone; configuration kept $kept; listed $(apk info -e netcfgd 2>/dev/null | wc -l)"
-[ "$gone" = yes ] && [ "$kept" = yes ] || failed=1
+# which the package never carried (10.813). Not where something runs after this
+# file with the package still wanted: hull-malta's guest.sh, which says so.
+if [ ! -e /payload/keep-installed ]; then
+	apk del netcfgd > /dev/null 2>&1
+	gone=$( [ -e /usr/sbin/netcfgd ] || [ -e /etc/init.d/netcfgd ] && echo no || echo yes)
+	kept=$( [ -s /etc/netcfgd/netcfgd.conf ] && echo yes || echo no)
+	say "removed by apk: program and init script gone $gone; configuration kept $kept; listed $(apk info -e netcfgd 2>/dev/null | wc -l)"
+	[ "$gone" = yes ] && [ "$kept" = yes ] || failed=1
+fi
 
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep -E 'netcfgd|procd|oom|Out of memory' |

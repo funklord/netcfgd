@@ -12716,9 +12716,21 @@ Two things it had to get right that nothing would have said:
 `apk del` takes the program and init script and leaves the person's configuration. BusyBox there
 has no `stat -c`, which the first version of the mode check asked for.
 
-**Not yet:** `hull-malta`, the big-endian tier, is still 24.10 and opkg -- its kernel modules
-are apk-v3 packages on 25.12, and its guest builds the package, so it wants apk-tools there
-too. The package is unsigned: a feed with a key is the holder's, as 10.750 left the `.ipk`'s.
+**`hull-malta` is on 25.12 too**, big-endian MIPS on OpenWrt's own kernel: its image pins
+25.12's kernel, toolchain (gcc 14.3.0) and the dummy and veth module packages, and builds the
+same pinned apk-tools, which also unpacks those modules. It had to move: it runs the x86 tier's
+payload, which now installs with apk, so the first commit of this left it broken on 24.10.
+Three things it met. **apk will not add a package from a file to a root in RAM**, malta's
+initramfs, without `--force-non-repository` -- a reboot would lose it -- and a router's flash
+root, like the x86 tier's block one, does not need it, so only malta says so. **Its own steps
+deleted the files under apk** and then added the package again, which apk, still listing it,
+did not reinstall; it removes with `apk del` now. **And procd's stop returns before the
+process has gone**, so a count straight after a quick remove and add read the leaving daemon
+as one the install had started; it waits, bounded, as the shared payload does.
+
+**What no tier runs now: the `.ipk`.** `tool/ipk.sh` stays for 24.10, whose security updates
+end in 2026-09, and nothing exercises it; the guide keeps its opkg lines for that release. The
+package is unsigned: a feed with a key is the holder's, as 10.750 left the `.ipk`'s.
 
 ## 10.812 OpenWrt 25.12: netcfgd runs under its procd, and has no package it can install
 

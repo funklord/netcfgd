@@ -564,8 +564,9 @@ show you both at once; this shows you both once both have been tried.
 
 ## 10. An OpenWrt router
 
-Everything here has been run on OpenWrt 24.10 in an emulator (`make hull-malta`), and
-under 25.12's procd (`make hull-openwrt`), and on no real router yet. A router may have no console, so the rule above matters more:
+Everything here has been run on OpenWrt 25.12 in emulators -- big-endian MIPS on OpenWrt's
+own kernel (`make hull-malta`) and x86 (`make hull-openwrt`) -- earlier on 24.10, and on no
+real router yet. A router may have no console, so the rule above matters more:
 **leave the port you are connected through with netifd until the end.**
 
 Build the program with OpenWrt's toolchain for your target, then the package. The

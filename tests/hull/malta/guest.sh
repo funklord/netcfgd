@@ -177,10 +177,18 @@ say "ncfg wifi clients: $(/usr/bin/ncfg wifi clients 2>&1 | head -3 | cut -c1-90
 # What a person has: the package, on this machine. Before the rest of this file
 # would have mattered, it has to install, say nothing was started, and go again.
 /etc/init.d/netcfgd stop 2>/dev/null
-rm -f /etc/init.d/netcfgd /usr/sbin/netcfgd /usr/bin/ncfg
-installed=$(opkg install /payload/netcfgd.ipk 2>&1 | tail -2 | cut -c1-100 | tr '\n' ';')
-say "opkg: $installed"
-listed=$(opkg list-installed 2>/dev/null | grep -c '^netcfgd ')
+# procd's stop returns before the process has gone, so wait for it, bounded, as
+# the shared payload does after its own: counted the moment after a quick apk
+# del and add, the daemon still leaving read as one the install had started.
+n=0
+while [ -n "$(pidof netcfgd)" ] && [ $n -lt 15 ]; do sleep 1; n=$((n + 1)); done
+# The shared payload installed it with apk (10.813), so it is taken away the same
+# way: files deleted under apk's feet leave it listed, and an add then does nothing.
+apk del netcfgd > /dev/null 2>&1
+installed=$(apk add --allow-untrusted --no-network --force-non-repository /payload/netcfgd.apk 2>&1 | grep -v WARNING |
+	tail -2 | cut -c1-100 | tr '\n' ';')
+say "apk: $installed"
+listed=$(apk info -e netcfgd 2>/dev/null | grep -c '^netcfgd$')
 enabled=$(ls /etc/rc.d 2>/dev/null | grep -c netcfgd)
 running=$(pidof netcfgd | wc -w)
 say "installed $listed, enabled $enabled, running $running, $(/usr/bin/ncfg --version 2>&1 | head -1)"
@@ -222,9 +230,9 @@ say "after the restore: $(ls /etc/rc.d | grep -c netcfgd) start links, $(pidof n
 	[ -e /etc/rc.d/S21netcfgd ] || failed=1
 /etc/init.d/netcfgd stop
 /etc/init.d/netcfgd disable
-opkg remove netcfgd > /dev/null 2>&1
+apk del netcfgd > /dev/null 2>&1
 [ ! -e /usr/sbin/netcfgd ] && [ ! -e /etc/init.d/netcfgd ] || failed=1
-say "after removal: $(opkg list-installed 2>/dev/null | grep -c '^netcfgd ') installed, $(ls /usr/sbin/netcfgd 2>/dev/null | wc -l) program"
+say "after removal: $(apk info -e netcfgd 2>/dev/null | grep -c '^netcfgd$') installed, $(ls /usr/sbin/netcfgd 2>/dev/null | wc -l) program"
 
 if [ "$failed" -ne 0 ]; then
 	logread 2>/dev/null | grep netcfgd | tail -14 | sed 's/^/  log: /' >> "$out"

@@ -41,16 +41,22 @@ top=/overlay
 mkdir -p $top/payload $top/repo/packaging/procd $top/verdict $top/etc
 cp netcfgd-static $top/payload/netcfgd
 "$toolchain/bin/mips-openwrt-linux-musl-strip" $top/payload/netcfgd
-(cd /work && cp /repo/tool/ipk.sh /tmp/ipk.sh && mkdir -p tool packaging/procd &&
-	cp /tmp/ipk.sh tool/ipk.sh && cp /repo/packaging/procd/netcfgd packaging/procd/netcfgd &&
-	sh tool/ipk.sh $top/payload/netcfgd mips_24kc $top/payload/netcfgd.ipk)
-say "package: $(wc -c < $top/payload/netcfgd.ipk) bytes"
+# The apk-v3 package of 25.12 (10.813), made by the apk-tools the image built.
+(cd /work && mkdir -p tool packaging/procd && cp /repo/tool/openwrt_apk.sh tool/openwrt_apk.sh &&
+	cp /repo/packaging/procd/netcfgd packaging/procd/netcfgd &&
+	APK=/malta/apk-tools/build/src/apk sh tool/openwrt_apk.sh $top/payload/netcfgd mips_24kc \
+		$top/payload/netcfgd.apk)
+say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /malta/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /malta/veth/lib/modules/*/veth.ko $top/payload/veth.ko
 cp /payload/guest.sh /payload/wider.conf $top/payload/
 cp /repo/tests/hull/openwrt/payload.sh $top/payload/payload.sh
 cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 : > $top/payload/kernel-has-netfilter
+# The root here is the initramfs, in RAM (see tests/hull/openwrt/payload.sh), and
+# guest.sh goes on with the package after the shared payload (10.813).
+: > $top/payload/ramdisk-root
+: > $top/payload/keep-installed
 printf '%s\n' '#!/bin/sh' 'sh /payload/guest.sh > /dev/console 2>&1 &' 'exit 0' > $top/etc/rc.local
 (cd $top && find . | cpio -o -H newc --quiet > /malta/overlay.cpio)
 
