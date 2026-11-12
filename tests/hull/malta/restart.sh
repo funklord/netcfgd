@@ -57,3 +57,22 @@ case "$leased" in
 	nft list ruleset 2>/dev/null | grep -E '^table|hook input' | sed 's/^/  nft: /' >> "$out"
 	;;
 esac
+
+# And the LAN's resolver. On OpenWrt that is the stock dnsmasq, which binds port 53
+# on every address the router has as it appears (`bind-dynamic`), the LAN's
+# included -- so `dns_forward` cannot be had beside it: netcfgd's dnsmasq for the
+# LAN would not start ("Address in use"), and took the LAN's DHCP down with it
+# (10.825). What fits OpenWrt is to leave the forwarder off and offer the router,
+# which the stock dnsmasq answers: checked here, the offer and the answer both.
+sed -i 's/dns = \["192.168.7.53"\]/dns = ["192.168.7.1"]/' /etc/netcfgd/netcfgd.conf
+n=0
+until grep -q '192.168.7.1' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null && whole || [ $n -gt 30 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+offered=$(udhcpc -i client4 -n -q -t 6 -T 2 -s /bin/true -O dns 2>&1 | grep -c 'lease of')
+answer=$(nslookup localhost 192.168.7.1 2>&1 | sed -n 's/^Address[^:]*: *\(127\.0\.0\.1\).*/\1/p' | head -1)
+say "the router offered as the LAN's resolver after $n s: $offered lease(s); localhost at 192.168.7.1 is ${answer:-not answered}, by $(netstat -lunp 2>/dev/null | grep '192.168.7.1:53 ' | awk '{print $NF}' | head -1)"
+grep -q 'dhcp-option=.*6,192.168.7.1\|option:dns-server,192.168.7.1' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null ||
+	say "  lan4.conf offers: $(grep -i 'dhcp-option' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | tr '\n' ' ')"
+[ "$offered" -ge 1 ] && [ "$answer" = 127.0.0.1 ] && whole || failed=1

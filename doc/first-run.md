@@ -651,6 +651,17 @@ starts one for each interface it advertises on. uradvd sends neither the managed
 other-config flag and takes only a /64, so a document asking for those is refused under it
 rather than advertised as something else.
 
+**The LAN's name server is OpenWrt's own dnsmasq**, which answers DNS on every address the
+router has, the LAN's included. So leave `dns_forward` off in a `dhcp_server` block there --
+netcfgd's dnsmasq for that LAN could not bind port 53 beside it and would not start, its DHCP
+included -- and offer the router instead:
+
+```
+dhcp_server {
+	dns = ["192.168.1.1"]   # this interface's own address
+}
+```
+
 **WireGuard needs its kernel module**, which the image does not carry: `apk add
 kmod-wireguard`. netcfgd speaks to the kernel itself, so `wireguard-tools` is not needed.
 

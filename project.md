@@ -12690,6 +12690,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.825 The LAN's resolver on OpenWrt is OpenWrt's dnsmasq
+
+**`dns_forward` cannot be had beside OpenWrt's stock dnsmasq, and failing it takes the LAN's
+DHCP down too.** The stock dnsmasq runs `bind-dynamic`: it binds port 53 on every address the
+router has as each appears -- measured, 28 sockets, `lan4`'s 192.168.7.1 among them. netcfgd's
+dnsmasq for a LAN with `dhcp_server { dns_forward = true }` (0301) binds port 53 on that
+interface too, so it would not start ("failed to create listening socket for 192.168.7.1:
+Address in use"), and since one dnsmasq serves both, the LAN's DHCP went with it: every apply
+logged `backend.start failed` for `lan4`. A first version of the check passed anyway -- the
+stock dnsmasq answered the name at 192.168.7.1 -- until it was made to ask whose process held
+the socket.
+
+**What fits OpenWrt** is to leave the forwarder off and offer the router: `dns =
+["<the LAN's address>"]`, which the stock dnsmasq answers. `restart.sh` checks exactly that on
+both OpenWrt tiers -- the lease made with the router offered, and a name answered at it --
+and the router guide says it.
+
+**Open, for the holder:** whether a forwarder that cannot bind should take its interface's
+DHCP down with it, as it does, or whether the DHCP should be served without it and the plan
+say why. Serving DHCP regardless keeps the LAN's addresses while DNS is somebody else's; the
+cost is a `dns_forward` that is quietly not in force, against 0301's word, and against this
+project's habit of refusing by name rather than substituting. A plan-time warning when another
+process already holds port 53 on the interface's address would serve either answer.
+
 ## 10.824 WireGuard on the router
 
 **The VPN a router is most often asked for**, run where routers are. `hull-armsr`'s image
