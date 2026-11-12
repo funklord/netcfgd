@@ -2853,6 +2853,22 @@ hull-malta:
 	sed 's/^/malta: /' tests/hull/malta/verdict/malta; \
 	tail -1 tests/hull/malta/verdict/malta | grep -q '^VERDICT ok'
 
+# OpenWrt's own arm64 kernel and rootfs, armsr-armv8, in qemu-system-aarch64 in
+# 256 MB, with malta's test: the program and package for `aarch64_generic`, the
+# arch most routers sold now have (10.814). Not in `hull`, two emulators deep.
+hull-armsr:
+	@$(call hull_says,netcfgd/armsr)
+	@$(call hull_image,armsr)
+	@rm -f tests/hull/armsr/verdict/armsr
+	@mkdir -p tests/hull/armsr/verdict
+	@timeout -k 30 3000 $(HULL) run -f tests/hull/armsr/hull.conf || true
+	@if [ ! -f tests/hull/armsr/verdict/armsr ]; then \
+		echo "armsr: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/armsr: /' tests/hull/armsr/verdict/armsr; \
+	tail -1 tests/hull/armsr/verdict/armsr | grep -q '^VERDICT ok'
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -2990,7 +3006,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

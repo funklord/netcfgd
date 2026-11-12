@@ -12690,6 +12690,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.814 The router tier on arm64: `hull-armsr`
+
+**The routers coming are mostly arm64 on OpenWrt 25.12**, and every router tier so far was x86
+or big-endian MIPS. `make hull-armsr` runs the same two documents on OpenWrt 25.12.0's
+`armsr/armv8` initramfs kernel under `qemu-system-aarch64 -M virt -cpu cortex-a53`: the shared
+payload (`tests/hull/openwrt/payload.sh`: apk install, procd, the fuzznet store, respawn,
+reload) and hull-malta's `guest.sh` (vlan, bridge, route, nftables, netifd beside it, a DHCP
+WAN under busybox udhcpc, the package taken out and put back through sysupgrade's keep list).
+Its image pins 25.12.0's kernel, the aarch64 musl toolchain (gcc 14.3.0), the dummy and veth
+module packages and apk-tools 3.0.2, all by sha256; the package arch is `aarch64_generic`.
+It is not in `make hull`, like the other qemu tiers. First run, 2026-11-12: both verdicts ok,
+the node key the same across a respawn and across the restore.
+
+**armsr's image has no wireless stack** -- no cfg80211, wpad or iw in its manifest -- so the
+radio half of `guest.sh` moved into `tests/hull/malta/radio.sh`, which `guest.sh` sources
+unless the payload carries `/payload/no-radio`, whose text is printed as the reason. hull-malta
+still runs it, and was rerun after the split: the station joins `bigend`, both verdicts ok.
+
 ## 10.813 A package OpenWrt 25.12 installs
 
 **The holder agreed (2026-11-12) to build apk-tools from source**, which 10.812 left with them.
