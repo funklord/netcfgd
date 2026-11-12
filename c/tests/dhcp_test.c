@@ -552,15 +552,15 @@ static void the_prefix_hook_writes_what_the_observer_reads(void)
 	char *text;
 
 	message[0] = '\0';
-	text = ncfg_dhcp_pd_script("eth0", "/run/netcfgd/prefixes/eth0", message,
-	    sizeof(message));
+	text = ncfg_dhcp_pd_script("eth0", "/run/netcfgd/prefixes/eth0",
+	    "/run/netcfgd/reported.d/eth0/odhcp6c", message, sizeof(message));
 	check(text != NULL, "the prefix hook renders");
 	if (!text) {
 		return;
 	}
 	check(strncmp(text, "#!/bin/sh\n", 10u) == 0, "  it is a shell script");
 	check(strstr(text, "${PREFIXES:-}") != NULL,
-	    "  it reads odhcp6c's PREFIXES and nothing else");
+	    "  it reads odhcp6c's PREFIXES");
 	check(strstr(text, "new_delegated_dhcp6_prefix") == NULL &&
 	    strstr(text, "new_dhcp6_prefix") == NULL,
 	    "  and no dhcpcd variable beside it, which would never be set (0050)");
@@ -575,21 +575,21 @@ static void the_prefix_hook_writes_what_the_observer_reads(void)
 	free(text);
 
 	message[0] = '\0';
-	check(ncfg_dhcp_pd_script(NULL, "/t", message, sizeof(message)) == NULL &&
+	check(ncfg_dhcp_pd_script(NULL, "/t", "/r", message, sizeof(message)) == NULL &&
 	    message[0] != '\0',
 	    "a hook asked for with no interface is refused with a sentence");
 }
 
 /* Run the prefix hook once with odhcp6c's environment; 1 if it exited 0. */
 static int run_pd_hook(const char *script, const char *env_path, const char *prefixes,
-    const char *routes)
+    const char *routes, const char *addresses, const char *dns)
 {
 	pid_t child = fork();
 	int   status = 0;
 
 	if (child == 0) {
 		const char *argv[4];
-		const char *envp[4];
+		const char *envp[6];
 
 		argv[0] = script;
 		argv[1] = "ra-updated";
@@ -598,7 +598,9 @@ static int run_pd_hook(const char *script, const char *env_path, const char *pre
 		envp[0] = env_path;
 		envp[1] = prefixes;
 		envp[2] = routes;
-		envp[3] = NULL;
+		envp[3] = addresses;
+		envp[4] = dns;
+		envp[5] = NULL;
 		execve(script, (char *const *)(const void *)argv, (char *const *)(const void *)envp);
 		_exit(127);
 	}
@@ -624,6 +626,9 @@ static void the_prefix_hook_takes_the_router_from_the_advertisement(const char *
 	char  prefixes_dir[1024];
 	char  target[1100];
 	char  router[1100];
+	char  held[1100];
+	char  reports[1024];
+	char  report[1100];
 	char  script[1024];
 	char  message[NCFG_ERROR_MAX];
 	char  body[2048];
@@ -644,16 +649,21 @@ static void the_prefix_hook_takes_the_router_from_the_advertisement(const char *
 	check(mkdir(prefixes_dir, 0755) == 0 || errno == EEXIST, "and the prefixes directory");
 	(void)snprintf(target, sizeof(target), "%s/eth9", prefixes_dir);
 	(void)snprintf(router, sizeof(router), "%s/.eth9.router", prefixes_dir);
+	(void)snprintf(held, sizeof(held), "%s/.eth9.addresses", prefixes_dir);
+	(void)testdir_in(dir, "eth9-reports", reports, sizeof(reports));
+	check(mkdir(reports, 0755) == 0 || errno == EEXIST, "and the interface's fragments directory");
+	(void)snprintf(report, sizeof(report), "%s/odhcp6c", reports);
 	(void)testdir_in(dir, "pd-eth9", script, sizeof(script));
 	message[0] = '\0';
-	text = ncfg_dhcp_pd_script("eth9", target, message, sizeof(message));
+	text = ncfg_dhcp_pd_script("eth9", target, report, message, sizeof(message));
 	check(text != NULL && testdir_write(script, text, strlen(text)) && chmod(script, 0755) == 0,
 	    "the prefix hook is written where odhcp6c would run it");
 	free(text);
 	(void)snprintf(env_path, sizeof(env_path), "PATH=%s:/usr/bin:/bin", bin);
 
 	check(run_pd_hook(script, env_path, "PREFIXES=2001:db8:1234::/56,3600,7200",
-	          "RA_ROUTES=2001:db8:aaaa::/64,::,600,256 ::/0,fe80::1,1800,512"),
+	          "RA_ROUTES=2001:db8:aaaa::/64,::,600,256 ::/0,fe80::1,1800,512", "ADDRESSES=",
+	          "RDNSS="),
 	    "an advertisement naming a router: the hook exits zero");
 	seen = testdir_read(ip_log, NULL);
 	check_text(seen, "-6 route replace default via fe80::1 dev eth9\n",
@@ -668,7 +678,7 @@ static void the_prefix_hook_takes_the_router_from_the_advertisement(const char *
 
 	(void)unlink(ip_log);
 	check(run_pd_hook(script, env_path, "PREFIXES=2001:db8:1234::/56,3600,7200",
-	          "RA_ROUTES=::/0,fe80::2,1800,512"),
+	          "RA_ROUTES=::/0,fe80::2,1800,512", "ADDRESSES=", "RDNSS="),
 	    "another router advertised: the hook exits zero");
 	seen = testdir_read(ip_log, NULL);
 	check_text(seen,
@@ -678,7 +688,7 @@ static void the_prefix_hook_takes_the_router_from_the_advertisement(const char *
 	free(seen);
 
 	(void)unlink(ip_log);
-	check(run_pd_hook(script, env_path, "PREFIXES=", "RA_ROUTES="),
+	check(run_pd_hook(script, env_path, "PREFIXES=", "RA_ROUTES=", "ADDRESSES=", "RDNSS="),
 	    "the router and the lease gone: the hook exits zero");
 	seen = testdir_read(ip_log, NULL);
 	check_text(seen, "-6 route del default via fe80::2 dev eth9\n",
@@ -687,12 +697,47 @@ static void the_prefix_hook_takes_the_router_from_the_advertisement(const char *
 	check(!testdir_exists(router), "  and its record with it");
 
 	(void)unlink(ip_log);
-	check(run_pd_hook(script, env_path, "PREFIXES=", "RA_ROUTES="),
+	check(run_pd_hook(script, env_path, "PREFIXES=", "RA_ROUTES=", "ADDRESSES=", "RDNSS="),
 	    "nothing advertised and nothing held: the hook exits zero");
 	check(!testdir_exists(ip_log), "  and asks the kernel for nothing");
 
 	message[0] = '\0';
-	check(ncfg_dhcp_pd_script("et'h9", target, message, sizeof(message)) == NULL &&
+	(void)unlink(ip_log);
+	check(run_pd_hook(script, env_path, "PREFIXES=2001:db8:1234::/56,3600,7200", "RA_ROUTES=",
+	          "ADDRESSES=2001:db8:aaaa::100/128,3600,7200 2001:db8:aaaa::101/128,3600,7200",
+	          "RDNSS=2001:db8:aaaa::53 2001:db8:aaaa::54"),
+	    "a lease with two addresses and two name servers: the hook exits zero");
+	seen = testdir_read(ip_log, NULL);
+	check_text(seen,
+	    "-6 addr replace 2001:db8:aaaa::100/128 dev eth9\n"
+	    "-6 addr replace 2001:db8:aaaa::101/128 dev eth9\n",
+	    "  both addresses go on the uplink, which odhcp6c does not do itself (10.823)");
+	free(seen);
+	seen = testdir_read(report, NULL);
+	check_text(seen,
+	    "# eth9, from DHCPv6. Written by netcfgd.\n"
+	    "dns=2001:db8:aaaa::53\n"
+	    "dns=2001:db8:aaaa::54\n",
+	    "  and the name servers are the interface's report fragment, whole");
+	free(seen);
+	(void)unlink(ip_log);
+	check(run_pd_hook(script, env_path, "PREFIXES=2001:db8:1234::/56,3600,7200",
+	          "RA_ROUTES=::/0,fe80::3,1800,512 2001:db8::/32,fe80::3,1800,512",
+	          "ADDRESSES=2001:db8:aaaa::101/128,3600,7200",
+	          "RDNSS=2001:db8:aaaa::53"),
+	    "one address renewed and one gone, and the advertisement naming a resolver: exits zero");
+	seen = testdir_read(ip_log, NULL);
+	check_text(seen,
+	    "-6 addr del 2001:db8:aaaa::100/128 dev eth9\n"
+	    "-6 addr replace 2001:db8:aaaa::101/128 dev eth9\n"
+	    "-6 route replace default via fe80::3 dev eth9\n",
+	    "  the address that left the lease goes, and only that one");
+	free(seen);
+	seen = testdir_read(held, NULL);
+	check_text(seen, "2001:db8:aaaa::101/128\n", "  and the record holds what is installed now");
+	free(seen);
+
+	check(ncfg_dhcp_pd_script("et'h9", target, report, message, sizeof(message)) == NULL &&
 	        strstr(message, "single quote") != NULL,
 	    "an interface carrying a single quote is refused, the name now being in the script");
 }

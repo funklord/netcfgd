@@ -69,9 +69,10 @@ interface. Nothing stops it and netcfgd will merge it. If you have one source --
 and a modem, a tunnel and a PPP link each have one -- the single file is simpler
 and is what the rest of this document describes.
 
-**netcfgd generates three writers itself**: the scripts it hands `dhcpcd -c`
-(one per family) and `udhcpc -s`, which report a lease's nameservers because
-netcfgd never sees the protocol
+**netcfgd generates four writers itself**: the scripts it hands `dhcpcd -c`
+(one per family), `udhcpc -s` and `odhcp6c -s`, which report a lease's nameservers
+because netcfgd never sees the protocol -- odhcp6c's as the fragment
+`reported.d/<interface>/odhcp6c`
 ([0066](decision/0066-a-lease-reports-its-nameservers.md)). They are worth reading
 as worked examples -- they are the shortest writers there are, and each one reports
 exactly one key.
@@ -299,8 +300,8 @@ of them is privileged by netcfgd:
 
 netcfgd does not start, supervise or speak to any of them. It reads a file.
 
-**And netcfgd writes three of these itself**, which are the shortest worked examples
-there are: the scripts it hands `dhcpcd -c` and `udhcpc -s`, which report a lease's
+**And netcfgd writes four of these itself**, which are the shortest worked examples
+there are: the scripts it hands `dhcpcd -c`, `udhcpc -s` and `odhcp6c -s`, which report a lease's
 nameservers and search suffixes because netcfgd never sees DHCP
 ([0066](decision/0066-a-lease-reports-its-nameservers.md)), and the `--route-up`
 script it hands `openvpn`, which reports a tunnel's routes and resolvers

@@ -12690,6 +12690,22 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.823 What a DHCPv6 lease gives the uplink itself
+
+**The next lens from 10.822: what else odhcp6c hands its script that the hook dropped.**
+Two things, and on OpenWrt they reach every DHCPv6 uplink, delegated prefix or not, since
+`ncfg_dhcp6_client` picks odhcp6c wherever it is installed: `ADDRESSES`, IA_NA's addresses,
+which odhcp6c puts on no interface, so the uplink had no global address of its own; and
+`RDNSS`/`RA_DNS`/`DOMAINS`, the ISP's resolvers and search list, which reached nothing.
+
+The hook installs the addresses (`ip -6 addr replace`, recorded as `.<uplink>.addresses`
+beside the router's record, and one that leaves the lease removed and no other) and writes
+the resolvers and search list as the interface-report fragment `reported.d/<uplink>/odhcp6c`,
+beside dhcpcd's `dhcpcd6` (0086), staged and renamed; a resolver both lists name is written
+once. `dhcp_test.c` runs it through two addresses becoming one and two resolvers; on
+`hull-armsr`, with kea handing out `dns-servers`, `isp6` carries 2001:db8:aaaa::100/128 and
+its report `dns=2001:db8:aaaa::53`. `doc/interface-report.md` counts four writers now.
+
 ## 10.822 A router's IPv6 default route, from the ISP's advertisement
 
 **Every netcfgd router given a prefix had no IPv6 default route.** An IPv6 default route only

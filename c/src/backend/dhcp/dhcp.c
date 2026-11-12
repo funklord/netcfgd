@@ -792,9 +792,20 @@ static int write_pd_hook(const char *run, const char *iface, char *out, size_t o
 {
 	char  dir[NCFG_DHCP_PATH_MAX];
 	char  target[NCFG_DHCP_PATH_MAX];
+	char  report[NCFG_DHCP_PATH_MAX];
+	char  fragments[NCFG_DHCP_PATH_MAX];
 	char *text;
 	int   ok;
 
+	/* The fragment's directory too, made here for the same reason: what the
+	 * lease named as resolvers goes to `reported.d/<iface>/odhcp6c` (0086). */
+	if (!ncfg_backend_join(fragments, sizeof(fragments), run, "reported.d", err, err_size) ||
+	    !ncfg_backend_make_dir(fragments, 0755, err, err_size) ||
+	    !ncfg_backend_join(dir, sizeof(dir), fragments, iface, err, err_size) ||
+	    !ncfg_backend_make_dir(dir, 0755, err, err_size) ||
+	    !ncfg_backend_join(report, sizeof(report), dir, "odhcp6c", err, err_size)) {
+		return 0;
+	}
 	if (!ncfg_backend_join(dir, sizeof(dir), run, "prefixes", err, err_size) ||
 	    !ncfg_backend_make_dir(dir, 0755, err, err_size)) {
 		return 0;
@@ -817,7 +828,7 @@ static int write_pd_hook(const char *run, const char *iface, char *out, size_t o
 			return 0;
 		}
 	}
-	text = ncfg_dhcp_pd_script(iface, target, err, err_size);
+	text = ncfg_dhcp_pd_script(iface, target, report, err, err_size);
 	if (!text) {
 		return 0;
 	}

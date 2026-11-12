@@ -309,7 +309,13 @@ int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t 
  * ------------------------------------------------------------------------ */
 
 /*
- * The script odhcp6c runs, which reports the prefixes it was delegated.
+ * The script odhcp6c runs: the prefixes it was delegated, into `target`; the
+ * addresses it was given and the uplink's default route, from its report, into
+ * the kernel; and the name servers and search domains, as the interface-report
+ * fragment `report` -- `<run>/reported.d/<iface>/odhcp6c`, beside dhcpcd's
+ * `dhcpcd6` (0086). odhcp6c configures nothing itself; this is its whole
+ * configuration step, as the udhcpc script is udhcpc's (project.md 10.822,
+ * 10.823).
  *
  * One prefix per line into `target`, written to a temporary beside it and
  * renamed -- `doc/interface-report.md`'s rule, because the observer may read
@@ -323,7 +329,8 @@ int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t 
  *
  * Allocated; free it. NULL with a sentence.
  */
-char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size_t err_size);
+char *ncfg_dhcp_pd_script(const char *iface, const char *target, const char *report, char *err,
+    size_t err_size);
 
 /*
  * The script udhcpc runs when a lease changes.

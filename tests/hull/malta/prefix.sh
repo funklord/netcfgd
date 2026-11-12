@@ -118,6 +118,17 @@ else
 	done
 	say "isp6's default route after $n s: $(ip -6 route show default dev isp6 2>/dev/null | head -1 | cut -c1-90)$(ip -6 route show default dev isp6 2>/dev/null | grep -q . || echo none); accept_ra $(cat /proc/sys/net/ipv6/conf/isp6/accept_ra), forwarding $(cat /proc/sys/net/ipv6/conf/isp6/forwarding)"
 	ip -6 route show default dev isp6 2>/dev/null | grep -q 'via fe80::' || failed=1
+	# And what the lease gave the uplink itself, which odhcp6c configures nowhere:
+	# IA_NA's address on isp6, and the name server in its report (10.823).
+	n=0
+	until ip -6 -o addr show dev isp6 2>/dev/null | grep -q 'inet6 2001:db8:aaaa::1' || [ $n -gt 20 ]; do
+		sleep 1
+		n=$((n + 1))
+	done
+	ia_na=$(ip -6 -o addr show dev isp6 2>/dev/null | grep 'inet6 2001:db8:aaaa::1' | awk '{print $4}' | head -1)
+	say "isp6's own address after $n s: ${ia_na:-none}; its report: $(grep -v '^#' /run/netcfgd/reported.d/isp6/odhcp6c 2>/dev/null | tr '\n' ' ')"
+	[ -n "$ia_na" ] && grep -q '^dns=2001:db8:aaaa::53$' /run/netcfgd/reported.d/isp6/odhcp6c 2>/dev/null ||
+		failed=1
 	# Relational, as cpe.sh's: lan6's network is the delegated one's.
 	network=${delegated%%::*}
 	n=0

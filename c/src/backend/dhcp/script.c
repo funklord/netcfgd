@@ -47,14 +47,17 @@ static int staged_path(const char *target, char *out, size_t out_size)
 	return written >= 0 && (size_t)written < out_size;
 }
 
-char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size_t err_size)
+char *ncfg_dhcp_pd_script(const char *iface, const char *target, const char *report, char *err,
+    size_t err_size)
 {
 	ncfg_buf_t buf;
 	char       staged[NCFG_DHCP_PATH_MAX];
 	char       router[NCFG_DHCP_PATH_MAX];
+	char       addresses[NCFG_DHCP_PATH_MAX];
+	char       report_staged[NCFG_DHCP_PATH_MAX];
 	char      *out;
 
-	if (!iface || !target) {
+	if (!iface || !target || !report) {
 		ncfg_error_set(err, err_size,
 		    "a prefix hook was rendered with no interface or nowhere to report to");
 		return NULL;
@@ -63,14 +66,17 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 	 * suffix, so it shares the leading dot the reader skips. */
 	if (!staged_path(target, staged, sizeof(staged)) || strlen(staged) < 4u ||
 	    snprintf(router, sizeof(router), "%.*s.router", (int)(strlen(staged) - 4u), staged) >=
-	        (int)sizeof(router)) {
+	        (int)sizeof(router) ||
+	    snprintf(addresses, sizeof(addresses), "%.*s.addresses", (int)(strlen(staged) - 4u),
+	        staged) >= (int)sizeof(addresses) ||
+	    !staged_path(report, report_staged, sizeof(report_staged))) {
 		ncfg_error_set(err, err_size,
 		    "the staging name beside %s is longer than this build will build", target);
 		return NULL;
 	}
 	/* The interface goes into the script inside single quotes now, as the
 	 * udhcpc script's does, so it is refused there for the same reason. */
-	if (strchr(iface, '\'') || strchr(target, '\'')) {
+	if (strchr(iface, '\'') || strchr(target, '\'') || strchr(report, '\'')) {
 		ncfg_error_set(err, err_size,
 		    "the prefix hook for %s would carry a single quote, which would end the "
 		    "quoting around a name and run what follows it", iface);
@@ -100,8 +106,10 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 	 */
 	ncfg_buf_addf(&buf,
 	    "#!/bin/sh\n"
-	    "# Written by netcfgd. Reports the prefixes delegated on %s.\n"
-	    "# One per line; an empty file means the lease is gone.\n"
+	    "# Written by netcfgd. odhcp6c's configuration step on %s: the prefixes\n"
+	    "# it was delegated, one per line (an empty file means the lease is gone);\n"
+	    "# its own addresses and the default route, into the kernel; and the name\n"
+	    "# servers, as an interface-report fragment.\n"
 	    "#\n"
 	    "# Run by odhcp6c. dhcpcd cannot report a delegated prefix to a script\n"
 	    "# at all -- see doc/decision/0050 -- so netcfgd refuses that pairing\n"
@@ -131,9 +139,62 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 	 * that route and no other: the ISP's advertisement taking the router away,
 	 * or the lease going, both arrive here with no `::/0` in the list.
 	 */
+	/*
+	 * **And what the lease gave the uplink itself** (project.md 10.823).
+	 * `ADDRESSES` is IA_NA's, `addr/len,preferred,valid` each, and odhcp6c
+	 * puts none of them on the interface: installed here, recorded under a
+	 * leading dot as the router is, and one that leaves the list removed and
+	 * no other. `RDNSS` is DHCPv6's name servers, `RA_DNS` the advertisement's
+	 * (`addr,lifetime`), `DOMAINS` the search list: written as the
+	 * interface-report fragment `reported.d/<iface>/odhcp6c`, staged and
+	 * renamed as every report is, so a dual-stack uplink's udhcpc report and
+	 * this one do not overwrite each other (0086). A name server the two lists
+	 * share is written once.
+	 */
 	ncfg_buf_addf(&buf,
 	    "\n"
 	    "iface='%s'\n"
+	    "addresses='%s'\n"
+	    "was=\n"
+	    "[ -r \"$addresses\" ] && was=$(cat \"$addresses\")\n"
+	    "now=\n"
+	    "for a in ${ADDRESSES:-}; do\n"
+	    "\tnow=\"$now ${a%%%%,*}\"\n"
+	    "done\n"
+	    "for a in $was; do\n"
+	    "\tcase \" $now \" in\n"
+	    "\t*\" $a \"*) ;;\n"
+	    "\t*) ip -6 addr del \"$a\" dev \"$iface\" 2>/dev/null || true ;;\n"
+	    "\tesac\n"
+	    "done\n"
+	    "for a in $now; do\n"
+	    "\tip -6 addr replace \"$a\" dev \"$iface\"\n"
+	    "done\n"
+	    "if [ -n \"$now\" ]; then\n"
+	    "\tprintf '%%s\\n' $now > \"$addresses\"\n"
+	    "else\n"
+	    "\trm -f \"$addresses\"\n"
+	    "fi\n"
+	    "\n"
+	    "{\n"
+	    "\tprintf '# %%s, from DHCPv6. Written by netcfgd.\\n' \"$iface\"\n"
+	    "\tseen=\n"
+	    "\tfor d in ${RDNSS:-} ${RA_DNS:-}; do\n"
+	    "\t\td=${d%%%%,*}\n"
+	    "\t\tcase \" $seen \" in\n"
+	    "\t\t*\" $d \"*) continue ;;\n"
+	    "\t\tesac\n"
+	    "\t\tseen=\"$seen $d\"\n"
+	    "\t\tprintf 'dns=%%s\\n' \"$d\"\n"
+	    "\tdone\n"
+	    "\tfor s in ${DOMAINS:-}; do\n"
+	    "\t\tprintf 'search=%%s\\n' \"$s\"\n"
+	    "\tdone\n"
+	    "} > '%s'\n"
+	    "mv '%s' '%s'\n",
+	    iface, addresses, report_staged, report_staged, report);
+	ncfg_buf_addf(&buf,
+	    "\n"
 	    "router='%s'\n"
 	    "gateway=\n"
 	    "for r in ${RA_ROUTES:-}; do\n"
@@ -156,7 +217,7 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size
 	    "\t\tprintf '%%s' \"$gateway\" > \"$router\"\n"
 	    "fi\n"
 	    "exit 0\n",
-	    iface, router);
+	    router);
 	if (ncfg_buf_failed(&buf)) {
 		ncfg_error_set(err, err_size,
 		    "the prefix hook for %s is larger than this build will render", iface);
