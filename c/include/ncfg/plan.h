@@ -366,9 +366,10 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op);
  * `ncfg_op_interface` answering NULL is not the same question. The daemon's
  * drift loop restricts a plan to the interfaces that opted into reconciling,
  * so anything answering NULL was dropped -- and a `resolv.conf` another
- * resolver had overwritten could never be put back. Deliberately a list of two
- * rather than "names no interface": the three commit ops also name none and
- * must never be swept into a drift pass. Decision 0165.
+ * resolver had overwritten could never be put back (0165), nor netcfgd's
+ * nftables table once OpenWrt's `fw4 flush` had deleted it, nor a policy rule
+ * (0318). Deliberately a list rather than "names no interface": the three
+ * commit ops also name none and must never be swept into a drift pass.
  */
 int ncfg_op_is_host_wide_config(const ncfg_op_t *op);
 

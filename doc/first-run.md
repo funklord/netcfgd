@@ -630,8 +630,11 @@ device wlan0 {
 
 **OpenWrt's firewall is still there.** It rejects input on a device it has no zone for,
 which stops a DHCP server on it. Give the device a zone, or stop `firewall` once netcfgd's
-`firewall` block does its work. `ncfg plan` warns when another table filters at the same
-hooks. When everything is handed over and confirmed, `/etc/init.d/netcfgd enable` is what
+`firewall` block does its work, and disable it so a reboot does not bring it back. `ncfg
+plan` warns when another table filters at the same hooks. Know that stopping or restarting
+it runs `fw4 flush`, which deletes every nftables table on the router, netcfgd's with the
+rest: netcfgd puts its own back within five seconds, and for those seconds the router has
+no NAT and no port forwards. When everything is handed over and confirmed, `/etc/init.d/netcfgd enable` is what
 makes it survive a reboot.
 
 **IPv6 on the LAN needs a daemon to send the advertisements.** netcfgd decides what the

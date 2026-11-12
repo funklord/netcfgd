@@ -938,6 +938,16 @@ static void what_counts_as_disruptive(void)
 	op.kind = NCFG_OP_NFTABLES_REPLACE;
 	check(!ncfg_op_interface(&op),
 	    "nftables.replace names no interface, so no guard has standing to refuse it");
+	/* And so a drift pass dropped it, and OpenWrt's `fw4 flush` -- which
+	 * `/etc/init.d/firewall stop` runs -- took a router's NAT away until the
+	 * next edit (0318). */
+	check(ncfg_op_is_host_wide_config(&op),
+	    "  and it is host-wide config, so a drift pass puts the table back (0318)");
+	op.kind = NCFG_OP_RULE_ADD;
+	check(ncfg_op_is_host_wide_config(&op) && !ncfg_op_interface(&op),
+	    "  as is a policy rule, the other object no interface owns (0318)");
+	op.kind = NCFG_OP_RULE_DEL;
+	check(ncfg_op_is_host_wide_config(&op), "  and taking one away");
 }
 
 /*

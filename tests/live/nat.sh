@@ -177,6 +177,33 @@ check "a second plan has nothing to do" \
 apply "the second apply"
 check "re-applying changes nothing" "$(uplinks)" "wan0"
 
+# **The table deleted under the daemon, as OpenWrt's `fw4 flush` deletes it** --
+# which `/etc/init.d/firewall stop` and `restart` run, taking every table on the
+# router. Drift passes dropped `nftables.replace` as naming no interface, so the
+# NAT stayed gone until the next edit (0318); the tick has to put it back. nft(8)
+# is not assumed here, so the deletion is the one netlink batch it would send.
+python3 -I - <<'PY'
+import socket, struct
+def msg(kind, flags, seq, family, res_id, payload=b""):
+    body = struct.pack("=BBH", family, 0, socket.htons(res_id)) + payload
+    return struct.pack("=IHHII", 16 + len(body), kind, flags, seq, 0) + body
+name = b"netcfgd\0"
+attr = struct.pack("=HH", 4 + len(name), 1) + name
+attr += b"\0" * ((4 - len(attr) % 4) % 4)
+sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 12)
+sock.settimeout(2)
+sock.bind((0, 0))
+sock.send(msg(0x10, 1, 1, 0, 10) + msg((10 << 8) | 2, 5, 2, 1, 0, attr) + msg(0x11, 1, 3, 0, 10))
+sock.recv(65536)
+PY
+check "the table is gone once deleted" "$(uplinks)" ""
+waited=0
+while [ -z "$(uplinks)" ] && [ "$waited" -lt 30 ]; do
+	waited=$((waited + 1))
+	sleep 0.5
+done
+check "and a drift pass puts it back, within the 5 s tick" "$(uplinks)" "wan0"
+
 # Adding an uplink rewrites the whole table. The one already there has to
 # survive that, which is the part a wholesale replacement can get wrong.
 write_config <<'CONF'

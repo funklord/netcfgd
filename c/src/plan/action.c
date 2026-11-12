@@ -285,7 +285,13 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 
 int ncfg_op_is_host_wide_config(const ncfg_op_t *op)
 {
-	return op->kind == NCFG_OP_DNS_APPLY || op->kind == NCFG_OP_HOSTNAME_SET;
+	/* The DNS delivery and the hostname (0165), and netcfgd's nftables table
+	 * and its policy rules (0318): the objects that are the host's rather
+	 * than an interface's. Not the commit ops, which name no interface either
+	 * and must never be swept into a drift pass. */
+	return op->kind == NCFG_OP_DNS_APPLY || op->kind == NCFG_OP_HOSTNAME_SET ||
+	    op->kind == NCFG_OP_NFTABLES_REPLACE || op->kind == NCFG_OP_RULE_ADD ||
+	    op->kind == NCFG_OP_RULE_DEL;
 }
 
 /*

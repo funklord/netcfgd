@@ -329,6 +329,17 @@ static int answer_apply(ncfg_main_desk_t *desk, const ncfg_proto_apply_t *ask, n
 		    "machine, so it observes and reports and applies nothing");
 		return 0;
 	}
+	/*
+	 * **An apply is the operator saying go, so `--no-apply-on-start` is over.**
+	 * `ncfg_reconcile_releases_hold` says the same of the requests a pass is
+	 * handed -- but a daemon with a node is answered here, by fuzznet's loop,
+	 * and its passes are handed none, so that release never came: a daemon
+	 * started held repaired no drift at all until it was restarted, an address
+	 * taken off an interface or a table `fw4 flush` deleted staying gone
+	 * (project.md 10.820). Any apply, as there: with a window or without one,
+	 * and whether or not it then succeeds.
+	 */
+	desk->loop->holding = 0;
 	/* An open window would put this back when it closes, which is the one thing
 	 * the caller said must not happen (0316). */
 	if (ask->no_rollback.bytes &&

@@ -3,10 +3,11 @@
  * interface: the DNS delivery and the hostname.
  *
  * WHY THESE TWO ARE ONE FILE
- *   They are the pair `ncfg_op_is_host_wide_config` names, and that list is
- *   deliberately a list of two rather than "names no interface" (0165): the
- *   three commit ops also name none and must never be swept into a drift pass.
- *   Whatever else this file grows, it grows because that list did.
+ *   They were the pair `ncfg_op_is_host_wide_config` named, and that list is
+ *   deliberately a list rather than "names no interface" (0165): the three
+ *   commit ops also name none and must never be swept into a drift pass. It
+ *   has since gained the nftables table and the policy rules (0318), which are
+ *   planned in their own files.
  *
  * THE SCOPE LIST IS A RULE, NOT A LOOP, AND IT IS NO LONGER HERE
  *   In the Rust the list is `netcfgd_model::dns::scopes`, called by the

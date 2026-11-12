@@ -12690,6 +12690,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.820 A home behind the router, and the NAT `fw4 flush` took away
+
+**A host behind the router, reaching past it**, which is what a router is for and what no
+tier had shown. `hull-armsr`'s guest gains a third NIC, `home0` -- 192.168.9.1/24 and
+`@pd:isp6/1=::1/64`, advertised by uradvd -- and the uplink `isp6` gains 192.0.2.2/24,
+2001:db8:aaaa:ffff::2/64, `forwarding` and `nat = true`. The far end of `home0` is a tap the
+outer machine moves into a network namespace of its own (after qemu has opened it: qemu
+opens `ifname=` in its own namespace and makes a fresh tap if it is gone), and a prober
+there pings the ISP's 192.0.2.1 and 2001:db8:aaaa:ffff::1 every five seconds while qemu
+lives. IPv4 can only answer through the router's masquerade (nothing here routes to
+192.168.9.0/24), IPv6 only from the delegated prefix (routed back via the router's
+link-local). Both answered: IPv6 from 2001:db8:1234:1::/64 within seconds of the
+advertisement, IPv4 -- **minutes later.**
+
+**Why minutes: OpenWrt's `/etc/init.d/firewall stop` runs `fw4 flush`, which deletes every
+nftables table on the machine**, and `restart` is a stop and a start. The guest stops it
+before its WAN test, as the router guide told people to. netcfgd's table -- the NAT, the
+port forward and its reflection -- was gone (0 lines), `ncfg plan` listed `nftables.replace`
+as the repair, and no drift pass made it: a drift pass keeps an action whose interface
+reconciles or whose op 0165 calls host-wide, and `nftables.replace` names no interface and
+was not on that list. The NAT came back with the next edit of the document. Reproduced on
+this host in seconds, under `unshare -rn`, with the netlink batch `fw4 flush` sends.
+
+**And a second fault under it: `--no-apply-on-start` was never released in a daemon with a
+node.** The release is asked of the requests a pass is handed, and since 0311 fuzznet's loop
+answers every request through `ncfg_main_answer` and hands the passes none -- a trace showed
+every pass with zero requests. So a daemon started held, as the first-run guide starts one,
+repaired no drift whatever after its first apply: an address taken off an interface stayed
+off. Decision 0318 adds `nftables.replace`, `rule.add` and `rule.del` to the host-wide list,
+and an answered apply now releases the hold. Measured: the deleted table, a deleted policy
+rule and a deleted address each back within one 5 s tick; nothing re-applied in 25 idle
+seconds, 0165's measure of a rewrite loop. `tests/live/nat.sh` deletes the table under the
+daemon and wants it back; each fix reverted alone turns that check red. The router guide now
+says what stopping `firewall` does.
+
 ## 10.819 A LAN served by OpenWrt's own dnsmasq
 
 **The router tiers had never served a LAN.** Their only dnsmasq was the one the guest runs

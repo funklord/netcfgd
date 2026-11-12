@@ -549,13 +549,13 @@ are using and one that will cut them off.
 | `link.up` |  |  |
 | `neighbour.add` |  |  |
 | `neighbour.del` |  |  |
-| `nftables.replace` |  |  |
+| `nftables.replace` |  | yes |
 | `qdisc.reset` |  |  |
 | `qdisc.set` |  |  |
 | `route.add` |  |  |
 | `route.del` | yes |  |
-| `rule.add` |  |  |
-| `rule.del` | yes |  |
+| `rule.add` |  | yes |
+| `rule.del` | yes | yes |
 | `station.steer` |  |  |
 | `sysctl.set_accept_ra` |  |  |
 | `sysctl.set_forwarding` | yes |  |
