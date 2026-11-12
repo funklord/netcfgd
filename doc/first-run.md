@@ -634,6 +634,20 @@ which stops a DHCP server on it. Give the device a zone, or stop `firewall` once
 hooks. When everything is handed over and confirmed, `/etc/init.d/netcfgd enable` is what
 makes it survive a reboot.
 
+**IPv6 on the LAN needs a daemon to send the advertisements.** netcfgd decides what the
+hosts are told -- `advertise { prefixes = ["@pd:wan0"] }` on the LAN, the prefix your ISP
+delegated -- and hands the sending to radvd or to uradvd. OpenWrt 25.12 carries no radvd in
+any feed, so install uradvd:
+
+```sh
+apk add uradvd
+```
+
+Its own service does nothing as shipped (`enabled '0'` in `/etc/config/uradvd`); netcfgd
+starts one for each interface it advertises on. uradvd sends neither the managed nor the
+other-config flag and takes only a /64, so a document asking for those is refused under it
+rather than advertised as something else.
+
 **A firmware upgrade keeps netcfgd**, if you keep settings. The package lists its
 configuration, its store and the program itself for `sysupgrade`, because the new image
 holds no netcfgd and a port you took out of `/etc/config/network` would otherwise come back

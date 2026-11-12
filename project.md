@@ -12690,6 +12690,43 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.817 Advertising on OpenWrt 25.12: uradvd
+
+**OpenWrt 25.12 carries no radvd in any feed**, measured 2026-11-12 against every feed's
+`index.json` for `aarch64_generic` (base, packages, routing, luci, telephony): `packages` has
+`uradvd`, and nothing else sends router advertisements but odhcpd, which is stock. The stock
+dnsmasq is built `no-DHCPv6` (its own log line in the guest), so it cannot either. So on the
+routers this project is for, `advertise` had no daemon to hand the LAN to: radvd absent,
+odhcpd refused by name.
+
+**uradvd became a backend**, `backend = "uradvd"`, and `auto` takes it where there is no
+radvd. Chosen over odhcpd because odhcpd is configured only through UCI's
+`/etc/config/dhcp` -- the file the stock router's netifd world uses -- where uradvd, like
+radvd, is one process per interface netcfgd starts and stops, so the lifecycle in `ra.c`
+carries over: a record file under `<run>/radvd/<iface>.conf` holds its arguments one to a
+line, and its path rides after `--` (where uradvd stops reading options) as the marker
+`ncfg_process_pid_of` matches. uradvd neither detaches nor writes a pid file, so a shell
+does both; its reload is a restart, there being no file to re-read, and the program to
+restart is the record's `# started as` line, since a command line shows an interpreter
+where the program is a script.
+
+Read from `uradvd.c` at the commit 25.12 builds (1e64364d), not from its usage line:
+
+- **`-p`, not `-a`.** Both make a prefix autonomous; `-p` also makes it on-link, which is
+  radvd's `AdvOnLink on`. The package's own init script calls `-a` "off link". The first
+  version of this backend wrote `-a` and its unit test asserted `-a` -- the test agreed
+  with the code it was written beside, which is why `hull-armsr`'s `prefix.sh` asks a
+  host on the LAN instead.
+- **The default router lifetime is 0**, which tells hosts the router is no default
+  gateway; radvd's is 1800. An unset `lifetime` is written as 1800, so one document
+  means the same under either daemon.
+- **No managed or other-config flag** (both sent as zero), **only /64 prefixes**, at most
+  8 prefixes and 3 name servers: each refused under uradvd with its reason rather than
+  advertised as something else.
+
+Installing the package enables its init script (`S50uradvd`), which does nothing:
+`/etc/config/uradvd` ships `enabled '0'`. The router guide says `apk add uradvd`.
+
 ## 10.814 The router tier on arm64: `hull-armsr`
 
 **The routers coming are mostly arm64 on OpenWrt 25.12**, and every router tier so far was x86

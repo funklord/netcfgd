@@ -1372,6 +1372,10 @@ typedef enum {
 	NCFG_RA_BACKEND_AUTO,
 	NCFG_RA_BACKEND_ODHCPD,
 	NCFG_RA_BACKEND_RADVD,
+	/* OpenWrt 25.12 carries no radvd in any feed; uradvd is its packages
+	 * feed's (project.md 10.817). Before `exec`, which stays last: the word
+	 * tables read every word but the last as a plain string. */
+	NCFG_RA_BACKEND_URADVD,
 	NCFG_RA_BACKEND_EXEC
 } ncfg_ra_backend_kind_t;
 

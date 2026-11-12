@@ -1751,7 +1751,7 @@ typedef struct {
 	char *guard;
 	/* Router advertisements (0009): `advertise` set where the block is
 	 * there; `advertise_prefixes` space-joined as the language writes them,
-	 * `@pd:wan0/1`; the backend `auto`, `radvd` or `odhcpd`; the lifetime
+	 * `@pd:wan0/1`; the backend `auto`, `radvd`, `uradvd` or `odhcpd`; the lifetime
 	 * -1 for the default. An `exec` backend, or a prefix naming which of
 	 * several delegations it is, has no field and stays unmodelled. */
 	/* Wired 802.1X (0008), carried since 10.612 as a network's is: `dot1x`

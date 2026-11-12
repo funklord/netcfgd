@@ -182,7 +182,7 @@ static const ncfg_enum_t networking_set = WORD_SET("networking setting", network
 static const char *const cert_source_words[] = { "path", "stored" };
 static const char *const principal_words[] = { "root", "any", "user", "group" };
 static const char *const hostname_policy_words[] = { "none", "from_dhcp", "static" };
-static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "exec" };
+static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "uradvd", "exec" };
 
 const char *ncfg_address_source_kind_name(int kind)
 {

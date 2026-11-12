@@ -627,19 +627,19 @@ static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t 
  * What an interface tells the hosts behind it.
  *
  * **In the enum's order, which is not the order the parser's own diagnostic
- * lists**: the enum is auto, odhcpd, radvd, exec and the message says "auto,
- * radvd, odhcpd". A table written from the message would name the wrong daemon
+ * lists**: the enum is auto, odhcpd, radvd, uradvd, exec and the message says
+ * "auto, radvd, uradvd, odhcpd". A table written from the message would name the wrong daemon
  * for every policy that sets one, and a document naming the wrong daemon
  * compiles -- so nothing downstream would report it.
  */
-static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "exec" };
+static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "uradvd", "exec" };
 
 /*
  * `advertise { }`, which was refused whole.
  *
  * Two of this policy's fields cannot come from a config file and are named
  * rather than written. `exec` is in the backend enum and `lower_advertise`
- * accepts only auto, radvd and odhcpd, so a policy carrying it arrived some
+ * accepts only auto, radvd, uradvd and odhcpd, so a policy carrying it arrived some
  * other way and its command has nowhere to go. A prefix's `index` is likewise
  * hardcoded to 0 on the way in -- the reference syntax is `@pd:<interface>` with
  * an optional `/<subnet>` and has no third part -- so a non-zero one would be

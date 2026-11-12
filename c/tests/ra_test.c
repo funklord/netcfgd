@@ -511,6 +511,190 @@ static void stopping_nothing_is_success(const char *run)
 	check(getpid() > 0, "and this process is still here to say so");
 }
 
+/* ------------------------------------------------------------ uradvd */
+
+static char *render_uradvd(const ncfg_ra_policy_t *policy, const char *const *prefixes,
+    size_t prefixes_n, const char *const *servers, size_t servers_n, char *message,
+    size_t message_size)
+{
+	message[0] = '\0';
+	return ncfg_ra_uradvd_render("lan0", policy, prefixes, prefixes_n, servers, servers_n,
+	    message, message_size);
+}
+
+/*
+ * uradvd's record, whole: the arguments it is started with, one to a line.
+ *
+ * **The lifetime is there although the document gave none**, and that line is
+ * the one this test exists for: uradvd's own default router lifetime is 0,
+ * which tells every host the router is not a default gateway, where radvd's is
+ * 1800. A record without it would advertise the prefix and take the hosts'
+ * route away.
+ */
+static void uradvd_is_given_its_arguments_and_radvds_lifetime(void)
+{
+	static const char *const prefixes[] = { "2001:db8:1234::/64", "fd00:1::/64" };
+	static const char *const servers[] = { "2001:db8:1234::1" };
+	char                     message[NCFG_ERROR_MAX];
+	char                    *text;
+	ncfg_ra_policy_t         policy = plain();
+
+	text = render_uradvd(&policy, prefixes, 2u, servers, 1u, message, sizeof(message));
+	check_text(text,
+	    "# uradvd for lan0, written by netcfgd. Do not edit; it is rewritten on apply.\n"
+	    "# uradvd reads no file: these are the arguments it was started with, one\n"
+	    "# to a line, and this file's path follows them, which is how netcfgd knows\n"
+	    "# its process from anybody else's.\n"
+	    "-i\nlan0\n-p\n2001:db8:1234::/64\n-p\nfd00:1::/64\n--default-lifetime\n1800\n"
+	    "--rdnss\n2001:db8:1234::1\n",
+	    "uradvd's record is its arguments, radvd's default lifetime among them");
+	free(text);
+
+	policy.dns = 0;
+	policy.lifetime.has = 1;
+	policy.lifetime.value = 0;
+	text = render_uradvd(&policy, prefixes, 1u, servers, 1u, message, sizeof(message));
+	check(text != NULL && strstr(text, "--default-lifetime\n0\n") != NULL &&
+	        strstr(text, "--rdnss") == NULL,
+	    "a lifetime of zero is passed as zero, and no name server where dns is off");
+	free(text);
+}
+
+/* What uradvd cannot say is refused rather than advertised as something else. */
+static void what_uradvd_cannot_carry_is_refused(void)
+{
+	static const char *const one[] = { "2001:db8:1234::/64" };
+	static const char *const wide[] = { "2001:db8:1234::/56" };
+	static const char *const nine[] = { "2001:db8:1::/64", "2001:db8:2::/64", "2001:db8:3::/64",
+		"2001:db8:4::/64", "2001:db8:5::/64", "2001:db8:6::/64", "2001:db8:7::/64",
+		"2001:db8:8::/64", "2001:db8:9::/64" };
+	static const char *const four[] = { "2001:db8::1", "2001:db8::2", "2001:db8::3",
+		"2001:db8::4" };
+	char                     message[NCFG_ERROR_MAX];
+	char                    *text;
+	ncfg_ra_policy_t         policy = plain();
+
+	policy.managed = 1;
+	text = render_uradvd(&policy, one, 1u, NULL, 0u, message, sizeof(message));
+	check(text == NULL && strstr(message, "managed") != NULL,
+	    "the managed flag is refused: uradvd sends it as off");
+	free(text);
+	policy = plain();
+	policy.other_config = 1;
+	text = render_uradvd(&policy, one, 1u, NULL, 0u, message, sizeof(message));
+	check(text == NULL && strstr(message, "other-config") != NULL,
+	    "and so is the other-config flag");
+	free(text);
+	policy = plain();
+	text = render_uradvd(&policy, wide, 1u, NULL, 0u, message, sizeof(message));
+	check(text == NULL && strstr(message, "/64") != NULL,
+	    "a prefix that is not a /64 is refused");
+	free(text);
+	text = render_uradvd(&policy, nine, 9u, NULL, 0u, message, sizeof(message));
+	check(text == NULL && strstr(message, "at most 8") != NULL,
+	    "nine prefixes are refused: uradvd takes eight");
+	free(text);
+	text = render_uradvd(&policy, one, 1u, four, 4u, message, sizeof(message));
+	check(text == NULL && strstr(message, "at most 3") != NULL,
+	    "four name servers are refused: uradvd takes three");
+	free(text);
+	policy.lifetime.has = 1;
+	policy.lifetime.value = 9001;
+	text = render_uradvd(&policy, one, 1u, NULL, 0u, message, sizeof(message));
+	check(text == NULL && strstr(message, "9000") != NULL,
+	    "a router lifetime past 9000 s is refused");
+	free(text);
+}
+
+/*
+ * A uradvd started, reloaded and stopped, with a stand-in that does what
+ * uradvd does: stays in the foreground and writes no pid file.
+ *
+ * The stand-in records its arguments and then waits, bounded, so a test that
+ * failed to stop it leaves nothing past a minute. Its command line carries the
+ * record's path after `--`, which is the whole of how netcfgd knows it.
+ */
+static void a_uradvd_is_started_restarted_on_reload_and_stopped(const char *run)
+{
+	static const char *const first[] = { "2001:db8:1234::/64" };
+	static const char *const second[] = { "2001:db8:5678::/64" };
+	char                     fake[512];
+	char                     seen[512];
+	char                     message[NCFG_ERROR_MAX];
+	char                     body[1024];
+	char                     want[1024];
+	char                    *arguments;
+	pid_t                    before;
+	pid_t                    after;
+	ncfg_ra_policy_t         policy = plain();
+
+	(void)testdir_in(run, "fake-uradvd", fake, sizeof(fake));
+	(void)testdir_in(run, "uradvd-arguments", seen, sizeof(seen));
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\nn=0\n"
+	    "while [ $n -lt 60 ]; do sleep 1; n=$((n + 1)); done\n",
+	    seen);
+	write_fake(fake, body);
+	policy.backend.kind = NCFG_RA_BACKEND_URADVD;
+	policy.dns = 0;
+
+	message[0] = '\0';
+	check(ncfg_ra_start(run, "uradvd0", &policy, first, 1u, NULL, 0u, fake, message,
+	      sizeof(message)),
+	    "a uradvd is started");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	before = ncfg_ra_running_pid(run, "uradvd0");
+	check(before > 0, "and is known by the pid file written for it and its record's path");
+	arguments = testdir_read(seen, NULL);
+	(void)snprintf(want, sizeof(want),
+	    "-i\nuradvd0\n-p\n2001:db8:1234::/64\n--default-lifetime\n1800\n--\n"
+	    "%s/radvd/uradvd0.conf\n",
+	    run);
+	check_text(arguments, want, "uradvd is given its arguments, then `--` and the record");
+	free(arguments);
+
+	message[0] = '\0';
+	check(ncfg_ra_reload(run, "uradvd0", &policy, second, 1u, NULL, 0u, message,
+	      sizeof(message)),
+	    "a reload of a uradvd succeeds");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	after = ncfg_ra_running_pid(run, "uradvd0");
+	arguments = testdir_read(seen, NULL);
+	check(after > 0 && after != before && arguments != NULL &&
+	        strstr(arguments, "2001:db8:5678::/64") != NULL,
+	    "and is a restart: another process, with the new prefix");
+	free(arguments);
+
+	message[0] = '\0';
+	check(ncfg_ra_stop(run, "uradvd0", message, sizeof(message)) &&
+	        ncfg_ra_running_pid(run, "uradvd0") == 0,
+	    "and a stop leaves none running");
+}
+
+/* A uradvd that exits at once is quoted: the shell that started it said 0. */
+static void a_uradvd_that_exits_at_once_is_quoted(const char *run)
+{
+	static const char *const prefixes[] = { "2001:db8:1234::/64" };
+	char                     fake[512];
+	char                     message[NCFG_ERROR_MAX];
+	ncfg_ra_policy_t         policy = plain();
+
+	(void)testdir_in(run, "fake-uradvd-angry", fake, sizeof(fake));
+	write_fake(fake, "#!/bin/sh\necho 'uradvd: error: interface and prefix arguments are "
+	    "required.' >&2\nexit 1\n");
+	policy.backend.kind = NCFG_RA_BACKEND_URADVD;
+	message[0] = '\0';
+	check(!ncfg_ra_start(run, "uradvd1", &policy, prefixes, 1u, NULL, 0u, fake, message,
+	      sizeof(message)) &&
+	    strstr(message, "arguments are required") != NULL,
+	    "a uradvd gone at once is a failed start, in its own words");
+	check(ncfg_ra_running_pid(run, "uradvd1") == 0, "and nothing is left recorded as running");
+}
+
 int main(void)
 {
 	const char *run = testdir_make("ra");
@@ -520,6 +704,8 @@ int main(void)
 	the_two_flags_that_send_hosts_to_a_server_are_the_documents();
 	nameservers_go_out_only_where_the_document_says_so();
 	a_zero_lifetime_is_a_value_and_not_an_absence();
+	uradvd_is_given_its_arguments_and_radvds_lifetime();
+	what_uradvd_cannot_carry_is_refused();
 
 	/* The refusals run against a directory inside ours that does not exist, so
 	 * that "nothing was created" is a statement about a path nothing else
@@ -533,6 +719,8 @@ int main(void)
 	a_reload_with_no_daemon_is_not_success(run);
 	a_daemon_slow_to_exit_is_waited_for(run);
 	stopping_nothing_is_success(run);
+	a_uradvd_is_started_restarted_on_reload_and_stopped(run);
+	a_uradvd_that_exits_at_once_is_quoted(run);
 
 	testdir_remove(run);
 	if (failures > 0) {

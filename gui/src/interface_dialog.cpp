@@ -485,6 +485,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	advertise_backend->setObjectName(QStringLiteral("iface_advertise_backend"));
 	advertise_backend->addItem(QStringLiteral("whichever is installed"), QStringLiteral("auto"));
 	advertise_backend->addItem(QStringLiteral("radvd"), QStringLiteral("radvd"));
+	advertise_backend->addItem(QStringLiteral("uradvd"), QStringLiteral("uradvd"));
 	advertise_backend->addItem(QStringLiteral("odhcpd"), QStringLiteral("odhcpd"));
 	form->addRow(QStringLiteral("advertised by"), advertise_backend);
 	advertise_managed = new QCheckBox(QStringLiteral("addresses come from DHCPv6 (managed)"), this);

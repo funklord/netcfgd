@@ -1350,6 +1350,12 @@ static void an_advertise_block_round_trips(void)
 	check(holds(rendered, "dns = false"),
 	    "and `dns` is stated, because true is its default and absence would mean that");
 	check(holds(rendered, "lifetime = 1800"), "and the lifetime it was given");
+	/* uradvd sits between radvd and exec in the enum (10.817), so a table one
+	 * word short names exec's neighbour for it, or nothing. */
+	round_trips("interface wan0 {\n\tconfig = \"dhcp6 pd\"\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.0.2.1/24\"\n"
+	    "\tadvertise {\n\t\tbackend = \"uradvd\"\n\t\tprefixes = [\"@pd:wan0\"]\n\t}\n}\n",
+	    "  and so does one naming uradvd");
 	free(rendered);
 
 	/* The other direction: a policy at every default must write none of the

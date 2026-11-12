@@ -849,12 +849,14 @@ static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				policy.backend.kind = NCFG_RA_BACKEND_AUTO;
 			} else if (strcmp(name, "radvd") == 0) {
 				policy.backend.kind = NCFG_RA_BACKEND_RADVD;
+			} else if (strcmp(name, "uradvd") == 0) {
+				policy.backend.kind = NCFG_RA_BACKEND_URADVD;
 			} else if (strcmp(name, "odhcpd") == 0) {
 				policy.backend.kind = NCFG_RA_BACKEND_ODHCPD;
 			} else {
 				ncfg_diag(ctx, assignment->span,
 				    "`%s` is not a router advertisement backend: backends: auto, radvd, "
-				    "odhcpd", name);
+				    "uradvd, odhcpd", name);
 				free(name);
 				goto drop;
 			}

@@ -11,10 +11,18 @@
  *   network, which is the surface this project is arranged to avoid.
  *
  * WHICH DAEMON
- *   radvd. `odhcpd` is the OpenWrt one and is not implemented in this build --
- *   it is **refused by name rather than silently substituted**, because the two
- *   take entirely different configuration and a document that names one and
- *   gets the other is a document that stopped describing the system.
+ *   radvd, or uradvd. **OpenWrt 25.12 carries no radvd in any feed** -- its
+ *   packages feed has uradvd, a small daemon from Freifunk's Gluon that takes
+ *   its whole configuration as arguments -- so `auto` takes radvd where there is
+ *   one and uradvd where there is not (10.817). uradvd cannot send the managed
+ *   or other-config flag and takes only a /64, so a policy asking for either is
+ *   refused under it rather than advertised as something else.
+ *   `odhcpd` is OpenWrt's own and is not implemented in this build -- it is
+ *   **refused by name rather than silently substituted**, because the two take
+ *   entirely different configuration and a document that names one and gets
+ *   the other is a document that stopped describing the system. It is
+ *   configured through UCI's `/etc/config/dhcp`, a file the stock router's own
+ *   netifd world shares, which is why uradvd came first.
  *
  * WHERE THE PREFIX COMES FROM
  *   Never from here. `ncfg_ra_policy_t::prefixes` is a list of
@@ -38,7 +46,9 @@
  *   which does not mention it. So a changed prefix costs nothing on the wire.
  *   That is the opposite of an access point, where the same question means a
  *   restart and every client is deauthenticated (0026), and it is worth
- *   knowing which of the two a backend is.
+ *   knowing which of the two a backend is. uradvd is the other kind: it reads
+ *   no file, so its reload is a restart, which costs a host nothing either --
+ *   an advertisement is repeated, and the next one carries the new prefix.
  */
 #ifndef NCFG_RA_H
 #define NCFG_RA_H
@@ -145,5 +155,20 @@ pid_t ncfg_ra_running_pid(const char *run, const char *iface);
 
 /* Find `radvd`, `/usr/sbin` first. Allocated, or NULL. */
 char *ncfg_ra_binary(void);
+
+/* Find `uradvd`, the same way. Allocated, or NULL. */
+char *ncfg_ra_uradvd_binary(void);
+
+/*
+ * What a uradvd is started with for this policy, as the file netcfgd keeps of
+ * it: a comment, then one argument to a line. Allocated; NULL with the reason
+ * where uradvd cannot carry the policy -- the managed or other-config flag, a
+ * prefix that is not a /64, more prefixes or name servers than it takes, or a
+ * lifetime outside 0 to 9000. An unset lifetime is written as radvd's 1800,
+ * uradvd's own default of 0 saying the router is no default gateway.
+ */
+char *ncfg_ra_uradvd_render(const char *iface, const ncfg_ra_policy_t *policy,
+    const char *const *prefixes, size_t prefix_count, const char *const *servers,
+    size_t server_count, char *err, size_t err_size);
 
 #endif /* NCFG_RA_H */
