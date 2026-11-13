@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -278,6 +279,77 @@ static int pair_ask_person(const char *socket_path, char *err, size_t err_size)
 	return 1;
 }
 
+/*
+ * `ncfg pair join CODE`, or `-` to read it from stdin: this machine joins the
+ * estate an owner's invite is from (0320). The code goes in rather than out,
+ * which is what a machine with no screen and no camera can do: the owner's
+ * phone or desktop makes it, and it reaches this machine by whatever carrier
+ * the appliance has -- a file written into the image at flash time, a paste
+ * over SSH. Done when the node's root has moved to the owner's; the node
+ * starts itself again in place to get there, and netcfgd stays up.
+ */
+static int pair_join(const char *socket_path, const char *given, char *err, size_t err_size)
+{
+	char   code[300];
+	char   line[NCFG_FUZZNET_REQUEST_MAX];
+	char   reply[2048];
+	char   before[2048];
+	size_t length;
+	int    waited;
+
+	if (strcmp(given, "-") == 0) {
+		if (!fgets(code, sizeof(code), stdin)) {
+			ncfg_error_set(err, err_size, "no code on stdin");
+			return 0;
+		}
+	} else {
+		(void)snprintf(code, sizeof(code), "%s", given);
+	}
+	length = strcspn(code, " \t\r\n");
+	code[length] = '\0';
+	if (strncmp(code, "FZI1:", 5) != 0 || length > 256u) {
+		ncfg_error_set(err, err_size, "that is not an invite: one reads `FZI1:` and about 150 "
+		                              "characters more");
+		return 0;
+	}
+	if (!port_is_served()) {
+		ncfg_error_set(err, err_size,
+		    "this machine is not open to its estate, so a join has no port to ask from: "
+		    "`ncfg pair open`, or `remote { observe = true }` in the `global` block, and "
+		    "restart netcfgd");
+		return 0;
+	}
+	if (!ask_node(socket_path, "list root", before, sizeof(before), err, err_size)) {
+		return 0;
+	}
+	(void)snprintf(line, sizeof(line), "add join %s", code);
+	if (!ask_node(socket_path, line, reply, sizeof(reply), err, err_size)) {
+		return 0;
+	}
+	if (strncmp(reply, "ok", 2) != 0) {
+		ncfg_error_set(err, err_size, "netcfgd's node would not ask with that code: %s", reply);
+		return 0;
+	}
+	/* The node asks for up to fifteen minutes; two are plenty on a LAN, and a
+	 * code that is not answered by then is spent or its host is away. */
+	for (waited = 0; waited < 120; waited++) {
+		char         now[2048];
+		struct timespec second = { 1, 0 };
+
+		(void)nanosleep(&second, NULL);
+		if (ask_node(socket_path, "list root", now, sizeof(now), NULL, 0) &&
+		    strncmp(now, "ok", 2) == 0 && strcmp(now, before) != 0) {
+			const char *root = strrchr(now, ' ');
+
+			printf("joined the estate rooted at %s\n", root ? root + 1 : now + 3);
+			return 1;
+		}
+	}
+	ncfg_error_set(err, err_size, "no answer to the code in two minutes: its host may be "
+	                              "unreachable from here, or the code spent or out of time");
+	return 0;
+}
+
 int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
@@ -306,11 +378,15 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	if (count == 2u && strcmp(positional[0], "revoke") == 0) {
 		return pair_revoke(socket_path, positional[1], err, err_size);
 	}
+	if (count == 2u && strcmp(positional[0], "join") == 0) {
+		return pair_join(socket_path, positional[1], err, err_size);
+	}
 	confirm = count == 1u && strcmp(positional[0], "confirm") == 0;
 	if (count != 0u && !confirm) {
 		ncfg_error_set(err, err_size, "`ncfg pair` draws a code, and `confirm` one that asks "
-		                              "you first; `open`, `list` and `revoke KEY` are the "
-		                              "rest of it");
+		                              "you first; `join CODE` joins an owner's estate with "
+		                              "theirs; `open`, `list` and `revoke KEY` are the rest "
+		                              "of it");
 		return 0;
 	}
 	if (!port_is_served()) {

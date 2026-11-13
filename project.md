@@ -12735,6 +12735,32 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.836 Pairing an appliance with no screen: the code goes in (0320, proposed)
+
+The holder asked how an embedded netcfgd pairs with no display, no camera and no easy
+serial port -- an OpenWrt router, a hal9001 or ESP32 board -- and to standardise on one
+way; hal9001 has no shell. [0320](doc/decision/0320-a-headless-appliance-is-paired-by-a-code-going-in.md)
+has the argument; the short of it:
+
+- **Reverse the direction.** The owner's phone or desktop makes the invite and the
+  appliance's node joins with it. **Measured first**: netcfgd's own node, told an owner's
+  fuzznetd's code, joins that estate, starts itself again in place, and netcfgd runs on.
+- **The standard, proposed: a claim window on the LAN** -- an unowned node accepts an
+  owner's invite pushed from the LAN side only during first boot, a factory reset, or two
+  minutes after a button press, once; the owner's app finds it and pushes; the person
+  confirms the appliance's key on the phone. No shell needed, so it is the same on a
+  router and on hal9001. **Pushing and finding are fuzznet's to design**, and are
+  offered to it; netcfgd's half is the appliance's: LAN side versus uplink, button, LED,
+  first boot. Whether this is the standard is the holder's.
+- **The same code by other carriers where an appliance has them**: written into the image
+  at flash time (ImageBuilder `FILES`, `uci-defaults`; an ESP32's NVS, written over the
+  serial line the flasher has while flashing), or pasted over SSH: **`ncfg pair join
+  CODE`**, built, `-` reading stdin. `c/tests/node_join.sh` has it end to end, and fails
+  with the join not sent.
+- **No SSH without authentication**: root for everything on the LAN, unbounded. **A
+  printed QR** carries a per-device claim secret, worth it for batches, and needs a claim
+  valid until first use where an invite lives 24 hours -- fuzznet's.
+
 ## 10.835 A VLAN's parent, the same shape: dropped by the daemon, and left down by the plan
 
 **Derived from 10.833's shape**: a link the document names only inside another device's
