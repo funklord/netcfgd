@@ -1234,7 +1234,17 @@ serial port is its one way in"), and of its Cortex-M boards only `lm3s6965evb`
 (`stellaris_enet`) and `mps2-an385` (`lan9118`) have a network controller in qemu 10.0;
 the STM32 boards, the L475 among them, have none. Whether a board gets one is hull's to
 decide; a firmware with a stack (Zephyr's, or lwIP under hal9001) would be netcfgd's
-side. The core's RAM and size, below, are what such a firmware would carry. What a
+side. The core's RAM and size, below, are what such a firmware would carry.
+
+**ESP32 is next on hull, and then in hal9001** (holder, 2026-11-13). The board is not in
+upstream qemu -- Debian's 10.0 `qemu-system-xtensa` has no `esp32` machine -- but in
+Espressif's fork, whose README says to "use `open_eth` network device" (`-nic
+user,model=open_eth`, ESP-IDF's `CONFIG_ETH_USE_OPENETH`), with 2 to 16 MB of flash and
+optional PSRAM. **So an ESP32 on hull can have a network, over Ethernet only**: the README
+names no Wi-Fi model, and the ESP case here leans on `esp_wifi` for the supplicant and the
+access point. A test there could check the core, DHCP over lwIP and NAT on the wired side;
+the radio half stays a real-board question. Read 2026-11-13 from
+<https://github.com/espressif/esp-toolchain-docs/blob/main/qemu/esp32/README.md>. What a
 netcfgd evaluation would check is whether Zephyr's own network management
 (interface events, Wi-Fi management, DHCP client and server) can carry the
 portable `Op` intents, and which of the two ESP parts it supports. Its
