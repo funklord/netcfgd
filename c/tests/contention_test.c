@@ -466,6 +466,9 @@ static void the_message_names_the_device_and_the_command(void)
 	/* And who stops them, because netcfgd killing daemons itself is the thing
 	 * 0125 declined to do. */
 	check(holds(message, "init system"), "and says who stops the other daemons");
+	/* And a machine with no systemd has a remedy too: ml350g6-01 (10.843). */
+	check(holds(message, "netcfgd_select.sh netcfgd"),
+	    "and names the switcher for a machine without systemd");
 
 	ncfg_buf_free(&text);
 	ncfg_contenders_free(&found);
@@ -710,6 +713,51 @@ static void netifd_holds_what_its_configuration_gives_it(void)
 	    !by_name(&found, "netifd"), "and a netifd with no file was told nothing");
 	ncfg_contenders_free(&found);
 	stop_process(4400u);
+}
+
+/*
+ * Debian's ifupdown, as ml350g6-01 had it (10.843): `ifup` writes
+ * `PHYSICAL=LOGICAL`, a mapping writes a different logical name, and an older
+ * ifupdown wrote the bare name. ifupdown has no daemon, so nothing running is
+ * needed for the claim to stand, and `ifdown` taking the line away is the
+ * withdrawal.
+ */
+static void ifupdown_holds_what_ifup_wrote(void)
+{
+	static const ncfg_interface_claim_t claims[] = {
+		{ "eth0", 2u }, { "eth1", 3u }, { "wlan0", 4u }, { "eth", 5u }, { "home", 6u }
+	};
+	ncfg_contention_where_t where;
+	ncfg_contenders_t       found;
+	const ncfg_contender_t *ifupdown;
+	char                    err[NCFG_ERROR_MAX];
+	char                    path[PATH_BYTES + 32];
+	char                    remedy[NCFG_REMEDY_MAX];
+
+	here(&where);
+	(void)snprintf(path, sizeof(path), "%s/network/ifstate", run_root);
+	put(path, "lo=lo\neth1=eth1\nwlan0=home\neth0\n");
+	check(ncfg_contenders_find(&where, claims, 5u, &found, err, sizeof(err)),
+	    "ifupdown is looked at");
+	ifupdown = by_name(&found, "ifupdown");
+	check(ifupdown && ifupdown->interface_count == 3u &&
+	    strcmp(ifupdown->interfaces[0], "eth0") == 0 &&
+	    strcmp(ifupdown->interfaces[1], "eth1") == 0 &&
+	    strcmp(ifupdown->interfaces[2], "wlan0") == 0,
+	    "every physical name ifup wrote, mapped or bare, and not a logical name or a prefix");
+	check(ifupdown && ncfg_contender_remedy_for(ifupdown, "eth1", remedy, sizeof(remedy)) &&
+	    strstr(remedy, "ifdown eth1") && strstr(remedy, "/etc/network/interfaces"),
+	    "  and the remedy names the command and the file");
+	ncfg_contenders_free(&found);
+
+	put(path, "lo=lo\n");
+	check(ncfg_contenders_find(&where, claims, 5u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "ifupdown"), "an interface ifdown took away is not claimed");
+	ncfg_contenders_free(&found);
+	forget(path);
+	check(ncfg_contenders_find(&where, claims, 5u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "ifupdown"), "and a machine with no ifstate has no ifupdown");
+	ncfg_contenders_free(&found);
 }
 
 /* Where the daemon reads when nobody has said otherwise, asserted by reading
@@ -961,6 +1009,7 @@ int main(void)
 	a_stopped_daemon_has_no_claim_however_much_state_it_left();
 	a_proc_that_cannot_be_read_keeps_the_guard();
 	netifd_holds_what_its_configuration_gives_it();
+	ifupdown_holds_what_ifup_wrote();
 	state_from_another_namespace_claims_nothing(dir);
 	the_machine_is_run_and_proc();
 	the_measured_reply_parses();

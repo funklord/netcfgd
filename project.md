@@ -12737,6 +12737,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.843 ifupdown is a contender, and the remedy has a sysvinit half
+
+10.842's survey, read once more for the shape of its fault -- **a check that
+covers some of the managers it means to cover** -- found a second instance.
+`ncfg_contenders_find`, which warns when another daemon manages an interface
+netcfgd is configured for, read NetworkManager, systemd-networkd and netifd. On
+ml350g6-01 ifupdown holds `eth0` through its `dhclient`, and a netcfgd
+configured for `eth0` planned DHCP on it and said nothing of the second client.
+
+Now ifupdown is read from `<run>/network/ifstate`: `ifup` writes
+`PHYSICAL=LOGICAL` and `ifdown` takes the line away, and the physical name is
+the claim, mapped or bare. **No process is checked**, unlike the other three:
+ifupdown has no daemon, and the file is in `/run`, so a boot clears it. The
+remedy is `ifdown` and the stanza out of `/etc/network/interfaces`, since an
+`allow-hotplug` stanza brings it back otherwise. The machine-wide advice, which
+named only systemd's drop-in, now also names `netcfgd_select.sh netcfgd` for a
+machine without systemd -- 10.842's fix.
+
+Run against this machine: the plan for `eth0` now warns "ifupdown also manages
+eth0". `contention_test` gains five checks; with the read disabled, two fail.
+**connman is still not read**, and deliberately: it publishes no per-interface
+state outside its D-Bus API, which constraint 3 keeps off the core's path, and
+its `/var/lib/connman` profiles say what it remembers rather than what it
+holds -- 11,796 of them here, for interfaces long gone. The switcher stands it down.
+
 ## 10.842 ml350g6-01 against netcfgd: what it has, and the switcher's sysvinit half
 
 **Asked by the holder 2026-11-13: is everything this machine and its network do

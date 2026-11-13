@@ -8,7 +8,8 @@
  *     <run>/NetworkManager/devices/<ifindex>
  *     <run>/systemd/netif/links/<ifindex>
  *
- *   one for all of them, `<etc>/config/network`, for OpenWrt's netifd; and, for
+ *   one for all of them, `<etc>/config/network`, for OpenWrt's netifd; one,
+ *   `<run>/network/ifstate`, for Debian's ifupdown; and, for
  *   liveness, `<proc>/<pid>/comm` for every numeric entry under `<proc>`. It
  *   opens nothing else, writes nothing, and signals nothing: netcfgd reports
  *   here and the operator decides.
@@ -476,6 +477,87 @@ static int netifd_claims(const char *etc_root, const ncfg_interface_claim_t *cla
 	return 1;
 }
 
+/*
+ * Whether ifupdown's `<run>/network/ifstate` lists `name` as up.
+ *
+ * ifupdown is not a daemon: `ifup` writes `PHYSICAL=LOGICAL` into that file
+ * when it brings an interface up and `ifdown` takes the line out, and the
+ * `dhclient` it started holds the lease meanwhile. So the line is the claim
+ * and there is no process to ask about -- the file is in `/run`, which a boot
+ * clears, so a line cannot outlive the machine's last `ifup`. ifupdown 0.8
+ * also writes `ifstate.<iface>`; the combined file is in every version.
+ * Found on ml350g6-01 (10.843), where ifupdown held `eth0` and nothing here
+ * would have said so to a netcfgd configured for it.
+ */
+static int ifupdown_configures(const char *run_root, const char *name)
+{
+	char  path[LINE_MAX_BYTES];
+	char  line[LINE_MAX_BYTES];
+	FILE *file;
+	int   found = 0;
+	int   skipping = 0;
+	int   lines = 0;
+	int   written;
+
+	written = snprintf(path, sizeof(path), "%s/network/ifstate", run_root);
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	while (!found && lines < LINE_LIMIT && fgets(line, (int)sizeof(line), file)) {
+		size_t length = strlen(line);
+		int    whole = length > 0u && line[length - 1u] == '\n';
+		char  *equals;
+
+		lines++;
+		if (skipping || !whole) {
+			skipping = !whole;
+			continue;
+		}
+		equals = strchr(line, '=');
+		if (equals) {
+			*equals = '\0';
+		}
+		found = strcmp(trim(line), name) == 0;
+	}
+	fclose(file);
+	return found;
+}
+
+/* The interfaces of `claims` ifupdown has up, sorted. */
+static int ifupdown_claims(const char *run_root, const ncfg_interface_claim_t *claims,
+    size_t claim_count, char ***names, size_t *count)
+{
+	size_t at;
+
+	*names = NULL;
+	*count = 0u;
+	if (claim_count == 0u) {
+		return 1;
+	}
+	*names = calloc(claim_count, sizeof(**names));
+	if (!*names) {
+		return 0;
+	}
+	for (at = 0u; at < claim_count; at++) {
+		if (!claims[at].name || !ifupdown_configures(run_root, claims[at].name)) {
+			continue;
+		}
+		(*names)[*count] = duplicate(claims[at].name);
+		if (!(*names)[*count]) {
+			return 0;
+		}
+		(*count)++;
+	}
+	if (*count > 1u) {
+		qsort(*names, *count, sizeof(**names), compare_names);
+	}
+	return 1;
+}
+
 /* Put one contender into the answer, taking the names with it. */
 static int push(ncfg_contenders_t *out, const char *name, const char *remedy, char **names,
     size_t count)
@@ -655,6 +737,30 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 			release_names(names, count);
 		}
 	}
+
+	/*
+	 * Debian's ifupdown, read from the state `ifup` leaves. No liveness check:
+	 * it has no daemon, and `ifdown` is what takes the line away.
+	 */
+	names = NULL;
+	count = 0u;
+	if (!ifupdown_claims(where->run_root, claims, claim_count, &names, &count)) {
+		release_names(names, count);
+		ncfg_contenders_free(out);
+		ncfg_error_set(err, err_size, "there was no memory to read what ifupdown claims");
+		return 0;
+	}
+	if (count > 0u) {
+		if (!push(out, "ifupdown", "ifdown {}, then take its stanza out of "
+		    "/etc/network/interfaces", names, count)) {
+			release_names(names, count);
+			ncfg_contenders_free(out);
+			ncfg_error_set(err, err_size, "there was no memory to record what ifupdown claims");
+			return 0;
+		}
+	} else {
+		release_names(names, count);
+	}
 	return 1;
 }
 
@@ -731,7 +837,8 @@ int ncfg_contender_describe(const ncfg_contender_t *contender, ncfg_buf_t *buf, 
 	    "    systemctl daemon-reload && systemctl restart netcfgd\n\n"
 	    "That drop-in conflicts with NetworkManager, systemd-networkd, connman, "
 	    "wpa_supplicant and ModemManager, so the init system stops them rather than "
-	    "netcfgd killing anything itself.");
+	    "netcfgd killing anything itself. Without systemd, `netcfgd_select.sh netcfgd` "
+	    "stops and disables the others through their init scripts.");
 	if (ncfg_buf_failed(buf)) {
 		ncfg_error_set(err, err_size,
 		    "the message about %s did not fit in the buffer it was being built in",
