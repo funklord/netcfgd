@@ -731,6 +731,8 @@ size_t ncfg_main_claims_of(const ncfg_daemon_state_t *state, ncfg_interface_clai
 		}
 		out[taken].name = name;
 		out[taken].index = (uint32_t)link->index;
+		out[taken].radio = link->wireless;
+		out[taken].kind = link->kind;
 		taken++;
 	}
 	return taken;

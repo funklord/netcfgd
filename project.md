@@ -12737,6 +12737,57 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.849 iwd is a contender for radios, read from its command line
+
+The same shape a third time: a daemon that takes interfaces unless told not
+to, which no check here read. iwd holds every wireless interface unless started
+with `-i LIST` (`--interfaces`, only these) or `-I LIST` (`--nointerfaces`, all
+but these), each a comma-separated list of fnmatch patterns; it keeps no state
+file, so its command line is the claim. It uses no wpa_supplicant control
+socket, so the supplicant guard -- "a socket netcfgd did not bind" -- could not
+see it, and netcfgd would start its own supplicant on a radio iwd was driving.
+
+A contention claim now says whether it is a radio (`link->wireless` where the
+plan and the daemon build claims; always, where the supplicant's start asks),
+and a running `iwd` claims the radios its options leave it, read from
+`/proc/<pid>/cmdline` with the value joined (`-iwlan0`, `--interfaces=...`) or
+following. A cmdline that cannot be read keeps the guard. An unreadable `/proc`
+names no pid, so iwd is not asked then -- unlike the file-backed daemons there
+is nothing else to read, and the socket check still stands. The remedy is
+`--nointerfaces` for that radio, or stopping iwd. `contention_test` holds no
+options, `-I` with a pattern, `--interfaces=` and a joined `-i`.
+
+## 10.848 connman is a contender, read from what its configuration leaves it
+
+10.843 left connman out because it keeps no per-interface state outside D-Bus.
+But what it holds is settled by its configuration, as netifd's is: **every
+interface it has a technology for, except names starting with an entry of
+`NetworkInterfaceBlacklist`** in `/etc/connman/main.conf`, whose default is
+connman's own list -- vmnet, vboxnet, virbr, ifb, ve-, vb-. Not `veth` and not
+`docker`, which is exactly why connman on ml350g6-01 numbered docker's veth
+from 169.254 and gave it a default route.
+
+So with `connmand` running, an interface netcfgd is configured for and the list
+does not spare is connman's claim; the remedy is adding it to the list and
+restarting connman. The loopback is never one, and **only the Ethernet-like kinds are**: connman
+decides by the kernel's device type and gives no technology to a bridge,
+WireGuard, VXLAN or VRF device -- the first probe on ml350g6-01 reported
+`docker0`, which connman had left unnumbered while it numbered docker's veth.
+So a claim now carries its link's rtnetlink kind, and connman's are physical,
+veth, VLAN, bond and macvlan: an allowlist, because a kind missing from it
+costs a warning not given, and one wrongly on it a warning about a fight that
+is not happening. Where `/proc` cannot be read -- which makes every daemon
+"running", the guard's direction -- `/etc/connman` has to exist as well, or a
+machine that never had connman would be told it does.
+
+On ml350g6-01, probed with this code against its own `/run`, `/proc` and
+`/etc`: connman holds `eth0` and `eth2` (it raised the idle ports), not
+`docker0`; ifupdown holds `eth0`.
+
+`contention_test` holds the default list with a bridge among the claims, a configured one (spaces and a
+commented line aside), a stopped connman and a machine with no `/etc/connman`;
+with the list read as sparing everything, three fail.
+
 ## 10.847 `ncfg pair open` restarts the daemon on a router too
 
 The same lens -- **a path written for systemd alone** -- run over the C's own
@@ -12825,10 +12876,8 @@ machine without systemd -- 10.842's fix.
 
 Run against this machine: the plan for `eth0` now warns "ifupdown also manages
 eth0". `contention_test` gains five checks; with the read disabled, two fail.
-**connman is still not read**, and deliberately: it publishes no per-interface
-state outside its D-Bus API, which constraint 3 keeps off the core's path, and
-its `/var/lib/connman` profiles say what it remembers rather than what it
-holds -- 11,796 of them here, for interfaces long gone. The switcher stands it down.
+connman was left out here, as publishing no per-interface state outside D-Bus;
+10.848 reads it from its configuration instead, as netifd is read. The switcher stands it down.
 
 ## 10.842 ml350g6-01 against netcfgd: what it has, and the switcher's sysvinit half
 

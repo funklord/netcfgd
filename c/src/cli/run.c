@@ -1658,6 +1658,8 @@ static void warn_about_contention(const ncfg_document_t *document,
 		if (link && link->index > 0 && link->index <= (int64_t)UINT32_MAX) {
 			claims[count].name = document->interfaces[at].name;
 			claims[count].index = (uint32_t)link->index;
+			claims[count].radio = link->wireless;
+			claims[count].kind = link->kind;
 			count++;
 		}
 	}

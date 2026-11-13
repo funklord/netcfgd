@@ -793,6 +793,13 @@ void ncfg_kernel_executor(ncfg_kernel_t *kernel, ncfg_executor_t *out);
 typedef struct {
 	const char *name;
 	uint32_t    index;
+	/* A wireless radio, which is all iwd holds: a running iwd claims every
+	 * radio its options do not leave out and nothing else (10.849). Zero in
+	 * a claim that does not say, which asks iwd about nothing. */
+	int         radio;
+	/* The link's rtnetlink kind, `bridge` or `veth`; NULL or empty for a
+	 * physical one. connman holds only the Ethernet-like kinds (10.848). */
+	const char *kind;
 } ncfg_interface_claim_t;
 
 /* The longest a remedy command gets once the device name is in it. */

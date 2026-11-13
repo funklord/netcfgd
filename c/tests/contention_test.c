@@ -283,7 +283,7 @@ static const ncfg_contender_t *by_name(const ncfg_contenders_t *found, const cha
 static void only_a_managed_device_is_a_claim(void)
 {
 	static const ncfg_interface_claim_t claims[] = {
-		{ "wlan0", 3u }, { "eth0", 2u }, { "eth1", 4u }
+		{ "wlan0", 3u, 0, NULL }, { "eth0", 2u, 0, NULL }, { "eth1", 4u, 0, NULL }
 	};
 	ncfg_contention_where_t where;
 	ncfg_contenders_t       found;
@@ -313,7 +313,7 @@ static void only_a_managed_device_is_a_claim(void)
  */
 static void an_interface_netcfgd_does_not_claim_is_not_reported(void)
 {
-	static const ncfg_interface_claim_t claims[] = { { "eth0", 2u } };
+	static const ncfg_interface_claim_t claims[] = { { "eth0", 2u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                err[NCFG_ERROR_MAX];
@@ -329,7 +329,7 @@ static void an_interface_netcfgd_does_not_claim_is_not_reported(void)
  * directories are absent. */
 static void a_clean_machine_reports_nothing(void)
 {
-	static const ncfg_interface_claim_t claims[] = { { "eth9", 90u } };
+	static const ncfg_interface_claim_t claims[] = { { "eth9", 90u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                err[NCFG_ERROR_MAX];
@@ -344,7 +344,7 @@ static void a_clean_machine_reports_nothing(void)
 /* `networkd`, from its documented layout. */
 static void networkd_is_detected_from_its_link_state(void)
 {
-	static const ncfg_interface_claim_t claims[] = { { "eth0", 10u }, { "wlan0", 11u } };
+	static const ncfg_interface_claim_t claims[] = { { "eth0", 10u, 0, NULL }, { "wlan0", 11u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                err[NCFG_ERROR_MAX];
@@ -372,7 +372,7 @@ static void networkd_is_detected_from_its_link_state(void)
 static void the_three_states_a_real_networkd_writes(void)
 {
 	static const ncfg_interface_claim_t claims[] = {
-		{ "nd0", 7u }, { "nd1", 8u }, { "lo", 1u }
+		{ "nd0", 7u, 0, NULL }, { "nd1", 8u, 0, NULL }, { "lo", 1u, 0, NULL }
 	};
 	ncfg_contention_where_t where;
 	ncfg_contenders_t       found;
@@ -424,7 +424,7 @@ static void the_message_names_the_device_and_the_command(void)
 {
 	/* Given in the order that makes the sort load-bearing: an answer that
 	 * simply echoed the caller's list would come back the other way round. */
-	static const ncfg_interface_claim_t claims[] = { { "wlan1", 5u }, { "wlan0", 3u } };
+	static const ncfg_interface_claim_t claims[] = { { "wlan1", 5u, 0, NULL }, { "wlan0", 3u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	ncfg_buf_t                          text;
@@ -477,7 +477,7 @@ static void the_message_names_the_device_and_the_command(void)
 /* The remedy for networkd is the other one, and it fills in the same way. */
 static void each_contender_has_its_own_remedy(void)
 {
-	static const ncfg_interface_claim_t claims[] = { { "eth0", 10u } };
+	static const ncfg_interface_claim_t claims[] = { { "eth0", 10u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                command[NCFG_REMEDY_MAX];
@@ -517,7 +517,7 @@ static void each_contender_has_its_own_remedy(void)
  */
 static void a_stopped_daemon_has_no_claim_however_much_state_it_left(void)
 {
-	static const ncfg_interface_claim_t claims[] = { { "wlan0", 3u } };
+	static const ncfg_interface_claim_t claims[] = { { "wlan0", 3u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                err[NCFG_ERROR_MAX];
@@ -546,7 +546,7 @@ static void a_stopped_daemon_has_no_claim_however_much_state_it_left(void)
  */
 static void a_proc_that_cannot_be_read_keeps_the_guard(void)
 {
-	static const ncfg_interface_claim_t claims[] = { { "wlan0", 3u } };
+	static const ncfg_interface_claim_t claims[] = { { "wlan0", 3u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                err[NCFG_ERROR_MAX];
@@ -600,7 +600,7 @@ static void namespace_fixture(const char *root, const char *ours, const char *in
  */
 static void state_from_another_namespace_claims_nothing(const char *dir)
 {
-	static const ncfg_interface_claim_t claims[] = { { "wlan0", 3u } };
+	static const ncfg_interface_claim_t claims[] = { { "wlan0", 3u, 0, NULL } };
 	ncfg_contention_where_t             where;
 	ncfg_contenders_t                   found;
 	char                                err[NCFG_ERROR_MAX];
@@ -650,8 +650,8 @@ static void state_from_another_namespace_claims_nothing(const char *dir)
 static void netifd_holds_what_its_configuration_gives_it(void)
 {
 	static const ncfg_interface_claim_t claims[] = {
-		{ "eth0", 2u }, { "br-lan", 3u }, { "eth2", 4u }, { "wlan9", 5u },
-		{ "wlan7", 6u }, { "eth", 7u }
+		{ "eth0", 2u, 0, NULL }, { "br-lan", 3u, 0, NULL }, { "eth2", 4u, 0, NULL }, { "wlan9", 5u, 0, NULL },
+		{ "wlan7", 6u, 0, NULL }, { "eth", 7u, 0, NULL }
 	};
 	static const char stock[] =
 	    "config interface 'loopback'\n"
@@ -725,7 +725,7 @@ static void netifd_holds_what_its_configuration_gives_it(void)
 static void ifupdown_holds_what_ifup_wrote(void)
 {
 	static const ncfg_interface_claim_t claims[] = {
-		{ "eth0", 2u }, { "eth1", 3u }, { "wlan0", 4u }, { "eth", 5u }, { "home", 6u }
+		{ "eth0", 2u, 0, NULL }, { "eth1", 3u, 0, NULL }, { "wlan0", 4u, 0, NULL }, { "eth", 5u, 0, NULL }, { "home", 6u, 0, NULL }
 	};
 	ncfg_contention_where_t where;
 	ncfg_contenders_t       found;
@@ -757,6 +757,142 @@ static void ifupdown_holds_what_ifup_wrote(void)
 	forget(path);
 	check(ncfg_contenders_find(&where, claims, 5u, &found, err, sizeof(err)) &&
 	    !by_name(&found, "ifupdown"), "and a machine with no ifstate has no ifupdown");
+	ncfg_contenders_free(&found);
+}
+
+/*
+ * connman holds what its configuration does not leave it (10.848): every
+ * interface whose name starts with no entry of `NetworkInterfaceBlacklist`,
+ * connman's own default list where the key is absent -- which spares
+ * `virbr0` and `ve-x` and not `veth0`, as ml350g6-01's docker veth showed.
+ */
+static void connman_holds_what_its_blacklist_does_not_spare(void)
+{
+	static const ncfg_interface_claim_t claims[] = {
+		{ "eth0", 2u, 0, NULL }, { "veth0", 3u, 0, "veth" }, { "virbr0", 4u, 0, NULL },
+		{ "ve-x", 5u, 0, NULL }, { "lo", 1u, 0, NULL }, { "docker0", 7u, 0, "bridge" }
+	};
+	ncfg_contention_where_t where;
+	ncfg_contenders_t       found;
+	const ncfg_contender_t *connman;
+	char                    err[NCFG_ERROR_MAX];
+	char                    path[PATH_BYTES + 32];
+	char                    remedy[NCFG_REMEDY_MAX];
+
+	here(&where);
+	(void)snprintf(path, sizeof(path), "%s/connman/main.conf", etc_root);
+	put(path, "[General]\n");
+	process(4500u, "connmand");
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)),
+	    "connman is looked at");
+	connman = by_name(&found, "connman");
+	check(connman && connman->interface_count == 2u &&
+	    strcmp(connman->interfaces[0], "eth0") == 0 &&
+	    strcmp(connman->interfaces[1], "veth0") == 0,
+	    "connman's default list spares virbr and ve-, not veth, and never lo or a bridge");
+	check(connman && ncfg_contender_remedy_for(connman, "eth0", remedy, sizeof(remedy)) &&
+	    strstr(remedy, "eth0") && strstr(remedy, "NetworkInterfaceBlacklist"),
+	    "  and the remedy names the device and the key");
+	ncfg_contenders_free(&found);
+
+	put(path, "[General]\n# NetworkInterfaceBlacklist = nothing\n"
+	    "NetworkInterfaceBlacklist = vmnet, eth ,veth\n");
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)),
+	    "a configured list is read");
+	connman = by_name(&found, "connman");
+	check(connman && connman->interface_count == 2u &&
+	    strcmp(connman->interfaces[0], "ve-x") == 0 &&
+	    strcmp(connman->interfaces[1], "virbr0") == 0,
+	    "  and replaces the default, spaces and comments aside");
+	ncfg_contenders_free(&found);
+
+	stop_process(4500u);
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "connman"), "a stopped connman holds nothing");
+	ncfg_contenders_free(&found);
+
+	process(4500u, "connmand");
+	forget(path);
+	(void)snprintf(path, sizeof(path), "%s/connman", etc_root);
+	(void)rmdir(path);
+	check(ncfg_contenders_find(&where, claims, 6u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "connman"), "and with no /etc/connman it is not connman's machine");
+	ncfg_contenders_free(&found);
+	stop_process(4500u);
+}
+
+/* A process's command line, NUL-separated as the kernel writes it: `put`
+ * makes the file and records it for the cleanup, and this fills it. */
+static void iwd_started_with(unsigned pid, const char *arguments, size_t length)
+{
+	char  path[PATH_BYTES];
+	FILE *file;
+
+	(void)snprintf(path, sizeof(path), "%s/%u/cmdline", proc_root, pid);
+	put(path, "");
+	file = fopen(path, "w");
+	if (file) {
+		(void)fwrite(arguments, 1u, length, file);
+		(void)fclose(file);
+	}
+}
+
+/*
+ * iwd holds every radio its options leave it, and only radios (10.849): its
+ * command line is the claim, `-i` naming the only ones and `-I` the ones left
+ * alone, each a list of fnmatch patterns.
+ */
+static void iwd_holds_the_radios_its_options_leave_it(void)
+{
+	static const ncfg_interface_claim_t claims[] = {
+		{ "wlan0", 2u, 1, NULL }, { "wlp3s0", 3u, 1, NULL }, { "eth0", 4u, 0, NULL }
+	};
+	static const char plain[] = "/usr/libexec/iwd";
+	static const char except[] = "/usr/libexec/iwd\0-I\0wlan*,foo";
+	static const char only[] = "/usr/libexec/iwd\0--interfaces=wlp3s0";
+	static const char joined[] = "/usr/libexec/iwd\0-iwlan0";
+	ncfg_contention_where_t where;
+	ncfg_contenders_t       found;
+	const ncfg_contender_t *iwd;
+	char                    err[NCFG_ERROR_MAX];
+	char                    remedy[NCFG_REMEDY_MAX];
+
+	here(&where);
+	process(4600u, "iwd");
+	iwd_started_with(4600u, plain, sizeof(plain));
+	check(ncfg_contenders_find(&where, claims, 3u, &found, err, sizeof(err)), "iwd is looked at");
+	iwd = by_name(&found, "iwd");
+	check(iwd && iwd->interface_count == 2u && strcmp(iwd->interfaces[0], "wlan0") == 0 &&
+	    strcmp(iwd->interfaces[1], "wlp3s0") == 0,
+	    "with no options iwd holds every radio, and no wire");
+	check(iwd && ncfg_contender_remedy_for(iwd, "wlan0", remedy, sizeof(remedy)) &&
+	    strstr(remedy, "--nointerfaces wlan0"), "  and the remedy names the option");
+	ncfg_contenders_free(&found);
+
+	iwd_started_with(4600u, except, sizeof(except));
+	check(ncfg_contenders_find(&where, claims, 3u, &found, err, sizeof(err)) &&
+	    (iwd = by_name(&found, "iwd")) != NULL && iwd->interface_count == 1u &&
+	    strcmp(iwd->interfaces[0], "wlp3s0") == 0,
+	    "`-I wlan*` leaves every radio the pattern matches");
+	ncfg_contenders_free(&found);
+
+	iwd_started_with(4600u, only, sizeof(only));
+	check(ncfg_contenders_find(&where, claims, 3u, &found, err, sizeof(err)) &&
+	    (iwd = by_name(&found, "iwd")) != NULL && iwd->interface_count == 1u &&
+	    strcmp(iwd->interfaces[0], "wlp3s0") == 0,
+	    "`--interfaces=wlp3s0` holds that one only");
+	ncfg_contenders_free(&found);
+
+	iwd_started_with(4600u, joined, sizeof(joined));
+	check(ncfg_contenders_find(&where, claims, 3u, &found, err, sizeof(err)) &&
+	    (iwd = by_name(&found, "iwd")) != NULL && iwd->interface_count == 1u &&
+	    strcmp(iwd->interfaces[0], "wlan0") == 0,
+	    "and `-iwlan0`, the value joined to the option, is read the same");
+	ncfg_contenders_free(&found);
+
+	stop_process(4600u);
+	check(ncfg_contenders_find(&where, claims, 3u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "iwd"), "a stopped iwd holds nothing");
 	ncfg_contenders_free(&found);
 }
 
@@ -1010,6 +1146,8 @@ int main(void)
 	a_proc_that_cannot_be_read_keeps_the_guard();
 	netifd_holds_what_its_configuration_gives_it();
 	ifupdown_holds_what_ifup_wrote();
+	connman_holds_what_its_blacklist_does_not_spare();
+	iwd_holds_the_radios_its_options_leave_it();
 	state_from_another_namespace_claims_nothing(dir);
 	the_machine_is_run_and_proc();
 	the_measured_reply_parses();

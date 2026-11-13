@@ -689,6 +689,9 @@ static int no_other_manager_holds(const ncfg_service_t *service, const char *ifa
 	}
 	memset(&claim, 0, sizeof(claim));
 	claim.name = iface;
+	/* Asked only before a supplicant starts, so always a radio -- the one
+	 * question iwd answers (10.849). */
+	claim.radio = 1;
 	if (!interface_index_of(service->class_net, iface, &claim.index)) {
 		return 1;
 	}

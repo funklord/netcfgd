@@ -9,7 +9,8 @@
  *     <run>/systemd/netif/links/<ifindex>
  *
  *   one for all of them, `<etc>/config/network`, for OpenWrt's netifd; one,
- *   `<run>/network/ifstate`, for Debian's ifupdown; and, for
+ *   `<run>/network/ifstate`, for Debian's ifupdown; `<etc>/connman/main.conf`,
+ *   for connman; and, for
  *   liveness, `<proc>/<pid>/comm` for every numeric entry under `<proc>`. It
  *   opens nothing else, writes nothing, and signals nothing: netcfgd reports
  *   here and the operator decides.
@@ -43,6 +44,7 @@
 #include "ncfg/process.h"
 
 #include <dirent.h>
+#include <fnmatch.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +78,8 @@
 static const char *const network_manager_names[] = { "NetworkManager" };
 static const char *const networkd_names[] = { "systemd-network", "systemd-networkd" };
 static const char *const netifd_names[] = { "netifd" };
+static const char *const connman_names[] = { "connmand" };
+static const char *const iwd_names[] = { "iwd" };
 
 /* ------------------------------------------------------------------------ *
  * Small things
@@ -236,7 +240,7 @@ static int named(const char *const *names, size_t count, const char *name)
  * supplicant on somebody else's radio.
  */
 static void running_daemons(const char *proc_root, int *network_manager, int *networkd,
-    int *netifd)
+    int *netifd, int *connman, char *iwd, size_t iwd_size)
 {
 	DIR                 *entries = opendir(proc_root);
 	const struct dirent *found;
@@ -244,13 +248,17 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 	*network_manager = 0;
 	*networkd = 0;
 	*netifd = 0;
+	*connman = 0;
+	iwd[0] = '\0';
 	if (!entries) {
 		*network_manager = 1;
 		*networkd = 1;
 		*netifd = 1;
+		*connman = 1;
 		return;
 	}
-	while ((*network_manager == 0 || *networkd == 0 || *netifd == 0) &&
+	while ((*network_manager == 0 || *networkd == 0 || *netifd == 0 || *connman == 0 ||
+	    iwd[0] == '\0') &&
 	    (found = readdir(entries)) != NULL) {
 		char   path[512];
 		char   comm[NCFG_PROGRAM_MAX + 16];
@@ -289,6 +297,15 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 			}
 			if (named(netifd_names, sizeof(netifd_names) / sizeof(*netifd_names), name)) {
 				*netifd = 1;
+			}
+			if (named(connman_names, sizeof(connman_names) / sizeof(*connman_names), name)) {
+				*connman = 1;
+			}
+			/* iwd by its pid, because its options are what say which
+			 * radios it holds, and they are in its command line. */
+			if (named(iwd_names, sizeof(iwd_names) / sizeof(*iwd_names), name) &&
+			    strlen(found->d_name) < iwd_size) {
+				memcpy(iwd, found->d_name, strlen(found->d_name) + 1u);
 			}
 		}
 		(void)fclose(file);
@@ -558,6 +575,254 @@ static int ifupdown_claims(const char *run_root, const ncfg_interface_claim_t *c
 	return 1;
 }
 
+/*
+ * Whether connman leaves `name` alone by its configuration.
+ *
+ * connman keeps no per-interface state outside D-Bus, which constraint 3 keeps
+ * off the core's path -- but what it holds is settled by its configuration as
+ * netifd's is: **every interface it has a technology for, except those whose
+ * names start with an entry of `NetworkInterfaceBlacklist`** in
+ * `<etc>/connman/main.conf`, whose default is connman's own (`src/main.c`):
+ * vmnet, vboxnet, virbr, ifb, ve-, vb-. Not `veth` and not `docker`, which is
+ * why connman on ml350g6-01 numbered docker's veth from 169.254 and gave it a
+ * default route (10.848). The key is read wherever it appears and only it.
+ */
+static int connman_leaves(const char *etc_root, const char *name)
+{
+	static const char default_list[] = "vmnet,vboxnet,virbr,ifb,ve-,vb-";
+	char        path[LINE_MAX_BYTES];
+	char        line[LINE_MAX_BYTES];
+	char        list[LINE_MAX_BYTES];
+	const char *at;
+	FILE       *file;
+	int         lines = 0;
+	int         written;
+
+	(void)snprintf(list, sizeof(list), "%s", default_list);
+	written = snprintf(path, sizeof(path), "%s/connman/main.conf", etc_root);
+	if (written >= 0 && (size_t)written < sizeof(path) && (file = fopen(path, "r")) != NULL) {
+		while (lines < LINE_LIMIT && fgets(line, (int)sizeof(line), file)) {
+			char *key = trim(line);
+			char *equals = strchr(key, '=');
+
+			lines++;
+			if (key[0] == '#' || !equals) {
+				continue;
+			}
+			*equals = '\0';
+			if (strcmp(trim(key), "NetworkInterfaceBlacklist") == 0) {
+				(void)snprintf(list, sizeof(list), "%s", trim(equals + 1));
+			}
+		}
+		(void)fclose(file);
+	}
+	for (at = list; *at != '\0';) {
+		const char *comma = strchr(at, ',');
+		size_t      length = comma ? (size_t)(comma - at) : strlen(at);
+
+		while (length > 0u && (*at == ' ' || *at == '\t')) {
+			at++;
+			length--;
+		}
+		while (length > 0u && (at[length - 1u] == ' ' || at[length - 1u] == '\t')) {
+			length--;
+		}
+		if (length > 0u && strncmp(name, at, length) == 0) {
+			return 1;
+		}
+		if (!comma) {
+			break;
+		}
+		at = comma + 1;
+	}
+	return 0;
+}
+
+/*
+ * Whether connman manages a link of this rtnetlink kind at all. It decides by
+ * the kernel's DEVTYPE and hardware type, and gives none of its technologies
+ * to a bridge, a WireGuard or VXLAN device or a VRF -- on ml350g6-01 it left
+ * `docker0` unnumbered while it numbered docker's veth. So the Ethernet-like
+ * kinds only: physical (no kind), veth, VLAN, bond, macvlan. An allowlist,
+ * because a kind left off it is a warning not given, where one wrongly on it
+ * is a warning about a fight that is not happening.
+ */
+static int connman_kind(const char *kind)
+{
+	static const char *const ethernet_like[] = { "veth", "vlan", "bond", "macvlan" };
+
+	if (!kind || kind[0] == '\0') {
+		return 1;
+	}
+	return named(ethernet_like, sizeof(ethernet_like) / sizeof(*ethernet_like), kind);
+}
+
+/* The interfaces of `claims` a running connman holds, sorted. */
+static int connman_claims(const char *etc_root, const ncfg_interface_claim_t *claims,
+    size_t claim_count, char ***names, size_t *count)
+{
+	size_t at;
+
+	*names = NULL;
+	*count = 0u;
+	if (claim_count == 0u) {
+		return 1;
+	}
+	*names = calloc(claim_count, sizeof(**names));
+	if (!*names) {
+		return 0;
+	}
+	for (at = 0u; at < claim_count; at++) {
+		if (!claims[at].name || strcmp(claims[at].name, "lo") == 0 ||
+		    !connman_kind(claims[at].kind) || connman_leaves(etc_root, claims[at].name)) {
+			continue;
+		}
+		(*names)[*count] = duplicate(claims[at].name);
+		if (!(*names)[*count]) {
+			return 0;
+		}
+		(*count)++;
+	}
+	if (*count > 1u) {
+		qsort(*names, *count, sizeof(**names), compare_names);
+	}
+	return 1;
+}
+
+/*
+ * Whether the iwd whose pid is `pid` holds the radio `name`.
+ *
+ * iwd manages every wireless interface unless started with `-i LIST`
+ * (`--interfaces`: only these) or `-I LIST` (`--nointerfaces`: all but
+ * these), each a comma-separated list of glob patterns iwd matches with
+ * fnmatch(3). It keeps no state file saying which it took, so its command
+ * line is the claim, read from `<proc>/<pid>/cmdline`. A cmdline that cannot
+ * be read keeps the guard: iwd running is iwd holding the radio.
+ */
+static int iwd_list_matches(const char *list, const char *name)
+{
+	char        pattern[NCFG_PROGRAM_MAX + 64];
+	const char *at = list;
+
+	while (*at != '\0') {
+		const char *comma = strchr(at, ',');
+		size_t      length = comma ? (size_t)(comma - at) : strlen(at);
+
+		if (length > 0u && length < sizeof(pattern)) {
+			memcpy(pattern, at, length);
+			pattern[length] = '\0';
+			if (fnmatch(trim(pattern), name, 0) == 0) {
+				return 1;
+			}
+		}
+		if (!comma) {
+			break;
+		}
+		at = comma + 1;
+	}
+	return 0;
+}
+
+static int iwd_holds(const char *proc_root, const char *pid, const char *name)
+{
+	char        path[LINE_MAX_BYTES];
+	char        cmdline[4096];
+	const char *only = NULL;
+	const char *except = NULL;
+	size_t      length;
+	size_t      at;
+	FILE       *file;
+	int         written;
+
+	written = snprintf(path, sizeof(path), "%s/%s/cmdline", proc_root, pid);
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return 1;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 1;
+	}
+	length = fread(cmdline, 1u, sizeof(cmdline) - 1u, file);
+	(void)fclose(file);
+	cmdline[length] = '\0';
+	/* Arguments are NUL-separated; walk them, a value either joined to its
+	 * option (`-iwlan0`, `--interfaces=wlan0`) or the next argument. */
+	for (at = 0u; at < length;) {
+		const char *argument = cmdline + at;
+		size_t      size = strlen(argument);
+		const char *next = at + size + 1u < length ? cmdline + at + size + 1u : "";
+		const char **slot = NULL;
+		const char *value = NULL;
+		int         takes_next = 0;
+
+		if (strcmp(argument, "-i") == 0 || strcmp(argument, "--interfaces") == 0) {
+			slot = &only;
+			takes_next = 1;
+		} else if (strcmp(argument, "-I") == 0 || strcmp(argument, "--nointerfaces") == 0) {
+			slot = &except;
+			takes_next = 1;
+		} else if (strncmp(argument, "--interfaces=", 13) == 0) {
+			slot = &only;
+			value = argument + 13;
+		} else if (strncmp(argument, "--nointerfaces=", 15) == 0) {
+			slot = &except;
+			value = argument + 15;
+		} else if (strncmp(argument, "-i", 2) == 0 && argument[2] != '\0') {
+			slot = &only;
+			value = argument + 2;
+		} else if (strncmp(argument, "-I", 2) == 0 && argument[2] != '\0') {
+			slot = &except;
+			value = argument + 2;
+		}
+		if (slot) {
+			*slot = takes_next ? next : value;
+		}
+		at += size + 1u;
+		if (takes_next && next[0] != '\0') {
+			at += strlen(next) + 1u;
+		}
+	}
+	if (only && !iwd_list_matches(only, name)) {
+		return 0;
+	}
+	if (except && iwd_list_matches(except, name)) {
+		return 0;
+	}
+	return 1;
+}
+
+/* The radios of `claims` a running iwd holds, sorted. */
+static int iwd_claims(const char *proc_root, const char *pid,
+    const ncfg_interface_claim_t *claims, size_t claim_count, char ***names, size_t *count)
+{
+	size_t at;
+
+	*names = NULL;
+	*count = 0u;
+	if (claim_count == 0u) {
+		return 1;
+	}
+	*names = calloc(claim_count, sizeof(**names));
+	if (!*names) {
+		return 0;
+	}
+	for (at = 0u; at < claim_count; at++) {
+		if (!claims[at].name || !claims[at].radio ||
+		    !iwd_holds(proc_root, pid, claims[at].name)) {
+			continue;
+		}
+		(*names)[*count] = duplicate(claims[at].name);
+		if (!(*names)[*count]) {
+			return 0;
+		}
+		(*count)++;
+	}
+	if (*count > 1u) {
+		qsort(*names, *count, sizeof(**names), compare_names);
+	}
+	return 1;
+}
+
 /* Put one contender into the answer, taking the names with it. */
 static int push(ncfg_contenders_t *out, const char *name, const char *remedy, char **names,
     size_t count)
@@ -624,6 +889,8 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 	int    network_manager = 0;
 	int    networkd = 0;
 	int    netifd = 0;
+	int    connman = 0;
+	char   iwd[32];
 
 	if (!out) {
 		ncfg_error_set(err, err_size, "there is nowhere to put what was found");
@@ -639,7 +906,8 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 	if (!run_root_is_ours(where)) {
 		return 1;
 	}
-	running_daemons(where->proc_root, &network_manager, &networkd, &netifd);
+	running_daemons(where->proc_root, &network_manager, &networkd, &netifd, &connman, iwd,
+	    sizeof(iwd));
 
 	/*
 	 * `NetworkManager` writes `<run>/NetworkManager/devices/<ifindex>`. The
@@ -731,6 +999,69 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 				ncfg_contenders_free(out);
 				ncfg_error_set(err, err_size,
 				    "there was no memory to record what netifd claims");
+				return 0;
+			}
+		} else {
+			release_names(names, count);
+		}
+	}
+
+	/*
+	 * connman, by its configuration and a running `connmand`. Where `/proc`
+	 * cannot be read the configuration directory has to exist too, or every
+	 * interface on a machine that never had connman would be its claim.
+	 */
+	names = NULL;
+	count = 0u;
+	if (connman && where->etc_root) {
+		char directory[LINE_MAX_BYTES];
+		DIR *present = NULL;
+		int  written = snprintf(directory, sizeof(directory), "%s/connman", where->etc_root);
+
+		if (written >= 0 && (size_t)written < sizeof(directory)) {
+			present = opendir(directory);
+		}
+		if (present) {
+			(void)closedir(present);
+			if (!connman_claims(where->etc_root, claims, claim_count, &names, &count)) {
+				release_names(names, count);
+				ncfg_contenders_free(out);
+				ncfg_error_set(err, err_size, "there was no memory to read what connman claims");
+				return 0;
+			}
+			if (count > 0u) {
+				if (!push(out, "connman", "add {} to NetworkInterfaceBlacklist in "
+				    "/etc/connman/main.conf, then restart connman", names, count)) {
+					release_names(names, count);
+					ncfg_contenders_free(out);
+					ncfg_error_set(err, err_size,
+					    "there was no memory to record what connman claims");
+					return 0;
+				}
+			} else {
+				release_names(names, count);
+			}
+		}
+	}
+
+	/* iwd, by its command line. An unreadable `/proc` names no pid, so this
+	 * asks nothing then -- unlike the others, there is no file to fall back
+	 * on, and the supplicant's own socket check is the guard there. */
+	names = NULL;
+	count = 0u;
+	if (iwd[0] != '\0') {
+		if (!iwd_claims(where->proc_root, iwd, claims, claim_count, &names, &count)) {
+			release_names(names, count);
+			ncfg_contenders_free(out);
+			ncfg_error_set(err, err_size, "there was no memory to read what iwd claims");
+			return 0;
+		}
+		if (count > 0u) {
+			if (!push(out, "iwd", "start iwd with --nointerfaces {}, or stop it", names,
+			    count)) {
+				release_names(names, count);
+				ncfg_contenders_free(out);
+				ncfg_error_set(err, err_size, "there was no memory to record what iwd claims");
 				return 0;
 			}
 		} else {
