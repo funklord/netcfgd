@@ -792,6 +792,11 @@ android-fresh:
 # file is read, and snurra, setting the directory below the include,
 # got a rule for "/kit.source" and "No rule to make target" for its own
 # (2026-11-13). Several build directories each keep their own record.
+#
+# So NAME a directory's kit.source as a prerequisite and write no rule
+# for it. An explicit rule outranks this pattern: bbq-predictor's, for a
+# second directory, re-ran make on its own target and so matched itself,
+# reaching about 16,000 make processes in ten minutes (2026-11-13).
 # `make` rather than $(MAKE), so a dry run prints this and runs nothing;
 # the record is written only when it changes, so nothing depending on it
 # is rebuilt while the kit stays put.
