@@ -12737,6 +12737,17 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.854 The router test's resolver step waits for the line it checks
+
+`hull-malta` failed at load 30 in `restart.sh`'s resolver step: the wait for
+netcfgd to rewrite `lan4.conf` was `grep -q '192.168.7.1'`, which the range's
+`192.168.7.100` already matched, so it ended at once ("after 0 s") and the
+check ran mid-reload with the file still offering `.53`. The wait and the check
+now share one pattern, anchored at the line's end and written for `grep -E`,
+since BusyBox's grep on OpenWrt is musl's regex, where `\|` in a basic
+expression is not to be relied on; checked against both file states with GNU
+grep and with BusyBox in `alpine:3.21`.
+
 ## 10.853 `network_arrives.sh` waits for the disable it then reads
 
 At load 33 `make live` failed three checks after `DISABLE [DISABLED] HomeFiber`:
