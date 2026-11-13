@@ -104,16 +104,73 @@ static const char *kind_word(const ncfg_interface_kind_t *kind)
  * Creation
  * ------------------------------------------------------------------------ */
 
+/* The link a device is made on top of, where its kind has one. */
+static const char *made_on(const ncfg_device_t *device)
+{
+	switch (device->kind.kind) {
+	case NCFG_KIND_VLAN:
+		return device->kind.vlan.parent;
+	case NCFG_KIND_VXLAN:
+		return device->kind.vxlan.parent;
+	case NCFG_KIND_MACVLAN:
+		return device->kind.macvlan.parent;
+	case NCFG_KIND_TUNNEL:
+		return device->kind.tunnel.parent;
+	default:
+		return NULL;
+	}
+}
+
+/* Whether this plan already creates the link. */
+static int creation_planned(const ncfg_builder_t *builder, const char *name)
+{
+	size_t at;
+
+	for (at = 0; at < builder->plan->action_count; at++) {
+		const ncfg_op_t *op = &builder->plan->actions[at].op;
+
+		if (op->kind == NCFG_OP_LINK_CREATE && op->u.link_create.name &&
+		    strcmp(op->u.link_create.name, name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *device)
 {
+	/* Deep enough for a bridge's VLAN on a VLAN; a chain longer than this is
+	 * a cycle, which the compiler refuses, or a document nobody wrote. */
+	static int      depth;
 	ncfg_plan_ids_t gate = { NULL, 0, 0 };
 	ncfg_op_t       op;
 	ncfg_op_t       inverse;
 	ncfg_reason_t   reason;
 	uint32_t        id;
+	const char     *parent;
 
-	if (ncfg_observed_link(builder->observed, device->name)) {
+	if (ncfg_observed_link(builder->observed, device->name) ||
+	    creation_planned(builder, device->name)) {
 		return;
+	}
+	/*
+	 * **Its parent first** (project.md 10.839). Rule 1 of the device walk is
+	 * that every link is created before anything references it, and the walk
+	 * runs in name order -- so a VLAN `guest10` on a dummy `lan0` was created
+	 * first, failed "lan0 is not an interface this kernel knows", and stopped
+	 * every action after it, under `ncfg apply` as under the daemon; a VLAN
+	 * named after its parent passed by the alphabet. The parent the document
+	 * makes is planned here, and the child waits on it below.
+	 */
+	parent = made_on(device);
+	if (parent && depth < 8 && !ncfg_observed_link(builder->observed, parent)) {
+		const ncfg_device_t *made = ncfg_plan_device(builder->desired, parent);
+
+		if (made && made != device) {
+			depth++;
+			ncfg_plan_link_creation(builder, made);
+			depth--;
+		}
 	}
 	if (device->kind.kind == NCFG_KIND_PPPOE || device->kind.kind == NCFG_KIND_OPENVPN) {
 		/*
@@ -221,6 +278,9 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 	reason = ncfg_plan_reason_absent(device->name, "kind", kind_word(&device->kind));
 
 	ncfg_builder_gate(builder, device->name, &gate);
+	if (parent) {
+		ncfg_builder_gate(builder, parent, &gate);
+	}
 	id = ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
 	ncfg_plan_ids_free(&gate);
 	ncfg_builder_mark(builder, &builder->gates, &builder->gate_count, device->name, id);
@@ -418,56 +478,67 @@ uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name)
  * inbound shaping drops every packet that arrives.
  *
  * **Deliberately narrow: being a port, being an `ifb`, or carrying a device
- * the document configures** -- the parent of a VLAN or a PPPoE session with an
- * `interface` block, which the kernel will not raise over a parent that is
- * down. A plain
+ * netcfgd raises** -- the parent of a VLAN or a PPPoE session with an
+ * `interface` block, or of a VLAN that is a bridge's port, which the kernel
+ * will not raise over a parent that is down. A plain
  * `device eth9 { mtu = 9000 }` with no interface block is an operator saying
  * something about the hardware and nothing about connecting over it, and
  * `enabled` lives on the interface -- so bringing up every device without a
  * block would be netcfgd deciding a question nobody asked it.
  */
 /*
- * Whether some device the document configures over an `interface` block names
- * `name` as the link it rides on: a VLAN, a VXLAN, a macvlan, a tunnel, a
- * PPPoE session. The kernel will not bring such a device up over a parent that
- * is down (`ENETDOWN`), so a parent with no block of its own was left down and
- * the device on it failed `link.up` on every pass (project.md 10.835). A mesh
- * point's parent is a radio, which the radio's own pass brings up.
+ * Whether netcfgd raises this device: it has an `interface` block, it is a
+ * bridge's or a bond's port, it is an `ifb` -- or it carries one that is
+ * raised, followed down the chain. The kernel will not bring a VLAN, a VXLAN,
+ * a macvlan, a tunnel or a PPPoE session up over a parent that is down
+ * (`ENETDOWN`), so a parent with no block of its own was left down and the
+ * device on it failed `link.up` on every pass (project.md 10.835) -- and a
+ * guest bridge's VLAN, itself only a port, left its parent down the same way
+ * (10.839). A mesh point's parent is a radio, which the radio's own pass
+ * brings up.
  */
-static int carries_a_configured_device(const ncfg_document_t *desired, const char *name)
+static int carries_a_raised_device(const ncfg_document_t *desired, const char *name, int depth);
+
+static int raised_by_netcfgd(const ncfg_document_t *desired, const ncfg_device_t *device,
+    int depth)
+{
+	return ncfg_plan_interface(desired, device->name) || device->master ||
+	    device->kind.kind == NCFG_KIND_IFB ||
+	    (depth < 8 && carries_a_raised_device(desired, device->name, depth + 1));
+}
+
+static int carries_a_raised_device(const ncfg_document_t *desired, const char *name, int depth)
 {
 	size_t at;
 
 	for (at = 0; desired && name && at < desired->device_count; at++) {
-		const ncfg_device_t         *device = &desired->devices[at];
-		const ncfg_interface_kind_t *kind = &device->kind;
-		const char                  *parent = NULL;
+		const ncfg_device_t *device = &desired->devices[at];
+		const char          *parent = made_on(device);
 
-		switch (kind->kind) {
-		case NCFG_KIND_VLAN:
-			parent = kind->vlan.parent;
-			break;
-		case NCFG_KIND_VXLAN:
-			parent = kind->vxlan.parent;
-			break;
-		case NCFG_KIND_MACVLAN:
-			parent = kind->macvlan.parent;
-			break;
-		case NCFG_KIND_TUNNEL:
-			parent = kind->tunnel.parent;
-			break;
-		case NCFG_KIND_PPPOE:
-			parent = kind->pppoe.parent;
-			break;
-		default:
-			break;
+		if (device->kind.kind == NCFG_KIND_PPPOE) {
+			parent = device->kind.pppoe.parent;
 		}
-		if (parent && strcmp(parent, name) == 0 &&
-		    ncfg_plan_interface(desired, device->name)) {
+		if (parent && strcmp(parent, name) == 0 && raised_by_netcfgd(desired, device, depth)) {
 			return 1;
 		}
 	}
 	return 0;
+}
+
+/* This plan's `link.up` of the link, or `NCFG_PLAN_NO_ACTION`. */
+static uint32_t raising_planned(const ncfg_builder_t *builder, const char *name)
+{
+	size_t at;
+
+	for (at = 0; at < builder->plan->action_count; at++) {
+		const ncfg_action_t *action = &builder->plan->actions[at];
+
+		if (action->op.kind == NCFG_OP_LINK_UP && action->op.u.named.name &&
+		    strcmp(action->op.u.named.name, name) == 0) {
+			return action->id;
+		}
+	}
+	return NCFG_PLAN_NO_ACTION;
 }
 
 void ncfg_plan_device_up(ncfg_builder_t *builder, const ncfg_device_t *device, uint32_t enslaved)
@@ -478,16 +549,33 @@ void ncfg_plan_device_up(ncfg_builder_t *builder, const ncfg_device_t *device, u
 	ncfg_op_t                   inverse;
 	ncfg_reason_t               reason;
 
+	static int                  depth;
+	const char                 *parent;
+
 	if (!device->master && device->kind.kind != NCFG_KIND_IFB &&
-	    !carries_a_configured_device(builder->desired, device->name)) {
+	    !carries_a_raised_device(builder->desired, device->name, 0)) {
 		return;
 	}
-	if (ncfg_plan_interface(builder->desired, device->name)) {
+	if (ncfg_plan_interface(builder->desired, device->name) ||
+	    raising_planned(builder, device->name) != NCFG_PLAN_NO_ACTION) {
 		return;
 	}
 	link = ncfg_observed_link(builder->observed, device->name);
 	if (link && link->up) {
 		return;
+	}
+	/* Its parent up first, where the document makes it and nothing else
+	 * raises it: the device walk runs in name order, and a guest bridge's
+	 * VLAN `guest10` came before its parent `lan0` (10.839). */
+	parent = made_on(device);
+	if (parent && depth < 8) {
+		const ncfg_device_t *under = ncfg_plan_device(builder->desired, parent);
+
+		if (under && under != device) {
+			depth++;
+			ncfg_plan_device_up(builder, under, NCFG_PLAN_NO_ACTION);
+			depth--;
+		}
 	}
 	/*
 	 * The creation gate, plus this device's own enslavement where one was just
@@ -497,6 +585,9 @@ void ncfg_plan_device_up(ncfg_builder_t *builder, const ncfg_device_t *device, u
 	 */
 	ncfg_builder_gate(builder, device->name, &deps);
 	ncfg_plan_ids_push(builder->plan, &deps, enslaved);
+	if (parent) {
+		ncfg_plan_ids_push(builder->plan, &deps, raising_planned(builder, parent));
+	}
 
 	memset(&op, 0, sizeof(op));
 	op.kind = NCFG_OP_LINK_UP;

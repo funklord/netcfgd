@@ -314,11 +314,17 @@ static int wanted_alone(const ncfg_action_t *action, const ncfg_document_t *docu
 		return 1;
 	}
 	/* A port or parent with no `interface` block of its own goes with the
-	 * device that names it; one that has a block keeps that block's
-	 * `on_drift`. */
-	if (interface && !named_interface(document, interface) &&
-	    (bridge = asked_for_by(document, interface)) != NULL) {
-		return ncfg_reconcile_reconciles(document, sims, bridge);
+	 * device that names it, followed up the chain to the first that has one
+	 * -- a guest bridge's VLAN's parent goes with the bridge (10.839); one
+	 * that has a block keeps that block's `on_drift`. */
+	{
+		int depth = 0;
+
+		while (interface && !named_interface(document, interface) && depth < 8 &&
+		    (bridge = asked_for_by(document, interface)) != NULL) {
+			interface = bridge;
+			depth++;
+		}
 	}
 	return ncfg_reconcile_reconciles(document, sims, interface);
 }

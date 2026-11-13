@@ -332,6 +332,69 @@ static void a_vlan_parent_is_brought_up(void)
 	planfix_release(plan, document, observed);
 }
 
+/* Where the plan creates and raises a link, as action ids, or -1. */
+static long action_of(const ncfg_plan_t *plan, int kind, const char *name)
+{
+	size_t at;
+
+	for (at = 0; plan && at < plan->action_count; at++) {
+		const ncfg_op_t *op = &plan->actions[at].op;
+		const char      *named = kind == NCFG_OP_LINK_CREATE ? op->u.link_create.name
+		                                                    : op->u.named.name;
+
+		if (op->kind == kind && named && strcmp(named, name) == 0) {
+			return (long)plan->actions[at].id;
+		}
+	}
+	return -1;
+}
+
+static int depends(const ncfg_plan_t *plan, long child, long parent)
+{
+	size_t edge;
+
+	if (!plan || child < 0 || parent < 0) {
+		return 0;
+	}
+	for (edge = 0; edge < plan->actions[child].depends_count; edge++) {
+		if ((long)plan->actions[child].depends_on[edge] == parent) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * A guest network as a router has one (10.839): a bridge whose port is a VLAN
+ * on a port, neither with a block of its own, and the VLAN's name sorting
+ * before its parent's. The device walk runs in name order, so the VLAN was
+ * created first and failed for want of its parent, and stopped every action
+ * after it; and the parent, carrying only a port, was never raised.
+ */
+static void a_guest_bridge_on_a_vlan_comes_up_in_order(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(
+	    /* In the order a compiled document has them, by name -- the order the
+	     * walk follows and the fault lived in. */
+	    "{\"name\":\"brguest\",\"kind\":{\"kind\":\"bridge\",\"members\":[\"guest10\"]}},"
+	    "{\"name\":\"guest10\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"lan0\",\"id\":10},"
+	    "\"master\":\"brguest\"},"
+	    "{\"name\":\"lan0\",\"kind\":{\"kind\":\"dummy\"}}",
+	    "{\"name\":\"brguest\"}", "", "", "\"links\":[]", &document, &observed);
+	long lan0 = action_of(plan, NCFG_OP_LINK_CREATE, "lan0");
+	long vlan = action_of(plan, NCFG_OP_LINK_CREATE, "guest10");
+	long lan0_up = action_of(plan, NCFG_OP_LINK_UP, "lan0");
+	long vlan_up = action_of(plan, NCFG_OP_LINK_UP, "guest10");
+
+	check(lan0 >= 0 && vlan > lan0 && depends(plan, vlan, lan0),
+	    "a VLAN is created after its parent, and waits on it, whatever the names");
+	check(lan0_up >= 0 && vlan_up > lan0_up && depends(plan, vlan_up, lan0_up),
+	    "  and a bridge's VLAN's parent is raised, before the VLAN");
+	planfix_release(plan, document, observed);
+}
+
 static void a_bond_with_members_is_told_rather_than_tried(void)
 {
 	ncfg_document_t *document;
@@ -977,6 +1040,7 @@ int main(void)
 	a_bond_mode_moves_on_a_bond_with_no_members();
 	a_bond_with_members_is_told_rather_than_tried();
 	a_vlan_parent_is_brought_up();
+	a_guest_bridge_on_a_vlan_comes_up_in_order();
 	a_mode_netcfgd_cannot_name_is_not_corrected();
 	a_macvlan_moves_among_the_three_modes_the_kernel_takes();
 	a_macvlan_passthru_transition_is_told_rather_than_tried();

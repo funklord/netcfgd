@@ -12737,6 +12737,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.839 A guest bridge on a VLAN: created out of order, and its parent left down
+
+**Derived from 10.833 and 10.835's shape, one level deeper**: a router's guest network is
+a bridge whose port is a VLAN on a port, `device brguest { bridge { members = ["guest10"]
+} }` on `guest10`, a VLAN of `lan0`, neither with an `interface` block. Run in a namespace,
+**three faults, one behind the other**:
+
+- **Created out of order, under `ncfg apply` too.** The device walk creates in name order,
+  and `guest10` sorts before `lan0`: the VLAN was created first, failed "lan0 is not an
+  interface this kernel knows", and the apply stopped there. 10.835's own check had a VLAN
+  named `vlan10` on `lan0`, which the alphabet put in order -- it passed by luck. **A parent
+  the document makes is now created first**, inside `ncfg_plan_link_creation`, and the
+  child's creation waits on it; the walk's own rule 1, "every link created before anything
+  references it", now holds whatever the names.
+- **The parent left down.** 10.835 raised a parent only where the device on it had an
+  `interface` block; `guest10` is only a bridge's port. A parent is raised now where what
+  rides on it is raised by netcfgd -- an interface, a port, an `ifb`, or something that
+  carries one, followed down -- and raised before the device on it, which waits on it.
+- **The daemon dropped the parent's actions**: 10.833's rule looked one level up, to
+  `guest10`, which has no block. It follows the chain now, to the first device with one.
+
+**Measured** in the namespace: the daemon brings the bridge, the VLAN and its parent up
+within a second of the config changing, and the plan is then empty; `ncfg apply` creates
+the parent first. `plan_kind_test` (order and raising) and `reconcile_test` (the chain)
+cover each: creation-first off, the old interface-only rule, and the chain stopped at one
+level each turn its check red. **The first version of the planner test passed with its fix
+removed**: its fixture listed the parent first, and a document read from JSON keeps the
+order given, so the walk never met the fault; it lists the devices by name now, as a
+compiled document has them.
+
 ## 10.838 A virtual sound card for streaming, designed (0322, not built)
 
 Discussed with the holder, 2026-11-13, after 0321: what changes if netcfgd, as root, makes

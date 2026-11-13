@@ -575,6 +575,26 @@ static void a_bridge_takes_its_members_with_it(void)
 	}
 	ncfg_plan_free(plan);
 	ncfg_document_free(document);
+
+	/* And followed up a chain (10.839): a guest bridge's VLAN, itself only a
+	 * port, on a parent with no block -- the parent goes with the bridge. */
+	document = document_of(
+	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"dummy\"}},"
+	    "{\"name\":\"guest10\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"lan0\",\"id\":10}},"
+	    "{\"name\":\"brguest\",\"kind\":{\"kind\":\"bridge\",\"members\":[\"guest10\"]}}],"
+	    "\"interfaces\":[{\"name\":\"brguest\"}]");
+	plan = document ? ncfg_plan_new(err, sizeof(err)) : NULL;
+	if (plan) {
+		(void)add_mtu(plan, "lan0", NULL, 0u);
+		kept = ncfg_reconcile_restrict(plan, document, NULL, 0, NULL, err, sizeof(err));
+		check(kept && plan_touches(kept, "lan0"),
+		    "a bridge's VLAN's parent is reconciled with the bridge, up the chain");
+		ncfg_plan_free(kept);
+	} else {
+		check(0, "the chain fixture reads");
+	}
+	ncfg_plan_free(plan);
+	ncfg_document_free(document);
 }
 
 static void a_restricted_plan_keeps_only_what_it_may_act_on(void)
