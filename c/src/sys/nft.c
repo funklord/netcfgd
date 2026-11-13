@@ -442,6 +442,102 @@ int ncfg_nft_build_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t er
 	return built;
 }
 
+int ncfg_nft_build_flowtable_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_buf_t filter;
+	int        built;
+
+	ncfg_buf_init(&filter, 0);
+	ncfg_wire_attr_put_str(&filter, NFTA_FLOWTABLE_TABLE, NCFG_NFT_TABLE);
+	built = build(out, NFT_MSG_GETFLOWTABLE, NLM_F_DUMP, seq, NFPROTO_INET, &filter, err,
+	    err_size);
+	ncfg_buf_free(&filter);
+	return built;
+}
+
+int ncfg_nft_flowtable_read(const void *payload, size_t length, ncfg_nft_flowtable_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t hook;
+	ncfg_wire_attrs_t devices;
+	ncfg_wire_attr_t  attr;
+	uint32_t          flags = 0;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "a flowtable needs somewhere to go");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	if (!payload_attrs(payload, length, &area, err, err_size) ||
+	    !read_name(&area, NFTA_FLOWTABLE_TABLE, out->table, sizeof(out->table), err, err_size) ||
+	    !read_name(&area, NFTA_FLOWTABLE_NAME, out->name, sizeof(out->name), err, err_size)) {
+		return 0;
+	}
+	if (ncfg_wire_attrs_find(&area, NFTA_FLOWTABLE_FLAGS, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		if (!attr_be32(&attr, &flags, err, err_size)) {
+			return 0;
+		}
+		out->hardware = (flags & NFT_FLOWTABLE_HW_OFFLOAD) != 0u;
+	}
+	if (ncfg_wire_attrs_find(&area, NFTA_FLOWTABLE_HOOK, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 1; /* a flowtable bound to nothing names no device */
+	}
+	ncfg_wire_attrs_start(&hook, attr.value, attr.length);
+	if (ncfg_wire_attrs_find(&hook, NFTA_FLOWTABLE_HOOK_DEVS, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 1;
+	}
+	ncfg_wire_attrs_start(&devices, attr.value, attr.length);
+	for (;;) {
+		ncfg_wire_step_t step = ncfg_wire_attrs_next(&devices, &attr, err, err_size);
+
+		if (step == NCFG_WIRE_END) {
+			return 1;
+		}
+		if (step != NCFG_WIRE_OK) {
+			return 0;
+		}
+		if (out->device_count >= NCFG_NFT_FLOWTABLE_DEVICES_MAX) {
+			ncfg_error_set(err, err_size, "a flowtable naming more than %u devices",
+			    (unsigned)NCFG_NFT_FLOWTABLE_DEVICES_MAX);
+			return 0;
+		}
+		if (!ncfg_wire_attr_string(&attr, out->devices[out->device_count],
+		        sizeof(out->devices[0]), err, err_size)) {
+			return 0;
+		}
+		out->device_count++;
+	}
+}
+
+int ncfg_nft_rule_is_offload(const void *payload, size_t length)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t list;
+	ncfg_wire_attr_t  attr;
+	char              name[NCFG_NFT_NAME_MAX];
+
+	if (!payload_attrs(payload, length, &area, NULL, 0) ||
+	    !read_name(&area, NFTA_RULE_TABLE, name, sizeof(name), NULL, 0) ||
+	    strcmp(name, NCFG_NFT_TABLE) != 0 ||
+	    !read_name(&area, NFTA_RULE_CHAIN, name, sizeof(name), NULL, 0) ||
+	    strcmp(name, NCFG_NFT_CHAIN_OFFLOAD) != 0 ||
+	    ncfg_wire_attrs_find(&area, NFTA_RULE_EXPRESSIONS, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	ncfg_wire_attrs_start(&list, attr.value, attr.length);
+	while (ncfg_wire_attrs_next(&list, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t expression;
+
+		ncfg_wire_attrs_start(&expression, attr.value, attr.length);
+		if (read_name(&expression, NFTA_EXPR_NAME, name, sizeof(name), NULL, 0) &&
+		    strcmp(name, "flow_offload") == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int ncfg_nft_build_table_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size)
 {
 	ncfg_buf_t filter;

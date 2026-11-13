@@ -345,6 +345,31 @@ int ncfg_nft_put_offload(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_
     int hardware, const char *const *devices, size_t device_count, char *err,
     size_t err_size);
 
+/* How many devices a flowtable read back may name; more is refused. */
+#define NCFG_NFT_FLOWTABLE_DEVICES_MAX 64u
+
+/* A flowtable as the kernel reports one (0319). */
+typedef struct {
+	char   table[NCFG_NFT_NAME_MAX];
+	char   name[NCFG_NFT_NAME_MAX];
+	int    hardware;
+	char   devices[NCFG_NFT_FLOWTABLE_DEVICES_MAX][NCFG_NFT_IFNAME_MAX];
+	size_t device_count;
+} ncfg_nft_flowtable_t;
+
+/* A dump of netcfgd's table's flowtables, filtered by the table; the reader
+ * checks each reply's table again rather than trusting the filter. */
+int ncfg_nft_build_flowtable_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size);
+
+/* One `NFT_MSG_NEWFLOWTABLE` reply. Refused where a name or a device is
+ * malformed, or there are more devices than the bound above. */
+int ncfg_nft_flowtable_read(const void *payload, size_t length, ncfg_nft_flowtable_t *out,
+    char *err, size_t err_size);
+
+/* Whether a rule reply is one of 0319's: in netcfgd's table, in its `offload`
+ * chain, moving flows with `flow_offload`. */
+int ncfg_nft_rule_is_offload(const void *payload, size_t length);
+
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
     const ncfg_forward_rule_t *forwards, size_t forward_count, ncfg_nft_batch_t *batch,

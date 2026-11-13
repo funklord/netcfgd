@@ -206,13 +206,14 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_
 
 		ncfg_nft_kernel_forward_t forward;
 
-		/* The dump is the whole table now (10.592), so the firewall's rules
-		 * and the port forwards (0298) are in it: they are read below, and
-		 * are not refusals here. */
+		/* The dump is the whole table now (10.592), so the firewall's rules,
+		 * the port forwards (0298) and flow offload's (0319) are in it: they
+		 * are read below, and are not refusals here. */
 		if (ncfg_nft_firewall_rule_read(reply_of->items[at].bytes, reply_of->items[at].length,
 		        &firewall, NULL, 0) ||
 		    ncfg_nft_forward_read(reply_of->items[at].bytes, reply_of->items[at].length,
-		        &forward, NULL, 0)) {
+		        &forward, NULL, 0) ||
+		    ncfg_nft_rule_is_offload(reply_of->items[at].bytes, reply_of->items[at].length)) {
 			continue;
 		}
 		if (!ncfg_nft_rule_uplink(reply_of->items[at].bytes, reply_of->items[at].length, name,
@@ -512,6 +513,61 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 	return 1;
 }
 
+static int by_name(const void *a, const void *b)
+{
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/*
+ * netcfgd's flowtable, read back (0319): which devices it names, whether it
+ * carries `flags offload`, and how many of the `offload` chain's rules move
+ * flows into it. NULL where the table has none. Another table's flowtable is
+ * somebody else's and is not read.
+ */
+static int read_offload(const ncfg_netlink_reply_t *flowtables, const ncfg_netlink_reply_t *rules,
+    ncfg_observed_t *observed, char *err, size_t err_size)
+{
+	ncfg_observed_offload_t *found;
+	ncfg_nft_flowtable_t     one;
+	size_t                   at;
+	size_t                   d;
+
+	ncfg_observed_offload_free(observed->offload);
+	observed->offload = NULL;
+	for (at = 0; at < flowtables->count; at++) {
+		if (ncfg_nft_flowtable_read(flowtables->items[at].bytes, flowtables->items[at].length,
+		        &one, NULL, 0) &&
+		    strcmp(one.table, NCFG_NFT_TABLE) == 0 && strcmp(one.name, NCFG_NFT_FLOWTABLE) == 0) {
+			break;
+		}
+	}
+	if (at == flowtables->count) {
+		return 1;
+	}
+	found = calloc(1u, sizeof(*found));
+	for (d = 0; found && d < one.device_count; d++) {
+		if (!observe_list_add(&found->devices, &found->device_count, one.devices[d])) {
+			ncfg_observed_offload_free(found);
+			found = NULL;
+		}
+	}
+	if (!found) {
+		ncfg_error_set(err, err_size, "out of memory recording the flowtable");
+		return 0;
+	}
+	found->hardware = one.hardware;
+	if (found->device_count > 1u) {
+		qsort(found->devices, found->device_count, sizeof(*found->devices), by_name);
+	}
+	for (at = 0; at < rules->count; at++) {
+		if (ncfg_nft_rule_is_offload(rules->items[at].bytes, rules->items[at].length)) {
+			found->rules++;
+		}
+	}
+	observed->offload = found;
+	return 1;
+}
+
 /* Forget the forwards an observation holds, for a pass that has none. */
 static void clear_forwards(ncfg_observed_t *observed)
 {
@@ -614,6 +670,8 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 		observed->nat_conflict_count = 0;
 		ncfg_observed_firewall_free(observed->firewall);
 		observed->firewall = NULL;
+		ncfg_observed_offload_free(observed->offload);
+		observed->offload = NULL;
 		clear_forwards(observed);
 		return 1;
 	}
@@ -658,6 +716,7 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 			{
 				ncfg_netlink_reply_t rules;
 				ncfg_netlink_reply_t chains;
+				ncfg_netlink_reply_t flowtables;
 				int                  read;
 
 				/* Two dumps a round, as before the firewall: the whole
@@ -672,12 +731,22 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 					ncfg_netlink_reply_free(&rules);
 					return 0;
 				}
+				/* The third (0319), inside the same generation bracket so a
+				 * flowtable and the rules feeding it describe one ruleset. */
+				if (!dump(kernel, ncfg_nft_build_flowtable_dump, "flowtable", &flowtables,
+				        err, err_size)) {
+					ncfg_netlink_reply_free(&rules);
+					ncfg_netlink_reply_free(&chains);
+					return 0;
+				}
 				read = read_uplinks(kernel, &rules, observed, err, err_size) &&
 				    read_conflicts(kernel, &chains, observed, err, err_size) &&
 				    read_firewall(kernel, &rules, &chains, observed, err, err_size) &&
-				    read_forwards(kernel, &rules, observed, err, err_size);
+				    read_forwards(kernel, &rules, observed, err, err_size) &&
+				    read_offload(&flowtables, &rules, observed, err, err_size);
 				ncfg_netlink_reply_free(&rules);
 				ncfg_netlink_reply_free(&chains);
+				ncfg_netlink_reply_free(&flowtables);
 				if (!read) {
 					return 0;
 				}

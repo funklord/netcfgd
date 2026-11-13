@@ -1491,6 +1491,9 @@ typedef struct {
 	 * project.md 10.592). NULL where the table has no filter chain, which
 	 * is every machine whose document has no `firewall`. */
 	struct ncfg_observed_firewall *firewall;
+	/* netcfgd's flowtable, read back (0319): NULL where the table has none,
+	 * which is every machine whose document does not ask for flow offload. */
+	struct ncfg_observed_offload  *offload;
 	/* Filter base chains in other tables at the hooks netcfgd's firewall
 	 * uses, as `table/chain (hook)`: docker, libvirt, firewalld. nftables is
 	 * additive, so both see a packet and the strictest verdict wins -- which
@@ -1583,6 +1586,20 @@ typedef struct ncfg_observed_firewall {
 /* Release one and what it holds, for the pass that replaces it. NULL is
  * nothing. */
 void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall);
+
+/*
+ * The flowtable netcfgd's table holds (0319), as the kernel reports it: the
+ * devices sorted, so a comparison is not about order, and how many of the
+ * `offload` chain's rules move flows into it -- two where it is whole.
+ */
+typedef struct ncfg_observed_offload {
+	int      hardware; /* `flags offload` */
+	char   **devices;
+	size_t   device_count;
+	int64_t  rules;
+} ncfg_observed_offload_t;
+
+void ncfg_observed_offload_free(ncfg_observed_offload_t *offload);
 /* Release an observation's port forwards, the list and each one. */
 void ncfg_observed_forwards_free(ncfg_observed_forward_t *forwards, size_t count);
 

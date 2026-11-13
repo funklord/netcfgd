@@ -1427,6 +1427,25 @@ void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall)
 	free(firewall);
 }
 
+static const ncfg_field_t observed_offload_fields[] = {
+	{ .name = "hardware", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_observed_offload_t, hardware) },
+	{ .name = "devices", .kind = NCFG_F_STR_LIST,
+	    .offset = offsetof(ncfg_observed_offload_t, devices),
+	    .count_offset = offsetof(ncfg_observed_offload_t, device_count) },
+	{ .name = "rules", .kind = NCFG_F_INT, .offset = offsetof(ncfg_observed_offload_t, rules) }
+};
+static const ncfg_type_t observed_offload_type =
+    TYPE("observed flow offload", observed_offload_fields);
+
+void ncfg_observed_offload_free(ncfg_observed_offload_t *offload)
+{
+	if (!offload) {
+		return;
+	}
+	ncfg_type_free(&observed_offload_type, offload);
+	free(offload);
+}
+
 static const ncfg_field_t observed_forward_fields[] = {
 	{ .name = "kind", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, kind) },
 	{ .name = "address", .kind = NCFG_F_STR,
@@ -1555,6 +1574,10 @@ static const ncfg_field_t observed_fields[] = {
 	{ .name = "firewall", .kind = NCFG_F_OPT_STRUCT, .type = &observed_firewall_type,
 	    .element_size = sizeof(ncfg_observed_firewall_t),
 	    .offset = offsetof(ncfg_observed_t, firewall) },
+	/* Omitted when absent for the same reason (0319). */
+	{ .name = "offload", .kind = NCFG_F_OPT_STRUCT, .type = &observed_offload_type,
+	    .element_size = sizeof(ncfg_observed_offload_t),
+	    .offset = offsetof(ncfg_observed_t, offload) },
 	{ .name = "filter_neighbours", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_t, filter_neighbours),
 	    .count_offset = offsetof(ncfg_observed_t, filter_neighbour_count) },

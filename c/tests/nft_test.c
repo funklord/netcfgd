@@ -903,11 +903,19 @@ static void offload_is_written(void)
 			}
 			switch (message.header.kind & 0xffu) {
 			case NFT_MSG_NEWFLOWTABLE: {
-				ncfg_wire_attrs_t hook;
-				ncfg_wire_attrs_t devs;
-				ncfg_wire_attr_t  one;
+				ncfg_wire_attrs_t    hook;
+				ncfg_wire_attrs_t    devs;
+				ncfg_wire_attr_t     one;
+				ncfg_nft_flowtable_t read_back;
 
 				flowtables++;
+				check(ncfg_nft_flowtable_read(message.payload, message.payload_length,
+				          &read_back, err, sizeof(err)) &&
+				        strcmp(read_back.table, NCFG_NFT_TABLE) == 0 &&
+				        strcmp(read_back.name, NCFG_NFT_FLOWTABLE) == 0 &&
+				        read_back.device_count == 2u && read_back.hardware == hardware &&
+				        strcmp(read_back.devices[1], "br-lan") == 0,
+				    "  and the observer's reader reads the flowtable back as written");
 				flagged = find(&area, NFTA_FLOWTABLE_FLAGS, &attr);
 				if (find(&area, NFTA_FLOWTABLE_HOOK, &attr)) {
 					nested(&attr, &hook);
@@ -926,6 +934,8 @@ static void offload_is_written(void)
 				break;
 			case NFT_MSG_NEWRULE:
 				rules++;
+				check(ncfg_nft_rule_is_offload(message.payload, message.payload_length),
+				    "  each rule is recognised as one of the offload chain's");
 				break;
 			default:
 				break;

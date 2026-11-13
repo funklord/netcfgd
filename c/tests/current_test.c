@@ -991,6 +991,7 @@ typedef struct {
 	ncfg_buf_t            before;
 	ncfg_buf_t            rules;
 	ncfg_buf_t            chains;
+	ncfg_buf_t            flowtables; /* 0319's third dump; empty unless a case fills it */
 	ncfg_buf_t            after;
 } nft_t;
 
@@ -1000,6 +1001,7 @@ static void nft_init(nft_t *nft)
 	ncfg_buf_init(&nft->before, 0);
 	ncfg_buf_init(&nft->rules, 0);
 	ncfg_buf_init(&nft->chains, 0);
+	ncfg_buf_init(&nft->flowtables, 0);
 	ncfg_buf_init(&nft->after, 0);
 }
 
@@ -1013,9 +1015,13 @@ static void nft_ready(nft_t *nft)
 	if (nft->after.length == 0u) {
 		append_generation(&nft->after, 7u);
 	}
+	if (nft->flowtables.length == 0u) {
+		append_done(&nft->flowtables);
+	}
 	queue(&nft->script, &nft->before);
 	queue(&nft->script, &nft->rules);
 	queue(&nft->script, &nft->chains);
+	queue(&nft->script, &nft->flowtables);
 	queue(&nft->script, &nft->after);
 	kernel_of(&nft->kernel, &nft->replay, &nft->script);
 }
@@ -1025,6 +1031,7 @@ static void nft_free(nft_t *nft)
 	ncfg_buf_free(&nft->before);
 	ncfg_buf_free(&nft->rules);
 	ncfg_buf_free(&nft->chains);
+	ncfg_buf_free(&nft->flowtables);
 	ncfg_buf_free(&nft->after);
 }
 
@@ -1121,13 +1128,17 @@ static void a_ruleset_that_moved_is_read_again(void)
 	append_done(&chains_again);
 	append_generation(&settled, 8u);
 
+	/* Each round's flowtable dump answers nothing (0319). */
+	append_done(&nft.flowtables);
 	queue(&nft.script, &nft.before);
 	queue(&nft.script, &nft.rules);
 	queue(&nft.script, &nft.chains);
+	queue(&nft.script, &nft.flowtables);
 	queue(&nft.script, &nft.after);
 	queue(&nft.script, &settled);
 	queue(&nft.script, &rules_again);
 	queue(&nft.script, &chains_again);
+	queue(&nft.script, &nft.flowtables);
 	queue(&nft.script, &settled);
 	kernel_of(&nft.kernel, &nft.replay, &nft.script);
 

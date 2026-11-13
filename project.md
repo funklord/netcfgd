@@ -12791,6 +12791,23 @@ refused `EOPNOTSUPP`, a veth having no flow offload -- the refusal 0319 says the
 name before an apply meets it, since the kernel's sentence today is about link kinds.
 Nothing calls the encoder yet: the op, the observation and the comparison are step three.
 
+**Step three's first half, the observation.** A third dump inside the same generation
+bracket as the rule and chain dumps -- `ncfg_nft_build_flowtable_dump`, filtered by
+netcfgd's table and checked again on every reply -- read by `ncfg_nft_flowtable_read` into
+`observed->offload`: `hardware`, the devices sorted, and how many rules in the `offload`
+chain move flows into it, two where it is whole. An optional struct omitted when absent,
+so an observation with no flowtable writes what it did. The NAT reader skips those two
+rules as it skips the firewall's and the port forwards', or it noted them on every pass as
+"not netcfgd's own masquerade" -- seen on the first real read. **Measured against the
+kernel**: the harness installed the table and flowtable in a namespace, and `ncfg status
+--json` read back `{"hardware": false, "devices": ["lanx", "wanx"], "rules": 2}` with the
+uplink, and no note. `nft_test` reads the encoder's bytes back through the same reader.
+**The third dump moved a scripted fake**: `current_test` answers the observer's requests
+in order, and its torn-ruleset case failed -- the flowtable dump took the generation's
+reply. Every other case using the same fake passed **by accident**, the generation then
+going unanswered, which reads as "no check" rather than as a failure. The fake now
+answers a flowtable dump in every round, so those cases check the generation again.
+
 ## 10.833 A bridge over ports with no `interface` block was never put up by the daemon
 
 **Asked by the holder, 2026-11-13: "what needs a real router? can't you use hull?"** --
