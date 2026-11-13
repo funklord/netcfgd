@@ -42,6 +42,7 @@ int ncfg_host_make_directory(const char *path, mode_t mode, char *err, size_t er
 	char *work;
 	char *at;
 	int ok = 1;
+	int failure;
 
 	if (!path || !path[0]) {
 		ncfg_error_set(err, err_size, "a directory was asked for with no name");
@@ -66,11 +67,29 @@ int ncfg_host_make_directory(const char *path, mode_t mode, char *err, size_t er
 	if (ok && mkdir(work, mode) != 0 && errno != EEXIST) {
 		ok = 0;
 	}
+	failure = errno;
 	if (!ok) {
-		ncfg_error_set(err, err_size, "could not create %s: %s", path, strerror(errno));
+		ncfg_error_set(err, err_size, "could not create %s: %s", path, strerror(failure));
 	}
 	free(work);
+	/* errno is the mkdir's on a failure, kept for a caller that classifies it. */
+	errno = failure;
 	return ok;
+}
+
+int ncfg_host_make_write_directory(const char *path, mode_t mode, int *denied, char *err,
+    size_t err_size)
+{
+	int failure;
+
+	if (ncfg_host_make_directory(path, mode, err, err_size)) {
+		return 1;
+	}
+	failure = errno;
+	if (denied && path && path[0] && (failure == EACCES || failure == EPERM || failure == EROFS)) {
+		*denied = 1;
+	}
+	return 0;
 }
 
 static int write_all(int fd, const void *bytes, size_t length)

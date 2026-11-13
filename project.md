@@ -11962,7 +11962,11 @@ socket is stale and sweeping it is correct -- **the test was wrong and not the
 daemon**. The survivor is held open by a live process now, named after it, and
 killing the holder before the sweep was watched turning the check red.
 
-### Open: a supplicant restart netcfgd does not notice under load
+### Closed by 10.163: a supplicant restart netcfgd did not notice under load
+
+**Fixed in 10.163**: an inode number reused under load hid the restart, and the
+watcher now probes its connection, so a dead peer is re-attached; `roam.sh`
+passes in the full suite. What follows is the state before that, kept as found.
 
 `roam.sh`'s last two checks. Thirteen before them pass, including the event
 burst; then the fake supplicant is restarted and **netcfgd never re-attaches**.
@@ -12690,6 +12694,58 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.831 A refused `conf.d` said nothing of the daemon nobody had started
+
+**`make live`, run whole for the first time since the router tier, found a fault in the
+product and one in a test.** Its `TMPDIR` was on `/home` because `/` was full.
+
+**The product's:** `ncfg config put` on a machine whose `/etc/netcfgd` is read-only or
+root's, with no `conf.d` yet and no daemon running, said only "could not create .../conf.d:
+Read-only file system". The second half -- "and could not ask netcfgd to do it either:
+nothing is listening on ..." -- is what tells a person to start netcfgd rather than look
+for a mode to change (0161, and `sandbox_writes.sh` asserts it). It was never said, because
+`ncfg_config_install_drop_in` makes `conf.d` before it writes the file, and only the file's
+write sets `denied`. A first drop-in is exactly the case where `conf.d` does not exist yet.
+`ncfg_host_make_write_directory` now classifies a refused mkdir (EACCES, EPERM, EROFS) the
+way `ncfg_config_write_atomically` classifies a refused file, and `ncfg_host_make_directory`
+keeps the mkdir's `errno` past its own cleanup so the reading is the mkdir's.
+
+**Derived from it, the same shape in two more writers**: a wifi profile's `secrets/`
+directory (`ncfg wifi add` with no daemon), and the directory a saved profile is written
+into (`ncfg profile save`) -- each made before a write that classifies its refusal, each now
+classified too. `ncfg_profile_adopt` makes `conf.d` the same way but reports no refusal to
+anybody, so it is left as it is.
+
+`config_test` has the case: a 0555 configuration directory and a first drop-in, which must
+fail as a refusal naming `conf.d`. With the `config_write.c` call put back to the plain
+mkdir it fails, and passes restored. Root skips it, as a mode does not refuse root.
+
+**ASan and UBSan over the whole C suite: clean**, the first full pass since 10.650, 180
+entries and the whole router tier ago: `make -C c SANITIZE=1 test` in a `git archive`
+copy with fuzznet's sources beside it, 107 binaries, every check passing, no sanitizer
+report and no leak. **Run it on `/home`, not in a `/tmp` scratch**: the instrumented build
+reached 901 MB, and on this machine `/tmp` is on `/`, which went from 3.1 GB free to 740 MB
+during the run.
+
+### A test that failed only in a setgid `TMPDIR`
+
+`c_estate_secret.sh` failed "beside a fuzznetd, netcfgd follows it": the standalone
+fuzznetd it starts as the face exited at once -- "the default socket ... cannot be served:
+its directory is not this user's own and mode 0700" -- so netcfgd became its own face and
+there was nothing to follow. The script makes `$XDG_RUNTIME_DIR/fuzznet` with `chmod 700`,
+and **GNU chmod keeps a directory's setgid bit**: under a setgid parent, which this tree is
+(2775, group `users`), the directory is 2700, and fuzznet's check is exact. `chmod 00700`
+clears it under GNU and busybox alike. Run from `/tmp`, the script passed unchanged, and in
+the setgid directory it failed both times before the fix and passes after. The
+nine other `chmod 700` sites in the node and live tests were changed too, then put back:
+their old forms pass in the same directory, because they hand fuzznet its paths and the
+mode reaches no check, so the fix stays where the failure was measured.
+
+**With both, every `make live` script passes** except `sandbox_writes.sh`'s last part, which
+drives the unit's real sandbox and under `NCFG_LIVE` refuses to skip on a machine with no
+systemd to run it -- 10.160's bargain, and the reason `make live` exits 2 here. It is the
+suite's last script, so nothing goes unrun behind it.
+
 ## 10.830 fuzznet ed93497: the local verb is `rrpc`, not `call`
 
 fuzznet's stage 3 (its sec 1087, f37ae02) gave a voice or video call CMD 18 and a STATUS
@@ -12709,6 +12765,10 @@ codec and distance helpers moved out of the core) come with it. **Size: unchange
 2,600,016 bytes, inside the budget 10.829 set.
 
 **Measured:** the full C suite at this pin, the node, fleet and fuzznet-line tests among it.
+And the router tier, since two pins had moved without one: `make hull-armsr` -- the arm64
+package built with OpenWrt's toolchain against musl, installed by apk on 25.12.6 under
+procd -- `VERDICT ok`, the stock services restarted, `dns_forward` and `range6` beside the
+stock dnsmasq, and sysupgrade's keep-and-restore all as 10.821 to 10.828 left them.
 
 ## 10.829 fuzznet b54490a: every host-to-host message's first byte moved
 

@@ -473,7 +473,7 @@ static int write_profile_snapshot(const char *config_dir, const char *factory_di
 		goto done;
 	}
 
-	if (!ncfg_host_make_directory(directory, (mode_t)0755, err, err_size)) {
+	if (!ncfg_host_make_write_directory(directory, (mode_t)0755, denied, err, err_size)) {
 		goto done;
 	}
 	if (!ncfg_config_write_atomically(snapshot, ncfg_buf_text(&text),

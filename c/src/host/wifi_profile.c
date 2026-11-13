@@ -693,7 +693,8 @@ int ncfg_wifi_profile_install(const char *config_dir, const char *factory_dir,
 		if (!secrets_dir) {
 			goto done;
 		}
-		if (!ncfg_host_make_directory(secrets_dir, (mode_t)0700, err, err_size)) {
+		if (!ncfg_host_make_write_directory(secrets_dir, (mode_t)0700, denied, err,
+		        err_size)) {
 			goto done;
 		}
 		/* The borrowed bytes, written once. 0600 from the moment the file

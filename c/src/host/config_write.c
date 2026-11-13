@@ -371,7 +371,12 @@ int ncfg_config_install_drop_in(const char *config_dir, const char *factory_dir,
 	}
 
 	conf_d = ncfg_host_join(config_dir, "conf.d", err, err_size);
-	if (!conf_d || !ncfg_host_make_directory(conf_d, (mode_t)0755, err, err_size)) {
+	/* **A refused `conf.d` is the same refusal as a refused file**: on a first
+	 * drop-in the directory is made before anything is written, so a read-only
+	 * or root's `/etc` failed here with `denied` never set, and a client with
+	 * no daemon to ask never said so. */
+	if (!conf_d || !ncfg_host_make_write_directory(conf_d, (mode_t)0755, denied, err,
+	    err_size)) {
 		free(conf_d);
 		free(previous);
 		free(path);

@@ -22,6 +22,13 @@ char *ncfg_host_join(const char *dir, const char *leaf, char *err, size_t err_si
  * directory is success, which is what every caller means. */
 int ncfg_host_make_directory(const char *path, mode_t mode, char *err, size_t err_size);
 
+/* The same, for a directory made on the way to a write that tells a refusal
+ * from a failure: a mkdir the system refuses (EACCES, EPERM, EROFS) sets
+ * `*denied`, as `ncfg_config_write_atomically` does for the file, so a client
+ * with no daemon to ask can say both halves (0161). `denied` may be NULL. */
+int ncfg_host_make_write_directory(const char *path, mode_t mode, int *denied, char *err,
+    size_t err_size);
+
 /*
  * Write a file via a temporary and a rename.
  *

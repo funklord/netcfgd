@@ -735,6 +735,40 @@ static void a_machine_that_has_a_hook(const char *root)
  * Writing a drop-in
  * ------------------------------------------------------------------------ */
 
+/*
+ * **A first drop-in where `conf.d` cannot be made is a refusal, and says so.**
+ * The directory is made before the file is written, so a read-only or root's
+ * `/etc` with no `conf.d` yet failed at the mkdir -- and `denied` was set only
+ * by the file's write, which never ran. A client with no daemon to ask then
+ * said the write failed and not that there had been nobody to ask (project.md
+ * 10.830, found by `sandbox_writes.sh`). A mode refuses only somebody without
+ * `CAP_DAC_OVERRIDE`, so root skips this rather than passing it vacuously.
+ */
+static void a_refused_conf_d(const char *root)
+{
+	char  config[512];
+	char  factory[512];
+	char  err[NCFG_ERROR_MAX];
+	char *path = NULL;
+	int   denied = 0;
+	int   wrote;
+
+	if (geteuid() == 0) {
+		printf("skip a refused conf.d: root walks through a directory's mode\n");
+		return;
+	}
+	(void)snprintf(factory, sizeof(factory), "%s", tree(root, "refused-factory", NULL, 0));
+	(void)snprintf(config, sizeof(config), "%s", tree(root, "refused-config", NULL, 0));
+	check(chmod(config, 0555) == 0, "the configuration directory is made read-only");
+	wrote = ncfg_config_install_drop_in(config, factory, "thing",
+	    "interface eth1 {\n\tconfig = \"dhcp\"\n}\n", 0, &path, &denied, err, sizeof(err));
+	check(!wrote, "a first drop-in where conf.d cannot be made is not written");
+	check(denied, "  and is a refusal, so a client can say there was nobody to ask");
+	check(strstr(err, "conf.d") != NULL, "  and the sentence names the directory");
+	free(path);
+	(void)chmod(config, 0755);
+}
+
 static void drop_ins(const char *root)
 {
 	char        err[NCFG_ERROR_MAX];
@@ -1337,6 +1371,7 @@ int main(void)
 	profiles(root);
 	a_machine_that_has_a_hook(root);
 	drop_ins(root);
+	a_refused_conf_d(root);
 	writing(root);
 	the_fold(root);
 	saving(root);
