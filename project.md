@@ -12822,8 +12822,9 @@ gone. **Measured in a namespace**, a NAT router document with `flow_offload =
 to do`, and `ncfg status --json` read back both devices and two rules; the key removed,
 the plan named `flow_offload: <none> (was software)`, applied, and converged; and
 `"hardware"` warned first and failed at apply with `EOPNOTSUPP`, a veth having no flow
-offload -- the sentence there is still the generic netlink one, which 0319 wanted to name
-the construct. **And a fault the planner tests found in step 3a**: the observed `rules`
+offload. The apply's sentence named it as a missing module or link kind, which sends an
+operator looking for the wrong thing; it now says hardware flow offload was refused, that
+NAT and the firewall went with it, and that `"software"` works on every device. **And a fault the planner tests found in step 3a**: the observed `rules`
 field had no declared range, so reading an observation back from JSON refused any value
 but 0 -- a client reading a daemon's observation with a flowtable in it would have
 failed; `R_U32` now. `plan_setting_test` has the four cases.

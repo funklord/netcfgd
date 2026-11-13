@@ -284,6 +284,22 @@ int ncfg_kernel_nat_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
 		 */
 		ok = ncfg_kernel_send(&socket, &message, batch.last_acked, op->kind,
 		    "replace the `" NCFG_NFT_TABLE "` table", err, err_size);
+		/*
+		 * **A hardware flowtable a driver cannot carry, named** (0319). The
+		 * kernel answers `EOPNOTSUPP` for the whole transaction, and the
+		 * generic sentence for that is about modules and link kinds, which
+		 * sends an operator looking for the wrong thing. The flag is the one
+		 * thing in this table only a driver can refuse.
+		 */
+		if (!ok && err && op->u.nftables.offload.has &&
+		    op->u.nftables.offload.value == NCFG_FLOW_OFFLOAD_HARDWARE &&
+		    strstr(err, "EOPNOTSUPP") != NULL) {
+			ncfg_error_set(err, err_size,
+			    "hardware flow offload was refused (EOPNOTSUPP): a driver of the devices "
+			    "the flowtable names has no flow offload, and the table is one transaction, "
+			    "so NAT and the firewall were not replaced either. `flow_offload = "
+			    "\"software\"` works on every device (0319)");
+		}
 	}
 	ncfg_buf_free(&message);
 	ncfg_netlink_close(&socket);
