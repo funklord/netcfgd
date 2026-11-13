@@ -2203,6 +2203,11 @@ static void the_globals_round_trip(void)
 	 * exactly the profile somebody most needs to come back unchanged. */
 	round_trips("global {\n\tnetworking = \"off\"\n}\ninterface eth0 {\n"
 	    "\tconfig = \"dhcp\"\n}\n", "and so does a profile that turns networking off");
+	/* Flow offload (0319), both words: a choice stored where it was made. */
+	round_trips("global {\n\tflow_offload = \"software\"\n}\ninterface eth0 {\n"
+	    "\tconfig = \"dhcp\"\n}\n", "and so does software flow offload");
+	round_trips("global {\n\tflow_offload = \"hardware\"\n}\ninterface eth0 {\n"
+	    "\tconfig = \"dhcp\"\n}\n", "and so does hardware flow offload");
 
 	rendered = rendering_of("global {\n\ton_drift = \"reconcile\"\n\tconfirm = 90\n}\n");
 	/* `reconcile` is today's default, and written it is a choice: a profile

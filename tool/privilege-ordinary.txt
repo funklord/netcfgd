@@ -61,6 +61,7 @@ eap
 enabled
 endpoint
 family
+flow_offload
 forward_delay
 forwarding
 from

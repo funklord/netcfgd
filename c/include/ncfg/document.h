@@ -2497,6 +2497,17 @@ typedef enum {
 	NCFG_NETWORKING_OFF
 } ncfg_networking_t;
 
+/*
+ * Flow offload (0319): established TCP and UDP flows moved to a flowtable in
+ * netcfgd's own nftables table, forwarded past the stack in software or handed
+ * to the switch silicon. **Absent is off**, as firewall4's is, and is the
+ * `has` of the `ncfg_optint_t` that carries this.
+ */
+typedef enum {
+	NCFG_FLOW_OFFLOAD_SOFTWARE,
+	NCFG_FLOW_OFFLOAD_HARDWARE
+} ncfg_flow_offload_t;
+
 typedef struct {
 	/* The fallback DNS scope. Per-interface policies are scopes in their own
 	 * right rather than overlays on this one (`doc/decision/0007`). */
@@ -2508,6 +2519,7 @@ typedef struct {
 	ncfg_optint_t              on_drift_default;
 	ncfg_optint_t              confirm_default;  /* seconds */
 	int                        networking;       /* ncfg_networking_t */
+	ncfg_optint_t              flow_offload;     /* ncfg_flow_offload_t; absent is off */
 	/* **Absent is the default and is not a profile called "none"** (0151): a
 	 * machine with hand-written configuration and no selection is not running
 	 * a profile, and spelling that state as one would make it permanently

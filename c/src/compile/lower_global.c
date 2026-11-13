@@ -475,6 +475,25 @@ void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 		free(word);
 		return;
 	}
+	if (strcmp(key, "flow_offload") == 0) {
+		char *word = ncfg_as_string(ctx, assignment->value);
+
+		if (!word) {
+			return;
+		}
+		if (strcmp(word, "software") == 0) {
+			globals->flow_offload.has = 1;
+			globals->flow_offload.value = NCFG_FLOW_OFFLOAD_SOFTWARE;
+		} else if (strcmp(word, "hardware") == 0) {
+			globals->flow_offload.has = 1;
+			globals->flow_offload.value = NCFG_FLOW_OFFLOAD_HARDWARE;
+		} else {
+			ncfg_diag(ctx, assignment->span, "`%s` is not a flow offload: one of: software, "
+			    "hardware -- and leaving the key out is off (0319)", word);
+		}
+		free(word);
+		return;
+	}
 	if (strcmp(key, "dns") == 0 || strcmp(key, "dns_search") == 0 ||
 	    strcmp(key, "dns_mode") == 0 || strcmp(key, "dns_domains") == 0) {
 		ncfg_lower_dns_key(ctx, &globals->dns, assignment);

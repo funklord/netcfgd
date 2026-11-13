@@ -704,6 +704,10 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 	if (globals->networking != NCFG_NETWORKING_ON) {
 		ncfg_buf_add_text(&body, "\tnetworking = \"off\"\n");
 	}
+	if (globals->flow_offload.has) {
+		ncfg_buf_addf(&body, "\tflow_offload = \"%s\"\n",
+		    globals->flow_offload.value == NCFG_FLOW_OFFLOAD_HARDWARE ? "hardware" : "software");
+	}
 	/* The locked subject keys (0290), rendered whenever there are any: an empty
 	 * list is the absence of the key rather than `locked = []`, because the
 	 * two mean the same thing here -- unlike `connectivity.ignore` above,

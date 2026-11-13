@@ -178,6 +178,8 @@ static const ncfg_enum_t requires_set = WORD_SET("connectivity requirement", req
 
 static const char *const networking_words[] = { "on", "off" };
 static const ncfg_enum_t networking_set = WORD_SET("networking setting", networking_words);
+static const char *const flow_offload_words[] = { "software", "hardware" };
+static const ncfg_enum_t flow_offload_set = WORD_SET("flow offload", flow_offload_words);
 
 static const char *const cert_source_words[] = { "path", "stored" };
 static const char *const principal_words[] = { "root", "any", "user", "group" };
@@ -2749,6 +2751,10 @@ static const ncfg_field_t globals_fields[] = {
 	    .offset = offsetof(ncfg_globals_t, confirm_default) },
 	{ .name = "networking", .kind = NCFG_F_ENUM, .choices = &networking_set,
 	    .fallback = NCFG_NETWORKING_ON, .offset = offsetof(ncfg_globals_t, networking) },
+	/* Omitted when absent, so a document that never asked writes what it did
+	 * before 0319 and the frozen witness still matches itself. */
+	{ .name = "flow_offload", .kind = NCFG_F_OPT_ENUM, .choices = &flow_offload_set,
+	    .offset = offsetof(ncfg_globals_t, flow_offload) },
 	{ .name = "profile", .kind = NCFG_F_STR, .offset = offsetof(ncfg_globals_t, profile) },
 	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_globals_t, regdom) },
 	{ .name = "hostname_policy", .kind = NCFG_F_CUSTOM, .custom = &hostname_policy_custom,

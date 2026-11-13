@@ -12735,6 +12735,19 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.834 `flow_offload`, read and kept ahead of the flowtable (0319, step one)
+
+0319 decides flow offload: `global { flow_offload = "software" }` or `"hardware"`, absent
+off, written as a flowtable and an `offload` chain in netcfgd's table. This step is the
+key alone -- lowered, rendered back (both words round-trip in `render_test`), carried in
+the document as an optional word omitted when absent, so a document that never asked
+writes what it wrote before and the frozen witness is unmoved -- and classified ordinary in
+`tool/privilege-ordinary.txt`, beside `nat` and `forwarding`: it changes how traffic
+already forwarded is carried, and grants nothing. **Until the encoder lands, the plan says
+so** with `ncfg_plan_warn_unbuilt`, and that arm comes out in the commit that writes the
+flowtable. Still to come: the encoder and its audit, the flowtable read back from the
+kernel, the plan's comparison, and the software half run on `hull-armsr`.
+
 ## 10.833 A bridge over ports with no `interface` block was never put up by the daemon
 
 **Asked by the holder, 2026-11-13: "what needs a real router? can't you use hull?"** --
