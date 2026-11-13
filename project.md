@@ -12785,6 +12785,36 @@ as the three that describe the machine as a whole. `network_arrives.sh`: 22 of
 22. An unnamed run on this host still warns that connman and ifupdown hold
 `eth0`.
 
+## 10.850 A dhcpcd running as a manager is a contender, and ifupdown-ng is ifupdown
+
+The shape of 10.848 and 10.849 once more: dhcpcd started with no interface is a
+whole network manager -- Raspberry Pi OS's until bookworm, and many minimal
+installs' -- taking every interface its configuration does not leave out. It
+contends with the dhcpcd clients netcfgd starts per interface, and nothing
+here read it.
+
+**Told apart from netcfgd's own by its title**, because dhcpcd retitles itself
+and its arguments are gone. Measured with dhcpcd 10.1 in a namespace: the
+manager is `dhcpcd: [manager] [ip4]`, one started on an interface `dhcpcd: d0
+[ip4]`, and the helpers of either `dhcpcd: [privileged proxy] ...`; before 10
+the word was `[master]`. netcfgd starts dhcpcd only on an interface, so a
+manager is never netcfgd's. Its claim is every interface but the loopback that
+`/etc/dhcpcd.conf`'s `denyinterfaces` does not match and, where
+`allowinterfaces` appears, that it does -- fnmatch patterns separated by spaces
+or commas, as dhcpcd.conf(5) gives them; Docker's own advice for Raspberry Pi
+OS is `denyinterfaces veth*`, which is the case. The remedy is that key. An
+unreadable `/proc` finds no manager: the title is the only evidence.
+
+`contention_test` holds a manager with `denyinterfaces`, an older `[master]`
+with `allowinterfaces`, and a per-interface dhcpcd that is not one; with the
+configuration or the title not read, two checks fail each.
+
+**And ifupdown-ng, Alpine's default `networking`**, which 10.843's ifupdown
+read missed: it keeps `/run/ifstate` rather than `/run/network/ifstate`, with
+lines `d0=d0 1 explicit`. Measured in `alpine:3.21` with ifupdown-ng installed:
+`ifup -a` wrote `lo` and `d0`, `ifdown d0` took its line away. Both files are
+read now, the name before `=` the claim in each.
+
 ## 10.849 iwd is a contender for radios, read from its command line
 
 The same shape a third time: a daemon that takes interfaces unless told not

@@ -10,7 +10,8 @@
  *
  *   one for all of them, `<etc>/config/network`, for OpenWrt's netifd; one,
  *   `<run>/network/ifstate`, for Debian's ifupdown; `<etc>/connman/main.conf`,
- *   for connman; and, for
+ *   for connman; `<etc>/dhcpcd.conf`, for a dhcpcd running as a manager; and,
+ *   for
  *   liveness, `<proc>/<pid>/comm` for every numeric entry under `<proc>`. It
  *   opens nothing else, writes nothing, and signals nothing: netcfgd reports
  *   here and the operator decides.
@@ -80,6 +81,7 @@ static const char *const networkd_names[] = { "systemd-network", "systemd-networ
 static const char *const netifd_names[] = { "netifd" };
 static const char *const connman_names[] = { "connmand" };
 static const char *const iwd_names[] = { "iwd" };
+static const char *const dhcpcd_names[] = { "dhcpcd" };
 
 /* ------------------------------------------------------------------------ *
  * Small things
@@ -274,6 +276,40 @@ static int named(const char *const *names, size_t count, const char *name)
 }
 
 /*
+ * Whether the dhcpcd at `pid` is a manager: dhcpcd started with no interface,
+ * which takes every one its configuration does not leave out (10.850).
+ *
+ * dhcpcd retitles itself, so its arguments are gone from the command line;
+ * the title is what says it. Measured with dhcpcd 10.1: the manager is
+ * `dhcpcd: [manager] [ip4]`, a per-interface one `dhcpcd: d0 [ip4]`, and each
+ * one's helpers `dhcpcd: [privileged proxy] ...`. Before 10, `[master]`.
+ * netcfgd starts dhcpcd only per interface (`backend/dhcp`), so a manager is
+ * never netcfgd's.
+ */
+static int dhcpcd_is_manager(const char *proc_root, const char *pid)
+{
+	char  path[LINE_MAX_BYTES];
+	char  title[128];
+	FILE *file;
+	size_t length;
+	int   written;
+
+	written = snprintf(path, sizeof(path), "%s/%s/cmdline", proc_root, pid);
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	length = fread(title, 1u, sizeof(title) - 1u, file);
+	(void)fclose(file);
+	title[length] = '\0';
+	return strncmp(title, "dhcpcd: [manager]", 17) == 0 ||
+	    strncmp(title, "dhcpcd: [master]", 16) == 0;
+}
+
+/*
  * Which of the two daemons has a process running, in one walk of `<proc>`.
  *
  * **An unreadable `/proc` means both**: falling back to believing the files is
@@ -281,7 +317,7 @@ static int named(const char *const *names, size_t count, const char *name)
  * supplicant on somebody else's radio.
  */
 static void running_daemons(const char *proc_root, int *network_manager, int *networkd,
-    int *netifd, int *connman, char *iwd, size_t iwd_size)
+    int *netifd, int *connman, char *iwd, size_t iwd_size, int *dhcpcd)
 {
 	DIR                 *entries = opendir(proc_root);
 	const struct dirent *found;
@@ -290,6 +326,7 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 	*networkd = 0;
 	*netifd = 0;
 	*connman = 0;
+	*dhcpcd = 0;
 	iwd[0] = '\0';
 	if (!entries) {
 		*network_manager = 1;
@@ -299,7 +336,7 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 		return;
 	}
 	while ((*network_manager == 0 || *networkd == 0 || *netifd == 0 || *connman == 0 ||
-	    iwd[0] == '\0') &&
+	    iwd[0] == '\0' || *dhcpcd == 0) &&
 	    (found = readdir(entries)) != NULL) {
 		char   path[512];
 		char   comm[NCFG_PROGRAM_MAX + 16];
@@ -344,6 +381,10 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 			}
 			/* iwd by its pid, because its options are what say which
 			 * radios it holds, and they are in its command line. */
+			if (named(dhcpcd_names, sizeof(dhcpcd_names) / sizeof(*dhcpcd_names), name) &&
+			    !*dhcpcd) {
+				*dhcpcd = dhcpcd_is_manager(proc_root, found->d_name);
+			}
 			if (named(iwd_names, sizeof(iwd_names) / sizeof(*iwd_names), name) &&
 			    strlen(found->d_name) < iwd_size) {
 				memcpy(iwd, found->d_name, strlen(found->d_name) + 1u);
@@ -547,7 +588,21 @@ static int netifd_claims(const char *etc_root, const ncfg_interface_claim_t *cla
  * Found on ml350g6-01 (10.843), where ifupdown held `eth0` and nothing here
  * would have said so to a netcfgd configured for it.
  */
+static int ifupdown_reads(const char *run_root, const char *file_name, const char *name);
+
+/*
+ * Debian's ifupdown keeps `<run>/network/ifstate`; ifupdown-ng, Alpine's
+ * default `networking`, keeps `<run>/ifstate`, with lines `d0=d0 1 explicit`
+ * -- measured in alpine:3.21 with ifupdown-ng, where `ifdown` took the line
+ * away (10.850). The name before `=` is the claim in both.
+ */
 static int ifupdown_configures(const char *run_root, const char *name)
+{
+	return ifupdown_reads(run_root, "network/ifstate", name) ||
+	    ifupdown_reads(run_root, "ifstate", name);
+}
+
+static int ifupdown_reads(const char *run_root, const char *file_name, const char *name)
 {
 	char  path[LINE_MAX_BYTES];
 	char  line[LINE_MAX_BYTES];
@@ -557,7 +612,7 @@ static int ifupdown_configures(const char *run_root, const char *name)
 	int   lines = 0;
 	int   written;
 
-	written = snprintf(path, sizeof(path), "%s/network/ifstate", run_root);
+	written = snprintf(path, sizeof(path), "%s/%s", run_root, file_name);
 	if (written < 0 || (size_t)written >= sizeof(path)) {
 		return 0;
 	}
@@ -864,6 +919,102 @@ static int iwd_claims(const char *proc_root, const char *pid,
 	return 1;
 }
 
+/*
+ * Whether a manager dhcpcd's configuration leaves `name` alone (10.850):
+ * `denyinterfaces` and `allowinterfaces` in `<etc>/dhcpcd.conf`, each a list
+ * of fnmatch patterns separated by spaces or commas, as dhcpcd.conf(5) says.
+ * Without either, a manager takes every interface but the loopback -- which
+ * is why Docker's documentation for Raspberry Pi OS says to add
+ * `denyinterfaces veth*`.
+ */
+static int dhcpcd_pattern_in(const char *list, const char *name)
+{
+	char        pattern[NCFG_PROGRAM_MAX + 64];
+	const char *at = list;
+
+	while (*at != '\0') {
+		size_t length = strcspn(at, " \t,");
+
+		if (length > 0u && length < sizeof(pattern)) {
+			memcpy(pattern, at, length);
+			pattern[length] = '\0';
+			if (fnmatch(pattern, name, 0) == 0) {
+				return 1;
+			}
+		}
+		at += length;
+		at += strspn(at, " \t,");
+	}
+	return 0;
+}
+
+static int dhcpcd_leaves(const char *etc_root, const char *name)
+{
+	char  path[LINE_MAX_BYTES];
+	char  line[LINE_MAX_BYTES];
+	FILE *file;
+	int   allowed_somewhere = 0;
+	int   allowed = 0;
+	int   denied = 0;
+	int   lines = 0;
+	int   written;
+
+	written = snprintf(path, sizeof(path), "%s/dhcpcd.conf", etc_root);
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	while (lines < LINE_LIMIT && fgets(line, (int)sizeof(line), file)) {
+		char *text = trim(line);
+
+		lines++;
+		if (strncmp(text, "denyinterfaces", 14) == 0 && (text[14] == ' ' || text[14] == '\t')) {
+			denied = denied || dhcpcd_pattern_in(trim(text + 14), name);
+		} else if (strncmp(text, "allowinterfaces", 15) == 0 &&
+		    (text[15] == ' ' || text[15] == '\t')) {
+			allowed_somewhere = 1;
+			allowed = allowed || dhcpcd_pattern_in(trim(text + 15), name);
+		}
+	}
+	(void)fclose(file);
+	return denied || (allowed_somewhere && !allowed);
+}
+
+/* The interfaces of `claims` a manager dhcpcd holds, sorted. */
+static int dhcpcd_claims(const char *etc_root, const ncfg_interface_claim_t *claims,
+    size_t claim_count, char ***names, size_t *count)
+{
+	size_t at;
+
+	*names = NULL;
+	*count = 0u;
+	if (claim_count == 0u) {
+		return 1;
+	}
+	*names = calloc(claim_count, sizeof(**names));
+	if (!*names) {
+		return 0;
+	}
+	for (at = 0u; at < claim_count; at++) {
+		if (!claims[at].name || strcmp(claims[at].name, "lo") == 0 ||
+		    dhcpcd_leaves(etc_root, claims[at].name)) {
+			continue;
+		}
+		(*names)[*count] = duplicate(claims[at].name);
+		if (!(*names)[*count]) {
+			return 0;
+		}
+		(*count)++;
+	}
+	if (*count > 1u) {
+		qsort(*names, *count, sizeof(**names), compare_names);
+	}
+	return 1;
+}
+
 /* Put one contender into the answer, taking the names with it. */
 static int push(ncfg_contenders_t *out, const char *name, const char *remedy, char **names,
     size_t count)
@@ -932,6 +1083,7 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 	int    netifd = 0;
 	int    connman = 0;
 	char   iwd[32];
+	int    dhcpcd = 0;
 
 	if (!out) {
 		ncfg_error_set(err, err_size, "there is nowhere to put what was found");
@@ -948,7 +1100,7 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 		return 1;
 	}
 	running_daemons(where->proc_root, &network_manager, &networkd, &netifd, &connman, iwd,
-	    sizeof(iwd));
+	    sizeof(iwd), &dhcpcd);
 
 	/*
 	 * `NetworkManager` writes `<run>/NetworkManager/devices/<ifindex>`. The
@@ -1082,6 +1234,31 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 			} else {
 				release_names(names, count);
 			}
+		}
+	}
+
+	/* A manager dhcpcd, by its title and `/etc/dhcpcd.conf`. An unreadable
+	 * `/proc` finds none, as for iwd: the title is the only evidence. */
+	names = NULL;
+	count = 0u;
+	if (dhcpcd && where->etc_root) {
+		if (!dhcpcd_claims(where->etc_root, claims, claim_count, &names, &count)) {
+			release_names(names, count);
+			ncfg_contenders_free(out);
+			ncfg_error_set(err, err_size, "there was no memory to read what dhcpcd claims");
+			return 0;
+		}
+		if (count > 0u) {
+			if (!push(out, "dhcpcd", "add denyinterfaces {} to /etc/dhcpcd.conf, then "
+			    "restart dhcpcd", names, count)) {
+				release_names(names, count);
+				ncfg_contenders_free(out);
+				ncfg_error_set(err, err_size,
+				    "there was no memory to record what dhcpcd claims");
+				return 0;
+			}
+		} else {
+			release_names(names, count);
 		}
 	}
 

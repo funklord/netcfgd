@@ -787,6 +787,16 @@ static void ifupdown_holds_what_ifup_wrote(void)
 	check(ncfg_contenders_find(&where, claims, 5u, &found, err, sizeof(err)) &&
 	    !by_name(&found, "ifupdown"), "and a machine with no ifstate has no ifupdown");
 	ncfg_contenders_free(&found);
+
+	/* ifupdown-ng, Alpine's, as alpine:3.21 wrote it. */
+	(void)snprintf(path, sizeof(path), "%s/ifstate", run_root);
+	put(path, "lo=lo 1 explicit\neth1=eth1 1 explicit\n");
+	check(ncfg_contenders_find(&where, claims, 5u, &found, err, sizeof(err)) &&
+	    (ifupdown = by_name(&found, "ifupdown")) != NULL && ifupdown->interface_count == 1u &&
+	    strcmp(ifupdown->interfaces[0], "eth1") == 0,
+	    "ifupdown-ng's /run/ifstate is read the same way");
+	ncfg_contenders_free(&found);
+	forget(path);
 }
 
 /*
@@ -923,6 +933,61 @@ static void iwd_holds_the_radios_its_options_leave_it(void)
 	check(ncfg_contenders_find(&where, claims, 3u, &found, err, sizeof(err)) &&
 	    !by_name(&found, "iwd"), "a stopped iwd holds nothing");
 	ncfg_contenders_free(&found);
+}
+
+/*
+ * A dhcpcd running as a manager takes every interface its configuration does
+ * not leave out (10.850). Told apart from netcfgd's own by its title, which is
+ * what dhcpcd 10.1 was measured writing: `[manager]` for the one started with
+ * no interface, the interface's name for one started on it.
+ */
+static void a_manager_dhcpcd_holds_what_its_configuration_does_not_deny(void)
+{
+	static const ncfg_interface_claim_t claims[] = {
+		{ "eth0", 2u, 0, NULL }, { "veth0", 3u, 0, "veth" }, { "br0", 4u, 0, "bridge" },
+		{ "lo", 1u, 0, NULL }
+	};
+	static const char manager[] = "dhcpcd: [manager] [ip4] [ip6]\0\0\0";
+	static const char older[] = "dhcpcd: [master] [ip4]\0\0";
+	static const char one[] = "dhcpcd: eth0 [ip4]\0\0\0";
+	ncfg_contention_where_t where;
+	ncfg_contenders_t       found;
+	const ncfg_contender_t *dhcpcd;
+	char                    err[NCFG_ERROR_MAX];
+	char                    path[PATH_BYTES + 32];
+	char                    remedy[NCFG_REMEDY_MAX];
+
+	here(&where);
+	(void)snprintf(path, sizeof(path), "%s/dhcpcd.conf", etc_root);
+	put(path, "# denyinterfaces eth0\nhostname\ndenyinterfaces veth*\n");
+	process(4700u, "dhcpcd");
+	iwd_started_with(4700u, manager, sizeof(manager));
+	check(ncfg_contenders_find(&where, claims, 4u, &found, err, sizeof(err)),
+	    "a manager dhcpcd is looked at");
+	dhcpcd = by_name(&found, "dhcpcd");
+	check(dhcpcd && dhcpcd->interface_count == 2u && strcmp(dhcpcd->interfaces[0], "br0") == 0 &&
+	    strcmp(dhcpcd->interfaces[1], "eth0") == 0,
+	    "it holds every interface `denyinterfaces veth*` leaves, and never lo");
+	check(dhcpcd && ncfg_contender_remedy_for(dhcpcd, "eth0", remedy, sizeof(remedy)) &&
+	    strstr(remedy, "denyinterfaces eth0") && strstr(remedy, "/etc/dhcpcd.conf"),
+	    "  and the remedy names the key and the file");
+	ncfg_contenders_free(&found);
+
+	put(path, "allowinterfaces eth*, wlan0\n");
+	iwd_started_with(4700u, older, sizeof(older));
+	check(ncfg_contenders_find(&where, claims, 4u, &found, err, sizeof(err)) &&
+	    (dhcpcd = by_name(&found, "dhcpcd")) != NULL && dhcpcd->interface_count == 1u &&
+	    strcmp(dhcpcd->interfaces[0], "eth0") == 0,
+	    "an older `[master]` with `allowinterfaces` holds only what the list allows");
+	ncfg_contenders_free(&found);
+
+	iwd_started_with(4700u, one, sizeof(one));
+	check(ncfg_contenders_find(&where, claims, 4u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "dhcpcd"),
+	    "a dhcpcd started on one interface, as netcfgd starts its own, is no manager");
+	ncfg_contenders_free(&found);
+	stop_process(4700u);
+	forget(path);
 }
 
 /* Where the daemon reads when nobody has said otherwise, asserted by reading
@@ -1177,6 +1242,7 @@ int main(void)
 	ifupdown_holds_what_ifup_wrote();
 	connman_holds_what_its_blacklist_does_not_spare();
 	iwd_holds_the_radios_its_options_leave_it();
+	a_manager_dhcpcd_holds_what_its_configuration_does_not_deny();
 	state_from_another_namespace_claims_nothing(dir);
 	the_machine_is_run_and_proc();
 	the_measured_reply_parses();
