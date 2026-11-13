@@ -1073,8 +1073,11 @@ as new decisions** -- recorded here so they stop reading as open:
 
 **And one question rather than a task: could this run on a microcontroller?**
 Put by the holder 2026-09-02. The core turns out to be portable already and the
-`Op` enum carries no platform in it -- what is unmeasured is RAM, which is the
-wall. *Asked: could this run on a microcontroller?* below has the numbers.
+`Op` enum carries no platform in it, and the C core's RAM, once the wall, measured
+about 32 KB to parse, compile and plan a home router (2026-11-13). Its flash, and
+the four calls that link the executor into it, are what a port meets first; hull's
+boards are where it may be tested. *Asked: could this run on a microcontroller?*
+below has the numbers.
 
 **And a question for later research: could netcfgd cooperate with a UniFi
 controller for wifi handover?** Put by the holder 2026-09-16. Nothing has been
@@ -1219,7 +1222,19 @@ one interface that also fits the small and odd architectures is the hard
 part. A netcfgd port would then target an interface that does not move.
 **Zephyr is a second path, to be evaluated** (holder, 2026-11-02): HAL9001
 predates it, so Zephyr is both a possible target for netcfgd in its own right
-and a source of knowledge for HAL9001's design. Not yet looked at here. What a
+and a source of knowledge for HAL9001's design. Not yet looked at here.
+
+**And a place to test it is coming** (holder, 2026-11-13: "we may soon be able to test an
+embedded version using hal9001 on hull or zephyr on hull"). hull boots microcontroller
+boards from their firmware since 2026-11-13, `(tuning (pc (machine BOARD)))` -- the AVR,
+Cortex-M and 8051 boards qemu and s51 emulate, built for hal9001, which runs its shell on
+four of them, the STM32L475 of `b-l475e-iot01a` the newest. **What a netcfgd test there
+needs that is not there yet is a network**: hull refuses one on a board today ("a board's
+serial port is its one way in"), and of its Cortex-M boards only `lm3s6965evb`
+(`stellaris_enet`) and `mps2-an385` (`lan9118`) have a network controller in qemu 10.0;
+the STM32 boards, the L475 among them, have none. Whether a board gets one is hull's to
+decide; a firmware with a stack (Zephyr's, or lwIP under hal9001) would be netcfgd's
+side. The core's RAM and size, below, are what such a firmware would carry. What a
 netcfgd evaluation would check is whether Zephyr's own network management
 (interface events, Wi-Fi management, DHCP client and server) can carry the
 portable `Op` intents, and which of the two ESP parts it supports. Its
@@ -1264,14 +1279,30 @@ encoding in its payload. `LinkSetOffloads` carries ethtool feature names as
 free strings, which is the loosest thing in the enum -- in the never-emitted
 22, so it costs nothing until it does not.
 
-**RAM is the wall, and it is the one thing not measured.** `make rss` reports
-508 KB as netcfgd's own on a Linux build carrying the socket server, the TUI
-and every backend. An ESP32 has 520 KB of SRAM and a C3 has 400 KB, so that
-figure is the whole chip before FreeRTOS, lwIP and the wifi stack exist. What
-model, compile and plan cost *alone* has never been measured, and that number
-decides whether this is possible rather than merely well-shaped. It is a
-`make cross`-shaped experiment and it is the next thing to do if the question
-is pursued.
+**RAM was the wall, and on the C core it is not one** (measured 2026-11-13). `make rss`
+reports 508 KB as netcfgd's own on a Linux build carrying the socket server, the TUI and
+every backend, and an ESP32 has 520 KB of SRAM, so the question was what parse, compile
+and plan cost *alone*. A harness linking `libncfg.a`, parsing and compiling the home router
+of `doc/first-run.md` section 10 (WAN by DHCP with a /56 delegated and NAT, a four-port
+bridge, the LAN's DHCP server and advertisements), then planning it against five observed
+links: **peak heap 25.7 KB, plus 4 KB of allocator overhead, and 5.8 KB of stack** under
+valgrind's massif, glibc's included; 391 allocations, 74 KB in all over the run. That fits
+an ESP32 with room for FreeRTOS, lwIP and the wifi stack, and the 128 KB of an STM32L4.
+One document measured, so a bigger one scales from here rather than being known.
+
+**Flash is the larger number, and four edges make it larger than it need be.** The same
+harness links 397 KB of text and 82 KB of read-only data on x86-64 at `-Os` -- a proxy:
+nothing here builds for a Cortex-M, having no libc for one, and Thumb-2 is usually
+smaller. The 72 KB of `.data.rel.ro` beside it is the field tables, `static const`, writable
+only because Debian builds position-independent; without PIC they are flash. **114 archive
+members are linked, and the executor comes in by four calls**: the planner's `link.o` asks
+`ncfg_apply_supported`, which takes `apply.o` and with it every backend, the supplicant,
+the journal and the daemon's state; `nat.o` asks `ncfg_nft_firewall_matches` of the
+nftables encoder; the dnsmasq backend's summary takes process handling; and `lower.o`
+frees provenance through `host/state_files.o`, which brings the state directory, its lock
+and the log. Stubbing the first three leaves 70 members and 361 KB -- `--gc-sections` had
+already dropped what nothing called -- so most of the size is real compile-and-plan code,
+and a port's first act is cutting those edges so the core links without the executor.
 
 **The tools are the easy half, and that is the surprise.** Most of what netcfgd
 delegates to on Linux is already inside ESP-IDF: `dhcp_start()` for the lease,
