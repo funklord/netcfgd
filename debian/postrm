@@ -20,6 +20,14 @@ purge)
 	if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
 		systemctl daemon-reload >/dev/null 2>&1 || true
 	fi
+	# The boot links `netcfgd_select.sh netcfgd` made on a machine without
+	# systemd (10.842). The init script is a conffile, so it outlives
+	# `remove` and its links are harmless until purge takes the script --
+	# and then they point at nothing. dh_installinit would write this, and
+	# debian/rules keeps it out.
+	if command -v update-rc.d >/dev/null 2>&1; then
+		update-rc.d netcfgd remove >/dev/null 2>&1 || true
+	fi
 	rmdir --ignore-fail-on-non-empty /etc/netcfgd 2>/dev/null || true
 	;;
 esac

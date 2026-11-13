@@ -104,9 +104,9 @@ configure)
 	if [ -z "$2" ] && [ -x /usr/sbin/netcfgd_select.sh ]; then
 		/usr/sbin/netcfgd_select.sh netcfgd || true
 		echo "netcfgd: installed, and it is now this machine's network daemon."
-		echo "netcfgd:   the other network services are stopped, disabled and"
-		echo "netcfgd:   masked -- the SERVICES only. No package was removed and"
-		echo "netcfgd:   no binary renamed."
+		echo "netcfgd:   the other network services are stopped and disabled,"
+		echo "netcfgd:   and masked where systemd runs -- the SERVICES only. No"
+		echo "netcfgd:   package was removed and no binary renamed."
 	else
 		echo "netcfgd: upgraded. Which daemon owns the network is unchanged:"
 		echo "netcfgd:   netcfgd_select.sh --dry-run   # what a switch would do"

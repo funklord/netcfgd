@@ -328,6 +328,72 @@ unit_of() {
 	esac
 }
 
+# The same, for a machine with no systemd: the scripts in /etc/init.d, which
+# sysvinit and OpenRC both read. **The names are the distributions', not this
+# script's**, and they were assumed equal until ml350g6-01 -- Devuan, sysvinit
+# -- was checked against it (10.842): `stand_down ifupdown` looked for
+# /etc/init.d/ifupdown where Debian's is `networking`, and NetworkManager's is
+# `network-manager` on Debian, `networkmanager` on Alpine and `NetworkManager`
+# on Gentoo. Every candidate is listed and whichever exists is acted on.
+#
+# The radios have none to list: Debian's wpasupplicant and iwd ship no init
+# script, and are started over D-Bus or by the manager that wants them.
+# `netcfgd-nm` is second for `bring_up`'s reason in `unit_of`: standing netcfgd
+# down stops it, and selecting netcfgd does not switch it on.
+script_of() {
+	case "$1" in
+	netcfgd) echo 'netcfgd netcfgd-nm' ;;
+	networkmanager) echo 'network-manager networkmanager NetworkManager' ;;
+	connman) echo connman ;;
+	ifupdown) echo networking ;;
+	wicd) echo wicd ;;
+	dhcpcd) echo dhcpcd ;;
+	modemmanager) echo 'modemmanager ModemManager' ;;
+	esac
+}
+
+# Stopped, and kept from starting at the next boot. **The stop alone was all
+# this did on sysvinit**, so the manager came back at the next boot beside
+# netcfgd -- while the postinst said it had been disabled. `update-rc.d
+# disable` is sysvinit's `systemctl disable`: it turns the start links into
+# stop links and leaves the script, so `sysv_up` can undo it. There is no
+# mask; a disabled script that something starts by hand runs.
+sysv_down() {
+	for script in $(script_of "$1"); do
+		[ -x "/etc/init.d/$script" ] || continue
+		if command -v rc-update >/dev/null 2>&1; then
+			run rc-service "$script" stop
+			run rc-update del "$script" default
+		else
+			run "/etc/init.d/$script" stop
+			if command -v update-rc.d >/dev/null 2>&1; then
+				run update-rc.d "$script" disable
+			fi
+		fi
+	done
+}
+
+# Started, and started at the next boot -- the first script that exists only,
+# as `bring_up` starts only the first unit. `defaults` makes the links where
+# the package made none, which this tree's deb does not (debian/rules keeps
+# dh_installinit out); `enable` undoes an earlier `sysv_down`.
+sysv_up() {
+	for script in $(script_of "$1"); do
+		[ -x "/etc/init.d/$script" ] || continue
+		if command -v rc-update >/dev/null 2>&1; then
+			run rc-update add "$script" default
+			run rc-service "$script" start
+		else
+			if command -v update-rc.d >/dev/null 2>&1; then
+				run update-rc.d "$script" defaults
+				run update-rc.d "$script" enable
+			fi
+			run "/etc/init.d/$script" start
+		fi
+		return 0
+	done
+}
+
 # The per-interface files a stopped daemon leaves claiming interfaces it no
 # longer manages. Empty for the daemons that leave none.
 claims_of() {
@@ -671,11 +737,8 @@ stand_down() {
 			# makes it stay down.
 			run systemctl mask "$unit"
 		done
-	elif command -v rc-update >/dev/null 2>&1; then
-		run rc-service "$manager" stop
-		run rc-update del "$manager" default
-	elif [ -x "/etc/init.d/$manager" ]; then
-		run "/etc/init.d/$manager" stop
+	else
+		sysv_down "$manager"
 	fi
 
 	sweep_children "$manager"
@@ -722,11 +785,8 @@ bring_up() {
 			*-wait-online.service) run systemctl enable "$unit" ;;
 			esac
 		done
-	elif command -v rc-update >/dev/null 2>&1; then
-		run rc-update add "$manager" default
-		run rc-service "$manager" start
-	elif [ -x "/etc/init.d/$manager" ]; then
-		run "/etc/init.d/$manager" start
+	else
+		sysv_up "$manager"
 	fi
 }
 
@@ -760,7 +820,14 @@ unmask_all() {
 # function is only ever reached for a service the target does not need, so
 # `netcfgd_select.sh networkmanager` cannot arrive here for the supplicant.
 stand_aside() {
-	[ -d /run/systemd/system ] || return 0
+	# Without systemd there is no D-Bus revival to mask against, so stopping
+	# and disabling is the whole of it. dhcpcd's script stops with
+	# `dhcpcd -x` and no interface, which dhcpcd(8) applies to the master
+	# process only -- netcfgd runs its clients per interface, so they stay.
+	if [ ! -d /run/systemd/system ]; then
+		sysv_down "$1"
+		return 0
+	fi
 	mask_it=
 	if echo " $revived_over_dbus " | grep -q " $1 "; then
 		mask_it=yes
@@ -783,7 +850,10 @@ stand_aside() {
 # of this script -- or of the version that masked everything -- may have left
 # it that way.
 ensure_service() {
-	[ -d /run/systemd/system ] || return 0
+	if [ ! -d /run/systemd/system ]; then
+		sysv_up "$1"
+		return 0
+	fi
 	for unit in $(unit_of "$1"); do
 		run systemctl unmask "$unit"
 	done
@@ -831,6 +901,14 @@ none)
 	if [ -d /run/systemd/system ]; then
 		for unit in $(unit_of netcfgd); do
 			run systemctl stop "$unit"
+		done
+	else
+		# Stopped and left enabled, as the units are: this is prerm's call,
+		# and the postrm's purge removes the links with the script.
+		for script in $(script_of netcfgd); do
+			if [ -x "/etc/init.d/$script" ]; then
+				run "/etc/init.d/$script" stop
+			fi
 		done
 	fi
 	sweep_children netcfgd

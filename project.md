@@ -12737,6 +12737,75 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.842 ml350g6-01 against netcfgd: what it has, and the switcher's sysvinit half
+
+**Asked by the holder 2026-11-13: is everything this machine and its network do
+supported by netcfgd already?** Read from the machine, read-only, and planned:
+a configuration describing it, `ncfg plan` against the live kernel as the user.
+
+What it runs: Devuan 6 (sysvinit, no systemd), kernel 6.12. `eth0` takes DHCPv4
+from 10.0.0.1, by ifupdown's `dhclient`; `eth1` (onboard) and `eth2`/`eth3` (the
+ConnectX-3 Pro, both ports Ethernet, RoCE device `rocep5s0`) are up with no
+carrier and nothing configured. `/etc/network/interfaces` also has `ib0`
+static 10.1.0.5/24, which does not exist: the ports run Ethernet (10.586).
+Alongside: **connman, running too**, which owns `/etc/resolv.conf` through its
+DNS proxy on 127.0.0.1 and ::1, gave docker's veth a 169.254 address and a
+default route, and keeps a profile directory for every veth it has ever seen --
+11,796 under `/var/lib/connman`, most of them the live suites' veths. dhcpcd's
+init script is enabled at boot and not running. docker (`docker0`), libvirt
+(its `default` network not autostarted), VirtualBox, nftables and
+netfilter-persistent at boot (`/etc/nftables.conf` begins `flush ruleset`, in
+rcS, before any runlevel-2 service), OpenVPN with PrivadoVPN profiles and
+nothing autostarted, strongSwan with one IKEv2 EAP connection `auto=add`,
+avahi, ntpsec, opensm, iwpmd, Bluetooth, ofono and dundee, hostapd's script
+with no configuration. No Wi-Fi interface.
+
+**Served by netcfgd today:** `eth0`'s DHCP (planned as `dhcp4`, nothing else
+wanted); the resolver file connman writes now (`write_resolv_conf`, or
+dnsmasq/unbound); docker's, libvirt's and VirtualBox's own interfaces and
+tables, which netcfgd leaves as foreign and does not touch (0318; `docker*`,
+`veth*`, `virbr*` out of connectivity); the ConnectX's port types, read and
+reported (10.586); an OpenVPN profile as an `openvpn` device (0046); the
+sysvinit script (10.183). The leftover `bond0`, `dummy0`, `ifb0/1` and the
+tunnel devices are the modules' own defaults from loading, not configuration.
+
+**Not served, each already a decision:** IPsec -- strongSwan's IKEv2 client --
+is 0036's end stage, not built; netcfgd would leave strongSwan running as it
+is. IPoIB (`ib0`) is not being built (10.586), and nothing here needs it.
+Setting a port's type is 10.586's open half. opensm, iwpmd, NTP and mDNS are
+not networking configuration and stay their own daemons.
+
+**The one fault, and it was netcfgd's: taking this machine over would not have
+held past a reboot.** `netcfgd_select.sh` -- what the deb's postinst runs --
+on a machine with no systemd only *stopped* a rival through
+`/etc/init.d/<name>`, and only where `<name>` was the switcher's own word for
+it. So on Devuan: connman was stopped and stayed enabled, and at the next boot
+came back beside netcfgd; ifupdown was looked for as `/etc/init.d/ifupdown`,
+where Debian's script is `networking`, so it was never stopped at all and its
+`dhclient` kept `eth0`; NetworkManager is `network-manager` there, so the same;
+the dhcpcd service was left alone; and netcfgd was started and **never given
+boot links** -- the deb keeps dh_installinit out -- so after a reboot it did not
+start, while the postinst said the others were "stopped, disabled and masked".
+
+Now: `script_of` names each manager's script as Debian, Alpine and Gentoo spell
+it, and whichever exists is acted on. Without systemd, standing one down is
+its stop and `update-rc.d NAME disable` (or `rc-update del` under OpenRC), and
+selecting one is `update-rc.d NAME defaults` and `enable` before its start.
+The radios and tools follow the same path (dhcpcd's script stops with
+`dhcpcd -x` and no interface, which dhcpcd(8) applies to the master only, so
+netcfgd's per-interface clients stay); `none` stops netcfgd's script; the
+postrm's purge removes its links; and the postinst says "masked" only where
+systemd runs. `tests/live/select.sh` gains 20 checks in a namespace with stub
+init scripts and a stub `update-rc.d`, and 4 for OpenRC; with the old script,
+13 of them fail.
+
+**What the machine would need from its holder to move**, if it ever does:
+`netcfgd_select.sh netcfgd` stops connman and ifupdown now and keeps them
+down; the `ib0` stanza goes with ifupdown; and connman's 11,796 profile
+directories are connman's to clear (`/var/lib/connman/ethernet_*_cable`), which
+nothing here does. Not done: this is the holder's working machine, and a
+switch is theirs to make.
+
 ## 10.841 On the router: the guest bridge comes up, and the plan stops saying it will not
 
 10.839's guest network was added to `tests/hull/malta/bridge.sh`, run on both router

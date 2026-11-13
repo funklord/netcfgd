@@ -410,6 +410,92 @@ check "and it succeeds" \
 check "--no-wait skips the check entirely" \
 	"$(grep -c "is now this machine.s network daemon" "$work/netcfgd.out" 2>/dev/null || true)" "1"
 
+# **And with no systemd at all**, which is what ml350g6-01 runs -- Devuan,
+# sysvinit (10.842). Before, the switcher only *stopped* a rival there: no
+# `update-rc.d disable`, so connman and ifupdown came back at the next boot
+# beside netcfgd; ifupdown was looked for as /etc/init.d/ifupdown where Debian
+# names it `networking`; and netcfgd itself was started and never enabled, so
+# it did not start at the next boot at all -- while the postinst said the
+# others were disabled.
+#
+# A tmpfs over /etc/init.d holds stub scripts that record what they were asked,
+# and stubs for update-rc.d (and, in the second pass, OpenRC's two commands).
+# /run is a fresh tmpfs with no /run/systemd/system, which is what the script
+# reads as "not systemd".
+mkdir -p "$work/sysv-bin"
+cat > "$work/sysv-bin/update-rc.d" <<'STUB'
+#!/bin/sh
+echo "update-rc.d $*" >> "$SEL_LOG"
+STUB
+chmod +x "$work/sysv-bin/update-rc.d"
+mkdir -p "$work/openrc-bin"
+for tool in rc-update rc-service; do
+	printf '#!/bin/sh\necho "%s $*" >> "$SEL_LOG"\n' "$tool" > "$work/openrc-bin/$tool"
+	chmod +x "$work/openrc-bin/$tool"
+done
+sysv_run() {
+	# $1 the log's name, $2 the stub directory, $3.. the targets in order
+	log=$1 bin=$2
+	shift 2
+	SEL_LOG="$work/$log.log"; export SEL_LOG
+	: > "$SEL_LOG"
+	unshare -rmn sh -c '
+		set -eu
+		work=$1; sel=$2; bin=$3
+		shift 3
+		mount -t tmpfs tmpfs /run
+		mount -t tmpfs tmpfs /etc/init.d
+		for script in netcfgd netcfgd-nm connman networking network-manager dhcpcd; do
+			printf "#!/bin/sh\necho \"init %s \$*\" >> \"\$SEL_LOG\"\n" "$script" > "/etc/init.d/$script"
+			chmod +x "/etc/init.d/$script"
+		done
+		export PATH="$work/$bin:$work/bin:$PATH"
+		for target in "$@"; do
+			echo "== $target" >> "$SEL_LOG"
+			sh "$sel" --no-wait "$target" > /dev/null 2>&1 || true
+		done
+	' sh "$work" "$select_sh" "$bin" "$@" 2>/dev/null || true
+}
+# Lines of one selection's section of the log.
+section() { sed -n "/^== $2\$/,/^== /p" "$work/$1.log" | grep -c "^$3\$" || true; }
+
+if command -v rc-update > /dev/null 2>&1; then
+	echo "select.sh: this host has rc-update, so the update-rc.d pass is the OpenRC one below"
+else
+	sysv_run sysv sysv-bin netcfgd networkmanager none
+	check "sysvinit: selecting netcfgd stops connman" "$(section sysv netcfgd 'init connman stop')" "1"
+	check "and keeps it from starting at the next boot" \
+		"$(section sysv netcfgd 'update-rc.d connman disable')" "1"
+	check "ifupdown is the script Debian names networking, and it is stopped" \
+		"$(section sysv netcfgd 'init networking stop')" "1"
+	check "and disabled" "$(section sysv netcfgd 'update-rc.d networking disable')" "1"
+	check "NetworkManager is Debian's network-manager, and is disabled" \
+		"$(section sysv netcfgd 'update-rc.d network-manager disable')" "1"
+	check "a dhcpcd service is a rival to netcfgd's clients, and is disabled" \
+		"$(section sysv netcfgd 'update-rc.d dhcpcd disable')" "1"
+	check "netcfgd gets its boot links" "$(section sysv netcfgd 'update-rc.d netcfgd defaults')" "1"
+	check "is enabled, in case an earlier switch disabled it" \
+		"$(section sysv netcfgd 'update-rc.d netcfgd enable')" "1"
+	check "and is started" "$(section sysv netcfgd 'init netcfgd start')" "1"
+	check "while its NetworkManager shim is not switched on" \
+		"$(section sysv netcfgd 'init netcfgd-nm start')" "0"
+	check "selecting NetworkManager disables netcfgd" \
+		"$(section sysv networkmanager 'update-rc.d netcfgd disable')" "1"
+	check "and its shim" "$(section sysv networkmanager 'update-rc.d netcfgd-nm disable')" "1"
+	check "and enables network-manager" \
+		"$(section sysv networkmanager 'update-rc.d network-manager enable')" "1"
+	check "and starts it" "$(section sysv networkmanager 'init network-manager start')" "1"
+	check "none stops netcfgd, which is what prerm needs" "$(section sysv none 'init netcfgd stop')" "1"
+	check "and enables nothing" "$(sed -n '/^== none$/,$p' "$work/sysv.log" | grep -c ' enable$' || true)" "0"
+fi
+sysv_run openrc openrc-bin netcfgd
+check "OpenRC: selecting netcfgd takes connman out of the default runlevel" \
+	"$(section openrc netcfgd 'rc-update del connman default')" "1"
+check "and ifupdown by its script name, networking" \
+	"$(section openrc netcfgd 'rc-update del networking default')" "1"
+check "and puts netcfgd in it" "$(section openrc netcfgd 'rc-update add netcfgd default')" "1"
+check "and starts it" "$(section openrc netcfgd 'rc-service netcfgd start')" "1"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "select.sh: all checks passed"
