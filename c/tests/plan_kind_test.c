@@ -342,6 +342,7 @@ static long action_of(const ncfg_plan_t *plan, int kind, const char *name)
 		const char      *named = kind == NCFG_OP_LINK_CREATE ? op->u.link_create.name
 		                                                    : op->u.named.name;
 
+
 		if (op->kind == kind && named && strcmp(named, name) == 0) {
 			return (long)plan->actions[at].id;
 		}
@@ -392,6 +393,30 @@ static void a_guest_bridge_on_a_vlan_comes_up_in_order(void)
 	    "a VLAN is created after its parent, and waits on it, whatever the names");
 	check(lan0_up >= 0 && vlan_up > lan0_up && depends(plan, vlan_up, lan0_up),
 	    "  and a bridge's VLAN's parent is raised, before the VLAN");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * Teardown is the reverse (10.840): what rides on a link is deleted before it.
+ * In the kernel's order `apar` went first, took its VLAN `zvlan` with it, and
+ * the VLAN's own delete failed and stopped the apply.
+ */
+static void a_vlan_is_deleted_before_its_parent(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "", "", "",
+	    "\"links\":["
+	    "{\"name\":\"apar\",\"index\":2,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"ours\",\"kind\":\"dummy\"},"
+	    "{\"name\":\"zvlan\",\"index\":3,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"ours\",\"kind\":\"vlan\",\"parent\":\"apar\"}]",
+	    &document, &observed);
+	long parent = action_of(plan, NCFG_OP_LINK_DELETE, "apar");
+	long child = action_of(plan, NCFG_OP_LINK_DELETE, "zvlan");
+
+	check(parent >= 0 && child >= 0 && child < parent,
+	    "a VLAN is deleted before the parent it rides on, whatever the order observed");
 	planfix_release(plan, document, observed);
 }
 
@@ -1041,6 +1066,7 @@ int main(void)
 	a_bond_with_members_is_told_rather_than_tried();
 	a_vlan_parent_is_brought_up();
 	a_guest_bridge_on_a_vlan_comes_up_in_order();
+	a_vlan_is_deleted_before_its_parent();
 	a_mode_netcfgd_cannot_name_is_not_corrected();
 	a_macvlan_moves_among_the_three_modes_the_kernel_takes();
 	a_macvlan_passthru_transition_is_told_rather_than_tried();

@@ -12737,6 +12737,16 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.840 Teardown in stack order: a VLAN before its parent
+
+**The other direction of 10.839's lens.** With the document emptied, a VLAN `zvlan` on a
+dummy `apar` was torn down in the kernel's order: `apar` deleted first, the kernel took the
+VLAN with it, and `link.delete zvlan` failed, so `ncfg apply` reported a stop on a machine
+that had reached exactly what the document asked. `teardown_links` now deletes deepest
+first, following each observed link's `parent` (bounded at eight), the reverse of
+creation's parent first. Measured in a namespace: the VLAN, then its parent, both `ok`.
+`plan_kind_test` holds it, from an observation listing the parent first.
+
 ## 10.839 A guest bridge on a VLAN: created out of order, and its parent left down
 
 **Derived from 10.833 and 10.835's shape, one level deeper**: a router's guest network is

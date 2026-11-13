@@ -634,37 +634,67 @@ static void teardown_addresses(ncfg_builder_t *builder)
 	}
 }
 
+/* How many links this one rides on, through observed parents: 0 for one on
+ * nothing. Bounded, since a chain longer than this is a kernel loop or a
+ * document nobody wrote. */
+static int stack_depth(const ncfg_observed_t *observed, const ncfg_observed_link_t *link)
+{
+	int depth = 0;
+
+	while (link && link->parent && depth < 8) {
+		link = ncfg_observed_link(observed, link->parent);
+		if (!link) {
+			break;
+		}
+		depth++;
+	}
+	return depth;
+}
+
 static void teardown_links(ncfg_builder_t *builder)
 {
 	size_t i;
+	int    depth;
 
-	for (i = 0; i < builder->observed->link_count; i++) {
-		const ncfg_observed_link_t *link = &builder->observed->links[i];
-		ncfg_op_t                   op;
-		ncfg_reason_t               reason;
+	/*
+	 * **What rides on a link goes before the link** (project.md 10.840), the
+	 * reverse of creation's parent first. In the kernel's order a parent could
+	 * go first, `apar` before its VLAN `zvlan`: deleting it took the VLAN with
+	 * it, the VLAN's own delete then failed, and the apply stopped on a
+	 * machine that had reached exactly what the document asked. Deepest first.
+	 */
+	for (depth = 8; depth >= 0; depth--) {
+		for (i = 0; i < builder->observed->link_count; i++) {
+			const ncfg_observed_link_t *link = &builder->observed->links[i];
+			ncfg_op_t                   op;
+			ncfg_reason_t               reason;
 
-		if (!ncfg_ownership_may_remove(link->ownership)) {
-			continue;
+			if (stack_depth(builder->observed, link) != depth) {
+				continue;
+			}
+			if (!ncfg_ownership_may_remove(link->ownership)) {
+				continue;
+			}
+			/*
+			 * **Devices, not interfaces.** What the document asks to exist is
+			 * stated on the device, and a device need not have an interface: an
+			 * `ifb` carries no address and never will, so asking the interface
+			 * list whether anything wants it answers no and deletes the thing that
+			 * was just created -- an apply that never converges.
+			 */
+			if (ncfg_plan_device(builder->desired, link->name)) {
+				continue;
+			}
+			memset(&op, 0, sizeof(op));
+			op.kind = NCFG_OP_LINK_DELETE;
+			op.u.named.name = link->name;
+			reason = ncfg_plan_reason_unwanted(link->name, "kind",
+			    link->kind ? link->kind : "<absent>");
+			/* A deleted link cannot be recreated without knowing how it was made,
+			 * and the observed model records only what the kernel says.
+			 * Irreversible, and the warning `ncfg_plan_add` emits says so. */
+			(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, NULL);
 		}
-		/*
-		 * **Devices, not interfaces.** What the document asks to exist is
-		 * stated on the device, and a device need not have an interface: an
-		 * `ifb` carries no address and never will, so asking the interface
-		 * list whether anything wants it answers no and deletes the thing that
-		 * was just created -- an apply that never converges.
-		 */
-		if (ncfg_plan_device(builder->desired, link->name)) {
-			continue;
-		}
-		memset(&op, 0, sizeof(op));
-		op.kind = NCFG_OP_LINK_DELETE;
-		op.u.named.name = link->name;
-		reason = ncfg_plan_reason_unwanted(link->name, "kind",
-		    link->kind ? link->kind : "<absent>");
-		/* A deleted link cannot be recreated without knowing how it was made,
-		 * and the observed model records only what the kernel says.
-		 * Irreversible, and the warning `ncfg_plan_add` emits says so. */
-		(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, NULL);
 	}
 }
 
