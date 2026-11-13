@@ -53,6 +53,15 @@ set -eu
 
 me=${0##*/}
 
+# **The administrative directories, appended.** `update-rc.d`, `rc-update` and
+# `dpkg-divert`'s neighbours live in /usr/sbin and /sbin, which an ordinary
+# user's PATH leaves out -- so `--dry-run` run by a user, which is what the
+# postinst tells a person to try, found no `update-rc.d` and previewed a switch
+# that stopped connman and never disabled it, where root's run disables it.
+# Seen on ml350g6-01 (10.845). Appended, so a PATH somebody set wins.
+PATH=$PATH:/usr/sbin:/sbin
+export PATH
+
 usage() {
 	cat <<USAGE
 usage: $me [netcfgd|networkmanager|networkd|none]
@@ -352,6 +361,16 @@ script_of() {
 	esac
 }
 
+# Whether OpenRC is what runs the services, rather than whether it is installed.
+# **Installed is not running**: Debian and Devuan package OpenRC beside
+# sysv-rc, so `rc-update` can be on a machine whose boot reads /etc/rc?.d and
+# never /etc/runlevels -- and the reverse, ml350g6-01, runs sysvinit as pid 1
+# with OpenRC's /etc/init.d/rc wrapper, so /etc/rc?.d there is what nothing
+# reads (10.845). OpenRC writes /run/openrc when it runs.
+openrc_runs() {
+	[ -d /run/openrc ] && command -v rc-update >/dev/null 2>&1
+}
+
 # Stopped, and kept from starting at the next boot. **The stop alone was all
 # this did on sysvinit**, so the manager came back at the next boot beside
 # netcfgd -- while the postinst said it had been disabled. `update-rc.d
@@ -361,7 +380,7 @@ script_of() {
 sysv_down() {
 	for script in $(script_of "$1"); do
 		[ -x "/etc/init.d/$script" ] || continue
-		if command -v rc-update >/dev/null 2>&1; then
+		if openrc_runs; then
 			run rc-service "$script" stop
 			run rc-update del "$script" default
 		else
@@ -380,7 +399,7 @@ sysv_down() {
 sysv_up() {
 	for script in $(script_of "$1"); do
 		[ -x "/etc/init.d/$script" ] || continue
-		if command -v rc-update >/dev/null 2>&1; then
+		if openrc_runs; then
 			run rc-update add "$script" default
 			run rc-service "$script" start
 		else
@@ -431,7 +450,10 @@ claims_of() {
 # in `children_of` already account for.
 pids_by_comm() {
 	for sweep_entry in /proc/[0-9]*; do
-		read -r sweep_comm < "$sweep_entry/comm" 2>/dev/null || continue
+		# stderr first: redirections apply left to right, so `< f 2>/dev/null`
+		# reported every process that exited during the walk -- dozens a run
+		# on a loaded machine -- before the silencing applied.
+		read -r sweep_comm 2>/dev/null < "$sweep_entry/comm" || continue
 		[ "$sweep_comm" = "$1" ] || continue
 		printf '%s\n' "${sweep_entry#/proc/}"
 	done

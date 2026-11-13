@@ -434,35 +434,44 @@ for tool in rc-update rc-service; do
 	chmod +x "$work/openrc-bin/$tool"
 done
 sysv_run() {
-	# $1 the log's name, $2 the stub directory, $3.. the targets in order
-	log=$1 bin=$2
+	# $1 the log's name, $2 `sysv` or `openrc` -- whether OpenRC is running --
+	# and $3.. the targets in order. Both sets of stubs are always on PATH, so
+	# the host's real update-rc.d or rc-update is never what gets called.
+	log=$1 rc=$2
 	shift 2
 	SEL_LOG="$work/$log.log"; export SEL_LOG
 	: > "$SEL_LOG"
 	unshare -rmn sh -c '
 		set -eu
-		work=$1; sel=$2; bin=$3
+		work=$1; sel=$2; rc=$3
 		shift 3
 		mount -t tmpfs tmpfs /run
 		mount -t tmpfs tmpfs /etc/init.d
+		# OpenRC is told apart by its running, not by its being installed.
+		if [ "$rc" = openrc ]; then
+			mkdir -p /run/openrc
+		fi
 		for script in netcfgd netcfgd-nm connman networking network-manager dhcpcd; do
 			printf "#!/bin/sh\necho \"init %s \$*\" >> \"\$SEL_LOG\"\n" "$script" > "/etc/init.d/$script"
 			chmod +x "/etc/init.d/$script"
 		done
-		export PATH="$work/$bin:$work/bin:$PATH"
+		export PATH="$work/sysv-bin:$work/openrc-bin:$work/bin:$PATH"
 		for target in "$@"; do
 			echo "== $target" >> "$SEL_LOG"
 			sh "$sel" --no-wait "$target" > /dev/null 2>&1 || true
 		done
-	' sh "$work" "$select_sh" "$bin" "$@" 2>/dev/null || true
+	' sh "$work" "$select_sh" "$rc" "$@" 2>/dev/null || true
 }
 # Lines of one selection's section of the log.
 section() { sed -n "/^== $2\$/,/^== /p" "$work/$1.log" | grep -c "^$3\$" || true; }
 
-if command -v rc-update > /dev/null 2>&1; then
-	echo "select.sh: this host has rc-update, so the update-rc.d pass is the OpenRC one below"
-else
-	sysv_run sysv sysv-bin netcfgd networkmanager none
+# Run with OpenRC's commands on PATH as well, because installed is not running:
+# ml350g6-01 has `rc-update` and boots by OpenRC, and a sysv-rc machine with the
+# package beside it would otherwise be switched in runlevels nothing reads.
+sysv_run sysv sysv netcfgd networkmanager none
+check "sysvinit with rc-update installed and OpenRC not running uses update-rc.d" \
+	"$(grep -c '^rc-' "$work/sysv.log" || true)" "0"
+{
 	check "sysvinit: selecting netcfgd stops connman" "$(section sysv netcfgd 'init connman stop')" "1"
 	check "and keeps it from starting at the next boot" \
 		"$(section sysv netcfgd 'update-rc.d connman disable')" "1"
@@ -487,14 +496,15 @@ else
 	check "and starts it" "$(section sysv networkmanager 'init network-manager start')" "1"
 	check "none stops netcfgd, which is what prerm needs" "$(section sysv none 'init netcfgd stop')" "1"
 	check "and enables nothing" "$(sed -n '/^== none$/,$p' "$work/sysv.log" | grep -c ' enable$' || true)" "0"
-fi
-sysv_run openrc openrc-bin netcfgd
+}
+sysv_run openrc openrc netcfgd
 check "OpenRC: selecting netcfgd takes connman out of the default runlevel" \
 	"$(section openrc netcfgd 'rc-update del connman default')" "1"
 check "and ifupdown by its script name, networking" \
 	"$(section openrc netcfgd 'rc-update del networking default')" "1"
 check "and puts netcfgd in it" "$(section openrc netcfgd 'rc-update add netcfgd default')" "1"
 check "and starts it" "$(section openrc netcfgd 'rc-service netcfgd start')" "1"
+check "and touches no sysv-rc link while OpenRC runs" "$(grep -c '^update-rc.d' "$work/openrc.log" || true)" "0"
 
 echo
 if [ "$failures" -eq 0 ]; then

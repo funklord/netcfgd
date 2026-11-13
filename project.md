@@ -12737,6 +12737,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.845 The switcher asks which rc system runs, not which is installed
+
+Running `netcfgd_select.sh --dry-run netcfgd` on ml350g6-01 as the user, after
+10.842, previewed a switch that stopped connman and disabled nothing. Two
+causes, and the second corrected 10.842 itself.
+
+- **An ordinary user's PATH has no `/usr/sbin`**, where `update-rc.d` and
+  `rc-update` live, so the preview -- the command the postinst tells a person
+  to try -- never showed the disabling root's run does. The script appends
+  `/usr/sbin:/sbin` to PATH now.
+- **This machine boots by OpenRC under sysvinit**: `/etc/init.d/rc` is
+  OpenRC's wrapper, `/run/openrc` is live and the services are in
+  `/etc/runlevels/default`, while `/etc/rc?.d` holds links nothing reads.
+  Debian and Devuan package OpenRC beside sysv-rc, so `rc-update` being
+  installed says nothing about which one boots -- and choosing by it, as the
+  switcher did, edits runlevels nothing reads on a sysv-rc machine with the
+  package beside it. It now asks `/run/openrc`, which OpenRC writes when it
+  runs. `tests/live/select.sh` runs the sysv-rc pass with `rc-update` on PATH
+  and asserts none of it is called, and the OpenRC pass asserts no
+  `update-rc.d`; with the old choice, the sysv-rc pass fails 14 checks.
+
+And a race made noise: the process scan read `/proc/<pid>/comm` with
+`< file 2>/dev/null`, which opens the file before stderr is redirected, so
+every process that exited during the walk printed an error -- dozens on a
+loaded machine. The redirections are the other way round.
+
+On ml350g6-01 the dry run now reads `rc-service connman stop`, `rc-update del
+connman default`, the same for `networking` and `dhcpcd`, and nothing else.
+
 ## 10.843 ifupdown is a contender, and the remedy has a sysvinit half
 
 10.842's survey, read once more for the shape of its fault -- **a check that
@@ -12768,7 +12797,11 @@ holds -- 11,796 of them here, for interfaces long gone. The switcher stands it d
 supported by netcfgd already?** Read from the machine, read-only, and planned:
 a configuration describing it, `ncfg plan` against the live kernel as the user.
 
-What it runs: Devuan 6 (sysvinit, no systemd), kernel 6.12. `eth0` takes DHCPv4
+What it runs: Devuan 6, kernel 6.12, sysvinit as pid 1 and **OpenRC as the rc
+system** -- `/etc/init.d/rc` is OpenRC's wrapper and the services are in
+`/etc/runlevels/default`; the `/etc/rc?.d` links are present and not what boots.
+This entry first read those links and called it plain sysvinit; 10.845 corrects
+it. `eth0` takes DHCPv4
 from 10.0.0.1, by ifupdown's `dhclient`; `eth1` (onboard) and `eth2`/`eth3` (the
 ConnectX-3 Pro, both ports Ethernet, RoCE device `rocep5s0`) are up with no
 carrier and nothing configured. `/etc/network/interfaces` also has `ib0`
@@ -12801,17 +12834,20 @@ now. IPoIB (`ib0`) is not being built (10.586), and nothing here needs it.
 Setting a port's type is 10.586's open half. opensm, iwpmd, NTP and mDNS are
 not networking configuration and stay their own daemons.
 
-**The one fault, and it was netcfgd's: taking this machine over would not have
-held past a reboot.** `netcfgd_select.sh` -- what the deb's postinst runs --
-on a machine with no systemd only *stopped* a rival through
-`/etc/init.d/<name>`, and only where `<name>` was the switcher's own word for
-it. So on Devuan: connman was stopped and stayed enabled, and at the next boot
-came back beside netcfgd; ifupdown was looked for as `/etc/init.d/ifupdown`,
-where Debian's script is `networking`, so it was never stopped at all and its
-`dhclient` kept `eth0`; NetworkManager is `network-manager` there, so the same;
-the dhcpcd service was left alone; and netcfgd was started and **never given
-boot links** -- the deb keeps dh_installinit out -- so after a reboot it did not
-start, while the postinst said the others were "stopped, disabled and masked".
+**The fault, and it was netcfgd's: a takeover without systemd went by the
+switcher's own names, and under sysv-rc did not last past a reboot.**
+`netcfgd_select.sh` -- what the deb's postinst runs -- used `rc-update` where
+it was installed, and otherwise only *stopped* `/etc/init.d/<name>`, in both
+cases with `<name>` the switcher's own word for the manager. So everywhere
+without systemd ifupdown was asked for as `ifupdown`, where Debian's and
+Alpine's script is `networking`, and was never stood down -- its `dhclient`
+kept `eth0`; NetworkManager is `network-manager` on Debian, so the same; and
+the dhcpcd service was left alone. On this machine, OpenRC, connman went out
+of the runlevel correctly. **On sysv-rc it was worse**: connman was stopped
+and stayed enabled, so it came back at the next boot beside netcfgd, and
+netcfgd was started and **never given boot links** -- the deb keeps
+dh_installinit out -- so after a reboot it did not start, while the postinst
+said the others were "stopped, disabled and masked".
 
 Now: `script_of` names each manager's script as Debian, Alpine and Gentoo spell
 it, and whichever exists is acted on. Without systemd, standing one down is
