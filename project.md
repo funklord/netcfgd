@@ -12771,7 +12771,8 @@ tunnel devices are the modules' own defaults from loading, not configuration.
 
 **Not served, each already a decision:** IPsec -- strongSwan's IKEv2 client --
 is 0036's end stage, not built; netcfgd would leave strongSwan running as it
-is. IPoIB (`ib0`) is not being built (10.586), and nothing here needs it.
+is. Asked whether to start it now, the holder, 2026-11-13: not wanted right
+now. IPoIB (`ib0`) is not being built (10.586), and nothing here needs it.
 Setting a port's type is 10.586's open half. opensm, iwpmd, NTP and mDNS are
 not networking configuration and stay their own daemons.
 
@@ -21281,9 +21282,12 @@ CPU port and an unnumbered one), the witness, and `kernel_bytes` fuzzing.
   interfaces they create; and renaming (`eth2` becomes `ib0` and back).
   **Not built because it cannot be checked here**: this kernel ships no
   `netdevsim`, no VM can have an mlx4, and hull does not pass a PCI device
-  into a vm (its draft did; it no longer declares it). The IOMMU is on
-  (the card is in group 31), so VFIO passthrough of the real card would be
-  the rig, and asking hull for it is the step before building this.
+  into a vm (its draft did; it no longer declares it). **Passing the real
+  card through is not a rig either**: the holder, 2026-11-13, "testing like
+  this will still brick hardware" -- a guest driving the card's real
+  firmware is the card at risk, whoever's kernel it runs in. So this waits
+  for something that can be checked without a real card, and is not to be
+  proposed as a hull request.
 
 ## 10.585 What the kernel lets a moving machine do with its regulatory domain
 
