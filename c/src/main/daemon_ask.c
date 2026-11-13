@@ -2,7 +2,7 @@
  * daemon_ask.c -- the control vocabulary as one fuzznet procedure, `ask`
  * (decision 0312, project.md 10.693).
  *
- * `call ask FROM REQUEST`: REQUEST is the line the control socket reads, and
+ * `rrpc ask FROM REQUEST`: REQUEST is the line the control socket reads, and
  * it is answered as the socket answers it -- the same reader, the same gate,
  * the same dispatcher -- in pages of fuzznet's size (`ok TOTAL FROM COUNT
  * DIGEST`, `client/ncfg_fuzznet.h`).
@@ -713,7 +713,7 @@ answered:
 
 /*
  * `do REQUEST` or `do @DIGEST` (10.708): the request carried out, for
- * fuzznet's propagation (`call do at estate`, its sec 872), which reports
+ * fuzznet's propagation (`rrpc do at estate`, its sec 872), which reports
  * each host only as ok, failed and the rest and carries no answer. So the
  * answer here is `ok` where the daemon carried the request out and nothing
  * where it refused or failed -- which fuzznet reports as `failed` -- rather

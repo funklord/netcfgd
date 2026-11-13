@@ -1115,7 +1115,7 @@ static size_t node_remote(void *context, const uint8_t key[NCFG_NODE_KEY_LEN], i
 }
 
 /*
- * A call of one of netcfgd's procedures through fuzznet (`call status
+ * A call of one of netcfgd's procedures through fuzznet (`rrpc status
  * [FROM]`, 10.688): a caller on this machine judged by netcfgd's tiers as on
  * the socket, an operator of the estate by the `remote` block, the page as
  * `get status [FROM]` answers it over the remote type.

@@ -530,7 +530,7 @@ typedef struct {
 	int         ran_maybe;  /* the request may have reached the daemon */
 } asked_t;
 
-/* One page over fuzznet: `call status [at HOST] FROM` on the socket in
+/* One page over fuzznet: `rrpc status [at HOST] FROM` on the socket in
  * `context`, the answer unescaped. A call across the estate waits for
  * fuzznet's round, three seconds (its sec 853), so it is given more. */
 static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size_t *length,
@@ -543,7 +543,7 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	long           n;
 
 	if (asked->eventlog) {
-		(void)snprintf(line, sizeof(line), "call eventlog %s", asked->eventlog);
+		(void)snprintf(line, sizeof(line), "rrpc eventlog %s", asked->eventlog);
 		if (asked->eventlog[0] != '-') {
 			size_t used = strlen(line);
 
@@ -552,8 +552,8 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 	} else if (asked->request) {
 		const char *request = asked->staged[0] ? asked->staged : asked->request;
 		int wrote = asked->host
-		    ? snprintf(line, sizeof(line), "call ask at %s %zu %s", asked->host, from, request)
-		    : snprintf(line, sizeof(line), "call ask %zu %s", from, request);
+		    ? snprintf(line, sizeof(line), "rrpc ask at %s %zu %s", asked->host, from, request)
+		    : snprintf(line, sizeof(line), "rrpc ask %zu %s", from, request);
 
 		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
 			say(err, err_size, "the request is too long for one fuzznet line: %zu bytes",
@@ -561,9 +561,9 @@ static int fuzznet_page(void *context, size_t from, char *page, size_t cap, size
 			return 0;
 		}
 	} else if (asked->host) {
-		(void)snprintf(line, sizeof(line), "call status at %s %zu", asked->host, from);
+		(void)snprintf(line, sizeof(line), "rrpc status at %s %zu", asked->host, from);
 	} else {
-		(void)snprintf(line, sizeof(line), "call status %zu", from);
+		(void)snprintf(line, sizeof(line), "rrpc status %zu", from);
 	}
 	if (asked->wait_ms) {
 		int sent = 0;
@@ -905,7 +905,7 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 
 /* A piece of a long request: what fits fuzznet's 512-byte line beside `call
  * askpart at HOST TOTAL OFFSET DIGEST ` (about 110 bytes), with room to
- * spare; and the longest request sent whole beside `call ask at HOST FROM `. */
+ * spare; and the longest request sent whole beside `rrpc ask at HOST FROM `. */
 #define ASK_PIECE 360u
 
 /* `request` to `host` in pieces, in order, each answered `ok HAVE TOTAL`. */
@@ -922,9 +922,9 @@ static int send_in_pieces(const char *socket, const char *host, const char *requ
 		size_t piece = total - offset < ASK_PIECE ? total - offset : ASK_PIECE;
 		int    silent = 0;
 		int    wrote = host
-		    ? snprintf(line, sizeof(line), "call askpart at %s %zu %zu %016llx %.*s", host,
+		    ? snprintf(line, sizeof(line), "rrpc askpart at %s %zu %zu %016llx %.*s", host,
 		          total, offset, (unsigned long long)digest, (int)piece, request + offset)
-		    : snprintf(line, sizeof(line), "call askpart %zu %zu %016llx %.*s", total, offset,
+		    : snprintf(line, sizeof(line), "rrpc askpart %zu %zu %016llx %.*s", total, offset,
 		          (unsigned long long)digest, (int)piece, request + offset);
 
 		if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
@@ -1075,7 +1075,7 @@ static int members_of(const char *socket, int through_root,
 		size_t        taken = 0;
 		int           silent = 0;
 
-		(void)snprintf(line, sizeof(line), through_root ? "call hosts %zu" : "list peer %zu", from);
+		(void)snprintf(line, sizeof(line), through_root ? "rrpc hosts %zu" : "list peer %zu", from);
 		if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 2000, &silent, err,
 		        err_size)) {
 			return 0;
@@ -1187,7 +1187,7 @@ int ncfg_fuzznet_events_at(const char *socket, const char *host, size_t from, si
 		return 0;
 	}
 	*count = 0;
-	(void)snprintf(line, sizeof(line), "call events at %s %zu", host, from);
+	(void)snprintf(line, sizeof(line), "rrpc events at %s %zu", host, from);
 	if (!ncfg_fuzznet_ask(socket, line, reply, sizeof(reply), 8000, &silent, err, err_size)) {
 		return 0;
 	}
@@ -1343,7 +1343,7 @@ int ncfg_fuzznet_do_many(const char *socket, const char *target, const char *req
 		(void)snprintf(named, sizeof(named), "@%016llx",
 		    (unsigned long long)ncfg_status_page_digest(request, strlen(request)));
 	}
-	wrote = snprintf(line, sizeof(line), "call do at %s %s", target, named[0] ? named : request);
+	wrote = snprintf(line, sizeof(line), "rrpc do at %s %s", target, named[0] ? named : request);
 	if (wrote <= 0 || (size_t)wrote >= sizeof(line)) {
 		say(err, err_size, "the request does not fit one fuzznet line");
 		return 0;
@@ -1494,7 +1494,7 @@ int ncfg_fuzznet_events_tick(const char *run_dir, char *why, size_t why_size)
 		say(why, why_size, "no fuzznet socket path fits");
 		return -1;
 	}
-	if (!ncfg_fuzznet_ask(path, "call eventlog -", reply, sizeof(reply), 2000, &silent, why,
+	if (!ncfg_fuzznet_ask(path, "rrpc eventlog -", reply, sizeof(reply), 2000, &silent, why,
 	        why_size)) {
 		return -1;
 	}

@@ -167,9 +167,9 @@ int main(void)
 	}
 	close(listener);
 
-	check(ncfg_fuzznet_ask(path, "call status 0", reply, sizeof(reply), 1000, &silent, why,
+	check(ncfg_fuzznet_ask(path, "rrpc status 0", reply, sizeof(reply), 1000, &silent, why,
 	          sizeof(why)) &&
-	        strcmp(reply, "ok you said call status 0") == 0 && !silent,
+	        strcmp(reply, "ok you said rrpc status 0") == 0 && !silent,
 	    "a line is asked with its newline added, and the reply read back");
 	check(ncfg_fuzznet_ask(path, "x\n", reply, sizeof(reply), 1000, &silent, why,
 	          sizeof(why)) &&
@@ -372,7 +372,7 @@ int main(void)
 			_exit(0);
 		}
 		close(listener);
-		fine = ncfg_fuzznet_ask(path, "call status 0", said, sizeof(said), 1000, &silent, why,
+		fine = ncfg_fuzznet_ask(path, "rrpc status 0", said, sizeof(said), 1000, &silent, why,
 		    sizeof(why));
 		check(fine && strncmp(said, "ok done", 7) == 0,
 		    "a daemon waiting on a peer is asked again until it answers");

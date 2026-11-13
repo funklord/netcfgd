@@ -5,7 +5,7 @@
  *
  * WHY THE APP STARTS IT
  *   The client reaches another host through this user's own node, by
- *   `call ask at HOST` on its socket. A desktop has one running. A phone has
+ *   `rrpc ask at HOST` on its socket. A desktop has one running. A phone has
  *   no place for a long-lived program but an app, so the app carries one, as
  *   `libncfghost.so`: Android extracts and marks executable only `lib*.so`.
  *   It stays a separate process, so everything above the socket is the

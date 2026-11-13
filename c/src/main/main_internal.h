@@ -358,7 +358,7 @@ const char *ncfg_main_store_look(ncfg_main_store_watch_t *watch, const char *run
  */
 size_t ncfg_main_node_remote(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
     int contact, const char *request, size_t length, char *reply, size_t cap);
-/* The status procedure's page (`call status [FROM]`, fuzznet sec 853):
+/* The status procedure's page (`rrpc status [FROM]`, fuzznet sec 853):
  * `local` the caller's peer on this machine, or NULL for an operator of the
  * estate. `escaped_cap`, where not 0, bounds the page as fuzznet escapes it. */
 size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observed_t *observed,
@@ -466,7 +466,7 @@ typedef struct {
 } ncfg_main_ask_t;
 
 /*
- * One page of the answer to `call ask FROM REQUEST`, `args` being `FROM
+ * One page of the answer to `rrpc ask FROM REQUEST`, `args` being `FROM
  * REQUEST`: `key` the calling host's, an operator of the estate, or NULL for
  * a caller on this machine whose credentials are `peer`. A page fits `cap`,
  * and `escaped_cap` once escaped where that is not 0. Its length; a refusal
@@ -477,7 +477,7 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
     uint64_t now_ms);
 
 /*
- * One piece of a long request, `call askpart TOTAL OFFSET DIGEST PIECE`
+ * One piece of a long request, `rrpc askpart TOTAL OFFSET DIGEST PIECE`
  * (10.695): pieces in order from 0, kept for this caller until the request
  * is whole and run, or a minute has passed. `ok HAVE TOTAL`, a newline, into
  * `reply`; a refusal is `error` and a sentence. `ask FROM @DIGEST` then runs

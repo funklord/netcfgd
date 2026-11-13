@@ -107,9 +107,9 @@ timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc
 check $? "the station that fuzznetd recorded is read back in-process, in ncfg status"
 
 # The same over fuzznet alone (10.689): a daemon with a node binds no control
-# socket, so only `call status` can bring its stations to `ncfg status`.
+# socket, so only `rrpc status` can bring its stations to `ncfg status`.
 timeout 10 "$C" status --json --run-dir "$R/run" 2>/dev/null | grep -q 'aa:bb:cc:00:00:07'
-check $? "  and over fuzznet's call status, with the control socket out of the way"
+check $? "  and over fuzznet's rrpc status, with the control socket out of the way"
 # And `monitor`, on fuzznet's held stream (10.729): a reload, heard.
 timeout 8 "$C" monitor --json --run-dir "$R/run" > "$R/held" 2>&1 &
 held=$!
@@ -148,10 +148,10 @@ sys.stdout.write(seen.decode(errors="replace"))' "$C" "$R/run" > "$R/tui.held" 2
 grep -q 'reloaded' "$R/tui.held"
 check $? "  and \`ncfg tui\`'s events pane hears it too"
 # Every request now (0309, 10.712), and not only `status`: with no control
-# socket to reach, these can only have come through `call ask`. A request past
+# socket to reach, these can only have come through `rrpc ask`. A request past
 # one line goes in pieces.
 timeout 10 "$C" plan --run-dir "$R/run" > "$R/plan.out" 2>&1
-check $? "ncfg plan answers over fuzznet's call ask, the socket out of the way"
+check $? "ncfg plan answers over fuzznet's rrpc ask, the socket out of the way"
 timeout 10 "$C" reload --run-dir "$R/run" > "$R/reload.out" 2>&1
 check $? "  and so does a change, ncfg reload ($(head -c 40 "$R/reload.out"))"
 {
@@ -180,14 +180,14 @@ said=$(ask "$R/fz.sock" "get status /tmp/netcfgd-node-serve-$$.json")
 echo "$said" | grep -q "^error .*not the caller's" && [ ! -e "/tmp/netcfgd-node-serve-$$.json" ]
 check $? "  and not into a directory that is not the caller's"
 
-# The same status as a fuzznet procedure (its sec 853, 10.688): `call status
+# The same status as a fuzznet procedure (its sec 853, 10.688): `rrpc status
 # FROM` answers `ok` and the page escaped, `ok TOTAL FROM COUNT DIGEST`
 # and the bytes. This caller is the node's own user, so fuzznet lets it call.
-said=$(ask "$R/fz.sock" "call status 0")
+said=$(ask "$R/fz.sock" "rrpc status 0")
 echo "$said" > "$R/out/call.txt"
 echo "$said" | grep -q '^ok ok%20[0-9][0-9]*%200%20[0-9]'
-check $? "call status 0 answers the status's first page ($(echo "$said" | cut -c1-24))"
-said=$(ask "$R/fz.sock" "call status x")
+check $? "rrpc status 0 answers the status's first page ($(echo "$said" | cut -c1-24))"
+said=$(ask "$R/fz.sock" "rrpc status x")
 echo "$said" | grep -q '^ok malformed'
 check $? "  and an offset that is not one is malformed ($(echo "$said" | cut -c1-24))"
 

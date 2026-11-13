@@ -110,7 +110,7 @@ timeout 10 "$C" hosts $L > "$R/hosts" 2>&1
 check $? "\`hosts\`: \`ncfg hosts\` ($(tail -1 "$R/hosts" | cut -c1-40))"
 ask "$R/a.sock" 'list peer' | grep -q '^ok'
 check $? "\`list peer\`"
-ask "$R/a.sock" 'call eventlog 0' | grep -q '^ok'
+ask "$R/a.sock" 'rrpc eventlog 0' | grep -q '^ok'
 check $? "\`eventlog\`"
 timeout 12 python3 -I -c '
 import socket, sys

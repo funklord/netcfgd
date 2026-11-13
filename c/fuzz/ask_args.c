@@ -3,7 +3,7 @@
  * 10.693, 10.695, 10.701).
  *
  * WHY THIS DESERVES A TARGET OF ITS OWN
- *   `call ask FROM REQUEST` and `call askpart TOTAL OFFSET DIGEST PIECE`
+ *   `rrpc ask FROM REQUEST` and `rrpc askpart TOTAL OFFSET DIGEST PIECE`
  *   reach the daemon from an estate operator's host as well as from this
  *   machine, and the daemon parses both before anything judges them: an
  *   offset, a digest, a staged request, a request line. A number read past

@@ -453,7 +453,7 @@ static int listen_at(const char *path)
 /*
  * The status over fuzznet first (project.md 10.690): beside a control socket
  * at `<run>/netcfgd.sock`, a fuzznet at `<run>/fuzznet.sock` that answers
- * `call status FROM` in pages, and the two statuses say which they are. The
+ * `rrpc status FROM` in pages, and the two statuses say which they are. The
  * fuzznet one is taken; once fuzznet refuses, the control socket's is.
  *
  * HOW IT STOPS: each fake serves a fixed count of connections under
@@ -660,7 +660,7 @@ static void a_request_is_not_sent_twice(void)
 			}
 			(void)read_request(fd, line, sizeof(line));
 			if (at == 0) {
-				wanted = strncmp(line, "call ask 0 {\"request\":\"plan\"}", 29u) == 0;
+				wanted = strncmp(line, "rrpc ask 0 {\"request\":\"plan\"}", 29u) == 0;
 				fake_page(fd, "{\"response\":\"plan\",\"said_by\":\"fuzznet\"}");
 			} else if (at == 2) {
 				(void)!write(fd, "error no procedure ask here\n", 28u);
@@ -724,7 +724,7 @@ static void a_request_is_not_sent_twice(void)
 		ncfg_client_close(client);
 	}
 	waitpid(fuzznet_child, &status, 0);
-	ok("the fake fuzznet read `call ask 0 REQUEST`",
+	ok("the fake fuzznet read `rrpc ask 0 REQUEST`",
 	   WIFEXITED(status) && WEXITSTATUS(status) == 0, "");
 	waitpid(control_child, &status, 0);
 	ok("the control socket heard the one request, and only that",
@@ -814,7 +814,7 @@ static void a_daemon_on_fuzznet_alone_opens(void)
 
 /*
  * A client of another node (10.698): with this user's fuzznetd faked at
- * `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, a request goes as `call ask at
+ * `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`, a request goes as `rrpc ask at
  * KEY 0 REQUEST` and the node's answer comes back as a document; the client
  * names its node and has no socket path, so nothing can reopen it onto this
  * machine; a fuzznet that answers `error` leaves it broken.
@@ -867,7 +867,7 @@ static void a_client_of_another_node(void)
 				_exit(1);
 			}
 			(void)read_request(fd, line, sizeof(line));
-			if (at == 1 || strncmp(line, "call ask at ", 12) != 0 ||
+			if (at == 1 || strncmp(line, "rrpc ask at ", 12) != 0 ||
 			    strncmp(line + 12, key, 64) != 0) {
 				(void)!write(fd, "error no such host\n", 19u);
 				close(fd);

@@ -12690,6 +12690,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.830 fuzznet ed93497: the local verb is `rrpc`, not `call`
+
+fuzznet's stage 3 (its sec 1087, f37ae02) gave a voice or video call CMD 18 and a STATUS
+CMD 19 and retired family 2; the commit after (sec 1088, 21c2478) renamed the local verb
+for a registered procedure `rrpc NAME [at HOST|estate|group=NAME] [ARGS]`, and `call` is
+answered as unknown (inbox 20261113T0305Z). netcfgd builds none of the stage-3 bytes; the
+rename is what touches it. **Every line the client writes to fuzznetd's socket for a
+netcfgd procedure** -- `ask`, `askpart`, `status`, `events`, `eventlog`, `hosts` and `do`,
+in `client/ncfg_fuzznet.c` -- now opens `rrpc`, and so do the node tests that type them by
+hand and the comments naming them. A client at this pin cannot ask a fuzznetd from before
+21c2478, nor an old client a new one, so a desktop's `ncfg` and its fuzznet move together,
+which they do: both are this binary.
+
+Pinned at ed93497, fuzznet's head, so the four commits after the rename (streams and file
+references under their own CMDs, a call answered on another of the user's hosts, the hex
+codec and distance helpers moved out of the core) come with it. **Size: unchanged**,
+2,600,016 bytes, inside the budget 10.829 set.
+
+**Measured:** the full C suite at this pin, the node, fleet and fuzznet-line tests among it.
+
 ## 10.829 fuzznet b54490a: every host-to-host message's first byte moved
 
 fuzznet split its family 2 into CMD categories (its sec 1085, stage 2; inbox
@@ -12712,10 +12732,7 @@ relays and NAT traversal, the metric layer, binary STATUS replies -- all reachab
 the daemon netcfgd runs, so `--gc-sections` keeps them. The budget is raised with the
 figure; netcfgd's own +21,896 since 11-07 had been inside the tolerance.
 
-**Coming, and not taken yet:** fuzznet's stage 3 (a call becomes CMD 18, STATUS CMD 19)
-and then the local verb `call NAME` renamed `rrpc NAME`. The second touches netcfgd: the
-client sends `call` for ten of its requests (`client/ncfg_fuzznet.c`), so the pin that
-renames it needs those lines changed with it.
+Stage 3 and the local verb's rename came the same day, and 10.830 took them.
 
 **Measured:** the full C suite at this pin, exit 0, the node and fleet tests among it.
 

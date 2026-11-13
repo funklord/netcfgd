@@ -151,7 +151,7 @@ int ncfg_status_pages_join(ncfg_status_page_ask_fn ask, void *context, char **ou
     size_t *length, char *err, size_t err_size);
 
 /*
- * The daemon's status over fuzznet: the `status` procedure (`call status
+ * The daemon's status over fuzznet: the `status` procedure (`rrpc status
  * FROM`, fuzznet's sec 853) on `ncfg_fuzznet_daemon_socket(run_dir)`, every
  * page joined, as `ncfg_status_pages_join` says. 1 with the JSON in `*out`.
  */
@@ -231,7 +231,7 @@ int ncfg_fuzznet_user_host(int start, char *why, size_t why_size);
 /*
  * Another node's status, asked as an operator of its estate (0311, 10.691):
  * through the fuzznetd at `socket` -- this user's own, the third of
- * fuzznet's three models -- `call status at HOST FROM`, `host` the node's
+ * fuzznet's three models -- `rrpc status at HOST FROM`, `host` the node's
  * key in hex, every page joined as `ncfg_status_pages_join` says. That node
  * answers by its own `remote` block. 1 with the JSON in `*out`.
  */
@@ -240,12 +240,12 @@ int ncfg_fuzznet_status_at(const char *socket, const char *host, char **out, siz
 
 /*
  * Any control-socket request of another node (0312, 10.694): `request` the
- * socket's own JSON line, without its newline, carried as `call ask at HOST
+ * socket's own JSON line, without its newline, carried as `rrpc ask at HOST
  * FROM REQUEST` through the fuzznetd at `socket`, every page joined. 1 with
  * the node's answer line in `*out`, as its socket would have written it.
  *
  * **A request longer than one fuzznet line is sent in pieces** (10.695):
- * `call askpart at HOST TOTAL OFFSET DIGEST PIECE` in order from 0, each
+ * `rrpc askpart at HOST TOTAL OFFSET DIGEST PIECE` in order from 0, each
  * answered `ok HAVE TOTAL`, and then `ask` names it as `@DIGEST`. That node
  * keeps the pieces for this caller only until it is whole and run, and
  * refuses one past 256 KiB.
@@ -259,7 +259,7 @@ int ncfg_fuzznet_ask_at(const char *socket, const char *host, const char *reques
 
 /*
  * Another node's events since `from` (10.703): fuzznet's own procedure,
- * `call events at HOST FROM` (its sec 866), whose answer is `NEXT FIRST
+ * `rrpc events at HOST FROM` (its sec 866), whose answer is `NEXT FIRST
  * [SUBJECT NAME]...`, escaped inside the call's own `ok`, from the last 256
  * that node published. The subjects into
  * `subjects`, at most `cap`, their number in `*count`; `*next`, where to ask

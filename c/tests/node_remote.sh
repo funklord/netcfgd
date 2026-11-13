@@ -80,14 +80,14 @@ s.sendall((\"add join \" + sys.argv[2] + \"\n\").encode()); print(s.recv(4096).d
 		# And back out: the device reaches the host until it is revoked.
 		host=$(ask "$2/xdg/fuzznet/fuzznetd.sock" "list peer" | cut -d" " -f4)
 		n=0
-		while ! ask "$2/xdg/fuzznet/fuzznetd.sock" "call status at $host" | grep -q "^ok" &&
+		while ! ask "$2/xdg/fuzznet/fuzznetd.sock" "rrpc status at $host" | grep -q "^ok" &&
 			[ $n -lt 16 ]; do sleep 0.5; n=$((n + 1)); done
-		ask "$2/xdg/fuzznet/fuzznetd.sock" "call status at $host" | cut -c1-2 > "$2/before"
+		ask "$2/xdg/fuzznet/fuzznetd.sock" "rrpc status at $host" | cut -c1-2 > "$2/before"
 		"${1%netcfgd}ncfg" pair list --run-dir "$2/run" > "$2/listed" 2>&1
 		"${1%netcfgd}ncfg" pair revoke "$(tail -1 "$2/listed")" --run-dir "$2/run" > "$2/revoked" 2>&1
 		echo $? > "$2/revoke.status"
 		"${1%netcfgd}ncfg" pair list --run-dir "$2/run" > "$2/listed.after" 2>&1
-		ask "$2/xdg/fuzznet/fuzznetd.sock" "call status at $host" | cut -c1-40 > "$2/after"
+		ask "$2/xdg/fuzznet/fuzznetd.sock" "rrpc status at $host" | cut -c1-40 > "$2/after"
 		kill -TERM $device 2>/dev/null
 		wait $device 2>/dev/null
 		kill -TERM $pid 2>/dev/null

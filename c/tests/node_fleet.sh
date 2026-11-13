@@ -11,7 +11,7 @@
 #   - `ncfg status --at A` through B, the third of fuzznet's models, answers
 #     A's observation, judged by A's `remote` block: open here;
 #   - `ncfg hosts` lists A by the same key, for `--at`;
-#   - `call ask at A` answers a plan and refuses an apply, by A's tiers;
+#   - `rrpc ask at A` answers a plan and refuses an apply, by A's tiers;
 #   - `ncfg modem --at A` is A's answer, `reload --at A` A's refusal, and a
 #     command that works on this machine is refused with `--at`;
 #   - `ncfg tui --at A` runs in a pty and says it has no event stream;
@@ -124,10 +124,10 @@ check $? "  and --json is a list of them"
 # The control vocabulary as one procedure (0312, 10.693), through B, raw:
 # a read under A's open `observe`, and a change under its closed `admin`,
 # whose request carries a comma for fuzznet's grammar to pass through.
-said=$(ask "$B" "call ask at $host 0 {\"request\":\"plan\"}")
+said=$(ask "$B" "rrpc ask at $host 0 {\"request\":\"plan\"}")
 echo "$said" | grep -q '^ok ok%20[0-9]*%200%20[0-9]*%20[0-9a-f]\{16\}%0a{"response":"plan"'
-check $? "call ask at A answers a plan, A's remote observe tier open ($(echo "$said" | cut -c1-30))"
-said=$(ask "$B" "call ask at $host 0 {\"request\":\"apply\",\"confirm\":90}")
+check $? "rrpc ask at A answers a plan, A's remote observe tier open ($(echo "$said" | cut -c1-30))"
+said=$(ask "$B" "rrpc ask at $host 0 {\"request\":\"apply\",\"confirm\":90}")
 echo "$said" | grep -q 'error.*admin'
 check $? "  and refuses an apply, its remote admin tier closed"
 
@@ -236,7 +236,7 @@ code=$?
 [ $code -ne 0 ] && head -1 "$R/denied.err" | grep -q 'denied' && [ ! -s "$R/denied.out" ]
 check $? "  status --at A --json says so on the first line of stderr ($(head -c 50 "$R/denied.err"))"
 
-# Propagation (10.708): `reload --at estate` through B is fuzznet's `call do
+# Propagation (10.708): `reload --at estate` through B is fuzznet's `rrpc do
 # at estate`, and A, its remote admin tier closed, is reported as failed --
 # not as ok, which `ask`'s page for a refusal would have read as.
 key16=$(echo "$host" | cut -c1-16)

@@ -398,7 +398,7 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 	}
 
 	/* **Another node** (10.698): the request asked through this user's
-	 * fuzznetd, `call ask at HOST`, and its answer read as that node's socket
+	 * fuzznetd, `rrpc ask at HOST`, and its answer read as that node's socket
 	 * would have written it -- a refusal still arrives as a document. Only a
 	 * transport that failed makes the client broken, the cue to reopen. */
 	if (client->at[0]) {

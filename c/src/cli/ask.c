@@ -293,7 +293,7 @@ const char *ncfg_cli_asking_host(void)
 
 /*
  * The request asked of another node (0312, 10.694): its socket's own line, as
- * `call ask at HOST`, through this user's host, and the answer read as
+ * `rrpc ask at HOST`, through this user's host, and the answer read as
  * that node's socket would have written it. Nothing about the transport shows
  * past this function, so every verb asking the daemon asks that node instead.
  */

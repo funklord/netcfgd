@@ -72,7 +72,7 @@ int main(int argc, char **argv)
 
 	{
 		/* The node's events cursor (10.704): a fake fuzznetd on this user's
-		 * socket answers `call events` twice -- where the node is, then one
+		 * socket answers `rrpc events` twice -- where the node is, then one
 		 * event past it -- and the second read lists it in the events tab. */
 		static const char *const answers[] = { "ok 5%205\n", "ok 6%205%20net-drift%20-\n" };
 		const QByteArray dir = (empty.path() + QStringLiteral("/fuzznet")).toUtf8();
