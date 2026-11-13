@@ -645,6 +645,15 @@ puts it in netcfgd's own table, over every interface with `forwarding` or `nat`;
 `ncfg plan` names the devices first -- a driver that cannot refuses, and with it the whole
 table, NAT included, so try `"software"` first. Decision 0319.
 
+**A router has no screen to show a pairing code, so it takes yours.** Make the code on
+the phone or desktop that runs your estate, then give it to the router over SSH, with
+`remote { observe = true }` in its `global` block so its node has a port to ask from:
+
+    ssh root@192.168.1.1 ncfg pair join -    # paste the code, then Ctrl-D
+
+It answers with the estate it joined, or says why within two minutes. The code is used
+once and lives as long as its maker said, ten minutes unless told. Decision 0320.
+
 **IPv6 on the LAN needs a daemon to send the advertisements.** netcfgd decides what the
 hosts are told -- `advertise { prefixes = ["@pd:wan0"] }` on the LAN, the prefix your ISP
 delegated -- and hands the sending to radvd or to uradvd. OpenWrt 25.12 carries no radvd in
