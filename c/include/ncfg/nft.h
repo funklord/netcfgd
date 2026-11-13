@@ -370,10 +370,17 @@ int ncfg_nft_flowtable_read(const void *payload, size_t length, ncfg_nft_flowtab
  * chain, moving flows with `flow_offload`. */
 int ncfg_nft_rule_is_offload(const void *payload, size_t length);
 
+/* Flow offload as a replacement writes it (0319); NULL where there is none. */
+typedef struct {
+	int                hardware;
+	const char *const *devices;
+	size_t             device_count;
+} ncfg_nft_offload_t;
+
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
-    const ncfg_forward_rule_t *forwards, size_t forward_count, ncfg_nft_batch_t *batch,
-    char *err, size_t err_size);
+    const ncfg_forward_rule_t *forwards, size_t forward_count,
+    const ncfg_nft_offload_t *offload, ncfg_nft_batch_t *batch, char *err, size_t err_size);
 
 /* The text a forward's digest is taken over, as `ncfg_nft_firewall_rule_text`
  * is for a firewall rule: every field, one fixed order. */

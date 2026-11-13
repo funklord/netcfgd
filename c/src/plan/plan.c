@@ -494,6 +494,8 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 			}
 			out->u.nftables.forwards = forwards;
 		}
+		out->u.nftables.offload_devices = intern_strings(plan, in->u.nftables.offload_devices,
+		    in->u.nftables.offload_device_count);
 		return;
 	case NCFG_OP_HOOK_RUN:
 		out->u.hook.iface = ncfg_plan_intern(plan, in->u.hook.iface);

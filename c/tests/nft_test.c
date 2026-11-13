@@ -704,7 +704,7 @@ static void forwards_are_written_and_read_back(void)
 	int                       others_pass = 1;
 
 	ncfg_buf_init(&out, 0);
-	check(ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, forwards, 2u, &batch, err,
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, forwards, 2u, NULL, &batch, err,
 	          sizeof(err)) && !batch.empty,
 	    "a table with an uplink and two port forwards builds");
 	check(message_count(&out) == 8u,
@@ -750,7 +750,7 @@ static void forwards_are_written_and_read_back(void)
 	ncfg_buf_free(&out);
 
 	ncfg_buf_init(&out, 0);
-	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, forwards, 1u, &batch, err,
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, forwards, 1u, NULL, &batch, err,
 	          sizeof(err)) && message_count(&out) == 5u,
 	    "a forward alone is a table, its chain and its rule, with no masquerade chain");
 	ncfg_buf_free(&out);
@@ -763,7 +763,7 @@ static void forwards_are_written_and_read_back(void)
 		int                       found = 0;
 
 		ncfg_buf_init(&out, 0);
-		check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &six, 1u, &batch, err,
+		check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &six, 1u, NULL, &batch, err,
 		          sizeof(err)),
 		    "a forward to an IPv6 address builds");
 		ncfg_wire_messages_start(&walk, out.data, out.length);
@@ -787,14 +787,14 @@ static void forwards_are_written_and_read_back(void)
 	bad.address = "203.0.113.1";
 	bad.to = "2001:db8::10";
 	ncfg_buf_init(&out, 0);
-	check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, &batch, err,
+	check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, NULL, &batch, err,
 	          sizeof(err)) && out.length == 0u && strstr(err, "not an IPv4 address") != NULL,
 	    "a reflection to an IPv6 address is refused, and nothing built");
 	ncfg_buf_free(&out);
 	bad = forwards[0];
 	bad.interface = "a-name-far-too-long";
 	ncfg_buf_init(&out, 0);
-	check(!ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &bad, 1u, &batch, err,
+	check(!ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &bad, 1u, NULL, &batch, err,
 	          sizeof(err)) && out.length == 0u,
 	    "  and one on an interface name no register holds");
 }
@@ -824,7 +824,7 @@ static void reflections_and_return_paths_are_read_back(void)
 	int                  chains = 0;
 
 	ncfg_buf_init(&out, 0);
-	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, rules, 3u, &batch, err,
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, rules, 3u, NULL, &batch, err,
 	          sizeof(err)),
 	    "a forward with its reflection and return path builds");
 	ncfg_wire_messages_start(&walk, out.data, out.length);

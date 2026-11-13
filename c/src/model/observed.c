@@ -1432,7 +1432,7 @@ static const ncfg_field_t observed_offload_fields[] = {
 	{ .name = "devices", .kind = NCFG_F_STR_LIST,
 	    .offset = offsetof(ncfg_observed_offload_t, devices),
 	    .count_offset = offsetof(ncfg_observed_offload_t, device_count) },
-	{ .name = "rules", .kind = NCFG_F_INT, .offset = offsetof(ncfg_observed_offload_t, rules) }
+	{ .name = "rules", .kind = NCFG_F_INT, R_U32, .offset = offsetof(ncfg_observed_offload_t, rules) }
 };
 static const ncfg_type_t observed_offload_type =
     TYPE("observed flow offload", observed_offload_fields);

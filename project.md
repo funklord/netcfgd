@@ -12808,6 +12808,28 @@ reply. Every other case using the same fake passed **by accident**, the generati
 going unanswered, which reads as "no check" rather than as a failure. The fake now
 answers a flowtable dump in every round, so those cases check the generation again.
 
+**Step three's second half: the plan writes it, and 0319 is built.** `nftables.replace`
+carries the offload -- the mode and the devices, sorted and interned, written into the
+plan's JSON only where set, so a plan without one is what it was -- and the whole-table
+builder takes it, as `ncfg_nft_offload_t`, NULL for none. `nat.c` plans it: the devices
+are the links of every interface with `forwarding` or `nat` that exist, and the table is
+replaced where the observed flowtable differs in mode, devices, or either of its two
+rules; the inverse is the observed one, so a revert puts it back. The reason names
+`flow_offload` where nothing else moved. `"hardware"` is said before the apply, naming
+the devices, and no device yet is said too. The "not acted on" warning of step one is
+gone. **Measured in a namespace**, a NAT router document with `flow_offload =
+"software"` on two veths: `ncfg apply` replaced the table, the second plan said `nothing
+to do`, and `ncfg status --json` read back both devices and two rules; the key removed,
+the plan named `flow_offload: <none> (was software)`, applied, and converged; and
+`"hardware"` warned first and failed at apply with `EOPNOTSUPP`, a veth having no flow
+offload -- the sentence there is still the generic netlink one, which 0319 wanted to name
+the construct. **And a fault the planner tests found in step 3a**: the observed `rules`
+field had no declared range, so reading an observation back from JSON refused any value
+but 0 -- a client reading a daemon's observation with a flowtable in it would have
+failed; `R_U32` now. `plan_setting_test` has the four cases. **What remains** is the
+software half on `hull-armsr`, where a connection through the router should show
+`[OFFLOAD]` in conntrack; the hardware half needs a MediaTek PPE.
+
 ## 10.833 A bridge over ports with no `interface` block was never put up by the daemon
 
 **Asked by the holder, 2026-11-13: "what needs a real router? can't you use hull?"** --

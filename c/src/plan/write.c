@@ -329,6 +329,15 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		if (op->u.nftables.firewall) {
 			write_firewall_summary(writer, op->u.nftables.firewall);
 		}
+		/* Written only where the table carries a flowtable (0319), so a plan
+		 * without one is what it was. */
+		if (op->u.nftables.offload.has) {
+			ncfg_json_write_member_string(writer, "flow_offload",
+			    op->u.nftables.offload.value == NCFG_FLOW_OFFLOAD_HARDWARE ? "hardware"
+			                                                               : "software");
+			member_strings(writer, "offload_devices", op->u.nftables.offload_devices,
+			    op->u.nftables.offload_device_count);
+		}
 		/* The forwards whole -- they are short -- with the digest their
 		 * comment will carry, which is what `ncfg status` shows (0298). */
 		if (op->u.nftables.forward_count) {

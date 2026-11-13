@@ -1888,13 +1888,13 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
     ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	return ncfg_nft_build_replace_all(out, first_seq, table_exists, uplinks, uplink_count,
-	    firewall, NULL, 0, batch, err, err_size);
+	    firewall, NULL, 0, NULL, batch, err, err_size);
 }
 
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
-    const ncfg_forward_rule_t *forwards, size_t forward_count, ncfg_nft_batch_t *batch,
-    char *err, size_t err_size)
+    const ncfg_forward_rule_t *forwards, size_t forward_count,
+    const ncfg_nft_offload_t *offload, ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	ncfg_buf_t transaction;
 	ncfg_buf_t attrs;
@@ -1944,7 +1944,7 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 			translations++;
 		}
 	}
-	if (!table_exists && uplink_count == 0 && !firewall && forward_count == 0) {
+	if (!table_exists && uplink_count == 0 && !firewall && forward_count == 0 && !offload) {
 		/* Nothing to remove and nothing to create. See `empty` in nft.h:
 		 * the begin-and-end transaction this would otherwise produce asks
 		 * for no acknowledgement and receives no reply, so a caller that
@@ -1972,7 +1972,7 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 		ncfg_buf_free(&attrs);
 	}
 
-	if (ok && (uplink_count > 0 || firewall || forward_count > 0)) {
+	if (ok && (uplink_count > 0 || firewall || forward_count > 0 || offload)) {
 		ncfg_buf_init(&attrs, 0);
 		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_TABLE);
 		last_acked = seq;
@@ -2046,6 +2046,12 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 					    &chains[c]->rules[r], err, err_size);
 				}
 			}
+		}
+		/* Flow offload last (0319): its chain sits at the forward hook beside
+		 * the firewall's, and filters nothing. */
+		if (ok && offload) {
+			ok = ncfg_nft_put_offload(&transaction, &seq, &last_acked, offload->hardware,
+			    offload->devices, offload->device_count, err, err_size);
 		}
 	}
 

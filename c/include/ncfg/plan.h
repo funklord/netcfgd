@@ -329,6 +329,12 @@ typedef struct {
 			 * owns the array and interns its strings. */
 			const ncfg_forward_rule_t *forwards;
 			size_t                     forward_count;
+			/* Flow offload (0319): `has` where the table carries a
+			 * flowtable, its value an `ncfg_flow_offload_t`, over these
+			 * devices, sorted and interned. */
+			ncfg_optint_t              offload;
+			const char *const         *offload_devices;
+			size_t                     offload_device_count;
 		} nftables;
 		struct {
 			const char *iface;

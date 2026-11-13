@@ -780,6 +780,10 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	ncfg_forward_rule_t   *forwards;
 	ncfg_forward_rule_t   *forwards_was;
 	size_t                 forward_count = 0;
+	const char           **offloaded = NULL;
+	size_t                 offloaded_count = 0;
+	int                    offload_wanted = 0;
+	int                    offload_same;
 	int                    failed = 0;
 	size_t                 i;
 
@@ -830,6 +834,65 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		return;
 	}
 	forwards_same = same_forwards(forwards, forward_count, forwards_was, builder->observed);
+	/*
+	 * Flow offload (0319): the links of every interface that forwards or
+	 * translates, those that exist -- a flowtable naming an absent device is
+	 * refused, and one that appears later is a difference the next pass
+	 * repairs. Sorted, as the observation's are.
+	 */
+	if (desired->globals.flow_offload.has && desired->interface_count != 0u) {
+		offloaded = calloc(desired->interface_count, sizeof(*offloaded));
+		if (!offloaded) {
+			builder->plan->failed = 1;
+			free(forwards_was);
+			free(forwards);
+			free(wanted);
+			return;
+		}
+		for (i = 0; i < desired->interface_count; i++) {
+			const ncfg_interface_t *interface = &desired->interfaces[i];
+
+			if (((interface->nat.has && interface->nat.value) ||
+			        (interface->forwarding.has && interface->forwarding.value)) &&
+			    ncfg_observed_link(builder->observed, interface->name)) {
+				offloaded[offloaded_count++] = interface->name;
+			}
+		}
+		if (offloaded_count > 1u) {
+			qsort(offloaded, offloaded_count, sizeof(*offloaded), by_name);
+		}
+	}
+	offload_wanted = desired->globals.flow_offload.has && offloaded_count != 0u;
+	if (desired->globals.flow_offload.has && offloaded_count == 0u) {
+		ncfg_plan_warn(builder->plan, NULL,
+		    "`flow_offload` is set and no interface with `forwarding` or `nat` has a link "
+		    "yet, so there is nothing to offload between; the flowtable is written when one "
+		    "appears");
+	}
+	if (offload_wanted && desired->globals.flow_offload.value == NCFG_FLOW_OFFLOAD_HARDWARE) {
+		ncfg_buf_t named;
+
+		ncfg_buf_init(&named, 0);
+		for (i = 0; i < offloaded_count; i++) {
+			ncfg_buf_addf(&named, "%s%s", i ? "`, `" : "", offloaded[i]);
+		}
+		ncfg_plan_warnf(builder->plan, NULL,
+		    "`flow_offload = \"hardware\"` asks the drivers of `%s` to carry established "
+		    "flows; a driver with no flow offload refuses it, and the table is one "
+		    "transaction, so NAT and the firewall are then not applied either (0319). "
+		    "`\"software\"` works on every device", ncfg_buf_text(&named));
+		ncfg_buf_free(&named);
+	}
+	{
+		const ncfg_observed_offload_t *seen = builder->observed->offload;
+
+		offload_same = !offload_wanted ? seen == NULL
+		    : seen && seen->rules == 2 &&
+		        seen->hardware == (desired->globals.flow_offload.value ==
+		                           NCFG_FLOW_OFFLOAD_HARDWARE) &&
+		        same_uplinks((const char *const *)offloaded, offloaded_count,
+		            (const char *const *)seen->devices, seen->device_count);
+	}
 	uplinks_same = same_uplinks((const char *const *)wanted, count,
 	    (const char *const *)builder->observed->nat, builder->observed->nat_count);
 	firewall_same = ncfg_nft_firewall_matches(desired->firewall, builder->observed->firewall,
@@ -857,7 +920,8 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		    "one. netcfgd does not touch them", ncfg_buf_text(&buf));
 		ncfg_buf_free(&buf);
 	}
-	if (uplinks_same && firewall_same && forwards_same) {
+	if (uplinks_same && firewall_same && forwards_same && offload_same) {
+		free(offloaded);
 		free(forwards_was);
 		free(forwards);
 		free(wanted);
@@ -885,6 +949,12 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	op.u.nftables.firewall = desired->firewall;
 	op.u.nftables.forwards = forwards;
 	op.u.nftables.forward_count = forward_count;
+	if (offload_wanted) {
+		op.u.nftables.offload.has = 1;
+		op.u.nftables.offload.value = desired->globals.flow_offload.value;
+		op.u.nftables.offload_devices = (const char *const *)offloaded;
+		op.u.nftables.offload_device_count = offloaded_count;
+	}
 	memset(&inverse, 0, sizeof(inverse));
 	inverse.kind = NCFG_OP_NFTABLES_REPLACE;
 	/* The table as it stands, which is a real revert rather than a guess: an
@@ -895,6 +965,15 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	inverse.u.nftables.uplink_count = builder->observed->nat_count;
 	inverse.u.nftables.forwards = forwards_was;
 	inverse.u.nftables.forward_count = forwards_was ? builder->observed->port_forward_count : 0u;
+	/* The flowtable as it stands, put back as it was by a revert. */
+	if (builder->observed->offload) {
+		inverse.u.nftables.offload.has = 1;
+		inverse.u.nftables.offload.value = builder->observed->offload->hardware ?
+		    NCFG_FLOW_OFFLOAD_HARDWARE : NCFG_FLOW_OFFLOAD_SOFTWARE;
+		inverse.u.nftables.offload_devices =
+		    (const char *const *)builder->observed->offload->devices;
+		inverse.u.nftables.offload_device_count = builder->observed->offload->device_count;
+	}
 	if (builder->observed->firewall) {
 		was = installed(builder->observed->firewall);
 		if (!was) {
@@ -904,13 +983,22 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	if (failed) {
 		builder->plan->failed = 1;
 		ncfg_firewall_free(was);
+		free(offloaded);
 		free(forwards_was);
 		free(forwards);
 		free(wanted);
 		return;
 	}
 	inverse.u.nftables.firewall = was;
-	if (uplinks_same && firewall_same) {
+	if (uplinks_same && firewall_same && forwards_same) {
+		const ncfg_observed_offload_t *seen = builder->observed->offload;
+
+		reason = ncfg_plan_reason_differs(NULL, "flow_offload",
+		    !offload_wanted ? "<none>"
+		    : desired->globals.flow_offload.value == NCFG_FLOW_OFFLOAD_HARDWARE ? "hardware"
+		                                                                      : "software",
+		    !seen ? "<none>" : seen->hardware ? "hardware" : "software");
+	} else if (uplinks_same && firewall_same) {
 		reason = ncfg_plan_reason_differs(NULL, "port_forwards",
 		    describe_forwards(builder->plan, forwards, forward_count),
 		    describe_forwards(builder->plan, forwards_was, inverse.u.nftables.forward_count));
@@ -936,6 +1024,7 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	 * are the caller's to give back -- the same bargain every string an op
 	 * names is under. */
 	ncfg_firewall_free(was);
+	free(offloaded);
 	free(forwards_was);
 	free(forwards);
 	free(wanted);

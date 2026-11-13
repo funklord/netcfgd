@@ -703,9 +703,73 @@ static void a_token_on_a_new_link_waits_for_the_link(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * Flow offload rides the same op (0319): the devices are the links of every
+ * interface that forwards or translates, sorted; a table already holding that
+ * flowtable plans nothing; and taking the key away plans its removal.
+ */
+static ncfg_plan_t *offload_plan(int wanted, const char *observation,
+    ncfg_document_t **document, ncfg_observed_t **observed)
+{
+	char message[NCFG_ERROR_MAX];
+
+	*document = planfix_document(DEVICE("wan0") "," DEVICE("lan0"),
+	    "{\"name\":\"wan0\",\"addressing\":[],\"nat\":true},"
+	    "{\"name\":\"lan0\",\"addressing\":[],\"forwarding\":true}", "", "");
+	*observed = planfix_observed(observation);
+	if (!*document || !*observed) {
+		return NULL;
+	}
+	if (wanted) {
+		(*document)->globals.flow_offload.has = 1;
+		(*document)->globals.flow_offload.value = NCFG_FLOW_OFFLOAD_SOFTWARE;
+	}
+	return ncfg_plan_build(*document, *observed, NULL, message, sizeof(message));
+}
+
+#define OFFLOAD_LINKS \
+	"\"links\":[" PLANFIX_LINK("wan0", "") "," PLANFIX_LINK("lan0", ",\"forwarding\":true") "]," \
+	"\"nat\":[\"wan0\"]"
+
+static void flow_offload_rides_the_table(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = offload_plan(1, OFFLOAD_LINKS, &document, &observed);
+
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
+	    "flow offload asked for is the table's replacement");
+	check(plan && wrote(plan, "\"flow_offload\":\"software\"") &&
+	        wrote(plan, "\"offload_devices\":[\"lan0\",\"wan0\"]"),
+	    "  over every forwarding or translating link, sorted");
+	check(plan && planfix_for_field(plan, "nftables.replace", "flow_offload") != NULL,
+	    "  and the reason names `flow_offload`");
+	planfix_release(plan, document, observed);
+
+	plan = offload_plan(1, OFFLOAD_LINKS ",\"offload\":{\"hardware\":false,"
+	    "\"devices\":[\"lan0\",\"wan0\"],\"rules\":2}", &document, &observed);
+	check(plan && ncfg_plan_is_empty(plan), "a table already holding it plans nothing");
+	planfix_release(plan, document, observed);
+
+	plan = offload_plan(1, OFFLOAD_LINKS ",\"offload\":{\"hardware\":false,"
+	    "\"devices\":[\"lan0\",\"wan0\"],\"rules\":1}", &document, &observed);
+	check(plan && planfix_count(plan, "nftables.replace") == 1u,
+	    "one of its two rules gone is a difference, put back");
+	planfix_release(plan, document, observed);
+
+	plan = offload_plan(0, OFFLOAD_LINKS ",\"offload\":{\"hardware\":false,"
+	    "\"devices\":[\"lan0\",\"wan0\"],\"rules\":2}", &document, &observed);
+	check(plan && planfix_count(plan, "nftables.replace") == 1u &&
+	        !planfix_action(plan, "nftables.replace")->op.u.nftables.offload.has &&
+	        planfix_action(plan, "nftables.replace")->inverse.u.nftables.offload.has,
+	    "and the key taken away plans the flowtable's removal, with it as the way back");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	the_uplinks_are_a_sorted_list_replaced_whole();
+	flow_offload_rides_the_table();
 	port_forwards_ride_the_table();
 	upnp_is_planned_and_warned();
 	a_forward_is_reachable_from_inside();

@@ -637,6 +637,14 @@ rest: netcfgd puts its own back within five seconds, and for those seconds the r
 no NAT and no port forwards. When everything is handed over and confirmed, `/etc/init.d/netcfgd enable` is what
 makes it survive a reboot.
 
+**Flow offloading goes with `firewall`, and comes back with one line.** If the router had
+"software flow offloading" or "hardware flow offloading" on in its firewall settings, it
+was `firewall`'s, and stopping `firewall` ends it. `global { flow_offload = "software" }`
+puts it in netcfgd's own table, over every interface with `forwarding` or `nat`;
+`"hardware"` hands established flows to the switch where its driver can take them, and
+`ncfg plan` names the devices first -- a driver that cannot refuses, and with it the whole
+table, NAT included, so try `"software"` first. Decision 0319.
+
 **IPv6 on the LAN needs a daemon to send the advertisements.** netcfgd decides what the
 hosts are told -- `advertise { prefixes = ["@pd:wan0"] }` on the LAN, the prefix your ISP
 delegated -- and hands the sending to radvd or to uradvd. OpenWrt 25.12 carries no radvd in

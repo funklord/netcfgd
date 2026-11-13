@@ -622,14 +622,6 @@ static void warn_unported(ncfg_builder_t *builder)
 		    "`bluetoothctl` is what connects a device; netcfgd reports what it "
 		    "sees and leaves the radio alone");
 	}
-	/* 0319's key, read and kept ahead of the flowtable that applies it: the
-	 * encoder, the observation and the plan's comparison are the steps after
-	 * this one, and this arm comes out in the commit that lands them. */
-	if (desired->globals.flow_offload.has) {
-		ncfg_plan_warn_unbuilt(builder, NULL,
-		    "`flow_offload` asks for established flows to be moved to a flowtable "
-		    "(decision 0319), and this build does not write one yet");
-	}
 }
 
 /* ------------------------------------------------------------------------ *
