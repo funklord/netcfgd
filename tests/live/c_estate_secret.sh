@@ -74,7 +74,9 @@ print(out.decode(errors="replace").strip())' "$S" "$1" 2>&1
 }
 
 mkdir "$R/a" "$R/run" "$R/conf" "$R/xdg" "$R/xdg/fuzznet"
-chmod 700 "$R/xdg" "$R/xdg/fuzznet"
+# 00700, not 700: GNU chmod keeps a directory's setgid bit under a
+# setgid TMPDIR, and fuzznet will not serve its default socket from 2700.
+chmod 00700 "$R/xdg" "$R/xdg/fuzznet"
 export XDG_RUNTIME_DIR="$R/xdg"
 S=$R/xdg/fuzznet/fuzznetd.sock
 cat > "$R/conf/netcfgd.conf" <<CONF
