@@ -51,6 +51,22 @@ hal9001. **The pushing and finding are fuzznet's protocol to design**; what netc
 is the appliance's half: which interfaces are the LAN side (not an interface with `nat`,
 which is the uplink), the button hook, the LED, and knowing first boot and reset.
 
+**Refined the same day by the holder, and preferred: the button asks, the owner's
+screen answers.** The press runs `ncfg pair request`; the appliance looks for a netcfgd or
+fuzznet node of an estate on the LAN side and sends it a request to join, carrying only
+its public key and what kind of thing it is; the owner's node shows a prompt to its
+person; on yes it sends an invite sealed to that key. **Not built anywhere yet**: fuzznet's
+LAN discovery (its sec 624) answers only a prober whose key it already knows, by design,
+and the stranger's request is the part that is missing. `confirm` invites already put the
+"let it in?" question to the inviting person. Reasonably secure -- WPS push-button's class,
+and Bluetooth's confirm -- with four things: a window on both sides (the button's two
+minutes, and the owner's node prompting only while its person has asked to add a device,
+dropping the rest unshown); two at once means abort, WPS's overlap rule, on either side;
+a short check derived from both keys where the appliance can show one (an LED blinking a
+count the prompt names), which is what holds against an active attacker on the LAN in
+that window; and the new member at the lowest tier until the owner raises it. Better than
+the push above because the prompt comes to where the owner already is.
+
 **The other carriers are the same primitive, for appliances that have them**, not rival
 methods: the code written into the image at flash time and used once at first boot; the
 code pasted over SSH, `ncfg pair join CODE` (built, below); a file on a USB stick. A

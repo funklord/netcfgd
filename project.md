@@ -12757,6 +12757,12 @@ has the argument; the short of it:
   serial line the flasher has while flashing), or pasted over SSH: **`ncfg pair join
   CODE`**, built, `-` reading stdin. `c/tests/node_join.sh` has it end to end, and fails
   with the join not sent.
+- **Refined by the holder: the button asks, the owner's node prompts** -- `ncfg pair
+  request` from the button hook, a request carrying only the appliance's key, a prompt on
+  the owner's screen, an invite sealed back on yes. Preferred over the push; not built,
+  since fuzznet's LAN probes (its sec 624) answer only known keys. Secure as WPS's
+  push-button with: windows on both sides, abort on two at once, an LED-blinked check
+  where possible, and the lowest tier first.
 - **No SSH without authentication**: root for everything on the LAN, unbounded. **A
   printed QR** carries a per-device claim secret, worth it for batches, and needs a claim
   valid until first use where an invite lives 24 hours -- fuzznet's.
