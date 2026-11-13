@@ -12735,6 +12735,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.835 A VLAN's parent, the same shape: dropped by the daemon, and left down by the plan
+
+**Derived from 10.833's shape**: a link the document names only inside another device's
+block. A bridge's ports were one; a VLAN's, a VXLAN's, a macvlan's, a tunnel's or a PPPoE
+session's `parent` is the other. Run against a daemon in a namespace -- `lo` configured,
+then `device lan0 { kind = "dummy" }`, a VLAN 10 on it and `interface vlan10 { config =
+"192.168.10.1/24" }` appended while it ran -- it showed two faults, one behind the other:
+
+- **The daemon dropped the parent's creation**, as it had the ports': `link.create
+  failed: lan0 is not an interface this kernel knows`, on every pass. The VLAN's
+  `link.create` carries no dependency edge on its parent's, so 10.833's walk could not
+  bring it along; the membership rule could. `ncfg_reconcile_restrict`'s helper is
+  `asked_for_by` now -- a bridge's or bond's members and the five kinds' parents -- and
+  `reconcile_test` has the VLAN case.
+- **And the plan never brought the parent up**, under the daemon or under `ncfg apply`:
+  `link.up failed: ... Network is down (ENETDOWN)`, the kernel refusing to raise a VLAN
+  over a down parent. `ncfg_plan_device_up` was deliberately narrow -- a port or an `ifb`
+  -- so that a `device eth9 { mtu = 9000 }` with no interface block stays down. It now
+  also raises a device that carries one the document configures: the parent of a VLAN,
+  VXLAN, macvlan, tunnel or PPPoE device that has an `interface` block. The narrow case is
+  kept, and `plan_kind_test` checks both halves: the parent raised, a dummy carrying
+  nothing left down. **PPPoE is in the list on purpose**: a router whose WAN Ethernet has
+  no block of its own, under netcfgd alone with nothing else raising it, had a session
+  that could never start; the armsr rig never met it because `guest.sh` raises the NIC.
+  A mesh point's parent is a radio, which the radio pass raises, and is left out.
+
+**Measured**: the same namespace, the fix in -- the VLAN up with its address a second
+after the append, no error in the daemon's log, and the plan `nothing to do`. Each rule,
+disabled alone, turns its test red.
+
 ## 10.834 `flow_offload`, read and kept ahead of the flowtable (0319, step one)
 
 0319 decides flow offload: `global { flow_offload = "software" }` or `"hardware"`, absent

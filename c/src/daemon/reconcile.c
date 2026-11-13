@@ -224,30 +224,61 @@ static int named_interface(const ncfg_document_t *document, const char *name)
 }
 
 /*
- * The bridge or bond the document makes `name` a port of, or NULL.
+ * The device whose block names `name` as a port or a parent, or NULL.
  *
- * A port with no `interface` block is the bridge's: the router guide's
- * `lan1`..`lan4` are configured only by being members of `br-lan`, and their
- * own `link.up` is what the bridge needs once it exists -- no dependency edge
- * says so after the bridge is up, so the walk in `ncfg_reconcile_restrict`
- * alone left the ports down and the LAN without carrier (10.833).
+ * A link with no `interface` block of its own is configured only by being
+ * named inside another device's block: the router guide's `lan1`..`lan4` as
+ * members of `br-lan`, a dummy or a NIC as the parent of a VLAN, the WAN
+ * Ethernet as a PPPoE session's. That device asked for it, so its policy
+ * governs (10.833). A member's own `link.up` is what a bridge needs once it
+ * exists -- no dependency edge says so after the bridge is up -- and a VLAN's
+ * `link.create` carries no edge to its parent's at all, so the dependency walk
+ * in `ncfg_reconcile_restrict` alone left both behind.
  */
-static const char *port_of(const ncfg_document_t *document, const char *name)
+static const char *asked_for_by(const ncfg_document_t *document, const char *name)
 {
 	size_t at;
 	size_t member;
 
 	for (at = 0; document && name && at < document->device_count; at++) {
-		const ncfg_device_t *device = &document->devices[at];
-		char *const         *members = NULL;
-		size_t               count = 0;
+		const ncfg_device_t        *device = &document->devices[at];
+		const ncfg_interface_kind_t *kind = &device->kind;
+		char *const                *members = NULL;
+		size_t                      count = 0;
+		const char                 *parent = NULL;
 
-		if (device->kind.kind == NCFG_KIND_BRIDGE) {
-			members = device->kind.bridge.members;
-			count = device->kind.bridge.member_count;
-		} else if (device->kind.kind == NCFG_KIND_BOND) {
-			members = device->kind.bond.members;
-			count = device->kind.bond.member_count;
+		switch (kind->kind) {
+		case NCFG_KIND_BRIDGE:
+			members = kind->bridge.members;
+			count = kind->bridge.member_count;
+			break;
+		case NCFG_KIND_BOND:
+			members = kind->bond.members;
+			count = kind->bond.member_count;
+			break;
+		case NCFG_KIND_VLAN:
+			parent = kind->vlan.parent;
+			break;
+		case NCFG_KIND_VXLAN:
+			parent = kind->vxlan.parent;
+			break;
+		case NCFG_KIND_MACVLAN:
+			parent = kind->macvlan.parent;
+			break;
+		case NCFG_KIND_TUNNEL:
+			parent = kind->tunnel.parent;
+			break;
+		case NCFG_KIND_PPPOE:
+			parent = kind->pppoe.parent;
+			break;
+		case NCFG_KIND_MESH_POINT:
+			parent = kind->mesh_point.parent;
+			break;
+		default:
+			break;
+		}
+		if (parent && strcmp(parent, name) == 0) {
+			return device->name;
 		}
 		for (member = 0; members && member < count; member++) {
 			if (members[member] && strcmp(members[member], name) == 0) {
@@ -282,10 +313,11 @@ static int wanted_alone(const ncfg_action_t *action, const ncfg_document_t *docu
 		/* Not drift: see `ncfg_reconcile_reconciles`. */
 		return 1;
 	}
-	/* A port with no `interface` block of its own goes with its bridge; one
-	 * that has one keeps that block's `on_drift`. */
+	/* A port or parent with no `interface` block of its own goes with the
+	 * device that names it; one that has a block keeps that block's
+	 * `on_drift`. */
 	if (interface && !named_interface(document, interface) &&
-	    (bridge = port_of(document, interface)) != NULL) {
+	    (bridge = asked_for_by(document, interface)) != NULL) {
 		return ncfg_reconcile_reconciles(document, sims, bridge);
 	}
 	return ncfg_reconcile_reconciles(document, sims, interface);

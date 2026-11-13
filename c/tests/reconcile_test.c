@@ -554,6 +554,27 @@ static void a_bridge_takes_its_members_with_it(void)
 	}
 	ncfg_plan_free(plan);
 	ncfg_document_free(document);
+
+	/* A VLAN's parent is the same shape one block over: named only as the
+	 * VLAN's `parent`, and the VLAN's `link.create` carries no edge to the
+	 * parent's, so nothing but this rule brings the parent along. */
+	document = document_of(
+	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"dummy\"}},"
+	    "{\"name\":\"vlan10\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"lan0\",\"id\":10}}],"
+	    "\"interfaces\":[{\"name\":\"vlan10\"}]");
+	plan = document ? ncfg_plan_new(err, sizeof(err)) : NULL;
+	if (plan) {
+		(void)add_mtu(plan, "lan0", NULL, 0u);
+		(void)add_mtu(plan, "vlan10", NULL, 0u);
+		kept = ncfg_reconcile_restrict(plan, document, NULL, 0, NULL, err, sizeof(err));
+		check(kept && plan_touches(kept, "lan0") && plan_touches(kept, "vlan10"),
+		    "a VLAN's parent with no block of its own is reconciled with the VLAN");
+		ncfg_plan_free(kept);
+	} else {
+		check(0, "the parent fixture reads");
+	}
+	ncfg_plan_free(plan);
+	ncfg_document_free(document);
 }
 
 static void a_restricted_plan_keeps_only_what_it_may_act_on(void)

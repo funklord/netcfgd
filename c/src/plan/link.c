@@ -417,12 +417,59 @@ uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name)
  * never gets carrier, and `tc mirred` refuses a down target, so turning on
  * inbound shaping drops every packet that arrives.
  *
- * **Deliberately narrow: being a port, or being an `ifb`.** A plain
+ * **Deliberately narrow: being a port, being an `ifb`, or carrying a device
+ * the document configures** -- the parent of a VLAN or a PPPoE session with an
+ * `interface` block, which the kernel will not raise over a parent that is
+ * down. A plain
  * `device eth9 { mtu = 9000 }` with no interface block is an operator saying
  * something about the hardware and nothing about connecting over it, and
  * `enabled` lives on the interface -- so bringing up every device without a
  * block would be netcfgd deciding a question nobody asked it.
  */
+/*
+ * Whether some device the document configures over an `interface` block names
+ * `name` as the link it rides on: a VLAN, a VXLAN, a macvlan, a tunnel, a
+ * PPPoE session. The kernel will not bring such a device up over a parent that
+ * is down (`ENETDOWN`), so a parent with no block of its own was left down and
+ * the device on it failed `link.up` on every pass (project.md 10.835). A mesh
+ * point's parent is a radio, which the radio's own pass brings up.
+ */
+static int carries_a_configured_device(const ncfg_document_t *desired, const char *name)
+{
+	size_t at;
+
+	for (at = 0; desired && name && at < desired->device_count; at++) {
+		const ncfg_device_t         *device = &desired->devices[at];
+		const ncfg_interface_kind_t *kind = &device->kind;
+		const char                  *parent = NULL;
+
+		switch (kind->kind) {
+		case NCFG_KIND_VLAN:
+			parent = kind->vlan.parent;
+			break;
+		case NCFG_KIND_VXLAN:
+			parent = kind->vxlan.parent;
+			break;
+		case NCFG_KIND_MACVLAN:
+			parent = kind->macvlan.parent;
+			break;
+		case NCFG_KIND_TUNNEL:
+			parent = kind->tunnel.parent;
+			break;
+		case NCFG_KIND_PPPOE:
+			parent = kind->pppoe.parent;
+			break;
+		default:
+			break;
+		}
+		if (parent && strcmp(parent, name) == 0 &&
+		    ncfg_plan_interface(desired, device->name)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 void ncfg_plan_device_up(ncfg_builder_t *builder, const ncfg_device_t *device, uint32_t enslaved)
 {
 	const ncfg_observed_link_t *link;
@@ -431,7 +478,8 @@ void ncfg_plan_device_up(ncfg_builder_t *builder, const ncfg_device_t *device, u
 	ncfg_op_t                   inverse;
 	ncfg_reason_t               reason;
 
-	if (!device->master && device->kind.kind != NCFG_KIND_IFB) {
+	if (!device->master && device->kind.kind != NCFG_KIND_IFB &&
+	    !carries_a_configured_device(builder->desired, device->name)) {
 		return;
 	}
 	if (ncfg_plan_interface(builder->desired, device->name)) {

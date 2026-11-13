@@ -286,6 +286,52 @@ static void a_bond_mode_moves_on_a_bond_with_no_members(void)
  * same plan -- the sentence stands beside the rest of the plan rather than
  * instead of it.
  */
+/* Whether the plan brings this device up. */
+static int brings_up(const ncfg_plan_t *plan, const char *name)
+{
+	size_t at;
+
+	for (at = 0; plan && at < plan->action_count; at++) {
+		const ncfg_op_t *op = &plan->actions[at].op;
+
+		if (op->kind == NCFG_OP_LINK_UP && op->u.named.name &&
+		    strcmp(op->u.named.name, name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * A VLAN's parent with no `interface` block of its own is brought up (10.835).
+ * The kernel answers `ENETDOWN` to raising a VLAN over a parent that is down, so
+ * a dummy or a NIC named only as `parent` was left down and the VLAN failed
+ * `link.up` on every pass. A device carrying nothing configured is still left
+ * alone: that is the rule this narrows nothing of.
+ */
+static void a_vlan_parent_is_brought_up(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(
+	    "{\"name\":\"lan0\",\"kind\":{\"kind\":\"dummy\"}},"
+	    "{\"name\":\"eth9\",\"kind\":{\"kind\":\"dummy\"}},"
+	    "{\"name\":\"vlan10\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"lan0\",\"id\":10}}",
+	    "{\"name\":\"vlan10\"}", "", "",
+	    "\"links\":["
+	    "{\"name\":\"lan0\",\"index\":2,\"mtu\":1500,\"up\":false,\"carrier\":false,"
+	    "\"ownership\":\"unknown\",\"kind\":\"dummy\"},"
+	    "{\"name\":\"eth9\",\"index\":3,\"mtu\":1500,\"up\":false,\"carrier\":false,"
+	    "\"ownership\":\"unknown\",\"kind\":\"dummy\"}]",
+	    &document, &observed);
+
+	check(plan && brings_up(plan, "lan0"),
+	    "a VLAN's parent with no block of its own is brought up");
+	check(plan && !brings_up(plan, "eth9"),
+	    "  and a device carrying nothing configured is still left down");
+	planfix_release(plan, document, observed);
+}
+
 static void a_bond_with_members_is_told_rather_than_tried(void)
 {
 	ncfg_document_t *document;
@@ -930,6 +976,7 @@ int main(void)
 	a_bridge_setting_the_document_omits_is_not_compared();
 	a_bond_mode_moves_on_a_bond_with_no_members();
 	a_bond_with_members_is_told_rather_than_tried();
+	a_vlan_parent_is_brought_up();
 	a_mode_netcfgd_cannot_name_is_not_corrected();
 	a_macvlan_moves_among_the_three_modes_the_kernel_takes();
 	a_macvlan_passthru_transition_is_told_rather_than_tried();
