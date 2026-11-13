@@ -184,8 +184,8 @@ typedef struct {
 #define NCFG_NODE_PROCEDURE_HOSTS "hosts"
 
 /*
- * netcfgd's types in fuzznet's extensions' range (its `node/types.h`, 128 to
- * 191): a request, and the answer to one. A line in each, the same vocabulary
+ * netcfgd's SUBCMDs under fuzznet's FZN_CMD_EXTENSION (its `wire/cmd.h` and
+ * `node/types.h`, sec 1085): a request, and the answer to one. A line in each, the same vocabulary
  * as the local socket's (10.685).
  */
 #define NCFG_NODE_TYPE_REQUEST 128u

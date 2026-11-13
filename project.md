@@ -12690,6 +12690,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.829 fuzznet b54490a: every host-to-host message's first byte moved
+
+fuzznet split its family 2 into CMD categories (its sec 1085, stage 2; inbox
+20261113T0049Z): byte 0 of a message between hosts is now a CMD (`wire/cmd.h`), byte 1 a
+SUBCMD, and an extension's remote requests arrive under `FZN_CMD_EXTENSION`, 20, where they
+were family 2's 128 to 191. **Both ends must run the same fuzznet**, nothing reading the old
+bytes: so a netcfgd at the old pin 364241c and one at this pin cannot ask each other
+anything, and an estate's hosts are upgraded together, as they already had to be for
+netcfgd's own vocabulary.
+
+netcfgd keeps its SUBCMDs, 128 a request and 129 its answer, which fuzznet now lists by
+owner in `node/types.h` as `FZN_TYPES_NETCFGD_REQUEST`/`_ANSWER`; `node.c`'s assertion
+checks netcfgd's against those, where it checked a range that no longer exists, and
+`serve_remote` reads and writes byte 0 as `FZN_CMD_EXTENSION`. Nothing else here builds
+those bytes: fuzznet sends a request from the local `call` verb.
+
+**Size: +94,984 bytes, all fuzznet's**, measured by building at both pins with netcfgd's
+tree otherwise the same (2,505,032 and 2,600,016). 166 commits came with it -- calls with
+relays and NAT traversal, the metric layer, binary STATUS replies -- all reachable from
+the daemon netcfgd runs, so `--gc-sections` keeps them. The budget is raised with the
+figure; netcfgd's own +21,896 since 11-07 had been inside the tolerance.
+
+**Coming, and not taken yet:** fuzznet's stage 3 (a call becomes CMD 18, STATUS CMD 19)
+and then the local verb `call NAME` renamed `rrpc NAME`. The second touches netcfgd: the
+client sends `call` for ten of its requests (`client/ncfg_fuzznet.c`), so the pin that
+renames it needs those lines changed with it.
+
+**Measured:** the full C suite at this pin, exit 0, the node and fleet tests among it.
+
 ## 10.828 DHCPv4 is served where the dnsmasq has no DHCPv6
 
 **Found by deriving the next lens from 10.827**: one part of the LAN's dnsmasq failing took

@@ -1118,4 +1118,8 @@ netcfgd
 # the heap, which costs text and saves the bss that stopped a small machine (10.751).
 # 2026-11-07: 2,483,136, +576 at fuzznet 364241c, all of it fuzznet's: a fork's dropped acts
 # made again whole, and notes and shares at scale (10.755).
-total 2483136
+# 2026-11-13: 2,600,016, +116,880: +21,896 netcfgd's own since 11-07 (the router work
+# through 10.828, inside the tolerance until now), and +94,984 at fuzznet b54490a, all of
+# it fuzznet's 166 commits: calls, relays, the metric layer, binary STATUS and the
+# CMD/SUBCMD split, reachable from the daemon it runs (10.829).
+total 2600016

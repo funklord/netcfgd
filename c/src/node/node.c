@@ -22,6 +22,7 @@
 #include "local/vocabulary.h"
 #include "node/identity.h"
 #include "node/types.h"
+#include "wire/cmd.h"
 #include "persist/persist_file.h"
 #include "qr/qr.h"
 #include "session/agree_monocypher.h"
@@ -60,13 +61,11 @@ _Static_assert((int)NCFG_SCOPE_HOST_PRIVATE == (int)FZN_SCOPE_HOST_PRIVATE &&
         (int)NCFG_SCOPE_ESTATE == (int)FZN_SCOPE_ESTATE,
     "netcfgd's scope copy has drifted from fuzznet's state/scope.h");
 
-/* netcfgd's remote types inside fuzznet's extensions' range, checked where
- * both are visible, as the scope table's are. */
-_Static_assert(NCFG_NODE_TYPE_REQUEST >= FZN_TYPES_EXTENSION_FIRST &&
-        NCFG_NODE_TYPE_REQUEST <= FZN_TYPES_EXTENSION_LAST &&
-        NCFG_NODE_TYPE_ANSWER >= FZN_TYPES_EXTENSION_FIRST &&
-        NCFG_NODE_TYPE_ANSWER <= FZN_TYPES_EXTENSION_LAST,
-    "netcfgd's remote types are outside fuzznet's extensions' range");
+/* netcfgd's remote SUBCMDs as fuzznet lists them under FZN_CMD_EXTENSION
+ * (its sec 1085), checked where both are visible, as the scope table's are. */
+_Static_assert(NCFG_NODE_TYPE_REQUEST == FZN_TYPES_NETCFGD_REQUEST &&
+        NCFG_NODE_TYPE_ANSWER == FZN_TYPES_NETCFGD_ANSWER,
+    "netcfgd's remote SUBCMDs differ from those fuzznet's node/types.h lists");
 
 /* Everything the identity points into, in one allocation that outlives it:
  * `identity.agree_secret` is a pointer to `agree_secret`, and the signer the
@@ -454,8 +453,8 @@ static size_t serve_local_from(void *ctx, fzn_origin_t origin, const fzn_peer_t 
 	return serving->local(serving->context, &peer, line, reply, cap);
 }
 
-/* A remote request of netcfgd's type, its two type bytes taken off and the
- * answer's put on: version 2, `NCFG_NODE_TYPE_ANSWER`. Any other type is not
+/* A remote request of netcfgd's, its CMD and SUBCMD taken off and the
+ * answer's put on: FZN_CMD_EXTENSION, `NCFG_NODE_TYPE_ANSWER`. Any other type is not
  * this daemon's, and fuzznet answers it `unsupported`. */
 static size_t serve_remote(void *ctx, const uint8_t sender[FZN_PUBKEY_LEN], int contact,
     const uint8_t *request, size_t request_len, uint8_t *reply, size_t cap)
@@ -464,7 +463,7 @@ static size_t serve_remote(void *ctx, const uint8_t sender[FZN_PUBKEY_LEN], int 
 
 	(void)ctx;
 	if (!serving->remote || !request || request_len < 2u || cap < 3u ||
-	    request[0] != FZN_TYPES_VERSION_SHARED || request[1] != NCFG_NODE_TYPE_REQUEST) {
+	    request[0] != FZN_CMD_EXTENSION || request[1] != NCFG_NODE_TYPE_REQUEST) {
 		return 0u;
 	}
 	n = serving->remote(serving->context, sender, contact, (const char *)request + 2,
@@ -472,7 +471,7 @@ static size_t serve_remote(void *ctx, const uint8_t sender[FZN_PUBKEY_LEN], int 
 	if (n == 0u) {
 		return 0u;
 	}
-	reply[0] = FZN_TYPES_VERSION_SHARED;
+	reply[0] = FZN_CMD_EXTENSION;
 	reply[1] = NCFG_NODE_TYPE_ANSWER;
 	return n + 2u;
 }
