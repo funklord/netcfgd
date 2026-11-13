@@ -1049,7 +1049,7 @@ int ncfg_contenders_find(const ncfg_contention_where_t *where,
 	 * on, and the supplicant's own socket check is the guard there. */
 	names = NULL;
 	count = 0u;
-	if (iwd[0] != '\0') {
+	if (iwd[0] != '\0' && where->etc_root) {
 		if (!iwd_claims(where->proc_root, iwd, claims, claim_count, &names, &count)) {
 			release_names(names, count);
 			ncfg_contenders_free(out);

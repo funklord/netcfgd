@@ -12737,6 +12737,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.851 A fixture's run root takes the machine's `/etc` out of the question
+
+`make live` after 10.848 failed three checks in `network_arrives.sh`: the
+daemon never joined the network it was asked to. The script names a fixture
+run root (`NCFG_RUN_ROOT`), which switches off the namespace question -- and
+`/proc` and `/etc` stayed this host's, where connman runs and `/etc/connman`
+exists. So the new connman read claimed the fixture's simulated radio, and the
+supplicant guard declined to start a supplicant on it.
+
+The product was not wrong -- unset, a netcfgd in another namespace asks
+nothing -- but a named run root is a fixture, and the machine's `/etc` is not
+part of it. Now naming one, in the daemon and in `ncfg plan`, sets `etc_root`
+to none, so connman, dhcpcd and netifd are not asked; and iwd, judged from a
+process's options rather than a file, is asked only where `etc_root` is given,
+as the three that describe the machine as a whole. `network_arrives.sh`: 22 of
+22. An unnamed run on this host still warns that connman and ifupdown hold
+`eth0`.
+
 ## 10.849 iwd is a contender for radios, read from its command line
 
 The same shape a third time: a daemon that takes interfaces unless told not

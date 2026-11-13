@@ -227,6 +227,12 @@ static void contention_roots_from_environment(ncfg_main_world_t *world)
 		(void)snprintf(world->contention_run, sizeof(world->contention_run), "%s", run);
 		world->contention.run_root = world->contention_run;
 		world->contention.run_root_is_the_machines = 0;
+		/* A named run root is a fixture, and the machine's `/etc` is not part
+		 * of it: connman's, dhcpcd's and netifd's configurations, and iwd's
+		 * options, describe the host's interfaces, not the fixture's. Found
+		 * when the live suite's radio fixture was claimed by this host's
+		 * running connman (10.851). */
+		world->contention.etc_root = NULL;
 	}
 	if (proc && proc[0] && strlen(proc) < sizeof(world->contention_proc)) {
 		(void)snprintf(world->contention_proc, sizeof(world->contention_proc), "%s",

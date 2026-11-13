@@ -1679,6 +1679,7 @@ static void warn_about_contention(const ncfg_document_t *document,
 		if (run && run[0]) {
 			where.run_root = run;
 			where.run_root_is_the_machines = 0;
+			where.etc_root = NULL;
 		}
 		if (proc && proc[0]) {
 			where.proc_root = proc;
