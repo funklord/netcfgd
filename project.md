@@ -12694,6 +12694,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.832 fuzznet 23e4f46: a group's leave and delete, agreed with current hosts
+
+fuzznet b1cfde6c changed what a group's log records when its last admin deletes it, or
+leaves it as the last member: the delete now writes that leave and keeps the log to serve
+it, and a host from before it **judges that leave denied**. So a netcfgd node at ed93497
+and a current fuzznet host -- a fuzzypickles, or a netcfgd at this pin -- would disagree on
+who is in a group made again under an old name, and groups are what `ncfg secret seal`
+seals an estate's secrets to (10.711, `c_estate_secret.sh` seals to zone1). The same commit stops
+a group left from taking its maker's name back from the group made since. The other four
+commits are comments, a test's diagnostics, and a QR recogniser and contact-card
+addresses taken into fuzznet from fuzzypickles, built by fuzznet's `qrcheck` and not linked
+here.
+
+**Size: +4,248 bytes**, 2,604,264, inside the budget's 3% tolerance, so the budget line
+stands. **Measured:** the full C suite at this pin, `node_serve.sh` and
+`node_second_user.sh` among it, and `c_estate_secret.sh`'s seal to a group and the apply
+that reads it, beside a standalone fuzznetd as well as alone.
+
 ## 10.831 A refused `conf.d` said nothing of the daemon nobody had started
 
 **`make live`, run whole for the first time since the router tier, found a fault in the
