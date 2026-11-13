@@ -1663,6 +1663,25 @@ static void warn_about_contention(const ncfg_document_t *document,
 	}
 	memset(&found, 0, sizeof(found));
 	ncfg_contention_machine(&where);
+	/*
+	 * The daemon's seam, read the daemon's way (`daemon_world.c`): a named run
+	 * root is a fixture, so the namespace question does not arise. Without it
+	 * a plan run by a test read the host's own `/run`, and a warnings test
+	 * gained a line the day ifupdown became a contender, on a machine whose
+	 * ifupdown held `eth0` (10.846).
+	 */
+	{
+		const char *run = getenv(NCFG_CONTENTION_RUN_ROOT_ENV);
+		const char *proc = getenv(NCFG_CONTENTION_PROC_ROOT_ENV);
+
+		if (run && run[0]) {
+			where.run_root = run;
+			where.run_root_is_the_machines = 0;
+		}
+		if (proc && proc[0]) {
+			where.proc_root = proc;
+		}
+	}
 	if (count > 0 && ncfg_contenders_find(&where, claims, count, &found, err, sizeof(err))) {
 		for (at = 0; at < found.count; at++) {
 			ncfg_buf_t said;

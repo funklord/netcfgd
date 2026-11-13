@@ -59,6 +59,10 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
+# Another manager's state, empty: the host's own -- an ifupdown holding `eth0`,
+# say -- is a warning about the host, not about the document under test.
+mkdir -p "$work/runroot"
+export NCFG_RUN_ROOT="$work/runroot"
 
 failures=0
 

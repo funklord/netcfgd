@@ -121,6 +121,59 @@ static const char *made_on(const ncfg_device_t *device)
 	}
 }
 
+/*
+ * Why a configured interface may be missing, where a VPI card's ports say so
+ * (10.586, 10.846): a port running InfiniBand has no Ethernet interface, and
+ * one running Ethernet has no `ib` interface. ml350g6-01 configures `ib0`
+ * while both ConnectX ports run Ethernet as `eth2` and `eth3`, and the plan
+ * said only that `ib0` was not there. A reason or an empty string, never
+ * NULL; written into `out`.
+ */
+static const char *card_port_reason(const ncfg_observed_t *observed, const char *name,
+    char *out, size_t out_size)
+{
+	const ncfg_observed_port_t *infiniband = NULL;
+	char                        ethernet[160] = "";
+	size_t                      at;
+	int                         written;
+
+	out[0] = '\0';
+	if (!observed || !name) {
+		return out;
+	}
+	for (at = 0u; at < observed->port_count; at++) {
+		const ncfg_observed_port_t *port = &observed->ports[at];
+
+		if (!port->type) {
+			continue;
+		}
+		if (strcmp(port->type, "ib") == 0 && !infiniband) {
+			infiniband = port;
+		} else if (strcmp(port->type, "eth") == 0 && port->interface &&
+		    strlen(ethernet) + strlen(port->interface) + 3u < sizeof(ethernet)) {
+			if (ethernet[0] != '\0') {
+				strcat(ethernet, ", ");
+			}
+			strcat(ethernet, port->interface);
+		}
+	}
+	if (strncmp(name, "ib", 2) == 0 && ethernet[0] != '\0') {
+		written = snprintf(out, out_size, " -- this machine's VPI card ports run as "
+		    "Ethernet (%s), so none is an InfiniBand interface; `ncfg status` lists them",
+		    ethernet);
+	} else if (strncmp(name, "ib", 2) != 0 && infiniband) {
+		written = snprintf(out, out_size, " -- %s port %lld runs as InfiniBand, which has "
+		    "no Ethernet interface; `ncfg status` says how to switch it",
+		    infiniband->device ? infiniband->device : "a card", (long long)infiniband->index);
+	} else {
+		return out;
+	}
+	if (written < 0 || (size_t)written >= out_size) {
+		out[0] = '\0';
+	}
+	return out;
+}
+
 /* Whether this plan already creates the link. */
 static int creation_planned(const ncfg_builder_t *builder, const char *name)
 {
@@ -189,11 +242,14 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 		return;
 	}
 	if (device->kind.kind == NCFG_KIND_PHYSICAL) {
+		char why[256];
+
 		/* A physical device that is not present is not something a plan can
 		 * fix. Say so rather than emitting actions that must fail. */
 		ncfg_plan_warnf(builder->plan, device->name,
-		    "%s is configured but no such device is present; nothing planned for it",
-		    device->name);
+		    "%s is configured but no such device is present; nothing planned for it%s",
+		    device->name, card_port_reason(builder->observed, device->name, why,
+		    sizeof(why)));
 		return;
 	}
 	/*

@@ -12758,6 +12758,24 @@ an action, and name the case they were written for, so they stay.
 `doc/first-run.md` gained the sysvinit install target in step 4 and, in section
 8, `netcfgd_select.sh netcfgd` as the whole of the takeover without systemd.
 
+## 10.846 A missing interface names the card port that explains it
+
+ml350g6-01's `/etc/network/interfaces` configures `ib0` while both ConnectX
+ports run Ethernet, and the plan said only "ib0 is configured but no such
+device is present". The observation already held the card's ports (10.586);
+the warning now uses them: a missing `ib*` name where VPI ports run Ethernet
+says so and names their interfaces (`eth2, eth3` here), and a missing
+Ethernet name where a port runs InfiniBand names that port and points at
+`ncfg status`, which says how to switch it. With no card ports the warning is
+the bare one. `plan_setting_test` holds all three; with the reason switched
+off, two fail.
+
+And `ncfg plan` now takes the contention seam the daemon already read,
+`NCFG_RUN_ROOT` and `NCFG_PROC`: run bare, `tests/live/c_warnings.sh` read this
+host's `/run` and gained "ifupdown also manages eth0" the day 10.843 landed.
+Under `make live` it runs in its own network namespace, where the check stands
+aside, so only a bare run saw it; the script names an empty run root now.
+
 ## 10.845 The switcher asks which rc system runs, not which is installed
 
 Running `netcfgd_select.sh --dry-run netcfgd` on ml350g6-01 as the user, after

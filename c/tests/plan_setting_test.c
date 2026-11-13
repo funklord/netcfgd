@@ -766,10 +766,50 @@ static void flow_offload_rides_the_table(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * A configured interface that is missing because a VPI card's port runs the
+ * other way (10.846). ml350g6-01 configures `ib0` while its ConnectX ports run
+ * Ethernet as eth2 and eth3; the reverse is an Ethernet name on a port running
+ * InfiniBand. And a missing name with no card ports gets only the bare warning.
+ */
+static void a_missing_interface_names_the_card_port_that_explains_it(void)
+{
+	static const char ethernet_ports[] =
+	    "\"links\":[],\"ports\":["
+	    "{\"device\":\"pci/0000:05:00.0\",\"index\":1,\"type\":\"eth\",\"interface\":\"eth2\"},"
+	    "{\"device\":\"pci/0000:05:00.0\",\"index\":2,\"type\":\"eth\",\"interface\":\"eth3\"}]";
+	static const char infiniband_port[] =
+	    "\"links\":[],\"ports\":["
+	    "{\"device\":\"pci/0000:05:00.0\",\"index\":2,\"type\":\"ib\",\"rdma\":\"mlx4_0\"}]";
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+	plan = planfix_plan(DEVICE("ib0"), "{\"name\":\"ib0\",\"addressing\":[]}", "", "",
+	    ethernet_ports, &document, &observed);
+	check(plan && planfix_warned(plan, "ports run as Ethernet (eth2, eth3)"),
+	    "a missing ib0 names the card ports that run as Ethernet");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("eth3"), "{\"name\":\"eth3\",\"addressing\":[]}", "", "",
+	    infiniband_port, &document, &observed);
+	check(plan && planfix_warned(plan, "pci/0000:05:00.0 port 2 runs as InfiniBand"),
+	    "a missing Ethernet name names the port that runs as InfiniBand");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("ib0"), "{\"name\":\"ib0\",\"addressing\":[]}", "", "",
+	    "\"links\":[]", &document, &observed);
+	check(plan && planfix_warned(plan, "no such device is present; nothing planned for it") &&
+	    !planfix_warned(plan, "card ports") && !planfix_warned(plan, "InfiniBand"),
+	    "and with no card ports the warning is the bare one");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	the_uplinks_are_a_sorted_list_replaced_whole();
 	flow_offload_rides_the_table();
+	a_missing_interface_names_the_card_port_that_explains_it();
 	port_forwards_ride_the_table();
 	upnp_is_planned_and_warned();
 	a_forward_is_reachable_from_inside();
