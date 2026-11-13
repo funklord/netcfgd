@@ -267,6 +267,39 @@ JSON
 	done
 ) &
 say "pppoe-server $(dpkg-query -W -f='${Version}' pppoe 2>/dev/null) on tap1, plugin ${plugin:-none}"
+# A TCP flow from the home to the ISP for flow offload (0319): a server on
+# 192.0.2.1:8099 that sends a byte a second for 30 s per connection, and a
+# client in the home that keeps one open, reconnecting while qemu lives. ICMP is
+# never offloaded, so the ping below cannot show it. Both end with qemu.
+cat > /run/flow.py <<'FLOW'
+import socket, sys, time
+if sys.argv[1] == "serve":
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("192.0.2.1", 8099))
+    listener.listen(4)
+    while True:
+        conn, _ = listener.accept()
+        try:
+            for _ in range(30):
+                conn.sendall(b".")
+                time.sleep(1)
+        except OSError:
+            pass
+        conn.close()
+else:
+    conn = socket.create_connection(("192.0.2.1", 8099), timeout=5)
+    conn.settimeout(5)
+    while conn.recv(16):
+        pass
+FLOW
+timeout 1900 python3 /run/flow.py serve > /run/flow-serve.log 2>&1 &
+flow_server=$!
+(
+	while [ -d /proc/$qemu ]; do
+		ip netns exec home timeout 40 python3 /run/flow.py connect > /dev/null 2>&1 || sleep 5
+	done
+) &
 # The home's host asks every five seconds while qemu lives, and the first answer
 # each way is kept: when, and from which address.
 (
@@ -281,8 +314,8 @@ say "pppoe-server $(dpkg-query -W -f='${Version}' pppoe 2>/dev/null) on tap1, pl
 ) > /run/home.log 2>&1 &
 wait $qemu
 ran=$?
-kill $kea $ac $capture $icmp0 $icmp2 $(cat /run/radvd.pid 2>/dev/null) $(cat /run/kea/ppp.pid 2>/dev/null) \
-	2>/dev/null
+kill $kea $ac $capture $icmp0 $icmp2 $flow_server $(cat /run/radvd.pid 2>/dev/null) \
+	$(cat /run/kea/ppp.pid 2>/dev/null) 2>/dev/null
 wait $kea 2>/dev/null
 wait $ac 2>/dev/null
 pkill -f '^pppd .*rp-pppoe' 2>/dev/null

@@ -46,7 +46,12 @@ if [ -e /payload/home ]; then
 	uplink='	config = ["dhcp6 pd_length 56", "192.0.2.2/24", "2001:db8:aaaa:ffff::2/64"]
 	forwarding = true
 	nat = true'
-	home="interface home0 {
+	# Flow offload too (0319), software: the home's TCP flow to the ISP, which
+	# the payload keeps open, should be carried by netcfgd's flowtable.
+	home="global {
+	flow_offload = \"software\"
+}
+interface home0 {
 	config = [\"192.168.9.1/24\", \"@pd:isp6/1=::1/64\"]
 	forwarding = true
 	advertise { prefixes = [\"@pd:isp6/1\"] }
@@ -178,6 +183,24 @@ else
 			nft list table inet netcfgd 2>/dev/null | grep -q 'oifname "isp6".*masquerade' || {
 				failed=1
 				nft list table inet netcfgd 2>/dev/null | grep -i masq | head -3 | sed 's/^[[:space:]]*/  nft: /' >> "$out"
+			}
+			# Flow offload (0319): the payload's client in the home holds a TCP
+			# connection to 192.0.2.1:8099 open, reconnecting while qemu lives;
+			# carried by the flowtable, conntrack marks it [OFFLOAD]. 120 s.
+			n=0
+			until grep -q 'dport=8099 .*\[OFFLOAD\]' /proc/net/nf_conntrack 2>/dev/null ||
+				[ $n -gt 120 ]; do
+				sleep 1
+				n=$((n + 1))
+			done
+			offloaded=$(grep -c 'dport=8099 .*\[OFFLOAD\]' /proc/net/nf_conntrack 2>/dev/null)
+			say "  flow offload after $n s: $(nft list flowtables inet 2>/dev/null | grep -c 'flowtable offload') flowtable, ${offloaded:-0} offloaded flow(s) to 8099 of $(grep -c 'dport=8099' /proc/net/nf_conntrack 2>/dev/null) seen"
+			[ "${offloaded:-0}" -ge 1 ] || {
+				failed=1
+				grep 'dport=8099' /proc/net/nf_conntrack 2>/dev/null | head -2 | cut -c1-200 |
+					sed 's/^/  conntrack: /' >> "$out"
+				nft list table inet netcfgd 2>/dev/null | grep -A3 -E 'flowtable|chain offload' |
+					head -8 | sed 's/^[[:space:]]*/  nft: /' >> "$out"
 			}
 		fi
 		case "$host" in

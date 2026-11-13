@@ -12826,9 +12826,16 @@ offload -- the sentence there is still the generic netlink one, which 0319 wante
 the construct. **And a fault the planner tests found in step 3a**: the observed `rules`
 field had no declared range, so reading an observation back from JSON refused any value
 but 0 -- a client reading a daemon's observation with a flowtable in it would have
-failed; `R_U32` now. `plan_setting_test` has the four cases. **What remains** is the
-software half on `hull-armsr`, where a connection through the router should show
-`[OFFLOAD]` in conntrack; the hardware half needs a MediaTek PPE.
+failed; `R_U32` now. `plan_setting_test` has the four cases.
+
+**And on the router, `hull-armsr`, software offload carries the flow.** The rig's home
+reached the ISP only by ping, which no flowtable carries, so the outer machine now runs a
+TCP server on the ISP's 192.0.2.1:8099 and a client in the home that keeps a connection
+open, reconnecting while qemu lives; `prefix.sh` asks for `flow_offload = "software"`
+beside the home's interface and reads conntrack: `1 flowtable, 1 offloaded flow(s) to
+8099 of 1 seen` -- the home's connection marked `[OFFLOAD]` on OpenWrt 25.12's arm64
+kernel, at 128 MB, with every other step of the rig passing beside it. **The hardware
+half needs a MediaTek PPE**, and is on 10.833's list of what a real router is for.
 
 ## 10.833 A bridge over ports with no `interface` block was never put up by the daemon
 
