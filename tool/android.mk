@@ -786,15 +786,21 @@ android-fresh:
 # fills from the kit, is removed -- by that one name, under a build
 # directory that must be relative and free of `..`. An absolute one is
 # refused rather than skipped, since skipping it is the stale APK again.
+# A pattern rule, with the directory taken from the target's own name,
+# so it does not matter where the project sets ANDROID_BUILD_DIR: a
+# target written as $(ANDROID_KIT_SOURCE) here would be expanded as this
+# file is read, and snurra, setting the directory below the include,
+# got a rule for "/kit.source" and "No rule to make target" for its own
+# (2026-11-13). Several build directories each keep their own record.
 # `make` rather than $(MAKE), so a dry run prints this and runs nothing;
 # the record is written only when it changes, so nothing depending on it
 # is rebuilt while the kit stays put.
 ANDROID_KIT_SOURCE = $(ANDROID_BUILD_DIR)/kit.source
 
-$(ANDROID_KIT_SOURCE): android-kit-recheck
-	@case "$(ANDROID_BUILD_DIR)" in \
+%/kit.source: android-kit-recheck
+	@case "$*" in \
 		''|/*|..|../*|*/..|*/../*) \
-			echo "android: ANDROID_BUILD_DIR '$(ANDROID_BUILD_DIR)' must be a relative path inside the tree" >&2; \
+			echo "android: ANDROID_BUILD_DIR '$*' must be a relative path inside the tree" >&2; \
 			exit 1 ;; \
 	esac; \
 	core='$(QT_ANDROID_ROOT)/lib/libQt6Core_$(ANDROID_ABI).so'; \
@@ -805,14 +811,14 @@ $(ANDROID_KIT_SOURCE): android-kit-recheck
 	want="$(QT_ANDROID_ROOT) $$(stat -c '%s %Y' "$$core")"; \
 	have=$$(cat '$@' 2>/dev/null); \
 	[ "$$have" = "$$want" ] && exit 0; \
-	mkdir -p '$(ANDROID_BUILD_DIR)' || exit 1; \
-	if [ -f '$(ANDROID_BUILD_DIR)/Makefile' ]; then \
-		echo "android: $(ANDROID_BUILD_DIR) was not built with this Qt kit; cleaning its objects"; \
-		make -C '$(ANDROID_BUILD_DIR)' clean >/dev/null || exit 1; \
+	mkdir -p '$*' || exit 1; \
+	if [ -f '$*/Makefile' ]; then \
+		echo "android: $* was not built with this Qt kit; cleaning its objects"; \
+		make -C '$*' clean >/dev/null || exit 1; \
 	fi; \
-	if [ -d '$(ANDROID_BUILD_DIR)/android-build/libs' ]; then \
-		echo "android: and removing $(ANDROID_BUILD_DIR)/android-build/libs, staged from the old kit"; \
-		rm -rf '$(ANDROID_BUILD_DIR)/android-build/libs' || exit 1; \
+	if [ -d '$*/android-build/libs' ]; then \
+		echo "android: and removing $*/android-build/libs, staged from the old kit"; \
+		rm -rf '$*/android-build/libs' || exit 1; \
 	fi; \
 	printf '%s\n' "$$want" > '$@'
 
