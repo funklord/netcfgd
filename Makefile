@@ -2867,7 +2867,7 @@ hull-malta:
 	tail -1 tests/hull/malta/verdict/malta | grep -q '^VERDICT ok'
 
 # OpenWrt's own arm64 kernel and rootfs, armsr-armv8, in qemu-system-aarch64 in
-# 256 MB, with malta's test: the program and package for `aarch64_generic`, the
+# 128 MB, with malta's test: the program and package for `aarch64_generic`, the
 # arch most routers sold now have (10.814). Not in `hull`, two emulators deep.
 hull-armsr:
 	@$(call hull_says,netcfgd/armsr)

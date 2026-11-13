@@ -12851,8 +12851,10 @@ WDS, regulatory and width rigs), what hull cannot give is short and specific:
 
 Everything else a person configures on a router in the guide is in reach of hull, and
 the bridge over four ports, with its server and a delegated /64, is the step that was
-missing from it. A small router's memory is too: armsr's guest has 256 MB, and the
-common floor of what 25.12 still builds for is 128 MB.
+missing from it. **A small router's memory is too, and is now what armsr runs in**: the
+guest went from 256 MB to 128 MB, the floor of what 25.12 still builds for, and the whole
+rig -- the bridge, PD, PPPoE, WireGuard, the stock restarts, sysupgrade -- passes there,
+with the root an initramfs in that same RAM, which a real router keeps in flash.
 
 ## 10.832 fuzznet 23e4f46: a group's leave and delete, agreed with current hosts
 

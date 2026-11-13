@@ -165,8 +165,11 @@ JSON
 # the console holds.
 : > /verdict/console
 say "booting"
-# 256 MB, a small Filogic router's; `virt`'s console is its PL011.
-timeout -k 10 1800 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 2 -m 256 -display none \
+# 128 MB, the floor of what OpenWrt 25.12 still builds for, and what a cheap
+# router has; the root here is an initramfs in that RAM besides, which a router
+# keeps in flash, so this is harder than the router it stands for. `virt`'s
+# console is its PL011.
+timeout -k 10 1800 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 2 -m 128 -display none \
 	-monitor none -no-reboot -serial file:/verdict/console -kernel /armsr/Image \
 	-netdev tap,id=wan,ifname=tap0,script=no,downscript=no \
 	-device virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56,romfile= \
