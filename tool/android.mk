@@ -60,6 +60,8 @@
 # WHAT THIS FILE SUPPLIES
 #   The variable names, the preflight, the versionCode, the adb plumbing,
 #   and the signature check that beerssh learned the hard way.
+#   ANDROID_KIT_SOURCE, the record of which Qt kit a build directory was
+#   built with; make it a prerequisite of your qmake rule (see there).
 # =============================================================================
 
 ANDROID_SDK_ROOT ?= $(HOME)/Android/Sdk
@@ -761,6 +763,61 @@ android-fresh:
 		if [ -e "$$f" ]; then rm -f "$$f" && echo "android-fresh: removed $$f"; fi; \
 	done
 
+# Which Qt kit ANDROID_BUILD_DIR was built with: the kit's path and its
+# QtCore's size and date, kept in ANDROID_KIT_SOURCE. Wire it in as a
+# prerequisite of the rule that runs qmake, so a new kit also regenerates
+# the build's Makefile:
+#
+#   $(ANDROID_BUILD_DIR)/Makefile: android-check $(ANDROID_KIT_SOURCE) ...
+#
+# Updating a kit in place rebuilds nothing on its own. Qt's headers carry
+# the dates of the kit's archives, older than any object already built,
+# so make keeps objects compiled against the old headers and links them
+# to the new libraries -- an undefined QSaveFile::setPermissions when
+# ~/Qt/6.12.0 went from the July pre-release to the release (beerssh,
+# 2026-11-13). And androiddeployqt skips a library whose staged copy in
+# android-build/libs is newer than the kit's, so even a clean build went
+# on packaging the old QtCore and FFmpeg 7.1 and died at start on
+# "cannot locate symbol av_freep".
+#
+# So when the kit differs from the record, or a directory built before
+# the record has none: the build's own `make clean` removes the objects
+# it names, and android-build/libs, the staging tree androiddeployqt
+# fills from the kit, is removed -- by that one name, under a build
+# directory that must be relative and free of `..`. An absolute one is
+# refused rather than skipped, since skipping it is the stale APK again.
+# `make` rather than $(MAKE), so a dry run prints this and runs nothing;
+# the record is written only when it changes, so nothing depending on it
+# is rebuilt while the kit stays put.
+ANDROID_KIT_SOURCE = $(ANDROID_BUILD_DIR)/kit.source
+
+$(ANDROID_KIT_SOURCE): android-kit-recheck
+	@case "$(ANDROID_BUILD_DIR)" in \
+		''|/*|..|../*|*/..|*/../*) \
+			echo "android: ANDROID_BUILD_DIR '$(ANDROID_BUILD_DIR)' must be a relative path inside the tree" >&2; \
+			exit 1 ;; \
+	esac; \
+	core='$(QT_ANDROID_ROOT)/lib/libQt6Core_$(ANDROID_ABI).so'; \
+	if [ -z '$(QT_ANDROID_ROOT)' ] || [ ! -f "$$core" ]; then \
+		echo "android: no $$core, so cannot tell which Qt kit this is; cleaning nothing" >&2; \
+		exit 1; \
+	fi; \
+	want="$(QT_ANDROID_ROOT) $$(stat -c '%s %Y' "$$core")"; \
+	have=$$(cat '$@' 2>/dev/null); \
+	[ "$$have" = "$$want" ] && exit 0; \
+	mkdir -p '$(ANDROID_BUILD_DIR)' || exit 1; \
+	if [ -f '$(ANDROID_BUILD_DIR)/Makefile' ]; then \
+		echo "android: $(ANDROID_BUILD_DIR) was not built with this Qt kit; cleaning its objects"; \
+		make -C '$(ANDROID_BUILD_DIR)' clean >/dev/null || exit 1; \
+	fi; \
+	if [ -d '$(ANDROID_BUILD_DIR)/android-build/libs' ]; then \
+		echo "android: and removing $(ANDROID_BUILD_DIR)/android-build/libs, staged from the old kit"; \
+		rm -rf '$(ANDROID_BUILD_DIR)/android-build/libs' || exit 1; \
+	fi; \
+	printf '%s\n' "$$want" > '$@'
+
+android-kit-recheck:
+
 android-install: android
 	$(if $(ANDROID_ARTIFACT_CHECK),@$(MAKE) --no-print-directory $(ANDROID_ARTIFACT_CHECK))
 	$(ANDROID_ADB) install -r $(ANDROID_ARTIFACT)
@@ -1079,4 +1136,4 @@ android-store-screenshots:
 		STORE_READY_TIMEOUT=$(STORE_EMULATOR_READY_TIMEOUT); \
 	rc=$$?; exit $$rc
 
-.PHONY: android-check android-fresh android-play-check android-screenshots android-store-screenshots android-install android-run android-log android-uninstall
+.PHONY: android-check android-fresh android-kit-recheck android-play-check android-screenshots android-store-screenshots android-install android-run android-log android-uninstall
