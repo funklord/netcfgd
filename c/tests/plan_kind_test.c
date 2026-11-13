@@ -393,6 +393,8 @@ static void a_guest_bridge_on_a_vlan_comes_up_in_order(void)
 	    "a VLAN is created after its parent, and waits on it, whatever the names");
 	check(lan0_up >= 0 && vlan_up > lan0_up && depends(plan, vlan_up, lan0_up),
 	    "  and a bridge's VLAN's parent is raised, before the VLAN");
+	check(plan && !planfix_warned(plan, "has a `device` block and no `interface` block"),
+	    "  and neither is said to plan nothing while the plan raises both (10.841)");
 	planfix_release(plan, document, observed);
 }
 

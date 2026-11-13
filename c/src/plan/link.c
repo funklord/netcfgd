@@ -525,6 +525,11 @@ static int carries_a_raised_device(const ncfg_document_t *desired, const char *n
 	return 0;
 }
 
+int ncfg_plan_device_is_raised(const ncfg_document_t *desired, const ncfg_device_t *device)
+{
+	return desired && device && raised_by_netcfgd(desired, device, 0);
+}
+
 /* This plan's `link.up` of the link, or `NCFG_PLAN_NO_ACTION`. */
 static uint32_t raising_planned(const ncfg_builder_t *builder, const char *name)
 {

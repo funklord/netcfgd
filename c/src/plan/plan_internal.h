@@ -287,6 +287,10 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 void ncfg_plan_link_attributes(ncfg_builder_t *builder, const ncfg_interface_t *interface);
 uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name);
 void ncfg_plan_device_up(ncfg_builder_t *builder, const ncfg_device_t *device, uint32_t enslaved);
+
+/* Whether netcfgd raises a device with no `interface` block of its own: a
+ * bridge's or bond's port, an `ifb`, or the parent of something it raises. */
+int ncfg_plan_device_is_raised(const ncfg_document_t *desired, const ncfg_device_t *device);
 void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_t *interface);
 void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface, size_t index,
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);

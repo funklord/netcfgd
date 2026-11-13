@@ -513,6 +513,19 @@ static void warn_inert_devices(ncfg_builder_t *builder)
 		if (ncfg_plan_interface(desired, device->name)) {
 			continue;
 		}
+		/*
+		 * **Not where netcfgd raises it** (10.841): a bridge's or bond's port,
+		 * or the parent of something it raises. The router's guest bridge on
+		 * a VLAN was told "nothing is planned" for both the VLAN and its port
+		 * while the same plan created and raised them, and a LAN bridge's
+		 * ports got the sentence too -- telling a person reading `ncfg plan`
+		 * that the network they wrote does nothing. Only those: skipping every
+		 * virtual kind as well silenced 0186's radio, which the first version
+		 * of this did and `plan_wifi_test` caught.
+		 */
+		if (ncfg_plan_device_is_raised(desired, device)) {
+			continue;
+		}
 		ncfg_plan_warnf(builder->plan, device->name,
 		    "%s has a `device` block and no `interface` block, so nothing is planned "
 		    "for it: netcfgd plans by interface, and a `device` block on its own is "

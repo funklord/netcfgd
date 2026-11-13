@@ -12737,6 +12737,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.841 On the router: the guest bridge comes up, and the plan stops saying it will not
+
+10.839's guest network was added to `tests/hull/malta/bridge.sh`, run on both router
+tiers: a bridge `brguest` whose port is a VLAN `guest10` on a veth `zport`, the VLAN's name
+sorting before its parent's. **On OpenWrt 25.12 the daemon did all of it** -- created the
+VLAN after its parent, raised `zport`, then `guest10`, then the bridge, and addressed it --
+and the plan then said `nothing to do`. Two things were wrong around it:
+
+- **The plan said the opposite.** `warn_inert_devices` told `guest10` and `zport` "has a
+  `device` block and no `interface` block, so nothing is planned for it" while the same plan
+  created and raised them, as it had told the LAN bridge's ports all along (seen in 10.833's
+  first runs, unread). A person reading `ncfg plan` on that router would be told their guest
+  network does nothing. The warning now skips what netcfgd raises -- a port, or the parent
+  of something it raises -- through `ncfg_plan_device_is_raised`, the rule 10.839 raises
+  by. **The first version also skipped every virtual kind, and silenced 0186's radio**:
+  `plan_wifi_test` and `c_warnings.sh` caught it, and it was narrowed to the raised alone.
+  `plan_kind_test` checks the guest chain draws no such warning, and fails with the skip off.
+- **The step's own check read nothing**: it used `ip -br`, which OpenWrt's BusyBox `ip` does
+  not have. It reads `/sys/class/net/*/flags` now.
+
 ## 10.840 Teardown in stack order: a VLAN before its parent
 
 **The other direction of 10.839's lens.** With the document emptied, a VLAN `zvlan` on a
