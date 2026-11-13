@@ -52,8 +52,8 @@ say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /armsr/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /armsr/veth/lib/modules/*/veth.ko $top/payload/veth.ko
 cp /repo/tests/hull/malta/guest.sh /repo/tests/hull/malta/prefix.sh /repo/tests/hull/malta/pppoe.sh \
-	/repo/tests/hull/malta/lan.sh /repo/tests/hull/malta/restart.sh /repo/tests/hull/malta/wg.sh \
-	/repo/tests/hull/malta/wider.conf $top/payload/
+	/repo/tests/hull/malta/lan.sh /repo/tests/hull/malta/bridge.sh /repo/tests/hull/malta/restart.sh \
+	/repo/tests/hull/malta/wg.sh /repo/tests/hull/malta/wider.conf $top/payload/
 # armsr's image carries no wireless stack, so guest.sh says the radio half was not
 # run and why, rather than failing it or passing over it.
 echo "armsr's image has no cfg80211, wpad or iw (hull-malta runs it)" > $top/payload/no-radio
@@ -166,7 +166,7 @@ JSON
 : > /verdict/console
 say "booting"
 # 256 MB, a small Filogic router's; `virt`'s console is its PL011.
-timeout -k 10 1200 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 2 -m 256 -display none \
+timeout -k 10 1800 qemu-system-aarch64 -M virt -cpu cortex-a53 -smp 2 -m 256 -display none \
 	-monitor none -no-reboot -serial file:/verdict/console -kernel /armsr/Image \
 	-netdev tap,id=wan,ifname=tap0,script=no,downscript=no \
 	-device virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56,romfile= \

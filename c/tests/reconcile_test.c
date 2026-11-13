@@ -458,6 +458,104 @@ static int plan_touches(const ncfg_plan_t *plan, const char *interface)
 	return 0;
 }
 
+/*
+ * A bridge's members come with it (project.md 10.833). The members are links
+ * with no `interface` block, so on their own nothing reconciles them, and the
+ * bridge's actions depend on theirs -- which left the router guide's `br-lan`
+ * down under the daemon while `ncfg apply` put it up. What the bridge asked
+ * for is kept; a link nobody asked for, and one with its own `report`, are not.
+ */
+static void a_bridge_takes_its_members_with_it(void)
+{
+	ncfg_document_t *document = document_of(
+	    "\"devices\":[],\"interfaces\":[{\"name\":\"brlan\"},"
+	    "{\"name\":\"held\",\"on_drift\":\"report\"}]");
+	ncfg_plan_t *plan;
+	ncfg_plan_t *kept;
+	char         err[NCFG_ERROR_MAX];
+	uint32_t     member;
+	uint32_t     second;
+	uint32_t     needs[2];
+
+	if (!document) {
+		check(0, "the bridge fixture reads");
+		return;
+	}
+	plan = ncfg_plan_new(err, sizeof(err));
+	if (!plan) {
+		check(0, "a plan for the bridge");
+		ncfg_document_free(document);
+		return;
+	}
+	member = add_mtu(plan, "port1", NULL, 0u);
+	needs[0] = member;
+	second = add_mtu(plan, "port2", needs, 1u); /* transitively, through port2 */
+	(void)add_mtu(plan, "lonely", NULL, 0u);    /* named by nothing that reconciles */
+	needs[0] = second;
+	(void)add_mtu(plan, "brlan", needs, 1u);
+	err[0] = '\0';
+	kept = ncfg_reconcile_restrict(plan, document, NULL, 0, NULL, err, sizeof(err));
+	if (kept) {
+		check(plan_touches(kept, "brlan"), "the bridge's own action is kept");
+		check(plan_touches(kept, "port1") && plan_touches(kept, "port2"),
+		    "  and so are its members', which it depends on, transitively");
+		check(!plan_touches(kept, "lonely"),
+		    "  and a link nothing that reconciles asked for is still left alone");
+		check(kept->action_count == 3u, "which is three actions");
+		ncfg_plan_free(kept);
+	} else {
+		check(0, "the bridge's plan restricts");
+	}
+
+	/* A member that has an `interface` block of its own set to `report`
+	 * keeps that policy, and the bridge waiting on it is held back and named. */
+	ncfg_plan_free(plan);
+	plan = ncfg_plan_new(err, sizeof(err));
+	if (plan) {
+		ncfg_buf_t dropped;
+
+		member = add_mtu(plan, "held", NULL, 0u);
+		needs[0] = member;
+		(void)add_mtu(plan, "brlan", needs, 1u);
+		ncfg_buf_init(&dropped, NCFG_LOG_MAX);
+		kept = ncfg_reconcile_restrict(plan, document, NULL, 0, &dropped, err, sizeof(err));
+		check(kept && kept->action_count == 0u,
+		    "a member whose own block says `report` is not swept in by the bridge");
+		check(strstr(ncfg_buf_text(&dropped), "needs action") != NULL,
+		    "  and the bridge waiting on it is named rather than reordered");
+		ncfg_plan_free(kept);
+		ncfg_buf_free(&dropped);
+	}
+	ncfg_plan_free(plan);
+	ncfg_document_free(document);
+
+	/*
+	 * And a port's own action that nothing depends on any more: once the bridge
+	 * is up, `link.up` on a port has no dependant, so only the membership says
+	 * the port is the bridge's. This is what armsr's rig showed after the walk
+	 * alone -- the bridge, its address and its server up, the ports down.
+	 */
+	document = document_of(
+	    "\"devices\":[{\"name\":\"brlan\",\"kind\":{\"kind\":\"bridge\","
+	    "\"members\":[\"port1\",\"held\"]}}],"
+	    "\"interfaces\":[{\"name\":\"brlan\"},{\"name\":\"held\",\"on_drift\":\"report\"}]");
+	plan = document ? ncfg_plan_new(err, sizeof(err)) : NULL;
+	if (plan) {
+		(void)add_mtu(plan, "port1", NULL, 0u);
+		(void)add_mtu(plan, "held", NULL, 0u);
+		kept = ncfg_reconcile_restrict(plan, document, NULL, 0, NULL, err, sizeof(err));
+		check(kept && plan_touches(kept, "port1"),
+		    "a bridge's port with no block of its own is reconciled with the bridge");
+		check(kept && !plan_touches(kept, "held"),
+		    "  and a port with its own `report` block is not");
+		ncfg_plan_free(kept);
+	} else {
+		check(0, "the membership fixture reads");
+	}
+	ncfg_plan_free(plan);
+	ncfg_document_free(document);
+}
+
 static void a_restricted_plan_keeps_only_what_it_may_act_on(void)
 {
 	ncfg_document_t *document = document_of(
@@ -2714,6 +2812,7 @@ int main(void)
 	the_drift_policy_in_force();
 	a_pending_sim_cycle_is_not_drift_either(base);
 	a_restricted_plan_keeps_only_what_it_may_act_on();
+	a_bridge_takes_its_members_with_it();
 	drift_is_read_out_of_the_plan();
 	more_drift_than_is_kept_is_counted();
 	a_drift_hook_fires_on_the_change_not_on_the_condition();

@@ -12735,6 +12735,82 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.833 A bridge over ports with no `interface` block was never put up by the daemon
+
+**Asked by the holder, 2026-11-13: "what needs a real router? can't you use hull?"** --
+after a run had ended saying the router side had nothing left short of real hardware.
+That was not checked against what hull can emulate, and checking found a fault in the
+router guide's own example.
+
+**The fault.** `doc/first-run.md` section 10 has a person write `device br-lan { bridge {
+members = ["lan1", "lan2", "lan3", "lan4"] } }` and `interface br-lan { ... }`, the ports
+having no `interface` block -- they are DSA ports, the bridge is what is configured. No
+rig had run that: their LANs were a single veth, and wider.conf's bridge had one dummy
+port and served nothing. `tests/hull/malta/bridge.sh`, run on both router tiers, makes
+the guide's LAN over four veth ports and asks hosts on two of them for leases; the bridge
+never came up. netcfgd's own log said why:
+
+    not reconciled in isolation: link.up on brlan needs action 5, which belongs to
+    another interface
+
+The daemon applies a configuration change, a drift repair and its passes through
+`ncfg_reconcile_restrict`, which keeps an action only where its interface reconciles --
+and `ncfg_reconcile_reconciles` answers no for an interface the document does not name,
+"a plan can only carry an action for it if something else in the document asked for
+it". The members' `link.create`, `link.set_master` and `link.up` are on links the
+document names only inside the bridge, so they were dropped, and every bridge action
+that depends on them with them. A one-shot `ncfg apply` takes the whole plan, which is
+why a hand test passed and the daemon did not. **So a router configured as the guide
+says got its bridge only from the first explicit apply**, and lost it to any change the
+daemon had to make itself.
+
+**The fix takes the comment at its word**: something did ask -- the bridge -- and it
+needed two halves, found in that order on armsr. **A port goes with its bridge**: an
+action on a link the document names only as a member of a bridge or bond, with no
+`interface` block of its own, is reconciled by the bridge's interface's policy. That alone
+is what keeps the ports up once the bridge exists, when no dependency edge points at them
+any more -- the first fix, without it, brought the bridge, its address and its server up
+and left the four ports down, so the hosts had no carrier. **And what a wanted action
+depends on comes with it**: a backwards walk from every wanted action takes in the
+actions it depends on that are on a link with no `interface` block -- a veth's
+`link.create`, which is no member of anything. A link with an `interface` block keeps its
+own `on_drift` either way, and a `report` there still holds the bridge back, named.
+`reconcile_test` has both halves, transitively through two members, a port with its own
+`report`, and a link nothing asked for still left alone; disabling either half turns its
+checks red.
+
+**Measured on `hull-armsr`**, the fix in: the bridge with all four ports, its address and
+its server within a second of the document changing; a lease each for hosts on `port1`
+and `port3` (192.168.8.108 and .247 from 192.168.8.1); each host's SLAAC address from the
+bridge's /64, the third of the delegated /56; and the plan after it `nothing to do`.
+Before it, the same step on the same rig: no ports in the bridge, no leases, and the plan
+still wanting every member's action. The step's waits are 120 s, and the guest's cap
+went from 1200 s to 1800 s (malta's from 900 s to 1200 s) for the time the step adds on
+an emulated CPU a loaded host slows several times over.
+
+### What does need a real router, then
+
+Measured against the rigs (`hull-armsr`, `hull-malta`, and the hwsim, roaming, mesh,
+WDS, regulatory and width rigs), what hull cannot give is short and specific:
+
+- **Vendor Wi-Fi drivers and their firmware** (mt76, ath10k/ath11k): hwsim runs
+  mac80211, hostapd and wpad faithfully, and has none of a driver's quirks -- DFS channel
+  availability checks, offloaded scanning, a firmware crash and recovery.
+- **The switch chip.** A DSA port is a netdev like the veths here, so the bridge and its
+  VLAN filtering are exercised; what is not is the same configuration offloaded into the
+  switch (switchdev), and the chip's own limits -- its VLAN table, its CPU port's tagging.
+- **Hardware flow offload**, a MediaTek PPE (0319); the software flowtable is emulable.
+- **Line rate**: whether a two-core Cortex-A53 forwards and translates a gigabit WAN is a
+  measurement of that CPU, not of a TCG emulation of it.
+- **Real flash and a real bootloader**: armsr's root is an initramfs, so sysupgrade's keep
+  list and restore are tested and a write-out to JFFS2 or UBIFS across a power cut and a
+  U-Boot boot are not.
+
+Everything else a person configures on a router in the guide is in reach of hull, and
+the bridge over four ports, with its server and a delegated /64, is the step that was
+missing from it. A small router's memory is too: armsr's guest has 256 MB, and the
+common floor of what 25.12 still builds for is 128 MB.
+
 ## 10.832 fuzznet 23e4f46: a group's leave and delete, agreed with current hosts
 
 fuzznet b1cfde6c changed what a group's log records when its last admin deletes it, or

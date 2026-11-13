@@ -49,8 +49,8 @@ cp netcfgd-static $top/payload/netcfgd
 say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /malta/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /malta/veth/lib/modules/*/veth.ko $top/payload/veth.ko
-cp /payload/guest.sh /payload/radio.sh /payload/lan.sh /payload/restart.sh /payload/wider.conf \
-	$top/payload/
+cp /payload/guest.sh /payload/radio.sh /payload/lan.sh /payload/bridge.sh /payload/restart.sh \
+	/payload/wider.conf $top/payload/
 cp /repo/tests/hull/openwrt/payload.sh $top/payload/payload.sh
 cp /repo/packaging/procd/netcfgd $top/repo/packaging/procd/netcfgd
 : > $top/payload/kernel-has-netfilter
@@ -69,7 +69,7 @@ printf '%s\n' '#!/bin/sh' 'sh /payload/guest.sh > /dev/console 2>&1 &' 'exit 0' 
 # the console holds.
 : > /verdict/console
 say "booting"
-timeout -k 10 900 qemu-system-mips -M malta -cpu 24Kc -m 128 -display none -monitor none \
+timeout -k 10 1200 qemu-system-mips -M malta -cpu 24Kc -m 128 -display none -monitor none \
 	-no-reboot -nic none -vga none -serial file:/verdict/console -kernel /malta/vmlinux.elf \
 	-initrd /malta/overlay.cpio -append 'console=ttyS0,115200'
 ran=$?

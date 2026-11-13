@@ -165,6 +165,10 @@ else
 	say "wireguard: not run, no module or peer on this tier (hull-armsr runs it)"
 fi
 
+# And the router guide's LAN, one bridge over four ports, on every tier: bridge.sh,
+# after prefix.sh so a tier with an ISP numbers it from the delegated prefix.
+. /payload/bridge.sh
+
 # And the stock services restarted under all of it, on every tier: restart.sh.
 . /payload/restart.sh
 

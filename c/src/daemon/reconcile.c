@@ -207,11 +207,96 @@ int ncfg_reconcile_reconciles(const ncfg_document_t *document, const ncfg_sims_t
 	return 0;
 }
 
+/* Whether the document has an `interface` block of this name. */
+static int named_interface(const ncfg_document_t *document, const char *name)
+{
+	size_t at;
+
+	if (!document || !name) {
+		return 0;
+	}
+	for (at = 0; at < document->interface_count; at++) {
+		if (document->interfaces[at].name && strcmp(document->interfaces[at].name, name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * The bridge or bond the document makes `name` a port of, or NULL.
+ *
+ * A port with no `interface` block is the bridge's: the router guide's
+ * `lan1`..`lan4` are configured only by being members of `br-lan`, and their
+ * own `link.up` is what the bridge needs once it exists -- no dependency edge
+ * says so after the bridge is up, so the walk in `ncfg_reconcile_restrict`
+ * alone left the ports down and the LAN without carrier (10.833).
+ */
+static const char *port_of(const ncfg_document_t *document, const char *name)
+{
+	size_t at;
+	size_t member;
+
+	for (at = 0; document && name && at < document->device_count; at++) {
+		const ncfg_device_t *device = &document->devices[at];
+		char *const         *members = NULL;
+		size_t               count = 0;
+
+		if (device->kind.kind == NCFG_KIND_BRIDGE) {
+			members = device->kind.bridge.members;
+			count = device->kind.bridge.member_count;
+		} else if (device->kind.kind == NCFG_KIND_BOND) {
+			members = device->kind.bond.members;
+			count = device->kind.bond.member_count;
+		}
+		for (member = 0; members && member < count; member++) {
+			if (members[member] && strcmp(members[member], name) == 0) {
+				return device->name;
+			}
+		}
+	}
+	return NULL;
+}
+
+/* Whether this action is one a pass may act on by its own standing. */
+static int wanted_alone(const ncfg_action_t *action, const ncfg_document_t *document,
+    const ncfg_sims_t *sims, int host_wide)
+{
+	const char *interface = ncfg_op_interface(&action->op);
+	const char *bridge;
+
+	/*
+	 * A host-wide action belongs to no interface, so the per-interface
+	 * filter could only ever drop it -- which is how a `resolv.conf`
+	 * another resolver had overwritten could never be put back (0165).
+	 * The three commit ops name no interface either and are deliberately
+	 * not swept in by this.
+	 */
+	if (ncfg_op_is_host_wide_config(&action->op)) {
+		return host_wide;
+	}
+	if (action->op.kind == NCFG_OP_STATION_STEER || action->op.kind == NCFG_OP_NEIGHBOUR_ADD ||
+	    action->op.kind == NCFG_OP_NEIGHBOUR_DEL ||
+	    (action->op.kind == NCFG_OP_ACCESS_CONTROL_ADD &&
+	        action->op.u.access_control.list == NCFG_ACL_POLICY_DENY)) {
+		/* Not drift: see `ncfg_reconcile_reconciles`. */
+		return 1;
+	}
+	/* A port with no `interface` block of its own goes with its bridge; one
+	 * that has one keeps that block's `on_drift`. */
+	if (interface && !named_interface(document, interface) &&
+	    (bridge = port_of(document, interface)) != NULL) {
+		return ncfg_reconcile_reconciles(document, sims, bridge);
+	}
+	return ncfg_reconcile_reconciles(document, sims, interface);
+}
+
 ncfg_plan_t *ncfg_reconcile_restrict(const ncfg_plan_t *plan, const ncfg_document_t *document,
     const ncfg_sims_t *sims, int host_wide, ncfg_buf_t *dropped, char *err, size_t err_size)
 {
 	ncfg_plan_t *kept;
 	char        *in_set = NULL;
+	char        *wanted_set = NULL;
 	size_t       at;
 
 	if (!plan) {
@@ -226,7 +311,10 @@ ncfg_plan_t *ncfg_reconcile_restrict(const ncfg_plan_t *plan, const ncfg_documen
 		/* Indexed by action id, which `ncfg_plan_add` assigns as the
 		 * position: one byte per action rather than a search per edge. */
 		in_set = calloc(plan->action_count, 1u);
-		if (!in_set) {
+		wanted_set = calloc(plan->action_count, 1u);
+		if (!in_set || !wanted_set) {
+			free(in_set);
+			free(wanted_set);
 			ncfg_plan_free(kept);
 			ncfg_error_set(err, err_size,
 			    "not enough memory to restrict a plan of %zu actions",
@@ -236,32 +324,56 @@ ncfg_plan_t *ncfg_reconcile_restrict(const ncfg_plan_t *plan, const ncfg_documen
 	}
 
 	for (at = 0; at < plan->action_count; at++) {
+		wanted_set[at] = (char)wanted_alone(&plan->actions[at], document, sims, host_wide);
+	}
+	/*
+	 * **What a reconciling interface asked for comes with it** (project.md
+	 * 10.833). A bridge's interface depends on its members joining it and
+	 * coming up, and a member is a port with a `device` block, or none, and
+	 * no `interface` block of its own -- so the filter above, which reconciles
+	 * only interfaces the document names, dropped every member's action and
+	 * the bridge with it: the router guide's `br-lan` over `lan1`..`lan4` was
+	 * never put up by the daemon, only by a one-shot `ncfg apply`. The rule
+	 * that dropped them says why it exists -- "a plan can only carry an action
+	 * for it if something else in the document asked for it" -- and here
+	 * something did, so the asker's policy governs. Only where the link has no
+	 * `interface` block: one that has its own keeps its own `on_drift`, and a
+	 * `report` there still holds the bridge back, named below.
+	 *
+	 * Backwards, once: a dependency always has a lower id than its dependant,
+	 * so walking down from the last action reaches every transitive one.
+	 */
+	for (at = plan->action_count; at-- > 0u;) {
+		const ncfg_action_t *action = &plan->actions[at];
+		size_t               edge;
+
+		if (!wanted_set[at]) {
+			continue;
+		}
+		for (edge = 0; edge < action->depends_count; edge++) {
+			uint32_t             id = action->depends_on[edge];
+			const ncfg_action_t *needed;
+			const char          *named;
+
+			if ((size_t)id >= plan->action_count || wanted_set[id]) {
+				continue;
+			}
+			needed = &plan->actions[id];
+			named = ncfg_op_interface(&needed->op);
+			if (named && !named_interface(document, named) &&
+			    !ncfg_op_is_host_wide_config(&needed->op)) {
+				wanted_set[id] = 1;
+			}
+		}
+	}
+
+	for (at = 0; at < plan->action_count; at++) {
 		const ncfg_action_t *action = &plan->actions[at];
 		const char          *interface = ncfg_op_interface(&action->op);
 		const uint32_t      *missing = NULL;
 		size_t               edge;
-		int                  wanted;
 
-		/*
-		 * A host-wide action belongs to no interface, so the per-interface
-		 * filter could only ever drop it -- which is how a `resolv.conf`
-		 * another resolver had overwritten could never be put back (0165).
-		 * The three commit ops name no interface either and are deliberately
-		 * not swept in by this.
-		 */
-		if (ncfg_op_is_host_wide_config(&action->op)) {
-			wanted = host_wide;
-		} else if (action->op.kind == NCFG_OP_STATION_STEER ||
-		    action->op.kind == NCFG_OP_NEIGHBOUR_ADD ||
-		    action->op.kind == NCFG_OP_NEIGHBOUR_DEL ||
-		    (action->op.kind == NCFG_OP_ACCESS_CONTROL_ADD &&
-		        action->op.u.access_control.list == NCFG_ACL_POLICY_DENY)) {
-			/* Not drift: see `ncfg_reconcile_reconciles`. */
-			wanted = 1;
-		} else {
-			wanted = ncfg_reconcile_reconciles(document, sims, interface);
-		}
-		if (!wanted) {
+		if (!wanted_set[at]) {
 			continue;
 		}
 		for (edge = 0; edge < action->depends_count; edge++) {
@@ -307,6 +419,7 @@ ncfg_plan_t *ncfg_reconcile_restrict(const ncfg_plan_t *plan, const ncfg_documen
 		ncfg_plan_strand(kept, &plan->stranded[at]);
 	}
 	free(in_set);
+	free(wanted_set);
 
 	if (ncfg_plan_failed(kept)) {
 		ncfg_plan_free(kept);
