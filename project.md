@@ -1229,12 +1229,14 @@ embedded version using hal9001 on hull or zephyr on hull"). hull boots microcont
 boards from their firmware since 2026-11-13, `(tuning (pc (machine BOARD)))` -- the AVR,
 Cortex-M and 8051 boards qemu and s51 emulate, built for hal9001, which runs its shell on
 four of them, the STM32L475 of `b-l475e-iot01a` the newest. **What a netcfgd test there
-needs that is not there yet is a network**: hull refuses one on a board today ("a board's
-serial port is its one way in"), and of its Cortex-M boards only `lm3s6965evb`
-(`stellaris_enet`) and `mps2-an385` (`lan9118`) have a network controller in qemu 10.0;
-the STM32 boards, the L475 among them, have none. Whether a board gets one is hull's to
-decide; a firmware with a stack (Zephyr's, or lwIP under hal9001) would be netcfgd's
-side. The core's RAM and size, below, are what such a firmware would carry.
+needed a network, and **hull gave boards one the same day**: an ESP32 (hull 86b6007,
+Espressif's `open_eth`, `hull esp fetch` once for Espressif's qemu; esp32, -s3, -c3, -c5,
+-c6, -c61, -h2, -p4), `lm3s6965evb` (`stellaris_enet`, cdc2283) and `mps2-an385`
+(`lan9118`, 88cc447), each with `(network nat)` and ports or one segment beside any other
+hull machine, measured in hull's `make check-board` (inbox 0950Z, 1235Z). The STM32
+boards, the L475 among them, have no network controller in qemu and still have none. A
+firmware with a stack (Zephyr's, or lwIP under hal9001) is netcfgd's side, and is what
+such a test now waits on. The core's RAM and size, below, are what it would carry.
 
 **ESP32 is next on hull, and then in hal9001** (holder, 2026-11-13). The board is not in
 upstream qemu -- Debian's 10.0 `qemu-system-xtensa` has no `esp32` machine -- but in
@@ -12766,6 +12768,16 @@ to it**: set EF on its voice and media classes, size its redundancy from the los
 observes, and carry the stream and its handover -- a server with no sound card to a
 hal9001 board with a DAC, and Bluetooth audio moved to the nearest room's node.
 
+**fuzznet built the mark** (its 1960844, `fzn_udp_send_marked`, inbox 1256Z) and asked
+whether a call's video should go EF or AF41, saying diffserv3's Video tin would take AF41.
+**It has none**: measured, 100 AF41 datagrams through netcfgd's `cake` landed in Best
+Effort beside the unmarked, and EF in Voice -- diffserv3 is Bulk, Best Effort, Voice.
+Answered: **video AF41**. On Wi-Fi RFC 8325 gives it AC_VI, its place; in `cake` it shares
+Best Effort, where flow isolation still keeps bulk from crowding it; and EF would put video
+in the Voice tin, capped at a quarter of the rate, crowding the voice it shares it with. A
+site that wants video tiered in `cake` would want `diffserv4`, whose Video tin takes AF4x --
+a key for when somebody asks.
+
 ## 10.836 Pairing an appliance with no screen: the code goes in (0320, proposed)
 
 The holder asked how an embedded netcfgd pairs with no display, no camera and no easy
@@ -12788,6 +12800,12 @@ has the argument; the short of it:
   serial line the flasher has while flashing), or pasted over SSH: **`ncfg pair join
   CODE`**, built, `-` reading stdin. `c/tests/node_join.sh` has it end to end, and fails
   with the join not sent.
+- **Adopted by the holder, 2026-11-13**: "a button (client activated) pairing into a
+  close-by network estate" is the standard; 0320 is accepted. fuzznet (its sec 1108, inbox
+  1212Z) named the cost -- a window bounds when, not who, so on a shared LAN anybody may
+  claim first -- which the overlap rule (two at once aborts) and the short value blinked and
+  named on the prompt answer; a printed claim secret is the stronger answer for batches.
+  fuzznet acts on the holder's word given to it, not on a relay.
 - **Refined by the holder: the button asks, the owner's node prompts** -- `ncfg pair
   request` from the button hook, a request carrying only the appliance's key, a prompt on
   the owner's screen, an invite sealed back on yes. Preferred over the push; not built,

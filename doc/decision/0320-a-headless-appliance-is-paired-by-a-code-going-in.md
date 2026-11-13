@@ -1,7 +1,8 @@
 # 0320: a headless appliance is paired by a code going in, one standard way
 
-Status: proposed -- the standard method is the holder's to adopt, and its network half is
-fuzznet's to design; the code-in primitive below is built
+Status: accepted -- the holder, 2026-11-13: "Yes we want a button (client activated) pairing
+into a close-by network estate", the refinement below; its network half is fuzznet's to build
+and fuzznet takes the decision from the holder directly; the code-in primitive is built
 Date: 2026-11-13
 Milestone: M5 (routers), and the microcontroller trial after it
 Extends: [project.md 10.720 to 10.723](../../project.md) (pairing a phone)
