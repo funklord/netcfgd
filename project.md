@@ -12735,6 +12735,20 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.838 A virtual sound card for streaming, designed (0322, not built)
+
+Discussed with the holder, 2026-11-13, after 0321: what changes if netcfgd, as root, makes
+the virtual sound card the holder now runs by hand (`dmix` on `snd-aloop`, `roc-send` as
+the user). [0322](doc/decision/0322-a-virtual-sound-card-for-streaming-is-a-device-netcfgd-loads.md)
+has it: netcfgd loads `snd-aloop` only while streaming is on, at a high index with the id
+`Stream`, never built in (built in it takes card 0 and becomes the default output, the
+holder's reason for keeping it out of the kernel); the user's apps reach it through the
+card's ALSA device and the kernel, with no socket to the daemon; the sender is a supervised
+backend with real-time priority, a CPU latency hold, EF marking and Wi-Fi power save off;
+a stream is the estate's, played on another node by `audio "NAME" { play = "hw:0" }`.
+**Who may: the `wifi` tier and `admin`, the holder's word** -- typed requests, as joining a
+network is. Waits on the receiving end, which the holder is working on.
+
 ## 10.837 Audio and queuing: one mark, honoured by netcfgd's queues (0321)
 
 The holder asked whether audio streaming was planned, netcfgd being placed to configure
