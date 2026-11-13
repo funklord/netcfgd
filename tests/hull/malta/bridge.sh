@@ -116,3 +116,53 @@ say "the plan after the bridge, $n s on: $([ "$settled" -ge 1 ] && echo 'nothing
 	logread 2>/dev/null | grep netcfgd | grep -vE 'fuzznetd:' | tail -25 | cut -c1-200 |
 		sed 's/^/  log: /' >> "$out"
 }
+
+# And a guest network the way a router has one (10.839): a second bridge whose
+# port is a VLAN on a port, neither with an `interface` block, the VLAN's name
+# sorting before its parent's -- the order that created the VLAN first and left
+# its parent down. The port is a veth netcfgd makes, `zport`, with `zhost` its far
+# end; the VLAN is `guest10`.
+cat >> /etc/netcfgd/netcfgd.conf <<'CONF'
+device zport {
+	veth { peer = "zhost" }
+}
+device guest10 {
+	vlan {
+		parent = "zport"
+		id     = 10
+	}
+}
+device brguest {
+	bridge {
+		members = ["guest10"]
+	}
+}
+interface brguest {
+	config = "192.168.10.1/24"
+}
+CONF
+# Read from /sys: OpenWrt's BusyBox `ip` has no `-br`, which the first version of
+# this step used and so read nothing while netcfgd had done all of it.
+state_of() {
+	f=$(cat "/sys/class/net/$1/flags" 2>/dev/null)
+	[ -n "$f" ] && [ $((f & 1)) = 1 ] && echo up || echo down
+}
+n=0
+until [ "$(state_of brguest)" = up ] && [ "$(state_of zport)" = up ] &&
+	[ "$(state_of guest10)" = up ] &&
+	ip -o -4 addr show dev brguest 2>/dev/null | grep -q '192.168.10.1/' || [ $n -gt 60 ]; do
+	sleep 1
+	n=$((n + 1))
+done
+guest="zport=$(state_of zport) guest10=$(state_of guest10) brguest=$(state_of brguest) $(ip -o -4 addr show dev brguest 2>/dev/null | awk '{print $4}')"
+say "the guest bridge on a VLAN after $n s: $guest"
+case "$guest" in
+"zport=up guest10=up brguest=up 192.168.10.1/24") ;;
+*)
+	failed=1
+	/usr/bin/ncfg plan 2>&1 | grep -E 'zport|guest10|brguest' | head -8 | cut -c1-200 |
+		sed 's/^/  plan: /' >> "$out"
+	logread 2>/dev/null | grep netcfgd | grep -E 'zport|guest10|brguest' | tail -6 |
+		cut -c1-200 | sed 's/^/  log: /' >> "$out"
+	;;
+esac
