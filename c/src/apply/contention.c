@@ -185,6 +185,45 @@ static int namespace_of(const char *proc_root, const char *who, char *out, size_
 }
 
 /*
+ * Whether this process is in the machine's own user namespace, which is what
+ * decides an unreadable `<proc>/1/ns/net` (10.852).
+ *
+ * Reading pid 1's namespace needs ptrace access to it. A root netcfgd always
+ * has that; an ordinary user on the host does not and is in the machine's
+ * namespace all the same, so for both the answer stays "ours". The process
+ * that cannot read it and is not on the host is one in a child user namespace
+ * -- `unshare -rn`, a rootless container -- and there the host's `/run`,
+ * `/proc` and `/etc` are not its interfaces' state. Found when the TUI's live
+ * test, in such a sandbox, was told by this host's running connman that its
+ * interface was taken. The first user namespace maps all of uid space onto
+ * itself: `0 0 4294967295` in `uid_map`, and nothing else does.
+ */
+static int in_the_first_user_namespace(const char *proc_root)
+{
+	char          path[512];
+	unsigned long inside;
+	unsigned long outside;
+	unsigned long length;
+	FILE         *file;
+	int           first = 1;
+	int           written;
+
+	written = snprintf(path, sizeof(path), "%s/self/uid_map", proc_root);
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return 1;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 1;
+	}
+	if (fscanf(file, "%lu %lu %lu", &inside, &outside, &length) == 3) {
+		first = inside == 0ul && outside == 0ul && length == 4294967295ul;
+	}
+	(void)fclose(file);
+	return first;
+}
+
+/*
  * Whether the state under `run_root` was written from this network namespace.
  *
  * There is nothing in the files to cross-check against: `NetworkManager`'s
@@ -208,9 +247,11 @@ static int run_root_is_ours(const ncfg_contention_where_t *where)
 	if (!where->run_root_is_the_machines) {
 		return 1;
 	}
-	if (!namespace_of(where->proc_root, "self", ours, sizeof(ours)) ||
-	    !namespace_of(where->proc_root, "1", init, sizeof(init))) {
+	if (!namespace_of(where->proc_root, "self", ours, sizeof(ours))) {
 		return 1;
+	}
+	if (!namespace_of(where->proc_root, "1", init, sizeof(init))) {
+		return in_the_first_user_namespace(where->proc_root);
 	}
 	return strcmp(ours, init) == 0;
 }

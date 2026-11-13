@@ -12737,6 +12737,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.852 A sandbox that cannot read pid 1's namespace is not on the host
+
+`make live` after 10.851 failed eight checks in `tui.py`: the plan and events
+panes missing, apply's window never shown. The same tree at the start of the
+day passed under the same load (45), so it was today's. Inside `unshare -rn`
+the TUI's own plan asked the contention check, which asks whether the host's
+`/run` is about this namespace by comparing ours with pid 1's -- and pid 1's
+`ns/net` cannot be read from a child user namespace, and an unreadable one was
+read as "ours". So this host's running connman claimed the test's interface,
+and the warning filled the panes. The reading predates 10.848; the new
+contenders made it visible.
+
+A root netcfgd can always read pid 1's namespace, and an ordinary user on the
+host cannot and is in the machine's namespace all the same, so for both the
+answer stays "ours". The process that cannot read it and is not on the host is
+one in a child user namespace, so that case is decided by `/proc/self/uid_map`:
+the first user namespace maps all of uid space onto itself (`0 0 4294967295`)
+and nothing else does. `tui.py` passes; with the decision forced to "ours", the
+new check fails.
+
 ## 10.851 A fixture's run root takes the machine's `/etc` out of the question
 
 `make live` after 10.848 failed three checks in `network_arrives.sh`: the

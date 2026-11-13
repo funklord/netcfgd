@@ -640,6 +640,35 @@ static void state_from_another_namespace_claims_nothing(const char *dir)
 	    by_name(&found, "NetworkManager") != NULL,
 	    "a run root the caller named is not asked whose namespace wrote it");
 	ncfg_contenders_free(&found);
+
+	/*
+	 * Pid 1's namespace unreadable (10.852): ours on the host, where the
+	 * first user namespace maps all of uid space, and not ours in a child
+	 * one -- `unshare -rn`, where this host's connman once claimed a test's
+	 * interface.
+	 */
+	{
+		char path[PATH_BYTES + 32];
+		char unread[ROOT_BYTES];
+
+		(void)testdir_in(dir, "proc-unread", unread, sizeof(unread));
+		namespace_fixture(unread, "net:[4026532999]", "net:[4026531840]");
+		(void)snprintf(path, sizeof(path), "%s/1/ns/net", unread);
+		(void)unlink(path);
+		(void)snprintf(path, sizeof(path), "%s/self/uid_map", unread);
+		put(path, "         0          0 4294967295\n");
+		where.proc_root = unread;
+		where.run_root_is_the_machines = 1;
+		check(ncfg_contenders_find(&where, claims, 1u, &found, err, sizeof(err)) &&
+		    by_name(&found, "NetworkManager") != NULL,
+		    "pid 1's namespace unreadable from the first user namespace: ours");
+		ncfg_contenders_free(&found);
+		put(path, "         0       1000          1\n");
+		check(ncfg_contenders_find(&where, claims, 1u, &found, err, sizeof(err)) &&
+		    found.count == 0u,
+		    "and from a child user namespace: not ours");
+		ncfg_contenders_free(&found);
+	}
 }
 
 /*
