@@ -395,7 +395,13 @@ check "a disabled network nobody configured provokes nothing" \
 	"$(grep -ac '^REMOVE_NETWORK all' "$work/daemon.log" || true)" "$rewrites_before"
 
 send_event "DISABLE [DISABLED] HomeFiber"
-sleep 1
+# **Waited for, not slept for.** A fixed second was enough until the machine
+# ran at load 33, when `make live` read status before the disable had reached
+# it and failed the three checks below about a line that arrived a moment
+# later (10.853); alone, the same script then passed. Bounded at fifteen
+# seconds by `awaits`, and the checks still read the status taken after it.
+awaits '"$ncfg" status 2>/dev/null | grep -q "HomeFiber. is configured to join automatically"' ||
+	true
 
 # **`|| status_rc=$?`, not `; status_rc=$?`.** Under `set -e` a failing command
 # aborts the script, so the assignment never runs and the whole test dies with

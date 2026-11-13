@@ -12737,6 +12737,16 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.853 `network_arrives.sh` waits for the disable it then reads
+
+At load 33 `make live` failed three checks after `DISABLE [DISABLED] HomeFiber`:
+`ncfg status` ran a fixed second later and read the radio before the disable
+had reached it, while the script run alone passed. The status path touches
+none of this day's contention work. It now waits, bounded by the script's own
+`awaits` at fifteen seconds, for status to name HomeFiber, and the checks read
+the status taken after; a disable that never shows still fails them. Three runs
+alone, all 22.
+
 ## 10.852 A sandbox that cannot read pid 1's namespace is not on the host
 
 `make live` after 10.851 failed eight checks in `tui.py`: the plan and events
