@@ -148,9 +148,11 @@ static long members_of(const char *socket_path)
 /*
  * `ncfg pair open`: the one step somebody who does not know what `remote` is can
  * take (10.726). What it does is plain in the file it leaves, `conf.d/remote.conf`,
- * and undone by removing that. Only a machine's own daemon is restarted, and only
- * under systemd: the tiers and the port are read at the start, and a run directory
- * of somebody's test is not this machine's service.
+ * and undone by removing that. Only a machine's own daemon is restarted: the tiers
+ * and the port are read at the start, and a run directory of somebody's test is not
+ * this machine's service. By systemd where it runs, and otherwise by the init
+ * script, which procd, OpenRC and sysvinit all answer `restart` to -- a router,
+ * the appliance pairing is for, has no systemd (10.847).
  */
 static int pair_open(const ncfg_cli_options_t *options, const char *run_dir, char *err,
     size_t err_size)
@@ -167,13 +169,21 @@ static int pair_open(const ncfg_cli_options_t *options, const char *run_dir, cha
 	if (!ok) {
 		return 0;
 	}
-	if (strcmp(run_dir, NCFG_RUN_DIR_DEFAULT) == 0 && geteuid() == 0 &&
-	    access("/run/systemd/system", F_OK) == 0) {
-		int status = system("systemctl restart netcfgd");
+	if (strcmp(run_dir, NCFG_RUN_DIR_DEFAULT) == 0 && geteuid() == 0) {
+		const char *restart = NULL;
 
-		if (status != 0) {
-			ncfg_error_set(err, err_size, "opened, but `systemctl restart netcfgd` failed: "
-			                              "restart it, then `ncfg pair`");
+		if (access("/run/systemd/system", F_OK) == 0) {
+			restart = "systemctl restart netcfgd";
+		} else if (access("/etc/init.d/netcfgd", X_OK) == 0) {
+			restart = "/etc/init.d/netcfgd restart";
+		}
+		if (!restart) {
+			puts("Open, once netcfgd restarts: it reads this at its start.");
+			return 1;
+		}
+		if (system(restart) != 0) {
+			ncfg_error_set(err, err_size, "opened, but `%s` failed: restart it, then "
+			                              "`ncfg pair`", restart);
 			return 0;
 		}
 		puts("Open. Devices of this machine's estate may read and change its network.");

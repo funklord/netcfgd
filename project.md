@@ -12737,6 +12737,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.847 `ncfg pair open` restarts the daemon on a router too
+
+The same lens -- **a path written for systemd alone** -- run over the C's own
+calls of `systemctl`: `ncfg pair open` (10.726) writes `conf.d/remote.conf` and
+restarts the daemon, since the tiers and the port are read at start, and it did
+so only where `/run/systemd/system` exists. A router has no systemd, and the
+appliance is exactly where pairing is for (0320), so there it printed "Open,
+once netcfgd restarts" and left the port closed until something else restarted
+it. Now, without systemd, `/etc/init.d/netcfgd restart` -- which procd's
+`rc.common`, OpenRC and this tree's sysvinit script all answer -- and still
+only for the machine's own daemon (default run directory, as root).
+
+Held on the router tier: `tests/hull/malta/guest.sh` runs `ncfg pair open`
+against netcfgd under procd and asks for a new process serving `0xBBDA`.
+
+The other `systemctl`s in messages (`daemon/wifi.c`, `supplicant/launch.c`)
+tell somebody to stop NetworkManager and its supplicant; they are advice, not
+an action, and name the case they were written for, so they stay.
+`doc/first-run.md` gained the sysvinit install target in step 4 and, in section
+8, `netcfgd_select.sh netcfgd` as the whole of the takeover without systemd.
+
 ## 10.845 The switcher asks which rc system runs, not which is installed
 
 Running `netcfgd_select.sh --dry-run netcfgd` on ml350g6-01 as the user, after

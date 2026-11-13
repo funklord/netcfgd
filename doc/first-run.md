@@ -169,7 +169,8 @@ device set enp0s31f6 managed yes` gives it straight back.
 ## 4. Start netcfgd, without letting it apply
 
 Install the service file for whichever init you run -- `make install-systemd`,
-`install-openrc` or `install-procd`. Then start it **once** with
+`install-sysvinit` (Devuan, or Debian with `sysvinit-core`), `install-openrc` or
+`install-procd`. Then start it **once** with
 `--no-apply-on-start`, so it observes and changes nothing:
 
 ```
@@ -310,7 +311,13 @@ cp /usr/share/doc/netcfgd/netcfgd-exclusive.conf \
 systemctl daemon-reload
 ```
 
-It adds `Conflicts=` for six units -- NetworkManager, systemd-networkd,
+**Without systemd** -- Devuan, or anything else running sysvinit or OpenRC --
+there is no drop-in, and `netcfgd_select.sh netcfgd` is the whole of this half:
+it stops the other managers' init scripts and disables them at boot
+(`update-rc.d disable`, or `rc-update del`), and enables netcfgd's. It is what
+the Debian package runs on a fresh install, there as here.
+
+The systemd drop-in adds `Conflicts=` for six units -- NetworkManager, systemd-networkd,
 connman, wpa_supplicant, ModemManager and systemd-resolved -- so starting
 netcfgd stops them. The file is the authority on that list rather than this
 sentence, which has already been wrong: read

@@ -236,6 +236,26 @@ after=$(node_key keep-mark-two)
 say "after the restore: $(ls /etc/rc.d | grep -c netcfgd) start links, $(pidof netcfgd | wc -w) running, node $before then $after"
 [ "$conf" -ge 1 ] && [ -n "$before" ] && [ "$before" = "$after" ] && [ -n "$(pidof netcfgd)" ] &&
 	[ -e /etc/rc.d/S21netcfgd ] || failed=1
+# `ncfg pair open` on the router, which has no systemd (10.847): it writes
+# conf.d/remote.conf and restarts the daemon through procd, whose next start
+# serves netcfgd's fuzznet port (0xBBDA). Before, it restarted only under
+# systemd and here left the port closed until something else restarted it.
+pid_before=$(pidof netcfgd)
+opened=$(/usr/bin/ncfg pair open 2>&1 | tail -1 | cut -c1-100)
+looks=0
+until { [ -n "$(pidof netcfgd)" ] && [ "$(pidof netcfgd)" != "$pid_before" ] &&
+	grep -q ':BBDA ' /proc/net/udp /proc/net/udp6 2>/dev/null; } || [ "$looks" -gt 30 ]; do
+	sleep 1
+	looks=$((looks + 1))
+done
+served=$(grep -c ':BBDA ' /proc/net/udp /proc/net/udp6 2>/dev/null | awk -F: '{n += $2} END {print n + 0}')
+say "pair open: \"$opened\"; after $looks s netcfgd $pid_before then $(pidof netcfgd), port served $served"
+case "$opened" in
+Open.*change*) ;;
+*) failed=1 ;;
+esac
+[ "$(pidof netcfgd)" != "$pid_before" ] && [ "$served" -ge 1 ] || failed=1
+rm -f /etc/netcfgd/conf.d/remote.conf
 /etc/init.d/netcfgd stop
 # And the package installed again over what the upgrade kept, which apk has no
 # record of: what a person does next, and what the router guide has to tell them.
