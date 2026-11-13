@@ -12769,6 +12769,9 @@ And the router tier, since two pins had moved without one: `make hull-armsr` -- 
 package built with OpenWrt's toolchain against musl, installed by apk on 25.12.6 under
 procd -- `VERDICT ok`, the stock services restarted, `dns_forward` and `range6` beside the
 stock dnsmasq, and sysupgrade's keep-and-restore all as 10.821 to 10.828 left them.
+`make hull-malta` too, big-endian MIPS with the radio half the armsr image lacks: `VERDICT
+ok`, a station on netcfgd's access point and `ncfg wifi status` reading it, the same stock
+restarts, and the package through apk and sysupgrade.
 
 ## 10.829 fuzznet b54490a: every host-to-host message's first byte moved
 
