@@ -197,7 +197,8 @@ static int name_must_be(const ncfg_wire_attrs_t *area, uint16_t kind, const char
 /* The chains netcfgd's table holds: the NAT chain of 0022 and the three filter
  * chains of 0294. A fifth name in a message is refused by the audit. */
 static const char *const OUR_CHAINS[] = { NCFG_NFT_CHAIN, NCFG_NFT_CHAIN_INPUT,
-	NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT, NCFG_NFT_CHAIN_PREROUTING };
+	NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT, NCFG_NFT_CHAIN_PREROUTING,
+	NCFG_NFT_CHAIN_OFFLOAD };
 
 static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char *err,
     size_t err_size)
@@ -216,8 +217,8 @@ static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char
 	}
 	ncfg_error_set(err, err_size,
 	    "a message would write to chain `%s`; netcfgd's table holds `postrouting`, "
-	    "`prerouting`, `input`, `forward` and `output` and nothing else (0022, 0294, "
-	    "0298)", name);
+	    "`prerouting`, `input`, `forward`, `output` and `offload` and nothing else (0022, "
+	    "0294, 0298, 0319)", name);
 	return 0;
 }
 
@@ -291,13 +292,19 @@ static int audit_message(const ncfg_wire_message_t *message, char *err, size_t e
 		return name_must_be(&area, NFTA_RULE_TABLE, NCFG_NFT_TABLE, "table", err,
 		    err_size) &&
 		    chain_must_be_ours(&area, NFTA_RULE_CHAIN, err, err_size);
+	case NFT_MSG_NEWFLOWTABLE:
+		/* One flowtable, by name, in netcfgd's table (0319). */
+		return name_must_be(&area, NFTA_FLOWTABLE_TABLE, NCFG_NFT_TABLE, "table", err,
+		    err_size) &&
+		    name_must_be(&area, NFTA_FLOWTABLE_NAME, NCFG_NFT_FLOWTABLE, "flowtable", err,
+		    err_size);
 	default:
 		break;
 	}
-	/* The set of messages netcfgd sends is closed: a table, a chain, three
-	 * expressions and the dumps that read them back. A set-element, a
-	 * flowtable or an object message arriving here means something upstream
-	 * has started doing more than NAT, which is the line 0022 draws. */
+	/* The set of messages netcfgd sends is closed: a table, its chains and
+	 * rules, the one flowtable 0319 adds, and the dumps that read them back. A
+	 * set-element or an object message arriving here means something upstream
+	 * has started writing what no record lets it. */
 	ncfg_error_set(err, err_size,
 	    "an nftables message of type %u, which netcfgd does not write", (unsigned)kind);
 	return 0;
@@ -1674,6 +1681,102 @@ static int forward_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *la
 		}
 	}
 	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Flow offload (0319)
+ * ------------------------------------------------------------------------ */
+
+/* `meta l4proto PROTO flow add @offload`. */
+static void offload_rule(ncfg_buf_t *rule, uint8_t protocol)
+{
+	ncfg_buf_t expressions;
+	ncfg_buf_t flow;
+
+	ncfg_buf_init(&expressions, 0);
+	put_meta(&expressions, NFT_META_L4PROTO);
+	put_cmp(&expressions, NFT_CMP_EQ, &protocol, 1u);
+	ncfg_buf_init(&flow, 0);
+	ncfg_wire_attr_put_str(&flow, NFTA_FLOW_TABLE_NAME, NCFG_NFT_FLOWTABLE);
+	put_expression(&expressions, "flow_offload", &flow);
+	ncfg_wire_attr_put_str(rule, NFTA_RULE_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(rule, NFTA_RULE_CHAIN, NCFG_NFT_CHAIN_OFFLOAD);
+	ncfg_wire_attr_put_nested(rule, NFTA_RULE_EXPRESSIONS, &expressions);
+	ncfg_buf_free(&flow);
+	ncfg_buf_free(&expressions);
+}
+
+int ncfg_nft_put_offload(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    int hardware, const char *const *devices, size_t device_count, char *err,
+    size_t err_size)
+{
+	static const uint8_t protocols[2] = { IPPROTO_TCP, IPPROTO_UDP };
+	ncfg_buf_t           attrs;
+	ncfg_buf_t           hook;
+	ncfg_buf_t           names;
+	size_t               at;
+	int                  ok;
+
+	if (!transaction || !seq || !last_acked) {
+		ncfg_error_set(err, err_size, "a flowtable needs a transaction to be written into");
+		return 0;
+	}
+	/* A flowtable over no device is refused by the kernel, and one naming an
+	 * absent device too, so the caller passes the links that exist. */
+	if (device_count == 0u || !devices) {
+		ncfg_error_set(err, err_size,
+		    "flow offload has no device to offload between: no interface that forwards "
+		    "or translates has a link yet");
+		return 0;
+	}
+	for (at = 0; at < device_count; at++) {
+		if (!valid_uplink(devices[at], err, err_size)) {
+			return 0;
+		}
+	}
+
+	ncfg_buf_init(&names, 0);
+	for (at = 0; at < device_count; at++) {
+		ncfg_wire_attr_put_str(&names, NFTA_DEVICE_NAME, devices[at]);
+	}
+	ncfg_buf_init(&hook, 0);
+	put_be32(&hook, NFTA_FLOWTABLE_HOOK_NUM, NF_NETDEV_INGRESS);
+	put_be32(&hook, NFTA_FLOWTABLE_HOOK_PRIORITY, 0u); /* `filter` */
+	ncfg_wire_attr_put_nested(&hook, NFTA_FLOWTABLE_HOOK_DEVS, &names);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_FLOWTABLE_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_FLOWTABLE_NAME, NCFG_NFT_FLOWTABLE);
+	ncfg_wire_attr_put_nested(&attrs, NFTA_FLOWTABLE_HOOK, &hook);
+	if (hardware) {
+		put_be32(&attrs, NFTA_FLOWTABLE_FLAGS, NFT_FLOWTABLE_HW_OFFLOAD);
+	}
+	*last_acked = *seq;
+	ok = build(transaction, NFT_MSG_NEWFLOWTABLE, (uint16_t)(NLM_F_ACK | NLM_F_CREATE),
+	    (*seq)++, NFPROTO_INET, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&hook);
+	ncfg_buf_free(&names);
+
+	/* Policy accept and nothing else to decide: this chain filters nothing,
+	 * and an accept here overrides no other chain's drop. */
+	if (ok) {
+		ncfg_buf_init(&attrs, 0);
+		filter_chain(&attrs, NCFG_NFT_CHAIN_OFFLOAD, NF_INET_FORWARD,
+		    NCFG_FIREWALL_POLICY_ACCEPT);
+		*last_acked = *seq;
+		ok = build(transaction, NFT_MSG_NEWCHAIN, (uint16_t)(NLM_F_ACK | NLM_F_CREATE),
+		    (*seq)++, NFPROTO_INET, &attrs, err, err_size);
+		ncfg_buf_free(&attrs);
+	}
+	for (at = 0; ok && at < 2u; at++) {
+		ncfg_buf_init(&attrs, 0);
+		offload_rule(&attrs, protocols[at]);
+		*last_acked = *seq;
+		ok = build(transaction, NFT_MSG_NEWRULE, (uint16_t)(NLM_F_ACK | NLM_F_CREATE),
+		    (*seq)++, NFPROTO_INET, &attrs, err, err_size);
+		ncfg_buf_free(&attrs);
+	}
+	return ok;
 }
 
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,

@@ -12778,6 +12778,19 @@ so** with `ncfg_plan_warn_unbuilt`, and that arm comes out in the commit that wr
 flowtable. Still to come: the encoder and its audit, the flowtable read back from the
 kernel, the plan's comparison, and the software half run on `hull-armsr`.
 
+**Step two, the encoder** (`ncfg_nft_put_offload` in `nft.c`): the flowtable `offload` at
+the ingress hook, priority `filter`, over the devices, `flags offload` for hardware; the
+chain `offload` at the forward hook, policy accept; `meta l4proto tcp flow add @offload`
+and the same for UDP. The audit admits exactly that flowtable, by name, in netcfgd's
+table, and `offload` joins the chains it allows; a flowtable over no device is refused
+before a byte is written. `nft_test` decodes the bytes back -- one flowtable, one chain,
+two rules, both devices, the flag only for hardware. **And the kernel took it**: a
+measurement harness sent netcfgd's NAT table with these four messages to Debian's 6.12 in
+a namespace with two veths, and the software flowtable was accepted; the hardware one was
+refused `EOPNOTSUPP`, a veth having no flow offload -- the refusal 0319 says the plan must
+name before an apply meets it, since the kernel's sentence today is about link kinds.
+Nothing calls the encoder yet: the op, the observation and the comparison are step three.
+
 ## 10.833 A bridge over ports with no `interface` block was never put up by the daemon
 
 **Asked by the holder, 2026-11-13: "what needs a real router? can't you use hull?"** --

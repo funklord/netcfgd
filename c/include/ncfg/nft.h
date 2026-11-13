@@ -87,6 +87,11 @@
 /* Port forwards (0298): a `nat` chain at the prerouting hook, written only
  * when some interface forwards a port. */
 #define NCFG_NFT_CHAIN_PREROUTING "prerouting"
+/* Flow offload (0319): a flowtable and the `filter` chain at the forward hook
+ * that moves an established TCP or UDP flow into it, written only where the
+ * document asks. The same word for both, as nft's own `@offload` reads. */
+#define NCFG_NFT_CHAIN_OFFLOAD "offload"
+#define NCFG_NFT_FLOWTABLE     "offload"
 
 /*
  * The table miniupnpd adds UPnP and NAT-PMP mappings to (0310): netcfgd's by
@@ -326,6 +331,20 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
  * comment with `name=IF/NAME`. Refused before a byte is written where a
  * forward's interface, address or name cannot be expressed.
  */
+/*
+ * Flow offload's three objects, appended to a transaction that has already
+ * created netcfgd's table (0319): the flowtable `offload` at the ingress hook,
+ * priority `filter`, over `devices`, with `flags offload` where `hardware`;
+ * the chain `offload` at the forward hook, priority `filter`, policy accept;
+ * and `meta l4proto tcp flow add @offload` and the same for `udp`. `seq` and
+ * `last_acked` advance as `ncfg_nft_build_replace_all` advances them.
+ * Refused before a byte is written where there is no device or a name cannot
+ * be an interface's.
+ */
+int ncfg_nft_put_offload(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    int hardware, const char *const *devices, size_t device_count, char *err,
+    size_t err_size);
+
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
     const ncfg_forward_rule_t *forwards, size_t forward_count, ncfg_nft_batch_t *batch,

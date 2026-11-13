@@ -862,12 +862,103 @@ static void reflections_and_return_paths_are_read_back(void)
 	ncfg_buf_free(&out);
 }
 
+/*
+ * Flow offload's three objects (0319): one flowtable over the devices, one
+ * chain, a rule each for TCP and UDP -- held to netcfgd's table by the same
+ * audit, and decoded back rather than trusted.
+ */
+static void offload_is_written(void)
+{
+	static const char *const devices[] = { "wan0", "br-lan" };
+	char                     err[NCFG_ERROR_MAX];
+	int                      hardware;
+
+	for (hardware = 0; hardware < 2; hardware++) {
+		ncfg_buf_t           transaction;
+		ncfg_wire_messages_t walk;
+		ncfg_wire_message_t  message;
+		uint32_t             seq = 10;
+		uint32_t             acked = 0;
+		int                  flowtables = 0;
+		int                  chains = 0;
+		int                  rules = 0;
+		int                  flagged = 0;
+		int                  names = 0;
+
+		ncfg_buf_init(&transaction, 0);
+		check(ncfg_nft_put_offload(&transaction, &seq, &acked, hardware, devices, 2u, err,
+		          sizeof(err)),
+		    hardware ? "a hardware flowtable is written" : "a software flowtable is written");
+		check(seq == 14u && acked == 13u, "  as four messages, the last one acknowledged");
+		check(ncfg_nft_writes_only_our_table(transaction.data, transaction.length, err,
+		          sizeof(err)),
+		    "  and the audit passes it as netcfgd's own");
+		ncfg_wire_messages_start(&walk, transaction.data, transaction.length);
+		while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+			ncfg_wire_attrs_t area;
+			ncfg_wire_attr_t  attr;
+
+			if (!ncfg_wire_message_attrs(&message, NCFG_NFT_NFGENMSG_LEN, &area, NULL, 0)) {
+				continue;
+			}
+			switch (message.header.kind & 0xffu) {
+			case NFT_MSG_NEWFLOWTABLE: {
+				ncfg_wire_attrs_t hook;
+				ncfg_wire_attrs_t devs;
+				ncfg_wire_attr_t  one;
+
+				flowtables++;
+				flagged = find(&area, NFTA_FLOWTABLE_FLAGS, &attr);
+				if (find(&area, NFTA_FLOWTABLE_HOOK, &attr)) {
+					nested(&attr, &hook);
+					if (find(&hook, NFTA_FLOWTABLE_HOOK_DEVS, &attr)) {
+						nested(&attr, &devs);
+						while (ncfg_wire_attrs_next(&devs, &one, NULL, 0) ==
+						    NCFG_WIRE_OK) {
+							names++;
+						}
+					}
+				}
+				break;
+			}
+			case NFT_MSG_NEWCHAIN:
+				chains++;
+				break;
+			case NFT_MSG_NEWRULE:
+				rules++;
+				break;
+			default:
+				break;
+			}
+		}
+		check(flowtables == 1 && chains == 1 && rules == 2,
+		    "  decoded: one flowtable, one chain, two rules");
+		check(names == 2, "  the flowtable names both devices");
+		check(flagged == hardware, hardware ? "  and carries `flags offload`"
+		                                    : "  and carries no flags");
+		ncfg_buf_free(&transaction);
+	}
+	{
+		ncfg_buf_t transaction;
+		uint32_t   seq = 1;
+		uint32_t   acked = 0;
+
+		ncfg_buf_init(&transaction, 0);
+		check(!ncfg_nft_put_offload(&transaction, &seq, &acked, 0, NULL, 0u, err, sizeof(err)) &&
+		        transaction.length == 0u,
+		    "a flowtable over no device is refused before a byte is written");
+		ncfg_buf_free(&transaction);
+	}
+}
+
 int main(void)
 {
 	char err[NCFG_ERROR_MAX];
 	char uplink[NCFG_NFT_IFNAME_MAX];
 	static const char *const one[] = { "wan0" };
 	static const char *const two[] = { "wan0", "wwan0" };
+
+	offload_is_written();
 
 	/*
 	 * **The transaction, and the only two names in it.**
