@@ -46,9 +46,11 @@
 
 #include <dirent.h>
 #include <fnmatch.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /*
@@ -276,6 +278,49 @@ static int named(const char *const *names, size_t count, const char *name)
 }
 
 /*
+ * Whether the process at `pid` is one the system runs rather than a user
+ * (10.855).
+ *
+ * connman, iwd and a manager dhcpcd are believed from their processes alone
+ * -- a name and a command line -- and any local user can start a process
+ * called `iwd`, `connmand` or `dhcpcd` with whatever command line they like.
+ * Believed, it is a claim on the machine's interfaces, and the supplicant's
+ * guard declines to start Wi-Fi on a radio another manager claims: so any
+ * user could switch netcfgd's Wi-Fi off with a renamed `sleep`. The real
+ * daemons run as root, and dhcpcd's manager, with privilege separation, as
+ * dhcpcd's own user -- `dhcpcd` on Debian, `_dhcpcd` where the BSDs' spelling
+ * is kept -- which `account` names. A fixture's fake `<proc>` is owned by
+ * whoever made it, so the owner of `<proc>` counts as root: on the machine
+ * that is root itself.
+ */
+static int run_by_the_system(const char *proc_root, const char *pid, const char *account)
+{
+	char          path[512];
+	struct stat   process;
+	struct stat   root;
+	struct passwd *entry;
+	int           written;
+
+	written = snprintf(path, sizeof(path), "%s/%s", proc_root, pid);
+	if (written < 0 || (size_t)written >= sizeof(path) || stat(path, &process) != 0 ||
+	    stat(proc_root, &root) != 0) {
+		return 0;
+	}
+	if (process.st_uid == 0 || process.st_uid == root.st_uid) {
+		return 1;
+	}
+	if (!account) {
+		return 0;
+	}
+	entry = getpwuid(process.st_uid);
+	if (!entry || !entry->pw_name) {
+		return 0;
+	}
+	return strcmp(entry->pw_name, account) == 0 ||
+	    (entry->pw_name[0] == '_' && strcmp(entry->pw_name + 1, account) == 0);
+}
+
+/*
  * Whether the dhcpcd at `pid` is a manager: dhcpcd started with no interface,
  * which takes every one its configuration does not leave out (10.850).
  *
@@ -376,17 +421,19 @@ static void running_daemons(const char *proc_root, int *network_manager, int *ne
 			if (named(netifd_names, sizeof(netifd_names) / sizeof(*netifd_names), name)) {
 				*netifd = 1;
 			}
-			if (named(connman_names, sizeof(connman_names) / sizeof(*connman_names), name)) {
+			if (named(connman_names, sizeof(connman_names) / sizeof(*connman_names), name) &&
+			    run_by_the_system(proc_root, found->d_name, NULL)) {
 				*connman = 1;
 			}
 			/* iwd by its pid, because its options are what say which
 			 * radios it holds, and they are in its command line. */
 			if (named(dhcpcd_names, sizeof(dhcpcd_names) / sizeof(*dhcpcd_names), name) &&
-			    !*dhcpcd) {
+			    !*dhcpcd && run_by_the_system(proc_root, found->d_name, "dhcpcd")) {
 				*dhcpcd = dhcpcd_is_manager(proc_root, found->d_name);
 			}
 			if (named(iwd_names, sizeof(iwd_names) / sizeof(*iwd_names), name) &&
-			    strlen(found->d_name) < iwd_size) {
+			    strlen(found->d_name) < iwd_size &&
+			    run_by_the_system(proc_root, found->d_name, NULL)) {
 				memcpy(iwd, found->d_name, strlen(found->d_name) + 1u);
 			}
 		}

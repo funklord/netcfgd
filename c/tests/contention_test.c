@@ -58,6 +58,8 @@
 #include "testdir.h"
 
 #include <errno.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -990,6 +992,79 @@ static void a_manager_dhcpcd_holds_what_its_configuration_does_not_deny(void)
 	forget(path);
 }
 
+/*
+ * A process any user can start is not a network manager (10.855). A copy of
+ * `sleep` named `dhcpcd`, run as this test's user with the manager's title
+ * as its argv[0], on the real `/proc`: owned by an ordinary user, it claims
+ * nothing. Skipped where the machine already runs a dhcpcd manager, which
+ * would answer for it.
+ */
+static void a_users_process_is_not_a_manager(const char *dir)
+{
+	static const ncfg_interface_claim_t claims[] = { { "eth0", 2u, 0, NULL } };
+	ncfg_contention_where_t where;
+	ncfg_contenders_t       found;
+	char                    err[NCFG_ERROR_MAX];
+	char                    program[ROOT_BYTES + 16];
+	char                    command[2 * ROOT_BYTES + 64];
+	pid_t                   child;
+	int                     waited;
+
+	if (getuid() == 0) {
+		printf("  skipped: run as root, every process is the system's\n");
+		return;
+	}
+	here(&where);
+	where.proc_root = "/proc";
+	where.run_root_is_the_machines = 0;
+	if (ncfg_contenders_find(&where, claims, 1u, &found, err, sizeof(err)) &&
+	    by_name(&found, "dhcpcd")) {
+		ncfg_contenders_free(&found);
+		printf("  skipped: this machine runs a dhcpcd manager\n");
+		return;
+	}
+	ncfg_contenders_free(&found);
+	(void)snprintf(program, sizeof(program), "%s/dhcpcd", dir);
+	(void)snprintf(command, sizeof(command), "cp /bin/sleep '%s'", program);
+	if (system(command) != 0) {
+		printf("  skipped: could not copy sleep\n");
+		return;
+	}
+	child = fork();
+	if (child == 0) {
+		char *const argv[] = { (char *)(uintptr_t)"dhcpcd: [manager] [ip4]",
+			(char *)(uintptr_t)"5", NULL };
+
+		execv(program, argv);
+		_exit(127);
+	}
+	for (waited = 0; waited < 50; waited++) {
+		char path[64];
+		char comm[32] = "";
+		FILE *file;
+
+		(void)snprintf(path, sizeof(path), "/proc/%ld/comm", (long)child);
+		file = fopen(path, "r");
+		if (file) {
+			if (!fgets(comm, (int)sizeof(comm), file)) {
+				comm[0] = '\0';
+			}
+			(void)fclose(file);
+		}
+		if (strncmp(comm, "dhcpcd", 6) == 0) {
+			break;
+		}
+		(void)usleep(20000);
+	}
+	check(ncfg_contenders_find(&where, claims, 1u, &found, err, sizeof(err)) &&
+	    !by_name(&found, "dhcpcd"),
+	    "a dhcpcd manager's title on a user's own process claims nothing");
+	ncfg_contenders_free(&found);
+	(void)kill(child, SIGTERM);
+	(void)waitpid(child, NULL, 0);
+	(void)unlink(program);
+}
+
 /* Where the daemon reads when nobody has said otherwise, asserted by reading
  * it rather than by letting anything go near it. */
 static void the_machine_is_run_and_proc(void)
@@ -1243,6 +1318,7 @@ int main(void)
 	connman_holds_what_its_blacklist_does_not_spare();
 	iwd_holds_the_radios_its_options_leave_it();
 	a_manager_dhcpcd_holds_what_its_configuration_does_not_deny();
+	a_users_process_is_not_a_manager(dir);
 	state_from_another_namespace_claims_nothing(dir);
 	the_machine_is_run_and_proc();
 	the_measured_reply_parses();

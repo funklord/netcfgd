@@ -12737,6 +12737,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.855 A process any user can start is not evidence of a network manager
+
+10.848 to 10.850 believe connman, iwd and a manager dhcpcd from their processes
+-- a name, and for iwd and dhcpcd a command line. **Any local user can start a
+process called `iwd`, `connmand` or `dhcpcd`** with whatever command line they
+like, and a believed claim makes the supplicant's guard decline to start Wi-Fi
+on the radio. So an unprivileged user could switch netcfgd's Wi-Fi off with a
+renamed `sleep` -- for connman wherever `/etc/connman` exists, which it does
+after a takeover has stopped connman; for iwd and dhcpcd anywhere. Found by
+asking who controls each input the new readers trust, which is the question
+the fuzz target for them started from.
+
+Now those three are believed only when the system runs them: the process owned
+by root, or for dhcpcd by dhcpcd's own user (`dhcpcd`, or `_dhcpcd`), which is
+what its manager runs as under privilege separation. A fixture's fake `/proc`
+belongs to whoever made it, so the owner of `/proc` counts as root; on the
+machine that is root. NetworkManager, networkd and netifd are unchanged: their
+claim is a file only root writes, and a process is asked only whether that
+file's writer still runs -- networkd as its own user -- so a spoofed one can at
+most keep a stale root-written claim alive.
+
 ## 10.854 The router test's resolver step waits for the line it checks
 
 `hull-malta` failed at load 30 in `restart.sh`'s resolver step: the wait for
