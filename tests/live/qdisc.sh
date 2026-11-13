@@ -179,6 +179,24 @@ if [ -n "$tc" ]; then
 	check "tc(8) agrees about the rate" \
 		"$("$tc" qdisc show dev veth0 | sed -n 's/.*bandwidth \([0-9A-Za-z]*\).*/\1/p')" \
 		"100Mbit"
+	# **Real-time traffic is honoured by the mark it carries** (0321): 100
+	# datagrams marked EF and 100 unmarked, sent out of veth0 to a neighbour
+	# that is not this namespace's, must land in cake's Voice tin and its
+	# Best Effort one. netcfgd writes no diffserv mode, so this is the
+	# kernel's default (diffserv3) -- and the check is what fails if netcfgd
+	# ever starts writing one, or `wash`, that loses the mark.
+	ip link set veth1 up 2>/dev/null
+	ip neigh replace 10.7.0.9 lladdr 02:00:00:00:00:09 dev veth0 2>/dev/null
+	python3 -I -c '
+import socket
+for tos in (0xb8, 0x00):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, tos)
+    for _ in range(100):
+        s.sendto(b"x" * 200, ("10.7.0.9", 9))
+    s.close()' 2>/dev/null
+	voice=$("$tc" -s qdisc show dev veth0 | awk '/Voice/ { col = NF } /^ *pkts/ && col { print $(col); exit }')
+	check "packets marked EF land in cake's Voice tin" "$([ "${voice:-0}" -ge 100 ] && echo yes || echo "no: ${voice:-none}")" "yes"
 else
 	echo "note: no tc(8); the independent rate check did not run"
 fi

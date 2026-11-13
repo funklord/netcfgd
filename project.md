@@ -12735,6 +12735,23 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.837 Audio and queuing: one mark, honoured by netcfgd's queues (0321)
+
+The holder asked whether audio streaming was planned, netcfgd being placed to configure
+queuing for it beside fuzznet's forward error correction. Bluetooth audio was (0148, 0149,
+handover over fuzznet last); nothing tied netcfgd's queues to what is in them.
+[0321](doc/decision/0321-real-time-traffic-is-honoured-by-the-mark-it-carries.md): **the
+contract is DSCP EF**, set by the sender, and netcfgd's queues carry it as voice.
+
+**netcfgd's half was already true and is now measured and held**: netcfgd's `cake` runs
+in the kernel's default `diffserv3`, so 200 EF-marked datagrams landed in the Voice tin
+(capped at a quarter of the rate) and 200 unmarked in Best Effort, read by `tc`;
+`tests/live/qdisc.sh` checks it, and fails sent unmarked. On Wi-Fi, Linux 6.8 and later
+map DSCP per RFC 8325, EF to AC_VO, with nothing configured. **fuzznet's half is offered
+to it**: set EF on its voice and media classes, size its redundancy from the loss netcfgd
+observes, and carry the stream and its handover -- a server with no sound card to a
+hal9001 board with a DAC, and Bluetooth audio moved to the nearest room's node.
+
 ## 10.836 Pairing an appliance with no screen: the code goes in (0320, proposed)
 
 The holder asked how an embedded netcfgd pairs with no display, no camera and no easy
