@@ -1529,7 +1529,10 @@ static const ncfg_field_t xfrm_fields[] = {
 	{ .name = "if_id", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, .low = 1,
 	    .high = 4294967295LL, .offset = offsetof(ncfg_xfrm_config_t, if_id) },
 	{ .name = "report_writer", .kind = NCFG_F_STR,
-	    .offset = offsetof(ncfg_xfrm_config_t, report_writer) }
+	    .offset = offsetof(ncfg_xfrm_config_t, report_writer) },
+	{ .name = "connection", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_xfrm_config_t, connection) },
+	{ .name = "child", .kind = NCFG_F_STR, .offset = offsetof(ncfg_xfrm_config_t, child) }
 };
 static const ncfg_type_t xfrm_type = TAGGED("xfrm", xfrm_fields, "kind");
 

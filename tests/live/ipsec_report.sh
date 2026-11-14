@@ -150,6 +150,45 @@ case "$(ip route show dev up0)" in
 *) echo "ok     and only the pin" ;;
 esac
 
+# `ncfg tunnel up|down` (10.864): the daemon asks strongSwan, through a
+# swanctl that records what it was asked -- `NCFG_SWANCTL` names it, as
+# `NCFG_OPENVPN` names openvpn. Started detached, so the record is waited for.
+sed -i 's/xfrm { if_id = 7 }/xfrm { if_id = 7; connection = "home"; child = "all" }/' \
+	"$work/etc/netcfgd.conf"
+cat > "$work/swanctl" <<SWAN
+#!/bin/sh
+echo "\$*" >> "$work/swanctl.log"
+SWAN
+chmod 755 "$work/swanctl"
+env NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" NCFG_SWANCTL="$work/swanctl" \
+	"$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+daemon=$!
+trap 'kill "$daemon" 2>/dev/null; rm -rf "$work"; ip link del ipsec0 2>/dev/null || true; ip link del up0 2>/dev/null || true' EXIT INT TERM
+waited=0
+until [ -e "$work/run/fuzznet.sock" ] || [ "$waited" -gt 100 ]; do
+	sleep 0.1
+	waited=$((waited + 1))
+done
+asked() {
+	waited=0
+	until grep -q -- "$1" "$work/swanctl.log" 2>/dev/null || [ "$waited" -gt 50 ]; do
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+	grep -c -- "$1" "$work/swanctl.log" 2>/dev/null || echo 0
+}
+said=$(NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel up ipsec0 2>&1)
+contains "ncfg tunnel up is answered" "$said" "asked strongSwan to bring ipsec0 up"
+contains "and strongSwan is asked for the child of the connection" \
+	"$(asked '--initiate --child all --ike home')" "1"
+NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel down ipsec0 > /dev/null 2>&1
+contains "ncfg tunnel down takes the connection down" \
+	"$(asked '--terminate --ike home')" "1"
+contains "a device that is not a tunnel is refused by name" \
+	"$(NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel up up0 2>&1)" "up0 is not an IPsec tunnel"
+kill "$daemon" 2>/dev/null
+wait "$daemon" 2>/dev/null || true
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "ipsec_report.sh: all checks passed"

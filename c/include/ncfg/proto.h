@@ -331,6 +331,10 @@ typedef enum {
 	NCFG_PROTO_REQ_RADIO_SET,
 	/* `name` in `u.name`, required (10.801). */
 	NCFG_PROTO_REQ_PROFILE_DELETE,
+	/* An IPsec tunnel up or down, by its XFRM interface (10.864): the
+	 * daemon runs strongSwan's `swanctl` for the connection the device's
+	 * block names. `u.tunnel_set`. */
+	NCFG_PROTO_REQ_TUNNEL_SET,
 	/* Not a request. The bound every exhaustive walk in this module uses in
 	 * place of the `match` the Rust gets checked for it. */
 	NCFG_PROTO_REQ_COUNT
@@ -450,6 +454,9 @@ typedef struct {
 	unsigned char    activate;
 } ncfg_proto_radio_set_t;
 
+/* The same two members as a radio's: the device, and up or down. */
+typedef ncfg_proto_radio_set_t ncfg_proto_tunnel_set_t;
+
 /*
  * One request.
  *
@@ -478,6 +485,7 @@ typedef struct {
 		ncfg_proto_str_t          name;
 		ncfg_proto_profile_save_t profile_save;
 		ncfg_proto_radio_set_t    radio_set;
+		ncfg_proto_tunnel_set_t   tunnel_set;
 	} u;
 } ncfg_proto_request_t;
 

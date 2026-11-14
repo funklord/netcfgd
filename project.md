@@ -12737,6 +12737,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.866 `ncfg tunnel up|down`: strongSwan asked from netcfgd
+
+10.864's design, built. The `xfrm` block gains `connection` and `child`, and a
+request `tunnel_set` (`interface`, `activate`, `radio_set`'s two members) asks
+the daemon to run `swanctl --initiate --child <child> --ike <connection>` or
+`--terminate --ike <connection>`. In the `wifi` tier, beside joining a
+network: a device name and up or down, no configuration text (0117). **Started
+detached and not waited for**: an initiate waits for IKE, and every request is
+answered on the loop's thread (0111), so the answer is the protocol's `ok` and
+what comes of it arrives as the tunnel's report. Refused by name for a device
+that is not an `xfrm` one, for a block naming no connection (or, for up, no
+child), and where `swanctl` is not installed; `NCFG_SWANCTL` names another
+program, as `NCFG_OPENVPN` does. `ncfg tunnel up|down IFACE` is the client.
+
+`tests/live/ipsec_report.sh` runs the daemon with a `swanctl` that records what
+it is asked: up asks for the child of the connection, down terminates the
+connection, and a device that is not a tunnel is refused naming it; with
+`--child` dropped from the up command, the check fails. The socket witness
+gains the request's line (69 now), the document witness the two keys -- an
+addition each, minor under 0020; both keys classified ordinary; `proto_test`,
+`authorize_test` and `idempotence_test` carry the kind. The guide's section 11
+says how. The first version answered with a sentence where the protocol wants
+JSON, and the client said "a number with no digits at byte 0" -- the live test
+is what caught it.
+
 ## 10.865 The container tiers unpack the sources rather than copy the tree
 
 `make live-alpine` and `make live-container` ran `cp -a /src /work` inside the

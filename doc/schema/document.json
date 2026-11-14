@@ -636,7 +636,9 @@
       "kind": {
         "kind": "xfrm",
         "if_id": 7,
-        "report_writer": "ipsec"
+        "report_writer": "ipsec",
+        "connection": "home",
+        "child": "all"
       },
       "bridge_vlans": [],
       "declared": true

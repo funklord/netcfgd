@@ -45,7 +45,9 @@ band
 bandwidth
 bssid
 channel
+child
 confirm
+connection
 deny
 dev
 device

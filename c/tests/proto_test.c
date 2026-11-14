@@ -310,6 +310,10 @@ static int fully_populated(ncfg_proto_request_kind_t kind, ncfg_proto_request_t 
 		out->u.radio_set.interface = ncfg_proto_str("wlan0");
 		out->u.radio_set.activate = 1;
 		return 1;
+	case NCFG_PROTO_REQ_TUNNEL_SET:
+		out->u.tunnel_set.interface = ncfg_proto_str("ipsec0");
+		out->u.tunnel_set.activate = 1;
+		return 1;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
 		return 0;

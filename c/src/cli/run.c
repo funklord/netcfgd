@@ -404,6 +404,40 @@ static int wireless_interface(const ncfg_cli_options_t *options, const char *giv
 }
 
 /*
+ * `ncfg tunnel up|down IFACE`: an IPsec tunnel, by its XFRM interface
+ * (10.864). The daemon asks strongSwan; what it brings arrives as the
+ * tunnel's report, so this says it asked rather than that the tunnel is up.
+ */
+static int command_tunnel(const ncfg_cli_options_t *options, const char **positional,
+    size_t count)
+{
+	ncfg_proto_request_t request;
+	int                  up;
+	int                  code;
+
+	if (count != 2u || (strcmp(positional[0], "up") != 0 &&
+	    strcmp(positional[0], "down") != 0)) {
+		return fail("usage: ncfg tunnel up|down IFACE, where IFACE is an IPsec tunnel's "
+		    "`xfrm` device");
+	}
+	up = strcmp(positional[0], "up") == 0;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_TUNNEL_SET;
+	request.u.tunnel_set.interface = ncfg_proto_str(positional[1]);
+	request.u.tunnel_set.activate = (unsigned char)(up ? 1 : 0);
+	code = ask_for_ok(options, &request);
+	if (code != NCFG_CLI_EXIT_OK) {
+		return code;
+	}
+	if (options->json) {
+		return say_json_ok();
+	}
+	ncfg_out_writef("asked strongSwan to bring %s %s; `ncfg status` shows its addressing "
+	    "when the tunnel reports it\n", positional[1], up ? "up" : "down");
+	return NCFG_CLI_EXIT_OK;
+}
+
+/*
  * `ncfg wifi activate|deactivate <radio>`.
  *
  * **The interface is named rather than defaulted**, unlike `scan` and
@@ -2621,7 +2655,7 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
     const char **positional, size_t count)
 {
 	static const char *const carried[] = { "wifi", "modem", "reload", "confirm", "revert",
-		"apply", "config", "secret", "profile", "tui", "monitor" };
+		"apply", "config", "secret", "profile", "tui", "monitor", "tunnel" };
 	char   why[NCFG_ERROR_MAX];
 	size_t at;
 
@@ -2718,6 +2752,9 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	}
 	if (strcmp(command, "modem") == 0) {
 		return command_modem(options, positional, count);
+	}
+	if (strcmp(command, "tunnel") == 0) {
+		return command_tunnel(options, positional, count);
 	}
 	if (strcmp(command, "monitor") == 0) {
 		return command_monitor(options);

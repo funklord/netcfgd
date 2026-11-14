@@ -144,7 +144,7 @@ reach.
 | Tier | Requests |
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
-| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set` |
+| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set`, `tunnel_set` |
 | `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
 
 **All thirty-two, and it stayed at twenty-three for a long time.** The nine

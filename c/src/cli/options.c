@@ -56,6 +56,8 @@ static const char usage_text[] =
     "                           input: `@secret:estate:KEY` in a configuration\n"
     "  ncfg show [options]      print the compiled desired-state document\n"
     "  ncfg block fetch [LIST...] download block lists from their `url`\n"
+    "  ncfg tunnel up|down IFACE  ask strongSwan to bring an IPsec tunnel up or down,\n"
+    "                           by its `xfrm` device\n"
     "  ncfg explain SUBJECT      why is it like this? SUBJECT is one of:\n"
     "                             interface NAME\n"
     "                             address   IFACE CIDR\n"

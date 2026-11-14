@@ -484,6 +484,14 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 			ncfg_buf_add_text(body, "; report_writer = ");
 			ncfg_render_quote(body, kind->xfrm.report_writer);
 		}
+		if (kind->xfrm.connection) {
+			ncfg_buf_add_text(body, "; connection = ");
+			ncfg_render_quote(body, kind->xfrm.connection);
+		}
+		if (kind->xfrm.child) {
+			ncfg_buf_add_text(body, "; child = ");
+			ncfg_render_quote(body, kind->xfrm.child);
+		}
 		ncfg_buf_add_text(body, " }\n");
 		break;
 	case NCFG_KIND_VETH:
@@ -735,15 +743,15 @@ static int our_ifb_name(const char *name, const char *shaped)
  * merely unexamined, and because the cost of being wrong here is silence.
  */
 /* 600 from 2026-11-03: the kind gained `mesh_point` (10.687), 608 from
- * 2026-11-07 `radio` (10.748), and 616 then 624 from 2026-11-14 `xfrm` and its
- * `report_writer` (0323, 10.863) --
+ * 2026-11-07 `radio` (10.748), and 616, 624, then 640 from 2026-11-14 `xfrm`
+ * and its `report_writer`, `connection` and `child` (0323, 10.863, 10.864) --
  * configs a synthesised `ifb` never carries, so `bare_ifb` needs no clause for
  * any of them. */
 /* Only here, because the point is that whoever adds a field meets it, and the
  * figure is an ABI's: i386 and a 32-bit ARM do not even agree with each other,
  * and a build for a router must not stop over a reminder (10.741). */
 #ifdef __x86_64__
-#define NCFG_RENDER_DEVICE_SIZE 624u /* measured, x86-64, 2026-11-14 */
+#define NCFG_RENDER_DEVICE_SIZE 640u /* measured, x86-64, 2026-11-14 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
     "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
 #endif

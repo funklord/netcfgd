@@ -57,6 +57,7 @@ static const char *const request_names[NCFG_PROTO_REQ_COUNT] = {
 	"radios",
 	"radio_set",
 	"profile_delete",
+	"tunnel_set",
 };
 
 /* The shared member lists, named after what they belong to. */
@@ -140,6 +141,7 @@ static const member_list_t request_members[NCFG_PROTO_REQ_COUNT] = {
 	EMPTY,                  /* radios */
 	LIST(members_radio_set),
 	LIST(members_name),     /* profile_delete */
+	LIST(members_radio_set),/* tunnel_set: interface and activate, a radio's */
 };
 
 #undef LIST
@@ -452,6 +454,13 @@ static int encode_payload(const ncfg_proto_request_t *request, ncfg_json_writer_
 		member_str(writer, "interface", request->u.radio_set.interface);
 		ncfg_json_write_member_bool(writer, "activate", request->u.radio_set.activate);
 		break;
+	case NCFG_PROTO_REQ_TUNNEL_SET:
+		if (!request->u.tunnel_set.interface.bytes) {
+			return missing(err, err_size, kind, "interface");
+		}
+		member_str(writer, "interface", request->u.tunnel_set.interface);
+		ncfg_json_write_member_bool(writer, "activate", request->u.tunnel_set.activate);
+		break;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
 		ncfg_error_set(err, err_size, "a request of no known kind");
@@ -762,6 +771,14 @@ int ncfg_proto_decode_request(ncfg_proto_dec_t *dec, uint32_t object, ncfg_proto
 		        &out->u.radio_set.interface) ||
 		    !ncfg_proto_get_bool(dec, object, "activate", 1, 0, what,
 		        &out->u.radio_set.activate)) {
+			return 0;
+		}
+		break;
+	case NCFG_PROTO_REQ_TUNNEL_SET:
+		if (!ncfg_proto_get_str(dec, object, "interface", 1, what,
+		        &out->u.tunnel_set.interface) ||
+		    !ncfg_proto_get_bool(dec, object, "activate", 1, 0, what,
+		        &out->u.tunnel_set.activate)) {
 			return 0;
 		}
 		break;

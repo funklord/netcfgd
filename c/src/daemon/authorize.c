@@ -117,6 +117,9 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	 * so a member of the `netcfgd` group can turn on the radio in their own
 	 * laptop without being able to decide who else may. */
 	[NCFG_PROTO_REQ_RADIO_SET] = NCFG_TIER_WIFI,
+	/* Connecting the VPN is the act joining a network is, for a person at
+	 * their own machine (10.864): a device name and up or down, no text. */
+	[NCFG_PROTO_REQ_TUNNEL_SET] = NCFG_TIER_WIFI,
 
 	/*
 	 * Everything that changes the machine. `apply` is `admin` even when the

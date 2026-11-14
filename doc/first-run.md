@@ -812,8 +812,11 @@ Where charon runs the updown as root, leave the key out.
 Measured end to end in Alpine 3.21 with strongSwan 5.9.14 and a pre-shared key
 (`tests/ipsec/e2e.sh`). EAP and certificate authentication are strongSwan's
 business and change nothing on netcfgd's side, but have not been run here.
-`ncfg` cannot yet bring a tunnel up or down; `start_action = start` in the
-connection, or `swanctl --initiate`, does.
+`ncfg tunnel up ipsec0` and `ncfg tunnel down ipsec0` ask strongSwan to bring it
+up or take it down, once the `xfrm` block names the connection and its child
+(`connection = "home"`, `child = "all"`); the addressing follows through the
+report as above. `start_action = start` in the connection brings it up with
+charon instead. Both are in the `wifi` tier, beside joining a network.
 
 ## When something goes wrong
 

@@ -397,6 +397,13 @@ static int lower_xfrm(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			 * netcfgd gives this interface's report directory (10.863). */
 			free(out->xfrm.report_writer);
 			out->xfrm.report_writer = ncfg_as_string(ctx, assignment->value);
+		} else if (strcmp(assignment->key, "connection") == 0) {
+			/* strongSwan's names, for `ncfg tunnel up` and `down` (10.864). */
+			free(out->xfrm.connection);
+			out->xfrm.connection = ncfg_as_string(ctx, assignment->value);
+		} else if (strcmp(assignment->key, "child") == 0) {
+			free(out->xfrm.child);
+			out->xfrm.child = ncfg_as_string(ctx, assignment->value);
 		} else {
 			ncfg_diag(ctx, assignment->span, "unknown xfrm key `%s`", assignment->key);
 		}

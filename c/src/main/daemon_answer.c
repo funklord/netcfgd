@@ -43,9 +43,14 @@
 #include "ncfg/log.h"
 #include "ncfg/secrets.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 /* The longest a name that becomes a path component may be. A drop-in name, a
  * secret name, a profile name and an interface name are all short, and each of
@@ -241,6 +246,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_AP_STATIONS:
 	case NCFG_PROTO_REQ_RADIOS:
 	case NCFG_PROTO_REQ_RADIO_SET:
+	case NCFG_PROTO_REQ_TUNNEL_SET:
 	/* The three that are a model and an envelope: `daemon.h` encodes each
 	 * from the model's own writer, so none can come to disagree with the file
 	 * of the same shape under `/run`. */
@@ -673,6 +679,128 @@ static int start_the_supplicant(void *context, const char *interface, char *err,
     size_t err_size)
 {
 	return ncfg_daemon_start_supplicant_request(context, interface, err, err_size);
+}
+
+/*
+ * An IPsec tunnel up or down, by its XFRM interface (10.864).
+ *
+ * strongSwan's own service loads the connection and charon negotiates it
+ * (0325); this only asks charon, through `swanctl`, to bring up the child the
+ * device's block names, or to take the connection down. **Started and not
+ * waited for**: an initiate waits for IKE to finish, which takes seconds or
+ * longer, and every request is answered on the loop's thread -- 0111 is what
+ * a wait there costs. What comes of it arrives as the tunnel's report, which
+ * is how the interface gets its addressing anyway.
+ *
+ * `NCFG_SWANCTL` names another program, the seam `NCFG_OPENVPN` is for
+ * openvpn, read here because a request is answered in the daemon's own
+ * process.
+ */
+static const char *swanctl_program(void)
+{
+	static const char *const places[] = { "/usr/sbin/swanctl", "/usr/bin/swanctl",
+		"/sbin/swanctl", "/bin/swanctl" };
+	const char *named = getenv("NCFG_SWANCTL");
+	size_t      at;
+
+	if (named && named[0]) {
+		return access(named, X_OK) == 0 ? named : NULL;
+	}
+	for (at = 0; at < sizeof(places) / sizeof(places[0]); at++) {
+		if (access(places[at], X_OK) == 0) {
+			return places[at];
+		}
+	}
+	return NULL;
+}
+
+/* Run `argv` detached: a child that forks the program and leaves at once, so
+ * the program is init's to reap and this loop waits for nothing. */
+static int start_detached(const char *program, char *const argv[])
+{
+	pid_t child = fork();
+
+	if (child < 0) {
+		return 0;
+	}
+	if (child == 0) {
+		pid_t grandchild;
+		int   null = open("/dev/null", O_RDWR);
+
+		(void)setsid();
+		if (null >= 0) {
+			(void)dup2(null, 0);
+			(void)dup2(null, 1);
+			(void)dup2(null, 2);
+			if (null > 2) {
+				(void)close(null);
+			}
+		}
+		grandchild = fork();
+		if (grandchild == 0) {
+			execv(program, argv);
+			_exit(127);
+		}
+		_exit(grandchild < 0 ? 1 : 0);
+	}
+	while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {
+	}
+	return 1;
+}
+
+static int answer_tunnel_set(ncfg_main_desk_t *desk, const ncfg_proto_tunnel_set_t *set,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	char                 interface[NAME_MAX_BYTES];
+	const ncfg_device_t *device;
+	const char          *program;
+	const char          *connection;
+	const char          *child;
+
+	if (!name_of(set->interface, "interface", interface, sizeof(interface), err, err_size)) {
+		return 0;
+	}
+	device = desk->state && desk->state->desired ?
+	    ncfg_document_device(desk->state->desired, interface) : NULL;
+	if (!device || device->kind.kind != (int)NCFG_KIND_XFRM) {
+		ncfg_error_set(err, err_size,
+		    "%s is not an IPsec tunnel this configuration describes: a tunnel is an "
+		    "`xfrm` device, and its block names the connection to drive", interface);
+		return 0;
+	}
+	connection = device->kind.xfrm.connection;
+	child = device->kind.xfrm.child;
+	if (!connection || (set->activate && !child)) {
+		ncfg_error_set(err, err_size,
+		    "%s's `xfrm` block names no %s, so there is nothing to ask strongSwan to "
+		    "bring %s: `connection` is the swanctl connection, `child` its child, and "
+		    "up needs both -- an initiate of the connection alone brings up no child",
+		    interface, !connection ? "connection" : "child", set->activate ? "up" : "down");
+		return 0;
+	}
+	program = swanctl_program();
+	if (!program) {
+		ncfg_error_set(err, err_size,
+		    "swanctl is not installed, so strongSwan cannot be asked to bring %s %s",
+		    interface, set->activate ? "up" : "down");
+		return 0;
+	}
+	{
+		char *const up[] = { (char *)(uintptr_t)program, (char *)(uintptr_t)"--initiate",
+			(char *)(uintptr_t)"--child", (char *)(uintptr_t)child,
+			(char *)(uintptr_t)"--ike", (char *)(uintptr_t)connection, NULL };
+		char *const down[] = { (char *)(uintptr_t)program, (char *)(uintptr_t)"--terminate",
+			(char *)(uintptr_t)"--ike", (char *)(uintptr_t)connection, NULL };
+
+		if (!start_detached(program, set->activate ? up : down)) {
+			ncfg_error_set(err, err_size, "could not start swanctl for %s: %s", interface,
+			    strerror(errno));
+			return 0;
+		}
+	}
+	/* The protocol's `ok`: what comes of it arrives as the tunnel's report,
+	 * which `status` shows, so there is nothing more to answer with. */
+	return ncfg_daemon_ok_encode(out, err, err_size);
 }
 
 static int answer_radio_set(ncfg_main_desk_t *desk, const ncfg_proto_radio_set_t *set,
@@ -1412,6 +1540,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		    out, err, err_size);
 	case NCFG_PROTO_REQ_RADIO_SET:
 		return answer_radio_set(desk, &request->u.radio_set, out, err, err_size);
+	case NCFG_PROTO_REQ_TUNNEL_SET:
+		return answer_tunnel_set(desk, &request->u.tunnel_set, out, err, err_size);
 	case NCFG_PROTO_REQ_CONFIG_PUT:
 		return wrote_configuration(desk,
 		    answer_config_put(desk, &request->u.put, out, err, err_size));

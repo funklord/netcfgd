@@ -82,6 +82,8 @@ static const ncfg_order_class_t order_table[NCFG_PROTO_REQ_COUNT] = {
 	[NCFG_PROTO_REQ_PROFILE_SET] = NCFG_ORDER_IDEMPOTENT,
 	[NCFG_PROTO_REQ_PROFILE_DELETE] = NCFG_ORDER_IDEMPOTENT,
 	[NCFG_PROTO_REQ_RADIO_SET] = NCFG_ORDER_IDEMPOTENT,
+	/* Up when up and down when down: a second ask changes nothing. */
+	[NCFG_PROTO_REQ_TUNNEL_SET] = NCFG_ORDER_IDEMPOTENT,
 
 	/* The two that make the machine match what is already written down.
 	 * `apply` is the declarative case at its purest -- it is convergence, so

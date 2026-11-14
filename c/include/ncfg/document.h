@@ -787,6 +787,12 @@ typedef struct {
 	 * runs it as `ipsec`, which cannot write in netcfgd's root-owned run
 	 * directory. NULL where the updown runs as root. */
 	char   *report_writer;
+	/* strongSwan's names for what `ncfg tunnel up` and `down` drive
+	 * (10.864): `swanctl --initiate --child <child> --ike <connection>`,
+	 * and `--terminate --ike <connection>`. An IKE-only initiate brings up
+	 * no child, measured, so up needs both. NULL where nobody asked. */
+	char   *connection;
+	char   *child;
 } ncfg_xfrm_config_t;
 
 typedef struct {
