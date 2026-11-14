@@ -12737,6 +12737,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.857 IPsec, step two: strongSwan's half, measured (0324)
+
+0323 left the IKE half to measurement, and this host's strongSwan has no vici
+and no `swanctl`, so `tests/ipsec/probe.sh` measures it in Alpine 3.21
+(strongSwan 5.9.14): two namespaces, a charon each, IKEv2 with a pre-shared
+key, a virtual IP from the server's pool, the client's child SA on step one's
+XFRM interface by `if_id`. The SAs carry `if_id 0x7`; charon puts the virtual
+IP on `ipsec0` with `install_virtual_ip_on`, or with `install_virtual_ip = no`
+reports it over vici and installs nothing -- and placed from outside, as
+netcfgd will, the far side answers through the tunnel either way.
+`tests/ipsec/twin.sh`: two charons in one namespace, and the second cannot
+bind IKE's port. And a child's `updown` command is handed the virtual IP, the
+`if_id` and the peer's subnets (`PLUTO_MY_SOURCEIP`, `PLUTO_IF_ID_IN`,
+`PLUTO_PEER_CLIENT`) on `up-client`.
+
+So [0324](doc/decision/0324-netcfgd-drives-the-machines-charon-and-places-the-virtual-ip-itself.md):
+netcfgd drives the machine's one charon and does not run its own, and each
+tunnel's virtual IP reaches its interface through the interface report, which
+an updown command netcfgd ships writes -- the operator's child names it beside
+the `if_id` lines it needs anyway. No vici client is needed to read anything.
+Still to measure: an EAP secret handed over vici rather than written in the
+file, which needs a server certificate in the probe. Step three builds
+netcfgd's side: load the operator's file with `swanctl`, and the updown
+command.
+
+Found on the way, and worth the next person's time: `swanctl.conf` takes no
+`;` between keys -- `local { auth = psk; id = srv }` loads as one value and the
+whole connection is discarded ("invalid value for: auth"); a relative
+`include` in a `strongswan.conf` named by `STRONGSWAN_CONF` resolves against
+that file's directory, so charon loaded no plugins and aborted; and a
+policy-based server's replies need some route to a device before its policy
+takes them.
+
 ## 10.856 IPsec, step one: the XFRM interface (0323)
 
 The holder, 2026-11-14: if nothing else is left, do IPsec. [0323](doc/decision/0323-an-ipsec-tunnel-is-an-xfrm-interface-and-the-swanctl-file-is-the-operators.md)
