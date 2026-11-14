@@ -12737,6 +12737,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.869 `loop_test`'s roam check waits ten rounds, not two
+
+The C suite failed one check once, "three joins are one roam", while
+`make live-alpine` was building in a container beside it; alone,
+`loop_test` passed thirteen runs of thirteen. The check gave the loop two
+rounds, each bounded by its tick, for datagrams a fake supplicant sends from
+another thread, so a loaded machine could end both before they arrived. What
+it checks is that the joins come out as one roam, not how quickly another
+thread is scheduled: ten rounds now, still stopping at the first that reports
+one. Not reproduced under load on purpose -- the reading is from the code and
+the one failure, which is recorded as such.
+
 ## 10.868 A report writer named for an existing tunnel takes effect at once
 
 10.863 made the report directory with the device, so naming a `report_writer`

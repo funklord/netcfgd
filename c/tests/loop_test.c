@@ -1822,9 +1822,16 @@ static void a_station_that_moved_is_carried_out_of_the_round(const char *base)
 	run.refresh_context = &watchers;
 	/* The real clock for this one, because what has to arrive is a datagram
 	 * from another thread: a round of no wait at all would be a race rather
-	 * than a check. The wait is bounded by the loop's own tick. */
+	 * than a check. The wait is bounded by the loop's own tick.
+	 *
+	 * **Ten rounds, not two.** The suite failed this once with two, while a
+	 * container build loaded the machine: the datagrams had not arrived when
+	 * the second round ended, and alone it passed thirteen times of thirteen
+	 * (10.869). What is checked is that the joins come out as one roam, not
+	 * how fast another thread is scheduled; the loop still stops at the
+	 * first round that reports one. */
 
-	for (at = 0; at < 2; at++) {
+	for (at = 0; at < 10; at++) {
 		err[0] = '\0';
 		if (!ncfg_main_round(&run, &report, err, sizeof(err))) {
 			detail("a round failed", err);
