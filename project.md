@@ -12737,6 +12737,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.858 IPsec, step three begins: the updown command writes the report (0324)
+
+`packaging/hooks/ipsec-updown`, installed as `libexec/netcfgd/ipsec-updown`.
+A child of the operator's `swanctl.conf` names it with the interface --
+`updown = /usr/libexec/netcfgd/ipsec-updown ipsec0`, beside `if_id_in` and
+`if_id_out` -- and charon runs it on the child's way up and down. On
+`up-client` it writes `reported.d/ipsec0/<child>`: the virtual IP as a host
+address (`PLUTO_MY_SOURCEIP`, or every `PLUTO_MY_SOURCEIP4_n`/`6_n` where
+several were given), the far side's subnet as a route (`PLUTO_PEER_CLIENT`,
+`0.0.0.0/0` spelled `default`), and any nameservers charon was given
+(`PLUTO_DNS4_n`/`6_n`). On `down-client` it empties the fragment. **A fragment
+per child, not the single file**: one interface can carry several child SAs,
+and with one file each replaces the last -- measured, the sabotage below. An
+interface name that is not one, or walks a path, writes nothing.
+
+With `interface ipsec0 { config = "reported" }` that is all it takes today:
+`tests/live/ipsec_report.sh`, in a namespace and in `make live`, drives the
+command with the environment the probe recorded for two children, applies,
+and finds the XFRM interface with the virtual IP and both subnets routed into
+it; one child down takes its route and leaves the other's, both down take the
+address. With the command writing the single file instead, five checks fail.
+
+**Open, and the next thing to measure: a full tunnel.** The holder's PrivadoVPN
+profile sends all of IPv4 through the tunnel, which reports `route=default` on
+`ipsec0` -- and IKE's own packets to the peer must still leave by the uplink,
+not into the tunnel they are negotiating. Whether charon's socket bypass
+policies keep them out with an XFRM interface, or a host route to the peer is
+needed, is for the probe with `remote_ts = 0.0.0.0/0`.
+
 ## 10.857 IPsec, step two: strongSwan's half, measured (0324)
 
 0323 left the IKE half to measurement, and this host's strongSwan has no vici

@@ -1665,11 +1665,20 @@
 #	config = "192.0.2.10/24"
 #}
 
-# An XFRM interface: the device a route-based IPsec tunnel is (0323). The IKE
-# daemon's connection carries the same id -- strongSwan's `if_id_in` and
-# `if_id_out` -- and the kernel sends its traffic through this device, which is
-# then addressed and routed like any other. netcfgd makes the device; it does
-# not yet run the IKE daemon.
+# An XFRM interface: the device a route-based IPsec tunnel is (0323, 0324).
+# The IKE daemon's connection carries the same id -- strongSwan's `if_id_in`
+# and `if_id_out` -- and the kernel sends its traffic through this device,
+# which is then addressed and routed like any other. strongSwan's own charon
+# negotiates; netcfgd makes the device. A child in the operator's swanctl.conf
+# names netcfgd's updown command with the interface:
+#
+#	if_id_in  = 7
+#	if_id_out = 7
+#	updown    = /usr/libexec/netcfgd/ipsec-updown ipsec0
+#
+# and with `install_virtual_ip = no` in charon's strongswan.conf the virtual IP
+# and the far side's subnets reach the interface as a report, which
+# `config = "reported"` takes. A fixed address works as on any interface.
 
 #device ipsec0 {
 #	xfrm {
@@ -1677,8 +1686,7 @@
 #	}
 #}
 #interface ipsec0 {
-#	config = "10.8.0.2/32"
-#	routes = ["10.8.0.0/16"]
+#	config = "reported"
 #}
 
 # A DUMMY interface, which is the usual home for a stable service address.

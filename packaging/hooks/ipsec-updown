@@ -1,0 +1,107 @@
+#!/bin/sh
+# strongSwan's updown command for a tunnel netcfgd owns (decision 0324).
+#
+#   updown = /usr/libexec/netcfgd/ipsec-updown ipsec0
+#
+# in a child of the operator's swanctl.conf, beside `if_id_in` and `if_id_out`
+# naming the id of netcfgd's `device ipsec0 { xfrm { if_id = N } }`. charon
+# runs it as the child comes up and goes down, with what it negotiated in the
+# environment; this writes that as the interface report netcfgd reads
+# (doc/interface-report.md), so the virtual IP and the peer's subnets reach the
+# interface the way an OpenVPN tunnel's do. charon itself is told
+# `install_virtual_ip = no`: one device for every tunnel is wrong with two.
+#
+# A FRAGMENT, `reported.d/<interface>/<child>`, not the single file: one
+# interface can carry several child SAs, each running this on its own, and a
+# single file would be replaced by each in turn. netcfgd merges fragments.
+#
+# What charon was measured handing it (strongSwan 5.9.14, tests/ipsec/probe.sh):
+# PLUTO_VERB=up-client, PLUTO_MY_SOURCEIP=10.98.0.1, PLUTO_IF_ID_IN=7,
+# PLUTO_PEER_CLIENT=10.99.0.1/32, PLUTO_CONNECTION=net (the child's name).
+#
+# Always exits 0: a failing updown makes charon log and carry on, and nothing
+# here should change what charon does. Writes nothing outside the run
+# directory; reads only its environment.
+#
+# POSIX sh.
+
+interface=${1:-}
+run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+
+# A name the kernel could give an interface, and nothing that walks a path.
+case "$interface" in
+"" | .* | */* | *[!A-Za-z0-9_.@:-]*)
+	echo "ipsec-updown: no usable interface named (got '$interface')" >&2
+	exit 0
+	;;
+esac
+# The child's name, as a file name: the same rule, its own spelling kept
+# where it fits and anything else replaced.
+source=$(printf '%s' "${PLUTO_CONNECTION:-child}" | tr -c 'A-Za-z0-9_.-' '_')
+case "$source" in
+"" | .*) source="child$source" ;;
+esac
+
+directory="$run_dir/reported.d/$interface"
+fragment="$directory/$source"
+# A leading dot, which netcfgd skips while it is being written (0113).
+staged="$directory/.$source.tmp"
+
+# An address with its length: a virtual IP is one host.
+host() {
+	case "$1" in
+	*:*) echo "$1/128" ;;
+	*) echo "$1/32" ;;
+	esac
+}
+
+# Every value strongSwan numbered, or the one it did not: PLUTO_MY_SOURCEIP4_1,
+# _2... where it assigned several, PLUTO_MY_SOURCEIP alone otherwise.
+numbered() {
+	prefix=$1
+	at=1
+	found=
+	while [ "$at" -le 16 ]; do
+		value=$(eval "printf '%s' \"\${${prefix}_$at:-}\"")
+		[ -n "$value" ] || break
+		printf '%s\n' "$value"
+		found=yes
+		at=$((at + 1))
+	done
+	[ -n "$found" ]
+}
+
+report() {
+	echo "# $interface, child ${PLUTO_CONNECTION:-?} up with ${PLUTO_PEER:-?}, if_id ${PLUTO_IF_ID_IN:-?}"
+	vips=$( { numbered PLUTO_MY_SOURCEIP4; numbered PLUTO_MY_SOURCEIP6; } 2>/dev/null)
+	[ -n "$vips" ] || vips=${PLUTO_MY_SOURCEIP:-}
+	for vip in $vips; do
+		echo "address=$(host "$vip")"
+	done
+	# What the far side's traffic selector covers is what goes into the tunnel.
+	# 0.0.0.0/0 is the whole of IPv4, which the report spells as a default.
+	if [ -n "${PLUTO_PEER_CLIENT:-}" ]; then
+		case "$PLUTO_PEER_CLIENT" in
+		0.0.0.0/0 | ::/0) echo "route=default" ;;
+		*) echo "route=$PLUTO_PEER_CLIENT" ;;
+		esac
+	fi
+	for dns in $( { numbered PLUTO_DNS4; numbered PLUTO_DNS6; } 2>/dev/null); do
+		echo "dns=$dns"
+	done
+}
+
+case "${PLUTO_VERB:-}" in
+up-client* | up-host*)
+	mkdir -p "$directory" 2>/dev/null || exit 0
+	report > "$staged" && mv "$staged" "$fragment"
+	;;
+down-client* | down-host*)
+	# Empty rather than gone, as the report's own rule asks: the tunnel is
+	# down, which is a statement, where a missing file is nobody watching.
+	if [ -d "$directory" ]; then
+		: > "$staged" && mv "$staged" "$fragment"
+	fi
+	;;
+esac
+exit 0

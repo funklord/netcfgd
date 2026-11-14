@@ -69,6 +69,11 @@ interface. Nothing stops it and netcfgd will merge it. If you have one source --
 and a modem, a tunnel and a PPP link each have one -- the single file is simpler
 and is what the rest of this document describes.
 
+**netcfgd ships one more, for IPsec**: `ipsec-updown`, which a strongSwan
+child names as its `updown` command and which writes
+`reported.d/<interface>/<child>` -- a fragment, because one XFRM interface can
+carry several child SAs, each running it on its own (0324).
+
 **netcfgd generates four writers itself**: the scripts it hands `dhcpcd -c`
 (one per family), `udhcpc -s` and `odhcp6c -s`, which report a lease's nameservers
 because netcfgd never sees the protocol -- odhcp6c's as the fragment

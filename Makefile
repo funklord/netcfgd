@@ -396,6 +396,10 @@ install:
 	install -d $(DESTDIR)$(LIBEXECDIR)/netcfgd
 	install -m 0755 packaging/hooks/dhcpcd-hook \
 		$(DESTDIR)$(LIBEXECDIR)/netcfgd/dhcpcd-hook
+	@# strongSwan's updown command for a tunnel's XFRM interface (0324): a
+	@# child of the operator's swanctl.conf names it, and charon execs it.
+	install -m 0755 packaging/hooks/ipsec-updown \
+		$(DESTDIR)$(LIBEXECDIR)/netcfgd/ipsec-updown
 	@echo "install: netcfgd and ncfg installed; no init glue"
 	@echo "install:   $(SYSCONFDIR)/netcfgd/netcfgd.conf.example documents every feature"
 	@echo "install:   make install-systemd | install-openrc | install-procd"
@@ -3085,6 +3089,10 @@ live:
 		exit 1; \
 	}
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/links.sh"
+	@# An IPsec tunnel's virtual IP reaching its XFRM interface through the
+	@# report strongSwan's updown command writes (0324). strongSwan is not
+	@# here; the command is driven with what charon was measured handing it.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ipsec_report.sh"
 	@# What a device the C port creates actually carries, compared against the
 	@# Rust on one kernel and read back by `ip -d`. Most kinds ride along in the
 	@# create message; a bridge deliberately does not (0057) and this port was
@@ -3774,6 +3782,7 @@ uninstall:
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd_select.sh
 	rm -f $(DESTDIR)$(LIBEXECDIR)/netcfgd/dhcpcd-hook
+	rm -f $(DESTDIR)$(LIBEXECDIR)/netcfgd/ipsec-updown
 	@# Named, and removed only if this is the last thing in it -- the directory
 	@# is netcfgd's, so an empty one is ours to take away and a non-empty one
 	@# holds something a later version installed that this uninstall does not
