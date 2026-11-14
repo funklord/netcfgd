@@ -12737,6 +12737,24 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.864 Bringing a tunnel up from ncfg: what it needs to know, measured
+
+0325 left `ncfg` unable to bring a tunnel up or down. Before the design:
+does `swanctl --initiate --ike <connection>` bring the connection's children up
+with it? Measured on `tests/ipsec/fulltunnel.sh`'s setup in Alpine 3.21:
+**no** -- "initiate completed successfully" and no CHILD_SA; and
+`--terminate --ike <connection>` took everything down. So bringing a tunnel
+up needs the child's name, and taking it down only the connection's.
+
+The design that follows, not built: the `xfrm` block gains `connection` and
+`child` -- what `swanctl --initiate --child <child> --ike <connection>` and
+`--terminate --ike <connection>` take -- and a typed request (0117's shape: no
+configuration text, a device name and up or down) runs those two as root, in
+the `wifi` tier beside joining a network, since connecting the VPN is the same
+kind of act for a person at their own machine. A new request kind is an
+addition to the frozen socket protocol, a minor bump (0020), with its witness
+line and ledger row. Waits on nothing but the work.
+
 ## 10.863 netcfgd gives a tunnel's report directory to charon's account
 
 10.862's open step. `device ipsec0 { xfrm { if_id = 7; report_writer = "ipsec" } }`:
