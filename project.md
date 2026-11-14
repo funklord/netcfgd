@@ -12737,6 +12737,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.862 netcfgd and strongSwan in one run, and the account charon's updown runs as
+
+`tests/ipsec/e2e.sh` builds netcfgd for musl inside Alpine 3.21 and runs the
+full tunnel of `fulltunnel.sh` with netcfgd doing its part: it makes the XFRM
+interface, the shipped `ipsec-updown` writes the report, and `ncfg apply` takes
+the virtual IP, the tunnel's default route and the peer's pin from it. Then:
+the internet host routes by `ipsec0` and two packets are counted out of it,
+pings are answered before and after an IKE and a CHILD rekey, a second plan
+has nothing to do, and terminating the tunnel empties the report and the next
+apply puts the routes back as they were -- `default via 198.51.100.1 dev c0`
+and nothing else.
+
+**Only with the report directory handed to charon's account by hand**, and
+that is the finding. On Alpine charon runs the updown as `ipsec` (uid 100)
+with no capabilities, measured by a trace in front of the hook -- so in
+netcfgd's root-owned run directory `mkdir -p reported.d/ipsec0` fails, and
+the hook, which exits 0 whatever happens so as never to disturb charon, wrote
+nothing. The earlier probes passed only because their run directory did not
+exist yet and `/tmp` let anyone create it. Before that was understood, two
+runs reported success they had not earned: the pings were answered OUTSIDE
+the tunnel, because the server answers there too -- the script counts packets
+on `ipsec0` and names the device now.
+
+**Open, and the next step: netcfgd prepares the directory.** The account is
+the distribution's choice (Alpine builds charon to drop to `ipsec`; whether
+OpenWrt's and Debian's run it as root is unmeasured), so it is named rather
+than guessed -- an `xfrm` key such as `report_writer = "ipsec"`, privileged,
+with netcfgd making `reported.d/<interface>/` that account's when it makes
+the device, so the account can write that interface's addressing and nothing
+else. The alternative is netcfgd reading charon's SAs as root
+(`swanctl --list-sas`), which needs no account and polls; 0324 set it aside.
+Also: the first run of this copied the whole 3.2 GB tree into the container,
+whose writable layer is the host's `/` at 94%, and was killed short of filling
+it; it copies the C build's 81 MB of sources now.
+
 ## 10.861 strongSwan's service loads the connection; netcfgd owns the device (0325)
 
 10.857 planned for netcfgd to load the operator's file with `swanctl`. Measured
