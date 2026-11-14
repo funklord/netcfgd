@@ -12737,6 +12737,21 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.867 An IPsec tunnel authenticated as a commercial VPN is, measured
+
+`tests/ipsec/eap.sh`: `fulltunnel.sh`'s full tunnel with the server proven by
+an RSA certificate from a CA made with strongSwan's `pki`, and the client by
+EAP-MSCHAPv2 against `eap_id = probe-user` and a password in strongSwan's
+secrets, trusting the CA -- the shape of the holder's PrivadoVPN profile. In
+Alpine 3.21 with strongSwan 5.9.14: the server's certificate verified, "EAP
+method EAP_MSCHAPV2 succeeded", the child came up, the shipped `ipsec-updown`
+reported the virtual IP, the default route and the peer, and pings through
+`ipsec0` were answered before and after an IKE and a CHILD rekey. So the
+authentication a provider hands out changes nothing on netcfgd's side, as 0325
+expected; the guide says so now rather than that it was not run. Its first
+attempt made ed25519 keys and `pki --pub` would not read them; RSA is what the
+probe uses.
+
 ## 10.866 `ncfg tunnel up|down`: strongSwan asked from netcfgd
 
 10.864's design, built. The `xfrm` block gains `connection` and `child`, and a

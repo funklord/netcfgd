@@ -810,8 +810,10 @@ interface gets nothing -- silently, because the updown never disturbs charon.
 Where charon runs the updown as root, leave the key out.
 
 Measured end to end in Alpine 3.21 with strongSwan 5.9.14 and a pre-shared key
-(`tests/ipsec/e2e.sh`). EAP and certificate authentication are strongSwan's
-business and change nothing on netcfgd's side, but have not been run here.
+(`tests/ipsec/e2e.sh`), and with the server proven by a certificate and the
+client by EAP-MSCHAPv2, a username and a password -- the shape of a commercial
+VPN profile (`tests/ipsec/eap.sh`). Authentication is strongSwan's business and
+changes nothing on netcfgd's side.
 `ncfg tunnel up ipsec0` and `ncfg tunnel down ipsec0` ask strongSwan to bring it
 up or take it down, once the `xfrm` block names the connection and its child
 (`connection = "home"`, `child = "all"`); the addressing follows through the
