@@ -3,6 +3,8 @@
 #
 #   updown = /usr/libexec/netcfgd/ipsec-updown ipsec0
 #
+# (and a run directory after the interface where netcfgd's is not the default)
+#
 # in a child of the operator's swanctl.conf, beside `if_id_in` and `if_id_out`
 # naming the id of netcfgd's `device ipsec0 { xfrm { if_id = N } }`. charon
 # runs it as the child comes up and goes down, with what it negotiated in the
@@ -25,8 +27,12 @@
 #
 # POSIX sh.
 
+# The run directory may follow the interface, for a netcfgd started with
+# another one: charon runs this with an environment of its own making, so a
+# `NCFG_RUN_DIR` set where charon was started never arrives -- measured, the
+# report went to /run/netcfgd while the probe's netcfgd read elsewhere.
 interface=${1:-}
-run_dir=${NCFG_RUN_DIR:-/run/netcfgd}
+run_dir=${2:-${NCFG_RUN_DIR:-/run/netcfgd}}
 
 # A name the kernel could give an interface, and nothing that walks a path.
 case "$interface" in

@@ -12737,6 +12737,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.859 A full tunnel needs its peer pinned to the uplink, measured
+
+10.858's open question, answered by `tests/ipsec/fulltunnel.sh` in Alpine 3.21
+with strongSwan 5.9.14: all of IPv4 into the XFRM interface, the peer reached
+only by a default route (host addresses and `onlink` routes, since a
+container's `/proc/sys` is read-only and nothing in it forwards), the shipped
+`ipsec-updown` writing the report, and what netcfgd does with it done by hand --
+the virtual IP on `ipsec0` and `default dev ipsec0` at metric 50, under the
+uplink's 100.
+
+- **Without a route to the peer, IKE works and the tunnel carries nothing.**
+  The peer resolves to `dev ipsec0`; both an IKE and a CHILD rekey completed
+  with no retransmits -- charon's own packets get out -- while pings through
+  the tunnel went unanswered: the ESP packets to the peer route back into
+  `ipsec0`.
+- **With `198.51.100.1/32` by the uplink, added first, it all works**: pings
+  answered before and after both rekeys.
+
+So a tunnel whose report carries a default route needs a host route to its
+peer by whatever reached the peer before -- which netcfgd, not charon, has to
+install, since netcfgd puts the default route there. The updown command knows
+the peer (`PLUTO_PEER`). Next: the report gains `peer=`, which the contract's
+"unknown keys are ignored" lets the writer add first, and netcfgd pins it.
+
+Also found: **charon runs the updown command with an environment of its own
+making**, so `NCFG_RUN_DIR` set where charon started never arrives -- the probe's
+report went under charon's own `/run`. The command now takes a run directory
+after the interface; the default is right on a real machine.
+
 ## 10.858 IPsec, step three begins: the updown command writes the report (0324)
 
 `packaging/hooks/ipsec-updown`, installed as `libexec/netcfgd/ipsec-updown`.
