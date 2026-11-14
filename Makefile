@@ -1466,6 +1466,13 @@ LIVE_PACKAGES = build-essential iproute2 iputils-ping dnsmasq \
 #   run alone -- and wrapping `control_exposure.sh` in `unshare -rn`, which
 #   `live` deliberately does not, failed it on a chown to an unmapped gid.
 ALPINE_IMAGE ?= alpine:latest
+# The tree's sources as one tar in $(DIST), for the container tiers to unpack
+# instead of copying the tree (see live-alpine).
+define live_sources
+@{ git ls-files --recurse-submodules -z && git ls-files -o --exclude-standard -z; } | \
+	tar --null --no-recursion -T - -cf "$(DIST)/live-src.tar"
+endef
+
 ALPINE_PACKAGES = make build-base linux-headers iproute2 iputils dnsmasq \
                   dhcpcd hostapd wpa_supplicant openvpn wireguard-tools ppp \
                   ppp-pppoe iw kmod python3 py3-dbus socat unbound \
@@ -1484,9 +1491,10 @@ live-alpine:
 		'# `dhcpcd_orphan.sh` reads these; an image ships neither.' \
 		'printf "root:100000:65536\n" > /etc/subuid' \
 		'printf "root:100000:65536\n" > /etc/subgid' \
-		'# Copied, because /src is read-only and the build must not leave' \
-		'# root-owned output in the host tree.' \
-		'cp -a /src /work && cd /work' \
+		'# Unpacked from the sources tar the recipe made (see below), because' \
+		'# /src is read-only and the build must not leave root-owned output' \
+		'# in the host tree.' \
+		'mkdir -p /work && tar -C /work -xf /dist/live-src.tar && cd /work' \
 		'# Cleaned first, or the glibc objects copied in are reused and the' \
 		'# run measures this machine rather than musl -- which is the same' \
 		'# trap `live-container` records at length.' \
@@ -1538,11 +1546,20 @@ live-alpine:
 		> $(DIST)/live-alpine.sh
 	@# Named for the reason `live-container` gives: an outer `timeout` would
 	@# bound this client and leave the container running.
+	@# **The sources, not the tree.** The tree is gigabytes with its build
+	@# output -- hull's images, the GUI's Android builds -- and a container's
+	@# writable layer is the host's `/`, which a whole-tree copy took within
+	@# 4 GB of full on ml350g6-01 (project.md 10.862). Git knows which files
+	@# are sources: the tracked ones, every submodule's, and untracked ones
+	@# nothing ignores, about 100 MB. `--no-recursion`, or a submodule's
+	@# directory entry would bring its build output back.
+	$(call live_sources)
 	name=netcfgd-alpine-$$$$; \
 	echo "live-alpine: $$name; stop it with 'docker kill $$name'"; \
 	docker run --rm --privileged --name "$$name" \
 		-v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
-		$(ALPINE_IMAGE) sh /dist/live-alpine.sh
+		$(ALPINE_IMAGE) sh /dist/live-alpine.sh; \
+	rc=$$?; rm -f "$(DIST)/live-src.tar"; exit $$rc
 
 live-container:
 	@command -v docker >/dev/null 2>&1 || { \
@@ -1558,7 +1575,7 @@ live-container:
 		'set -eu' \
 		'apt-get -qq update >/dev/null' \
 		'apt-get -qq install -y $(LIVE_PACKAGES) >/dev/null' \
-		'# Copied, not built in place: /src is read-only so the host tree' \
+		'# Unpacked, not built in place: /src is read-only so the host tree' \
 		'# cannot be left holding root-owned build output.' \
 		'# A subordinate id range for root, which `dhcpcd_orphan.sh` needs' \
 		'# and an image does not ship. That script makes its own user,' \
@@ -1570,17 +1587,17 @@ live-container:
 		'# meets this.' \
 		'printf "root:100000:65536\\n" > /etc/subuid' \
 		'printf "root:100000:65536\\n" > /etc/subgid' \
-		'cp -a /src /work && cd /work' \
+		'mkdir -p /work && tar -C /work -xf /dist/live-src.tar && cd /work' \
 		'# **Built in here, not inherited, and cleaned first or it is' \
-		'# neither.** The copy above brings the host tree with whatever' \
-		'# binaries were sitting in it, and the live scripts drive' \
+		'# neither.** The whole-tree copy this replaced brought whatever' \
+		'# binaries were sitting in the host tree, and the live scripts drive' \
 		'# `c/netcfgd` and the shim by path -- so without this the' \
 		'# container runs whatever binaries the host had, where they' \
 		'# exist, and skips the rest, which is the one thing a container' \
 		'# run must not do: cover less than the host while looking like' \
 		'# more.' \
 		'#' \
-		'# The clean is not tidiness. `cp -a` preserves mtimes and' \
+		'# The clean is not tidiness. An unpacked tar keeps mtimes and' \
 		'# `.build-flags` records the flag string rather than the' \
 		'# compiler, so an unclean build here inherits the verdict the' \
 		'# host left -- nothing to be done -- and compiles not one file,' \
@@ -1625,11 +1642,14 @@ live-container:
 	@# the container got, so the message named a container that did not
 	@# exist. Unprefixed, so make echoes what ran -- a docker run is
 	@# network access and worth seeing.
+	@# The sources only, for live-alpine's reason.
+	$(call live_sources)
 	name=netcfgd-live-$$$$; \
 	echo "live-container: $$name; stop it with 'docker kill $$name'"; \
 	docker run --rm --privileged --name "$$name" --group-add users \
 		-v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
-		$(LIVE_IMAGE) sh /dist/live-container.sh
+		$(LIVE_IMAGE) sh /dist/live-container.sh; \
+	rc=$$?; rm -f "$(DIST)/live-src.tar"; exit $$rc
 
 # What the shipped binaries are allowed to link.
 #

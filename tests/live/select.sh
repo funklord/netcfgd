@@ -465,6 +465,14 @@ sysv_run() {
 # Lines of one selection's section of the log.
 section() { sed -n "/^== $2\$/,/^== /p" "$work/$1.log" | grep -c "^$3\$" || true; }
 
+# **Only where /etc/init.d exists** to mount a tmpfs over: an Alpine image
+# without OpenRC has none, and there the namespace died on the mount and every
+# check below read zero -- eighteen failures about a switcher that never ran
+# (live-alpine, 10.865). A machine with no init scripts has nothing for these
+# passes to say about it.
+if [ ! -d /etc/init.d ]; then
+	echo "select.sh: no /etc/init.d here, so the sysvinit and OpenRC passes are not run"
+else
 # Run with OpenRC's commands on PATH as well, because installed is not running:
 # ml350g6-01 has `rc-update` and boots by OpenRC, and a sysv-rc machine with the
 # package beside it would otherwise be switched in runlevels nothing reads.
@@ -505,6 +513,7 @@ check "and ifupdown by its script name, networking" \
 check "and puts netcfgd in it" "$(section openrc netcfgd 'rc-update add netcfgd default')" "1"
 check "and starts it" "$(section openrc netcfgd 'rc-service netcfgd start')" "1"
 check "and touches no sysv-rc link while OpenRC runs" "$(grep -c '^update-rc.d' "$work/openrc.log" || true)" "0"
+fi
 
 echo
 if [ "$failures" -eq 0 ]; then

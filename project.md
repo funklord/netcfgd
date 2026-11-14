@@ -12737,6 +12737,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.865 The container tiers unpack the sources rather than copy the tree
+
+`make live-alpine` and `make live-container` ran `cp -a /src /work` inside the
+container, and the tree is 3.2 GB with its build output -- hull's images, the
+GUI's Android builds, `.git` -- while a container's writable layer is the
+host's `/`, at 94% on ml350g6-01 (10.862's probe met it first and was killed).
+Now the recipe makes `dist/live-src.tar` of what git knows -- tracked files,
+every submodule's, and untracked ones nothing ignores, 58 MB -- with
+`--no-recursion` so a submodule's directory entry cannot bring its build output
+back, mounts it, unpacks it, and removes it after the run whatever the result.
+
+Measured on `live-alpine`: unpacked, built, 85 scripts run, the tar removed.
+Two failed, and neither was the copy. `select.sh` failed eighteen checks
+because the Alpine image has no `/etc/init.d` for its sysvinit and OpenRC passes
+(10.842, 10.845) to mount a tmpfs over, so their namespace died and every
+count read zero; those passes now run only where `/etc/init.d` exists, saying
+so where it does not. `c_supplicant_settings.sh` failed because Alpine 3.21's
+wpa_supplicant refuses the `SAE` and `FT-` key managements -- that image's
+build, recorded and not changed here.
+
 ## 10.864 Bringing a tunnel up from ncfg: what it needs to know, measured
 
 0325 left `ncfg` unable to bring a tunnel up or down. Before the design:
