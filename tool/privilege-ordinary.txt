@@ -76,6 +76,7 @@ hold_down
 hostname
 id
 identity
+if_id
 ignore
 iif
 ingress_bandwidth

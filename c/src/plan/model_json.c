@@ -388,6 +388,9 @@ void ncfg_plan_write_interface_kind(ncfg_json_writer_t *writer, const ncfg_inter
 	case NCFG_KIND_VRF:
 		ncfg_json_write_member_int(writer, "table", kind->vrf.table);
 		break;
+	case NCFG_KIND_XFRM:
+		ncfg_json_write_member_int(writer, "if_id", kind->xfrm.if_id);
+		break;
 	case NCFG_KIND_MESH_POINT:
 		member_text(writer, "parent", kind->mesh_point.parent);
 		break;

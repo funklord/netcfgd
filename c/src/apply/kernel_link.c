@@ -200,6 +200,16 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
 		}
 		out->vrf.table = (uint32_t)kind->vrf.table;
 		return 1;
+	case NCFG_KIND_XFRM:
+		out->kind = NCFG_OPS_LINK_XFRM;
+		if (kind->xfrm.if_id <= 0 || kind->xfrm.if_id > (int64_t)0xffffffff) {
+			ncfg_error_set(err, err_size,
+			    "%s asks for if_id %lld, which an XFRM interface cannot carry: it is "
+			    "a non-zero 32-bit number", name, (long long)kind->xfrm.if_id);
+			return 0;
+		}
+		out->xfrm.if_id = (uint32_t)kind->xfrm.if_id;
+		return 1;
 	case NCFG_KIND_VXLAN:
 		out->kind = NCFG_OPS_LINK_VXLAN;
 		if (kind->vxlan.id < 0 || kind->vxlan.id > 0xffffff) {

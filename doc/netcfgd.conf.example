@@ -1665,6 +1665,22 @@
 #	config = "192.0.2.10/24"
 #}
 
+# An XFRM interface: the device a route-based IPsec tunnel is (0323). The IKE
+# daemon's connection carries the same id -- strongSwan's `if_id_in` and
+# `if_id_out` -- and the kernel sends its traffic through this device, which is
+# then addressed and routed like any other. netcfgd makes the device; it does
+# not yet run the IKE daemon.
+
+#device ipsec0 {
+#	xfrm {
+#		if_id = 7
+#	}
+#}
+#interface ipsec0 {
+#	config = "10.8.0.2/32"
+#	routes = ["10.8.0.0/16"]
+#}
+
 # A DUMMY interface, which is the usual home for a stable service address.
 
 #device dummy0 {

@@ -152,7 +152,9 @@ typedef enum {
 	NCFG_OPS_LINK_TUNNEL,
 	/* The link is ordinary rtnetlink; everything that makes it a tunnel --
 	 * keys, peers, allowed IPs -- goes over generic netlink afterwards. */
-	NCFG_OPS_LINK_WIREGUARD
+	NCFG_OPS_LINK_WIREGUARD,
+	/* The device of a route-based IPsec tunnel (0323). */
+	NCFG_OPS_LINK_XFRM
 } ncfg_ops_link_kind_t;
 
 typedef struct {
@@ -192,6 +194,11 @@ typedef struct {
 	/* The table its members' routes go into. */
 	uint32_t table;
 } ncfg_ops_vrf_t;
+
+typedef struct {
+	/* The id its SAs carry, which is what binds them to it (0323). */
+	uint32_t if_id;
+} ncfg_ops_xfrm_t;
 
 typedef struct {
 	uint32_t parent;
@@ -237,6 +244,7 @@ typedef struct {
 	ncfg_ops_vxlan_t   vxlan;
 	ncfg_ops_veth_t    veth;
 	ncfg_ops_vrf_t     vrf;
+	ncfg_ops_xfrm_t    xfrm;
 	ncfg_ops_macvlan_t macvlan;
 	ncfg_ops_tunnel_t  tunnel;
 } ncfg_ops_newlink_t;

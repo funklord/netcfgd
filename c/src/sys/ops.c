@@ -474,6 +474,9 @@ static int info_data(ncfg_buf_t *data, const ncfg_ops_newlink_t *link, int chang
 	case NCFG_OPS_LINK_VRF:
 		ncfg_wire_attr_put_u32(data, IFLA_VRF_TABLE, link->vrf.table);
 		break;
+	case NCFG_OPS_LINK_XFRM:
+		ncfg_wire_attr_put_u32(data, IFLA_XFRM_IF_ID, link->xfrm.if_id);
+		break;
 	case NCFG_OPS_LINK_MACVLAN:
 		ncfg_wire_attr_put_u32(data, IFLA_MACVLAN_MODE, link->macvlan.mode);
 		break;
@@ -516,6 +519,8 @@ const char *ncfg_ops_link_kind_word(const ncfg_ops_newlink_t *link)
 		return "wireguard";
 	case NCFG_OPS_LINK_VRF:
 		return "vrf";
+	case NCFG_OPS_LINK_XFRM:
+		return "xfrm";
 	case NCFG_OPS_LINK_MACVLAN:
 		return "macvlan";
 	case NCFG_OPS_LINK_TUNNEL:

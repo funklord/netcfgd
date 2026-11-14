@@ -775,6 +775,15 @@ typedef struct {
 	int64_t table;
 } ncfg_vrf_config_t;
 
+/*
+ * An XFRM interface (0323). `if_id` is what binds it to its SAs: an IKE
+ * daemon's connection carrying the same id in `if_id_in` and `if_id_out` sends
+ * its traffic through this device, and the kernel refuses an id of 0.
+ */
+typedef struct {
+	int64_t if_id;
+} ncfg_xfrm_config_t;
+
 typedef struct {
 	char *parent;
 	int   mode; /* ncfg_macvlan_mode_t */
@@ -853,7 +862,10 @@ typedef enum {
 	NCFG_KIND_MESH_POINT,
 	/* An interface made on a phy that has none, over nl80211 as a mesh point is
 	 * and never remade by deletion for the same reason (10.748). */
-	NCFG_KIND_RADIO
+	NCFG_KIND_RADIO,
+	/* An XFRM interface: the device a route-based IPsec tunnel is, whose
+	 * traffic the kernel encrypts by the SAs carrying its `if_id` (0323). */
+	NCFG_KIND_XFRM
 } ncfg_interface_kind_tag_t;
 
 typedef struct {
@@ -872,6 +884,7 @@ typedef struct {
 	ncfg_tun_config_t       tun;
 	ncfg_mesh_point_config_t mesh_point;
 	ncfg_radio_config_t     radio;
+	ncfg_xfrm_config_t      xfrm;
 } ncfg_interface_kind_t;
 
 /* The document's word for a kind, which is not always the language's. NULL

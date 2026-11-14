@@ -85,6 +85,7 @@
       "ipv6_token": "::5",
       "qdisc": "cake",
       "qdisc_bandwidth_bits": 20000000,
+      "xfrm_if_id": 7,
       "qdisc_ingress": true,
       "ingress_redirect": "ifb-eth0",
       "forwarding": true,

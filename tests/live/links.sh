@@ -85,6 +85,9 @@ interface flip0 { config = "null" }
 # Everything below came out of the pre-freeze format audit.
 device mgmt-vrf { vrf { table = 100 } }
 interface mgmt-vrf { config = "null" }
+# The device a route-based IPsec tunnel is (0323), addressed like any other.
+device ipsec7 { xfrm { if_id = 7 } }
+interface ipsec7 { config = "10.8.0.1/24" }
 device base0 { kind = "dummy" }
 interface base0 { config = "10.7.0.1/24" }
 # A second parent, for the checks that move a virtual link from one to another.
@@ -302,6 +305,8 @@ contains "and so is the peer"          "$(detail veth-b)" "master bond0"
 # create one -- a rule field that could only ever match something netcfgd could
 # not build.
 contains "a vrf owns its table"        "$(detail mgmt-vrf)" "vrf table 100"
+contains "an xfrm interface carries its if_id" "$(detail ipsec7)" "xfrm if_id 0x7"
+contains "and its address"             "$(ip -br addr show ipsec7)" "10.8.0.1/24"
 contains "a dummy can be declared"     "$(ip -br addr show base0)" "10.7.0.1/24"
 contains "a macvlan gets its mode"     "$(detail mv0)"    "macvlan mode bridge"
 
@@ -347,6 +352,17 @@ refuses() {
 		echo "ok   $label -- $out"
 	fi
 }
+
+# An XFRM interface's id is fixed at creation, so an edited one is a remake --
+# and one left with the old id would bind to no SA the connection makes.
+sed -i 's/xfrm { if_id = 7 }/xfrm { if_id = 8 }/' "$work/etc/netcfgd.conf"
+xfrm_plan=$("$ncfg" plan 2>&1 || true)
+contains "an edited xfrm if_id is a remake" "$xfrm_plan" "xfrm.if_id"
+"$ncfg" apply > "$work/apply-xfrm.txt" 2>&1 || { cat "$work/apply-xfrm.txt" >&2; exit 1; }
+contains "and the kernel has the new id"   "$(detail ipsec7)" "xfrm if_id 0x8"
+contains "and the address came back on it" "$(ip -br addr show ipsec7)" "10.8.0.1/24"
+contains "and the next plan has nothing to do" \
+	"$("$ncfg" plan 2>&1 | head -1)" "nothing to do"
 
 # A macvlan's mode moves among private, vepa and bridge.
 sed -i '/macvlan/s/mode = "bridge"/mode = "vepa"/' "$work/etc/netcfgd.conf"

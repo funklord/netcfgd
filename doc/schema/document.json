@@ -630,6 +630,17 @@
       "declared": true
     },
     {
+      "name": "k-xfrm",
+      "managed": true,
+      "on_unmanage": "leave",
+      "kind": {
+        "kind": "xfrm",
+        "if_id": 7
+      },
+      "bridge_vlans": [],
+      "declared": true
+    },
+    {
       "name": "t-geneve",
       "managed": true,
       "on_unmanage": "leave",

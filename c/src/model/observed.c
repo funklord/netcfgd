@@ -790,6 +790,8 @@ static const ncfg_field_t observed_link_fields[] = {
 	{ .name = "qdisc", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_link_t, qdisc) },
 	{ .name = "qdisc_bandwidth_bits", .kind = NCFG_F_OPT_INT, R_U64,
 	    .offset = offsetof(ncfg_observed_link_t, qdisc_bandwidth_bits) },
+	{ .name = "xfrm_if_id", .kind = NCFG_F_OPT_INT, R_U32,
+	    .offset = offsetof(ncfg_observed_link_t, xfrm_if_id) },
 	{ .name = "qdisc_ingress", .kind = NCFG_F_BOOL,
 	    .offset = offsetof(ncfg_observed_link_t, qdisc_ingress) },
 	{ .name = "ingress_redirect", .kind = NCFG_F_STR,

@@ -755,6 +755,9 @@ typedef struct {
 	ncfg_macvlan_info_t macvlan;
 	int      has_vlan;
 	ncfg_vlan_info_t vlan;
+	/* An XFRM interface's id (0323), which binds it to its SAs. */
+	int      has_xfrm_if_id;
+	uint32_t xfrm_if_id;
 	int      has_tunnel;
 	ncfg_tunnel_info_t tunnel;
 	int      has_vxlan;

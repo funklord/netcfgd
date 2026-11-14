@@ -12737,6 +12737,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.856 IPsec, step one: the XFRM interface (0323)
+
+The holder, 2026-11-14: if nothing else is left, do IPsec. [0323](doc/decision/0323-an-ipsec-tunnel-is-an-xfrm-interface-and-the-swanctl-file-is-the-operators.md)
+gives the shape: a route-based tunnel, an XFRM interface netcfgd makes, so the
+tunnel is an interface like every other; strongSwan driven through `swanctl`,
+the connection file the operator's as the `.ovpn` is (0046). This is the
+first step, and the one that does not wait on the IKE half.
+
+`device ipsec0 { xfrm { if_id = 7 } }` makes `ip link add ipsec0 type xfrm
+if_id 7`: a new device kind, `xfrm`, with one required non-zero key (the kernel
+refuses 0, and an IKE connection reaches the device only by the same id).
+**The id is observed and compared**: it is fixed at creation, and a device with
+another id binds to no SA the connection makes -- up, addressed, carrying
+nothing -- so an edited or foreign id is a remake, as a VLAN's id is (0059).
+Observed as `xfrm_if_id` on the link, read from `IFLA_XFRM_IF_ID`.
+
+Checked: `lower_test` (an id required, 0 refused); `plan_kind_test` (another
+id is a delete and a create naming `xfrm.if_id`, the same id nothing);
+`tests/live/links.sh` against the kernel (created with `if_id 0x7` and its
+address, edited to 8 and remade with the address back, then nothing to do).
+With the comparison removed, both the unit check and the live one fail. The
+schema witnesses gain a `k-xfrm` device and the observed field: a variant and
+a field added, a minor bump (0020). `bare_ifb`'s size assertion moved to 616.
+The suite's own coverage caught two more: the document reader took `if_id = 0`,
+which renders a profile the compiler then refuses (its range starts at 1 now),
+and the ledger's `link.create`-per-kind witness had to move by hand, as it is
+written to. `if_id` is classified ordinary (`tool/privilege-ordinary.txt`):
+making a tunnel device is configuring the network, as a VLAN's id or a VRF's
+table is.
+
+**Next**, in 0323's order: measure strongSwan's half in a container (Alpine
+has `swanctl` and the vici plugin; this host has neither) -- whether netcfgd
+runs its own charon, how a virtual IP reaches the interface, and where the
+EAP secret goes.
+
 ## 10.855 A process any user can start is not evidence of a network manager
 
 10.848 to 10.850 believe connman, iwd and a manager dhcpcd from their processes

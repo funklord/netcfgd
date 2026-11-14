@@ -2310,6 +2310,19 @@ static void kind_cases(void)
 		ncfg_document_free(document);
 	}
 
+	/* An XFRM interface (0323): the id is required and the kernel refuses 0. */
+	refuses("device ipsec0 { xfrm { } }\n", "needs a non-zero `if_id`",
+	    "an xfrm interface needs an if_id");
+	refuses("device ipsec0 { xfrm { if_id = 0 } }\n", "needs a non-zero `if_id`",
+	    "  and not 0, which the kernel refuses");
+	document = compiles("device ipsec0 { xfrm { if_id = 7 } }\n", "an xfrm interface compiles");
+	if (document) {
+		device = device_named(document, "ipsec0");
+		check(device && device->kind.kind == NCFG_KIND_XFRM && device->kind.xfrm.if_id == 7,
+		    "  with its if_id");
+		ncfg_document_free(document);
+	}
+
 	document = compiles("device mv0 { macvlan { parent = \"eth0\"; mode = \"bridge\" } }\n",
 	    "macvlan compiles");
 	if (document) {

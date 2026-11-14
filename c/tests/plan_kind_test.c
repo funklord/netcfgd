@@ -105,6 +105,24 @@ static void a_link_the_kernel_will_not_change_is_remade(void)
 	    "  and a create after it, from the document rather than the observation");
 	planfix_release(plan, document, observed);
 
+	/* An XFRM interface whose id differs (0323): fixed at creation, and one
+	 * with another id binds to no SA, so it is remade like a vlan. */
+	plan = one("{\"name\":\"ipsec0\",\"kind\":{\"kind\":\"xfrm\",\"if_id\":7}}",
+	    "\"links\":[{\"name\":\"ipsec0\",\"index\":9,\"mtu\":1500,\"up\":true,"
+	    "\"carrier\":true,\"ownership\":\"ours\",\"kind\":\"xfrm\",\"xfrm_if_id\":9}]",
+	    &document, &observed);
+	check(plan && corrects(plan, "link.delete", "xfrm.if_id"),
+	    "an xfrm interface with another if_id plans a delete naming the field");
+	check(plan && planfix_action(plan, "link.create"), "  and a create after it");
+	planfix_release(plan, document, observed);
+	plan = one("{\"name\":\"ipsec0\",\"kind\":{\"kind\":\"xfrm\",\"if_id\":7}}",
+	    "\"links\":[{\"name\":\"ipsec0\",\"index\":9,\"mtu\":1500,\"up\":true,"
+	    "\"carrier\":true,\"ownership\":\"ours\",\"kind\":\"xfrm\",\"xfrm_if_id\":7}]",
+	    &document, &observed);
+	check(plan && !planfix_action(plan, "link.delete"),
+	    "  and one with the same if_id is left alone");
+	planfix_release(plan, document, observed);
+
 	/* A device that exists as an entirely different kind. Before 0059 this
 	 * planned a `link.up` and nothing else, on somebody else's device. */
 	plan = one("{\"name\":\"flip0\",\"kind\":{\"kind\":\"macvlan\","

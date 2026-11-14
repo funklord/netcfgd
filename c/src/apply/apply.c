@@ -78,6 +78,7 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 	case NCFG_KIND_VETH:
 	case NCFG_KIND_VRF:
 	case NCFG_KIND_VXLAN:
+	case NCFG_KIND_XFRM:
 		return 1;
 	case NCFG_KIND_RADIO:
 	case NCFG_KIND_MESH_POINT:

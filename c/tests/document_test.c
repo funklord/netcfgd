@@ -607,7 +607,7 @@ int main(int argc, char **argv)
 				}
 			}
 			check(paired, "every kind has a word in both tables");
-			check(walked == (int)NCFG_KIND_RADIO + 1,
+			check(walked == (int)NCFG_KIND_XFRM + 1,
 			    "  and the pair runs the whole length of the enum, not part of it");
 			/* Exactly the two, and naming the count rather than the words:
 			 * a third kind that started differing would be a spelling

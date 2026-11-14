@@ -375,6 +375,39 @@ static int lower_vrf(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	return 1;
 }
 
+/*
+ * `xfrm { if_id = 7 }`: the device a route-based IPsec tunnel is (0323). The
+ * id is required and non-zero -- the kernel refuses 0, and an IKE connection
+ * reaches the device only by naming the same id.
+ */
+static int lower_xfrm(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_interface_kind_t *out)
+{
+	const ncfg_ast_item_t       *item;
+	const ncfg_ast_assignment_t *assignment;
+	ncfg_optint_t                if_id;
+	size_t                       at;
+
+	memset(&if_id, 0, sizeof(if_id));
+	FOR_ASSIGNMENTS(block, item, assignment) {
+		if (strcmp(assignment->key, "if_id") == 0) {
+			ncfg_as_u32_opt(ctx, assignment->value, &if_id);
+		} else {
+			ncfg_diag(ctx, assignment->span, "unknown xfrm key `%s`", assignment->key);
+		}
+	}
+	if (!if_id.has || if_id.value == 0) {
+		ncfg_diag(ctx, block->span,
+		    "an xfrm interface needs a non-zero `if_id`: it is what an IPsec connection's "
+		    "`if_id_in` and `if_id_out` name to send its traffic through this device, "
+		    "and the kernel refuses 0");
+		return 0;
+	}
+	out->kind = NCFG_KIND_XFRM;
+	out->xfrm.if_id = if_id.value;
+	return 1;
+}
+
 static int lower_macvlan(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
     ncfg_interface_kind_t *out)
 {
@@ -1013,7 +1046,7 @@ int ncfg_is_kind_block(const char *head)
 {
 	static const char *const heads[] = { "bridge", "bond", "vlan", "veth", "vxlan", "vrf",
 		"macvlan", "tunnel", "tun", "tap", "wireguard", "pppoe", "openvpn", "mesh_point",
-		"radio" };
+		"radio", "xfrm" };
 	size_t i;
 
 	for (i = 0; i < sizeof(heads) / sizeof(heads[0]); i++) {
@@ -1047,6 +1080,9 @@ int ncfg_lower_kind_block(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *inner,
 	}
 	if (strcmp(head, "vrf") == 0) {
 		return lower_vrf(ctx, inner, out);
+	}
+	if (strcmp(head, "xfrm") == 0) {
+		return lower_xfrm(ctx, inner, out);
 	}
 	if (strcmp(head, "macvlan") == 0) {
 		return lower_macvlan(ctx, inner, out);

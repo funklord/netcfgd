@@ -465,6 +465,9 @@ static int build_link(const ncfg_observe_snapshot_t *snapshot, const ncfg_link_r
 			}
 		}
 	}
+	if (record->has_xfrm_if_id) {
+		link->xfrm_if_id = some_int(record->xfrm_if_id);
+	}
 	/* The kernel has no protocol field for links, so this can only come
 	 * from the alternative name netcfgd stamps and from what it wrote
 	 * down. A link nobody recorded is never deleted. */

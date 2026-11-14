@@ -759,6 +759,11 @@ int ncfg_dump_link(const void *payload, size_t length, ncfg_link_record_t *out, 
 				goto refused;
 			}
 			out->has_vxlan = 1;
+		} else if (strcmp(out->kind, "xfrm") == 0) {
+			if (!area_u32(&data, IFLA_XFRM_IF_ID, &out->xfrm_if_id, &out->has_xfrm_if_id,
+			    err, err_size)) {
+				goto refused;
+			}
 		} else if (family != NCFG_TUNNEL_NONE) {
 			if (!read_tunnel(&out->tunnel, family, &data, err, err_size)) {
 				goto refused;

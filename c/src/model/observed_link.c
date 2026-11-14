@@ -590,7 +590,8 @@ int ncfg_link_category_of(const ncfg_observed_link_t *link, const ncfg_document_
 	    strcmp(kind, "ip6gre") == 0 || strcmp(kind, "ip6tnl") == 0 ||
 	    strcmp(kind, "ipip") == 0 || strcmp(kind, "sit") == 0 ||
 	    strcmp(kind, "vxlan") == 0 || strcmp(kind, "tun") == 0 || strcmp(kind, "tap") == 0 ||
-	    strcmp(kind, "ppp") == 0 || strcmp(kind, "vti") == 0 || strcmp(kind, "vti6") == 0) {
+	    strcmp(kind, "ppp") == 0 || strcmp(kind, "vti") == 0 || strcmp(kind, "vti6") == 0 ||
+	    strcmp(kind, "xfrm") == 0) {
 		return NCFG_LINK_CATEGORY_TUNNEL;
 	}
 	if (strcmp(kind, "veth") == 0 || strcmp(kind, "dummy") == 0 || strcmp(kind, "ifb") == 0 ||

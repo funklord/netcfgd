@@ -1343,6 +1343,8 @@ static const char *recreatable_kind(const ncfg_interface_kind_t *kind)
 		return "veth";
 	case NCFG_KIND_VRF:
 		return "vrf";
+	case NCFG_KIND_XFRM:
+		return "xfrm";
 	case NCFG_KIND_MACVLAN:
 		return "macvlan";
 	case NCFG_KIND_TUNNEL:
@@ -1413,6 +1415,23 @@ static int recreation_reason(const ncfg_interface_kind_t *kind,
 		*field = "parent";
 		*wanted = parent;
 		*seen = link->parent;
+		return 1;
+	}
+	/* An XFRM interface's id is fixed at creation, and one with another id
+	 * binds to no SA the connection makes: the tunnel would be up and carry
+	 * nothing (0323). Only where the kernel answered. */
+	if (kind->kind == NCFG_KIND_XFRM && link->xfrm_if_id.has &&
+	    link->xfrm_if_id.value != kind->xfrm.if_id) {
+		int written = snprintf(scratch, scratch_size, "%lld|%lld",
+		    (long long)kind->xfrm.if_id, (long long)link->xfrm_if_id.value);
+
+		if (written < 0 || (size_t)written >= scratch_size) {
+			return 0;
+		}
+		*field = "xfrm.if_id";
+		*wanted = scratch;
+		*seen = strchr(scratch, '|') + 1;
+		*(strchr(scratch, '|')) = '\0';
 		return 1;
 	}
 	if (kind->kind != NCFG_KIND_VLAN || !link->vlan) {

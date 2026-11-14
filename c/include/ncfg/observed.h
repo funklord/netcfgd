@@ -687,6 +687,9 @@ typedef struct {
 	char   *qdisc;
 	/* The shaped rate in **bits** per second, where the qdisc shapes. */
 	ncfg_optint_t qdisc_bandwidth_bits;
+	/* An XFRM interface's `if_id` (0323), compared because one with another
+	 * id sends its traffic to no SA at all. */
+	ncfg_optint_t xfrm_if_id;
 	int           qdisc_ingress;
 	char         *ingress_redirect;
 	/* True only when both the IPv4 and the IPv6 sysctl are set: half a

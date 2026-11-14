@@ -148,7 +148,7 @@ static const ncfg_enum_t tun_mode_set = WORD_SET("tun mode", tun_mode_words);
  * configuration language's are `wireguard` and `openvpn`. */
 static const char *const interface_kind_words[] = { "physical", "bridge", "bond", "vlan",
 	"vxlan", "wire_guard", "pppoe", "open_vpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
-	"tun", "ifb", "mesh_point", "radio" };
+	"tun", "ifb", "mesh_point", "radio", "xfrm" };
 static const ncfg_enum_t interface_kind_set = WORD_SET("interface kind", interface_kind_words);
 
 static const char *const qdisc_kind_words[] = { "fq_codel", "cake", "fq", "pfifo_fast",
@@ -220,7 +220,7 @@ const char *ncfg_interface_kind_name(int kind)
  */
 static const char *const language_kind_words[] = { "physical", "bridge", "bond", "vlan",
 	"vxlan", "wireguard", "pppoe", "openvpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
-	"tun", "ifb", "mesh_point", "radio" };
+	"tun", "ifb", "mesh_point", "radio", "xfrm" };
 static const ncfg_enum_t language_kind_set = WORD_SET("interface kind", language_kind_words);
 
 const char *ncfg_interface_kind_language_name(int kind)
@@ -1523,6 +1523,14 @@ static const ncfg_field_t vrf_fields[] = {
 };
 static const ncfg_type_t vrf_type = TAGGED("vrf", vrf_fields, "kind");
 
+static const ncfg_field_t xfrm_fields[] = {
+	/* From 1: the kernel refuses 0 and the language does too, so a document
+	 * read back with 0 would render a profile its own compiler refused. */
+	{ .name = "if_id", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, .low = 1,
+	    .high = 4294967295LL, .offset = offsetof(ncfg_xfrm_config_t, if_id) }
+};
+static const ncfg_type_t xfrm_type = TAGGED("xfrm", xfrm_fields, "kind");
+
 static const ncfg_field_t macvlan_fields[] = {
 	{ .name = "parent", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_macvlan_config_t, parent) },
@@ -1604,6 +1612,9 @@ static const ncfg_type_t *kind_arm(int kind, ncfg_interface_kind_t *value, void 
 	case NCFG_KIND_VRF:
 		*payload = &value->vrf;
 		return &vrf_type;
+	case NCFG_KIND_XFRM:
+		*payload = &value->xfrm;
+		return &xfrm_type;
 	case NCFG_KIND_MACVLAN:
 		*payload = &value->macvlan;
 		return &macvlan_type;
