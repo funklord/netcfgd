@@ -12737,6 +12737,26 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.861 strongSwan's service loads the connection; netcfgd owns the device (0325)
+
+10.857 planned for netcfgd to load the operator's file with `swanctl`. Measured
+first, in Alpine 3.21 with `openrc`: the `charon` service runs `swanctl
+--load-all` after starting charon, and `swanctl.conf` includes `conf.d/*.conf`;
+it needs `net`, which netcfgd's OpenRC script provides. So
+[0325](doc/decision/0325-strongswans-own-service-loads-the-connection-and-netcfgd-owns-the-tunnel-device.md):
+the connection and its secrets live in `/etc/swanctl/conf.d/`, strongSwan's
+service loads them, and netcfgd loads nothing into charon -- a second loader of
+one directory would be a second owner of one charon. netcfgd's part is the
+device, its addressing and the peer's pin, and the file binds itself to it with
+three lines: `if_id_in`, `if_id_out`, `updown`. The EAP secret is strongSwan's,
+not an `@secret:`. OpenWrt's and Debian's services are not measured.
+
+**What is open for IPsec now**: bringing a tunnel up and down from `ncfg` (a
+typed request running `swanctl --initiate`/`--terminate`, for the wifi tier);
+netcfgd and strongSwan in one run, which wants a hull guest with `swanctl`;
+and `install_virtual_ip = no` in charon's settings, which is the operator's to
+set and which the guide will have to say.
+
 ## 10.860 netcfgd pins a full tunnel's peer to the uplink
 
 10.859 measured that a full tunnel carries nothing unless its peer has a host
@@ -12850,8 +12870,8 @@ an updown command netcfgd ships writes -- the operator's child names it beside
 the `if_id` lines it needs anyway. No vici client is needed to read anything.
 Still to measure: an EAP secret handed over vici rather than written in the
 file, which needs a server certificate in the probe. Step three builds
-netcfgd's side: load the operator's file with `swanctl`, and the updown
-command.
+netcfgd's side: the updown command (10.858) -- and, it turned out, not the
+loading, which strongSwan's own service does (10.861).
 
 Found on the way, and worth the next person's time: `swanctl.conf` takes no
 `;` between keys -- `local { auth = psk; id = srv }` loads as one value and the
