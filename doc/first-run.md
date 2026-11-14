@@ -807,7 +807,10 @@ go into it.
 the `ipsec` account; netcfgd gives that account `ipsec0`'s report directory
 when it makes the device, and without it the updown cannot write and the
 interface gets nothing -- silently, because the updown never disturbs charon.
-Where charon runs the updown as root, leave the key out.
+Where charon runs the updown as root, leave the key out: Debian's does
+(measured in Debian 13, project.md 10.870). Debian's strongSwan service, which
+loads `conf.d` as Alpine's does, is a systemd unit only; a Debian without
+systemd has no script that starts it.
 
 Measured end to end in Alpine 3.21 with strongSwan 5.9.14 and a pre-shared key
 (`tests/ipsec/e2e.sh`), and with the server proven by a certificate and the

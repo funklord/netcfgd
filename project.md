@@ -12737,6 +12737,32 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.870 Debian's strongSwan loads `conf.d` too, under systemd only, as root
+
+0325 left open whether Debian's and OpenWrt's packages load
+`/etc/swanctl/conf.d` as Alpine's does. Debian 13 (strongSwan 6.0.1),
+measured in a `debian:trixie-slim` container from the packages themselves:
+`charon-systemd` ships `strongswan.service`, which runs
+`swanctl --load-all --noprompt` after start and on reload, and
+`strongswan-swanctl`'s `swanctl.conf` ends `include conf.d/*.conf` -- the
+same shape. The unit orders itself after `network-online.target`, which
+`netcfgd-wait-online.service` provides.
+
+Two differences matter to an operator:
+
+- **There is no sysvinit or OpenRC script** in any of the four packages. On a
+  Debian without systemd -- this host is one -- nothing starts a
+  swanctl-loading charon, and the IPsec tunnel needs a service script of the
+  operator's until Debian ships one. Not netcfgd's to fill: 0324 keeps
+  running charon the init system's.
+- **charon stays root.** Started in the container, `/usr/lib/ipsec/charon` ran
+  as uid 0 with only `CAP_NET_ADMIN` effective, where Alpine's switches to the
+  `ipsec` account. Its updown writes into root-owned `/run/netcfgd` as the
+  owner, so `report_writer` is left out on Debian -- the case
+  `doc/first-run.md` section 11 already names.
+
+OpenWrt's package is still unmeasured; there is no OpenWrt image here.
+
 ## 10.869 `loop_test`'s roam check waits ten rounds, not two
 
 The C suite failed one check once, "three joins are one roam", while
