@@ -173,7 +173,7 @@ chmod 755 "$work/swanctl"
 env NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" NCFG_SWANCTL="$work/swanctl" \
 	"$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
-trap 'kill "$daemon" 2>/dev/null; rm -rf "$work"; ip link del ipsec0 2>/dev/null || true; ip link del up0 2>/dev/null || true' EXIT INT TERM
+trap 'kill "$daemon" 2>/dev/null || true; rm -rf "$work"; ip link del ipsec0 2>/dev/null || true; ip link del up0 2>/dev/null || true' EXIT INT TERM
 waited=0
 until [ -e "$work/run/fuzznet.sock" ] || [ "$waited" -gt 100 ]; do
 	sleep 0.1
