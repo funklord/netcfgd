@@ -47,6 +47,10 @@ private slots:
 	 * control here that needs no row selected, because the device being made
 	 * is not in the list yet. */
 	void new_device();
+	/* Bring the selected IPsec tunnel up, or take it down: what
+	 * `ncfg tunnel up|down` asks. Only an `xfrm` device has these. */
+	void tunnel_up();
+	void tunnel_down();
 
 private:
 	ncfg_connection *connection;
@@ -54,6 +58,12 @@ private:
 	QList<ncfg_device_row> rows;
 	QPushButton *configure_button;
 	QPushButton *new_button;
+	QPushButton *tunnel_up_button;
+	QPushButton *tunnel_down_button;
+
+	/* Enable what fits the selected row. */
+	void selection_changed();
+	void set_tunnel(bool activate);
 };
 
 #endif /* NCFG_DEVICES_VIEW_H */

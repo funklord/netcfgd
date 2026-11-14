@@ -2665,6 +2665,18 @@ int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t er
 int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
               size_t err_size);
 
+/*
+ * Bring an IPsec tunnel up, or take it down: `ncfg tunnel up|down` (10.864).
+ *
+ * The daemon asks strongSwan for the `connection` and `child` the tunnel's
+ * `xfrm` block names, and answers once it has asked -- not once the tunnel is
+ * up, which strongSwan reports through the tunnel's addressing. `wifi` tier,
+ * for radio_set's reason: an interface name and a flag, and nothing else. A
+ * device that is not a tunnel is refused, by name.
+ */
+int ncfg_client_tunnel_set(ncfg_client_t *client, const char *interface, int activate, char *err,
+               size_t err_size);
+
 int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
               char *err, size_t err_size);
 int ncfg_client_wifi_status(ncfg_client_t *client, const char *interface,

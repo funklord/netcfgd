@@ -35,6 +35,18 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	new_button = new QPushButton(QStringLiteral("new device..."), this);
 	new_button->setObjectName(QStringLiteral("new_device"));
 	table->add_control(new_button);
+	/* **Where a tunnel is brought up.** An IPsec tunnel's connection is
+	 * strongSwan's (0325), and until this the only way to ask for it from
+	 * netcfgd was `ncfg tunnel up` in a terminal. The device row is the
+	 * tunnel's, so the control is here rather than in a tab of its own. */
+	tunnel_up_button = new QPushButton(QStringLiteral("bring up"), this);
+	tunnel_up_button->setObjectName(QStringLiteral("tunnel_up"));
+	tunnel_up_button->setEnabled(false);
+	table->add_control(tunnel_up_button);
+	tunnel_down_button = new QPushButton(QStringLiteral("take down"), this);
+	tunnel_down_button->setObjectName(QStringLiteral("tunnel_down"));
+	tunnel_down_button->setEnabled(false);
+	table->add_control(tunnel_down_button);
 
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
@@ -45,8 +57,49 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	connect(new_button, &QPushButton::clicked, this, &ncfg_devices_view::new_device);
 	connect(table, &ncfg_table_view::activated, this,
 	    &ncfg_devices_view::configure_selected);
+	connect(tunnel_up_button, &QPushButton::clicked, this, &ncfg_devices_view::tunnel_up);
+	connect(tunnel_down_button, &QPushButton::clicked, this, &ncfg_devices_view::tunnel_down);
 	connect(table, &ncfg_table_view::selection_changed, this,
-	    [this]() { configure_button->setEnabled(table->selected_row() >= 0); });
+	    &ncfg_devices_view::selection_changed);
+}
+
+void ncfg_devices_view::selection_changed()
+{
+	configure_button->setEnabled(table->selected_row() >= 0);
+	/* By the document's kind, which is what the daemon judges too: a tunnel
+	 * the document does not describe has no connection to ask for. */
+	const bool tunnel = table->selected_cell(1) == QStringLiteral("xfrm");
+	tunnel_up_button->setEnabled(tunnel);
+	tunnel_down_button->setEnabled(tunnel);
+}
+
+void ncfg_devices_view::tunnel_up()
+{
+	set_tunnel(true);
+}
+
+void ncfg_devices_view::tunnel_down()
+{
+	set_tunnel(false);
+}
+
+void ncfg_devices_view::set_tunnel(bool activate)
+{
+	const QString name = table->selected_cell(0);
+	if (name.isEmpty()) {
+		return;
+	}
+	QString error;
+	if (!connection->set_tunnel(name, activate, &error)) {
+		/* The daemon's words, which name the device and the reason. */
+		emit reported(error);
+		return;
+	}
+	/* Asked, not done: strongSwan brings it up, and the tunnel's addresses
+	 * in `links` are what say it is. */
+	emit reported(activate
+	        ? QStringLiteral("asked strongSwan to bring %1 up").arg(name)
+	        : QStringLiteral("asked strongSwan to take %1 down").arg(name));
 }
 
 void ncfg_devices_view::refresh()

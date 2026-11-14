@@ -824,7 +824,9 @@ changes nothing on netcfgd's side.
 up or take it down, once the `xfrm` block names the connection and its child
 (`connection = "home"`, `child = "all"`); the addressing follows through the
 report as above. `start_action = start` in the connection brings it up with
-charon instead. Both are in the `wifi` tier, beside joining a network.
+charon instead. Both are in the `wifi` tier, beside joining a network. In the
+window, the same two are `bring up` and `take down` in the `devices` tab, on the
+tunnel's row.
 
 ## When something goes wrong
 

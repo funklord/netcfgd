@@ -1239,6 +1239,12 @@ public:
 	 * no hook, no path and no `run_as`. */
 	bool set_radio(const QString &interface, bool activate, QString *error);
 
+	/* Bring an IPsec tunnel up or take it down (10.864): the daemon asks
+	 * strongSwan for what the tunnel's `xfrm` block names, and this returns
+	 * once it has asked -- the tunnel's addresses say when it is up. `wifi`
+	 * tier, for set_radio's reason. */
+	bool set_tunnel(const QString &interface, bool activate, QString *error);
+
 	/*
 	 * Scan, and say through `stale` why the results are the previous scan's.
 	 *

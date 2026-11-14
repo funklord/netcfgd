@@ -12737,6 +12737,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.871 The window brings an IPsec tunnel up
+
+`ncfg tunnel up|down` (10.864) had no control in the GUI, so a person who
+uses the window and not a terminal could configure a tunnel and never connect
+it. The devices tab now has `bring up` and `take down`, enabled on a row
+whose document kind is `xfrm` and on nothing else -- by the document's kind,
+which is what the daemon judges as well, since a tunnel the document does not
+describe names no connection to ask for. They send `tunnel_set` through a new
+`ncfg_client_tunnel_set`, which shares `radio_set`'s request builder: the two
+requests carry the same two members. What the window says is what it asked,
+not that the tunnel is up; the tunnel's addresses in `links` say that.
+The TUI has them too, being these widgets (gui/project.md section 7a).
+
+On the devices tab rather than a tab of its own: the row is the tunnel's,
+and a VPN tab with one kind in it would be the first of several kinds nobody
+has asked to be gathered. `gui/tests/tunnel_buttons` drives it against a real
+daemon and a recording swanctl; with the kind check removed and the up button
+emptied, three of its nine checks fail.
+
 ## 10.870 Debian's strongSwan loads `conf.d` too, under systemd only, as root
 
 0325 left open whether Debian's and OpenWrt's packages load

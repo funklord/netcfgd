@@ -6012,16 +6012,14 @@ int ncfg_client_radios(ncfg_client_t *client, ncfg_radios_t *out, char *err, siz
 	return 1;
 }
 
-int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
-              size_t err_size)
+/*
+ * radio_set and tunnel_set: the same two members, an interface and which way.
+ */
+static int interface_set(ncfg_client_t *client, const char *verb, const char *interface,
+             int activate, char *err, size_t err_size)
 {
-	if (!interface) {
-		set_error(err, err_size, "a radio needs a name");
-		return 0;
-	}
-
 	char request[512];
-	int head = snprintf(request, sizeof(request), "{\"request\":\"radio_set\",\"interface\":");
+	int head = snprintf(request, sizeof(request), "{\"request\":\"%s\",\"interface\":", verb);
 	if (head < 0 || (size_t)head >= sizeof(request)) {
 		return 0;
 	}
@@ -6045,6 +6043,26 @@ int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int acti
 	int done = !took_refusal(doc, err, err_size);
 	ncfg_json_free(doc);
 	return done;
+}
+
+int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
+              size_t err_size)
+{
+	if (!interface) {
+		set_error(err, err_size, "a radio needs a name");
+		return 0;
+	}
+	return interface_set(client, "radio_set", interface, activate, err, err_size);
+}
+
+int ncfg_client_tunnel_set(ncfg_client_t *client, const char *interface, int activate, char *err,
+               size_t err_size)
+{
+	if (!interface) {
+		set_error(err, err_size, "a tunnel needs a name");
+		return 0;
+	}
+	return interface_set(client, "tunnel_set", interface, activate, err, err_size);
 }
 
 static int convert_scan(const ncfg_json_doc_t *doc, ncfg_scan_t *out, char *err, size_t err_size)

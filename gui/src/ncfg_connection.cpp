@@ -2059,6 +2059,27 @@ bool ncfg_connection::set_radio(const QString &interface, bool activate, QString
 	return true;
 }
 
+bool ncfg_connection::set_tunnel(const QString &interface, bool activate, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	const QByteArray name = interface.toUtf8();
+	if (!ncfg_client_tunnel_set(client, name.constData(), activate ? 1 : 0, message,
+	              sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
 bool ncfg_connection::wifi_scan(const QString &interface, QList<ncfg_access_point_row> *out,
                 QString *stale, QString *error)
 {

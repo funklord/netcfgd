@@ -1811,12 +1811,12 @@ static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
 	char sent[1024];
 
 	char answers[1024];
-	snprintf(answers, sizeof(answers), "%s%s",
+	snprintf(answers, sizeof(answers), "%s%s%s",
 	     "{\"response\":\"radios\",\"radios\":["
 	     "{\"interface\":\"wlan0\",\"activated\":true,\"supplicant\":true},"
 	     "{\"interface\":\"wlan1\",\"activated\":false,\"supplicant\":true},"
 	     "{\"interface\":\"wlan2\",\"activated\":false,\"supplicant\":false}]}\n",
-	     "{\"response\":\"ok\"}\n");
+	     "{\"response\":\"ok\"}\n", "{\"response\":\"ok\"}\n");
 	if (!staged_open(&staged, "a radio list can be staged", answers)) {
 		return;
 	}
@@ -1845,6 +1845,14 @@ static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
 		       "{\"request\":\"radio_set\",\"interface\":\"wlan2\",\"activate\":true}\n");
 	} else {
 		ok("activating names the radio and says which way", 0, err);
+	}
+
+	if (ncfg_client_tunnel_set(staged.client, "ipsec0", 0, err, sizeof(err))) {
+		equals("a tunnel is asked for by name and which way, as a radio is",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"tunnel_set\",\"interface\":\"ipsec0\",\"activate\":false}\n");
+	} else {
+		ok("a tunnel is asked for by name and which way, as a radio is", 0, err);
 	}
 
 	/* Freeing a list that was never filled in is nothing, which is the trap
