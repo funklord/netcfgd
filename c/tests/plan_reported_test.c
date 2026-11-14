@@ -528,6 +528,53 @@ static void the_documents_own_routes_are_still_planned_beside_them(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * A full tunnel pins its peer to the uplink (project.md 10.859, 10.860).
+ *
+ * The tunnel's report takes the default route and names its peer; the
+ * uplink's default is the kernel's, as a DHCP client installs it. Measured in
+ * a container, the tunnel's own packets to the peer route back into it
+ * without a host route the other way -- so the uplink's route list gains one,
+ * via the uplink's gateway, and loses it with the report.
+ */
+static void a_full_tunnel_pins_its_peer_to_the_uplink(void)
+{
+	static const char devices[] =
+	    "{\"name\":\"ipsec0\",\"kind\":{\"kind\":\"xfrm\",\"if_id\":7}},"
+	    "{\"name\":\"up0\",\"kind\":{\"kind\":\"dummy\"}}";
+	static const char interfaces[] =
+	    "{\"name\":\"ipsec0\",\"addressing\":[{\"source\":\"reported\"}]},"
+	    "{\"name\":\"up0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"192.0.2.2/24\"}]}";
+#define PIN_OBSERVATION(peers) \
+	"\"links\":[{\"name\":\"ipsec0\",\"index\":5,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"ours\",\"kind\":\"xfrm\",\"xfrm_if_id\":7}," \
+	"{\"name\":\"up0\",\"index\":6,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"ours\",\"kind\":\"dummy\"}]," \
+	"\"routes\":[{\"interface\":\"up0\",\"destination\":\"default\"," \
+	"\"via\":\"192.0.2.1\",\"metric\":100,\"ownership\":\"unknown\"}]," \
+	"\"reports\":[{\"interface\":\"ipsec0\",\"addresses\":[\"10.98.0.1/32\"]," \
+	"\"nameservers\":[],\"gateways\":[],\"routes\":[{\"destination\":\"default\"}]" \
+	peers "}]"
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+	plan = plan_of(devices, interfaces, PIN_OBSERVATION(",\"peers\":[\"198.51.100.1\"]"),
+	    &document, &observed);
+	check(plan && wrote(plan, "\"destination\":\"198.51.100.1/32\""),
+	    "a full tunnel's peer gets a host route");
+	check(plan && wrote(plan, "\"interface\":\"up0\"") && wrote(plan, "\"via\":\"192.0.2.1\""),
+	    "  on the uplink, by the uplink's own gateway");
+	planfix_release(plan, document, observed);
+
+	plan = plan_of(devices, interfaces, PIN_OBSERVATION(""), &document, &observed);
+	check(plan && lacks(plan, "198.51.100.1"),
+	    "and a report that names no peer pins nothing");
+	planfix_release(plan, document, observed);
+#undef PIN_OBSERVATION
+}
+
 int main(void)
 {
 	a_report_is_where_the_addresses_come_from();
@@ -541,6 +588,7 @@ int main(void)
 	a_report_is_believed_only_where_the_document_gave_a_reason();
 	the_teardown_reads_the_report_the_forward_pass_read();
 	the_documents_own_routes_are_still_planned_beside_them();
+	a_full_tunnel_pins_its_peer_to_the_uplink();
 
 	printf("\nplan reported: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

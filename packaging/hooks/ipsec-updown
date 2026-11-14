@@ -92,6 +92,11 @@ report() {
 		*) echo "route=$PLUTO_PEER_CLIENT" ;;
 		esac
 	fi
+	# The far end, which netcfgd keeps reachable outside the tunnel when the
+	# tunnel takes the default route (project.md 10.859).
+	if [ -n "${PLUTO_PEER:-}" ]; then
+		echo "peer=$PLUTO_PEER"
+	fi
 	for dns in $( { numbered PLUTO_DNS4; numbered PLUTO_DNS6; } 2>/dev/null); do
 		echo "dns=$dns"
 	done

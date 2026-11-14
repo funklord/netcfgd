@@ -991,6 +991,9 @@ static const ncfg_field_t observed_report_fields[] = {
 	    .element_size = sizeof(ncfg_reported_route_t),
 	    .offset = offsetof(ncfg_observed_report_t, routes),
 	    .count_offset = offsetof(ncfg_observed_report_t, route_count) },
+	{ .name = "peers", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_report_t, peers),
+	    .count_offset = offsetof(ncfg_observed_report_t, peer_count) },
 	{ .name = "iccid", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_report_t, iccid) },
 	{ .name = "sim", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_report_t, sim) }
 };

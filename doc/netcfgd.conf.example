@@ -1678,7 +1678,9 @@
 #
 # and with `install_virtual_ip = no` in charon's strongswan.conf the virtual IP
 # and the far side's subnets reach the interface as a report, which
-# `config = "reported"` takes. A fixed address works as on any interface.
+# `config = "reported"` takes. A fixed address works as on any interface. A
+# full tunnel (`remote_ts = 0.0.0.0/0`) takes the default route, and netcfgd
+# keeps the peer itself reachable by the uplink with a host route of its own.
 
 #device ipsec0 {
 #	xfrm {

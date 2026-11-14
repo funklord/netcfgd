@@ -189,6 +189,7 @@ int ncfg_state_parse_report(const char *interface, const char *body, size_t leng
 	size_t gateway_capacity = 0;
 	size_t nameserver_capacity = 0;
 	size_t search_capacity = 0;
+	size_t peer_capacity = 0;
 	int ok = 1;
 
 	if (!out) {
@@ -247,6 +248,10 @@ int ncfg_state_parse_report(const char *interface, const char *body, size_t leng
 		} else if (strcmp(key, "dns") == 0) {
 			ok = ncfg_host_strings_add(&out->nameservers, &out->nameserver_count,
 			    &nameserver_capacity, value);
+		} else if (strcmp(key, "peer") == 0) {
+			/* A tunnel's far end, to be reached outside it (10.859). */
+			ok = ncfg_host_strings_add(&out->peers, &out->peer_count, &peer_capacity,
+			    value);
 		} else if (strcmp(key, "search") == 0) {
 			/* One suffix per line, like a nameserver. A writer with several
 			 * has several lines, which is the shape every repeating key here
@@ -293,6 +298,7 @@ void ncfg_state_report_free(ncfg_observed_report_t *report)
 	ncfg_host_strings_free(report->gateways, report->gateway_count);
 	ncfg_host_strings_free(report->nameservers, report->nameserver_count);
 	ncfg_host_strings_free(report->search, report->search_count);
+	ncfg_host_strings_free(report->peers, report->peer_count);
 	for (i = 0; i < report->route_count; i++) {
 		free(report->routes[i].destination);
 		free(report->routes[i].via);

@@ -900,6 +900,12 @@ typedef struct {
 	 * netcfgd's to install rather than the daemon's. */
 	ncfg_reported_route_t *routes;
 	size_t                 route_count;
+	/* The far end of a tunnel, which has to be reached OUTSIDE it: where the
+	 * report also carries a default route, the tunnel's own packets to its
+	 * peer would otherwise route back into it (project.md 10.859), so netcfgd
+	 * pins a host route to each by the uplink that reached it before. */
+	char **peers;
+	size_t peer_count;
 	/* **Not addressing, and the only field here that is not.** It exists
 	 * because a board that muxes two SIMs cannot be asked which one is
 	 * selected: the mux sits outside the module, so the card's own identifier

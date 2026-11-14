@@ -12737,6 +12737,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.860 netcfgd pins a full tunnel's peer to the uplink
+
+10.859 measured that a full tunnel carries nothing unless its peer has a host
+route by the uplink. Now the report says who the peer is -- `peer=`, written by
+`ipsec-updown` from `PLUTO_PEER`, the contract's "unknown keys are ignored"
+letting the writer add it before any reader -- and netcfgd pins it.
+
+**On the uplink, in the uplink's own route list.** When `ncfg_plan_routes_for`
+builds an interface's routes it also appends, for every report it acts on that
+takes the default route and names a peer, a host route to that peer by the
+best-metric default route of the peer's family that is not itself such a
+tunnel's -- read from the kernel, since an uplink's default is very often a
+DHCP client's and not the document's -- where that route is on this interface.
+One list for the forward pass and the teardown (the function's own rule), so
+when the tunnel goes down and its report stops taking the default, the pin is
+no longer in the list and is withdrawn like any route the document dropped.
+
+`tests/live/ipsec_report.sh` against the kernel: with `default via 192.0.2.1
+dev up0 metric 100` installed as a DHCP client would, a full-tunnel child's
+report puts `default dev ipsec0` in and `198.51.100.1 via 192.0.2.1 dev up0`
+beside it; `ip route get` sends the peer by `up0` and everything else by
+`ipsec0`; a second plan has nothing to do; down, the pin goes and the uplink's
+own default stays. With the pin switched off, the live check fails.
+`plan_reported_test` holds it without a kernel, and a report with no peer
+pins nothing. The observed witness carries `peers`: a field added, minor.
+
+Not covered: an uplink netcfgd does not manage -- the pin is planned in the
+uplink's own list, so an interface outside the document gets none, and the
+tunnel then carries nothing as before. The netcfgd binary here is glibc and
+the strongSwan probe's container is musl, so the two have met through the
+report and the measured route shape rather than in one run; hull's Alpine or
+OpenWrt guests are where they meet.
+
 ## 10.859 A full tunnel needs its peer pinned to the uplink, measured
 
 10.858's open question, answered by `tests/ipsec/fulltunnel.sh` in Alpine 3.21

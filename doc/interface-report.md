@@ -114,6 +114,7 @@ dns=10.0.0.53
 | `dns` | yes | A nameserver. IPv4 or IPv6. |
 | `search` | yes | A suffix to complete an unqualified name with. One per line. **Not a routing domain** -- see below. |
 | `route` | yes | A route the far end handed over: `<destination>`, optionally followed by `via <gateway>`. |
+| `peer` | yes | A tunnel's far end, which must be reached outside the tunnel. Where the report also takes the default route, netcfgd pins a host route to it on the uplink that reached it before (project.md 10.859). |
 | `iccid` | no | The identifier of the SIM a cellular module is reading. Not addressing -- see below. |
 | `sim` | no | Which SIM source the writer had been asked for when it read that card. |
 

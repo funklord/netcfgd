@@ -38,7 +38,7 @@ ip link add ncfg-xfrm-probe type xfrm if_id 99 2>/dev/null || skip "this kernel 
 ip link del ncfg-xfrm-probe
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-ipsec.XXXXXX")
-trap 'rm -rf "$work"; ip link del ipsec0 2>/dev/null || true' EXIT INT TERM
+trap 'rm -rf "$work"; ip link del ipsec0 2>/dev/null || true; ip link del up0 2>/dev/null || true' EXIT INT TERM
 mkdir -p "$work/etc" "$work/run"
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 device ipsec0 {
@@ -113,6 +113,42 @@ down mgmt
 apply
 contains "and with both down the address goes too" \
 	"$(ip -o -4 addr show dev ipsec0 | wc -l | tr -d ' ')" "0"
+
+# A full tunnel (project.md 10.859): all of IPv4 into ipsec0, and the peer
+# reached only by the uplink's default route, as a DHCP client installs it.
+# Its own packets to the peer must still leave by the uplink, so netcfgd pins
+# a host route to the peer there -- and takes it away with the tunnel.
+cat >> "$work/etc/netcfgd.conf" <<'CONF'
+device up0 { kind = "dummy" }
+interface up0 {
+	config = "192.0.2.2/24"
+}
+CONF
+apply
+ip route add default via 192.0.2.1 dev up0 metric 100
+env NCFG_RUN_DIR="$work/run" PLUTO_VERB=up-client PLUTO_MY_SOURCEIP=10.98.0.1 \
+	PLUTO_PEER=198.51.100.1 PLUTO_PEER_CLIENT=0.0.0.0/0 PLUTO_CONNECTION=all \
+	sh "$updown" ipsec0
+contains "the report names the peer" "$(cat "$work/run/reported.d/ipsec0/all")" \
+	"peer=198.51.100.1"
+apply
+contains "the tunnel takes the default route" "$(ip route get 203.0.113.9)" "dev ipsec0"
+contains "and the peer is pinned to the uplink" "$(ip route get 198.51.100.1)" \
+	"via 192.0.2.1 dev up0"
+contains "and the next plan has nothing to do" \
+	"$("$build/ncfg" plan --config-dir "$work/etc" --factory-dir "$work/none" \
+		--run-dir "$work/run" 2>&1 | head -1)" "nothing to do"
+env NCFG_RUN_DIR="$work/run" PLUTO_VERB=down-client PLUTO_CONNECTION=all \
+	sh "$updown" ipsec0
+apply
+contains "with the tunnel down the pin is gone" "$(ip route show dev up0)" "default via 192.0.2.1"
+case "$(ip route show dev up0)" in
+*198.51.100.1*)
+	echo "FAIL   and only the pin"
+	failures=$((failures + 1))
+	;;
+*) echo "ok     and only the pin" ;;
+esac
 
 echo
 if [ "$failures" -eq 0 ]; then

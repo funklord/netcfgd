@@ -45,6 +45,7 @@
 #include "ncfg/base.h"
 #include "ncfg/value.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -309,6 +310,171 @@ static ncfg_route_t *room_for(ncfg_builder_t *builder, ncfg_plan_routes_t *out, 
 	return grown;
 }
 
+/* ------------------------------------------------------------------------ *
+ * A tunnel's peer, pinned outside the tunnel (project.md 10.859, 10.860)
+ * ------------------------------------------------------------------------ */
+
+/* Whether a report asks for a default route, by a gateway or a route line. */
+static int report_wants_default(const ncfg_observed_report_t *report)
+{
+	size_t at;
+	char   destination[NCFG_ADDRESS_MAX];
+
+	if (report->gateway_count != 0u) {
+		return 1;
+	}
+	for (at = 0; at < report->route_count; at++) {
+		if (destination_of(report->routes[at].destination, destination,
+		    sizeof(destination)) && strcmp(destination, route_destination_default) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* The reports netcfgd acts on that would take the default route from under
+ * their own peers: a default asked for, a peer named, and the interface one
+ * the document says to believe. */
+static int report_pins(const ncfg_builder_t *builder, const ncfg_observed_report_t *report)
+{
+	const ncfg_interface_t *tunnel;
+
+	if (!report->interface || report->peer_count == 0u || !report_wants_default(report)) {
+		return 0;
+	}
+	tunnel = ncfg_plan_interface(builder->desired, report->interface);
+	return tunnel && ncfg_plan_takes_reports(builder->desired, tunnel);
+}
+
+/* Whether `name` is an interface whose own report takes the default route,
+ * so its default is a tunnel's and never the way to a tunnel's peer. */
+static int is_pinning_tunnel(const ncfg_builder_t *builder, const char *name)
+{
+	size_t at;
+
+	for (at = 0; at < builder->observed->report_count; at++) {
+		const ncfg_observed_report_t *report = &builder->observed->reports[at];
+
+		if (report->interface && strcmp(report->interface, name) == 0 &&
+		    report_pins(builder, report)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * The default route that reaches `peer` outside every tunnel: of the
+ * machine's default routes in the peer's family, the one with the best metric
+ * on an interface that is not itself such a tunnel. Read from the kernel,
+ * because an uplink's default is very often a DHCP client's rather than the
+ * document's. NULL where there is none.
+ */
+static const ncfg_observed_route_t *uplink_for(const ncfg_builder_t *builder, int six)
+{
+	const ncfg_observed_route_t *best = NULL;
+	size_t                       at;
+
+	for (at = 0; at < builder->observed->route_count; at++) {
+		const ncfg_observed_route_t *route = &builder->observed->routes[at];
+		int                          route_six;
+
+		if (!route->interface || !route->destination ||
+		    strcmp(route->destination, route_destination_default) != 0) {
+			continue;
+		}
+		if (route->table.has && route->table.value != 254) {
+			continue;
+		}
+		/* A default with no next hop -- a point-to-point uplink -- has no
+		 * family of its own to read, so it serves either. */
+		route_six = route->via ? strchr(route->via, ':') != NULL : six;
+		if (route_six != six || is_pinning_tunnel(builder, route->interface)) {
+			continue;
+		}
+		if (!best || (route->metric.has ? route->metric.value : 0) <
+		    (best->metric.has ? best->metric.value : 0)) {
+			best = route;
+		}
+	}
+	return best;
+}
+
+/*
+ * Append to `out` a host route to every reporting tunnel's peer that this
+ * interface is the way to. **Planned on the uplink, in the uplink's own route
+ * list**, which is what makes the teardown free: the list is the one both
+ * passes read, so when the tunnel stops reporting, the pin is no longer in it
+ * and is withdrawn like any route the document dropped.
+ */
+static void pin_peers(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    ncfg_plan_routes_t *out)
+{
+	size_t at;
+
+	for (at = 0; at < builder->observed->report_count; at++) {
+		const ncfg_observed_report_t *report = &builder->observed->reports[at];
+		size_t                        peer;
+
+		if (strcmp(report->interface ? report->interface : "", interface->name) == 0 ||
+		    !report_pins(builder, report)) {
+			continue;
+		}
+		for (peer = 0; peer < report->peer_count; peer++) {
+			const ncfg_observed_route_t *uplink;
+			ncfg_address_t               address;
+			char                         host[NCFG_ADDRESS_MAX];
+			char                         via[NCFG_ADDRESS_MAX];
+			ncfg_route_t                *slot;
+			int                          six;
+
+			if (!report->peers[peer] ||
+			    !ncfg_address_parse(report->peers[peer], &address, NULL, 0) ||
+			    address.has_prefix) {
+				continue;
+			}
+			six = strchr(report->peers[peer], ':') != NULL;
+			uplink = uplink_for(builder, six);
+			if (!uplink || strcmp(uplink->interface, interface->name) != 0) {
+				continue;
+			}
+			{
+				char text[NCFG_ADDRESS_MAX];
+				int  written = snprintf(text, sizeof(text), "%s/%s",
+				    report->peers[peer], six ? "128" : "32");
+
+				if (written < 0 || (size_t)written >= sizeof(text) ||
+				    !destination_of(text, host, sizeof(host))) {
+					continue;
+				}
+			}
+			if (uplink->via && !ncfg_address_canonical(uplink->via, via, sizeof(via), NULL,
+			    0)) {
+				continue;
+			}
+			slot = room_for(builder, out, out->count + 1u);
+			if (!slot) {
+				return;
+			}
+			memset(&slot[out->count], 0, sizeof(slot[out->count]));
+			slot[out->count].destination = own(builder, host);
+			slot[out->count].via = uplink->via ? own(builder, via) : NULL;
+			/* `onlink`, because the uplink's own default may be: a /32 with the
+			 * gateway outside it is the shape of many uplinks, and the kernel
+			 * refuses the pin without it there. The observation does not carry
+			 * a route's flags to copy, and on a gateway inside a subnet the
+			 * flag changes nothing. */
+			slot[out->count].onlink = uplink->via != NULL;
+			if (!slot[out->count].destination || (uplink->via && !slot[out->count].via)) {
+				free(slot[out->count].destination);
+				free(slot[out->count].via);
+				return;
+			}
+			out->count++;
+		}
+	}
+}
+
 /*
  * Every route this interface should have: the document's, then the report's.
  *
@@ -347,15 +513,18 @@ void ncfg_plan_routes_for(ncfg_builder_t *builder, const ncfg_interface_t *inter
 	}
 	out->owned_from = out->count;
 	if (!ncfg_plan_takes_reports(builder->desired, interface)) {
+		pin_peers(builder, interface, out);
 		return;
 	}
 	report = ncfg_plan_report_for(builder->observed, interface->name);
 	if (!report) {
+		pin_peers(builder, interface, out);
 		return;
 	}
 
 	room = out->count + report->gateway_count + report->route_count;
 	if (room == out->count) {
+		pin_peers(builder, interface, out);
 		return;
 	}
 	slot = room_for(builder, out, room);
@@ -426,6 +595,7 @@ void ncfg_plan_routes_for(ncfg_builder_t *builder, const ncfg_interface_t *inter
 		}
 		out->count++;
 	}
+	pin_peers(builder, interface, out);
 }
 
 void ncfg_plan_routes_free(ncfg_plan_routes_t *routes)
