@@ -150,6 +150,16 @@ case "$(ip route show dev up0)" in
 *) echo "ok     and only the pin" ;;
 esac
 
+# A `report_writer` named for a tunnel that already exists takes effect at
+# the next apply rather than at the device's next remake (10.868). `root` is
+# the one account a user namespace can hand a directory to.
+rm -rf "$work/run/reported.d/ipsec0"
+sed -i 's/xfrm { if_id = 7 }/xfrm { if_id = 7; report_writer = "root" }/' "$work/etc/netcfgd.conf"
+apply
+contains "a writer named for an existing tunnel gets its directory at the next apply" \
+	"$([ -d "$work/run/reported.d/ipsec0" ] && echo present || echo absent)" "present"
+sed -i 's/; report_writer = "root"//' "$work/etc/netcfgd.conf"
+
 # `ncfg tunnel up|down` (10.864): the daemon asks strongSwan, through a
 # swanctl that records what it was asked -- `NCFG_SWANCTL` names it, as
 # `NCFG_OPENVPN` names openvpn. Started detached, so the record is waited for.

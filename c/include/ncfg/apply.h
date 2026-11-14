@@ -572,6 +572,13 @@ int ncfg_apply_write_journal(const char *run_dir, const ncfg_journal_t *journal,
  */
 int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size);
 
+/* Give every existing XFRM interface that names a `report_writer` its report
+ * directory under `run_dir` (10.863, 10.868): what a device made earlier, or
+ * before the key was added, would otherwise lack. 0 with a sentence where one
+ * could not be prepared; the rest are still tried. */
+int ncfg_apply_report_dirs(const char *run_dir, const ncfg_document_t *document, char *err,
+    size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * Hooks
  * ------------------------------------------------------------------------ */

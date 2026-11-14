@@ -12737,6 +12737,18 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.868 A report writer named for an existing tunnel takes effect at once
+
+10.863 made the report directory with the device, so naming a `report_writer`
+for a tunnel already up waited for the device's next remake while its updown
+went on writing nothing. `ncfg_apply_report_dirs` prepares the directory for
+every existing XFRM device that names one, and runs where the daemon adopts a
+document and where a one-shot apply begins; a failure is said and does not
+stop the document. Measured both ways in a namespace: a device made without
+the key, the key added, and a one-shot apply with nothing to plan made the
+directory; a daemon started on an existing device made it at start.
+`tests/live/ipsec_report.sh` holds the one-shot case.
+
 ## 10.867 An IPsec tunnel authenticated as a commercial VPN is, measured
 
 `tests/ipsec/eap.sh`: `fulltunnel.sh`'s full tunnel with the server proven by
@@ -12835,10 +12847,8 @@ rekeys, a second plan is empty, and the teardown restores the uplink's routes.
 Without the key the same run wrote no report (10.862). In a namespace, an
 account with no entry fails the create naming it.
 
-**Limit, recorded**: the directory is made with the device, so a
-`report_writer` added to a device that already exists takes effect when the
-device is next made. The account's report directory is not observed, so the
-plan cannot see it otherwise.
+A `report_writer` added to a device that already exists is prepared when the
+document is taken up rather than at the device's next remake (10.868).
 
 ## 10.862 netcfgd and strongSwan in one run, and the account charon's updown runs as
 

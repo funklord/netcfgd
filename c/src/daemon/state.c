@@ -15,6 +15,7 @@
  */
 #include "ncfg/daemon.h"
 
+#include "ncfg/apply.h"
 #include "ncfg/config.h"
 #include "ncfg/hooks.h"
 #include "ncfg/log.h"
@@ -335,6 +336,12 @@ int ncfg_daemon_state_reload(ncfg_daemon_state_t *state, char *err, size_t err_s
 		return 0;
 	}
 	(void)ncfg_state_write_desired(state->paths.run, document, why, sizeof(why));
+	/* A `report_writer` added to a tunnel that already exists takes effect
+	 * now rather than at the device's next remake (10.868). Said, not fatal:
+	 * the document is still the one to follow. */
+	if (!ncfg_apply_report_dirs(state->paths.run, document, why, sizeof(why))) {
+		ncfg_log_emitf("config", NCFG_LOG_WARNING, "%s", why);
+	}
 	ncfg_document_free(state->desired);
 	state->desired = document;
 	hold(&state->diagnostics, NULL);

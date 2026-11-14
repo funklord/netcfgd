@@ -53,6 +53,7 @@
 #include "ncfg/wire.h"
 
 #include <errno.h>
+#include <net/if.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -472,6 +473,44 @@ int ncfg_kernel_xfrm_report_dir(const char *run_dir, const char *name,
 /* `ncfg_peer_user_id` and `ncfg_peer_group_id` through one signature, so that
  * `id_of` can take either. A cast between function pointer types would be
  * undefined behaviour the sanitizer is right to complain about. */
+/*
+ * Every XFRM interface's report directory, for a document just taken up
+ * (10.868). The directory is made with the device, so a `report_writer` added
+ * to a device that already exists would otherwise wait for the next remake,
+ * while the tunnel's updown went on writing nothing. Called where the daemon
+ * adopts a document and where a one-shot apply starts; only devices that
+ * exist, since one not yet made gets its directory when it is. A failure for
+ * one device is said and does not stop the rest.
+ */
+int ncfg_apply_report_dirs(const char *run_dir, const ncfg_document_t *document, char *err,
+    size_t err_size)
+{
+	size_t at;
+	int    ok = 1;
+
+	if (!run_dir || !document) {
+		return 1;
+	}
+	for (at = 0; at < document->device_count; at++) {
+		const ncfg_device_t *device = &document->devices[at];
+		char                 one[NCFG_ERROR_MAX];
+
+		if (device->kind.kind != (int)NCFG_KIND_XFRM || !device->kind.xfrm.report_writer ||
+		    !device->name || if_nametoindex(device->name) == 0u) {
+			continue;
+		}
+		one[0] = '\0';
+		if (!ncfg_kernel_xfrm_report_dir(run_dir, device->name, &device->kind, NULL, one,
+		    sizeof(one))) {
+			if (ok) {
+				ncfg_error_set(err, err_size, "%s", one);
+			}
+			ok = 0;
+		}
+	}
+	return ok;
+}
+
 static int user_id_of(const char *file, const char *name, unsigned long *out)
 {
 	uid_t id;

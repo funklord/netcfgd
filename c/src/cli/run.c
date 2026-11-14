@@ -2467,6 +2467,11 @@ static int command_apply(const ncfg_cli_options_t *options)
 	}
 	(void)ncfg_state_write_desired(run_dir, document, err, sizeof(err));
 	(void)ncfg_state_write_observed(run_dir, observed, err, sizeof(err));
+	/* Before the plan, as the daemon does on adopting a document (10.868):
+	 * an existing tunnel's report directory for a writer named since. */
+	if (!ncfg_apply_report_dirs(run_dir, document, err, sizeof(err))) {
+		ncfg_out_writef("warning: %s\n", err);
+	}
 
 	plan_options_of(options, &how);
 	plan = ncfg_plan_build(document, observed, &how, err, sizeof(err));
