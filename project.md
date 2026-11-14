@@ -12761,7 +12761,17 @@ Two differences matter to an operator:
   owner, so `report_writer` is left out on Debian -- the case
   `doc/first-run.md` section 11 already names.
 
-OpenWrt's package is still unmeasured; there is no OpenWrt image here.
+**OpenWrt's is read, not measured, and it is a different shape.** Its
+`swanctl.init` (openwrt/packages, `net/strongswan/files`, read 2026-11-14)
+is a procd service that generates the connection from UCI,
+`/etc/config/ipsec`, into `/var/swanctl/swanctl.conf`, and has UCI options
+that write `if_id_in`/`if_id_out` and `updown` -- so there the operator's file
+is UCI, not `conf.d`, and the three lines 0325 asks for are UCI options. It
+also lists `/etc/swanctl/conf.d/*.conf` among the files procd watches for a
+reload. Whether `swanctl --load-all` there reads `conf.d` depends on the
+directory OpenWrt's build gives swanctl, which the script does not show;
+that, and whether its charon stays root, are to measure on an OpenWrt image
+when OpenWrt is the target -- before 0325's sentence is taken to hold there.
 
 ## 10.869 `loop_test`'s roam check waits ten rounds, not two
 
