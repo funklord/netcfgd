@@ -12737,6 +12737,31 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.863 netcfgd gives a tunnel's report directory to charon's account
+
+10.862's open step. `device ipsec0 { xfrm { if_id = 7; report_writer = "ipsec" } }`:
+when netcfgd makes the device it makes `reported.d/ipsec0/` and gives it to
+that account (`chown`, mode 0755), so a charon that runs its updown as
+`ipsec` -- Alpine's, measured -- can write that interface's addressing and
+nothing else. Named rather than guessed, because the account is the
+distribution's build choice. Resolved from `/etc/passwd` as a file, as
+`tun { owner }` is, and refused by name where there is no such account rather
+than falling back to root. Privileged, as `tun { owner }` is
+(`NCFG_PRIV_PRINCIPAL`): it hands a device's state to a principal.
+
+`tests/ipsec/e2e.sh` with the key and no hand-made directory, in Alpine 3.21
+with netcfgd built for musl: the directory is `ipsec`'s, the updown writes the
+report, netcfgd applies the virtual IP, the tunnel's default and the peer's
+pin, two packets leave by `ipsec0` and are answered before and after both
+rekeys, a second plan is empty, and the teardown restores the uplink's routes.
+Without the key the same run wrote no report (10.862). In a namespace, an
+account with no entry fails the create naming it.
+
+**Limit, recorded**: the directory is made with the device, so a
+`report_writer` added to a device that already exists takes effect when the
+device is next made. The account's report directory is not observed, so the
+plan cannot see it otherwise.
+
 ## 10.862 netcfgd and strongSwan in one run, and the account charon's updown runs as
 
 `tests/ipsec/e2e.sh` builds netcfgd for musl inside Alpine 3.21 and runs the

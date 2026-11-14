@@ -1684,7 +1684,11 @@
 
 #device ipsec0 {
 #	xfrm {
-#		if_id = 7
+#		if_id         = 7
+#		# The account charon runs the updown as, where it is not root:
+#		# `ipsec` on Alpine. netcfgd gives it this interface's report
+#		# directory when it makes the device.
+#		report_writer = "ipsec"
 #	}
 #}
 #interface ipsec0 {

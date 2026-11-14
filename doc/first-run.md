@@ -752,6 +752,69 @@ rest of the router's settings. What comes back is files the package manager no l
 knows. On 25.12 a later `apk add` of the package takes them over as they are; on 24.10,
 `opkg install` needs `--force-overwrite`.
 
+## 11. An IPsec tunnel
+
+strongSwan negotiates; netcfgd owns the tunnel's device and its addressing
+(decisions 0323 to 0325). The connection stays strongSwan's, in
+`/etc/swanctl/conf.d/`, with its credentials, loaded by strongSwan's own service
+-- netcfgd loads nothing into charon. What binds the two is an id and a script.
+
+**netcfgd's side** -- an XFRM interface, and the addressing the tunnel reports:
+
+```ini
+device ipsec0 {
+	xfrm {
+		if_id         = 7
+		report_writer = "ipsec"   # the account charon runs its updown as;
+		                          # omit where that is root
+	}
+}
+interface ipsec0 {
+	config = "reported"
+}
+```
+
+**strongSwan's side** -- three lines added to the child of the connection a
+provider hands you, and one setting for charon:
+
+```
+children {
+	<the child> {
+		...
+		if_id_in  = 7
+		if_id_out = 7
+		updown    = /usr/libexec/netcfgd/ipsec-updown ipsec0
+	}
+}
+```
+
+and in `strongswan.conf` (or a file under `strongswan.d/`):
+
+```
+charon {
+	install_virtual_ip = no
+}
+```
+
+so the virtual IP the server assigns is not put on whatever device charon
+picks: `ipsec-updown` reports it, with the far side's subnets and nameservers,
+and netcfgd puts it on `ipsec0`. When the connection carries the whole of IPv4
+(`remote_ts = 0.0.0.0/0`), the tunnel takes the default route and netcfgd adds
+a host route to the IKE peer by the uplink, so the tunnel's own packets do not
+go into it.
+
+**`report_writer` is the one to get right.** Alpine's charon runs the updown as
+the `ipsec` account; netcfgd gives that account `ipsec0`'s report directory
+when it makes the device, and without it the updown cannot write and the
+interface gets nothing -- silently, because the updown never disturbs charon.
+Where charon runs the updown as root, leave the key out.
+
+Measured end to end in Alpine 3.21 with strongSwan 5.9.14 and a pre-shared key
+(`tests/ipsec/e2e.sh`). EAP and certificate authentication are strongSwan's
+business and change nothing on netcfgd's side, but have not been run here.
+`ncfg` cannot yet bring a tunnel up or down; `start_action = start` in the
+connection, or `swanctl --initiate`, does.
+
 ## When something goes wrong
 
 **Ask what netcfgd thinks it did.** `ncfg status` for what the kernel has,

@@ -2322,6 +2322,14 @@ static void kind_cases(void)
 		    "  with its if_id");
 		ncfg_document_free(document);
 	}
+	document = compiles("device ipsec0 { xfrm { if_id = 7; report_writer = \"ipsec\" } }\n",
+	    "an xfrm interface may name the account that writes its report");
+	if (document) {
+		device = device_named(document, "ipsec0");
+		check(device && device->kind.xfrm.report_writer &&
+		    strcmp(device->kind.xfrm.report_writer, "ipsec") == 0, "  and keeps it");
+		ncfg_document_free(document);
+	}
 
 	document = compiles("device mv0 { macvlan { parent = \"eth0\"; mode = \"bridge\" } }\n",
 	    "macvlan compiles");

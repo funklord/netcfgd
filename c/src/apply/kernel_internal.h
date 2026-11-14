@@ -146,6 +146,8 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
  * which is what keeps every decision above testable on a machine that must not
  * grow a device.
  */
+int ncfg_kernel_xfrm_report_dir(const char *run_dir, const char *name,
+    const ncfg_interface_kind_t *kind, const char *passwd_file, char *err, size_t err_size);
 int ncfg_kernel_tun_spec_of(const ncfg_interface_kind_t *kind, const char *name,
     const char *passwd_file, const char *group_file, ncfg_tun_spec_t *out, char *err,
     size_t err_size);

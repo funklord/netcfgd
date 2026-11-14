@@ -52,8 +52,11 @@
 #include "ncfg/observe.h"
 #include "ncfg/wire.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* ------------------------------------------------------------------------ *
  * What the document says
@@ -401,6 +404,66 @@ static int id_of(int (*lookup)(const char *file, const char *name, unsigned long
 		ncfg_error_set(err, err_size,
 		    "%s asks to be owned by the %s `%s`, and this machine has no such entry",
 		    link ? link : "?", what, who);
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * An XFRM interface's report directory, given to the account its IKE daemon
+ * runs the updown command as (10.862, 10.863).
+ *
+ * strongSwan on Alpine runs `ipsec-updown` as `ipsec`, uid 100, with no
+ * capabilities: in netcfgd's root-owned run directory it cannot make
+ * `reported.d/<interface>`, and the hook -- which exits 0 so as never to
+ * disturb charon -- writes nothing. So netcfgd makes that one directory and
+ * gives it to the account the document names, which can then write that
+ * interface's addressing and nothing else. Made when the device is made;
+ * nothing at all where no account is named.
+ *
+ * An account with no entry is refused by name, `tun { owner }`'s rule: falling
+ * back to root would make a directory the named writer still cannot use.
+ */
+static int user_id_of(const char *file, const char *name, unsigned long *out);
+
+int ncfg_kernel_xfrm_report_dir(const char *run_dir, const char *name,
+    const ncfg_interface_kind_t *kind, const char *passwd_file, char *err, size_t err_size)
+{
+	char          path[4096];
+	unsigned long id;
+	int           written;
+
+	if (!kind || kind->kind != (int)NCFG_KIND_XFRM || !kind->xfrm.report_writer) {
+		return 1;
+	}
+	if (!run_dir || !name) {
+		ncfg_error_set(err, err_size,
+		    "%s names a report_writer, and this apply has no run directory to give it one in",
+		    name ? name : "an xfrm interface");
+		return 0;
+	}
+	if (!id_of(user_id_of, passwd_file, kind->xfrm.report_writer, "user", name, &id, err,
+	    err_size)) {
+		return 0;
+	}
+	written = snprintf(path, sizeof(path), "%s/reported.d", run_dir);
+	if (written < 0 || (size_t)written >= sizeof(path) ||
+	    (mkdir(path, 0755) != 0 && errno != EEXIST)) {
+		ncfg_error_set(err, err_size, "could not make %s for %s's report: %s", path, name,
+		    strerror(errno));
+		return 0;
+	}
+	written = snprintf(path, sizeof(path), "%s/reported.d/%s", run_dir, name);
+	if (written < 0 || (size_t)written >= sizeof(path) ||
+	    (mkdir(path, 0755) != 0 && errno != EEXIST)) {
+		ncfg_error_set(err, err_size, "could not make %s for %s's report: %s", path, name,
+		    strerror(errno));
+		return 0;
+	}
+	if (chown(path, (uid_t)id, (gid_t)-1) != 0 || chmod(path, 0755) != 0) {
+		ncfg_error_set(err, err_size,
+		    "could not give %s to %s, who writes %s's report: %s", path,
+		    kind->xfrm.report_writer, name, strerror(errno));
 		return 0;
 	}
 	return 1;

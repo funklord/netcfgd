@@ -392,6 +392,11 @@ static int lower_xfrm(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	FOR_ASSIGNMENTS(block, item, assignment) {
 		if (strcmp(assignment->key, "if_id") == 0) {
 			ncfg_as_u32_opt(ctx, assignment->value, &if_id);
+		} else if (strcmp(assignment->key, "report_writer") == 0) {
+			/* The account the IKE daemon's updown command runs as, which
+			 * netcfgd gives this interface's report directory (10.863). */
+			free(out->xfrm.report_writer);
+			out->xfrm.report_writer = ncfg_as_string(ctx, assignment->value);
 		} else {
 			ncfg_diag(ctx, assignment->span, "unknown xfrm key `%s`", assignment->key);
 		}

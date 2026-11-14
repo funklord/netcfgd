@@ -53,7 +53,7 @@ interface c0 {
 	config = "192.0.2.2/32"
 }
 device ipsec0 {
-	xfrm { if_id = 7 }
+	xfrm { if_id = 7; report_writer = "ipsec" }
 }
 interface ipsec0 {
 	config = "reported"
@@ -68,9 +68,9 @@ apply "before the tunnel"
 # **charon runs the updown as its own account** -- `ipsec`, uid 100, no
 # capabilities, on Alpine -- so it cannot write in netcfgd's root-owned run
 # directory, and on the first runs here it silently wrote nothing
-# (project.md 10.862). By hand, the interface's report directory is that
-# account's, standing in for netcfgd preparing it, which is not built yet.
-mkdir -p /tmp/ncfg/reported.d/ipsec0 && chown ipsec /tmp/ncfg/reported.d/ipsec0
+# (project.md 10.862). `report_writer` is netcfgd giving it the interface's
+# report directory when it makes the device (10.863).
+say "the report directory: $(ls -ld /tmp/ncfg/reported.d/ipsec0 2>&1 | awk '{print $1, $3}')"
 say "netcfgd made: $(ip -n cli -d link show ipsec0 2>&1 | grep -o 'xfrm if_id 0x[0-9a-f]*')"
 
 for side in srv cli; do

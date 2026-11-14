@@ -102,7 +102,11 @@ static const struct {
 	 * two meanings, which is the second time the block qualifier has earned
 	 * its place in this table. */
 	{ "tun", "owner", NCFG_PRIV_PRINCIPAL },
-	{ "tun", "group", NCFG_PRIV_PRINCIPAL }
+	{ "tun", "group", NCFG_PRIV_PRINCIPAL },
+	/* An account handed an XFRM interface's report directory, which decides
+	 * that interface's addresses and routes (10.863) -- `tun { owner }`'s
+	 * shape, a device's state given to a principal the caller chose. */
+	{ "xfrm", "report_writer", NCFG_PRIV_PRINCIPAL }
 };
 
 const char *ncfg_privilege_why(ncfg_privilege_reason_t reason)

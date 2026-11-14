@@ -1527,7 +1527,9 @@ static const ncfg_field_t xfrm_fields[] = {
 	/* From 1: the kernel refuses 0 and the language does too, so a document
 	 * read back with 0 would render a profile its own compiler refused. */
 	{ .name = "if_id", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, .low = 1,
-	    .high = 4294967295LL, .offset = offsetof(ncfg_xfrm_config_t, if_id) }
+	    .high = 4294967295LL, .offset = offsetof(ncfg_xfrm_config_t, if_id) },
+	{ .name = "report_writer", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_xfrm_config_t, report_writer) }
 };
 static const ncfg_type_t xfrm_type = TAGGED("xfrm", xfrm_fields, "kind");
 

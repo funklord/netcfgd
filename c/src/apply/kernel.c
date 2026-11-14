@@ -738,6 +738,9 @@ static int finish_create(const ncfg_kernel_world_t *world, const ncfg_op_t *crea
 	if (!ncfg_kernel_wg_configure_new(world, name, kind, err, err_size)) {
 		return 0;
 	}
+	if (!ncfg_kernel_xfrm_report_dir(world->run_dir, name, kind, NULL, err, err_size)) {
+		return 0;
+	}
 	if (!kind || kind->kind != (int)NCFG_KIND_BRIDGE) {
 		return 1;
 	}

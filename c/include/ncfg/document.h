@@ -782,6 +782,11 @@ typedef struct {
  */
 typedef struct {
 	int64_t if_id;
+	/* The account the IKE daemon runs its updown command as, given this
+	 * interface's report directory (10.862, 10.863): strongSwan on Alpine
+	 * runs it as `ipsec`, which cannot write in netcfgd's root-owned run
+	 * directory. NULL where the updown runs as root. */
+	char   *report_writer;
 } ncfg_xfrm_config_t;
 
 typedef struct {

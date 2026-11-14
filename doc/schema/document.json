@@ -635,7 +635,8 @@
       "on_unmanage": "leave",
       "kind": {
         "kind": "xfrm",
-        "if_id": 7
+        "if_id": 7,
+        "report_writer": "ipsec"
       },
       "bridge_vlans": [],
       "declared": true
