@@ -12761,17 +12761,18 @@ Two differences matter to an operator:
   owner, so `report_writer` is left out on Debian -- the case
   `doc/first-run.md` section 11 already names.
 
-**OpenWrt's is read, not measured, and it is a different shape.** Its
-`swanctl.init` (openwrt/packages, `net/strongswan/files`, read 2026-11-14)
-is a procd service that generates the connection from UCI,
-`/etc/config/ipsec`, into `/var/swanctl/swanctl.conf`, and has UCI options
-that write `if_id_in`/`if_id_out` and `updown` -- so there the operator's file
-is UCI, not `conf.d`, and the three lines 0325 asks for are UCI options. It
-also lists `/etc/swanctl/conf.d/*.conf` among the files procd watches for a
-reload. Whether `swanctl --load-all` there reads `conf.d` depends on the
-directory OpenWrt's build gives swanctl, which the script does not show;
-that, and whether its charon stays root, are to measure on an OpenWrt image
-when OpenWrt is the target -- before 0325's sentence is taken to hold there.
+**OpenWrt 25.12.6 loads `conf.d` too, beside a file it writes from UCI.**
+From its x86_64 packages (strongSwan 6.0.7), fetched and unpacked with the
+tree's apk 3: `swanctl` is built with `/etc/swanctl` as its directory, and
+`/etc/swanctl/swanctl.conf` ends with `include conf.d/*.conf` and
+`include /var/swanctl/swanctl.conf`. The second is what the procd service
+`swanctl` writes from UCI (`/etc/config/ipsec`), whose options include
+`if_id` and `updown`; `--load-all` reads both, so an operator's `conf.d` file
+works as 0325 says, and UCI is a second way to write the same three lines.
+**Its charon should stay root**: the literal `ipsec` that Alpine's charon
+carries for the account it switches to (checked in Alpine's binary, the
+control) is in neither OpenWrt's `charon` nor its `libcharon`, and procd
+names no user. That is read from the binaries, not seen running.
 
 ## 10.869 `loop_test`'s roam check waits ten rounds, not two
 

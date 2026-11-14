@@ -810,7 +810,10 @@ interface gets nothing -- silently, because the updown never disturbs charon.
 Where charon runs the updown as root, leave the key out: Debian's does
 (measured in Debian 13, project.md 10.870). Debian's strongSwan service, which
 loads `conf.d` as Alpine's does, is a systemd unit only; a Debian without
-systemd has no script that starts it.
+systemd has no script that starts it. OpenWrt's `swanctl` service loads
+`conf.d` as well, beside a connection it writes from UCI, whose `if_id` and
+`updown` options are these same lines; its charon carries no account to
+switch to either (10.870).
 
 Measured end to end in Alpine 3.21 with strongSwan 5.9.14 and a pre-shared key
 (`tests/ipsec/e2e.sh`), and with the server proven by a certificate and the
