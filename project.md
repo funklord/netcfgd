@@ -12750,6 +12750,15 @@ requests carry the same two members. What the window says is what it asked,
 not that the tunnel is up; the tunnel's addresses in `links` say that.
 The TUI has them too, being these widgets (gui/project.md section 7a).
 
+**Open, and the holder's: the same for OpenVPN and WireGuard.** `tunnel_set`
+answers only an `xfrm` device. netcfgd runs those two tunnels itself, so
+"take it down" from the `wifi` tier would be that tier writing the
+interface's `enabled`, as `radio_set` writes a `device` block -- precedent
+for yes. It widens what the `wifi` tier may write, which sits inside the
+deferred permission overhaul (*Open: the permission system needs an
+overhaul*), so it is asked rather than built. Until answered, neither has an
+on/off control in `ncfg` or the window short of editing the file.
+
 On the devices tab rather than a tab of its own: the row is the tunnel's,
 and a VPN tab with one kind in it would be the first of several kinds nobody
 has asked to be gathered. `gui/tests/tunnel_buttons` drives it against a real
