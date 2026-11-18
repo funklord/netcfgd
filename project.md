@@ -12755,8 +12755,21 @@ without it, a watcher started with the switch -- HUP ignored, the terminal let
 go, so the session a switch cuts does not take it along -- switches back when
 the window ends, 120 s by default, `--confirm=N` to change, `--confirm=0`
 for a switch made at once. A reboot inside the window comes up on netifd,
-since nothing was disabled. A second switch while one waits is refused. The
-other rc systems are unchanged: their machines have a console.
+since nothing was disabled. **A new switch supersedes one that waits**: it
+stops the watcher, drops the record and goes on. The first version refused it,
+and the holder pointed out what that breaks: the switch back is the commonest
+thing to want inside the window, and a script that runs `netcfgd_select.sh
+netifd` -- or `none`, on removal -- would have failed for two minutes. Back to
+netifd it is made at once, since netifd is still enabled; the same switch
+again starts its window afresh. Each watcher acts only on a record carrying
+its own token, so one a supersede failed to stop cannot wake and undo a newer
+switch. **And it cannot fall back to the unconfirmed state it superseded**,
+which the holder asked next: a held switch disables nothing, so until
+`confirm` the last confirmed manager is the only one enabled, and every
+switch computes its fallback afresh as that one. The same switch again, or a
+switch to a third manager, falls back to netifd, never to the unconfirmed
+netcfgd; only `confirm` or `--confirm=0` makes an unconfirmed manager stick.
+The other rc systems are unchanged: their machines have a console.
 
 `netifd` is a manager the switcher knows, as `/etc/init.d/network`, stood
 down ahead of ifupdown, whose sweep takes every udhcpc not netcfgd's and on a
@@ -12767,11 +12780,21 @@ interfaces. So on procd it waits, up to ten seconds, for procd to list the
 service as not running.
 
 `make hull-openwrt-select`, on the 128 MB OpenWrt 25.12 vm with stock netifd:
-the held switch, a second switch refused, the window ending unconfirmed with
+the held switch, a switch back inside the window made at once and left alone
+by the first window's watcher, the same switch again, the window ending unconfirmed with
 netifd back and netcfgd gone and nothing disabled, a confirmed switch that
 outlasts its window, and the switch back. `tests/live/select.sh` (the
 systemd paths, 50 checks) and the select gate pass unchanged. With the
 watcher's switch-back made a no-op, the unconfirmed window goes red.
+
+**Open: one failure not explained.** In the first run with the supersede, the
+last step -- `netcfgd_select.sh netifd --confirm=0`, with nothing pending --
+was reported failed, and the console line carrying it was torn, so its exit
+status is not known. Its verdict, which holds the switcher's own output on a
+failure, was overwritten by the next run before it was read. Five runs since,
+27 of 27 each. Reading that path under `set -eu` found nothing that fails
+transiently (`run` swallows a failed `kill`). Non-reproduction is not a
+verdict on it; the next failure's `select:` lines are what to read.
 
 ## 10.873 `ncfg` waits for a daemon that is starting
 

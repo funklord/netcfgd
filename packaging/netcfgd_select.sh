@@ -994,7 +994,7 @@ if [ "$target" = confirm ]; then
 		say "no switch is waiting to be confirmed"
 		exit 1
 	fi
-	read -r previous selected watcher < "$pending" || true
+	read -r previous selected watcher _ < "$pending" || true
 	run rm -f "$pending"
 	# The watcher found no pending file would do nothing; stopped anyway, so
 	# a second switch inside the same window does not meet it.
@@ -1005,10 +1005,23 @@ if [ "$target" = confirm ]; then
 	say "$selected is kept; $previous is disabled and stays down at the next boot"
 	exit 0
 fi
+# **A new switch supersedes one that waits**, rather than being refused: the
+# commonest thing to want inside the window is the switch back, and a script
+# that runs `$me netifd` -- or `none`, on removal -- has to work then as at any
+# other time. So the watcher is stopped and the record dropped, and the switch
+# goes on as if none were pending. Back to the old manager it is made at once,
+# since that one is still enabled and there is nothing to hold; the same switch
+# again starts its window afresh. **What a superseding switch falls back to is
+# never the unconfirmed one it replaced**: a held switch disables nothing, so
+# the last confirmed manager is still the only one enabled, and the fallback
+# is computed afresh as that (`enabled_manager_other_than`).
 if [ -f "$pending" ] && [ -z "$dry" ]; then
-	say "a switch is waiting to be confirmed ($(cat "$pending" 2>/dev/null | cut -d' ' -f1,2));"
-	say "  '$me confirm' keeps it, or it switches back when its window ends"
-	exit 1
+	read -r waiting_previous waiting_selected waiting_watcher _ < "$pending" || true
+	say "superseding the switch to ${waiting_selected:-?} that was waiting to be confirmed"
+	run rm -f "$pending"
+	if [ -n "${waiting_watcher:-}" ] && [ -d "/proc/$waiting_watcher" ]; then
+		run kill "$waiting_watcher" 2>/dev/null || true
+	fi
 fi
 
 case "$target" in
@@ -1114,18 +1127,24 @@ none)
 		*) self=$(pwd)/$0 ;;
 		esac
 		# Detached from the operator's session, which is the one most likely
-		# to be cut by the switch: HUP ignored, the terminal let go.
+		# to be cut by the switch: HUP ignored, the terminal let go. **It acts
+		# only on its own switch's record**, by the token this run writes: a
+		# watcher a supersede failed to stop must not wake to a newer switch's
+		# record and undo that one instead.
+		token=$$
 		(
 			trap '' HUP
 			sleep "$window"
-			if [ -f "$pending" ]; then
+			mine=
+			read -r _ _ _ mine < "$pending" 2>/dev/null || true
+			if [ "$mine" = "$token" ]; then
 				rm -f "$pending"
 				command -v logger >/dev/null 2>&1 &&
 					logger -t netcfgd_select "no confirm within ${window}s: back to $previous"
 				"$self" "$previous" --confirm=0 --no-wait
 			fi
 		) < /dev/null > /dev/null 2>&1 &
-		echo "$previous $target $!" > "$pending"
+		echo "$previous $target $! $token" > "$pending"
 		say "$target runs now; $previous is stopped and still enabled"
 		say "  '$me confirm' within ${window}s keeps $target, or $previous comes back"
 	fi

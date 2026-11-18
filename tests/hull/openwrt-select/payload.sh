@@ -9,7 +9,9 @@
 #   - stock netifd runs and is enabled, as on any OpenWrt;
 #   - selecting netcfgd stops netifd without disabling it, starts netcfgd
 #     without enabling it, and records the switch as pending;
-#   - a second switch while one is pending is refused;
+#   - a switch back while one is pending is made at once, and the first
+#     switch's watcher, when its window ends, leaves it alone;
+#   - the same switch again succeeds and starts its window afresh;
 #   - left unconfirmed, the window ends with netifd back and netcfgd gone;
 #   - selected again and confirmed, netifd is disabled and netcfgd enabled,
 #     and that holds past the window;
@@ -73,11 +75,23 @@ check "  and still enabled, so a reboot comes back on it" "$(enabled network)" e
 check "  netcfgd is not yet enabled" "$(enabled netcfgd)" disabled
 check "  the switch waits to be confirmed" "$([ -f /var/run/netcfgd-select.pending ] && echo pending || echo none)" pending
 
+# Back, inside the window: what a script runs, and what must work then too.
 switch_to netifd --no-wait
-check "a second switch while one waits is refused" "$?" 1
+check "a switch back while one waits is made" "$?" 0
+check "  at once: netifd runs, enabled" "$(enabled network)/$([ "$(within '[ "$(running netifd)" = running ]')" != never ] && echo running || echo stopped)" enabled/running
+check "  netcfgd stopped, not enabled" "$(enabled netcfgd)/$(running netcfgd)" disabled/stopped
+check "  nothing pending" "$([ -f /var/run/netcfgd-select.pending ] && echo pending || echo none)" none
+sleep 18
+check "  and when the first window ends, its watcher leaves it alone" \
+	"$(running netifd)/$(running netcfgd)" running/stopped
+
+switch_to netcfgd --confirm=15 --no-wait
+switch_to netcfgd --confirm=15 --no-wait
+check "the same switch again succeeds" "$?" 0
+check "  and still waits to be confirmed" "$([ -f /var/run/netcfgd-select.pending ] && echo pending || echo none)" pending
 
 took=$(within '[ "$(running netifd)" = running ] && [ "$(running netcfgd)" = stopped ]' 30)
-check "unconfirmed, the window ends with netifd back and netcfgd gone" \
+check "unconfirmed, the superseding switch falls back to netifd, the last confirmed" \
 	"$([ "$took" != never ] && echo back || echo "not back")" back
 check "  netifd still enabled" "$(enabled network)" enabled
 check "  netcfgd not enabled" "$(enabled netcfgd)" disabled
