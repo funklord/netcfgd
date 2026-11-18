@@ -531,6 +531,15 @@ android-check:
 # tool update, which is the same failure one layer up. An unreadable signature
 # is now an error rather than a blank.
 #
+# **And the version is not an integer.** Reported by fuzzypickles 2026-11-18:
+# apksigner 37.0.0 prints "V3.0 Signer: certificate DN:" for a v3 signature,
+# and `V[0-9]*` cannot match the dot, so a correctly release-signed APK was
+# refused with "cannot read the signature" in every tree carrying this
+# fragment. It fails closed, so nothing shipped wrong -- but a guard that
+# refuses a correct build is one somebody switches off, which is how the
+# original fault above arrived. `V[0-9.]*` matches "V2", "V3.0" and whatever
+# the next build-tools prints with a point release in it.
+#
 # beerssh shipped a "release build" signed with the Android debug key, and
 # the only reason anybody noticed is that somebody ran apksigner by hand:
 # flags passed to Qt's GENERATED Makefile are dropped silently, so the build
@@ -550,7 +559,7 @@ define android_verify_signature
 	fi; \
 	dn=$$($$signer verify --print-certs "$(1)" 2>/dev/null \
 	      | sed -n -e 's/^Signer #1 certificate DN: //p' \
-	               -e 's/^V[0-9]* Signer: certificate DN: //p' \
+	               -e 's/^V[0-9.]* Signer: certificate DN: //p' \
 	      | head -1); \
 	if [ -z "$$dn" ]; then \
 		echo "android: cannot read the signature of $(1)." >&2; \
