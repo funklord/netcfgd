@@ -50,6 +50,10 @@ mkdir -p "$work/root/usr/sbin" "$work/root/usr/bin" "$work/root/etc/init.d" \
 cp "$program" "$work/root/usr/sbin/netcfgd"
 chmod 755 "$work/root/usr/sbin/netcfgd"
 ln -s ../sbin/netcfgd "$work/root/usr/bin/ncfg"
+# The switcher (project.md 10.874): on a router it hands the network from
+# netifd to netcfgd and back, held until confirmed, since there is no console.
+cp "$here/packaging/netcfgd_select.sh" "$work/root/usr/sbin/netcfgd_select.sh"
+chmod 755 "$work/root/usr/sbin/netcfgd_select.sh"
 cp "$here/packaging/procd/netcfgd" "$work/root/etc/init.d/netcfgd"
 chmod 755 "$work/root/etc/init.d/netcfgd"
 # strongSwan's updown command for an IPsec tunnel's XFRM interface (0324), at
@@ -70,6 +74,7 @@ cat > "$work/root/lib/upgrade/keep.d/netcfgd" <<'KEEP'
 /etc/netcfgd/
 /root/.local/share/fuzznet/
 /usr/sbin/netcfgd
+/usr/sbin/netcfgd_select.sh
 /usr/bin/ncfg
 /usr/libexec/netcfgd/
 /etc/init.d/netcfgd

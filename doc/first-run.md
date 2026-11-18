@@ -625,6 +625,20 @@ ncfg apply --confirm-within 60
 ncfg confirm
 ```
 
+**When the document covers the whole router**, the port you are connected through
+included, hand it over with the switcher the package ships. It is held until you
+confirm it: netifd is stopped and left enabled, netcfgd started and not yet enabled,
+and if `confirm` does not arrive within the window -- because the switch cut you off --
+it switches back by itself. A reboot inside the window comes up on netifd.
+
+```sh
+netcfgd_select.sh netcfgd            # 120 s to confirm; --confirm=N for another window
+netcfgd_select.sh confirm            # from a new session, once you are back in
+netcfgd_select.sh netifd --confirm=0 # and back, at once, whenever you want
+```
+
+Measured under procd in `make hull-openwrt-select` (project.md 10.874).
+
 **On wifi, OpenWrt makes no interface on a radio**, so name the radio's `phy`, from
 `ls /sys/class/ieee80211`, and netcfgd makes one. Leave it out of
 `/etc/config/wireless`, or disable it there:

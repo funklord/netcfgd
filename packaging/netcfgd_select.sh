@@ -64,16 +64,20 @@ export PATH
 
 usage() {
 	cat <<USAGE
-usage: $me [netcfgd|networkmanager|networkd|none]
+usage: $me [netcfgd|networkmanager|networkd|netifd|none|confirm]
 
   netcfgd         stand the others down and run netcfgd  (the default)
   networkmanager  stand the others down and run NetworkManager
   networkd        stand the others down and run systemd-networkd
+  netifd          stand the others down and run OpenWrt's netifd
   none            unmask everything and start nothing -- what prerm uses
+  confirm         keep a switch made on OpenWrt, inside its window
 
   --dry-run       say what would happen and change nothing
   --wait-online N wait up to N seconds for a default route (default 30)
   --no-wait       do not wait, and do not check -- the old behaviour
+  --confirm=N     on OpenWrt, switch back unless confirmed within N
+                  seconds (default 120; 0 makes the switch at once)
 USAGE
 }
 
@@ -86,16 +90,30 @@ target=
 # What the persistence pass renamed, so the summary can say so rather than
 # claiming nothing was. Empty on every ordinary run.
 renamed=
+# **On OpenWrt a switch is held until it is confirmed** (project.md 10.874):
+# a router has no console, so a manager that brings up nothing is a lockout,
+# and 10.746 rejected taking netifd down on install for exactly that reason.
+# For this many seconds the old manager is stopped and still enabled and the
+# new one started and not yet enabled; `confirm` makes it stick, and without
+# it a watcher started here switches back. A reboot inside the window comes up
+# on the old manager, since nothing was disabled. Not on the other rc systems,
+# whose machines have a console and whose behaviour is unchanged.
+window=120
+# Set while a switch is held: stop and start, but do not disable or enable.
+holding=
+# Where a held switch is recorded: tmpfs, so a reboot forgets it with the rest.
+pending=/var/run/netcfgd-select.pending
 for argument in "$@"; do
 	case "$argument" in
 	--dry-run) dry=yes ;;
 	--no-wait) patience=0 ;;
+	--confirm=*) window=${argument#*=} ;;
 	--wait-online=*) patience=${argument#*=} ;;
 	-h | --help)
 		usage
 		exit 0
 		;;
-	netcfgd | networkmanager | networkd | none) target=$argument ;;
+	netcfgd | networkmanager | networkd | netifd | none | confirm) target=$argument ;;
 	*)
 		echo "$me: unknown argument: $argument" >&2
 		usage >&2
@@ -214,7 +232,10 @@ confirm_online() {
 # reached by a new route.
 #
 # Only these compete for interfaces, and only these are ever masked.
-managers='netcfgd networkmanager networkd connman ifupdown wicd'
+# netifd ahead of ifupdown, whose sweep takes every udhcpc not netcfgd's: on a
+# router that would be netifd's own DHCP client, killed while netifd still runs
+# and restarts it. Stopped first, netifd takes its children with it.
+managers='netcfgd netifd networkmanager networkd connman ifupdown wicd'
 
 # A radio is held exclusively by whoever has it, so at most one of these may
 # run -- but which one is a property of the *selected manager*, not something
@@ -334,6 +355,8 @@ unit_of() {
 	dhcpcd) echo 'dhcpcd.service dhcpcd5.service' ;;
 	ifupdown) echo networking.service ;;
 	wicd) echo wicd.service ;;
+	# None: netifd is OpenWrt's and runs under procd, which `script_of` covers.
+	netifd) echo '' ;;
 	esac
 }
 
@@ -356,6 +379,8 @@ script_of() {
 	connman) echo connman ;;
 	ifupdown) echo networking ;;
 	wicd) echo wicd ;;
+	# OpenWrt's: netifd runs as the `network` service under procd.
+	netifd) echo network ;;
 	dhcpcd) echo dhcpcd ;;
 	modemmanager) echo 'modemmanager ModemManager' ;;
 	esac
@@ -371,6 +396,29 @@ openrc_runs() {
 	[ -d /run/openrc ] && command -v rc-update >/dev/null 2>&1
 }
 
+# **procd's `stop` returns before the process has gone**: it signals and moves
+# on. Measured on OpenWrt 25.12 (10.874): netifd still ran when the switcher
+# went on to start netcfgd, which reads a live netifd as holding its
+# interfaces. So wait, up to ten seconds, until procd lists the service as
+# not running.
+procd_wait_stopped() {
+	[ -n "$dry" ] && return 0
+	waited=0
+	while [ "$waited" -lt 10 ] &&
+		ubus call service list "{\"name\":\"$1\"}" 2>/dev/null | grep -q '"running": true'; do
+		sleep 1
+		waited=$((waited + 1))
+	done
+	return 0
+}
+
+# Whether procd runs the services: OpenWrt's init scripts source
+# /etc/rc.common and answer `enable`, `disable` and `enabled` themselves, and
+# there is no update-rc.d. Asked after systemd, which never has rc.common.
+procd_runs() {
+	[ ! -d /run/systemd/system ] && [ -f /etc/rc.common ] && command -v ubus >/dev/null 2>&1
+}
+
 # Stopped, and kept from starting at the next boot. **The stop alone was all
 # this did on sysvinit**, so the manager came back at the next boot beside
 # netcfgd -- while the postinst said it had been disabled. `update-rc.d
@@ -380,7 +428,11 @@ openrc_runs() {
 sysv_down() {
 	for script in $(script_of "$1"); do
 		[ -x "/etc/init.d/$script" ] || continue
-		if openrc_runs; then
+		if procd_runs; then
+			run "/etc/init.d/$script" stop
+			[ -n "$holding" ] || run "/etc/init.d/$script" disable
+			procd_wait_stopped "$script"
+		elif openrc_runs; then
 			run rc-service "$script" stop
 			run rc-update del "$script" default
 		else
@@ -399,7 +451,10 @@ sysv_down() {
 sysv_up() {
 	for script in $(script_of "$1"); do
 		[ -x "/etc/init.d/$script" ] || continue
-		if openrc_runs; then
+		if procd_runs; then
+			[ -n "$holding" ] || run "/etc/init.d/$script" enable
+			run "/etc/init.d/$script" start
+		elif openrc_runs; then
 			run rc-update add "$script" default
 			run rc-service "$script" start
 		else
@@ -904,6 +959,58 @@ warn_about_netplan() {
 # one piece of state that has to outlive the stop.
 netcfgd_clients=$(netcfgd_dhcpcd_clients)
 
+# The manager this machine runs now, other than `$1`: the first whose init
+# script is enabled. Asked of procd's scripts only, which answer `enabled`.
+enabled_manager_other_than() {
+	for manager in $managers; do
+		[ "$manager" = "$1" ] && continue
+		for script in $(script_of "$manager"); do
+			if [ -x "/etc/init.d/$script" ] && "/etc/init.d/$script" enabled 2>/dev/null; then
+				echo "$manager"
+				return 0
+			fi
+		done
+	done
+	return 0
+}
+
+# Make a held switch stick: the old manager disabled, the new one enabled.
+keep_switch() {
+	previous=$1
+	selected=$2
+	for script in $(script_of "$previous"); do
+		[ -x "/etc/init.d/$script" ] && run "/etc/init.d/$script" disable
+	done
+	for script in $(script_of "$selected"); do
+		if [ -x "/etc/init.d/$script" ]; then
+			run "/etc/init.d/$script" enable
+			break
+		fi
+	done
+}
+
+if [ "$target" = confirm ]; then
+	if [ ! -f "$pending" ]; then
+		say "no switch is waiting to be confirmed"
+		exit 1
+	fi
+	read -r previous selected watcher < "$pending" || true
+	run rm -f "$pending"
+	# The watcher found no pending file would do nothing; stopped anyway, so
+	# a second switch inside the same window does not meet it.
+	if [ -n "${watcher:-}" ] && [ -d "/proc/$watcher" ]; then
+		run kill "$watcher" 2>/dev/null || true
+	fi
+	keep_switch "$previous" "$selected"
+	say "$selected is kept; $previous is disabled and stays down at the next boot"
+	exit 0
+fi
+if [ -f "$pending" ] && [ -z "$dry" ]; then
+	say "a switch is waiting to be confirmed ($(cat "$pending" 2>/dev/null | cut -d' ' -f1,2));"
+	say "  '$me confirm' keeps it, or it switches back when its window ends"
+	exit 1
+fi
+
 case "$target" in
 none)
 	# What `postrm` calls. Unmask everything and start nothing: the operator
@@ -950,6 +1057,11 @@ none)
 	;;
 *)
 	say "selecting $target"
+	previous=
+	if procd_runs && [ "$window" -gt 0 ] && [ -z "$dry" ]; then
+		previous=$(enabled_manager_other_than "$target")
+		[ -n "$previous" ] && holding=yes
+	fi
 
 	# 1. The rival managers. Only these are masked, because only these
 	#    compete for the interfaces.
@@ -996,6 +1108,27 @@ none)
 
 	bring_up "$target"
 	warn_about_netplan
+	if [ -n "$holding" ]; then
+		case "$0" in
+		/*) self=$0 ;;
+		*) self=$(pwd)/$0 ;;
+		esac
+		# Detached from the operator's session, which is the one most likely
+		# to be cut by the switch: HUP ignored, the terminal let go.
+		(
+			trap '' HUP
+			sleep "$window"
+			if [ -f "$pending" ]; then
+				rm -f "$pending"
+				command -v logger >/dev/null 2>&1 &&
+					logger -t netcfgd_select "no confirm within ${window}s: back to $previous"
+				"$self" "$previous" --confirm=0 --no-wait
+			fi
+		) < /dev/null > /dev/null 2>&1 &
+		echo "$previous $target $!" > "$pending"
+		say "$target runs now; $previous is stopped and still enabled"
+		say "  '$me confirm' within ${window}s keeps $target, or $previous comes back"
+	fi
 	# **The announcement is now conditional on the network existing**, which
 	# is the whole of what a person means by "did the switch work". The same
 	# reasoning as the "no binary renamed" line below, applied to the sentence

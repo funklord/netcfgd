@@ -12737,6 +12737,42 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.874 A router hands its network to netcfgd, held until confirmed
+
+The aim is to take over cleanly from the manager a machine has, on procd as
+on the other three, and on a router the switcher could not: it knew no
+netifd and no procd, the OpenWrt packages did not ship it, and it undoes
+nothing when the new manager brings up no network -- "nothing here has been
+undone" -- which on a machine with a console is a message and on a router
+with none is a lockout. 10.746 rejected taking netifd down on install for
+that reason, and left which manager a router keeps to its operator.
+
+So on procd, `netcfgd_select.sh netcfgd` is held, as commit-confirm holds an
+apply (0163): netifd is stopped and left enabled, netcfgd started and not
+enabled, and the switch recorded in `/var/run/netcfgd-select.pending`, on
+tmpfs. `netcfgd_select.sh confirm` disables netifd and enables netcfgd;
+without it, a watcher started with the switch -- HUP ignored, the terminal let
+go, so the session a switch cuts does not take it along -- switches back when
+the window ends, 120 s by default, `--confirm=N` to change, `--confirm=0`
+for a switch made at once. A reboot inside the window comes up on netifd,
+since nothing was disabled. A second switch while one waits is refused. The
+other rc systems are unchanged: their machines have a console.
+
+`netifd` is a manager the switcher knows, as `/etc/init.d/network`, stood
+down ahead of ifupdown, whose sweep takes every udhcpc not netcfgd's and on a
+router would take netifd's own while netifd still ran. **procd's `stop`
+returns before the process has gone**, measured: netifd still ran when the
+switcher went on to start netcfgd, which reads a live netifd as holding its
+interfaces. So on procd it waits, up to ten seconds, for procd to list the
+service as not running.
+
+`make hull-openwrt-select`, on the 128 MB OpenWrt 25.12 vm with stock netifd:
+the held switch, a second switch refused, the window ending unconfirmed with
+netifd back and netcfgd gone and nothing disabled, a confirmed switch that
+outlasts its window, and the switch back. `tests/live/select.sh` (the
+systemd paths, 50 checks) and the select gate pass unchanged. With the
+watcher's switch-back made a no-op, the unconfirmed window goes red.
+
 ## 10.873 `ncfg` waits for a daemon that is starting
 
 Asked in the seconds after the daemon starts, before its node is open
