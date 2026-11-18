@@ -58,6 +58,12 @@ chmod 755 "$work/root/etc/init.d/netcfgd"
 mkdir -p "$work/root/usr/libexec/netcfgd"
 cp "$here/packaging/hooks/ipsec-updown" "$work/root/usr/libexec/netcfgd/ipsec-updown"
 chmod 755 "$work/root/usr/libexec/netcfgd/ipsec-updown"
+# Every feature, commented, in the directory being configured (constraint 1's
+# note): a router set up from its console has no network to look anything up
+# with. About 31 kB on the overlay, beside a 3.7 MB program. netcfgd never
+# reads it -- the loader takes `netcfgd.conf` and `conf.d/*.conf` by name.
+cp "$here/doc/netcfgd.conf.example" "$work/root/etc/netcfgd/netcfgd.conf.example"
+chmod 644 "$work/root/etc/netcfgd/netcfgd.conf.example"
 # The same list `tool/ipk.sh` writes, for its reason (10.753): a firmware image
 # holds no netcfgd, and "keep settings" keeps only what is named.
 cat > "$work/root/lib/upgrade/keep.d/netcfgd" <<'KEEP'

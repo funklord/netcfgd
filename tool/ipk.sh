@@ -43,6 +43,12 @@ chmod 755 "$work/data/etc/init.d/netcfgd"
 mkdir -p "$work/data/usr/libexec/netcfgd"
 cp "$here/packaging/hooks/ipsec-updown" "$work/data/usr/libexec/netcfgd/ipsec-updown"
 chmod 755 "$work/data/usr/libexec/netcfgd/ipsec-updown"
+# Every feature, commented, in the directory being configured (constraint 1's
+# note): a router set up from its console has no network to look anything up
+# with. About 31 kB on the overlay, beside a 3.7 MB program. netcfgd never
+# reads it -- the loader takes `netcfgd.conf` and `conf.d/*.conf` by name.
+cp "$here/doc/netcfgd.conf.example" "$work/data/etc/netcfgd/netcfgd.conf.example"
+chmod 644 "$work/data/etc/netcfgd/netcfgd.conf.example"
 # **What `sysupgrade` carries over, and the program is in it on purpose** (project.md
 # 10.753). A firmware image holds no netcfgd and "keep settings" keeps only what is
 # named, so a router whose port was handed to netcfgd came back with netifd no longer
