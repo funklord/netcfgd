@@ -812,8 +812,10 @@ Where charon runs the updown as root, leave the key out: Debian's does
 loads `conf.d` as Alpine's does, is a systemd unit only; a Debian without
 systemd has no script that starts it. OpenWrt's `swanctl` service loads
 `conf.d` as well, beside a connection it writes from UCI, whose `if_id` and
-`updown` options are these same lines; its charon carries no account to
-switch to either (10.870).
+`updown` options are these same lines; its charon stays root too. Install
+`strongswan-minimal strongswan-swanctl strongswan-mod-kdf` there: without
+`kdf`, which minimal does not pull in on 25.12, IKE fails "key derivation
+failed" (10.870, 10.872 -- run under procd in `make hull-openwrt-ipsec`).
 
 Measured end to end in Alpine 3.21 with strongSwan 5.9.14 and a pre-shared key
 (`tests/ipsec/e2e.sh`), and with the server proven by a certificate and the

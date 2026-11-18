@@ -12737,6 +12737,47 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.872 An IPsec tunnel runs on OpenWrt 25.12 under procd
+
+`make hull-openwrt-ipsec`: the router is the guest's root namespace on
+`hull-openwrt`'s image, with netcfgd's package and OpenWrt's own strongSwan
+6.0.7, each under procd, and the far end a second charon in a network
+namespace. The connection is an operator's `conf.d` file naming the hook the
+package ships, with no `report_writer`. All twelve checks hold: OpenWrt's
+`swanctl` service loads the file, its charon is uid 0, netcfgd makes ipsec0
+with the if_id, `ncfg tunnel up` brings the child up, the hook writes the
+report and the daemon puts `10.98.0.1/32` and `10.99.0.0/24` on ipsec0 by
+itself, a ping is answered and counted leaving by ipsec0, and `ncfg tunnel
+down` takes the address away.
+
+What getting there found, each worth knowing on a router:
+
+- **The OpenWrt packages did not carry the hook** (`59b0dd35`): they are
+  built by `tool/openwrt_apk.sh` and `tool/ipk.sh`, not `make install`, so a
+  router following doc/first-run.md section 11 named a command that was not
+  there. Nor the example configuration (`3969461a`).
+- **`strongswan-minimal` is not enough on 25.12.** charon needs its SHA-1
+  hasher to start at all, and IKE fails `KDF_PRF with PRF_HMAC_SHA2_256 not
+  supported` -- key derivation failed -- without `strongswan-mod-kdf`, which
+  strongSwan 6 made a plugin and minimal does not pull in. An operator
+  installs `strongswan-minimal strongswan-swanctl strongswan-mod-kdf` (the
+  rig's list is minimal's, less `stroke`, plus vici and kdf).
+- **The daemon answers `ncfg` a few seconds after procd starts it** on a
+  machine this small, while its node opens; asked earlier, `ncfg` cannot
+  reach it. The rig waits for `ncfg status`, as a boot-time caller has to.
+
+What the rig is not: strongSwan's files are unpacked with `apk extract`,
+because OpenWrt's `strongswan` package depends on kmod packages for a kernel
+the vm does not run -- the host's IPsec modules go in instead, as
+`hull-openwrt`'s dummy does. The tunnel is split, so the vm's own uplink is
+never routed into it; the full tunnel and the peer pin are
+`tests/ipsec/e2e.sh`'s, in Alpine. 256 MB, not 128, for the far end's charon.
+
+The control: the package built with an empty script for the hook leaves the
+report unwritten, and the address, the route, the ping and the count on
+ipsec0 go red -- four of twelve; "the virtual IP goes" passes there only
+because it never came.
+
 ## 10.871 The window brings an IPsec tunnel up
 
 `ncfg tunnel up|down` (10.864) had no control in the GUI, so a person who
@@ -12797,10 +12838,10 @@ tree's apk 3: `swanctl` is built with `/etc/swanctl` as its directory, and
 `swanctl` writes from UCI (`/etc/config/ipsec`), whose options include
 `if_id` and `updown`; `--load-all` reads both, so an operator's `conf.d` file
 works as 0325 says, and UCI is a second way to write the same three lines.
-**Its charon should stay root**: the literal `ipsec` that Alpine's charon
-carries for the account it switches to (checked in Alpine's binary, the
-control) is in neither OpenWrt's `charon` nor its `libcharon`, and procd
-names no user. That is read from the binaries, not seen running.
+**Its charon stays root**, seen running since (10.872): uid 0 under procd.
+The binaries had said so first -- the literal `ipsec` that Alpine's charon
+carries for the account it switches to is in neither OpenWrt's `charon` nor
+its `libcharon`.
 
 ## 10.869 `loop_test`'s roam check waits ten rounds, not two
 

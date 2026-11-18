@@ -2796,6 +2796,67 @@ hull-openwrt:
 	sed 's/^/openwrt: /' tests/hull/openwrt/verdict/openwrt; \
 	grep -q '^VERDICT ok' tests/hull/openwrt/verdict/openwrt
 
+# An IPsec tunnel on OpenWrt 25.12, with OpenWrt's own strongSwan under procd
+# (project.md 10.872), on hull-openwrt's image. Not in `hull`, because it
+# fetches: OpenWrt's strongSwan, ip-full and unshare, from the release's feeds,
+# once, into tests/hull/openwrt-ipsec/apk/, saying so. The host's IPsec modules
+# go in decompressed, in dependency order, as hull-openwrt's dummy does. The
+# plugins are strongswan-minimal's (less stroke) and vici: charon will not
+# start without minimal's SHA-1 hasher, nor derive IKE keys without kdf
+# (strongSwan 6 moved it to a plugin, which minimal does not pull in) -- both
+# measured.
+OPENWRT_IPSEC_FEED    ?= https://downloads.openwrt.org/releases/25.12.0
+OPENWRT_IPSEC_MODULES := xfrm_algo xfrm_user tunnel4 tunnel6 xfrm6_tunnel xfrm_interface \
+                         esp4 authenc crypto_null geniv echainiv seqiv veth
+OPENWRT_IPSEC_SWAN    := strongswan strongswan-charon strongswan-swanctl strongswan-mod-vici \
+                         strongswan-mod-updown strongswan-mod-kernel-netlink \
+                         strongswan-mod-socket-default strongswan-mod-random \
+                         strongswan-mod-aes strongswan-mod-sha1 strongswan-mod-sha2 \
+                         strongswan-mod-hmac strongswan-mod-gmp strongswan-mod-mgf1 \
+                         strongswan-mod-pubkey strongswan-mod-x509 strongswan-mod-xcbc strongswan-mod-kdf libgmp10
+hull-openwrt-ipsec:
+	@$(MAKE) --no-print-directory -C c netcfgd-static
+	@$(MAKE) --no-print-directory $(APK)
+	@APK=$(APK) sh tool/openwrt_apk.sh c/netcfgd-static x86_64 tests/hull/openwrt-ipsec/netcfgd.apk
+	@rig=tests/hull/openwrt-ipsec; mkdir -p $$rig/module; : > $$rig/module/order; \
+	for name in $(OPENWRT_IPSEC_MODULES); do \
+		module=$$(/sbin/modinfo -F filename $$name 2>/dev/null); \
+		case "$$module" in \
+		"" | "(builtin)") echo "openwrt-ipsec: this kernel has no $$name module to hand the guest" >&2; exit 1 ;; \
+		*.xz) xz -dc "$$module" > $$rig/module/$$name.ko ;; \
+		*.zst) zstd -qdc "$$module" > $$rig/module/$$name.ko ;; \
+		*) cp "$$module" $$rig/module/$$name.ko ;; \
+		esac; \
+		echo $$name >> $$rig/module/order; \
+	done
+	@rig=tests/hull/openwrt-ipsec; feeds="-X $(OPENWRT_IPSEC_FEED)/packages/x86_64/packages/packages.adb \
+		-X $(OPENWRT_IPSEC_FEED)/packages/x86_64/base/packages.adb \
+		-X $(OPENWRT_IPSEC_FEED)/targets/x86/64/packages/packages.adb"; \
+	if [ ! -f $$rig/apk/fetched ]; then \
+		echo "openwrt-ipsec: fetching OpenWrt's strongSwan, ip-full and unshare from $(OPENWRT_IPSEC_FEED)"; \
+		rm -f $$rig/apk/tools/*.apk $$rig/apk/swan/*.apk; mkdir -p $$rig/apk/tools $$rig/apk/swan; \
+		( cd $$rig/apk/tools && timeout 300 $(abspath $(APK)) --allow-untrusted --no-cache $$feeds \
+			fetch --recursive ip-full unshare >/dev/null ) || \
+			{ echo "openwrt-ipsec: could not fetch ip-full and unshare" >&2; exit 1; }; \
+		for package in $(OPENWRT_IPSEC_SWAN); do \
+			( cd $$rig/apk/swan && timeout 120 $(abspath $(APK)) --allow-untrusted --no-cache $$feeds \
+				fetch $$package >/dev/null ) || \
+				{ echo "openwrt-ipsec: could not fetch $$package" >&2; exit 1; }; \
+		done; \
+		ls $$rig/apk/swan $$rig/apk/tools > $$rig/apk/fetched; \
+	fi
+	@$(call hull_says,netcfgd/openwrt)
+	@$(call hull_image,openwrt)
+	@rm -f tests/hull/openwrt-ipsec/verdict/openwrt-ipsec
+	@mkdir -p tests/hull/openwrt-ipsec/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openwrt-ipsec/hull.conf || true
+	@if [ ! -f tests/hull/openwrt-ipsec/verdict/openwrt-ipsec ]; then \
+		echo "openwrt-ipsec: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/openwrt-ipsec: /' tests/hull/openwrt-ipsec/verdict/openwrt-ipsec; \
+	grep -q '^VERDICT ok' tests/hull/openwrt-ipsec/verdict/openwrt-ipsec
+
 # The C suite as big-endian 32-bit MIPS, under qemu-user in a guest that carries the
 # compiler (10.742). Hands the guest the host's binfmt_misc, as hull-openwrt does its
 # dummy. Not in `hull`, at about fifteen minutes. The payload copies the tree, so its
@@ -3043,7 +3104,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-upnp hull-openwrt hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one
