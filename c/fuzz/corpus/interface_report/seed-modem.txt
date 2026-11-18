@@ -1,0 +1,7 @@
+address=100.64.1.2/30
+gateway=100.64.1.1
+route=default
+route=10.0.0.0/8 via 100.64.1.1
+search=example.net
+iccid=8946000000000000001
+sim=1

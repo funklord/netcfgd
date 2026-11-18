@@ -1,0 +1,4 @@
+ddault
+route=. via =lt
+route=%1>.0/4 via 00
+route=1 via '

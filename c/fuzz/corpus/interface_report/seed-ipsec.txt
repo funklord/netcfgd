@@ -1,0 +1,5 @@
+# ipsec0, child net up
+address=10.98.0.1/32
+route=10.99.0.0/24
+peer=192.0.2.1
+dns=10.99.0.53

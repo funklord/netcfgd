@@ -122,9 +122,14 @@ static char *trim(char *text)
  */
 static int parse_route(char *value, ncfg_reported_route_t *out)
 {
+	/* The blanks `trim` takes off a value's ends, `\r` among them, so a
+	 * report written with CRLF line ends -- or a stray `\r` between words --
+	 * splits the same way. Splitting on space and tab alone kept a `\r` inside
+	 * the destination, found by fuzz/interface_report. */
+	static const char blanks[] = " \t\r";
 	char *save = NULL;
-	char *destination = strtok_r(value, " \t", &save);
-	char *word = destination ? strtok_r(NULL, " \t", &save) : NULL;
+	char *destination = strtok_r(value, blanks, &save);
+	char *word = destination ? strtok_r(NULL, blanks, &save) : NULL;
 	char *gateway = NULL;
 
 	memset(out, 0, sizeof(*out));
@@ -135,12 +140,12 @@ static int parse_route(char *value, ncfg_reported_route_t *out)
 		if (strcmp(word, "via") != 0) {
 			return 0;
 		}
-		gateway = strtok_r(NULL, " \t", &save);
+		gateway = strtok_r(NULL, blanks, &save);
 		if (!gateway) {
 			return 0;
 		}
 		/* Anything after the gateway is a word this contract does not define. */
-		if (strtok_r(NULL, " \t", &save)) {
+		if (strtok_r(NULL, blanks, &save)) {
 			return 0;
 		}
 	}

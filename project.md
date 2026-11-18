@@ -12761,6 +12761,16 @@ files root's own directories hold, where a link -- a `conf.d` file linked in
 fragment under an alarm: only the fragment is read; with the plain open back,
 the test dies on its alarm.
 
+**And what the account writes inside a file is fuzzed now**:
+`fuzz/interface_report`, the fourteenth target, asserts every kept value is a
+string with no newline and no blank at either end, and every route has a
+destination. Its first two minutes found the reader inconsistent with itself:
+`trim` treats `\r` as a blank and `parse_route` split only on space and tab,
+so a `\r` between a route's words stayed inside the destination -- a route the
+planner would then refuse, so nothing worse, but a CRLF report losing routes
+for it. Routes split on `\r` too; the input is in the corpus as
+`regress-route-cr.txt`, and the next two minutes, 1.9 million runs, were clean.
+
 The other two places netcfgd hands something to another account were read for
 the same shape and already hold: a caller's document is created `O_EXCL |
 O_NOFOLLOW` in a directory checked to be the caller's alone, and the control

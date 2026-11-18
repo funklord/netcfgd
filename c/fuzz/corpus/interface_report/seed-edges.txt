@@ -1,0 +1,7 @@
+  address = 10.1.1.1/32 
+route=1.2.3.0/24 via
+route=1.2.3.0/24 metric 5
+=x
+key
+
+#dns=8.8.8.8
