@@ -37,6 +37,12 @@ chmod 755 "$work/data/usr/sbin/netcfgd"
 ln -s ../sbin/netcfgd "$work/data/usr/bin/ncfg"
 cp "$here/packaging/procd/netcfgd" "$work/data/etc/init.d/netcfgd"
 chmod 755 "$work/data/etc/init.d/netcfgd"
+# strongSwan's updown command for an IPsec tunnel's XFRM interface (0324), at
+# the path `make install` gives it and doc/first-run.md names: a router's
+# swanctl connection says `updown = /usr/libexec/netcfgd/ipsec-updown ipsec0`.
+mkdir -p "$work/data/usr/libexec/netcfgd"
+cp "$here/packaging/hooks/ipsec-updown" "$work/data/usr/libexec/netcfgd/ipsec-updown"
+chmod 755 "$work/data/usr/libexec/netcfgd/ipsec-updown"
 # **What `sysupgrade` carries over, and the program is in it on purpose** (project.md
 # 10.753). A firmware image holds no netcfgd and "keep settings" keeps only what is
 # named, so a router whose port was handed to netcfgd came back with netifd no longer
@@ -48,6 +54,7 @@ cat > "$work/data/lib/upgrade/keep.d/netcfgd" <<'KEEP'
 /root/.local/share/fuzznet/
 /usr/sbin/netcfgd
 /usr/bin/ncfg
+/usr/libexec/netcfgd/
 /etc/init.d/netcfgd
 /etc/rc.d/S21netcfgd
 /etc/rc.d/K89netcfgd
