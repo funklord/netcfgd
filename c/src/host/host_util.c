@@ -205,19 +205,15 @@ int ncfg_host_write_atomically(const char *path, const void *bytes, size_t lengt
 	return 1;
 }
 
-char *ncfg_host_read_file(const char *path, size_t *length_out, size_t ceiling)
+/* Read an open descriptor whole, up to `ceiling`, and close it. */
+static char *read_whole(int fd, size_t *length_out, size_t ceiling)
 {
-	int fd;
 	char *body = NULL;
 	size_t length = 0;
 	size_t capacity = 0;
 
 	if (length_out) {
 		*length_out = 0;
-	}
-	fd = open(path, O_RDONLY);
-	if (fd < 0) {
-		return NULL;
 	}
 	for (;;) {
 		ssize_t got;
@@ -284,6 +280,53 @@ char *ncfg_host_read_file(const char *path, size_t *length_out, size_t ceiling)
 		*length_out = length;
 	}
 	return body;
+}
+
+char *ncfg_host_read_file(const char *path, size_t *length_out, size_t ceiling)
+{
+	int fd;
+
+	if (length_out) {
+		*length_out = 0;
+	}
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		return NULL;
+	}
+	return read_whole(fd, length_out, ceiling);
+}
+
+/*
+ * **A file somebody else may have put there**: not followed if it is a link,
+ * not waited on if it is a FIFO, and read only if it is a regular file.
+ *
+ * For directories netcfgd hands to another account -- a tunnel's report
+ * directory under `report_writer` (10.863), Alpine's charon running as
+ * `ipsec`. Opened plainly, a FIFO there blocked the reader for good, and the
+ * daemon reads reports on every observation, so the account a network-facing
+ * daemon drops to could stop netcfgd; and a link there pointed root's read at
+ * any file on the machine (10.875). `O_NONBLOCK` is what keeps the open of a
+ * FIFO from waiting for a writer; the `fstat` then refuses it, and a device
+ * with it.
+ */
+char *ncfg_host_read_regular(const char *path, size_t *length_out, size_t ceiling)
+{
+	struct stat what;
+	int fd;
+
+	if (length_out) {
+		*length_out = 0;
+	}
+	fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+	if (fd < 0) {
+		return NULL;
+	}
+	if (fstat(fd, &what) != 0 || !S_ISREG(what.st_mode)) {
+		(void)close(fd);
+		errno = EINVAL;
+		return NULL;
+	}
+	return read_whole(fd, length_out, ceiling);
 }
 
 int ncfg_host_strings_add_bytes(char ***items, size_t *count, size_t *capacity,

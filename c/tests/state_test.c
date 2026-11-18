@@ -954,6 +954,49 @@ static void two_clients_on_one_interface_keep_both_their_answers(const char *run
 	free(fragments);
 }
 
+/*
+ * **A report directory may be another account's** (`report_writer`, 10.863),
+ * so what that account puts there must not stop the reader or send it
+ * elsewhere (10.875). A FIFO opened plainly blocked until a writer came -- for
+ * good, and the daemon reads reports on every observation -- and a link was
+ * followed wherever it pointed. The alarm is what turns the block back into a
+ * failure here rather than a hung suite.
+ */
+static void a_fifo_or_a_link_in_a_report_directory_is_skipped(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_observed_report_t *reports = NULL;
+	size_t count = 0;
+	char *fragments = strdup(join(run_dir, "reported.d/ipsec0"));
+	char *elsewhere = strdup(join(run_dir, "elsewhere"));
+	int read_it;
+
+	check(mkdir(join(run_dir, "reported.d"), 0755) == 0 && mkdir(fragments, 0755) == 0,
+	    "a tunnel's report directory");
+	(void)testdir_write(join(fragments, "net"), "dns=1.1.1.1\n", 12u);
+	(void)testdir_write(elsewhere, "dns=6.6.6.6\n", 12u);
+	check(mkfifo(join(fragments, "fifo"), 0644) == 0 &&
+	    symlink(elsewhere, join(fragments, "link")) == 0,
+	    "  holding a FIFO and a link its writer placed beside a fragment");
+	(void)alarm(10);
+	read_it = ncfg_state_read_reports(run_dir, &reports, &count, message, sizeof(message));
+	(void)alarm(0);
+	check(read_it && count == 1u, "the reports are read, not waited on");
+	check(count == 1u && reports[0].nameserver_count == 1u &&
+	    strcmp(reports[0].nameservers[0], "1.1.1.1") == 0,
+	    "  and only the regular file is: the FIFO and the link are skipped");
+	ncfg_state_reports_free(reports, count);
+
+	(void)unlink(join(fragments, "net"));
+	(void)unlink(join(fragments, "fifo"));
+	(void)unlink(join(fragments, "link"));
+	(void)unlink(elsewhere);
+	(void)rmdir(fragments);
+	(void)rmdir(join(run_dir, "reported.d"));
+	free(fragments);
+	free(elsewhere);
+}
+
 static void the_delegations_a_client_reported(const char *run_dir)
 {
 	char message[NCFG_ERROR_MAX] = "";
@@ -1193,6 +1236,7 @@ int main(void)
 	the_observation_is_written_whole(run_dir);
 	the_report_format_is_the_contract();
 	two_clients_on_one_interface_keep_both_their_answers(run_dir);
+	a_fifo_or_a_link_in_a_report_directory_is_skipped(run_dir);
 	the_delegations_a_client_reported(run_dir);
 	testdir_remove(run_dir);
 

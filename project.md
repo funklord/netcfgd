@@ -12737,6 +12737,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.875 A report directory another account owns is read as untrusted
+
+`report_writer` (10.863) gives a tunnel's report directory to the account a
+daemon such as charon drops to -- Alpine's `ipsec` -- and root netcfgd reads
+what is in it on every observation. It read with a plain `open`, so two things
+that account could place there reached root:
+
+- **a FIFO blocked the reader for good**: reproduced, `ncfg plan` over a run
+  directory holding one in `reported.d/ipsec0/` was still waiting when a
+  five-second timeout killed it, and the daemon reads the same files. The
+  account a network-facing IKE daemon runs as could stop netcfgd.
+- **a link was followed**, pointing root's read at any file on the machine;
+  what the reader then keeps is only `address=`, `dns=` and the other
+  report keys, but the read itself is the boundary crossed.
+
+Report files are read with `ncfg_host_read_regular` now: `O_NOFOLLOW` and
+`O_NONBLOCK` on the open, so neither a link nor a FIFO's missing writer is
+waited on, then `fstat`, and nothing but a regular file is read; anything else
+is skipped like an unreadable file. `ncfg_host_read_file` is unchanged for the
+files root's own directories hold, where a link -- a `conf.d` file linked in
+-- is ordinary. `c/tests/state_test.c` places a FIFO and a link beside a real
+fragment under an alarm: only the fragment is read; with the plain open back,
+the test dies on its alarm.
+
+The other two places netcfgd hands something to another account were read for
+the same shape and already hold: a caller's document is created `O_EXCL |
+O_NOFOLLOW` in a directory checked to be the caller's alone, and the control
+socket gets only its group.
+
 ## 10.874 A router hands its network to netcfgd, held until confirmed
 
 The aim is to take over cleanly from the manager a machine has, on procd as

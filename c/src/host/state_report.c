@@ -324,12 +324,15 @@ void ncfg_state_reports_free(ncfg_observed_report_t *reports, size_t count)
 
 /* ------------------------------------------------------------- the reading */
 
-/* Append one file's contents to what an interface has reported. Unreadable is
- * skipped rather than fatal. */
+/* Append one file's contents to what an interface has reported. Unreadable --
+ * or not a regular file -- is skipped rather than fatal. */
 static int gather_file(gathered_t *into, const char *path)
 {
 	size_t length = 0;
-	char *body = ncfg_host_read_file(path, &length, REPORT_MAX);
+	/* Regular files only: a report directory may be another account's
+	 * (`report_writer`), and a FIFO or a link it placed there must neither
+	 * stop this reader nor point it elsewhere (10.875). */
+	char *body = ncfg_host_read_regular(path, &length, REPORT_MAX);
 	int ok;
 
 	if (!body) {

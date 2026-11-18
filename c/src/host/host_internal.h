@@ -47,6 +47,9 @@ int ncfg_host_write_atomically(const char *path, const void *bytes, size_t lengt
  * looked at" and a boolean cannot carry that.
  */
 char *ncfg_host_read_file(const char *path, size_t *length_out, size_t ceiling);
+/* The same for a file another account may have placed: no link followed, no
+ * FIFO waited on, nothing but a regular file read. */
+char *ncfg_host_read_regular(const char *path, size_t *length_out, size_t ceiling);
 
 /* Append a copy of `text` to a growable array of strings. Returns 1, or 0 with
  * the array unchanged. */
