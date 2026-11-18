@@ -41,7 +41,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 const char *ncfg_cli_socket_path(const char *run_dir, char *out, size_t out_size)
@@ -351,18 +354,127 @@ static int ask_elsewhere(const ncfg_proto_request_t *request, ncfg_proto_message
 	return read_it;
 }
 
+/*
+ * Whether a daemon holds `run_dir`'s instance lock (ncfg_main_only_one_here):
+ * one is running there, whether or not it answers yet.
+ *
+ * **Read from /proc/locks rather than by trying the lock.** A shared lock
+ * taken to find out, however briefly, is one a daemon starting at that moment
+ * meets with its non-blocking exclusive one -- and it refuses to start,
+ * "another netcfgd is running". So this looks and touches nothing: a FLOCK
+ * WRITE lock on the lock file's device and inode. Anything unreadable is "no",
+ * which is the answer ncfg gave before it asked.
+ */
+static int daemon_holds_lock(const char *run_dir)
+{
+	char        path[NCFG_CLI_TEXT_MAX + 16u];
+	char        line[256];
+	char        want[64];
+	struct stat lock;
+	FILE       *locks;
+	int         held = 0;
+
+	if (snprintf(path, sizeof(path), "%s/netcfgd.lock", run_dir) >= (int)sizeof(path) ||
+	    stat(path, &lock) != 0) {
+		return 0;
+	}
+	(void)snprintf(want, sizeof(want), "%02x:%02x:%llu", major(lock.st_dev), minor(lock.st_dev),
+	    (unsigned long long)lock.st_ino);
+	locks = fopen("/proc/locks", "re");
+	if (!locks) {
+		return 0;
+	}
+	while (!held && fgets(line, sizeof(line), locks)) {
+		char kind[16], advice[16], mode[16], where[64];
+
+		if (sscanf(line, "%*s %15s %15s %15s %*s %63s", kind, advice, mode, where) == 4 &&
+		    strcmp(kind, "FLOCK") == 0 && strcmp(mode, "WRITE") == 0 &&
+		    strcmp(where, want) == 0) {
+			held = 1;
+		}
+	}
+	(void)fclose(locks);
+	return held;
+}
+
+/*
+ * **A daemon that is starting is waited for, not reported missing.** On a
+ * machine a router's size the daemon answers a few seconds after it starts,
+ * while its node opens (project.md 10.872), and `ncfg` asked in that window
+ * said it could not reach a daemon at the control socket -- which a daemon
+ * with a node never binds -- and that the daemon "has to be running", while it
+ * was. A button script or a hotplug hook run at boot is in exactly that window.
+ *
+ * So where nothing answered and nothing ran, but the run directory's lock is
+ * held, wait up to ten seconds for the fuzznet face or the control socket to
+ * appear, and ask again. Only then: anything that may have run is never asked
+ * twice, and a run directory nobody holds fails at once, as before. Only for
+ * a request that would otherwise fail; one that can do the work itself falls
+ * back at once, as it always did (ncfg_cli_ask_if_there).
+ */
+static int ask_waiting(const char *socket_path, const ncfg_proto_request_t *request,
+    ncfg_proto_message_t *out, int *absent, char *err, size_t err_size)
+{
+	char run_dir[NCFG_CLI_TEXT_MAX];
+	char face[NCFG_CLI_TEXT_MAX + 16u];
+	int  missing = 0;
+	int  asked;
+	int  looked;
+
+	asked = ask_noting(socket_path, request, out, &missing, err, err_size);
+	if (asked || !missing || through_host ||
+	    !ncfg_fuzznet_run_dir_of(socket_path, run_dir, sizeof(run_dir)) ||
+	    !daemon_holds_lock(run_dir)) {
+		if (absent) {
+			*absent = missing;
+		}
+		return asked;
+	}
+	(void)snprintf(face, sizeof(face), "%s/fuzznet.sock", run_dir);
+	for (looked = 0; looked < 100; looked++) {
+		const struct timespec tenth = { 0, 100000000L };
+
+		if (access(face, F_OK) == 0 || access(socket_path, F_OK) == 0) {
+			break;
+		}
+		(void)nanosleep(&tenth, NULL);
+	}
+	missing = 0;
+	asked = ask_noting(socket_path, request, out, &missing, err, err_size);
+	if (!asked && missing) {
+		size_t used = strlen(err);
+
+		(void)snprintf(err + used, err_size - used,
+		    "\nnetcfgd is running on %s -- it holds netcfgd.lock -- but opened "
+		    "neither its fuzznet face nor its control socket within ten seconds",
+		    run_dir);
+	}
+	if (absent) {
+		*absent = missing;
+	}
+	return asked;
+}
+
 int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, char *err, size_t err_size)
 {
-	return ask_noting(socket_path, request, out, NULL, err, err_size);
+	return ask_waiting(socket_path, request, out, NULL, err, err_size);
 }
 
 int ncfg_cli_ask_if_there(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, int *absent, char *err, size_t err_size)
 {
-	if (absent) {
-		*absent = 0;
+	/* **Waited for only by a caller that cannot do the work itself**, which
+	 * says so by passing no `absent`. One that passes it falls back at once
+	 * where no daemon answers, so nothing fails for want of one -- and a
+	 * daemon whose fuzznet face is not in its run directory (a `--socket`
+	 * named elsewhere) is never found here at all, so a wait would cost every
+	 * such `ncfg status` ten seconds and then fall back anyway, measured in
+	 * c/tests/node_ram_host.sh. */
+	if (!absent) {
+		return ask_waiting(socket_path, request, out, NULL, err, err_size);
 	}
+	*absent = 0;
 	return ask_noting(socket_path, request, out, absent, err, err_size);
 }
 

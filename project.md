@@ -12737,6 +12737,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.873 `ncfg` waits for a daemon that is starting
+
+Asked in the seconds after the daemon starts, before its node is open
+(10.872), `ncfg` said "cannot reach the daemon at .../netcfgd.sock" -- a
+socket a daemon with a node never binds (10.738) -- and that the daemon "has
+to be running", while it was. A button script (`ncfg pair request`, 0320) or
+a hotplug hook at boot is in exactly that window.
+
+Now, where nothing answered and nothing ran but the run directory's
+`netcfgd.lock` is held, `ncfg` waits up to ten seconds for the fuzznet face
+or the control socket to appear and asks again; if neither does, it says the
+daemon is running and has opened neither. A run directory nobody holds fails
+at once, as before, and a request that may have run is never sent twice.
+
+**Only a request that would otherwise fail waits.** `ncfg status` and `plan`
+do the work themselves where no daemon answers, and they fall back at once as
+they always did. The first version waited for them too, and
+`c/tests/node_ram_host.sh` caught it: its daemon's fuzznet face is a socket
+named elsewhere, never in the run directory, so `ncfg status` there had always
+fallen back -- and now spent ten seconds first, past the test's own timeout.
+
+**Whether the lock is held is read from `/proc/locks`, not by taking it.**
+A shared lock taken to find out, however briefly, is one a daemon starting at
+that moment meets with its non-blocking exclusive lock, and it would refuse to
+start ("another netcfgd is running"). An unprivileged caller can read
+`/proc/locks` and stat the 0600 file, so the answer does not depend on who
+asks. `c/tests/ncfg_waits.sh` holds the lock with `flock(1)`: alone, `ncfg
+reload` fails at once; held with nothing opening, it fails after ten seconds
+naming the running daemon; held and then taken over by a real daemon, the
+question asked during the hold gets the daemon's answer.
+
 ## 10.872 An IPsec tunnel runs on OpenWrt 25.12 under procd
 
 `make hull-openwrt-ipsec`: the router is the guest's root namespace on
@@ -12763,8 +12794,9 @@ What getting there found, each worth knowing on a router:
   installs `strongswan-minimal strongswan-swanctl strongswan-mod-kdf` (the
   rig's list is minimal's, less `stroke`, plus vici and kdf).
 - **The daemon answers `ncfg` a few seconds after procd starts it** on a
-  machine this small, while its node opens; asked earlier, `ncfg` cannot
-  reach it. The rig waits for `ncfg status`, as a boot-time caller has to.
+  machine this small, while its node opens; asked earlier, `ncfg` reported
+  it missing. `ncfg` waits for it now (10.873); the rig still waits for
+  `ncfg status` first, so its checks do not depend on that.
 
 What the rig is not: strongSwan's files are unpacked with `apk extract`,
 because OpenWrt's `strongswan` package depends on kmod packages for a kernel

@@ -407,6 +407,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	timeout 400 sh tests/node_fleet.sh || fail=1; \
 	echo "== tests/host_user.sh"; \
 	timeout 120 sh tests/host_user.sh || fail=1; \
+	echo "== tests/ncfg_waits.sh"; \
+	timeout 90 sh tests/ncfg_waits.sh || fail=1; \
 	echo "== tests/node_remote.sh"; \
 	timeout 60 sh tests/node_remote.sh || fail=1; \
 	echo "== tests/node_second_user.sh"; \
