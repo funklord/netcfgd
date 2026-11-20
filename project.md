@@ -12747,6 +12747,28 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.882 netrescue: a gateway that drops pings is still a gateway
+
+Reachable meant a default gateway answering an echo, so under a router
+that drops pings netrescue climbed for ever on a network that worked --
+listening, forcing, rebinding -- and the listening rung would have put a
+second address, picked from what it heard, beside the port's own lease in
+the same pool. Two changes. **After an unanswered echo, a completed ARP
+entry for the gateway counts** (`ncfg_rescue_arp_resolved` over
+`/proc/net/arp`, flags `ATF_COM` and a hardware address not zero): a
+router has to answer ARP to route at all, and the echo just sent made the
+kernel ask. The report says "(by ARP; it drops pings)". **And a port with
+an IPv4 address other than the fallback is not listened on**: its network
+has already said what it is.
+
+Verified: `rescue_test`'s ARP cases (complete, incomplete, zero hardware
+address, absent); `tests/live/rescue.sh`'s phase 1b, a gateway **in a
+namespace of its own** leasing an address and ignoring echoes
+(`icmp_echo_ignore_all`), reached at rung 1 by ARP; then with its ARP off
+and the neighbour table flushed, the ladder climbs and says it is not
+listening on the port with a lease, which keeps only its lease. With
+both changes disabled the phase goes red on all three. 35 checks.
+
 ## 10.881 `ethtool`'s ring sizes are applied, on virtio-net over PCI
 
 The next fields of 10.877's shape, parsed and applied by nothing:

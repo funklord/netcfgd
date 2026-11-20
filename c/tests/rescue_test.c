@@ -451,6 +451,20 @@ static void test_mdns(void)
 	          answer, 20) == 0u, "an answer that does not fit is not sent cut");
 }
 
+static void test_arp(void)
+{
+	static const char table[] =
+	    "IP address       HW type     Flags       HW address            Mask     Device\n"
+	    "192.168.2.1      0x1         0x2         52:54:00:12:34:56     *        eno1\n"
+	    "192.168.2.7      0x1         0x0         00:00:00:00:00:00     *        eno1\n"
+	    "10.0.0.1         0x1         0x2         00:00:00:00:00:00     *        eno2\n";
+
+	check(ncfg_rescue_arp_resolved(table, ip("192.168.2.1")), "a completed ARP entry is a gateway there");
+	check(!ncfg_rescue_arp_resolved(table, ip("192.168.2.7")), "an incomplete one is not");
+	check(!ncfg_rescue_arp_resolved(table, ip("10.0.0.1")), "nor one with no hardware address");
+	check(!ncfg_rescue_arp_resolved(table, ip("192.168.2.9")), "nor one not in the table");
+}
+
 static void test_gateways(void)
 {
 	static const char table[] =
@@ -486,6 +500,7 @@ int main(void)
 	test_rebind(root);
 	test_kmsg();
 	test_mdns();
+	test_arp();
 	test_render_learned();
 	testdir_remove(root);
 	check(!testdir_exists(root), "the test's directory is gone");

@@ -396,10 +396,25 @@ static int reachable(const rescue_options_t *options, char *said, size_t said_si
 	for (at = 0; at < count; at++) {
 		struct in_addr address;
 		char           err[NCFG_ERROR_MAX];
+		char          *arp;
+		int            resolved;
 
 		address.s_addr = gateways[at];
 		(void)inet_ntop(AF_INET, &address, said, (socklen_t)said_size);
 		if (ncfg_rescue_gateway_answers(gateways[at], 1000, err, sizeof(err))) {
+			return 1;
+		}
+		/*
+		 * **A router that drops pings still answers ARP**, and the echo
+		 * just sent made the kernel ask. Without this a network that works
+		 * reads as one that does not, and the ladder climbs on it for ever
+		 * -- listening, forcing, rebinding -- under a router that is there.
+		 */
+		arp = read_text("/proc/net/arp");
+		resolved = arp && ncfg_rescue_arp_resolved(arp, gateways[at]);
+		free(arp);
+		if (resolved) {
+			(void)snprintf(said + strlen(said), said_size - strlen(said), " (by ARP; it drops pings)");
 			return 1;
 		}
 		(void)snprintf(why, why_size, "%s %.180s", said, err[0] ? err : "does not answer");
@@ -469,6 +484,34 @@ static void apply_learned(ncfg_rescue_ports_t *ports)
 	learned_count = kept;
 }
 
+/* Whether `port` holds an IPv4 address other than the fallback. */
+static int has_own_address(const char *port, const char *fallback)
+{
+	struct ifaddrs *all, *at;
+	char            fallback_address[INET_ADDRSTRLEN] = "";
+	int             found = 0;
+
+	if (fallback) {
+		(void)snprintf(fallback_address, sizeof(fallback_address), "%.*s",
+		    (int)strcspn(fallback, "/"), fallback);
+	}
+	if (getifaddrs(&all) != 0) {
+		return 0;
+	}
+	for (at = all; at && !found; at = at->ifa_next) {
+		char text[INET_ADDRSTRLEN];
+
+		if (!at->ifa_addr || at->ifa_addr->sa_family != AF_INET || strcmp(at->ifa_name, port) != 0) {
+			continue;
+		}
+		(void)inet_ntop(AF_INET, &((const struct sockaddr_in *)(const void *)at->ifa_addr)->sin_addr,
+		    text, sizeof(text));
+		found = strcmp(text, fallback_address) != 0;
+	}
+	freeifaddrs(all);
+	return found;
+}
+
 /* Listen on every port with a carrier and nothing learned, and keep what
  * each says. Blocking, `--listen` seconds a port: the daemon is its own
  * process and goes on meanwhile. */
@@ -489,6 +532,13 @@ static void listen_all(const rescue_options_t *options, const ncfg_rescue_ports_
 
 		if (port->carrier != 1 || port->learned[0] != '\0' ||
 		    learned_count == NCFG_RESCUE_PORT_MAX) {
+			continue;
+		}
+		/* A port with an address of the network's own -- a lease -- is on
+		 * a network that already said what it is; a second address picked
+		 * by listening would sit beside the lease in the same pool. */
+		if (has_own_address(port->name, options->fallback)) {
+			say("not listening on %s: it has an address already", port->name);
 			continue;
 		}
 		say("listening on %s for %d s", port->name, options->listen);

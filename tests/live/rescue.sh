@@ -60,6 +60,7 @@ server=
 rescuer=
 chatter=
 neighbour=
+far=
 # The DHCP clients netcfgd started outlive netrescue on purpose -- a daemon
 # that stops leaves its backends for the next one to adopt -- so the test
 # stops them, by the pid file netcfgd wrote and only where the process still
@@ -76,7 +77,7 @@ stop_clients() {
 	done
 }
 cleanup() {
-	for pid in $rescuer $server $chatter $neighbour; do
+	for pid in $rescuer $server $chatter $neighbour $far; do
 		kill "$pid" 2>/dev/null || true
 		wait "$pid" 2>/dev/null || true
 	done
@@ -184,6 +185,72 @@ kill "$server"
 wait "$server" 2>/dev/null || true
 server=
 stop_clients
+
+# ---- 1b. A gateway that drops pings, in a namespace of its own.
+# A router that answers no echo still answers ARP, and netrescue counts it
+# reachable that way rather than climbing on a network that works. Then it
+# stops answering ARP too: the ladder climbs, and the listening rung leaves
+# the port alone, since its lease already says what network it is on.
+if command -v nsenter >/dev/null 2>&1; then
+	ip link add wan type veth peer name far0
+	mkdir -p "$work/sys1b/wan"
+	printf '1\n' > "$work/sys1b/wan/type"
+	printf '1\n' > "$work/sys1b/wan/carrier"
+	ln -s ../../devices/fake "$work/sys1b/wan/device"
+	unshare --net -- sleep 300 &
+	far=$!
+	waited=0
+	while [ "$(readlink /proc/$far/ns/net 2>/dev/null)" = "$(readlink /proc/$$/ns/net)" ] &&
+	    [ "$waited" -lt 50 ]; do
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	ip link set far0 netns "$far"
+	nsenter -t "$far" -n sh -c 'ip link set lo up && ip link set far0 up &&
+		ip addr add 10.48.0.1/24 dev far0 &&
+		echo 1 > /proc/sys/net/ipv4/icmp_echo_ignore_all'
+	printf '%s\n' "start 10.48.0.20" "end 10.48.0.20" "interface far0" \
+		"option subnet 255.255.255.0" "option router 10.48.0.1" "option lease 600" \
+		"lease_file $work/udhcpd-far.leases" "pidfile $work/udhcpd-far.pid" \
+		> "$work/udhcpd-far.conf"
+	: > "$work/udhcpd-far.leases"
+	nsenter -t "$far" -n busybox udhcpd -f "$work/udhcpd-far.conf" > "$work/udhcpd-far.log" 2>&1 &
+	server=$!
+	"$build/netrescue" --dir "$work/oneb" --sysfs "$work/sys1b" --wait 4 --listen 2 --for 60 \
+		> "$work/rescue.out" 2>&1 &
+	rescuer=$!
+	if wait_for "reachable:" 30; then
+		echo "ok   a gateway dropping pings was reached"
+	else
+		echo "FAIL a gateway dropping pings was never counted reachable"
+		sed 's/^/       /' "$work/rescue.out"
+		failures=$((failures + 1))
+	fi
+	contains "by ARP, and it says so" "$(cat "$work/rescue.out")" "gateway 10.48.0.1 (by ARP; it drops pings) answers, at rung 1"
+	nsenter -t "$far" -n ip link set far0 arp off
+	ip neigh flush dev wan
+	if wait_for "not listening on wan" 30; then
+		echo "ok   with the gateway gone it climbed, and did not listen on the port with a lease"
+	else
+		echo "FAIL it listened on a port that had a lease, or never climbed"
+		sed 's/^/       /' "$work/rescue.out"
+		failures=$((failures + 1))
+	fi
+	missing "and took no second address there" "$(ip -4 -br addr show wan)" "10.48.0.250"
+	kill "$rescuer" 2>/dev/null || true
+	wait "$rescuer" 2>/dev/null || true
+	rescuer=
+	kill "$server" 2>/dev/null || true
+	wait "$server" 2>/dev/null || true
+	server=
+	kill "$far" 2>/dev/null || true
+	wait "$far" 2>/dev/null || true
+	far=
+	stop_clients
+	ip link del wan 2>/dev/null || true
+else
+	echo "skip the pingless gateway: no nsenter"
+fi
 
 # ---- 2. Nothing answers: the fallback stays and the ladder climbs.
 ip addr flush dev cli

@@ -126,6 +126,15 @@ int ncfg_rescue_render(const ncfg_rescue_ports_t *ports, ncfg_rescue_rung_t rung
 size_t ncfg_rescue_default_gateways(const char *route_text, uint32_t *out, size_t max);
 
 /*
+ * Whether `/proc/net/arp`'s text holds a completed entry for `gateway`
+ * (network byte order): the flags say `ATF_COM` and the hardware address is
+ * not zero. A router that drops pings still answers ARP -- it has to, to
+ * route at all -- so after an echo nobody answered, this is the second way a
+ * gateway counts as there. Pure.
+ */
+int ncfg_rescue_arp_resolved(const char *arp_text, uint32_t gateway);
+
+/*
  * Whether `gateway` (network byte order) answers an ICMP echo within
  * `timeout_ms`. Needs a raw socket, so root or CAP_NET_RAW; without one the
  * answer is 0 with the reason in `err`, which is not the same as silence and

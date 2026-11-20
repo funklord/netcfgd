@@ -1011,3 +1011,28 @@ size_t ncfg_rescue_mdns_answer(const uint8_t *query, size_t length, const char *
 	out[7] = (uint8_t)answers;
 	return used;
 }
+
+int ncfg_rescue_arp_resolved(const char *arp_text, uint32_t gateway)
+{
+	const char *line = arp_text;
+
+	if (!arp_text) {
+		return 0;
+	}
+	while (line && *line != '\0') {
+		char          address[64], hardware[64], mask[64], device[64];
+		unsigned      type, flags;
+		struct in_addr value;
+		const char   *next = strchr(line, '\n');
+
+		/* IP address, HW type, Flags, HW address, Mask, Device; the header
+		 * line fails the scan. */
+		if (sscanf(line, "%63s 0x%x 0x%x %63s %63s %63s", address, &type, &flags, hardware, mask,
+		        device) == 6 && inet_pton(AF_INET, address, &value) == 1 &&
+		    value.s_addr == gateway && (flags & 0x2u) && strcmp(hardware, "00:00:00:00:00:00") != 0) {
+			return 1;
+		}
+		line = next ? next + 1 : NULL;
+	}
+	return 0;
+}
