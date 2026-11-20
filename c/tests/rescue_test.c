@@ -245,6 +245,69 @@ static void test_render(void)
 	          sizeof(text), err, sizeof(err)) && compiles(text, NULL), "no ports is an empty document");
 }
 
+static uint32_t ip(const char *text)
+{
+	struct in_addr address;
+
+	(void)inet_pton(AF_INET, text, &address);
+	return address.s_addr;
+}
+
+static void test_learn(void)
+{
+	ncfg_rescue_heard_t   heard[16];
+	ncfg_rescue_learned_t learned;
+	uint32_t              taken[1];
+	size_t                count = 0;
+
+#define HEARD(s, t) (heard[count].sender = ip(s), heard[count].target = ip(t), count++)
+	HEARD("192.168.5.10", "192.168.5.1");
+	HEARD("192.168.5.11", "192.168.5.1");
+	HEARD("192.168.5.1", "192.168.5.12");
+	HEARD("192.168.5.12", "192.168.5.1");
+	HEARD("192.168.5.250", "192.168.5.1");
+	HEARD("169.254.3.4", "169.254.3.5");
+	HEARD("169.254.3.4", "169.254.3.6");
+	HEARD("0.0.0.0", "192.168.5.249");
+#undef HEARD
+	check(ncfg_rescue_learn(heard, count, 3, NULL, 0, &learned), "a LAN's ARP is learned from");
+	check(learned.network == ip("192.168.5.0"), "its /24, link-local passed over");
+	check(learned.gateway == ip("192.168.5.1"), "the busiest address taken for the gateway");
+	check(learned.address == ip("192.168.5.248"),
+	    "and an address nobody was heard using or probing for: .250 and .249 are");
+	taken[0] = ip("192.168.5.248");
+	check(ncfg_rescue_learn(heard, count, 3, taken, 1, &learned) &&
+	    learned.address == ip("192.168.5.247"), "one a probe found in use is passed over");
+	check(!ncfg_rescue_learn(heard, count, 9, NULL, 0, &learned) && learned.network == 0u,
+	    "too little traffic says nothing");
+	check(!ncfg_rescue_learn(heard + 5, 2, 1, NULL, 0, &learned), "link-local alone says nothing");
+}
+
+static void test_render_learned(void)
+{
+	ncfg_rescue_ports_t ports;
+	ncfg_document_t    *document = NULL;
+	char                text[8192];
+	char                err[NCFG_ERROR_MAX];
+
+	memset(&ports, 0, sizeof(ports));
+	ports.count = 1;
+	(void)snprintf(ports.ports[0].name, NCFG_RESCUE_NAME_MAX, "eno1");
+	ports.ports[0].carrier = 1;
+	(void)snprintf(ports.ports[0].learned, sizeof(ports.ports[0].learned), "192.168.5.248/24");
+	(void)snprintf(ports.ports[0].gateway, sizeof(ports.ports[0].gateway), "192.168.5.1");
+	check(ncfg_rescue_render(&ports, NCFG_RESCUE_RUNG_FORCE_100, "10.0.0.250/16", 0, 0, text,
+	          sizeof(text), err, sizeof(err)) && compiles(text, &document),
+	    "a learned address renders and compiles, at a later rung too");
+	if (document) {
+		check(document->interface_count == 1u && document->interfaces[0].addressing_count == 3u,
+		    "beside DHCP and the fallback");
+		check(document->interface_count == 1u && document->interfaces[0].route_count == 1u,
+		    "with a default route through what was learned");
+		ncfg_document_free(document);
+	}
+}
+
 static void test_gateways(void)
 {
 	static const char table[] =
@@ -276,6 +339,8 @@ int main(void)
 	test_fallback();
 	test_render();
 	test_gateways();
+	test_learn();
+	test_render_learned();
 	testdir_remove(root);
 	check(!testdir_exists(root), "the test's directory is gone");
 	printf("%s\n", failures ? "rescue_test: FAILED" : "rescue_test: all passed");

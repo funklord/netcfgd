@@ -12737,6 +12737,40 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.878 netrescue listens: an unknown network learned from its ARP
+
+The proposal's rung 4, built as **rung 2**: on a port with a carrier and no
+lease, netrescue listens to ARP for `--listen` seconds (15 by default), and
+`ncfg_rescue_learn` reads the traffic -- the /24 most of it is in, and its
+busiest address as the gateway, since every host asks for its gateway and
+the gateway asks for every host. It takes the highest address in
+.200-.250 nobody was heard using or probing for (DHCP pools usually start
+low), confirms it with an RFC 5227 probe (`ncfg_rescue_address_free`:
+sender 0.0.0.0, so no cache learns an address that is not yet taken; an
+answer, or another host's probe for the same address, means taken, and the
+next is tried), and the next document carries it with a default route
+through the gateway. **Before the forcing rungs**, which are now 3 and 4,
+because it disturbs nothing and serves the ports they do not: the ones with
+a carrier. What was learned is written at every rung after, and forgotten
+when its port loses its carrier.
+
+**Listening time does not count against the rung's wait**: found by the
+live test, which reached the gateway one rung late because the four
+seconds spent listening had already used rung 2's four-second wait.
+
+A /24 is a guess -- right on almost every network a rescue meets and never
+wider than the truth; DHCP traffic would say the real mask and is not read
+yet, nor is IPv6's router advertisement, which the kernel acts on itself.
+
+Verified: `rescue_test` (learning from a LAN's traffic with link-local
+noise and a probe in it, a taken address passed over, too little traffic
+saying nothing; the learned address and route compiling at a later rung);
+`tests/live/rescue.sh`'s third phase, a far end at 10.46.0.1 asking for its
+neighbours and holding .250 without being heard using it: netrescue names
+the gateway by its traffic, finds .250 taken by its probe, takes .249, and
+reaches the gateway at rung 2. A probe that never finds anything taken
+turns that phase red.
+
 ## 10.877 `ethtool`'s autoneg, speed and duplex are applied
 
 **They parsed, compiled and were applied by nothing** -- the plan said so
@@ -12808,9 +12842,10 @@ document for a rung, the gateways from `/proc/net/route`, the echo) and
 `c/src/main/rescue_main.c` (the loop, the child daemon, the report on
 standard output, `DIR/netrescue.log` and with `--console` on
 `/dev/console`). Rung 1 is DHCP on every port and 10.0.0.250/16 on the
-first with a carrier, kept there while it has one; rungs 2 and 3 force the
-ports with no carrier to 1000/full and 100/full; after rung 3 it starts
-again, asking the forced ports to negotiate. Ports are taken again every
+first with a carrier, kept there while it has one; rung 2 listens on ports
+with a carrier and no lease (10.878); rungs 3 and 4 force the ports with
+no carrier to 1000/full and 100/full; after rung 4 it starts again, asking
+the forced ports to negotiate. Ports are taken again every
 two seconds, so a USB adapter or a tethered phone plugged in later is a
 port at the next tick. `--for` bounds a run from inside, which is what the
 test uses.
@@ -12820,18 +12855,16 @@ compiler the daemon runs (a quoted speed and a radio taken for a port both
 turn it red); `tests/live/rescue.sh` gets a lease through netrescue's own
 netcfgd from busybox udhcpd across a veth, reads the default route, has
 the gateway answer at rung 1 with the fallback and the kernel's IPv6
-link-local address both on the port, then with no server climbs all three
-rungs, keeps the fallback, and goes round. The ports there come from a
+link-local address both on the port, then with no server climbs every
+rung, keeps the fallback, and goes round. The ports there come from a
 sysfs directory the test writes, because a veth has no `device` and is
 rightly not a port.
 
-**Rungs 2 and 3 are applied since 10.877**, which built what they write:
+**The forcing rungs are applied since 10.877**, which built what they write:
 until then `ethtool`'s `autoneg`, `speed` and `duplex` parsed and were
 applied by nothing.
 
-**Open, in the order the ladder needs them**: listening for ARP and DHCP
-to learn an unknown subnet and taking an address nothing answers for (rung
-4); rebinding a NIC's driver through sysfs and
+**Open, in the order the ladder needs them**: rebinding a NIC's driver through sysfs and
 reporting firmware errors (rung 3 of the proposal); an mDNS announcement;
 PPP on a serial console. **The stick needs a DHCP client netcfgd drives** --
 dhcpcd or busybox's udhcpc; its isc-dhcp-client is not one -- and should

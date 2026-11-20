@@ -41,6 +41,11 @@ typedef struct {
 	/* 1 with a carrier, 0 without, -1 when the kernel would not say -- which
 	 * is what reading `carrier` on a link that is administratively down does. */
 	int carrier;
+	/* What listening learned on this port (the LISTEN rung): an address with
+	 * its prefix, and the gateway, both empty until it has. Kept by the
+	 * caller across rungs, so climbing never takes it away. */
+	char learned[24];
+	char gateway[16];
 } ncfg_rescue_port_t;
 
 typedef struct {
@@ -58,6 +63,10 @@ typedef struct {
 typedef enum {
 	/* DHCP on every port, and the fixed fallback on one. */
 	NCFG_RESCUE_RUNG_ADDRESS = 1,
+	/* And on a port with a carrier and no lease, an address learned by
+	 * listening to the network's ARP, with its gateway. Before the forcing
+	 * rungs because it disturbs nothing, and they are for the other ports. */
+	NCFG_RESCUE_RUNG_LISTEN,
 	/* And autonegotiation off at 1000/full on every port with no carrier. */
 	NCFG_RESCUE_RUNG_FORCE_1000,
 	/* The same at 100/full: an old switch, or a cable with two pairs. */
@@ -119,5 +128,58 @@ size_t ncfg_rescue_default_gateways(const char *route_text, uint32_t *out, size_
  * the report says which.
  */
 int ncfg_rescue_gateway_answers(uint32_t gateway, int timeout_ms, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Listening
+ * ------------------------------------------------------------------------ */
+
+/* One ARP frame heard: who sent it, whom it asked about, network byte order.
+ * A probe (sender 0.0.0.0) is kept too: its target is an address somebody is
+ * about to take. */
+typedef struct {
+	uint32_t sender;
+	uint32_t target;
+} ncfg_rescue_heard_t;
+
+typedef struct {
+	uint32_t network;  /* the /24 most of what was heard is in */
+	uint32_t gateway;  /* its busiest address: asked about and asking most */
+	uint32_t address;  /* one in it nobody was heard using, or 0 */
+	size_t   heard;    /* how many frames were in that /24 */
+} ncfg_rescue_learned_t;
+
+/*
+ * What a port's ARP says about the network it is on. Pure, so a test can hand
+ * it any traffic it likes.
+ *
+ * **A /24, and the busiest address is the gateway.** Every host on a LAN asks
+ * for its gateway and the gateway asks for every host, so whatever the
+ * network's real prefix it is the address heard most; and a /24 around it is
+ * the guess that is right on almost every network a rescue meets and never
+ * wider than the truth. Link-local, loopback, multicast and the zero address
+ * are passed over. The address chosen is the highest in .200-.250 nobody was
+ * heard using, high because DHCP pools usually start low; `taken` is more
+ * addresses to avoid (one a probe already found in use). 0 when fewer than
+ * `minimum` frames were in any one /24.
+ */
+int ncfg_rescue_learn(const ncfg_rescue_heard_t *heard, size_t count, size_t minimum,
+    const uint32_t *taken, size_t taken_count, ncfg_rescue_learned_t *out);
+
+/*
+ * Listen for ARP on `port` for `seconds`, filling `heard` up to `max`. Needs
+ * a packet socket, so root or CAP_NET_RAW. 0 with a sentence where it could
+ * not listen at all.
+ */
+int ncfg_rescue_listen(const char *port, int seconds, ncfg_rescue_heard_t *heard, size_t max,
+    size_t *count, char *err, size_t err_size);
+
+/*
+ * RFC 5227's probe: ask, from 0.0.0.0, who has `address` on `port`, and
+ * listen `timeout_ms` for an answer -- or for another host probing for the
+ * same address. 1 when nobody claimed it, 0 when somebody did or the probe
+ * could not be sent (with a sentence then).
+ */
+int ncfg_rescue_address_free(const char *port, uint32_t address, int timeout_ms, char *err,
+    size_t err_size);
 
 #endif /* NCFG_RESCUE_H */

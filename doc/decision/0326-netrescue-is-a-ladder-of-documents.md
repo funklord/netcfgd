@@ -95,6 +95,12 @@ since every rung keeps those.
 
 - netrescue needs a DHCP client netcfgd drives (dhcpcd, or busybox's
   udhcpc); the rescue stick's isc-dhcp-client is not one of them.
-- Built in steps: rungs 1 and 2 and the report first; then listening (4),
-  driver rebind (3), an mDNS announcement (5), PPP on a serial console (6).
+- Built in steps: the address rung, the forcing rungs and the report first
+  (project.md 10.876, with 10.877 making the forcing real); then listening
+  (10.878), which runs second, before forcing, because it disturbs nothing
+  and serves the ports forcing does not -- the ones with a carrier and no
+  lease; then driver rebind, an mDNS announcement, PPP on a serial console.
   The stick takes it when project.md says it is ready.
+- Stopping netrescue stops its netcfgd and leaves what it configured,
+  DHCP clients included, as a stopped netcfgd does: a rescue that took the
+  network away on exit would cut off the person who stopped it.

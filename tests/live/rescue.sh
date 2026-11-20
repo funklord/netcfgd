@@ -20,7 +20,9 @@
 # WHAT STOPS IT
 #   Every netrescue here runs with `--for`, its own bound, and is killed by
 #   its pid on exit besides; netrescue stops the daemon it started. The
-#   waits are counted loops. udhcpd is killed by its pid.
+#   waits are counted loops. udhcpd is killed by its pid, and so is the
+#   loop that makes ARP traffic for the listening phase, which also stops by
+#   itself after 120 pings or when the work directory goes.
 #
 # POSIX sh, not bash: this runs wherever the project does.
 
@@ -56,6 +58,7 @@ ip link del rscp$$
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rescue.XXXXXX")
 server=
 rescuer=
+chatter=
 # The DHCP clients netcfgd started outlive netrescue on purpose -- a daemon
 # that stops leaves its backends for the next one to adopt -- so the test
 # stops them, by the pid file netcfgd wrote and only where the process still
@@ -72,7 +75,7 @@ stop_clients() {
 	done
 }
 cleanup() {
-	for pid in $rescuer $server; do
+	for pid in $rescuer $server $chatter; do
 		kill "$pid" 2>/dev/null || true
 		wait "$pid" 2>/dev/null || true
 	done
@@ -183,7 +186,7 @@ stop_clients
 # ---- 2. Nothing answers: the fallback stays and the ladder climbs.
 ip addr flush dev cli
 ip addr del 10.45.0.1/24 dev srv
-"$build/netrescue" --dir "$work/two" --sysfs "$work/sys" --wait 4 --for 30 \
+"$build/netrescue" --dir "$work/two" --sysfs "$work/sys" --wait 4 --listen 2 --for 30 \
 	> "$work/rescue.out" 2>&1 &
 rescuer=$!
 if wait_for "starting again from the first" 30; then
@@ -195,15 +198,58 @@ else
 fi
 report=$(cat "$work/rescue.out")
 contains "it says why" "$report" "not yet: no default route"
-contains "rung 2 was written" "$report" "rung 2:"
-contains "and rung 3" "$report" "rung 3:"
+contains "it listened at rung 2" "$report" "listening on cli"
+contains "and said it heard too little" "$report" "not enough to say what network it is"
+contains "rung 3 was written" "$report" "rung 3:"
+contains "and rung 4" "$report" "rung 4:"
 contains "the document at the top asked for 100/full" "$report" "forced to 100/full"
 contains "the fallback is on the port whatever the rung" "$(ip -4 -br addr show cli)" "10.0.0.250/16"
 wait "$rescuer" 2>/dev/null || true
 rescuer=
 contains "--for bounds it" "$(cat "$work/rescue.out")" "--for 30 s has run out"
 
-# ---- 3. What a person typing it gets wrong.
+stop_clients
+
+# ---- 3. No DHCP, but a network to hear: the listening rung learns it.
+# The far end is 10.46.0.1 and asks for addresses around it, which is the
+# traffic a gateway makes; netrescue should take its /24 and route through it.
+# It also holds .250 without ever being heard using it, so the first address
+# netrescue would pick is one only its probe can find taken.
+ip addr flush dev cli
+ip addr add 10.46.0.1/24 dev srv
+ip addr add 10.46.0.250/24 dev srv
+(
+	n=0
+	while [ "$n" -lt 120 ] && [ -d "$work" ]; do
+		busybox ping -c 1 -W 1 "10.46.0.$((10 + n % 20))" >/dev/null 2>&1 || true
+		n=$((n + 1))
+	done
+) &
+chatter=$!
+"$build/netrescue" --dir "$work/three" --sysfs "$work/sys" --wait 4 --listen 4 --for 40 \
+	> "$work/rescue.out" 2>&1 &
+rescuer=$!
+if wait_for "reachable:" 40; then
+	echo "ok   with no DHCP it learned the network by listening and reached the gateway"
+else
+	echo "FAIL it never reached the gateway by listening"
+	sed 's/^/       /' "$work/rescue.out"
+	failures=$((failures + 1))
+fi
+report=$(cat "$work/rescue.out")
+contains "it says what it learned" "$report" "learned on cli"
+contains "the gateway by its traffic" "$report" "gateway 10.46.0.1 by traffic"
+contains "and it reached it at the listening rung" "$report" "answers, at rung 2"
+contains "the probe found .250 in use" "$report" "10.46.0.250 is in use on cli"
+contains "and the next address is on the port" "$(ip -4 -br addr show cli)" "10.46.0.249/24"
+kill "$rescuer" 2>/dev/null || true
+wait "$rescuer" 2>/dev/null || true
+rescuer=
+kill "$chatter" 2>/dev/null || true
+wait "$chatter" 2>/dev/null || true
+stop_clients
+
+# ---- 4. What a person typing it gets wrong.
 out=$("$build/netrescue" --wait 0 2>&1 || true)
 contains "a wait of zero is refused" "$out" "is not something it takes"
 

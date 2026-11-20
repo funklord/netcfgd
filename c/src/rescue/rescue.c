@@ -13,11 +13,16 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <net/if_arp.h>
+#include <netpacket/packet.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -28,6 +33,8 @@ const char *ncfg_rescue_rung_says(ncfg_rescue_rung_t rung)
 	switch (rung) {
 	case NCFG_RESCUE_RUNG_ADDRESS:
 		return "DHCP on every Ethernet port, and the fixed fallback address on one";
+	case NCFG_RESCUE_RUNG_LISTEN:
+		return "the same, and an address learned by listening on ports with a carrier and no lease";
 	case NCFG_RESCUE_RUNG_FORCE_1000:
 		return "the same, with ports that have no carrier forced to 1000/full";
 	case NCFG_RESCUE_RUNG_FORCE_100:
@@ -272,11 +279,24 @@ int ncfg_rescue_render(const ncfg_rescue_ports_t *ports, ncfg_rescue_rung_t rung
 		} else if (speed == 0 && renegotiate && port->carrier != 1) {
 			add(&text, "device \"%s\" {\n\tethtool {\n\t\tautoneg = \"on\"\n\t}\n}\n", port->name);
 		}
+		/*
+		 * **What was learned is written at every rung once it has been**,
+		 * whichever rung it is: a rung that dropped it would take away the
+		 * one way in listening found. Checked for characters here as the
+		 * fallback is; the caller wrote both from numbers.
+		 */
+		add(&text, "interface \"%s\" {\n\tconfig = [\"dhcp\"", port->name);
 		if (fallback && (int)at == fallback_at) {
-			add(&text, "interface \"%s\" { config = [\"dhcp\", \"%s\"] }\n", port->name, fallback);
-		} else {
-			add(&text, "interface \"%s\" { config = \"dhcp\" }\n", port->name);
+			add(&text, ", \"%s\"", fallback);
 		}
+		if (port->learned[0] != '\0' && name_is_plain(port->learned)) {
+			add(&text, ", \"%s\"", port->learned);
+		}
+		add(&text, "]\n");
+		if (port->learned[0] != '\0' && port->gateway[0] != '\0' && name_is_plain(port->gateway)) {
+			add(&text, "\troutes = \"default via %s\"\n", port->gateway);
+		}
+		add(&text, "}\n");
 	}
 	if (text.overflow) {
 		ncfg_error_set(err, err_size, "the document for %zu ports does not fit in %zu bytes",
@@ -406,4 +426,271 @@ int ncfg_rescue_gateway_answers(uint32_t gateway, int timeout_ms, char *err, siz
 	}
 	(void)close(fd);
 	return 0;
+}
+
+/* ------------------------------------------------------------- listening */
+
+/* Addresses no host on a LAN uses as its own. */
+static int unusable(uint32_t address)
+{
+	uint32_t host = ntohl(address);
+
+	return host == 0u || (host >> 24) == 127u || (host >> 24) == 0u || (host >> 28) == 0xeu ||
+	    (host >> 28) == 0xfu || (host >> 16) == 0xa9feu;
+}
+
+typedef struct {
+	uint32_t address;
+	size_t   count;
+} tally_t;
+
+static void tally(tally_t *tallies, size_t *count, size_t max, uint32_t address)
+{
+	size_t at;
+
+	for (at = 0; at < *count; at++) {
+		if (tallies[at].address == address) {
+			tallies[at].count++;
+			return;
+		}
+	}
+	if (*count < max) {
+		tallies[*count].address = address;
+		tallies[*count].count = 1;
+		(*count)++;
+	}
+}
+
+#define LEARN_TALLY_MAX 512u
+
+int ncfg_rescue_learn(const ncfg_rescue_heard_t *heard, size_t count, size_t minimum,
+    const uint32_t *taken, size_t taken_count, ncfg_rescue_learned_t *out)
+{
+	tally_t  networks[LEARN_TALLY_MAX];
+	tally_t  hosts[LEARN_TALLY_MAX];
+	size_t   network_count = 0, host_count = 0, at, best = 0;
+	uint32_t network, host;
+
+	if (!out) {
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	if (!heard) {
+		return 0;
+	}
+	for (at = 0; at < count; at++) {
+		if (!unusable(heard[at].sender)) {
+			tally(networks, &network_count, LEARN_TALLY_MAX, heard[at].sender & htonl(0xffffff00u));
+		}
+		if (!unusable(heard[at].target)) {
+			tally(networks, &network_count, LEARN_TALLY_MAX, heard[at].target & htonl(0xffffff00u));
+		}
+	}
+	if (network_count == 0u) {
+		return 0;
+	}
+	for (at = 1; at < network_count; at++) {
+		if (networks[at].count > networks[best].count) {
+			best = at;
+		}
+	}
+	network = networks[best].address;
+	for (at = 0; at < count; at++) {
+		if ((heard[at].sender & htonl(0xffffff00u)) == network && !unusable(heard[at].sender)) {
+			tally(hosts, &host_count, LEARN_TALLY_MAX, heard[at].sender);
+			out->heard++;
+		}
+		if ((heard[at].target & htonl(0xffffff00u)) == network && !unusable(heard[at].target)) {
+			tally(hosts, &host_count, LEARN_TALLY_MAX, heard[at].target);
+		}
+	}
+	if (out->heard < minimum || host_count == 0u) {
+		memset(out, 0, sizeof(*out));
+		return 0;
+	}
+	best = 0;
+	for (at = 1; at < host_count; at++) {
+		if (hosts[at].count > hosts[best].count) {
+			best = at;
+		}
+	}
+	out->network = network;
+	out->gateway = hosts[best].address;
+	for (host = 250; host >= 200; host--) {
+		uint32_t candidate = network | htonl(host);
+		int      used = 0;
+
+		for (at = 0; at < host_count && !used; at++) {
+			used = hosts[at].address == candidate;
+		}
+		for (at = 0; taken && at < taken_count && !used; at++) {
+			used = taken[at] == candidate;
+		}
+		if (!used) {
+			out->address = candidate;
+			break;
+		}
+	}
+	return 1;
+}
+
+/* An ARP payload as a packet socket of type SOCK_DGRAM hands it over: no
+ * Ethernet header, and the hardware addresses six bytes wide. */
+typedef struct __attribute__((packed)) {
+	uint16_t hardware;
+	uint16_t protocol;
+	uint8_t  hardware_size;
+	uint8_t  protocol_size;
+	uint16_t opcode;
+	uint8_t  sender_mac[6];
+	uint8_t  sender_ip[4];
+	uint8_t  target_mac[6];
+	uint8_t  target_ip[4];
+} arp_t;
+
+static int open_arp(const char *port, struct sockaddr_ll *where, char *err, size_t err_size)
+{
+	int fd;
+
+	memset(where, 0, sizeof(*where));
+	where->sll_family = AF_PACKET;
+	where->sll_protocol = htons(ETH_P_ARP);
+	where->sll_ifindex = (int)if_nametoindex(port);
+	if (where->sll_ifindex == 0) {
+		ncfg_error_set(err, err_size, "there is no port called `%s`", port);
+		return -1;
+	}
+	fd = socket(AF_PACKET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, htons(ETH_P_ARP));
+	if (fd < 0) {
+		ncfg_error_set(err, err_size, "cannot open a packet socket: %s", strerror(errno));
+		return -1;
+	}
+	if (bind(fd, (const struct sockaddr *)where, sizeof(*where)) != 0) {
+		ncfg_error_set(err, err_size, "cannot listen on `%s`: %s", port, strerror(errno));
+		(void)close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+/* One ARP frame for IPv4 over Ethernet, or 0. */
+static int read_arp(int fd, arp_t *arp)
+{
+	ssize_t got = recv(fd, arp, sizeof(*arp), 0);
+
+	return got >= (ssize_t)sizeof(*arp) && ntohs(arp->hardware) == ARPHRD_ETHER &&
+	    ntohs(arp->protocol) == ETH_P_IP && arp->hardware_size == 6u && arp->protocol_size == 4u;
+}
+
+int ncfg_rescue_listen(const char *port, int seconds, ncfg_rescue_heard_t *heard, size_t max,
+    size_t *count, char *err, size_t err_size)
+{
+	struct sockaddr_ll where;
+	long long          deadline;
+	int                fd;
+
+	if (!port || !heard || !count) {
+		ncfg_error_set(err, err_size, "nothing to listen with");
+		return 0;
+	}
+	*count = 0;
+	fd = open_arp(port, &where, err, err_size);
+	if (fd < 0) {
+		return 0;
+	}
+	deadline = now_ms() + (long long)seconds * 1000LL;
+	while (*count < max) {
+		struct pollfd wait = { fd, POLLIN, 0 };
+		long long     left = deadline - now_ms();
+		arp_t         arp;
+
+		if (left <= 0) {
+			break;
+		}
+		if (poll(&wait, 1, (int)left) <= 0) {
+			continue;
+		}
+		while (*count < max && read_arp(fd, &arp)) {
+			memcpy(&heard[*count].sender, arp.sender_ip, 4);
+			memcpy(&heard[*count].target, arp.target_ip, 4);
+			(*count)++;
+		}
+	}
+	(void)close(fd);
+	return 1;
+}
+
+int ncfg_rescue_address_free(const char *port, uint32_t address, int timeout_ms, char *err,
+    size_t err_size)
+{
+	struct sockaddr_ll where;
+	struct ifreq       request;
+	arp_t              probe;
+	long long          deadline;
+	int                fd;
+
+	if (err && err_size) {
+		err[0] = '\0';
+	}
+	if (!port || strlen(port) >= sizeof(request.ifr_name)) {
+		ncfg_error_set(err, err_size, "no port to probe on");
+		return 0;
+	}
+	fd = open_arp(port, &where, err, err_size);
+	if (fd < 0) {
+		return 0;
+	}
+	memset(&request, 0, sizeof(request));
+	memcpy(request.ifr_name, port, strlen(port) + 1u);
+	if (ioctl(fd, SIOCGIFHWADDR, &request) != 0) {
+		ncfg_error_set(err, err_size, "cannot read `%s`'s hardware address: %s", port, strerror(errno));
+		(void)close(fd);
+		return 0;
+	}
+	memset(&probe, 0, sizeof(probe));
+	probe.hardware = htons(ARPHRD_ETHER);
+	probe.protocol = htons(ETH_P_IP);
+	probe.hardware_size = 6;
+	probe.protocol_size = 4;
+	probe.opcode = htons(ARPOP_REQUEST);
+	memcpy(probe.sender_mac, request.ifr_hwaddr.sa_data, 6);
+	/* RFC 5227: the sender address is zero, so nobody's cache learns an
+	 * address that is not yet ours. */
+	memcpy(probe.target_ip, &address, 4);
+	where.sll_halen = 6;
+	memset(where.sll_addr, 0xff, 6);
+	if (sendto(fd, &probe, sizeof(probe), 0, (const struct sockaddr *)&where, sizeof(where)) < 0) {
+		ncfg_error_set(err, err_size, "cannot send a probe on `%s`: %s", port, strerror(errno));
+		(void)close(fd);
+		return 0;
+	}
+	deadline = now_ms() + timeout_ms;
+	for (;;) {
+		struct pollfd wait = { fd, POLLIN, 0 };
+		long long     left = deadline - now_ms();
+		arp_t         arp;
+
+		if (left <= 0) {
+			break;
+		}
+		if (poll(&wait, 1, (int)left) <= 0) {
+			continue;
+		}
+		while (read_arp(fd, &arp)) {
+			uint32_t sender, target;
+
+			memcpy(&sender, arp.sender_ip, 4);
+			memcpy(&target, arp.target_ip, 4);
+			/* Somebody has it, or somebody else is probing for it --
+			 * our own probe comes back as an outgoing frame on some
+			 * drivers, and is told apart by its hardware address. */
+			if (sender == address || (sender == 0u && target == address &&
+			    memcmp(arp.sender_mac, request.ifr_hwaddr.sa_data, 6) != 0)) {
+				(void)close(fd);
+				return 0;
+			}
+		}
+	}
+	(void)close(fd);
+	return 1;
 }

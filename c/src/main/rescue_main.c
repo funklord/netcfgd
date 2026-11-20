@@ -58,6 +58,7 @@ typedef struct {
 	const char *routes;
 	const char *log;
 	int         wait;
+	int         listen;
 	int         run_for;
 	int         console;
 } rescue_options_t;
@@ -124,6 +125,7 @@ static const char *usage(void)
 	       "  --fallback CIDR    the fixed address beside DHCP, default " NCFG_RESCUE_FALLBACK_DEFAULT ";\n"
 	       "                     `none` for none\n"
 	       "  --wait SECONDS     how long a rung has before the next, default 30\n"
+	       "  --listen SECONDS   how long the listening rung listens per port, default 15\n"
 	       "  --for SECONDS      stop after this long; default never\n"
 	       "  --console          say each line on /dev/console as well\n"
 	       "  --log PATH         default DIR/netrescue.log\n"
@@ -159,6 +161,7 @@ static int parse(int argc, char **argv, rescue_options_t *options, int *status)
 	options->routes = "/proc/net/route";
 	options->log = NULL;
 	options->wait = 30;
+	options->listen = 15;
 	options->run_for = 0;
 	options->console = 0;
 	for (at = 1; at < argc; at++) {
@@ -190,6 +193,8 @@ static int parse(int argc, char **argv, rescue_options_t *options, int *status)
 			options->routes = value;
 		} else if (strcmp(arg, "--log") == 0) {
 			options->log = value;
+		} else if (strcmp(arg, "--listen") == 0 && number(value, &options->listen)) {
+			/* taken */
 		} else if (strcmp(arg, "--wait") == 0 && number(value, &options->wait)) {
 			/* taken */
 		} else if (strcmp(arg, "--for") == 0 && number(value, &options->run_for)) {
@@ -355,6 +360,109 @@ static void describe_ports(const ncfg_rescue_ports_t *ports, char *out, size_t s
 	}
 }
 
+/*
+ * What listening learned, by port name, kept across ticks: the port list is
+ * read again every two seconds and would otherwise forget it. A port that
+ * loses its carrier loses what was learned on it -- it may be on another
+ * network when it comes back.
+ */
+typedef struct {
+	char name[NCFG_RESCUE_NAME_MAX];
+	char learned[24];
+	char gateway[16];
+} learned_t;
+
+static learned_t learned_ports[NCFG_RESCUE_PORT_MAX];
+static size_t    learned_count;
+
+static void apply_learned(ncfg_rescue_ports_t *ports)
+{
+	size_t at, kept = 0, port;
+
+	for (at = 0; at < learned_count; at++) {
+		int still = 0;
+
+		for (port = 0; port < ports->count; port++) {
+			if (strcmp(ports->ports[port].name, learned_ports[at].name) == 0 &&
+			    ports->ports[port].carrier != 0) {
+				memcpy(ports->ports[port].learned, learned_ports[at].learned,
+				    sizeof(learned_ports[at].learned));
+				memcpy(ports->ports[port].gateway, learned_ports[at].gateway,
+				    sizeof(learned_ports[at].gateway));
+				still = 1;
+			}
+		}
+		if (still) {
+			learned_ports[kept++] = learned_ports[at];
+		} else {
+			say("forgetting what was learned on %s: it is gone or lost its carrier",
+			    learned_ports[at].name);
+		}
+	}
+	learned_count = kept;
+}
+
+/* Listen on every port with a carrier and nothing learned, and keep what
+ * each says. Blocking, `--listen` seconds a port: the daemon is its own
+ * process and goes on meanwhile. */
+static void listen_all(const rescue_options_t *options, const ncfg_rescue_ports_t *ports)
+{
+	static ncfg_rescue_heard_t heard[4096];
+	size_t                     at;
+
+	for (at = 0; at < ports->count && !stop_asked; at++) {
+		const ncfg_rescue_port_t *port = &ports->ports[at];
+		ncfg_rescue_learned_t     learned;
+		uint32_t                  taken[5];
+		size_t                    taken_count = 0;
+		size_t                    count = 0;
+		char                      err[NCFG_ERROR_MAX];
+		char                      address[INET_ADDRSTRLEN], gateway[INET_ADDRSTRLEN];
+		struct in_addr            value;
+
+		if (port->carrier != 1 || port->learned[0] != '\0' ||
+		    learned_count == NCFG_RESCUE_PORT_MAX) {
+			continue;
+		}
+		say("listening on %s for %d s", port->name, options->listen);
+		if (!ncfg_rescue_listen(port->name, options->listen, heard,
+		        sizeof(heard) / sizeof(heard[0]), &count, err, sizeof(err))) {
+			say("cannot listen on %s: %s", port->name, err);
+			continue;
+		}
+		for (;;) {
+			if (!ncfg_rescue_learn(heard, count, 3, taken, taken_count, &learned) ||
+			    learned.address == 0u) {
+				say("heard %zu ARP frame(s) on %s, not enough to say what network it is",
+				    count, port->name);
+				break;
+			}
+			value.s_addr = learned.address;
+			(void)inet_ntop(AF_INET, &value, address, sizeof(address));
+			value.s_addr = learned.gateway;
+			(void)inet_ntop(AF_INET, &value, gateway, sizeof(gateway));
+			if (ncfg_rescue_address_free(port->name, learned.address, 1000, err, sizeof(err))) {
+				learned_t *keep = &learned_ports[learned_count++];
+
+				(void)snprintf(keep->name, sizeof(keep->name), "%s", port->name);
+				(void)snprintf(keep->learned, sizeof(keep->learned), "%s/24", address);
+				(void)snprintf(keep->gateway, sizeof(keep->gateway), "%s", gateway);
+				say("learned on %s: %zu frame(s) in its /24, gateway %s by traffic; "
+				    "taking %s/24, which nothing answered for", port->name, learned.heard,
+				    gateway, address);
+				break;
+			}
+			if (err[0] != '\0' || taken_count == 5u) {
+				say("cannot take an address on %s: %s", port->name,
+				    err[0] ? err : "five in a row were in use");
+				break;
+			}
+			say("%s is in use on %s; trying another", address, port->name);
+			taken[taken_count++] = learned.address;
+		}
+	}
+}
+
 static long long now_seconds(void)
 {
 	struct timespec now;
@@ -379,6 +487,7 @@ int ncfg_main_rescue(int argc, char **argv)
 	int                status = NCFG_MAIN_EXIT_OK;
 	int                answered = 0;
 	int                wrapped = 0;
+	int                listened = 0;
 	char               last_why[256] = "";
 
 	if (!parse(argc, argv, &options, &status)) {
@@ -435,6 +544,17 @@ int ncfg_main_rescue(int argc, char **argv)
 			say("cannot read the ports: %s", err);
 			ports.count = 0;
 			ports.skipped = 0;
+		}
+		apply_learned(&ports);
+		if (rung == NCFG_RESCUE_RUNG_LISTEN && !listened) {
+			listen_all(&options, &ports);
+			listened = 1;
+			/* The rung's wait starts once there is something to wait for:
+			 * time spent listening is not time the daemon had to apply
+			 * what was heard, and counting it climbed past the rung
+			 * that worked. */
+			rung_since = now_seconds();
+			apply_learned(&ports);
 		}
 		describe_ports(&ports, described, sizeof(described));
 		if (strcmp(described, last_ports) != 0) {
@@ -496,6 +616,7 @@ int ncfg_main_rescue(int argc, char **argv)
 					say("no gateway after every rung; starting again from the first");
 					rung = NCFG_RESCUE_RUNG_ADDRESS;
 					wrapped = 1;
+					listened = 0;
 				} else {
 					rung = (ncfg_rescue_rung_t)((int)rung + 1);
 				}
