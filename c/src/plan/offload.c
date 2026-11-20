@@ -28,6 +28,7 @@
 
 #include "ncfg/base.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -147,12 +148,7 @@ static void warn_unapplied(ncfg_builder_t *builder, const ncfg_device_t *device)
 	if (settings->wol) {
 		stated[count++] = "wol";
 	}
-	if (settings->rx_ring.has) {
-		stated[count++] = "rx_ring";
-	}
-	if (settings->tx_ring.has) {
-		stated[count++] = "tx_ring";
-	}
+	/* The ring sizes are applied too since 10.881, by `ncfg_plan_rings`. */
 	if (count == 0u) {
 		return;
 	}
@@ -422,6 +418,91 @@ void ncfg_plan_link_modes(ncfg_builder_t *builder)
 		    describe_modes(builder->plan, want_autoneg, want_speed, want_duplex),
 		    describe_modes(builder->plan, link->autoneg.value,
 		        link->speed.has ? link->speed.value : 0, have_duplex));
+		ncfg_builder_gate(builder, device->name, &gate);
+		(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
+		ncfg_plan_ids_free(&gate);
+	}
+}
+
+/* ------------------------------------------------------------------------ *
+ * Ring sizes
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `link.set_rings` for every device whose `ethtool` block states `rx_ring` or
+ * `tx_ring` and whose link says another. A size past the maximum the device
+ * reports is warned about and not asked for: the driver would refuse it on
+ * every pass. A link that reports no rings is warned about rather than
+ * planned for, as a link with no link modes is.
+ */
+void ncfg_plan_rings(ncfg_builder_t *builder)
+{
+	size_t at;
+
+	for (at = 0; at < builder->desired->device_count; at++) {
+		const ncfg_device_t        *device = &builder->desired->devices[at];
+		const ncfg_link_settings_t *settings = device->link_settings;
+		const ncfg_observed_link_t *link;
+		ncfg_plan_ids_t             gate = { NULL, 0, 0 };
+		ncfg_op_t                   op;
+		ncfg_op_t                   inverse;
+		ncfg_reason_t               reason;
+		uint32_t                    rx = 0, tx = 0;
+		char                        wanted[64], had[64];
+
+		if (!settings || (!settings->rx_ring.has && !settings->tx_ring.has)) {
+			continue;
+		}
+		link = ncfg_observed_link(builder->observed, device->name);
+		if (!link) {
+			continue;
+		}
+		if (!link->rx_ring.has || !link->tx_ring.has) {
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "%s does not report its ring sizes, so netcfgd sets neither: most "
+			    "virtual devices have no rings to size", device->name);
+			continue;
+		}
+		if (settings->rx_ring.has && settings->rx_ring.value != link->rx_ring.value) {
+			if (link->rx_ring_max.has && settings->rx_ring.value > link->rx_ring_max.value) {
+				ncfg_plan_warnf(builder->plan, device->name,
+				    "%s's receive ring can be at most %lld, so `rx_ring = %lld` is not "
+				    "asked for", device->name, (long long)link->rx_ring_max.value,
+				    (long long)settings->rx_ring.value);
+			} else {
+				rx = (uint32_t)settings->rx_ring.value;
+			}
+		}
+		if (settings->tx_ring.has && settings->tx_ring.value != link->tx_ring.value) {
+			if (link->tx_ring_max.has && settings->tx_ring.value > link->tx_ring_max.value) {
+				ncfg_plan_warnf(builder->plan, device->name,
+				    "%s's transmit ring can be at most %lld, so `tx_ring = %lld` is not "
+				    "asked for", device->name, (long long)link->tx_ring_max.value,
+				    (long long)settings->tx_ring.value);
+			} else {
+				tx = (uint32_t)settings->tx_ring.value;
+			}
+		}
+		if (rx == 0u && tx == 0u) {
+			continue;
+		}
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_LINK_SET_RINGS;
+		op.u.set_rings.name = device->name;
+		op.u.set_rings.rx = rx;
+		op.u.set_rings.tx = tx;
+		memset(&inverse, 0, sizeof(inverse));
+		inverse.kind = NCFG_OP_LINK_SET_RINGS;
+		inverse.u.set_rings.name = device->name;
+		inverse.u.set_rings.rx = rx != 0u ? (uint32_t)link->rx_ring.value : 0u;
+		inverse.u.set_rings.tx = tx != 0u ? (uint32_t)link->tx_ring.value : 0u;
+		(void)snprintf(wanted, sizeof(wanted), "rx=%lld tx=%lld",
+		    (long long)(rx ? rx : (uint32_t)link->rx_ring.value),
+		    (long long)(tx ? tx : (uint32_t)link->tx_ring.value));
+		(void)snprintf(had, sizeof(had), "rx=%lld tx=%lld", (long long)link->rx_ring.value,
+		    (long long)link->tx_ring.value);
+		reason = ncfg_plan_reason_differs(device->name, "ethtool",
+		    ncfg_plan_intern(builder->plan, wanted), ncfg_plan_intern(builder->plan, had));
 		ncfg_builder_gate(builder, device->name, &gate);
 		(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
 		ncfg_plan_ids_free(&gate);

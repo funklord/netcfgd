@@ -795,8 +795,9 @@ static void every_startable_backend_can_also_be_stopped(void)
  * Six fields stated, because that was the longest this sentence got and the
  * case that ran into `NCFG_ERROR_MAX`. **Three of them are applied since
  * project.md 10.877** -- `autoneg`, `speed` and `duplex`, verified against
- * virtio-net -- so the sentence names the other three, and the case holds
- * that the applied ones are no longer called nobody's.
+ * virtio-net -- and two more since 10.881, the ring sizes, so the sentence
+ * names `wol` alone, and the case holds that the applied ones are no longer
+ * called nobody's.
  */
 static void the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for(void)
 {
@@ -809,10 +810,10 @@ static void the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for(voi
 	    "{\"name\":\"eth0\",\"addressing\":[]}", "", "",
 	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
 
-	check(plan && planfix_warned(plan, "`wol`, `rx_ring`, `tx_ring` in the `ethtool` block"),
-	    "every unapplied field the document stated is named, in the order the block lists them");
-	check(plan && !planfix_warned(plan, "`autoneg`, `speed`"),
-	    "and the link modes, applied now, are not among them");
+	check(plan && planfix_warned(plan, "`wol` in the `ethtool` block is recognised and applied by "
+	    "nothing"), "the one unapplied field the document stated is named");
+	check(plan && !planfix_warned(plan, "`autoneg`, `speed`") && !planfix_warned(plan, "`rx_ring`"),
+	    "and the link modes and ring sizes, applied now, are not among them");
 	check(planfix_whole(planfix_warning_with(plan, "in the `ethtool` block"),
 	    PLANFIX_UNBUILT_TAIL),
 	    "and the whole of the longest form arrives, marked as nobody's gap");

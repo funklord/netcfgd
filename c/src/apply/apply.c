@@ -244,6 +244,8 @@ int ncfg_apply_optional(const ncfg_op_t *op)
 	 * from virtio-net asked to negotiate. The interface still works, so the
 	 * rest of the plan goes on (0326's ladder is the caller that needs it to). */
 	case NCFG_OP_LINK_SET_LINK_MODES:
+	/* A ring size the driver will not take leaves the ring as it was. */
+	case NCFG_OP_LINK_SET_RINGS:
 		return 1;
 	/*
 	 * The `ifb` device and its state, which exist only for ingress shaping.
@@ -355,6 +357,7 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 	case NCFG_OP_LINK_SET_OFFLOADS:
 	case NCFG_OP_LINK_SET_LINK_MODES:
+	case NCFG_OP_LINK_SET_RINGS:
 	case NCFG_OP_LINK_SET_WDS:
 	case NCFG_OP_BRIDGE_VLAN_ADD:
 	case NCFG_OP_BRIDGE_VLAN_DEL:

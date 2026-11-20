@@ -12737,6 +12737,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.881 `ethtool`'s ring sizes are applied, on virtio-net over PCI
+
+The next fields of 10.877's shape, parsed and applied by nothing:
+`rx_ring` and `tx_ring`. Built the same way -- `RINGS_GET` and `RINGS_SET`
+in `c/src/sys/ethtool.c`, the observed link's `rx_ring`, `tx_ring` and
+their maxima, `link.set_rings` (the fifty-fourth op, disruptive since most
+physical drivers reset the NIC to resize, optional since a refusal leaves
+the ring as it was) planned by `ncfg_plan_rings`. A ring already the size
+asked is left out of the set; a size past the device's maximum is warned
+about and not asked for, since the driver would refuse it every pass.
+`wol` is now the one field of the block applied by nothing.
+
+**virtio-net resizes a ring only with queue reset, which a microvm does not
+have.** The first rig run had `ethtool -G` itself answer `ENOENT`, the same
+as netcfgd, on a NIC whose device sat on `LNRO0005`, virtio-mmio: hull's
+default vm is a microvm on its own kernel. `(tuning (vm (profile full)))`
+makes it q35 on the host's kernel, virtio-net on PCI, where QEMU 10 offers
+queue reset; the rig now runs that way, and the link modes pass there too.
+
+Verified: `link_modes_test`'s ring cases (the set leaving an unasked ring
+out rather than sending zero, the reply with its maxima, a grown ring with
+its inverse, a size past the maximum warned, a ring already right left, a
+link with no rings warned); `make hull-link-modes`, now 15 checks, the
+rings shrunk to 128 each and read back by `ethtool -g` in the guest -- the
+hwsim image carries `ethtool` for that, a reader that is not netcfgd's --
+and a second plan with nothing to size: VERDICT ok, and red with the
+encoder sending twice the receive size. A diagnostic that called
+`ethtool -G` in the rig was taken out once it had answered: it set the
+rings itself, and hid the second-plan check in the sabotaged run. Both
+witnesses moved, a minor bump.
+
 ## 10.880 netrescue answers to NAME.local
 
 The proposal's "always reachable on a direct cable: IPv6 link-local kept on
@@ -12941,8 +12972,10 @@ with no gateway, the stick's inittab leaving that tty without a getty.
 Testing it needs `pppd` in a vm image, which the hwsim image lacks. The
 driver rebind is 10.879 and the name 10.880. **The stick needs a DHCP client netcfgd drives** --
 dhcpcd or busybox's udhcpc; its isc-dhcp-client is not one -- and should
-not also run ifupdown on the same ports. **Not yet ready for the stick**:
-the consumer takes it when this entry says so.
+not also run ifupdown on the same ports. **Ready to try on the stick**
+(2026-11-20, after 10.880): the consumer was told so, with what it needs,
+in its inbox (`~/claude`, 20261120T1752Z). What an HP G6's own NICs do
+under it is that run's to find.
 
 Two findings from building the stick, recorded as the proposal gave them:
 ifupdown's `allow-hotplug /eth*=eth` pattern stanza does not answer the
@@ -13336,7 +13369,8 @@ runs reported success they had not earned: the pings were answered OUTSIDE
 the tunnel, because the server answers there too -- the script counts packets
 on `ipsec0` and names the device now.
 
-**Open, and the next step: netcfgd prepares the directory.** The account is
+**Settled since, by 10.863** (`report_writer`), and hardened by 10.875; what
+follows is what this entry said while it was open. The account is
 the distribution's choice (Alpine builds charon to drop to `ipsec`; whether
 OpenWrt's and Debian's run it as root is unmeasured), so it is named rather
 than guessed -- an `xfrm` key such as `report_writer = "ipsec"`, privileged,
@@ -13452,7 +13486,9 @@ and finds the XFRM interface with the virtual IP and both subnets routed into
 it; one child down takes its route and leaves the other's, both down take the
 address. With the command writing the single file instead, five checks fail.
 
-**Open, and the next thing to measure: a full tunnel.** The holder's PrivadoVPN
+**Measured since, by 10.859, and built in 10.860**: a full tunnel needs its
+peer pinned to the uplink, and netcfgd pins it. What follows is what this
+entry said while it was open. The holder's PrivadoVPN
 profile sends all of IPv4 through the tunnel, which reports `route=default` on
 `ipsec0` -- and IKE's own packets to the peer must still leave by the uplink,
 not into the tunnel they are negotiating. Whether charon's socket bypass

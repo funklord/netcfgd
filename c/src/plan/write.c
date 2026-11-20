@@ -192,6 +192,19 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 			    op->u.set_link_modes.duplex == 1 ? "full" : "half");
 		}
 		break;
+	case NCFG_OP_LINK_SET_RINGS:
+		member_text(writer, "name", op->u.set_rings.name);
+		if (op->u.set_rings.rx != 0u) {
+			ncfg_optint_t rx = { 1, (int64_t)op->u.set_rings.rx };
+
+			member_optint(writer, "rx", rx);
+		}
+		if (op->u.set_rings.tx != 0u) {
+			ncfg_optint_t tx = { 1, (int64_t)op->u.set_rings.tx };
+
+			member_optint(writer, "tx", tx);
+		}
+		break;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		member_text(writer, "name", op->u.set_offloads.name);
 		ncfg_json_write_key(writer, "features");

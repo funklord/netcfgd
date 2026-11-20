@@ -235,6 +235,16 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "RA acceptance off, so a router interface cannot have one";
 		}
 		return NULL;
+	case NCFG_OP_LINK_SET_RINGS:
+		if (code == EOPNOTSUPP) {
+			return "this device's rings cannot be resized -- most virtual ones, and a "
+			       "virtio NIC whose host offers no queue reset";
+		}
+		if (code == EINVAL) {
+			return "the driver refused the size: it is past the maximum `ncfg status` "
+			       "shows, or not one this driver takes";
+		}
+		return NULL;
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		if (code == EOPNOTSUPP) {
 			return "this device has no link modes to set -- most virtual ones do not";

@@ -353,6 +353,8 @@ void ncfg_plan_offloads(ncfg_builder_t *builder);
 /* Autonegotiation, speed and duplex from each device's `ethtool` block, in
  * `offload.c` beside the offloads (project.md 10.877). */
 void ncfg_plan_link_modes(ncfg_builder_t *builder);
+/* The ring sizes, in `offload.c` as well (10.881). */
+void ncfg_plan_rings(ncfg_builder_t *builder);
 /*
  * The IPv6 interface identifier, and netcfgd's one nftables table.
  *

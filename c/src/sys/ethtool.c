@@ -433,3 +433,123 @@ int ncfg_ethtool_link_modes_merge(ncfg_ethtool_link_modes_t *out, const void *pa
 	out->duplex = duplex == DUPLEX_HALF ? DUPLEX_HALF : duplex == DUPLEX_FULL ? DUPLEX_FULL : -1;
 	return 1;
 }
+
+/* ---------------------------------------------------------------- rings */
+
+int ncfg_ethtool_rings_get_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                built;
+
+	if (!out || !family) {
+		ncfg_error_set(err, err_size, "an ethtool request needs the resolved family");
+		return 0;
+	}
+	ncfg_buf_init(&attrs, 0);
+	if (!ethtool_header(&attrs, device, err, err_size)) {
+		ncfg_buf_free(&attrs);
+		return 0;
+	}
+	header.cmd = ETHTOOL_MSG_RINGS_GET;
+	header.version = 1;
+	built = ncfg_genl_build_request(out, family->id, &header, 0, seq, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+int ncfg_ethtool_rings_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t rx, uint32_t tx, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                built;
+
+	if (!out || !family) {
+		ncfg_error_set(err, err_size, "an ethtool request needs the resolved family");
+		return 0;
+	}
+	if (rx == 0u && tx == 0u) {
+		ncfg_error_set(err, err_size, "a ring-size request on %s names no ring to change",
+		    device ? device : "?");
+		return 0;
+	}
+	ncfg_buf_init(&attrs, 0);
+	if (!ethtool_header(&attrs, device, err, err_size)) {
+		ncfg_buf_free(&attrs);
+		return 0;
+	}
+	if (rx != 0u) {
+		ncfg_wire_attr_put_u32(&attrs, ETHTOOL_A_RINGS_RX, rx);
+	}
+	if (tx != 0u) {
+		ncfg_wire_attr_put_u32(&attrs, ETHTOOL_A_RINGS_TX, tx);
+	}
+	header.cmd = ETHTOOL_MSG_RINGS_SET;
+	header.version = 1;
+	built = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs,
+	    err, err_size);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+/* One optional u32 out of a reply; 1 with it, 1 with `*has` 0 where absent, 0
+ * where it will not decode. */
+static int optional_u32(const void *payload, size_t length, uint16_t kind, uint32_t *out,
+    int *has, char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attr_t  attr;
+	ncfg_wire_step_t  step;
+
+	*has = 0;
+	if (!ncfg_genl_payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	step = ncfg_wire_attrs_find(&area, kind, &attr, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step == NCFG_WIRE_END) {
+		return 1;
+	}
+	if (!ncfg_wire_attr_u32(&attr, out, err, err_size)) {
+		return 0;
+	}
+	*has = 1;
+	return 1;
+}
+
+int ncfg_ethtool_rings_merge(ncfg_ethtool_rings_t *out, const void *payload, size_t length,
+    char *err, size_t err_size)
+{
+	uint32_t rx = 0, tx = 0, rx_max = 0, tx_max = 0;
+	int      has_rx, has_tx, has_rx_max, has_tx_max;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "ring sizes need somewhere to go");
+		return 0;
+	}
+	if (!optional_u32(payload, length, ETHTOOL_A_RINGS_RX, &rx, &has_rx, err, err_size) ||
+	    !optional_u32(payload, length, ETHTOOL_A_RINGS_TX, &tx, &has_tx, err, err_size) ||
+	    !optional_u32(payload, length, ETHTOOL_A_RINGS_RX_MAX, &rx_max, &has_rx_max, err,
+	        err_size) ||
+	    !optional_u32(payload, length, ETHTOOL_A_RINGS_TX_MAX, &tx_max, &has_tx_max, err,
+	        err_size)) {
+		return 0;
+	}
+	if (!has_rx && !has_tx) {
+		return 1;
+	}
+	if (!has_rx || !has_tx) {
+		ncfg_error_set(err, err_size, "a ring-size reply gave one ring and not the other");
+		return 0;
+	}
+	out->known = 1;
+	out->rx = rx;
+	out->tx = tx;
+	out->rx_max = has_rx_max ? rx_max : 0u;
+	out->tx_max = has_tx_max ? tx_max : 0u;
+	return 1;
+}

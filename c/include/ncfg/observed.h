@@ -686,6 +686,12 @@ typedef struct {
 	ncfg_optbool_t autoneg;
 	ncfg_optint_t  speed;
 	char          *duplex;
+	/* The receive and transmit ring sizes and their maxima, from `RINGS_GET`
+	 * (10.881); absent where the device has none to say. */
+	ncfg_optint_t  rx_ring;
+	ncfg_optint_t  tx_ring;
+	ncfg_optint_t  rx_ring_max;
+	ncfg_optint_t  tx_ring_max;
 	/* Absent covers both "no token" and "this device cannot have one": a dummy
 	 * or any other NOARP device does no neighbour discovery, and the kernel
 	 * refuses a token on it. */

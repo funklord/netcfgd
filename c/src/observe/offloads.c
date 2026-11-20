@@ -241,6 +241,50 @@ static void link_modes_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_fam
 	}
 }
 
+/* One device's ring sizes and their maxima, where it says them; the same
+ * bargain as `link_modes_of`. */
+static void rings_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *family,
+    ncfg_observed_link_t *link)
+{
+	ncfg_buf_t           message;
+	ncfg_buf_t           body;
+	ncfg_netlink_reply_t reply;
+	ncfg_ethtool_rings_t rings;
+	uint16_t             kind = 0;
+	uint16_t             flags = 0;
+	size_t               at;
+	char                 why[NCFG_ERROR_MAX];
+	int                  ok;
+
+	memset(&reply, 0, sizeof(reply));
+	memset(&rings, 0, sizeof(rings));
+	ncfg_buf_init(&message, 0);
+	ncfg_buf_init(&body, 0);
+	ok = ncfg_ethtool_rings_get_request(&message, family, link->name, 0, why, sizeof(why)) &&
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why, sizeof(why));
+	ncfg_buf_free(&message);
+	if (ok) {
+		ok = genl->exchange(genl->context, kind, flags, &body, NULL, &reply, why, sizeof(why));
+	}
+	ncfg_buf_free(&body);
+	for (at = 0; ok && at < reply.count; at++) {
+		ok = ncfg_ethtool_rings_merge(&rings, reply.items[at].bytes, reply.items[at].length, why,
+		    sizeof(why));
+	}
+	ncfg_netlink_reply_free(&reply);
+	if (!ok || !rings.known) {
+		return;
+	}
+	link->rx_ring.has = 1;
+	link->rx_ring.value = (int64_t)rings.rx;
+	link->tx_ring.has = 1;
+	link->tx_ring.value = (int64_t)rings.tx;
+	link->rx_ring_max.has = rings.rx_max != 0u;
+	link->rx_ring_max.value = (int64_t)rings.rx_max;
+	link->tx_ring_max.has = rings.tx_max != 0u;
+	link->tx_ring_max.value = (int64_t)rings.tx_max;
+}
+
 /* Everything the model can express out of one device's active set, in the
  * order the set is already in -- which is sorted and without repeats, so two
  * observations of one machine compare equal. */
@@ -357,6 +401,10 @@ static void nothing_is_known(ncfg_observed_t *observed)
 		observed->links[at].offloads_fixed = NULL;
 		observed->links[at].offloads_fixed_count = 0;
 		observed->links[at].autoneg.has = 0;
+		observed->links[at].rx_ring.has = 0;
+		observed->links[at].tx_ring.has = 0;
+		observed->links[at].rx_ring_max.has = 0;
+		observed->links[at].tx_ring_max.has = 0;
 		observed->links[at].speed.has = 0;
 		free(observed->links[at].duplex);
 		observed->links[at].duplex = NULL;
@@ -443,6 +491,9 @@ int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_
 	 */
 	for (at = 0; at < observed->link_count; at++) {
 		link_modes_of(genl, &family, &observed->links[at]);
+	}
+	for (at = 0; at < observed->link_count; at++) {
+		rings_of(genl, &family, &observed->links[at]);
 	}
 	ncfg_genl_family_free(&family);
 	if (unreadable != 0) {

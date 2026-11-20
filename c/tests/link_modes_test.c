@@ -1,6 +1,7 @@
 /*
  * link_modes_test.c -- autonegotiation, speed and duplex: the messages, the
- * record of what was forced, and the plan (project.md 10.877).
+ * record of what was forced, and the plan (project.md 10.877); and the ring
+ * sizes beside them, built the same way (10.881).
  *
  * WHAT THESE CASES ARE FOR
  *   * **The two messages carry exactly what was asked.** A field left alone
@@ -289,6 +290,78 @@ static void test_plan(void)
 	planfix_release(plan, document, observed);
 }
 
+static void test_rings(void)
+{
+	ncfg_genl_family_t   family;
+	ncfg_buf_t           message, payload;
+	ncfg_wire_attr_t     attr;
+	ncfg_genl_header_t   header;
+	ncfg_ethtool_rings_t rings;
+	uint32_t             word = 0;
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan;
+	const ncfg_action_t *action;
+
+	resolved_family(&family);
+	ncfg_buf_init(&message, 0);
+	check(ncfg_ethtool_rings_set_request(&message, &family, "eth0", 1024, 0, 4, NULL, 0),
+	    "a ring set for the receive ring alone is built");
+	check(has_attr(&message, ETHTOOL_A_RINGS_RX, &attr) &&
+	    ncfg_wire_attr_u32(&attr, &word, NULL, 0) && word == 1024u &&
+	    !has_attr(&message, ETHTOOL_A_RINGS_TX, &attr),
+	    "carrying rx 1024 and leaving tx out rather than sending zero");
+	ncfg_buf_free(&message);
+	ncfg_buf_init(&message, 0);
+	check(!ncfg_ethtool_rings_set_request(&message, &family, "eth0", 0, 0, 4, NULL, 0),
+	    "a ring set naming no ring is refused");
+	ncfg_buf_free(&message);
+
+	header.cmd = ETHTOOL_MSG_RINGS_GET_REPLY;
+	header.version = 1;
+	ncfg_buf_init(&payload, 0);
+	ncfg_genl_header_encode(&header, &payload);
+	ncfg_wire_attr_put_u32(&payload, ETHTOOL_A_RINGS_RX_MAX, 4096);
+	ncfg_wire_attr_put_u32(&payload, ETHTOOL_A_RINGS_TX_MAX, 4096);
+	ncfg_wire_attr_put_u32(&payload, ETHTOOL_A_RINGS_RX, 256);
+	ncfg_wire_attr_put_u32(&payload, ETHTOOL_A_RINGS_TX, 256);
+	memset(&rings, 0, sizeof(rings));
+	check(ncfg_ethtool_rings_merge(&rings, payload.data, payload.length, NULL, 0) && rings.known &&
+	    rings.rx == 256u && rings.tx == 256u && rings.rx_max == 4096u,
+	    "a reply is read: 256 each, at most 4096");
+	ncfg_buf_free(&payload);
+
+	plan = planfix_plan(DEVICE("\"rx_ring\":1024,\"tx_ring\":256"), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"rx_ring\":256,\"tx_ring\":256,\"rx_ring_max\":4096,"
+	    "\"tx_ring_max\":4096") "]", &document, &observed);
+	action = plan ? planfix_action(plan, "link.set_rings") : NULL;
+	check(action && action->op.u.set_rings.rx == 1024u && action->op.u.set_rings.tx == 0u,
+	    "the receive ring is grown and the transmit ring, already right, left out");
+	check(action && action->has_inverse && action->inverse.u.set_rings.rx == 256u,
+	    "and the inverse puts back what it was");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("\"rx_ring\":8192"), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"rx_ring\":256,\"tx_ring\":256,\"rx_ring_max\":4096,"
+	    "\"tx_ring_max\":4096") "]", &document, &observed);
+	check(plan && !planfix_action(plan, "link.set_rings") && planfix_warned(plan, "at most 4096"),
+	    "past the maximum is warned about, not asked for on every pass");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("\"rx_ring\":256"), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"rx_ring\":256,\"tx_ring\":512") "]", &document,
+	    &observed);
+	check(plan && !planfix_action(plan, "link.set_rings"), "a ring already that size is left");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("\"rx_ring\":256"), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
+	check(plan && !planfix_action(plan, "link.set_rings") &&
+	    planfix_warned(plan, "does not report its ring sizes"),
+	    "a link with no rings is warned about, not planned for");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	const char *run = testdir_make("link-modes");
@@ -300,6 +373,7 @@ int main(void)
 	test_merge();
 	test_record(run);
 	test_plan();
+	test_rings();
 	testdir_remove(run);
 	printf("%s\n", failures ? "link_modes_test: FAILED" : "link_modes_test: all passed");
 	return failures ? 1 : 0;

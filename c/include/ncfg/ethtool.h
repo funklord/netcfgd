@@ -9,10 +9,10 @@
  *   does. In this port that means genl.h resolves the family and this module
  *   only builds messages -- there is no descriptor in this file at all.
  *
- * THE OFFLOADS AND THE LINK MODES, AND NOT THE REST
- *   The model also carries ring sizes and wake-on-LAN, and those are not
- *   here. The reason is verification, not effort: ring and wake-on-LAN
- *   messages are `EOPNOTSUPP` on anything that is not a physical NIC. Every
+ * THE OFFLOADS, THE LINK MODES AND THE RINGS, AND NOT WAKE-ON-LAN
+ *   The model also carries wake-on-LAN, and that is not here. The reason is
+ *   verification, not effort: a wake-on-LAN message is `EOPNOTSUPP` on
+ *   anything that is not a physical NIC. Every
  *   netlink defect this project has shipped -- the WireGuard flags attribute,
  *   the nftables meta key, the qdisc rate unit -- was found by writing to a
  *   real kernel and reading it back, and none of them would have been found
@@ -23,7 +23,9 @@
  *   **The link modes left that list on 2026-11-20** (project.md 10.877): a
  *   veth refuses every link-modes set, but virtio-net takes speed and duplex
  *   with autonegotiation off, and a hull vm has one -- a real driver, read
- *   back through sysfs in `tests/hull/link-modes`.
+ *   back through sysfs in `tests/hull/link-modes`. **The ring sizes followed
+ *   the same day** (10.881): virtio-net resizes a ring where it has queue
+ *   reset, which it has on PCI and not on a microvm's MMIO.
  *
  * FEATURES ARE NAMED, NOT NUMBERED
  *   The kernel's bit indices are not stable across versions and are not a wire
@@ -224,5 +226,33 @@ int ncfg_ethtool_link_modes_set_request(ncfg_buf_t *out, const ncfg_genl_family_
  * nothing and is not a failure; one that will not decode is. */
 int ncfg_ethtool_link_modes_merge(ncfg_ethtool_link_modes_t *out, const void *payload,
     size_t length, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Ring sizes
+ * ------------------------------------------------------------------------ */
+
+/*
+ * What a `RINGS_GET` reply says: the receive and transmit ring sizes and the
+ * largest each may be. `known` 0 until a reply carrying the two sizes was
+ * read -- a device with no rings answers `EOPNOTSUPP` -- and a maximum of 0
+ * where the device did not say one (project.md 10.881).
+ */
+typedef struct {
+	int      known;
+	uint32_t rx;
+	uint32_t tx;
+	uint32_t rx_max;
+	uint32_t tx_max;
+} ncfg_ethtool_rings_t;
+
+int ncfg_ethtool_rings_get_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t seq, char *err, size_t err_size);
+
+/* `rx` and `tx` of 0 leave that ring alone; both 0 is refused. */
+int ncfg_ethtool_rings_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t rx, uint32_t tx, uint32_t seq, char *err, size_t err_size);
+
+int ncfg_ethtool_rings_merge(ncfg_ethtool_rings_t *out, const void *payload, size_t length,
+    char *err, size_t err_size);
 
 #endif /* NCFG_ETHTOOL_H */

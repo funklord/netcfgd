@@ -91,6 +91,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "link.set_offloads";
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		return "link.set_link_modes";
+	case NCFG_OP_LINK_SET_RINGS:
+		return "link.set_rings";
 	case NCFG_OP_LINK_SET_WDS:
 		return "link.set_wds";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
@@ -182,6 +184,9 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	 * carrier drops for a second or more, and a forced mode the far end does
 	 * not match is a link that stays down. */
 	case NCFG_OP_LINK_SET_LINK_MODES:
+	/* Resizing a ring resets the queue it belongs to, and on most physical
+	 * drivers -- e1000e, igb, ixgbe -- the whole NIC: the carrier drops. */
+	case NCFG_OP_LINK_SET_RINGS:
 		return 1;
 	/*
 	 * Turning forwarding off cuts every host behind this interface off from
@@ -337,6 +342,8 @@ static const char *subject_class(int kind)
 		return "offloads";
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		return "link_modes";
+	case NCFG_OP_LINK_SET_RINGS:
+		return "rings";
 	case NCFG_OP_LINK_SET_WDS:
 		return "wds";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
@@ -534,6 +541,8 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 		return op->u.set_offloads.name;
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		return op->u.set_link_modes.name;
+	case NCFG_OP_LINK_SET_RINGS:
+		return op->u.set_rings.name;
 	case NCFG_OP_LINK_SET_WDS:
 		return op->u.set_wds.name;
 	case NCFG_OP_LINK_DELETE:
