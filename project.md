@@ -12737,6 +12737,42 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.880 netrescue answers to NAME.local
+
+The proposal's "always reachable on a direct cable: IPv6 link-local kept on
+every port, plus an mDNS announcement". The link-local half was already so
+(10.876 checks the kernel's address stays); this is the name. netrescue
+answers A and AAAA questions for `--name`.local (`rescue` by default) on
+every port, over IPv4 and IPv6, between its two-second looks at the machine
+rather than in a thread. **IPv6 is the family that always works on a direct
+cable**: a link-local address is on every port the moment it is up, where
+an IPv4 one is only on the port the fallback is on. A question is answered
+on the port it arrived on, with that port's own addresses, since another
+port's are unreachable from where the asker is. One from a port other than
+5353 is a legacy resolver's and is answered to it with its ID (RFC 6762
+6.7); the rest go to the group, with the cache-flush bit and a two-minute
+TTL, as RFC 6762 says of host records. It answers and does not announce or
+probe for its name: a rescue box is one host, and two on one cable would
+both answer, which is a nuisance and not a hazard.
+
+`ncfg_rescue_mdns_answer` is the only code reading those bytes, as root,
+from anybody on the link, so it is pure, tested, and the fifteenth fuzz
+target (`fuzz/mdns_query`): names with compression pointers are followed
+only backwards and at most eight times. Two minutes, 9.2 million runs,
+clean.
+
+Verified: `rescue_test` (A, AAAA without case, ANY with the second record
+by pointer; another name, a response, a cut question, a self-pointing
+name and an answer too large for its buffer all refused);
+`tests/live/rescue.sh`'s fourth phase, a neighbour **in a namespace of its
+own** asking from a random port over both families and from 5353 as a
+responder would: 10.0.0.250, the port's link-local address, and the group
+answer. A neighbour in netrescue's own namespace was the first try, and
+its IPv4 question was never answered: the kernel drops a packet arriving
+on a port from an address the namespace holds, as a martian, and IPv6 does
+not -- a test artifact, recorded so nobody reads it as a responder fault.
+Not answering the legacy resolver turns the phase red.
+
 ## 10.879 netrescue rebinds a NIC's driver, and says what the kernel said
 
 The proposal's "reload NIC drivers and log firmware errors", built as
@@ -12763,8 +12799,8 @@ VERDICT ok, the device bound to `virtio_net` again and `eth1` back **with a
 new ifindex**, which is the evidence the device really went and came back
 -- "bound again" alone would also be true of a rebind that did nothing.
 
-**Open now**: an mDNS announcement and PPP on a serial console, the last
-two rungs of the proposal; and the stick itself, which is the consumer's.
+**Open now**: PPP on a serial console, the proposal's last rung (the
+name is 10.880); and the stick itself, which is the consumer's.
 
 ## 10.878 netrescue listens: an unknown network learned from its ARP
 
@@ -12893,8 +12929,17 @@ rightly not a port.
 until then `ethtool`'s `autoneg`, `speed` and `duplex` parsed and were
 applied by nothing.
 
-**Open, in the order the ladder needs them**: an mDNS announcement; PPP
-on a serial console. The driver rebind is 10.879. **The stick needs a DHCP client netcfgd drives** --
+**Open, and the stick's builder's to answer: PPP on a serial console.**
+The proposal's last resort turns a BMC's serial-over-LAN into a slow IP
+link, and to do it netrescue would have to take a tty from whatever owns it
+-- the stick's getty on `ttyS0` and `ttyS1`, and the kernel's console
+output, either of which corrupts PPP's frames. So it is a choice between a
+serial login and a serial network, made per machine, with a timing
+question beside it: after how many rounds of the ladder. **Best guess,
+unbuilt:** opt-in, `--serial-ppp TTY`, started only after a full round
+with no gateway, the stick's inittab leaving that tty without a getty.
+Testing it needs `pppd` in a vm image, which the hwsim image lacks. The
+driver rebind is 10.879 and the name 10.880. **The stick needs a DHCP client netcfgd drives** --
 dhcpcd or busybox's udhcpc; its isc-dhcp-client is not one -- and should
 not also run ifupdown on the same ports. **Not yet ready for the stick**:
 the consumer takes it when this entry says so.

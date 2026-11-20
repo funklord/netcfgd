@@ -211,4 +211,25 @@ int ncfg_rescue_rebind(const char *sysfs_net, const char *port, char *driver, si
 int ncfg_rescue_kmsg_complaint(const char *record, const char *driver, const char *device,
     char *out, size_t out_size);
 
+/* ------------------------------------------------------------------------ *
+ * A name on the local link
+ * ------------------------------------------------------------------------ */
+
+#define NCFG_RESCUE_MDNS_PORT 5353
+#define NCFG_RESCUE_NAME_DEFAULT "rescue"
+
+/*
+ * The answer to one mDNS query, if it asks for `name`.local: A records for
+ * `ipv4` and AAAA records for `ipv6` (network byte order, 4 and 16 bytes
+ * each), whichever the question asks -- A, AAAA or ANY, class IN, the
+ * unicast-response bit ignored since every answer here is multicast. The
+ * name is compared without case, as DNS does. Returns the length written to
+ * `out`, or 0 where the query is malformed, is a response, or asks for
+ * something else. Pure, and the only part of the responder that reads bytes
+ * from the network, so it is what is fuzzed and tested.
+ */
+size_t ncfg_rescue_mdns_answer(const uint8_t *query, size_t length, const char *name,
+    const uint32_t *ipv4, size_t ipv4_count, const uint8_t (*ipv6)[16], size_t ipv6_count,
+    uint8_t *out, size_t out_size);
+
 #endif /* NCFG_RESCUE_H */

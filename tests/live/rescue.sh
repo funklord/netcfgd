@@ -59,6 +59,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rescue.XXXXXX")
 server=
 rescuer=
 chatter=
+neighbour=
 # The DHCP clients netcfgd started outlive netrescue on purpose -- a daemon
 # that stops leaves its backends for the next one to adopt -- so the test
 # stops them, by the pid file netcfgd wrote and only where the process still
@@ -75,7 +76,7 @@ stop_clients() {
 	done
 }
 cleanup() {
-	for pid in $rescuer $server $chatter; do
+	for pid in $rescuer $server $chatter $neighbour; do
 		kill "$pid" 2>/dev/null || true
 		wait "$pid" 2>/dev/null || true
 	done
@@ -168,6 +169,7 @@ contains "and the fallback beside it" "$addresses" "10.0.0.250/16"
 contains "the kernel's IPv6 link-local address is left on it" "$(ip -6 -br addr show cli)" "fe80::"
 contains "the report is in its log as well" "$(cat "$work/one/netrescue.log")" "answers, at rung 1"
 
+
 kill "$rescuer"
 wait "$rescuer" 2>/dev/null || true
 rescuer=
@@ -249,7 +251,108 @@ kill "$chatter" 2>/dev/null || true
 wait "$chatter" 2>/dev/null || true
 stop_clients
 
-# ---- 4. What a person typing it gets wrong.
+# ---- 4. A name on the link: NAME.local asked by a neighbour.
+# The neighbour is in a namespace of its own, as a laptop on the cable is a
+# host of its own: in this one a query arriving on a port from an address
+# the namespace holds is dropped as a martian, which IPv4 does and IPv6 does
+# not -- found as an IPv4 query that was never answered. Asked the way a
+# resolver that is not a responder asks, from a port other than 5353, so the
+# answer comes back to it, over both families; three seconds a question.
+if command -v python3 >/dev/null 2>&1 && command -v nsenter >/dev/null 2>&1; then
+	ip link add m0 type veth peer name m1
+	mkdir -p "$work/sys4/m0"
+	printf '1\n' > "$work/sys4/m0/type"
+	printf '1\n' > "$work/sys4/m0/carrier"
+	ln -s ../../devices/fake "$work/sys4/m0/device"
+	unshare --net -- sleep 120 &
+	neighbour=$!
+	waited=0
+	while [ "$(readlink /proc/$neighbour/ns/net 2>/dev/null)" = "$(readlink /proc/$$/ns/net)" ] &&
+	    [ "$waited" -lt 50 ]; do
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	ip link set m1 netns "$neighbour"
+	nsenter -t "$neighbour" -n ip link set lo up
+	nsenter -t "$neighbour" -n ip link set m1 up
+	nsenter -t "$neighbour" -n ip addr add 10.0.0.1/16 dev m1
+	"$build/netrescue" --dir "$work/four" --sysfs "$work/sys4" --wait 30 --for 30 \
+		--name rescuetest > "$work/rescue.out" 2>&1 &
+	rescuer=$!
+	wait_for "rung 1:" 10 || true
+	waited=0
+	while ! ip -4 -br addr show m0 | grep -q 10.0.0.250 && [ "$waited" -lt 50 ]; do
+		waited=$((waited + 1))
+		sleep 0.2
+	done
+	m0_6=$(ip -6 -br addr show m0 | awk '{ print $3 }' | cut -d/ -f1)
+	answers=$(nsenter -t "$neighbour" -n python3 - <<'PY' 2>&1
+import socket, struct
+def query(name, kind):
+    b = struct.pack('>HHHHHH', 0x4242, 0, 1, 0, 0, 0)
+    for label in name.split('.'):
+        b += bytes([len(label)]) + label.encode()
+    return b + b'\0' + struct.pack('>HH', kind, 1)
+def ask(family, group, kind):
+    s = socket.socket(family, socket.SOCK_DGRAM)
+    s.settimeout(3)
+    if family == socket.AF_INET:
+        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton('10.0.0.1'))
+        s.sendto(query('rescuetest.local', kind), (group, 5353))
+    else:
+        index = socket.if_nametoindex('m1')
+        s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, index)
+        s.sendto(query('rescuetest.local', kind), (group, 5353, 0, index))
+    try:
+        data, _ = s.recvfrom(1500)
+    except socket.timeout:
+        return 'nothing'
+    if data[:2] != b'\x42\x42':
+        return 'a wrong id'
+    if kind == 1:
+        return socket.inet_ntop(socket.AF_INET, data[-4:])
+    return socket.inet_ntop(socket.AF_INET6, data[-16:])
+def ask_as_responder(kind):
+    # From 5353 and joined to the group, as avahi and Bonjour ask: the
+    # answer goes to the group rather than back to the asker.
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(('', 5353))
+    membership = socket.inet_aton('224.0.0.251') + socket.inet_aton('10.0.0.1')
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton('10.0.0.1'))
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+    s.settimeout(3)
+    s.sendto(query('rescuetest.local', kind), ('224.0.0.251', 5353))
+    try:
+        while True:
+            data, sender = s.recvfrom(1500)
+            if data[2] & 0x80:
+                return socket.inet_ntop(socket.AF_INET, data[-4:]) + ' from ' + sender[0]
+    except socket.timeout:
+        return 'nothing'
+print('A', ask(socket.AF_INET, '224.0.0.251', 1))
+print('AAAA', ask(socket.AF_INET6, 'ff02::fb', 28))
+print('group', ask_as_responder(1))
+PY
+)
+	contains "rescuetest.local answers a neighbour over IPv4 with the port's address" "$answers" "A 10.0.0.250"
+	contains "and over IPv6 with its link-local address" "$answers" "AAAA $m0_6"
+	contains "and to a responder asking from 5353, to the group" "$answers" "group 10.0.0.250 from 10.0.0.250"
+	contains "it says what it answers to" "$(cat "$work/rescue.out")" "answering to rescuetest.local"
+	kill "$rescuer" 2>/dev/null || true
+	wait "$rescuer" 2>/dev/null || true
+	rescuer=
+	kill "$neighbour" 2>/dev/null || true
+	wait "$neighbour" 2>/dev/null || true
+	neighbour=
+	ip link del m0 2>/dev/null || true
+	stop_clients
+else
+	echo "skip mDNS: no python3 or nsenter to ask with"
+fi
+
+# ---- 5. What a person typing it gets wrong.
 out=$("$build/netrescue" --wait 0 2>&1 || true)
 contains "a wait of zero is refused" "$out" "is not something it takes"
 

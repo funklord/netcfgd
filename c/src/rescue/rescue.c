@@ -827,3 +827,187 @@ int ncfg_rescue_kmsg_complaint(const char *record, const char *driver, const cha
 	(void)snprintf(out, out_size, "%.*s", (int)strcspn(text, "\n"), text);
 	return 1;
 }
+
+/* ------------------------------------------------------------------ mDNS */
+
+#define MDNS_TYPE_A    1u
+#define MDNS_TYPE_AAAA 28u
+#define MDNS_TYPE_ANY  255u
+#define MDNS_CLASS_IN  1u
+/* Records about this host are unique to it: the cache-flush bit (RFC 6762
+ * 10.2) says so, and a TTL of two minutes is the RFC's for host records. */
+#define MDNS_CACHE_FLUSH 0x8000u
+#define MDNS_TTL         120u
+
+/* Read the name at `at` as labels; 1 when it is `name`.local exactly. A
+ * compression pointer in a question is legal and is followed, at most a few
+ * times, and only backwards, so a loop cannot be built out of one. */
+static int question_is(const uint8_t *packet, size_t length, size_t *at, const char *name,
+    int *matches)
+{
+	size_t position = *at;
+	size_t end = 0;
+	int    label = 0, jumps = 0;
+	int    same = 1;
+
+	for (;;) {
+		uint8_t size;
+
+		if (position >= length) {
+			return 0;
+		}
+		size = packet[position];
+		if ((size & 0xc0u) == 0xc0u) {
+			size_t target;
+
+			if (position + 1u >= length || ++jumps > 8) {
+				return 0;
+			}
+			target = ((size_t)(size & 0x3fu) << 8) | packet[position + 1u];
+			if (target >= position) {
+				return 0;
+			}
+			if (end == 0u) {
+				end = position + 2u;
+			}
+			position = target;
+			continue;
+		}
+		if (size & 0xc0u) {
+			return 0;
+		}
+		if (size == 0u) {
+			if (end == 0u) {
+				end = position + 1u;
+			}
+			break;
+		}
+		if (position + 1u + size > length) {
+			return 0;
+		}
+		{
+			const char *want = label == 0 ? name : label == 1 ? "local" : NULL;
+			size_t      at_char;
+
+			if (!want || strlen(want) != size) {
+				same = 0;
+			} else {
+				for (at_char = 0; at_char < size; at_char++) {
+					if (tolower(packet[position + 1u + at_char]) !=
+					    tolower((unsigned char)want[at_char])) {
+						same = 0;
+					}
+				}
+			}
+		}
+		label++;
+		position += 1u + size;
+	}
+	*matches = same && label == 2;
+	*at = end;
+	return 1;
+}
+
+static int put16(uint8_t *out, size_t size, size_t *used, unsigned value)
+{
+	if (*used + 2u > size) {
+		return 0;
+	}
+	out[(*used)++] = (uint8_t)(value >> 8);
+	out[(*used)++] = (uint8_t)value;
+	return 1;
+}
+
+static int put_bytes(uint8_t *out, size_t size, size_t *used, const void *bytes, size_t length)
+{
+	if (*used + length > size) {
+		return 0;
+	}
+	memcpy(out + *used, bytes, length);
+	*used += length;
+	return 1;
+}
+
+/* One answer record, its name written whole the first time and as a pointer
+ * to it after. */
+static int put_record(uint8_t *out, size_t size, size_t *used, const char *name, size_t *name_at,
+    unsigned type, const void *data, size_t data_length)
+{
+	if (*name_at == 0u) {
+		uint8_t label = (uint8_t)strlen(name);
+
+		*name_at = *used;
+		if (!put_bytes(out, size, used, &label, 1) || !put_bytes(out, size, used, name, label) ||
+		    !put_bytes(out, size, used, "\5local\0", 7)) {
+			return 0;
+		}
+	} else if (!put16(out, size, used, 0xc000u | (unsigned)*name_at)) {
+		return 0;
+	}
+	return put16(out, size, used, type) && put16(out, size, used, MDNS_CLASS_IN | MDNS_CACHE_FLUSH) &&
+	    put16(out, size, used, 0) && put16(out, size, used, MDNS_TTL) &&
+	    put16(out, size, used, (unsigned)data_length) && put_bytes(out, size, used, data, data_length);
+}
+
+size_t ncfg_rescue_mdns_answer(const uint8_t *query, size_t length, const char *name,
+    const uint32_t *ipv4, size_t ipv4_count, const uint8_t (*ipv6)[16], size_t ipv6_count,
+    uint8_t *out, size_t out_size)
+{
+	size_t   at = 12, used = 12, name_at = 0, asked, question;
+	int      want_a = 0, want_aaaa = 0;
+	unsigned answers = 0;
+
+	if (!query || length < 12u || !name || !out || out_size < 12u || strlen(name) == 0u ||
+	    strlen(name) > 63u) {
+		return 0;
+	}
+	/* A response, or a query with an opcode other than 0, is not asked of us. */
+	if ((query[2] & 0x80u) || (query[2] & 0x78u)) {
+		return 0;
+	}
+	asked = ((size_t)query[4] << 8) | query[5];
+	for (question = 0; question < asked; question++) {
+		int      matches = 0;
+		unsigned type;
+
+		if (!question_is(query, length, &at, name, &matches) || at + 4u > length) {
+			return 0;
+		}
+		type = ((unsigned)query[at] << 8) | query[at + 1u];
+		if (matches && (((unsigned)query[at + 2u] << 8 | query[at + 3u]) & 0x7fffu) == MDNS_CLASS_IN) {
+			want_a |= type == MDNS_TYPE_A || type == MDNS_TYPE_ANY;
+			want_aaaa |= type == MDNS_TYPE_AAAA || type == MDNS_TYPE_ANY;
+		}
+		at += 4u;
+	}
+	if (want_a) {
+		size_t index;
+
+		for (index = 0; index < ipv4_count; index++) {
+			if (!put_record(out, out_size, &used, name, &name_at, MDNS_TYPE_A, &ipv4[index], 4)) {
+				return 0;
+			}
+			answers++;
+		}
+	}
+	if (want_aaaa) {
+		size_t index;
+
+		for (index = 0; index < ipv6_count; index++) {
+			if (!put_record(out, out_size, &used, name, &name_at, MDNS_TYPE_AAAA, ipv6[index], 16)) {
+				return 0;
+			}
+			answers++;
+		}
+	}
+	if (answers == 0u) {
+		return 0;
+	}
+	/* RFC 6762 18: the ID is zero in a multicast response, the flags are
+	 * "response, authoritative", and no question is repeated. */
+	memset(out, 0, 12);
+	out[2] = 0x84;
+	out[6] = (uint8_t)(answers >> 8);
+	out[7] = (uint8_t)answers;
+	return used;
+}

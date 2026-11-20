@@ -27,6 +27,9 @@
  *   too. Either way the daemon is sent TERM, given ten seconds, then KILL,
  *   and waited for: netrescue does not leave a netcfgd behind.
  */
+/* `struct in6_pktinfo`, which glibc and musl declare only under it. */
+#define _GNU_SOURCE
+
 #include "main_internal.h"
 
 #include "ncfg/base.h"
@@ -35,12 +38,17 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -57,6 +65,7 @@ typedef struct {
 	const char *sysfs;
 	const char *routes;
 	const char *log;
+	const char *name;
 	int         wait;
 	int         listen;
 	int         run_for;
@@ -129,11 +138,32 @@ static const char *usage(void)
 	       "  --for SECONDS      stop after this long; default never\n"
 	       "  --console          say each line on /dev/console as well\n"
 	       "  --log PATH         default DIR/netrescue.log\n"
+	       "  --name NAME        answered to as NAME.local over mDNS, default "
+	       NCFG_RESCUE_NAME_DEFAULT "\n"
 	       "  --sysfs PATH       where the ports are read, default /sys/class/net\n"
 	       "  --routes PATH      the route table read, default /proc/net/route\n"
 	       "  -h, --help         this text\n"
 	       "\n"
 	       "It runs netcfgd on DIR/etc, which it writes; decision 0326 is the design.\n";
+}
+
+/* One DNS label of letters, digits and hyphens: what `NAME.local` may be. */
+static int plain_label(const char *text)
+{
+	size_t at;
+
+	if (!text || text[0] == '\0' || strlen(text) > 63u) {
+		return 0;
+	}
+	for (at = 0; text[at] != '\0'; at++) {
+		char c = text[at];
+
+		if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		    c == '-')) {
+			return 0;
+		}
+	}
+	return 1;
 }
 
 static int number(const char *text, int *out)
@@ -160,6 +190,7 @@ static int parse(int argc, char **argv, rescue_options_t *options, int *status)
 	options->sysfs = "/sys/class/net";
 	options->routes = "/proc/net/route";
 	options->log = NULL;
+	options->name = NCFG_RESCUE_NAME_DEFAULT;
 	options->wait = 30;
 	options->listen = 15;
 	options->run_for = 0;
@@ -193,6 +224,8 @@ static int parse(int argc, char **argv, rescue_options_t *options, int *status)
 			options->routes = value;
 		} else if (strcmp(arg, "--log") == 0) {
 			options->log = value;
+		} else if (strcmp(arg, "--name") == 0 && plain_label(value)) {
+			options->name = value;
 		} else if (strcmp(arg, "--listen") == 0 && number(value, &options->listen)) {
 			/* taken */
 		} else if (strcmp(arg, "--wait") == 0 && number(value, &options->wait)) {
@@ -531,6 +564,262 @@ static void rebind_all(const rescue_options_t *options, const ncfg_rescue_ports_
 	}
 }
 
+/*
+ * The mDNS responder: NAME.local on every port, so a laptop on a direct
+ * cable finds the box without knowing which address any rung gave it.
+ *
+ * **IPv6 as well as IPv4, and IPv6 is the one that always works there**: a
+ * link-local address is on every port from the moment it is up, where an
+ * IPv4 one is only on the port the fallback is on. A query is answered on the
+ * port it arrived on, with that port's own addresses -- another port's would
+ * be unreachable from where the asker is. One that came from a port other
+ * than 5353 is a "legacy" resolver's and is answered to it directly, with its
+ * ID (RFC 6762 6.7); everything else goes to the group.
+ */
+typedef struct {
+	int fd4;
+	int fd6;
+	int joined[NCFG_RESCUE_PORT_MAX];
+	size_t joined_count;
+} mdns_t;
+
+static mdns_t mdns = { -1, -1, { 0 }, 0 };
+
+static void mdns_open(void)
+{
+	struct sockaddr_in  any4;
+	struct sockaddr_in6 any6;
+	int                 on = 1, off = 0, hops = 255;
+
+	mdns.fd4 = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+	memset(&any4, 0, sizeof(any4));
+	any4.sin_family = AF_INET;
+	any4.sin_port = htons(NCFG_RESCUE_MDNS_PORT);
+	if (mdns.fd4 >= 0 && (setsockopt(mdns.fd4, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0 ||
+	    setsockopt(mdns.fd4, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on)) != 0 ||
+	    setsockopt(mdns.fd4, IPPROTO_IP, IP_MULTICAST_TTL, &hops, sizeof(hops)) != 0 ||
+	    setsockopt(mdns.fd4, IPPROTO_IP, IP_MULTICAST_LOOP, &off, sizeof(off)) != 0 ||
+	    bind(mdns.fd4, (const struct sockaddr *)&any4, sizeof(any4)) != 0)) {
+		say("mDNS over IPv4 is off: %s", strerror(errno));
+		(void)close(mdns.fd4);
+		mdns.fd4 = -1;
+	}
+	mdns.fd6 = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+	memset(&any6, 0, sizeof(any6));
+	any6.sin6_family = AF_INET6;
+	any6.sin6_port = htons(NCFG_RESCUE_MDNS_PORT);
+	if (mdns.fd6 >= 0 && (setsockopt(mdns.fd6, IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(on)) != 0 ||
+	    setsockopt(mdns.fd6, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) != 0 ||
+	    setsockopt(mdns.fd6, IPPROTO_IPV6, IPV6_RECVPKTINFO, &on, sizeof(on)) != 0 ||
+	    setsockopt(mdns.fd6, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof(hops)) != 0 ||
+	    setsockopt(mdns.fd6, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &off, sizeof(off)) != 0 ||
+	    bind(mdns.fd6, (const struct sockaddr *)&any6, sizeof(any6)) != 0)) {
+		say("mDNS over IPv6 is off: %s", strerror(errno));
+		(void)close(mdns.fd6);
+		mdns.fd6 = -1;
+	}
+}
+
+static int mdns_port_index(const ncfg_rescue_ports_t *ports, int index)
+{
+	size_t at;
+
+	for (at = 0; at < ports->count; at++) {
+		if ((int)if_nametoindex(ports->ports[at].name) == index) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Join both groups on every port not yet joined. A port that has gone and
+ * come back has a new index and is joined again; a failure is tried again
+ * next tick, since a link that is down cannot join. */
+static void mdns_join(const ncfg_rescue_ports_t *ports)
+{
+	size_t at, seen;
+
+	for (at = 0; at < ports->count; at++) {
+		int index = (int)if_nametoindex(ports->ports[at].name);
+		int ok = 0;
+
+		if (index == 0 || mdns.joined_count == NCFG_RESCUE_PORT_MAX) {
+			continue;
+		}
+		for (seen = 0; seen < mdns.joined_count && mdns.joined[seen] != index; seen++) {
+		}
+		if (seen < mdns.joined_count) {
+			continue;
+		}
+		if (mdns.fd4 >= 0) {
+			struct ip_mreqn group;
+
+			memset(&group, 0, sizeof(group));
+			(void)inet_pton(AF_INET, "224.0.0.251", &group.imr_multiaddr);
+			group.imr_ifindex = index;
+			ok |= setsockopt(mdns.fd4, IPPROTO_IP, IP_ADD_MEMBERSHIP, &group, sizeof(group)) == 0;
+		}
+		if (mdns.fd6 >= 0) {
+			struct ipv6_mreq group;
+
+			memset(&group, 0, sizeof(group));
+			(void)inet_pton(AF_INET6, "ff02::fb", &group.ipv6mr_multiaddr);
+			group.ipv6mr_interface = (unsigned)index;
+			ok |= setsockopt(mdns.fd6, IPPROTO_IPV6, IPV6_JOIN_GROUP, &group, sizeof(group)) == 0;
+		}
+		if (ok) {
+			mdns.joined[mdns.joined_count++] = index;
+		}
+	}
+}
+
+/* One port's own addresses, for the answer. */
+static void addresses_of(int index, uint32_t *ipv4, size_t *ipv4_count, uint8_t (*ipv6)[16],
+    size_t *ipv6_count)
+{
+	struct ifaddrs *all, *at;
+	char            name[IF_NAMESIZE];
+
+	*ipv4_count = 0;
+	*ipv6_count = 0;
+	if (!if_indextoname((unsigned)index, name) || getifaddrs(&all) != 0) {
+		return;
+	}
+	for (at = all; at; at = at->ifa_next) {
+		if (!at->ifa_addr || strcmp(at->ifa_name, name) != 0) {
+			continue;
+		}
+		if (at->ifa_addr->sa_family == AF_INET && *ipv4_count < 8u) {
+			ipv4[(*ipv4_count)++] = ((const struct sockaddr_in *)(const void *)at->ifa_addr)->sin_addr.s_addr;
+		} else if (at->ifa_addr->sa_family == AF_INET6 && *ipv6_count < 8u) {
+			memcpy(ipv6[(*ipv6_count)++],
+			    &((const struct sockaddr_in6 *)(const void *)at->ifa_addr)->sin6_addr, 16);
+		}
+	}
+	freeifaddrs(all);
+}
+
+static void mdns_answer_one(int fd, int family, const rescue_options_t *options,
+    const ncfg_rescue_ports_t *ports)
+{
+	uint8_t                 query[1500], answer[1500];
+	union {
+		struct sockaddr_in  v4;
+		struct sockaddr_in6 v6;
+	} from;
+	char                    control[256];
+	struct iovec            io = { query, sizeof(query) };
+	struct msghdr           message;
+	struct cmsghdr         *header;
+	uint32_t                ipv4[8];
+	uint8_t                 ipv6[8][16];
+	size_t                  ipv4_count, ipv6_count, length;
+	ssize_t                 got;
+	int                     index = 0;
+	uint16_t                source_port;
+
+	memset(&message, 0, sizeof(message));
+	message.msg_name = &from;
+	message.msg_namelen = sizeof(from);
+	message.msg_iov = &io;
+	message.msg_iovlen = 1;
+	message.msg_control = control;
+	message.msg_controllen = sizeof(control);
+	got = recvmsg(fd, &message, 0);
+	if (got <= 0) {
+		return;
+	}
+	for (header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
+		if (header->cmsg_level == IPPROTO_IP && header->cmsg_type == IP_PKTINFO) {
+			struct in_pktinfo info;
+
+			memcpy(&info, CMSG_DATA(header), sizeof(info));
+			index = info.ipi_ifindex;
+		} else if (header->cmsg_level == IPPROTO_IPV6 && header->cmsg_type == IPV6_PKTINFO) {
+			struct in6_pktinfo info;
+
+			memcpy(&info, CMSG_DATA(header), sizeof(info));
+			index = (int)info.ipi6_ifindex;
+		}
+	}
+	if (index == 0 || !mdns_port_index(ports, index)) {
+		return;
+	}
+	addresses_of(index, ipv4, &ipv4_count, ipv6, &ipv6_count);
+	length = ncfg_rescue_mdns_answer(query, (size_t)got, options->name, ipv4, ipv4_count,
+	    (const uint8_t (*)[16])ipv6, ipv6_count, answer, sizeof(answer));
+	if (length == 0u) {
+		return;
+	}
+	source_port = family == AF_INET ? ntohs(from.v4.sin_port) : ntohs(from.v6.sin6_port);
+	if (source_port != NCFG_RESCUE_MDNS_PORT) {
+		/* A legacy resolver's question, answered to it with its own ID. */
+		answer[0] = query[0];
+		answer[1] = query[1];
+		(void)sendto(fd, answer, length, 0, (const struct sockaddr *)&from, message.msg_namelen);
+		return;
+	}
+	if (family == AF_INET) {
+		struct ip_mreqn     out;
+		struct sockaddr_in  group;
+
+		memset(&out, 0, sizeof(out));
+		out.imr_ifindex = index;
+		(void)setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &out, sizeof(out));
+		memset(&group, 0, sizeof(group));
+		group.sin_family = AF_INET;
+		group.sin_port = htons(NCFG_RESCUE_MDNS_PORT);
+		(void)inet_pton(AF_INET, "224.0.0.251", &group.sin_addr);
+		(void)sendto(fd, answer, length, 0, (const struct sockaddr *)&group, sizeof(group));
+	} else {
+		struct sockaddr_in6 group;
+		unsigned            out = (unsigned)index;
+
+		(void)setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_IF, &out, sizeof(out));
+		memset(&group, 0, sizeof(group));
+		group.sin6_family = AF_INET6;
+		group.sin6_port = htons(NCFG_RESCUE_MDNS_PORT);
+		group.sin6_scope_id = (uint32_t)index;
+		(void)inet_pton(AF_INET6, "ff02::fb", &group.sin6_addr);
+		(void)sendto(fd, answer, length, 0, (const struct sockaddr *)&group, sizeof(group));
+	}
+}
+
+/* Answer what arrives for `seconds`, which is the loop's tick: the wait
+ * between two looks at the machine is spent listening rather than asleep. */
+static void mdns_serve(const rescue_options_t *options, const ncfg_rescue_ports_t *ports,
+    int seconds)
+{
+	struct pollfd wait[2];
+	struct timespec start, now;
+	long long       left;
+
+	(void)clock_gettime(CLOCK_MONOTONIC, &start);
+	wait[0].fd = mdns.fd4;
+	wait[0].events = POLLIN;
+	wait[1].fd = mdns.fd6;
+	wait[1].events = POLLIN;
+	for (;;) {
+		(void)clock_gettime(CLOCK_MONOTONIC, &now);
+		left = (long long)seconds * 1000LL - ((long long)(now.tv_sec - start.tv_sec) * 1000LL +
+		    (now.tv_nsec - start.tv_nsec) / 1000000L);
+		if (left <= 0 || stop_asked) {
+			return;
+		}
+		wait[0].revents = 0;
+		wait[1].revents = 0;
+		if (poll(wait, 2, (int)left) <= 0) {
+			continue;
+		}
+		if (wait[0].revents & POLLIN) {
+			mdns_answer_one(mdns.fd4, AF_INET, options, ports);
+		}
+		if (wait[1].revents & POLLIN) {
+			mdns_answer_one(mdns.fd6, AF_INET6, options, ports);
+		}
+	}
+}
+
 static long long now_seconds(void)
 {
 	struct timespec now;
@@ -594,8 +883,9 @@ int ncfg_main_rescue(int argc, char **argv)
 	(void)sigaction(SIGHUP, &action, NULL);
 
 	started = rung_since = now_seconds();
-	say("started: rungs of %d s, fallback %s, directory %s", options.wait,
-	    options.fallback ? options.fallback : "none", options.dir);
+	say("started: rungs of %d s, fallback %s, directory %s, answering to %s.local",
+	    options.wait, options.fallback ? options.fallback : "none", options.dir, options.name);
+	mdns_open();
 
 	while (!stop_asked) {
 		char err[NCFG_ERROR_MAX];
@@ -701,12 +991,19 @@ int ncfg_main_rescue(int argc, char **argv)
 				rung_since = now_seconds();
 			}
 		}
-		(void)sleep(RESCUE_TICK_SECONDS);
+		mdns_join(&ports);
+		mdns_serve(&options, &ports, RESCUE_TICK_SECONDS);
 	}
 	if (stop_asked) {
 		say("stopping: asked to");
 	}
 	stop_daemon(daemon);
+	if (mdns.fd4 >= 0) {
+		(void)close(mdns.fd4);
+	}
+	if (mdns.fd6 >= 0) {
+		(void)close(mdns.fd6);
+	}
 	free(document);
 	free(written);
 	if (log_file) {

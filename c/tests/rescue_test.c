@@ -375,6 +375,82 @@ static void test_kmsg(void)
 	          "virtio_net", "virtio1", said, sizeof(said)), "matched by device name too, any case");
 }
 
+/* A query for `labels` (each preceded by its length, ending in a zero) of
+ * `type`, from a resolver with ID 0x1234. */
+static size_t mdns_query(uint8_t *out, const char *labels, size_t labels_size, unsigned type)
+{
+	static const uint8_t header[12] = { 0x12, 0x34, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0 };
+	size_t               used = 0;
+
+	memcpy(out, header, 12);
+	used = 12;
+	memcpy(out + used, labels, labels_size);
+	used += labels_size;
+	out[used++] = (uint8_t)(type >> 8);
+	out[used++] = (uint8_t)type;
+	out[used++] = 0x80;
+	out[used++] = 1;
+	return used;
+}
+
+static void test_mdns(void)
+{
+	static const char rescue[] = "\6rescue\5local";
+	static const char other[] = "\5other\5local";
+	uint32_t          ipv4[1];
+	uint8_t           ipv6[1][16];
+	uint8_t           query[256], answer[512];
+	size_t            length, answered;
+
+	ipv4[0] = ip("10.0.0.250");
+	memset(ipv6[0], 0, 16);
+	ipv6[0][0] = 0xfe;
+	ipv6[0][1] = 0x80;
+	ipv6[0][15] = 7;
+
+	length = mdns_query(query, rescue, sizeof(rescue), 1);
+	answered = ncfg_rescue_mdns_answer(query, length, "rescue", ipv4, 1,
+	    (const uint8_t (*)[16])ipv6, 1, answer, sizeof(answer));
+	check(answered == 12u + 14u + 10u + 4u, "an A question for rescue.local is answered");
+	check(answered > 12u && answer[0] == 0 && answer[1] == 0 && answer[2] == 0x84 && answer[7] == 1,
+	    "as an authoritative response with ID zero and one answer");
+	check(answered >= 40u && memcmp(answer + answered - 4u, &ipv4[0], 4) == 0 &&
+	    answer[answered - 14u] == 0 && answer[answered - 13u] == 1, "an A record with the address");
+
+	length = mdns_query(query, rescue, sizeof(rescue), 28);
+	answered = ncfg_rescue_mdns_answer(query, length, "RESCUE", ipv4, 1,
+	    (const uint8_t (*)[16])ipv6, 1, answer, sizeof(answer));
+	check(answered >= 16u && memcmp(answer + answered - 16u, ipv6[0], 16) == 0,
+	    "AAAA is answered with the link-local address, the name compared without case");
+
+	length = mdns_query(query, rescue, sizeof(rescue), 255);
+	answered = ncfg_rescue_mdns_answer(query, length, "rescue", ipv4, 1,
+	    (const uint8_t (*)[16])ipv6, 1, answer, sizeof(answer));
+	check(answered > 12u && answer[7] == 2 && answer[12 + 14 + 10 + 4] == 0xc0,
+	    "ANY gets both, the second naming the first by pointer");
+
+	length = mdns_query(query, other, sizeof(other), 1);
+	check(ncfg_rescue_mdns_answer(query, length, "rescue", ipv4, 1, (const uint8_t (*)[16])ipv6, 1,
+	          answer, sizeof(answer)) == 0u, "another name is not answered");
+	length = mdns_query(query, rescue, sizeof(rescue), 1);
+	query[2] = 0x84;
+	check(ncfg_rescue_mdns_answer(query, length, "rescue", ipv4, 1, (const uint8_t (*)[16])ipv6, 1,
+	          answer, sizeof(answer)) == 0u, "a response is not answered");
+	query[2] = 0;
+	check(ncfg_rescue_mdns_answer(query, length - 3u, "rescue", ipv4, 1,
+	          (const uint8_t (*)[16])ipv6, 1, answer, sizeof(answer)) == 0u,
+	    "a question cut short is not answered");
+	check(ncfg_rescue_mdns_answer(query, length, "rescue", NULL, 0, (const uint8_t (*)[16])ipv6, 0,
+	          answer, sizeof(answer)) == 0u, "nothing to say is no answer");
+	/* A name that is a pointer to itself. */
+	query[12] = 0xc0;
+	query[13] = 12;
+	check(ncfg_rescue_mdns_answer(query, length, "rescue", ipv4, 1, (const uint8_t (*)[16])ipv6, 1,
+	          answer, sizeof(answer)) == 0u, "a name pointing at itself is refused, not followed");
+	check(ncfg_rescue_mdns_answer(query, length, "rescue", ipv4, 1, (const uint8_t (*)[16])ipv6, 1,
+	          answer, 20) == 0u, "an answer that does not fit is not sent cut");
+}
+
 static void test_gateways(void)
 {
 	static const char table[] =
@@ -409,6 +485,7 @@ int main(void)
 	test_learn();
 	test_rebind(root);
 	test_kmsg();
+	test_mdns();
 	test_render_learned();
 	testdir_remove(root);
 	check(!testdir_exists(root), "the test's directory is gone");

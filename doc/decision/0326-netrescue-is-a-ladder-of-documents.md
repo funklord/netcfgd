@@ -99,8 +99,9 @@ since every rung keeps those.
   (project.md 10.876, with 10.877 making the forcing real); then listening
   (10.878), which runs second, before forcing, because it disturbs nothing
   and serves the ports forcing does not -- the ones with a carrier and no
-  lease; then the driver rebind as the last rung (10.879), an mDNS
-  announcement, PPP on a serial console.
+  lease; then the driver rebind as the last rung (10.879), a responder for
+  NAME.local that runs from the start rather than as a rung (10.880), and
+  PPP on a serial console.
   The stick takes it when project.md says it is ready.
 - Stopping netrescue stops its netcfgd and leaves what it configured,
   DHCP clients included, as a stopped netcfgd does: a rescue that took the
