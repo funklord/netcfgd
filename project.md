@@ -12747,6 +12747,25 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.886 Taking over ml350's shape: OpenRC under sysvinit
+
+10.884's rig on the desktop's shape: `make hull-takeover-openrc` boots the
+same payloads on a Devuan excalibur image with OpenRC as the rc system under
+sysvinit, as ml350 runs (10.845), so the boot and the switch go through
+`/etc/runlevels`. `nas.sh` tells the two apart by `/run/openrc` and checks
+OpenRC's runlevels there rather than `/etc/rc?.d`, which nothing reads.
+
+**It found the switcher leaving ifupdown enabled.** Under OpenRC
+`netcfgd_select.sh` stood a script down with `rc-update del SCRIPT
+default`, but Debian's `networking` says `Default-Start: S`, so OpenRC has
+it in `boot`: the delete failed quietly, the script stayed enabled, and at
+the next boot ifupdown would have configured ml350's interfaces beside
+netcfgd. It deletes the script from every runlevel `rc-update show -v`
+lists it in now. `tests/live/select.sh`'s stand-in `rc-update` answers
+`show -v` as such a machine does, and its check -- `networking` out of
+`boot` -- fails with the old line and passes with the new. Both rigs pass,
+sysv-rc and OpenRC.
+
 ## 10.885 A firewall rule can count per source: `over`
 
 The one rule of the servers' `rules.v4` with no translation (10.884): an
@@ -12843,8 +12862,22 @@ Found on the way, and fixed or open:
 - **The SSH guard had no translation**: the firewall language had no
   per-source rate limit. **Settled by 10.885**, `over`; the rig checks the
   guard in phase B as in phase A.
-- **Open: IPoIB's connected mode** is not modelled, and nothing here has
-  InfiniBand to test it on.
+- **IPoIB's connected mode is not modelled**, and nothing here has
+  InfiniBand to test a native setting on, so the translation is a `pre_up`
+  hook writing `connected` to `/sys/class/net/ib0/mode` and setting the MTU
+  with `ip`. **Not `device ib0 { mtu = 65520 }`**: a plan sets a device's
+  MTU before `pre_up` runs (measured, `ncfg plan` on a dummy `ib0`), IPoIB
+  refuses 65520 in datagram mode, and a failed `link.set_mtu` stops the rest
+  of the plan -- so `ib0` would never come up. Unverified on the card; the
+  first live install is its test.
+- **The translated documents for -01, -03 and ml350**, each compiling,
+  went to the system-notes tree's inbox (`~/claude`, 20261120T2017Z) with
+  the steps for -01's fresh install: a DHCP client netcfgd drives
+  (`dhcpcd-base`), iptables-persistent retired, `netcfgd_select.sh`, from
+  the BMC's serial console. **One check only the real network can make**:
+  netcfgd's dhcpcd sends a DUID client identifier where `dhclient` sent
+  none, so a router keying a reservation on client-id rather than MAC would
+  lease -01 another address.
 - hull's microvm kernel has no `nf_tables`, so the rig's machines run
   `(tuning (vm (profile full)))`, the host's kernel and modules.
 

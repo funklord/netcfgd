@@ -434,7 +434,16 @@ sysv_down() {
 			procd_wait_stopped "$script"
 		elif openrc_runs; then
 			run rc-service "$script" stop
-			run rc-update del "$script" default
+			# **Out of every runlevel it is in, not only `default`.**
+			# Debian's `networking` says `Default-Start: S`, so OpenRC puts
+			# it in `boot`: deleting it from `default` failed, left it
+			# enabled, and on ml350's shape ifupdown would have come back
+			# at the next boot beside netcfgd (`make hull-takeover-openrc`,
+			# project.md 10.886).
+			for level in $(rc-update show -v 2>/dev/null |
+				sed -n "s/^ *$script | *//p"); do
+				run rc-update del "$script" "$level"
+			done
 		else
 			run "/etc/init.d/$script" stop
 			if command -v update-rc.d >/dev/null 2>&1; then

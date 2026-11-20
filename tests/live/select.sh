@@ -429,10 +429,21 @@ echo "update-rc.d $*" >> "$SEL_LOG"
 STUB
 chmod +x "$work/sysv-bin/update-rc.d"
 mkdir -p "$work/openrc-bin"
-for tool in rc-update rc-service; do
-	printf '#!/bin/sh\necho "%s $*" >> "$SEL_LOG"\n' "$tool" > "$work/openrc-bin/$tool"
-	chmod +x "$work/openrc-bin/$tool"
-done
+printf '#!/bin/sh\necho "rc-service $*" >> "$SEL_LOG"\n' > "$work/openrc-bin/rc-service"
+# `show -v` answers as a Devuan box with OpenRC does: Debian's `networking`
+# says `Default-Start: S`, so OpenRC has it in `boot`, the rest in
+# `default`. The switcher once deleted from `default` only, and ifupdown
+# stayed enabled (project.md 10.886).
+cat > "$work/openrc-bin/rc-update" <<'STUB'
+#!/bin/sh
+if [ "${1:-}" = show ]; then
+	printf '%s\n' '          connman | default' '       networking | boot' \
+		'  network-manager | default' '           dhcpcd | default' '      netcfgd-nm |'
+	exit 0
+fi
+echo "rc-update $*" >> "$SEL_LOG"
+STUB
+chmod +x "$work/openrc-bin/rc-service" "$work/openrc-bin/rc-update"
 sysv_run() {
 	# $1 the log's name, $2 `sysv` or `openrc` -- whether OpenRC is running --
 	# and $3.. the targets in order. Both sets of stubs are always on PATH, so
@@ -508,8 +519,8 @@ check "sysvinit with rc-update installed and OpenRC not running uses update-rc.d
 sysv_run openrc openrc netcfgd
 check "OpenRC: selecting netcfgd takes connman out of the default runlevel" \
 	"$(section openrc netcfgd 'rc-update del connman default')" "1"
-check "and ifupdown by its script name, networking" \
-	"$(section openrc netcfgd 'rc-update del networking default')" "1"
+check "and ifupdown by its script name, networking, from boot where it is" \
+	"$(section openrc netcfgd 'rc-update del networking boot')" "1"
 check "and puts netcfgd in it" "$(section openrc netcfgd 'rc-update add netcfgd default')" "1"
 check "and starts it" "$(section openrc netcfgd 'rc-service netcfgd start')" "1"
 check "and touches no sysv-rc link while OpenRC runs" "$(grep -c '^update-rc.d' "$work/openrc.log" || true)" "0"

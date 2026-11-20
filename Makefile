@@ -2638,6 +2638,26 @@ hull-takeover:
 	sed 's/^/takeover: /' tests/hull/takeover/verdict/nas; \
 	grep -q '^VERDICT ok' tests/hull/takeover/verdict/nas
 
+# The same on ml350's shape (10.884): OpenRC as the rc system under sysvinit,
+# so the boot and the switch go through /etc/runlevels.
+hull-takeover-openrc:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/devuan-openrc)
+	@if ! $(HULL) images 2>/dev/null | grep -q 'netcfgd/devuan-openrc'; then \
+		timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/takeover/openrc.conf netcfgd/devuan-openrc; \
+	fi
+	@rm -f tests/hull/takeover/verdict/nas tests/hull/takeover/verdict/nas-* \
+		tests/hull/takeover/verdict/router-A tests/hull/takeover/verdict/router-B \
+		tests/hull/takeover/verdict/router-A-done tests/hull/takeover/verdict/router-B-done
+	@$(call hull_verdict,tests/hull/takeover/verdict)
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/takeover/openrc.conf || true
+	@if [ ! -f tests/hull/takeover/verdict/nas ]; then \
+		echo "takeover-openrc: the nas left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/takeover-openrc: /' tests/hull/takeover/verdict/nas; \
+	grep -q '^VERDICT ok' tests/hull/takeover/verdict/nas
+
 # Autonegotiation, speed and duplex on a real driver (10.877): virtio-net in a
 # vm, on a bare segment's NIC so the machine's own network is not touched,
 # read back through sysfs rather than through netcfgd's own netlink reading.
@@ -3182,7 +3202,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-takeover hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-takeover hull-takeover-openrc hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

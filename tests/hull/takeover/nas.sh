@@ -31,10 +31,20 @@ from_router() { sed -n "s/^$2 //p" $v/router-$1; }
 
 say "     pid 1: $(cat /proc/1/comm), $(cat /etc/devuan_version 2>/dev/null)"
 say "     kernel $(uname -r); modules $(ls /lib/modules 2>&1 | tr '\n' ' '); nf_tables: $(modprobe nf_tables 2>&1 && echo loaded)"
+# **sysv-rc or OpenRC under sysvinit**: the DL180s run the first, ml350 the
+# second (project.md 10.845), and `hull-takeover-openrc` boots this payload
+# on an image of that shape. Either way init reaches runlevel 2; OpenRC also
+# records its own softlevel.
 if ! waitfor '[ "$(runlevel 2>/dev/null | cut -d" " -f2)" = 2 ]' 120; then
 	say "VERDICT bad: sysvinit never reached runlevel 2 ($(runlevel 2>&1))"
 	exit 0
 fi
+rc=sysv-rc
+if [ -d /run/openrc ]; then
+	rc=openrc
+	waitfor '[ -f /run/openrc/softlevel ]' 60
+fi
+say "     rc system: $rc"
 python3 /payload/listen.py 22 2049 635 8443 &
 
 # ---- Phase A, as the box is today.
@@ -66,7 +76,14 @@ check "B: the translated document compiles and plans" "$(grep -c 'error' $v/nas-
 # The firewall handover, by hand: netcfgd does not touch another program's
 # table, so rules.v4 would go on filtering beside netcfgd's.
 netfilter-persistent flush > $v/nas-flush.log 2>&1
-update-rc.d netfilter-persistent disable >> $v/nas-flush.log 2>&1
+if [ "$rc" = openrc ]; then
+	# Out of whichever runlevels OpenRC put it in.
+	for level in $(rc-update show -v 2>/dev/null | sed -n 's/^ *netfilter-persistent | *//p'); do
+		rc-update del netfilter-persistent "$level" >> $v/nas-flush.log 2>&1
+	done
+else
+	update-rc.d netfilter-persistent disable >> $v/nas-flush.log 2>&1
+fi
 sh /repo/packaging/netcfgd_select.sh netcfgd > $v/nas-select.log 2>&1
 say "     select exited $?"
 waitfor 'ip -4 addr show eth0 | grep -q 10.0.0.11 && ! pgrep -x dhclient' 120
@@ -77,11 +94,18 @@ check "B: netcfgd's DHCP client holds eth0's lease" "$(ip -4 -br addr show eth0 
 check "B: eth1 keeps its storage address" "$(ip -4 -br addr show eth1 | grep -o 10.1.0.1/24)" "10.1.0.1/24"
 check "B: netcfgd is running" "$(pgrep -x netcfgd | wc -l | tr -d ' ')" "1"
 check "B: iptables holds no rules of its own now" "$(iptables -S INPUT | head -1)" "-P INPUT ACCEPT"
-# Start links only: `update-rc.d disable` turns an S link into a K link in
-# the same directory, so a disabled script is still listed there.
-check "B: netcfgd starts at boot" "$(ls /etc/rc2.d | grep -c '^S.*netcfgd$')" "1"
-check "B: ifupdown does not" "$(ls /etc/rcS.d /etc/rc2.d | grep -c '^S.*networking$')" "0"
-check "B: iptables-persistent does not" "$(ls /etc/rcS.d /etc/rc2.d | grep -c '^S.*netfilter-persistent$')" "0"
+if [ "$rc" = openrc ]; then
+	# The runlevels OpenRC reads, not /etc/rc?.d, which nothing reads here.
+	check "B: netcfgd starts at boot" "$(rc-update show 2>/dev/null | grep -c '^ *netcfgd |')" "1"
+	check "B: ifupdown does not" "$(rc-update show 2>/dev/null | grep -c '^ *networking |')" "0"
+	check "B: iptables-persistent does not" "$(rc-update show 2>/dev/null | grep -c '^ *netfilter-persistent |')" "0"
+else
+	# Start links only: `update-rc.d disable` turns an S link into a K link in
+	# the same directory, so a disabled script is still listed there.
+	check "B: netcfgd starts at boot" "$(ls /etc/rc2.d | grep -c '^S.*netcfgd$')" "1"
+	check "B: ifupdown does not" "$(ls /etc/rcS.d /etc/rc2.d | grep -c '^S.*networking$')" "0"
+	check "B: iptables-persistent does not" "$(ls /etc/rcS.d /etc/rc2.d | grep -c '^S.*netfilter-persistent$')" "0"
+fi
 ncfg status > $v/nas-status.txt 2>&1
 for f in /run/netcfgd/dhcpcd/* /run/netcfgd/udhcpc/*; do
 	[ -f "$f" ] && { echo "== $f"; cat "$f"; } >> $v/nas-dhcp.txt 2>&1
