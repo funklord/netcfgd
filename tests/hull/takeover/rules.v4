@@ -1,0 +1,32 @@
+# dl180g6-01's /etc/iptables/rules.v4 (2026-11-20), ib0 written as eth1.
+*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:SSH - [0:0]
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -i lo -j ACCEPT
+-A INPUT -d 127.0.0.0/8 ! -i lo -j DROP
+-A INPUT -p icmp -m icmp --icmp-type 8 -j ACCEPT
+-A INPUT -p tcp -m tcp --dport 22 -j SSH
+-A INPUT -i eth1 -p tcp -m tcp --dport 2049 -j ACCEPT
+-A INPUT -i eth1 -p udp -m udp --dport 2049 -j ACCEPT
+-A INPUT -i eth1 -p tcp -m tcp --dport 111 -j ACCEPT
+-A INPUT -i eth1 -p udp -m udp --dport 111 -j ACCEPT
+-A INPUT -i eth1 -p tcp -m tcp --dport 635 -j ACCEPT
+-A INPUT -i eth1 -p udp -m udp --dport 635 -j ACCEPT
+-A INPUT -i eth1 -p tcp -m tcp --dport 4045 -j ACCEPT
+-A INPUT -i eth1 -p udp -m udp --dport 4045 -j ACCEPT
+-A INPUT -i eth1 -p tcp -m tcp --dport 4046 -j ACCEPT
+-A INPUT -i eth1 -p udp -m udp --dport 4046 -j ACCEPT
+-A INPUT -i eth1 -p tcp -m tcp --dport 4048 -j DROP
+-A INPUT -i eth1 -p udp -m udp --dport 4048 -j DROP
+-A INPUT -i eth1 -p tcp -m tcp --dport 4049 -j DROP
+-A INPUT -i eth1 -p udp -m udp --dport 4049 -j DROP
+-A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+-A SSH -s 10.0.0.3/32 -j ACCEPT
+-A SSH -p tcp -m tcp --dport 22 -m state --state NEW -m recent --set --name SSH_brute --mask 255.255.255.255 --rsource
+-A SSH -p tcp -m tcp --dport 22 -m state --state NEW -m recent --update --seconds 900 --hitcount 9 --name SSH_brute --mask 255.255.255.255 --rsource -j DROP
+-A SSH -j ACCEPT
+COMMIT

@@ -12747,6 +12747,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.884 Taking over dl180g6-01: simulated, and what it needs
+
+The holder asked (2026-11-20) whether netcfgd can go onto the servers now
+and take over from what configures them. Their state was captured by the
+system-notes tree that day (its `~/claude`): every box Devuan, sysvinit as
+pid 1 -- sysv-rc on the DL180s, OpenRC on ml350 -- classic `ethN` names
+pinned by udev, `eth0` by DHCP from ifupdown's `isc-dhcp-client` against a
+router reservation on a /16, the storage link `ib0` (QLE7340, IPoIB,
+10.1.0.x/24; connected mode and MTU 65520 set by hand and not yet kept), and
+iptables-persistent loading a `rules.v4` from `rcS.d`: INPUT DROP,
+established, `lo`, ping, NFS only on `ib0`, an SSH chain with a `recent`
+brute guard (9 new in 900 s, ml350 exempt), and `rules.v6` accepting
+everything. **Live takeover waits**: a 16 TB copy -03 -> -01 runs over
+`ib0` on runtime-only state, and -01 gets a fresh install afterwards, the
+natural point for netcfgd (system-notes, 2026-11-20).
+
+**Simulated in `make hull-takeover`**: a Devuan excalibur vm booting real
+sysvinit with sysv-rc, configured from -01's own `interfaces` and
+`rules.v4` (`ib0` written as `eth1`: a vm has no InfiniBand), beside a
+router leasing the reserved address and probing from the LAN, from the
+admin desktop's address and from the storage net. Phase A is the box as it
+is; phase B installs netcfgd as the package does, gives it the translated
+document (`tests/hull/takeover/netcfgd.conf`), retires iptables-persistent
+by hand and runs `netcfgd_select.sh netcfgd`. **76 checks pass**: the
+lease moves to netcfgd's DHCP client with no `dhclient` left, the storage
+address stays, iptables holds nothing, the start links are netcfgd's alone,
+and from outside the same matrix holds -- ping, ssh on both nets, NFS and
+mountd on the storage net only -- with UniFi open for the NAS role and,
+because netcfgd's table is `inet`, IPv6 filtered where `rules.v6` left it
+open (ICMPv6 accepted, or neighbour discovery breaks).
+
+Found on the way, and fixed or open:
+
+- **Under sysvinit the daemon's log went nowhere**: `start-stop-daemon
+  --background` with no output. The first run took no lease and nothing
+  said why. The script writes `/var/log/netcfgd.log` now with `--output`,
+  asked for only where `start-stop-daemon --help` names it, since beowulf's
+  dpkg (still on -01's current install) has no such option and would
+  refuse to start netcfgd. OpenRC's script and procd already kept it.
+- **A hand install without `/usr/libexec/netcfgd/dhcpcd-hook` takes no
+  lease**, and the log says exactly that. The package and `make install`
+  place it; the rig had missed it.
+- **The firewall handover is by hand**: netcfgd leaves another program's
+  table alone, so `netfilter-persistent flush` and `update-rc.d
+  netfilter-persistent disable` are steps of the takeover, and
+  `netcfgd_select.sh` does not do them.
+- **The switcher names the `dhclient` it ends as left by "networkmanager"**
+  when ifupdown started it.
+- **Open: the SSH guard has no translation** -- the firewall language has no
+  per-source rate limit. Reported as a GAP by the rig rather than failed.
+- **Open: IPoIB's connected mode** is not modelled, and nothing here has
+  InfiniBand to test it on.
+- hull's microvm kernel has no `nf_tables`, so the rig's machines run
+  `(tuning (vm (profile full)))`, the host's kernel and modules.
+
 ## 10.883 The GUI follows a dark desktop, and has Help and About
 
 M8's desktop half, against the list the holder set 2026-11-20 of what a

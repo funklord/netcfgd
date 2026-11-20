@@ -1,0 +1,15 @@
+# dl180g6-01's /etc/network/interfaces (2026-11-20), with ib0 standing as
+# eth1: a vm has no InfiniBand, and what is under test is the handover, not
+# IPoIB.
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+allow-hotplug eth0
+iface eth0 inet dhcp
+
+allow-hotplug eth1
+iface eth1 inet static
+	address 10.1.0.1
+	netmask 255.255.255.0

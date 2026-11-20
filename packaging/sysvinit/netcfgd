@@ -54,6 +54,7 @@ fi
 # has nowhere else to live, and a restart that threw it away would leave the
 # daemon unable to put those back (0135).
 RUN_DIR=/run/netcfgd
+LOG_FILE=/var/log/netcfgd.log
 
 # The fuzznet store, named, for the reason the procd script gives (project.md
 # 10.677): a script run at boot inherits init's environment, and the kernel
@@ -71,7 +72,19 @@ start() {
 	mkdir -p "$RUN_DIR"
 	store=$(fuzznet_store)
 	mkdir -p "$store" && chmod 700 "$store"
-	start-stop-daemon --start --quiet --background --make-pidfile \
+	# **The daemon's log goes to $LOG_FILE**, which OpenRC's script does
+	# with `output_log` and procd with `stderr 1`. Without it `--background`
+	# sent everything netcfgd said to nowhere, so a Devuan server that took
+	# no lease after the switch had nothing to say why (project.md 10.884).
+	# `--output` is dpkg 1.20.6's; an older start-stop-daemon (Devuan
+	# beowulf's 1.19) refuses the option and would not start netcfgd at all,
+	# so it is asked for only where the help names it.
+	output=
+	if start-stop-daemon --help 2>&1 | grep -q -- '--output'; then
+		output="--output $LOG_FILE"
+	fi
+	# shellcheck disable=SC2086 # $output is the option and its value, or nothing.
+	start-stop-daemon --start --quiet --background --make-pidfile $output \
 		--pidfile "$PIDFILE" --exec "$DAEMON" -- --fuzznet-dir "$store" "$@"
 	log_end_msg $?
 }
