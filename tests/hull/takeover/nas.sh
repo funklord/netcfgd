@@ -71,6 +71,8 @@ sh /repo/packaging/netcfgd_select.sh netcfgd > $v/nas-select.log 2>&1
 say "     select exited $?"
 waitfor 'ip -4 addr show eth0 | grep -q 10.0.0.11 && ! pgrep -x dhclient' 120
 check "B: no dhclient left from ifupdown" "$(pgrep -x dhclient | wc -l)" "0"
+check "B: the switcher does not credit it to an absent NetworkManager" \
+	"$(grep -c 'left behind by networkmanager' $v/nas-select.log)" "0"
 check "B: netcfgd's DHCP client holds eth0's lease" "$(ip -4 -br addr show eth0 | grep -o 10.0.0.11)" "10.0.0.11"
 check "B: eth1 keeps its storage address" "$(ip -4 -br addr show eth1 | grep -o 10.1.0.1/24)" "10.1.0.1/24"
 check "B: netcfgd is running" "$(pgrep -x netcfgd | wc -l | tr -d ' ')" "1"

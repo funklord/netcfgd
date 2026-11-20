@@ -733,6 +733,26 @@ stop_netcfgd_dhcpcd() {
 # NetworkManager's alone. The old form skipped netcfgd's unconditionally, which
 # is correct for every manager except the one whose orphans anybody actually
 # needed swept.
+# Whether a manager is on this machine at all: one of its init scripts, or
+# one of its systemd units in a unit directory. **What a sweep credits a
+# leftover to.** A dhclient is a child NetworkManager and ifupdown both
+# start, and the sweep walks NetworkManager first -- so on a Devuan server
+# with no NetworkManager the dhclient ifupdown started was reported "left
+# behind by networkmanager" (project.md 10.884). Only the sentence changes:
+# what is swept stays as it was, since a supplicant a system service started
+# is a rival whoever is named.
+manager_installed() {
+	for script in $(script_of "$1"); do
+		[ -x "/etc/init.d/$script" ] && return 0
+	done
+	for unit in $(unit_of "$1"); do
+		for dir in /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system; do
+			[ -e "$dir/$unit" ] && return 0
+		done
+	done
+	return 1
+}
+
 sweep_children() {
 	manager=$1
 	# dhcpcd first, by netcfgd's bookkeeping rather than by argv -- see
@@ -776,7 +796,11 @@ sweep_children() {
 			if ! in_our_netns "$pid"; then
 				continue
 			fi
-			say "terminating $program (pid $pid) left behind by $manager"
+			if [ "$manager" = netcfgd ] || manager_installed "$manager"; then
+				say "terminating $program (pid $pid) left behind by $manager"
+			else
+				say "terminating $program (pid $pid), left behind by whichever manager started it"
+			fi
 			run kill "$pid"
 		done
 	done

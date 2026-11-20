@@ -12835,8 +12835,11 @@ Found on the way, and fixed or open:
   table alone, so `netfilter-persistent flush` and `update-rc.d
   netfilter-persistent disable` are steps of the takeover, and
   `netcfgd_select.sh` does not do them.
-- **The switcher names the `dhclient` it ends as left by "networkmanager"**
-  when ifupdown started it.
+- **The switcher named the `dhclient` it ended as left by "networkmanager"**
+  when ifupdown had started it: the sweep walks NetworkManager first and
+  both start dhclient. It credits a manager now only where its init script
+  or unit is installed, and says "whichever manager started it" otherwise;
+  what it sweeps is unchanged. The rig checks the sentence.
 - **The SSH guard had no translation**: the firewall language had no
   per-source rate limit. **Settled by 10.885**, `over`; the rig checks the
   guard in phase B as in phase A.
