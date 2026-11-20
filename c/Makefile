@@ -104,7 +104,7 @@ OBJS = $(LIB_OBJS) $(SHARED_OBJS)
 
 # The program, its second name, and the entry points that make it one.
 PROGRAM       = netcfgd
-PROGRAM_LINK  = ncfg
+PROGRAM_LINK  = ncfg netrescue
 PROGRAM_SRCS  = $(wildcard src/main/*.c)
 PROGRAM_OBJS  = $(patsubst %.c,%.o,$(PROGRAM_SRCS))
 # What a test may link: the three programs' bodies without the one symbol it

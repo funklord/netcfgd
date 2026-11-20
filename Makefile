@@ -370,6 +370,9 @@ install:
 	@# dangles inside a DESTDIR staging root and resolves once that root is
 	@# unpacked at /. That is what a package expects.
 	ln -sf $(SBINDIR)/netcfgd $(DESTDIR)$(BINDIR)/ncfg
+	@# The third, in sbin beside the daemon it starts: netrescue (0326) is
+	@# run as root by a rescue system's boot, never by a user.
+	ln -sf $(SBINDIR)/netcfgd $(DESTDIR)$(SBINDIR)/netrescue
 	@# netifrc's `net.example` shape: every feature, commented, in the
 	@# directory being configured. It is documentation for the case the manual
 	@# is not reachable -- a machine with no network cannot look anything up,
@@ -3428,6 +3431,10 @@ live:
 	@# busybox udhcpd wants nothing special; the dnsmasq fallback drops
 	@# privileges, which `unshare -rn` forbids.
 	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/dhcp.sh
+	@# netrescue (0326): a lease reached through its own daemon, the gateway
+	@# answering at the first rung, and with no server the ladder climbing
+	@# and keeping its fallback. Makes its own namespace, like dhcp.sh.
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/rescue.sh
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
 	@# nor under unshare: dhcpcd is a package, and it drops privileges to a user
 	@# that a namespace with one mapped uid does not have -- so the script makes
@@ -3879,6 +3886,7 @@ distclean: veryclean
 # and `install-modem` were both missing.
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/ncfg
+	rm -f $(DESTDIR)$(SBINDIR)/netrescue
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd
 	rm -f $(DESTDIR)$(SBINDIR)/netcfgd_select.sh
 	rm -f $(DESTDIR)$(LIBEXECDIR)/netcfgd/dhcpcd-hook

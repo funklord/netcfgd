@@ -12737,6 +12737,67 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.876 netrescue: a ladder of documents, for a box nobody configured
+
+**Asked for by the holder** (2026-11-20, building a USB rescue stick for the
+HP G6 servers: "netrescue sounds like something we should have in netcfgd
+instead and include that when it's finished"), and proposed through the
+inbox by the system-notes tree, whose stick is the first consumer
+(`~/claude/rescue/build-rescue-usb.sh`, Devuan, sysvinit). The proposal's
+seven rungs and its rejected alternative -- a local language model -- are
+recorded in [0326](doc/decision/0326-netrescue-is-a-ladder-of-documents.md),
+which is the design: **a fourth name of the multi-call program that writes
+one netcfgd document per rung and runs its own netcfgd on it**, climbing
+when no default gateway answers an echo by the rung's deadline.
+
+**Built, step one**: `c/src/rescue/rescue.c` (which links are ports, the
+document for a rung, the gateways from `/proc/net/route`, the echo) and
+`c/src/main/rescue_main.c` (the loop, the child daemon, the report on
+standard output, `DIR/netrescue.log` and with `--console` on
+`/dev/console`). Rung 1 is DHCP on every port and 10.0.0.250/16 on the
+first with a carrier, kept there while it has one; rungs 2 and 3 force the
+ports with no carrier to 1000/full and 100/full; after rung 3 it starts
+again, asking the forced ports to negotiate. Ports are taken again every
+two seconds, so a USB adapter or a tethered phone plugged in later is a
+port at the next tick. `--for` bounds a run from inside, which is what the
+test uses.
+
+Verified: `c/tests/rescue_test.c` compiles every rung's document with the
+compiler the daemon runs (a quoted speed and a radio taken for a port both
+turn it red); `tests/live/rescue.sh` gets a lease through netrescue's own
+netcfgd from busybox udhcpd across a veth, reads the default route, has
+the gateway answer at rung 1 with the fallback and the kernel's IPv6
+link-local address both on the port, then with no server climbs all three
+rungs, keeps the fallback, and goes round. The ports there come from a
+sysfs directory the test writes, because a veth has no `device` and is
+rightly not a port.
+
+**Rungs 2 and 3 write a setting nothing applies yet.** `ethtool`'s
+`autoneg`, `speed` and `duplex` parse, compile and are reported by the plan
+as applied by nothing (`warn_unapplied` in `c/src/plan/offload.c`): the
+encoder for `ETHTOOL_MSG_LINKMODES_SET` was never written, waiting on a
+NIC it could safely be tried against. A VM's emulated NIC -- e1000 or
+virtio-net in hull -- takes a link-modes set, which makes it buildable
+without hardware; it is the next step here, and until it lands those two
+rungs cost a minute and change nothing.
+
+**Open, in the order the ladder needs them**: the link-modes encoder above;
+listening for ARP and DHCP to learn an unknown subnet and taking an address
+nothing answers for (rung 4); rebinding a NIC's driver through sysfs and
+reporting firmware errors (rung 3 of the proposal); an mDNS announcement;
+PPP on a serial console. **The stick needs a DHCP client netcfgd drives** --
+dhcpcd or busybox's udhcpc; its isc-dhcp-client is not one -- and should
+not also run ifupdown on the same ports. **Not yet ready for the stick**:
+the consumer takes it when this entry says so.
+
+Two findings from building the stick, recorded as the proposal gave them:
+ifupdown's `allow-hotplug /eth*=eth` pattern stanza does not answer the
+boot script's or udev's `ifup eth0` ("ifup: unknown interface eth0",
+measured under a hull pc boot 2026-11-20), where explicit per-name stanzas
+do; and on a box with no COM2 an inittab getty on `ttyS1` respawns too
+fast and prints on the console every five minutes, so the stick gates each
+serial getty on `/proc/tty/driver/serial` showing a UART.
+
 ## 10.875 A report directory another account owns is read as untrusted
 
 `report_writer` (10.863) gives a tunnel's report directory to the account a

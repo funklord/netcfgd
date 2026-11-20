@@ -82,6 +82,9 @@
 #define NCFG_MAIN_DAEMON_NAME "netcfgd"
 #define NCFG_MAIN_CLIENT_NAME "ncfg"
 
+/* The fourth, 0326's: a program of its own that runs `netcfgd` as a child. */
+#define NCFG_MAIN_RESCUE_NAME "netrescue"
+
 /* How much of `argv[0]` is repeated back when it is neither name. A path
  * somebody chose, not a document: enough for `/usr/local/libexec/netcfgdd` to
  * arrive whole, and a refusal that names a ceiling rather than a wall of
@@ -95,7 +98,8 @@ typedef enum {
 	NCFG_MAIN_PROGRAM_NONE = 0,
 	NCFG_MAIN_PROGRAM_CLIENT,
 	NCFG_MAIN_PROGRAM_DAEMON,
-	NCFG_MAIN_PROGRAM_PROBE
+	NCFG_MAIN_PROGRAM_PROBE,
+	NCFG_MAIN_PROGRAM_RESCUE
 } ncfg_main_program_t;
 
 /*
@@ -539,6 +543,12 @@ void ncfg_main_netcfgd_supported(void);
  * it is the only difference between this and the Rust's `helper_main`.
  */
 int ncfg_main_probe(int argc, char **argv);
+
+/*
+ * `netrescue`, from `argv`: the ladder of 0326, in `rescue_main.c`. Runs until
+ * a signal or `--for` stops it, and stops the daemon it started on the way out.
+ */
+int ncfg_main_rescue(int argc, char **argv);
 
 #endif /* NCFG_MAIN_INTERNAL_H */
 

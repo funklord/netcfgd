@@ -82,11 +82,12 @@ adapter/netcfgd-nm/c/fuzz/*.d
 c/.build-flags
 c/*.a
 c/tests/*_test
-# The program the port links, and its second name. Two literal names rather
-# than a shape, because `c/` is a source directory and everything else in it is
+# The program the port links, and its other names. Literal names rather than
+# a shape, because `c/` is a source directory and everything else in it is
 # tracked -- a pattern here would be a promise about whatever lands next.
 c/netcfgd
 c/ncfg
+c/netrescue
 # The live probes `make -C c examples` builds. A shape rather than two literal
 # names, unlike the pair above, and the difference is the directory: `c/examples`
 # holds nothing but a `.c` per probe and the binary beside it, so the promise a

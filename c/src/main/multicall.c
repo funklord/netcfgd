@@ -1,10 +1,11 @@
 /*
- * multicall.c -- which of the three programs this image was called as.
+ * multicall.c -- which of the four programs this image was called as.
  *
  * WHY THE NAME IS A STRING COMPARISON AND NOT A TABLE
- *   Three names, and two of them are the install. A table would be a list to
- *   keep in step with the install rules, the symlink in the Makefile and the
- *   packaging, for three entries that have not changed since 0024.
+ *   Four names, and three of them are links made beside the program. A table
+ *   would be a list to keep in step with the install rules, the symlinks in
+ *   the Makefile and the packaging, for entries that changed once since 0024:
+ *   `netrescue`, 0326.
  *
  * WHAT THIS FILE MAY NOT DO
  *   Guess. A name that is neither is refused with both names said out loud,
@@ -42,6 +43,9 @@ ncfg_main_program_t ncfg_main_program_for(const char *argv0)
 	}
 	if (strcmp(name, NCFG_PORTAL_HELPER_NAME) == 0) {
 		return NCFG_MAIN_PROGRAM_PROBE;
+	}
+	if (strcmp(name, NCFG_MAIN_RESCUE_NAME) == 0) {
+		return NCFG_MAIN_PROGRAM_RESCUE;
 	}
 	return NCFG_MAIN_PROGRAM_NONE;
 }

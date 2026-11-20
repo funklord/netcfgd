@@ -99,6 +99,9 @@ int main(int argc, char **argv)
 		return ncfg_main_netcfgd(argc, argv);
 	case NCFG_MAIN_PROGRAM_PROBE:
 		return ncfg_main_probe(argc, argv);
+	case NCFG_MAIN_PROGRAM_RESCUE:
+		ncfg_log_accept_from_env();
+		return ncfg_main_rescue(argc, argv);
 	case NCFG_MAIN_PROGRAM_NONE:
 	default:
 		return ncfg_main_miscalled(called_as);
