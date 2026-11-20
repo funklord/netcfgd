@@ -12747,6 +12747,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.883 The GUI follows a dark desktop, and has Help and About
+
+M8's desktop half, against the list the holder set 2026-11-20 of what a
+new GUI in this workspace carries without being asked. Three of it were
+missing here:
+
+- **A dark palette on a dark desktop.** Qt hands a TDE or LXQt session its
+  light palette, so the window glared white there. `main.cpp` calls
+  `qtkit_follow_desktop` once the application exists, except in the TUI;
+  `NETCFGD_GUI_THEME=dark` or `light` overrides a desktop that says
+  neither. Without QtDBus, so the freedesktop portal is not asked -- the
+  desktop's own files and Qt's colour scheme are.
+- **Help, holding About**, as hydra, beerssh and fuzzypickles have it: the
+  version and the copyright line, the address escaped so
+  `QMessageBox::about`'s rich text keeps it.
+- **An accessible name on the one control with no visible text**, the
+  machine box on the toolbar. The GUI has no icon-only button; its
+  controls are in form rows, which name them by their labels.
+
+**qtkit is a pinned copy, not a submodule** -- `gui/vendor/qtkit`, qtkit
+`ed18c25`, six files -- because qtkit has no remote: a submodule nobody
+else could clone would be a broken checkout. **Open, and the holder's:
+publishing qtkit**, after which this becomes the submodule the rule
+describes, by replacing the directory.
+
+Verified: the GUI builds with it; `gui/tests/about_menu` (offscreen) finds
+Help and About, reads the box's text with the address escaped, and the
+machine box's accessible name. qtkit's own suite is what holds its theme;
+nothing here drives a dark desktop through the GUI.
+
 ## 10.882 netrescue: a gateway that drops pings is still a gateway
 
 Reachable meant a default gateway answering an echo, so under a router

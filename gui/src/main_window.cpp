@@ -39,6 +39,13 @@ extern "C" {
 #include "layout.h"
 
 #include <QApplication>
+#include <QMenuBar>
+
+/* `VERSION`, by gui.pro, as main.cpp has it. */
+#ifndef NETCFGD_VERSION_TEXT
+#define NETCFGD_VERSION_TEXT "(version not given to this build)"
+#endif
+#include <QMessageBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDir>
@@ -235,6 +242,24 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	setCentralWidget(central);
 
+	/*
+	 * **Help, holding About**, where hydra, beerssh and fuzzypickles keep it:
+	 * the window says what it is and who wrote it, as `--version` does. The
+	 * address is escaped because `QMessageBox::about` reads rich text and
+	 * drops `<...>` it does not know -- the half of the line a reader acts on.
+	 */
+	QMenu *help = menuBar()->addMenu(QStringLiteral("&Help"));
+	help->addAction(QStringLiteral("&About netcfgd"), this, [this]() {
+		QMessageBox::about(this, QStringLiteral("About netcfgd"),
+		    QStringLiteral("<p><b>netcfgd</b> %1</p>"
+		                   "<p>A client for netcfgd: what the machine is doing, what "
+		                   "would change and why, and nothing changed without the plan "
+		                   "shown first.</p><p>%2</p>")
+		        .arg(QStringLiteral(NETCFGD_VERSION_TEXT).toHtmlEscaped(),
+		            QStringLiteral("Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>")
+		                .toHtmlEscaped()));
+	});
+
 	auto *tools = addToolBar(QStringLiteral("main"));
 	/* **Which node, chosen here** (10.699): this machine first, then the
 	 * estate's other members as this user's host lists them -- by whole
@@ -242,6 +267,9 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * user with no node sees this machine alone. */
 	nodes = new QComboBox(tools);
 	nodes->setObjectName(QStringLiteral("hosts"));
+	/* It has no label beside it, so a screen reader is told what it is. */
+	nodes->setAccessibleName(QStringLiteral("Machine"));
+	nodes->setToolTip(QStringLiteral("Which machine this window shows and changes"));
 	if (ncfg_device_has_local()) {
 		nodes->addItem(QStringLiteral("this machine"), QString());
 	}

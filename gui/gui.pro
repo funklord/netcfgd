@@ -20,6 +20,13 @@ TARGET = netcfgd-gui
 
 QT += widgets
 CONFIG += c++17
+
+# qtkit's theme: a dark palette on a dark desktop, which Qt alone does not
+# give a TDE or LXQt session. A pinned copy of qtkit ed18c25 under vendor/,
+# not a submodule, because qtkit has no remote to clone yet (project.md
+# 10.883). Without QtDBus, so the portal is not asked: the desktop's own
+# files and Qt's colour scheme are.
+include(vendor/qtkit/qtkit.pri)
 CONFIG -= app_bundle
 
 # -Os, because build-and-commit.md asks for it and says that in a Qt project

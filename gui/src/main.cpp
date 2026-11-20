@@ -28,6 +28,8 @@
 
 #include "layout.h"
 
+#include <qtkit/theme.h>
+
 #include <QFileInfo>
 #ifdef Q_OS_ANDROID
 #  include "phone/pair_view.h"
@@ -155,6 +157,19 @@ int main(int argc, char **argv)
 		Qtty::setup(application);
 #endif
 	QApplication::setApplicationName(QStringLiteral("netcfgd-gui"));
+	/*
+	 * **A dark window on a dark desktop.** Qt alone hands a TDE or LXQt
+	 * session its light palette, so the window glared white there; qtkit
+	 * asks the desktop and follows it when it changes. Not in the TUI,
+	 * whose palette is qtty's character grid. `NETCFGD_GUI_THEME` is the
+	 * override, `dark` or `light`, for a desktop that reports neither.
+	 */
+	bool follows_desktop = true;
+#ifdef NETCFGD_QTTY
+	follows_desktop = !tui;
+#endif
+	if (follows_desktop)
+		qtkit_follow_desktop(application, "NETCFGD_GUI_THEME");
 
 	QCommandLineParser parser;
 	parser.setApplicationDescription(

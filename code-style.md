@@ -329,8 +329,8 @@ already carry keep resolving.
 ### Exempt paths
 
 Vendored or generated sources are exempt — they keep whatever their
-generator or upstream produces. Nothing is vendored yet; when something is,
-say so here.
+generator or upstream produces. `gui/vendor/qtkit` is vendored: a pinned
+copy of qtkit `ed18c25` (project.md 10.883), kept as qtkit wrote it.
 
 ### 1. Naming: the C spelling, and why abbreviations cost more here
 
