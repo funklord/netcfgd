@@ -1396,6 +1396,13 @@ int ncfg_contender_remedy_for(const ncfg_contender_t *contender, const char *int
 int ncfg_contender_describe(const ncfg_contender_t *contender, ncfg_buf_t *buf, char *err,
     size_t err_size)
 {
+	return ncfg_contender_describe_on(contender, access("/run/systemd/system", F_OK) == 0, buf,
+	    err, err_size);
+}
+
+int ncfg_contender_describe_on(const ncfg_contender_t *contender, int systemd, ncfg_buf_t *buf,
+    char *err, size_t err_size)
+{
 	size_t at;
 
 	if (!contender || !buf) {
@@ -1424,17 +1431,33 @@ int ncfg_contender_describe(const ncfg_contender_t *contender, ncfg_buf_t *buf, 
 		ncfg_buf_add_text(buf, at > 0u ? "` and `" : "");
 		ncfg_buf_add_text(buf, command);
 	}
-	ncfg_buf_add_text(buf,
-	    "`, or set `managed = false` on the device here."
-	    "\n\nTo make netcfgd the only network daemon on the machine instead:\n\n"
-	    "    mkdir -p /etc/systemd/system/netcfgd.service.d\n"
-	    "    cp /usr/share/doc/netcfgd/netcfgd-exclusive.conf \\\n"
-	    "        /etc/systemd/system/netcfgd.service.d/\n"
-	    "    systemctl daemon-reload && systemctl restart netcfgd\n\n"
-	    "That drop-in conflicts with NetworkManager, systemd-networkd, connman, "
-	    "wpa_supplicant and ModemManager, so the init system stops them rather than "
-	    "netcfgd killing anything itself. Without systemd, `netcfgd_select.sh netcfgd` "
-	    "stops and disables the others through their init scripts.");
+	ncfg_buf_add_text(buf, "`, or set `managed = false` on the device here.");
+	/*
+	 * **The whole-machine remedy that works here, and only that one.** The
+	 * systemd drop-in conflicts with NetworkManager, systemd-networkd, connman,
+	 * wpa_supplicant and ModemManager -- not with ifupdown's `networking`,
+	 * which it never named -- and it does nothing at all on a machine systemd
+	 * does not run. On the Devuan servers netcfgd was simulated taking over
+	 * (project.md 10.884) the plan led with it for ifupdown under sysvinit,
+	 * where the one remedy that applies is the switcher (10.888).
+	 */
+	if (systemd && strcmp(contender->name, "ifupdown") != 0) {
+		ncfg_buf_add_text(buf,
+		    "\n\nTo make netcfgd the only network daemon on the machine instead:\n\n"
+		    "    mkdir -p /etc/systemd/system/netcfgd.service.d\n"
+		    "    cp /usr/share/doc/netcfgd/netcfgd-exclusive.conf \\\n"
+		    "        /etc/systemd/system/netcfgd.service.d/\n"
+		    "    systemctl daemon-reload && systemctl restart netcfgd\n\n"
+		    "That drop-in conflicts with NetworkManager, systemd-networkd, connman, "
+		    "wpa_supplicant and ModemManager, so the init system stops them rather than "
+		    "netcfgd killing anything itself.");
+	} else {
+		ncfg_buf_add_text(buf,
+		    "\n\nTo make netcfgd the only network daemon on the machine instead:\n\n"
+		    "    netcfgd_select.sh netcfgd\n\n"
+		    "which stops and disables the others through the init system this machine "
+		    "runs, and ends what they left running.");
+	}
 	if (ncfg_buf_failed(buf)) {
 		ncfg_error_set(err, err_size,
 		    "the message about %s did not fit in the buffer it was being built in",

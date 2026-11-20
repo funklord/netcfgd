@@ -12747,6 +12747,23 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.888 The plan offers the whole-machine remedy that works on this machine
+
+On the Devuan rig (10.884) `ncfg plan`'s warning that ifupdown also holds
+the interfaces led with a systemd drop-in -- `mkdir -p
+/etc/systemd/system/netcfgd.service.d` and a `systemctl daemon-reload` --
+on a machine systemd does not run, with `netcfgd_select.sh` in the last
+sentence. And for ifupdown it was wrong under systemd too: the drop-in
+conflicts with NetworkManager, systemd-networkd, connman, wpa_supplicant
+and ModemManager, never with ifupdown's `networking`.
+
+The message offers one whole-machine remedy now: the drop-in where systemd
+runs and the contender is one it conflicts with, the switcher otherwise.
+`ncfg_contender_describe_on` takes whether systemd runs, so
+`contention_test` asks both ways: NetworkManager under systemd names the
+drop-in, without systemd the switcher and not the drop-in, and ifupdown the
+switcher even under systemd.
+
 ## 10.887 The coming storage net, bridged in a ring, simulated
 
 The holder's boxes are to get ConnectX-3s in Ethernet mode, two ports each,

@@ -914,6 +914,11 @@ int ncfg_contender_remedy_for(const ncfg_contender_t *contender, const char *int
  * a message a daemon builds has to be bounded somewhere the caller can see.
  * 0 with a sentence where the buffer would not take it.
  */
+/* The same, saying whether systemd runs this machine rather than looking:
+ * which whole-machine remedy the message offers depends on it (10.888). */
+int ncfg_contender_describe_on(const ncfg_contender_t *contender, int systemd, ncfg_buf_t *buf,
+    char *err, size_t err_size);
+
 int ncfg_contender_describe(const ncfg_contender_t *contender, ncfg_buf_t *buf, char *err,
     size_t err_size);
 

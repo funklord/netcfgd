@@ -447,8 +447,8 @@ static void the_message_names_the_device_and_the_command(void)
 	    "two managed devices are one contender, with its interfaces sorted");
 
 	ncfg_buf_init(&text, 0u);
-	check(ncfg_contender_describe(&found.at[0], &text, err, sizeof(err)),
-	    "the contender describes itself");
+	check(ncfg_contender_describe_on(&found.at[0], 1, &text, err, sizeof(err)),
+	    "the contender describes itself, on a machine systemd runs");
 	message = ncfg_buf_text(&text);
 
 	check(holds(message, "nmcli device set wlan0 managed no") &&
@@ -468,9 +468,30 @@ static void the_message_names_the_device_and_the_command(void)
 	/* And who stops them, because netcfgd killing daemons itself is the thing
 	 * 0125 declined to do. */
 	check(holds(message, "init system"), "and says who stops the other daemons");
-	/* And a machine with no systemd has a remedy too: ml350g6-01 (10.843). */
-	check(holds(message, "netcfgd_select.sh netcfgd"),
-	    "and names the switcher for a machine without systemd");
+	/* And a machine with no systemd has its own remedy, and only that one:
+	 * the drop-in does nothing there (ml350g6-01, 10.843; 10.888). */
+	ncfg_buf_free(&text);
+	ncfg_buf_init(&text, 0u);
+	check(ncfg_contender_describe_on(&found.at[0], 0, &text, err, sizeof(err)),
+	    "described again for a machine with no systemd");
+	message = ncfg_buf_text(&text);
+	check(holds(message, "netcfgd_select.sh netcfgd") &&
+	        !holds(message, "netcfgd-exclusive.conf"),
+	    "  it names the switcher, and not a drop-in that would do nothing there");
+	/* ifupdown's `networking` is not among the drop-in's conflicts, so even
+	 * under systemd the switcher is its remedy (10.888). */
+	{
+		ncfg_contender_t ifupdown = found.at[0];
+
+		ifupdown.name = (char *)"ifupdown";
+		ncfg_buf_free(&text);
+		ncfg_buf_init(&text, 0u);
+		check(ncfg_contender_describe_on(&ifupdown, 1, &text, err, sizeof(err)) &&
+		        holds(ncfg_buf_text(&text), "netcfgd_select.sh netcfgd") &&
+		        !holds(ncfg_buf_text(&text), "netcfgd-exclusive.conf"),
+		    "ifupdown is pointed at the switcher even under systemd, the drop-in not "
+		    "conflicting with it");
+	}
 
 	ncfg_buf_free(&text);
 	ncfg_contenders_free(&found);
