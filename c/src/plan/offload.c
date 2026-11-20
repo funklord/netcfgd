@@ -142,15 +142,8 @@ static void warn_unapplied(ncfg_builder_t *builder, const ncfg_device_t *device)
 	ncfg_buf_t                  block;
 	size_t                      i;
 
-	if (settings->autoneg != NCFG_TOGGLE_UNMANAGED) {
-		stated[count++] = "autoneg";
-	}
-	if (settings->speed.has) {
-		stated[count++] = "speed";
-	}
-	if (settings->duplex) {
-		stated[count++] = "duplex";
-	}
+	/* `autoneg`, `speed` and `duplex` are applied now (10.877), by
+	 * `ncfg_plan_link_modes` below. */
 	if (settings->wol) {
 		stated[count++] = "wol";
 	}
@@ -314,5 +307,123 @@ void ncfg_plan_offloads(ncfg_builder_t *builder)
 		 * string an op names is under. */
 		free(wanted);
 		free(inverse_features);
+	}
+}
+
+/* ------------------------------------------------------------------------ *
+ * Link modes
+ * ------------------------------------------------------------------------ */
+
+static const char *describe_modes(ncfg_plan_t *plan, int autoneg, int64_t speed, int duplex)
+{
+	ncfg_buf_t  buf;
+	const char *text;
+
+	ncfg_buf_init(&buf, 0);
+	ncfg_buf_addf(&buf, "autoneg=%s", autoneg < 0 ? "?" : autoneg ? "on" : "off");
+	if (speed > 0) {
+		ncfg_buf_addf(&buf, " speed=%lld", (long long)speed);
+	}
+	if (duplex >= 0) {
+		ncfg_buf_addf(&buf, " duplex=%s", duplex ? "full" : "half");
+	}
+	text = ncfg_plan_intern(plan, ncfg_buf_text(&buf));
+	ncfg_buf_free(&buf);
+	return text ? text : "<absent>";
+}
+
+/*
+ * `link.set_link_modes` for every device whose `ethtool` block states
+ * `autoneg`, `speed` or `duplex` and whose link says otherwise.
+ *
+ * **What is compared depends on what is wanted.** With autonegotiation off,
+ * speed and duplex are the setting, and they are compared. With it on, the
+ * speed and duplex the kernel reports are what the two ends agreed, not what
+ * was asked -- comparing them would plan a set on every pass for a link that
+ * negotiated something else -- so only `autoneg` itself is compared, and any
+ * speed or duplex stated beside it rides along with that change.
+ *
+ * **A link with no carrier cannot say its speed**, and that is the case
+ * netrescue's forcing rungs meet (0326): `observe.h`'s record of what was last
+ * forced stands in for the kernel's answer then, and is overruled by it the
+ * moment there is a carrier. A link that answers nothing at all -- no ethtool
+ * link modes, most virtual devices -- is warned about rather than planned
+ * for, since the set would fail on every pass.
+ */
+void ncfg_plan_link_modes(ncfg_builder_t *builder)
+{
+	size_t at;
+
+	for (at = 0; at < builder->desired->device_count; at++) {
+		const ncfg_device_t        *device = &builder->desired->devices[at];
+		const ncfg_link_settings_t *settings = device->link_settings;
+		const ncfg_observed_link_t *link;
+		ncfg_plan_ids_t             gate = { NULL, 0, 0 };
+		ncfg_op_t                   op;
+		ncfg_op_t                   inverse;
+		ncfg_reason_t               reason;
+		int                         want_autoneg, want_duplex, have_duplex;
+		int64_t                     want_speed;
+		int                         differs = 0;
+
+		if (!settings || (settings->autoneg == NCFG_TOGGLE_UNMANAGED && !settings->speed.has &&
+		    !settings->duplex)) {
+			continue;
+		}
+		link = ncfg_observed_link(builder->observed, device->name);
+		if (!link) {
+			continue;
+		}
+		if (!link->autoneg.has) {
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "%s does not report autonegotiation, speed or duplex, so netcfgd "
+			    "sets none of them: most virtual devices have no link modes", device->name);
+			continue;
+		}
+		want_autoneg = settings->autoneg == NCFG_TOGGLE_UNMANAGED ? -1 :
+		    settings->autoneg == NCFG_TOGGLE_ON ? 1 : 0;
+		want_speed = settings->speed.has ? settings->speed.value : 0;
+		want_duplex = !settings->duplex ? -1 : strcmp(settings->duplex, "full") == 0 ? 1 : 0;
+		have_duplex = !link->duplex ? -1 : strcmp(link->duplex, "full") == 0 ? 1 : 0;
+
+		if (want_autoneg >= 0 && want_autoneg != link->autoneg.value) {
+			differs = 1;
+		}
+		/* Speed and duplex are the setting only where the link does not
+		 * negotiate, which is what it is about to be or already is. */
+		if (want_autoneg == 0 || (want_autoneg < 0 && !link->autoneg.value)) {
+			if (want_speed > 0 && (!link->speed.has || link->speed.value != want_speed)) {
+				differs = 1;
+			}
+			if (want_duplex >= 0 && have_duplex != want_duplex) {
+				differs = 1;
+			}
+		}
+		if (!differs) {
+			continue;
+		}
+
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_LINK_SET_LINK_MODES;
+		op.u.set_link_modes.name = device->name;
+		op.u.set_link_modes.autoneg = want_autoneg;
+		op.u.set_link_modes.speed = (uint32_t)want_speed;
+		op.u.set_link_modes.duplex = want_duplex;
+		memset(&inverse, 0, sizeof(inverse));
+		inverse.kind = NCFG_OP_LINK_SET_LINK_MODES;
+		inverse.u.set_link_modes.name = device->name;
+		inverse.u.set_link_modes.autoneg = link->autoneg.value ? 1 : 0;
+		/* Back to negotiating needs nothing more; back to a forced mode
+		 * needs the mode, where it was known. */
+		inverse.u.set_link_modes.speed =
+		    !link->autoneg.value && link->speed.has ? (uint32_t)link->speed.value : 0u;
+		inverse.u.set_link_modes.duplex = !link->autoneg.value ? have_duplex : -1;
+		reason = ncfg_plan_reason_differs(device->name, "ethtool",
+		    describe_modes(builder->plan, want_autoneg, want_speed, want_duplex),
+		    describe_modes(builder->plan, link->autoneg.value,
+		        link->speed.has ? link->speed.value : 0, have_duplex));
+		ncfg_builder_gate(builder, device->name, &gate);
+		(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
+		ncfg_plan_ids_free(&gate);
 	}
 }

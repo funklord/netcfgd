@@ -887,6 +887,8 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		return ncfg_kernel_wg_op(&world, op, err, err_size);
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return ncfg_kernel_offloads_op(&world, op, err, err_size);
+	case NCFG_OP_LINK_SET_LINK_MODES:
+		return ncfg_kernel_link_modes_op(&world, op, err, err_size);
 	case NCFG_OP_LINK_SET_WDS:
 		return ncfg_kernel_wds_op(&world, op, err, err_size);
 	case NCFG_OP_RULE_ADD:

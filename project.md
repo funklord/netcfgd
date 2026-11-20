@@ -12737,6 +12737,59 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.877 `ethtool`'s autoneg, speed and duplex are applied
+
+**They parsed, compiled and were applied by nothing** -- the plan said so
+in `warn_unapplied` -- because the encoder for `ETHTOOL_MSG_LINKMODES_SET`
+was held back until it could meet a driver: a veth refuses every link-modes
+set, and every netlink defect this project has shipped was found by a real
+kernel rather than by a careful encoder (`ethtool.h`). netrescue's forcing
+rungs (10.876) were the first consumer to need them. **virtio-net is the
+driver**: it takes speed and duplex with autonegotiation off, and a hull vm
+has one, so no hardware was needed.
+
+Built: `ncfg_ethtool_link_modes_get_request`, `_set_request` and `_merge`
+in `c/src/sys/ethtool.c`; the observed link carries `autoneg`, `speed` and
+`duplex`, asked of every link beside its offloads and absent where it will
+not say; `link.set_link_modes`, the fifty-third op, planned by
+`ncfg_plan_link_modes` in `c/src/plan/offload.c`, disruptive (the PHY
+retrains) and optional (a driver that will not force leaves the link
+negotiating, and the rest of the plan goes on). `wol` and the ring sizes
+are still warned about as applied by nothing.
+
+**What is compared depends on what is wanted.** With autonegotiation off,
+speed and duplex are the setting and are compared. With it on, the speed
+the kernel reports is what the two ends agreed, so only `autoneg` is
+compared -- comparing the rest planned a carrier-dropping set on every pass,
+and the unit test's sabotage of exactly that goes red.
+
+**A forced NIC with no carrier cannot say its speed** (a physical one
+reports `SPEED_UNKNOWN`; virtio does not), which would have left the
+planner a choice between never converging and never changing it -- the
+second stopping netrescue's 1000-to-100 rung on precisely the ports it is
+for. The executor writes `<run>/link_modes/<iface>` after a forced set,
+WireGuard's record precedent, and `ncfg_observe_link_modes_recorded` uses
+it only where the kernel said autoneg off and gave no speed; a kernel
+answer always wins. Measured only in the unit test: no NIC here reports
+`SPEED_UNKNOWN` while forced, so the record's live half waits for a real
+one.
+
+**And a wrong name in every generic netlink refusal through the executor.**
+`ncfg_netlink_send_batch` named a refused request by its message type read
+as rtnetlink, which on a generic netlink socket is the family's runtime id:
+ethtool's was 22 here, so a refused link-modes set read "RTM_GETADDR
+failed". `ncfg_netlink_request_from` already corrected this and the batch
+path did not; it does now, for ethtool, WireGuard and nl80211 sets alike.
+
+Verified: `c/tests/link_modes_test.c` (the messages, the merge, the record,
+six plans; sabotaging the autoneg-on rule and the kernel-wins rule each
+goes red); `make hull-link-modes`, a vm forcing its segment NIC to 100/full
+and 1000/full read back through sysfs rather than netcfgd's own netlink,
+converging, writing the record, and refusing "negotiate" without stopping
+the address -- VERDICT ok, and red with the encoder sending ten times the
+speed. Both witnesses moved, a minor bump: `observed.json` gained the
+three fields, `plan.json` the op.
+
 ## 10.876 netrescue: a ladder of documents, for a box nobody configured
 
 **Asked for by the holder** (2026-11-20, building a USB rescue stick for the
@@ -12772,18 +12825,13 @@ rungs, keeps the fallback, and goes round. The ports there come from a
 sysfs directory the test writes, because a veth has no `device` and is
 rightly not a port.
 
-**Rungs 2 and 3 write a setting nothing applies yet.** `ethtool`'s
-`autoneg`, `speed` and `duplex` parse, compile and are reported by the plan
-as applied by nothing (`warn_unapplied` in `c/src/plan/offload.c`): the
-encoder for `ETHTOOL_MSG_LINKMODES_SET` was never written, waiting on a
-NIC it could safely be tried against. A VM's emulated NIC -- e1000 or
-virtio-net in hull -- takes a link-modes set, which makes it buildable
-without hardware; it is the next step here, and until it lands those two
-rungs cost a minute and change nothing.
+**Rungs 2 and 3 are applied since 10.877**, which built what they write:
+until then `ethtool`'s `autoneg`, `speed` and `duplex` parsed and were
+applied by nothing.
 
-**Open, in the order the ladder needs them**: the link-modes encoder above;
-listening for ARP and DHCP to learn an unknown subnet and taking an address
-nothing answers for (rung 4); rebinding a NIC's driver through sysfs and
+**Open, in the order the ladder needs them**: listening for ARP and DHCP
+to learn an unknown subnet and taking an address nothing answers for (rung
+4); rebinding a NIC's driver through sysfs and
 reporting firmware errors (rung 3 of the proposal); an mDNS announcement;
 PPP on a serial console. **The stick needs a DHCP client netcfgd drives** --
 dhcpcd or busybox's udhcpc; its isc-dhcp-client is not one -- and should

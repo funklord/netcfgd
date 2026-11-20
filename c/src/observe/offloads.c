@@ -78,6 +78,7 @@
 #include "ncfg/log.h"
 #include "ncfg/wire.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -189,6 +190,55 @@ static int features_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family
 	}
 	ncfg_netlink_reply_free(&reply);
 	return ok;
+}
+
+/*
+ * One device's autonegotiation, speed and duplex, stored on `link` where it
+ * answered. A device that would not -- `EOPNOTSUPP` from most virtual ones --
+ * leaves the three absent and costs nothing else: unlike the offloads there is
+ * no list here that a partial answer could shorten, so nothing is noted.
+ */
+static void link_modes_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *family,
+    ncfg_observed_link_t *link)
+{
+	ncfg_buf_t                message;
+	ncfg_buf_t                body;
+	ncfg_netlink_reply_t      reply;
+	ncfg_ethtool_link_modes_t modes;
+	uint16_t                  kind = 0;
+	uint16_t                  flags = 0;
+	size_t                    at;
+	char                      why[NCFG_ERROR_MAX];
+	int                       ok;
+
+	memset(&reply, 0, sizeof(reply));
+	memset(&modes, 0, sizeof(modes));
+	ncfg_buf_init(&message, 0);
+	ncfg_buf_init(&body, 0);
+	ok = ncfg_ethtool_link_modes_get_request(&message, family, link->name, 0, why, sizeof(why)) &&
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why, sizeof(why));
+	ncfg_buf_free(&message);
+	if (ok) {
+		ok = genl->exchange(genl->context, kind, flags, &body, NULL, &reply, why, sizeof(why));
+	}
+	ncfg_buf_free(&body);
+	for (at = 0; ok && at < reply.count; at++) {
+		ok = ncfg_ethtool_link_modes_merge(&modes, reply.items[at].bytes, reply.items[at].length,
+		    why, sizeof(why));
+	}
+	ncfg_netlink_reply_free(&reply);
+	if (!ok || !modes.known) {
+		return;
+	}
+	link->autoneg.has = 1;
+	link->autoneg.value = modes.autoneg;
+	if (modes.speed != 0u) {
+		link->speed.has = 1;
+		link->speed.value = (int64_t)modes.speed;
+	}
+	if (modes.duplex >= 0) {
+		link->duplex = strdup(modes.duplex == DUPLEX_FULL ? "full" : "half");
+	}
 }
 
 /* Everything the model can express out of one device's active set, in the
@@ -306,6 +356,10 @@ static void nothing_is_known(ncfg_observed_t *observed)
 		    observed->links[at].offloads_fixed_count);
 		observed->links[at].offloads_fixed = NULL;
 		observed->links[at].offloads_fixed_count = 0;
+		observed->links[at].autoneg.has = 0;
+		observed->links[at].speed.has = 0;
+		free(observed->links[at].duplex);
+		observed->links[at].duplex = NULL;
 	}
 }
 
@@ -380,6 +434,16 @@ int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_
 		ncfg_ethtool_names_free(&active);
 		ncfg_ethtool_names_free(&asked);
 	}
+	/*
+	 * **The link modes after every link's features, as a round of their
+	 * own**, not interleaved: a replayed exchange answers in the order it was
+	 * recorded, and a question asked between two links' features would take
+	 * the second link's answer. A link that will not say is left with none,
+	 * so a replay that has run out costs only these.
+	 */
+	for (at = 0; at < observed->link_count; at++) {
+		link_modes_of(genl, &family, &observed->links[at]);
+	}
 	ncfg_genl_family_free(&family);
 	if (unreadable != 0) {
 		ncfg_log_emitf("observe", NCFG_LOG_NOTE,
@@ -418,5 +482,71 @@ int observe_genl_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out)
 	 * one that never opened. */
 	out->exchange = ncfg_observe_exchange_socket;
 	out->context = socket;
+	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * What was forced, for a link that cannot say
+ * ------------------------------------------------------------------------ */
+
+int ncfg_observe_link_modes_record_path(const char *run_dir, const char *iface, char *out,
+    size_t out_size, char *err, size_t err_size)
+{
+	int written;
+
+	if (!out || out_size == 0u || !run_dir || !run_dir[0] || !iface || !iface[0] ||
+	    strchr(iface, '/')) {
+		ncfg_error_set(err, err_size, "a link-modes record needs a run directory and a link");
+		return 0;
+	}
+	written = snprintf(out, out_size, "%s/link_modes/%s", run_dir, iface);
+	if (written < 0 || (size_t)written >= out_size) {
+		out[0] = '\0';
+		ncfg_error_set(err, err_size, "the link-modes record path for `%s` is too long", iface);
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_observe_link_modes_recorded(ncfg_observed_t *observed, const char *run_dir, char *err,
+    size_t err_size)
+{
+	size_t at;
+
+	(void)err;
+	(void)err_size;
+	if (!observed || !run_dir) {
+		return 1;
+	}
+	for (at = 0; at < observed->link_count; at++) {
+		ncfg_observed_link_t *link = &observed->links[at];
+		char                  path[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+		char                  line[64];
+		FILE                 *record;
+
+		if (!link->autoneg.has || link->autoneg.value || (link->speed.has && link->duplex) ||
+		    !ncfg_observe_link_modes_record_path(run_dir, link->name, path, sizeof(path), NULL,
+		        0)) {
+			continue;
+		}
+		record = fopen(path, "re");
+		if (!record) {
+			continue;
+		}
+		while (fgets(line, sizeof(line), record)) {
+			unsigned long speed;
+			char          duplex[8];
+
+			if (!link->speed.has && sscanf(line, "speed %lu", &speed) == 1 && speed > 0 &&
+			    speed <= 4000000000UL) {
+				link->speed.has = 1;
+				link->speed.value = (int64_t)speed;
+			} else if (!link->duplex && sscanf(line, "duplex %7s", duplex) == 1 &&
+			    (strcmp(duplex, "full") == 0 || strcmp(duplex, "half") == 0)) {
+				link->duplex = strdup(duplex);
+			}
+		}
+		(void)fclose(record);
+	}
 	return 1;
 }

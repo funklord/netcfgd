@@ -333,6 +333,7 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	 */
 	if (!ncfg_observe_netfilter_from(netfilter, observed, err, err_size) ||
 	    !ncfg_observe_offloads_from(genl, observed, err, err_size) ||
+	    !ncfg_observe_link_modes_recorded(observed, run_dir, err, err_size) ||
 	    !ncfg_observe_regdom_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_ports_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_wds_from(genl, observed, err, err_size) ||

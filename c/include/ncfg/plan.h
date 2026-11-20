@@ -110,6 +110,8 @@ typedef enum {
 	NCFG_OP_WG_SET_PEERS,
 	NCFG_OP_DNS_APPLY,
 	NCFG_OP_LINK_SET_OFFLOADS,
+	/* Autonegotiation, speed and duplex, over ethtool (project.md 10.877). */
+	NCFG_OP_LINK_SET_LINK_MODES,
 	/* A station radio's four-address (WDS) mode, over nl80211 (10.587). */
 	NCFG_OP_LINK_SET_WDS,
 	NCFG_OP_LINK_SET_IPV6_TOKEN,
@@ -191,6 +193,13 @@ typedef struct {
 			const ncfg_offload_t *features;
 			size_t                feature_count;
 		} set_offloads;
+		/* -1 for autoneg or duplex, 0 for speed: leave it as it is. */
+		struct {
+			const char *name;
+			int         autoneg;
+			uint32_t    speed;
+			int         duplex; /* DUPLEX_HALF or DUPLEX_FULL */
+		} set_link_modes;
 		struct {
 			const char *name;
 			int         on;

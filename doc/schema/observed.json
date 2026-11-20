@@ -82,6 +82,9 @@
       "offloads_fixed": [
         "rx-checksum"
       ],
+      "autoneg": false,
+      "speed": 100,
+      "duplex": "full",
       "ipv6_token": "::5",
       "qdisc": "cake",
       "qdisc_bandwidth_bits": 20000000,

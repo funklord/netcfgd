@@ -177,6 +177,21 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		member_text(writer, "name", op->u.set_wds.name);
 		ncfg_json_write_member_bool(writer, "on", op->u.set_wds.on);
 		break;
+	case NCFG_OP_LINK_SET_LINK_MODES:
+		member_text(writer, "name", op->u.set_link_modes.name);
+		if (op->u.set_link_modes.autoneg >= 0) {
+			ncfg_json_write_member_bool(writer, "autoneg", op->u.set_link_modes.autoneg);
+		}
+		if (op->u.set_link_modes.speed != 0u) {
+			ncfg_optint_t speed = { 1, (int64_t)op->u.set_link_modes.speed };
+
+			member_optint(writer, "speed", speed);
+		}
+		if (op->u.set_link_modes.duplex >= 0) {
+			member_text(writer, "duplex",
+			    op->u.set_link_modes.duplex == 1 ? "full" : "half");
+		}
+		break;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		member_text(writer, "name", op->u.set_offloads.name);
 		ncfg_json_write_key(writer, "features");

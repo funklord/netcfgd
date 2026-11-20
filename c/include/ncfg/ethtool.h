@@ -9,17 +9,21 @@
  *   does. In this port that means genl.h resolves the family and this module
  *   only builds messages -- there is no descriptor in this file at all.
  *
- * ONLY THE OFFLOADS
- *   The model also carries ring sizes, link modes and wake-on-LAN, and those
- *   are not here. The reason is verification, not effort: a veth accepts a
- *   features set and refuses a link-modes set with a bare `EINVAL`; ring and
- *   wake-on-LAN messages are `EOPNOTSUPP` on anything that is not a physical
- *   NIC. Every netlink defect this project has shipped -- the WireGuard flags
- *   attribute, the nftables meta key, the qdisc rate unit -- was found by
- *   writing to a real kernel and reading it back, and none of them would have
- *   been found by writing an encoder carefully. So the settings that can only
- *   be exercised against hardware this build cannot safely write to stay
+ * THE OFFLOADS AND THE LINK MODES, AND NOT THE REST
+ *   The model also carries ring sizes and wake-on-LAN, and those are not
+ *   here. The reason is verification, not effort: ring and wake-on-LAN
+ *   messages are `EOPNOTSUPP` on anything that is not a physical NIC. Every
+ *   netlink defect this project has shipped -- the WireGuard flags attribute,
+ *   the nftables meta key, the qdisc rate unit -- was found by writing to a
+ *   real kernel and reading it back, and none of them would have been found
+ *   by writing an encoder carefully. So the settings that can only be
+ *   exercised against hardware this build cannot safely write to stay
  *   unimplemented and stay warned about.
+ *
+ *   **The link modes left that list on 2026-11-20** (project.md 10.877): a
+ *   veth refuses every link-modes set, but virtio-net takes speed and duplex
+ *   with autonegotiation off, and a hull vm has one -- a real driver, read
+ *   back through sysfs in `tests/hull/link-modes`.
  *
  * FEATURES ARE NAMED, NOT NUMBERED
  *   The kernel's bit indices are not stable across versions and are not a wire
@@ -172,5 +176,53 @@ int ncfg_ethtool_bitset_merge(ncfg_ethtool_names_t *out, const void *payload, si
  * predates there being a second one. */
 int ncfg_ethtool_active_merge(ncfg_ethtool_names_t *out, const void *payload, size_t length,
     char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Link modes: autonegotiation, speed and duplex
+ * ------------------------------------------------------------------------ */
+
+/*
+ * What a `LINKMODES_GET` reply says about a device.
+ *
+ * `known` is 0 until a reply carrying the three has been folded in: most
+ * virtual devices answer `EOPNOTSUPP`, and a device that never answered is not
+ * a device at 0 Mb/s. `speed` is Mb/s, 0 where the kernel said
+ * `SPEED_UNKNOWN` (no carrier); `duplex` is `DUPLEX_HALF`, `DUPLEX_FULL`, or
+ * -1 for `DUPLEX_UNKNOWN`.
+ */
+typedef struct {
+	int      known;
+	int      autoneg;
+	uint32_t speed;
+	int      duplex;
+} ncfg_ethtool_link_modes_t;
+
+/*
+ * What a `LINKMODES_SET` asks for. Each field may be left alone: `autoneg`
+ * and `duplex` -1, `speed` 0. A request leaving all three alone is refused,
+ * as an empty offload set is: it would acknowledge work nobody did.
+ *
+ * **Verified against virtio-net**, which takes speed and duplex with
+ * autonegotiation off and nothing else (`ethtool_virtdev_set_link_ksettings`),
+ * in a hull guest -- the first real driver this encoder met, since a veth
+ * refuses every link-modes set (project.md 10.877).
+ */
+typedef struct {
+	int      autoneg;
+	uint32_t speed;
+	int      duplex;
+} ncfg_ethtool_link_modes_set_t;
+
+int ncfg_ethtool_link_modes_get_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t seq, char *err, size_t err_size);
+
+int ncfg_ethtool_link_modes_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, const ncfg_ethtool_link_modes_set_t *wanted, uint32_t seq, char *err,
+    size_t err_size);
+
+/* Fold one `LINKMODES_GET` reply payload in. A payload without the three adds
+ * nothing and is not a failure; one that will not decode is. */
+int ncfg_ethtool_link_modes_merge(ncfg_ethtool_link_modes_t *out, const void *payload,
+    size_t length, char *err, size_t err_size);
 
 #endif /* NCFG_ETHTOOL_H */

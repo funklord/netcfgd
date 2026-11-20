@@ -876,6 +876,13 @@ int ncfg_netlink_send_batch(ncfg_netlink_t *netlink, const void *bytes, size_t l
 	}
 	collected = ncfg_netlink_collect_batch(socket_recv, netlink, last_acked,
 	    NCFG_NETLINK_REPLY_INITIAL, out, err, err_size);
+	/* The same correction as `ncfg_netlink_request_from`'s, which this path
+	 * lacked: the executor sends every set through here, so a refused ethtool
+	 * set on a machine where the family's id was 22 was reported as
+	 * "RTM_GETADDR failed" (project.md 10.877). */
+	if (!collected && out->refused != 0 && netlink->protocol == NETLINK_GENERIC) {
+		(void)ncfg_netlink_fail(err, err_size, "a generic netlink request", out->refused);
+	}
 	netlink->dropped += (uint32_t)out->dropped;
 	return collected;
 }

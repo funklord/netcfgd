@@ -1077,6 +1077,26 @@ int ncfg_observe_wireguard_currency(ncfg_observed_t *observed, const char *run_d
  */
 #define NCFG_OBSERVE_WG_RECORD_PATH_MAX (NCFG_OBSERVE_RUN_DIR_MAX + 256u)
 
+/*
+ * `<run>/link_modes/<iface>`: what netcfgd last forced on a link, for the one
+ * case the kernel cannot say it -- a physical NIC with no carrier reports
+ * `SPEED_UNKNOWN` and `DUPLEX_UNKNOWN` however it was forced, so a forced
+ * mode on a cable-less port would otherwise be planned on every pass, or, if
+ * that were suppressed, never changed again. Lines `speed N` and
+ * `duplex full|half`; absent where the link negotiates.
+ */
+int ncfg_observe_link_modes_record_path(const char *run_dir, const char *iface, char *out,
+    size_t out_size, char *err, size_t err_size);
+
+/*
+ * Fill a link's speed and duplex from that record **only where the kernel
+ * left them unknown and says autonegotiation is off**. A kernel answer always
+ * wins, so a cable plugged in replaces the record with the truth. Nothing here
+ * fails an observation: an unreadable record is no record.
+ */
+int ncfg_observe_link_modes_recorded(ncfg_observed_t *observed, const char *run_dir, char *err,
+    size_t err_size);
+
 int ncfg_observe_wg_key_record_path(const char *run_dir, const char *iface, char *out,
     size_t out_size, char *err, size_t err_size);
 

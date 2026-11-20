@@ -235,6 +235,16 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "RA acceptance off, so a router interface cannot have one";
 		}
 		return NULL;
+	case NCFG_OP_LINK_SET_LINK_MODES:
+		if (code == EOPNOTSUPP) {
+			return "this device has no link modes to set -- most virtual ones do not";
+		}
+		if (code == EINVAL) {
+			return "the driver refused the mode: a virtio NIC takes a speed and duplex "
+			       "only with autonegotiation off, and a physical one only a mode its "
+			       "PHY supports";
+		}
+		return NULL;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		if (code == EINVAL || code == EOPNOTSUPP) {
 			return "a driver that does not know a feature refuses the whole request, "

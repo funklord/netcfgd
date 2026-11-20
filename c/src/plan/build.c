@@ -976,6 +976,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * anything arrives on it.
 	 */
 	ncfg_plan_offloads(&builder);
+	ncfg_plan_link_modes(&builder);
 	/* After the offloads and before the rules, which is the Rust's position
 	 * for it. Nothing here depends on that order: a token is a property of one
 	 * interface and is gated on its creation like every other link

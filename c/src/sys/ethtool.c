@@ -1,5 +1,6 @@
 /*
- * ethtool.c -- the two features messages, and the one bitset that is a list.
+ * ethtool.c -- the features messages, the one bitset that is a list, and the
+ * link modes.
  *
  * Bytes in, structures out, and no socket anywhere: the requests are built into
  * a buffer the caller sends and the replies are folded in as payloads the
@@ -14,6 +15,9 @@
 #include "ncfg/wire.h"
 
 /* The header nest every ethtool message begins with: the device it is about. */
+/* Every message's header attribute is number 1 (`ETHTOOL_A_FEATURES_HEADER`,
+ * `ETHTOOL_A_LINKMODES_HEADER`, ...): the kernel's convention, so one function
+ * serves both. */
 static int ethtool_header(ncfg_buf_t *out, const char *device, char *err, size_t err_size)
 {
 	ncfg_buf_t inner;
@@ -305,4 +309,127 @@ int ncfg_ethtool_active_merge(ncfg_ethtool_names_t *out, const void *payload, si
 {
 	return ncfg_ethtool_bitset_merge(out, payload, length, NCFG_ETHTOOL_BITSET_ACTIVE, err,
 	    err_size);
+}
+
+/* ---------------------------------------------------------------- link modes */
+
+int ncfg_ethtool_link_modes_get_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                built;
+
+	if (!out || !family) {
+		ncfg_error_set(err, err_size, "an ethtool request needs the resolved family");
+		return 0;
+	}
+	ncfg_buf_init(&attrs, 0);
+	if (!ethtool_header(&attrs, device, err, err_size)) {
+		ncfg_buf_free(&attrs);
+		return 0;
+	}
+	header.cmd = ETHTOOL_MSG_LINKMODES_GET;
+	header.version = 1;
+	built = ncfg_genl_build_request(out, family->id, &header, 0, seq, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+int ncfg_ethtool_link_modes_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, const ncfg_ethtool_link_modes_set_t *wanted, uint32_t seq, char *err,
+    size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                built;
+
+	if (!out || !family || !wanted) {
+		ncfg_error_set(err, err_size, "an ethtool request needs the resolved family");
+		return 0;
+	}
+	if (wanted->autoneg < 0 && wanted->speed == 0u && wanted->duplex < 0) {
+		ncfg_error_set(err, err_size, "a link-modes request on %s names nothing to change",
+		    device ? device : "?");
+		return 0;
+	}
+	if (wanted->autoneg > 1 || (wanted->duplex >= 0 && wanted->duplex != DUPLEX_HALF &&
+	    wanted->duplex != DUPLEX_FULL)) {
+		ncfg_error_set(err, err_size, "a link-modes request on %s asks for a mode that does "
+		    "not exist", device ? device : "?");
+		return 0;
+	}
+	ncfg_buf_init(&attrs, 0);
+	if (!ethtool_header(&attrs, device, err, err_size)) {
+		ncfg_buf_free(&attrs);
+		return 0;
+	}
+	if (wanted->autoneg >= 0) {
+		ncfg_wire_attr_put_u8(&attrs, ETHTOOL_A_LINKMODES_AUTONEG, (uint8_t)wanted->autoneg);
+	}
+	if (wanted->speed != 0u) {
+		ncfg_wire_attr_put_u32(&attrs, ETHTOOL_A_LINKMODES_SPEED, wanted->speed);
+	}
+	if (wanted->duplex >= 0) {
+		ncfg_wire_attr_put_u8(&attrs, ETHTOOL_A_LINKMODES_DUPLEX, (uint8_t)wanted->duplex);
+	}
+	header.cmd = ETHTOOL_MSG_LINKMODES_SET;
+	header.version = 1;
+	built = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs,
+	    err, err_size);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+int ncfg_ethtool_link_modes_merge(ncfg_ethtool_link_modes_t *out, const void *payload,
+    size_t length, char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attr_t  attr;
+	ncfg_wire_step_t  step;
+	uint8_t           autoneg, duplex;
+	uint32_t          speed;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "link modes need somewhere to go");
+		return 0;
+	}
+	if (!ncfg_genl_payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	step = ncfg_wire_attrs_find(&area, ETHTOOL_A_LINKMODES_AUTONEG, &attr, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step == NCFG_WIRE_END) {
+		return 1;
+	}
+	if (!ncfg_wire_attr_u8(&attr, &autoneg, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_genl_payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	step = ncfg_wire_attrs_find(&area, ETHTOOL_A_LINKMODES_SPEED, &attr, err, err_size);
+	if (step != NCFG_WIRE_OK || !ncfg_wire_attr_u32(&attr, &speed, err, err_size)) {
+		if (step == NCFG_WIRE_END) {
+			ncfg_error_set(err, err_size, "a link-modes reply said autonegotiation and no speed");
+		}
+		return 0;
+	}
+	if (!ncfg_genl_payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	step = ncfg_wire_attrs_find(&area, ETHTOOL_A_LINKMODES_DUPLEX, &attr, err, err_size);
+	if (step != NCFG_WIRE_OK || !ncfg_wire_attr_u8(&attr, &duplex, err, err_size)) {
+		if (step == NCFG_WIRE_END) {
+			ncfg_error_set(err, err_size, "a link-modes reply said autonegotiation and no duplex");
+		}
+		return 0;
+	}
+	out->known = 1;
+	out->autoneg = autoneg == AUTONEG_ENABLE;
+	out->speed = speed == (uint32_t)SPEED_UNKNOWN ? 0u : speed;
+	out->duplex = duplex == DUPLEX_HALF ? DUPLEX_HALF : duplex == DUPLEX_FULL ? DUPLEX_FULL : -1;
+	return 1;
 }

@@ -350,6 +350,9 @@ void ncfg_plan_bridge_vlans(ncfg_builder_t *builder, const ncfg_device_t *device
  * than not redirecting it at all.
  */
 void ncfg_plan_offloads(ncfg_builder_t *builder);
+/* Autonegotiation, speed and duplex from each device's `ethtool` block, in
+ * `offload.c` beside the offloads (project.md 10.877). */
+void ncfg_plan_link_modes(ncfg_builder_t *builder);
 /*
  * The IPv6 interface identifier, and netcfgd's one nftables table.
  *

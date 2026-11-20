@@ -575,6 +575,8 @@ int ncfg_kernel_wg_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, cha
 /* `link.set_wds`: four-address mode on a station radio, over nl80211. */
 int ncfg_kernel_wds_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
+int ncfg_kernel_link_modes_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
+    size_t err_size);
 int ncfg_kernel_offloads_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
 /*

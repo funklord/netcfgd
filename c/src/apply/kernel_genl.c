@@ -1002,3 +1002,89 @@ int ncfg_kernel_mesh_point_op(const ncfg_op_t *create, const char *name, char *e
 	ncfg_netlink_close(&socket);
 	return ok;
 }
+
+/* ------------------------------------------------------------------------ *
+ * The link modes
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Leave what was forced where the observer reads it back
+ * (`ncfg_observe_link_modes_recorded`): a NIC with no carrier cannot say its
+ * forced speed, and without this the planner could neither leave it alone nor
+ * change it. Removed when the link is told to negotiate. Nothing here fails
+ * the op: the kernel has the setting, and a missing record costs only a
+ * repeated set while the cable is out.
+ */
+static void write_link_modes_record(const char *run_dir, const ncfg_op_t *op)
+{
+	char        path[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+	char        dir[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+	char        text[64];
+	char        why[NCFG_ERROR_MAX];
+	const char *iface = op->u.set_link_modes.name;
+	int         length;
+
+	if (!ncfg_observe_link_modes_record_path(run_dir, iface, path, sizeof(path), NULL, 0)) {
+		return;
+	}
+	if (op->u.set_link_modes.autoneg == 1) {
+		(void)unlink(path);
+		return;
+	}
+	if (op->u.set_link_modes.speed == 0u && op->u.set_link_modes.duplex < 0) {
+		return;
+	}
+	length = snprintf(text, sizeof(text), "speed %u\nduplex %s\n",
+	    (unsigned)op->u.set_link_modes.speed,
+	    op->u.set_link_modes.duplex == 1 ? "full" : op->u.set_link_modes.duplex == 0 ? "half" : "-");
+	(void)snprintf(dir, sizeof(dir), "%s/link_modes", run_dir);
+	if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+		return;
+	}
+	why[0] = '\0';
+	if (length <= 0 || !ncfg_write_atomically(path, text, (size_t)length, 0600, why, sizeof(why))) {
+		ncfg_log_emitf("ethtool", NCFG_LOG_WARNING,
+		    "%s: the record of its forced link mode could not be written (%s); with no "
+		    "carrier it will be set again on the next pass", iface ? iface : "?", why);
+	}
+}
+
+int ncfg_kernel_link_modes_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
+    size_t err_size)
+{
+	ncfg_netlink_t                socket;
+	ncfg_genl_family_t            family;
+	ncfg_buf_t                    message;
+	ncfg_ethtool_link_modes_set_t wanted;
+	char                          doing[NCFG_ERROR_MAX];
+	uint32_t                      seq;
+	int                           ok;
+
+	(void)world;
+	if (!op) {
+		ncfg_error_set(err, err_size, "there is no link-modes action to carry out");
+		return 0;
+	}
+	if (!ncfg_genl_family_open(NCFG_ETHTOOL_FAMILY, &socket, &family, err, err_size)) {
+		return 0;
+	}
+	wanted.autoneg = op->u.set_link_modes.autoneg;
+	wanted.speed = op->u.set_link_modes.speed;
+	wanted.duplex = op->u.set_link_modes.duplex;
+	seq = ncfg_netlink_take_seq(&socket);
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_ethtool_link_modes_set_request(&message, &family, op->u.set_link_modes.name,
+	    &wanted, seq, err, err_size);
+	if (ok) {
+		(void)snprintf(doing, sizeof(doing), "set the link modes on %s",
+		    op->u.set_link_modes.name ? op->u.set_link_modes.name : "?");
+		ok = ncfg_kernel_send(&socket, &message, seq, op->kind, doing, err, err_size);
+	}
+	if (ok && world && world->run_dir) {
+		write_link_modes_record(world->run_dir, op);
+	}
+	ncfg_buf_free(&message);
+	ncfg_genl_family_free(&family);
+	ncfg_netlink_close(&socket);
+	return ok;
+}

@@ -89,6 +89,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "dns.apply";
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return "link.set_offloads";
+	case NCFG_OP_LINK_SET_LINK_MODES:
+		return "link.set_link_modes";
 	case NCFG_OP_LINK_SET_WDS:
 		return "link.set_wds";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
@@ -176,6 +178,10 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	 * being shaped, which on a saturated line is the same kind of loss. */
 	case NCFG_OP_RULE_DEL:
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
+	/* A change of speed, duplex or autonegotiation retrains the PHY: the
+	 * carrier drops for a second or more, and a forced mode the far end does
+	 * not match is a link that stays down. */
+	case NCFG_OP_LINK_SET_LINK_MODES:
 		return 1;
 	/*
 	 * Turning forwarding off cuts every host behind this interface off from
@@ -329,6 +335,8 @@ static const char *subject_class(int kind)
 		return "vxlan";
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return "offloads";
+	case NCFG_OP_LINK_SET_LINK_MODES:
+		return "link_modes";
 	case NCFG_OP_LINK_SET_WDS:
 		return "wds";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
@@ -524,6 +532,8 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 		return op->u.set_ipv6_token.name;
 	case NCFG_OP_LINK_SET_OFFLOADS:
 		return op->u.set_offloads.name;
+	case NCFG_OP_LINK_SET_LINK_MODES:
+		return op->u.set_link_modes.name;
 	case NCFG_OP_LINK_SET_WDS:
 		return op->u.set_wds.name;
 	case NCFG_OP_LINK_DELETE:

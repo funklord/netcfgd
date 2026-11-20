@@ -676,6 +676,16 @@ typedef struct {
 	 */
 	char  **offloads_fixed;
 	size_t  offloads_fixed_count;
+	/*
+	 * Autonegotiation, speed and duplex, from ethtool's `LINKMODES_GET`
+	 * (project.md 10.877). All three absent where the device would not say,
+	 * which is most virtual ones -- a veth answers and a bridge does not --
+	 * and that is not a device at 0 Mb/s. `speed` is Mb/s and absent with no
+	 * carrier; `duplex` is "full" or "half", absent when unknown.
+	 */
+	ncfg_optbool_t autoneg;
+	ncfg_optint_t  speed;
+	char          *duplex;
 	/* Absent covers both "no token" and "this device cannot have one": a dummy
 	 * or any other NOARP device does no neighbour discovery, and the kernel
 	 * refuses a token on it. */
