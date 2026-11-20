@@ -2658,6 +2658,33 @@ hull-takeover-openrc:
 	sed 's/^/takeover-openrc: /' tests/hull/takeover/verdict/nas; \
 	grep -q '^VERDICT ok' tests/hull/takeover/verdict/nas
 
+# The storage net the holder's boxes are to get (10.887): three machines,
+# two ports each, cabled in a ring with no switch, each bridging its ports
+# with spanning tree and MTU 9000 under netcfgd. Passes when every box
+# reaches the other two with an unfragmented jumbo frame and exactly one
+# port in the ring blocks. The verdicts are removed by name.
+RING_VERDICT = tests/hull/storage-ring/verdict
+hull-storage-ring:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/hwsim)
+	@$(call hull_image,hwsim)
+	@rm -f $(RING_VERDICT)/ml350 $(RING_VERDICT)/dl180g6-01 $(RING_VERDICT)/dl180g6-03 \
+		$(RING_VERDICT)/states $(RING_VERDICT)/up-ml350 $(RING_VERDICT)/up-dl180g6-01 \
+		$(RING_VERDICT)/up-dl180g6-03 $(RING_VERDICT)/done-ml350 \
+		$(RING_VERDICT)/done-dl180g6-01 $(RING_VERDICT)/done-dl180g6-03
+	@$(call hull_verdict,$(RING_VERDICT))
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/storage-ring/hull.conf || true
+	@bad=0; \
+	for box in ml350 dl180g6-01 dl180g6-03; do \
+		if [ ! -f $(RING_VERDICT)/$$box ]; then echo "storage-ring: $$box left no verdict"; bad=1; continue; fi; \
+		sed "s/^/storage-ring: $$box: /" $(RING_VERDICT)/$$box; \
+		grep -q '^VERDICT ok' $(RING_VERDICT)/$$box || bad=1; \
+	done; \
+	blocking=$$(awk '$$3 == 4' $(RING_VERDICT)/states 2>/dev/null | wc -l); \
+	echo "storage-ring: ports blocking across the ring: $$blocking (one is right)"; \
+	[ "$$blocking" -eq 1 ] || bad=1; \
+	[ "$$bad" -eq 0 ]
+
 # Autonegotiation, speed and duplex on a real driver (10.877): virtio-net in a
 # vm, on a bare segment's NIC so the machine's own network is not touched,
 # read back through sysfs rather than through netcfgd's own netlink reading.
@@ -3202,7 +3229,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-takeover hull-takeover-openrc hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-takeover hull-takeover-openrc hull-storage-ring hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

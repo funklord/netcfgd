@@ -12747,6 +12747,41 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.887 The coming storage net, bridged in a ring, simulated
+
+The holder's boxes are to get ConnectX-3s in Ethernet mode, two ports each,
+cabled box to box with no switch (system-notes, 2026-11-20); whether each
+box bridges its two ports or routes a subnet per link is the holder's, and
+open. Both shapes are things netcfgd already expresses -- a `bridge` with
+`stp`, or addresses and `routes` per port -- so this measures the one that
+can go wrong: the bridged ring, ml350 to -01 to -03 and back, where spanning
+tree must block one port or every broadcast circles for ever.
+
+`make hull-storage-ring`: three vms, two segments each forming the ring,
+each running `ncfg apply` with its two ports in `br-storage`, STP on,
+`forward_delay = 4`, MTU 9000 on the ports and the bridge, and its 10.1.0.x
+address. Every box reaches the other two with an 8972-byte ping that may
+not fragment, a second plan has nothing to do, and across the ring exactly
+one port blocks. With `stp = false` the boxes fail their check and nothing
+blocks. virtio-net stands in for mlx4, and the machines run the host's
+kernel: hull's microvm kernel has no bridge module, which was the first
+run's failure.
+
+The document each box needs, for the holder's choice of a bridge:
+
+    device eth2 { mtu = 9000 }
+    device eth3 { mtu = 9000 }
+    device br-storage {
+    	mtu = 9000
+    	bridge { members = ["eth2", "eth3"]; stp = true; forward_delay = 4 }
+    }
+    interface eth2 { config = "null" }
+    interface eth3 { config = "null" }
+    interface br-storage { config = "10.1.0.X/24" }
+
+with the firewall's NFS rules naming `br-storage` where they name `ib0`
+today.
+
 ## 10.886 Taking over ml350's shape: OpenRC under sysvinit
 
 10.884's rig on the desktop's shape: `make hull-takeover-openrc` boots the
