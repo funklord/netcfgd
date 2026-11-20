@@ -345,8 +345,8 @@ review. Beyond the spelling:
   names *are* its `/run` file names *are* the dotted paths in a `Reason`
   (§4). An abbreviation invented inside a struct definition ends up in
   `ncfg explain` output and then in somebody's grep, where it can no longer
-  be renamed. Names in `netcfgd-model` are a public interface even before
-  the schema freezes at M4.
+  be renamed. Names in the model (`c/include/ncfg/`, `c/src/model`) are a
+  public interface even before the schema freezes at M4.
 - **One word per concept, everywhere.** `desired` and `observed` are the
   clearest case: the same word in the type name, the `/run` path, the CLI
   subcommand and the documentation, and no synonym anywhere. A synonym
@@ -354,9 +354,9 @@ review. Beyond the spelling:
   concerned. `doc/decision/0005-state-vocabulary.md` settles which pair,
   and rules out carrying both as aliases.
 - **Prefer the plain descriptive name over the redundant one.** The type a
-  planner returns is `Plan`, not `PlanStruct` or `PlanResult`;
-  `netcfgd_plan::Plan` already reads correctly at the call site, and
-  stuttering only shows up once someone imports it.
+  planner returns is `ncfg_plan_t`, not `ncfg_plan_struct_t` or
+  `ncfg_plan_result_t`; the prefix already says whose it is, and the
+  category word says nothing a reader needs.
 
 **A toolkit whose own API is `camelCase` does not pull your names across.**
 Call the foreign API exactly as it is spelled -- `setParent`, `addWidget`,
@@ -410,16 +410,26 @@ the reason below.
 
 ### No formatter for the C and the C++
 
-`clang-format` is **not run here, not even ad hoc on a single file**, for
-the reason the sibling C projects recorded: it rewrites tabs to spaces
-unconditionally and cannot be configured out of it. That is a configuration
-gap, which is disqualifying rather than something to work around — the
-failure mode is a silent conversion of files that were already correct,
-found later as a reverted commit rather than as an error.
+`clang-format` is **not run here, not even ad hoc on a single file** --
+because it has never been evaluated against this tree, not because it
+cannot comply. This section said until 2026-11-20 that it "rewrites tabs
+to spaces unconditionally and cannot be configured out of it", attributed
+to the sibling C projects. That was wrong: `UseTab: AlignWithSpaces`
+(clang-format 11 and later) indents with tabs and aligns with spaces,
+which is rule 2 exactly, and openmlx4 and ossacli name `UseTab` as the
+setting to evaluate. qtty rejected it for its alignment and defaults
+instead, which is the question that remains open here too: whether a
+configuration exists that leaves this tree's already-correct files
+byte-identical. Pointed out by claude-guidelines' message of 2026-11-20.
 
-This is the same evaluation `rustfmt` passed while the Rust was here, and
-it fails: the rule has to survive the tool, and here it does not.
-`make style` gates indentation and alignment instead.
+So the verdict is *unevaluated*, and unevaluated means not run. The
+evaluation, when somebody makes it: pin a version, write a `.clang-format`
+with `UseTab: AlignWithSpaces`, run it over `c/` and `client/` in a
+scratch copy, and count the files it changes. A tool that rewrites files
+the gate already passes fails; one that changes none is a candidate.
+clang-format was not installed on the machine this was corrected on, so
+nothing was measured. `make style` gates indentation and alignment
+meanwhile.
 
 ### 3. Filenames: what this project names
 
