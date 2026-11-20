@@ -88,6 +88,16 @@ static void lower_bridge(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			ncfg_as_u32_opt(ctx, assignment->value, &config->forward_delay);
 		} else if (strcmp(key, "hello_time") == 0) {
 			ncfg_as_u32_opt(ctx, assignment->value, &config->hello_time);
+		} else if (strcmp(key, "max_age") == 0) {
+			ncfg_as_u32_opt(ctx, assignment->value, &config->max_age);
+			/* The kernel's own bounds (br_set_max_age), said here so the
+			 * document is refused by line rather than its apply by errno. */
+			if (config->max_age.has &&
+			    (config->max_age.value < 6 || config->max_age.value > 40)) {
+				ncfg_diag(ctx, assignment->value->span,
+				    "a bridge's `max_age` is 6 to 40 seconds, not %lld",
+				    (long long)config->max_age.value);
+			}
 		} else if (strcmp(key, "ageing_time") == 0) {
 			ncfg_as_u32_opt(ctx, assignment->value, &config->ageing_time);
 		} else if (strcmp(key, "priority") == 0) {

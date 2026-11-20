@@ -1281,6 +1281,8 @@ static const ncfg_field_t bridge_fields[] = {
 	    .offset = offsetof(ncfg_bridge_config_t, forward_delay) },
 	{ .name = "hello_time", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_bridge_config_t, hello_time) },
+	{ .name = "max_age", .kind = NCFG_F_OPT_INT, R_U32,
+	    .offset = offsetof(ncfg_bridge_config_t, max_age) },
 	{ .name = "ageing_time", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_bridge_config_t, ageing_time) },
 	{ .name = "priority", .kind = NCFG_F_OPT_INT, R_U16,

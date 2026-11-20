@@ -112,6 +112,7 @@
         "stp": true,
         "forward_delay": 4,
         "hello_time": 2,
+        "max_age": 20,
         "ageing_time": 300,
         "priority": 4096,
         "vlan_filtering": true

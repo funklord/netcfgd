@@ -446,6 +446,7 @@ typedef struct {
 	int           stp;
 	ncfg_optint_t forward_delay;
 	ncfg_optint_t hello_time;
+	ncfg_optint_t max_age;
 	ncfg_optint_t ageing_time;
 	ncfg_optint_t priority;
 	int           vlan_filtering;

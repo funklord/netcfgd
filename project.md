@@ -12747,6 +12747,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.889 The storage ring heals around a cut cable; a bridge takes `max_age`
+
+The holder chose the bridged storage net (2026-11-21: "bridged, possibly
+with STP"), settling 10.887's open question. Spanning tree is not optional
+in it: three boxes with two ports each, cabled box to box, close a ring,
+and with `stp = false` the rig's boxes lose each other (10.887). So each
+box bridges its two ConnectX-3 ports with STP on.
+
+A ring is cabled for its redundancy, so `make hull-storage-ring` now cuts a
+cable -- both ends of a forwarding segment down, as a pulled cable drops
+carrier at both -- and every box must reach the other two again. **The cut
+measured is the hard one**: the segment the box holding the blocked port is
+not on. That box loses no link of its own, so classic spanning tree (the
+kernel's; RSTP needs mstpd) unblocks its port only once the root's
+information there has aged out, then listens and learns. At the kernel's
+`max_age` of 20 s that took 28 to 30 s; a cut beside the blocked port took
+8 to 9. Half a minute is an NFS stall the holder would notice.
+
+**So a bridge takes `max_age`**, in seconds like its other timers, through
+every layer `hello_time` goes (document, observed record, plan comparison,
+apply, renderer, witnesses -- a minor bump), refused outside the kernel's
+6 to 40 at compile time. 802.1D wants `2 x (forward_delay - 1) >= max_age
+>= 2 x (hello_time + 1)`; at `forward_delay = 4` and the default hello of
+2 that is exactly 6, and the ring heals in 13 to 16 s, which the rig now
+holds to 20. -01, the NAS, takes `priority = 4096` so it is the root: both
+its links forward and the port that blocks is on the ml350 -- -03 cable,
+which carries neither box's NAS traffic; the rig checks that too.
+
+Each box's storage section is then
+
+    device eth2 { mtu = 9000 }
+    device eth3 { mtu = 9000 }
+    device br-storage {
+    	mtu = 9000
+    	bridge {
+    		members       = ["eth2", "eth3"]
+    		stp           = true
+    		forward_delay = 4
+    		max_age       = 6
+    		priority      = 4096	# on dl180g6-01 only
+    	}
+    }
+    interface eth2 { config = "null" }
+    interface eth3 { config = "null" }
+    interface br-storage { config = "10.1.0.X/24" }
+
+with the port names whatever mlx4_en gives the ConnectX-3 once its ports are
+in Ethernet mode, which is the boxes' setup and not netcfgd's.
+
+During the suite run for this change `node_store_trouble.sh` failed its
+recovery check once ("when it has room the line goes") and passed three of
+three alone: it waits 60 s for a pressure that comes down a step per 30 s,
+which is tight under the suite's load. Nothing here touches it; noted as
+intermittent, not explained.
+
 ## 10.888 The plan offers the whole-machine remedy that works on this machine
 
 On the Devuan rig (10.884) `ncfg plan`'s warning that ifupdown also holds
@@ -12768,8 +12823,8 @@ switcher even under systemd.
 
 The holder's boxes are to get ConnectX-3s in Ethernet mode, two ports each,
 cabled box to box with no switch (system-notes, 2026-11-20); whether each
-box bridges its two ports or routes a subnet per link is the holder's, and
-open. Both shapes are things netcfgd already expresses -- a `bridge` with
+box bridges its two ports or routes a subnet per link was the holder's, and
+was settled bridged on 2026-11-21 (10.889). Both shapes are things netcfgd already expresses -- a `bridge` with
 `stp`, or addresses and `routes` per port -- so this measures the one that
 can go wrong: the bridged ring, ml350 to -01 to -03 and back, where spanning
 tree must block one port or every broadcast circles for ever.
@@ -12784,7 +12839,8 @@ blocks. virtio-net stands in for mlx4, and the machines run the host's
 kernel: hull's microvm kernel has no bridge module, which was the first
 run's failure.
 
-The document each box needs, for the holder's choice of a bridge:
+The document each box needs, for the holder's choice of a bridge (10.889
+adds `max_age` and the NAS's priority to it):
 
     device eth2 { mtu = 9000 }
     device eth3 { mtu = 9000 }

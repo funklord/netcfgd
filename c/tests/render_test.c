@@ -2027,7 +2027,7 @@ static void a_name_needing_escapes_round_trips(void)
 static void the_link_kinds_round_trip(void)
 {
 	round_trips("device br0 {\n\tbridge {\n\t\tmembers = [\"eth0\", \"eth1\"]\n"
-	    "\t\tstp = true\n\t\tforward_delay = 4\n\t\thello_time = 2\n"
+	    "\t\tstp = true\n\t\tforward_delay = 4\n\t\thello_time = 2\n\t\tmax_age = 6\n"
 	    "\t\tageing_time = 300\n\t\tpriority = 4096\n\t\tvlan_filtering = true\n\t}\n}\n"
 	    "device bond0 {\n\tbond {\n\t\tmembers = [\"eth2\", \"eth3\"]\n"
 	    "\t\tmode = \"802.3ad\"\n\t\tmiimon = 100\n\t}\n}\n"

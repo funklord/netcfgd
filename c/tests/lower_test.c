@@ -2243,6 +2243,20 @@ static void kind_cases(void)
 		    "  and the bridge parameters survive");
 		ncfg_document_free(document);
 	}
+	/* `max_age` (10.889): kept in seconds, and refused outside the 6 to 40
+	 * the kernel takes, by line rather than by an apply's errno. */
+	document = compiles("device br0 {\n\tbridge {\n\t\tmembers = [\"eth0\", \"eth1\"]\n"
+	    "\t\tstp = true\n\t\tmax_age = 6\n\t}\n}\n", "a bridge's max age compiles");
+	if (document) {
+		device = device_named(document, "br0");
+		check(device && device->kind.bridge.max_age.has &&
+		    device->kind.bridge.max_age.value == 6, "  and is kept in seconds");
+		ncfg_document_free(document);
+	}
+	refuses("device br0 { bridge { members = [\"eth0\"]; max_age = 5 } }\n",
+	    "6 to 40 seconds", "  and one below the kernel's floor is refused");
+	refuses("device br0 { bridge { members = [\"eth0\"]; max_age = 41 } }\n",
+	    "6 to 40 seconds", "  and so is one above its ceiling");
 	/* A second kind block replaces the first, as the Rust's assignment does,
 	 * and the first's member list has to go with it: `make SANITIZE=1 test`
 	 * is what sees it if it does not. */

@@ -392,6 +392,7 @@ int main(void)
 		ncfg_buf_init(&attrs, 0);
 		ncfg_buf_init(&buffer, 0);
 		ncfg_wire_attr_put_u32(&data, IFLA_BR_AGEING_TIME, 30000);
+		ncfg_wire_attr_put_u32(&data, IFLA_BR_MAX_AGE, 600);
 		ncfg_wire_attr_put(&data, IFLA_BR_PRIORITY, &priority, sizeof(priority));
 		ncfg_wire_attr_put_u32(&data, IFLA_BR_STP_STATE, 1);
 		ncfg_wire_attr_put_u8(&data, IFLA_BR_VLAN_FILTERING, 1);
@@ -407,6 +408,8 @@ int main(void)
 		    "and a two-byte priority is read");
 		check(link.bridge.has_ageing_time && link.bridge.ageing_time == 30000u,
 		    "and the u32 control beside it still reads");
+		check(link.bridge.has_max_age && link.bridge.max_age == 600u,
+		    "and so does the max age, in the kernel's hundredths");
 		check(link.bridge.stp && link.bridge.vlan_filtering,
 		    "and stp state and vlan filtering are booleans");
 		check(!link.has_vlan && !link.has_vxlan && !link.has_bond,

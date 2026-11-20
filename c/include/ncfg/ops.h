@@ -339,6 +339,7 @@ typedef struct {
 	 * documentation uses. The kernel counts them in hundredths. */
 	ncfg_optint_t forward_delay;
 	ncfg_optint_t hello_time;
+	ncfg_optint_t max_age;
 	/* Seconds here too, which is easy to miss: it is the one measured in
 	 * minutes by habit. */
 	ncfg_optint_t ageing_time;

@@ -982,6 +982,7 @@ int main(void)
 		attrs.stp = 1;
 		attrs.forward_delay = some(4);
 		attrs.hello_time = some(2);
+		attrs.max_age = some(6);
 		attrs.ageing_time = some(300);
 		attrs.priority = some(4096);
 		attrs.vlan_filtering = 1;
@@ -997,8 +998,9 @@ int main(void)
 		 * is the one measured in minutes by habit. */
 		check(u32_of(&data, IFLA_BR_FORWARD_DELAY) == 400u &&
 		    u32_of(&data, IFLA_BR_HELLO_TIME) == 200u &&
+		    u32_of(&data, IFLA_BR_MAX_AGE) == 600u &&
 		    u32_of(&data, IFLA_BR_AGEING_TIME) == 30000u,
-		    "with the three timers converted from seconds to hundredths");
+		    "with the four timers converted from seconds to hundredths");
 		check(u32_of(&data, IFLA_BR_STP_STATE) == 1u &&
 		    u8_of(&data, IFLA_BR_VLAN_FILTERING) == 1u,
 		    "spanning tree as a word and VLAN filtering as a byte");

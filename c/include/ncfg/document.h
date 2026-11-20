@@ -596,6 +596,10 @@ typedef struct {
 	int     stp;
 	ncfg_optint_t forward_delay;
 	ncfg_optint_t hello_time;
+	/* How long a port keeps the root's word once it stops coming: classic
+	 * spanning tree's wait before it unblocks around a failure a box did
+	 * not see itself (10.889). 6 to 40 seconds, as the kernel takes it. */
+	ncfg_optint_t max_age;
 	ncfg_optint_t ageing_time;
 	ncfg_optint_t priority;
 	/* Off by default, as in the kernel. Never inferred from the presence of

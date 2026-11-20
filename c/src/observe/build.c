@@ -283,6 +283,7 @@ static int build_bridge(const ncfg_link_record_t *record, ncfg_observed_link_t *
 	    centiseconds(record->bridge.has_forward_delay, record->bridge.forward_delay);
 	link->bridge->hello_time =
 	    centiseconds(record->bridge.has_hello_time, record->bridge.hello_time);
+	link->bridge->max_age = centiseconds(record->bridge.has_max_age, record->bridge.max_age);
 	link->bridge->ageing_time =
 	    centiseconds(record->bridge.has_ageing_time, record->bridge.ageing_time);
 	link->bridge->priority =

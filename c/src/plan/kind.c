@@ -334,6 +334,10 @@ void ncfg_plan_bridge(ncfg_builder_t *builder, const ncfg_device_t *device)
 		difference.field = "bridge.hello_time";
 		difference.desired = rendered(builder->plan, bridge->hello_time, "s");
 		difference.observed = rendered(builder->plan, running->hello_time, "s");
+	} else if (stated_differs(bridge->max_age, running->max_age)) {
+		difference.field = "bridge.max_age";
+		difference.desired = rendered(builder->plan, bridge->max_age, "s");
+		difference.observed = rendered(builder->plan, running->max_age, "s");
 	} else if (stated_differs(bridge->ageing_time, running->ageing_time)) {
 		difference.field = "bridge.ageing_time";
 		difference.desired = rendered(builder->plan, bridge->ageing_time, "s");

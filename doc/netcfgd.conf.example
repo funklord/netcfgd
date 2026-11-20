@@ -1541,6 +1541,9 @@
 #		stp             = true
 #		forward_delay   = 4
 #		hello_time      = 2
+#		max_age         = 20	# 6 to 40; how long a blocked port waits
+#					# before taking over from a link that
+#					# failed out of its own sight
 #		ageing_time     = 300
 #		priority        = 4096
 #		vlan_filtering  = false

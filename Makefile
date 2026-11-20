@@ -2671,7 +2671,10 @@ hull-storage-ring:
 	@rm -f $(RING_VERDICT)/ml350 $(RING_VERDICT)/dl180g6-01 $(RING_VERDICT)/dl180g6-03 \
 		$(RING_VERDICT)/states $(RING_VERDICT)/up-ml350 $(RING_VERDICT)/up-dl180g6-01 \
 		$(RING_VERDICT)/up-dl180g6-03 $(RING_VERDICT)/done-ml350 \
-		$(RING_VERDICT)/done-dl180g6-01 $(RING_VERDICT)/done-dl180g6-03
+		$(RING_VERDICT)/done-dl180g6-01 $(RING_VERDICT)/done-dl180g6-03 \
+		$(RING_VERDICT)/cut-ml350 $(RING_VERDICT)/cut-dl180g6-01 \
+		$(RING_VERDICT)/cut-dl180g6-03 $(RING_VERDICT)/healed-ml350 \
+		$(RING_VERDICT)/healed-dl180g6-01 $(RING_VERDICT)/healed-dl180g6-03
 	@$(call hull_verdict,$(RING_VERDICT))
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/storage-ring/hull.conf || true
 	@bad=0; \
@@ -2683,6 +2686,9 @@ hull-storage-ring:
 	blocking=$$(awk '$$3 == 4' $(RING_VERDICT)/states 2>/dev/null | wc -l); \
 	echo "storage-ring: ports blocking across the ring: $$blocking (one is right)"; \
 	[ "$$blocking" -eq 1 ] || bad=1; \
+	awk '$$3 == 4 { print $$1, $$2 }' $(RING_VERDICT)/states 2>/dev/null | \
+		grep -qxE 'ml350 eth1|dl180g6-03 eth1' || \
+		{ echo "storage-ring: the blocking port is not on the ml350 -- -03 cable"; bad=1; }; \
 	[ "$$bad" -eq 0 ]
 
 # Autonegotiation, speed and duplex on a real driver (10.877): virtio-net in a

@@ -227,6 +227,8 @@ static void every_bridge_setting_is_compared(void)
 		    "\"stp\":false,\"forward_delay\":15,\"vlan_filtering\":false" },
 		{ "bridge.hello_time", "\"stp\":false,\"hello_time\":2",
 		    "\"stp\":false,\"hello_time\":3,\"vlan_filtering\":false" },
+		{ "bridge.max_age", "\"stp\":false,\"max_age\":6",
+		    "\"stp\":false,\"max_age\":20,\"vlan_filtering\":false" },
 		{ "bridge.ageing_time", "\"stp\":false,\"ageing_time\":300",
 		    "\"stp\":false,\"ageing_time\":30,\"vlan_filtering\":false" },
 		{ "bridge.priority", "\"stp\":false,\"priority\":4096",
@@ -236,8 +238,8 @@ static void every_bridge_setting_is_compared(void)
 	};
 	size_t i;
 
-	check(sizeof(cases) / sizeof(cases[0]) == 6u,
-	    "a bridge has six settings of its own, and each is a case below");
+	check(sizeof(cases) / sizeof(cases[0]) == 7u,
+	    "a bridge has seven settings of its own, and each is a case below");
 	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
 		ncfg_document_t *document;
 		ncfg_observed_t *observed;
@@ -263,7 +265,7 @@ static void a_bridge_setting_the_document_omits_is_not_compared(void)
 	ncfg_observed_t *observed;
 	ncfg_plan_t     *plan = one(BRIDGE_DEVICE("\"stp\":false"),
 	    "\"links\":[" BRIDGE_LINK("\"stp\":false,\"forward_delay\":15,\"hello_time\":2,"
-	    "\"ageing_time\":300,\"priority\":32768,\"vlan_filtering\":false") "]",
+	    "\"max_age\":20,\"ageing_time\":300,\"priority\":32768,\"vlan_filtering\":false") "]",
 	    &document, &observed);
 
 	check(plan && quiet(plan),

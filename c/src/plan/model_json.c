@@ -330,6 +330,7 @@ void ncfg_plan_write_interface_kind(ncfg_json_writer_t *writer, const ncfg_inter
 		ncfg_json_write_member_bool(writer, "stp", kind->bridge.stp);
 		member_optint(writer, "forward_delay", kind->bridge.forward_delay);
 		member_optint(writer, "hello_time", kind->bridge.hello_time);
+		member_optint(writer, "max_age", kind->bridge.max_age);
 		member_optint(writer, "ageing_time", kind->bridge.ageing_time);
 		member_optint(writer, "priority", kind->bridge.priority);
 		ncfg_json_write_member_bool(writer, "vlan_filtering",

@@ -555,6 +555,8 @@ typedef struct {
 	uint32_t forward_delay;
 	int      has_hello_time;
 	uint32_t hello_time;
+	int      has_max_age;
+	uint32_t max_age;
 	int      has_ageing_time;
 	uint32_t ageing_time;
 	int      has_priority;

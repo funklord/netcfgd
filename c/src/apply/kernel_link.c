@@ -659,6 +659,7 @@ int ncfg_kernel_build_bridge(ncfg_buf_t *out, uint32_t seq, uint32_t index,
 	attrs.stp = kind->bridge.stp;
 	attrs.forward_delay = kind->bridge.forward_delay;
 	attrs.hello_time = kind->bridge.hello_time;
+	attrs.max_age = kind->bridge.max_age;
 	attrs.ageing_time = kind->bridge.ageing_time;
 	attrs.priority = kind->bridge.priority;
 	attrs.vlan_filtering = kind->bridge.vlan_filtering;

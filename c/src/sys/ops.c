@@ -814,6 +814,13 @@ int ncfg_ops_set_bridge_attrs(ncfg_buf_t *out, uint32_t seq, uint32_t index,
 			ncfg_wire_attr_put_u32(&data, IFLA_BR_HELLO_TIME, centiseconds(number));
 		}
 	}
+	if (built && attrs->max_age.has) {
+		built = ncfg_ops_narrow(attrs->max_age, UINT32_MAX, "a bridge's max age", &number, err,
+		    err_size);
+		if (built) {
+			ncfg_wire_attr_put_u32(&data, IFLA_BR_MAX_AGE, centiseconds(number));
+		}
+	}
 	/* Seconds here too, which is easy to miss: it is the one measured in
 	 * minutes by habit. */
 	if (built && attrs->ageing_time.has) {

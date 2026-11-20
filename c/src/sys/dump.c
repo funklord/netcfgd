@@ -462,6 +462,9 @@ static int read_bridge(ncfg_bridge_info_t *out, const ncfg_wire_attrs_t *data, c
 	    err_size)) {
 		return 0;
 	}
+	if (!area_u32(data, IFLA_BR_MAX_AGE, &out->max_age, &out->has_max_age, err, err_size)) {
+		return 0;
+	}
 	if (!area_u32(data, IFLA_BR_AGEING_TIME, &out->ageing_time, &out->has_ageing_time, err,
 	    err_size)) {
 		return 0;

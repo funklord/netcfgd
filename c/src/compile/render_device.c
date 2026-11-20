@@ -56,9 +56,9 @@ static const char *const mac_policy_words[] = { "permanent", "per_network", "per
 
 static void render_bridge(const ncfg_bridge_config_t *bridge, ncfg_buf_t *body)
 {
-	static const char *const keys[] = { "forward_delay", "hello_time", "ageing_time",
-		"priority" };
-	const ncfg_optint_t *values[4];
+	static const char *const keys[] = { "forward_delay", "hello_time", "max_age",
+		"ageing_time", "priority" };
+	const ncfg_optint_t *values[5];
 	/* Paired, as above. */
 	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(values),
 	    "a values per keys");
@@ -77,8 +77,9 @@ static void render_bridge(const ncfg_bridge_config_t *bridge, ncfg_buf_t *body)
 	}
 	values[0] = &bridge->forward_delay;
 	values[1] = &bridge->hello_time;
-	values[2] = &bridge->ageing_time;
-	values[3] = &bridge->priority;
+	values[2] = &bridge->max_age;
+	values[3] = &bridge->ageing_time;
+	values[4] = &bridge->priority;
 	for (i = 0; i < NCFG_COUNT_OF(keys); i++) {
 		if (values[i]->has) {
 			ncfg_buf_addf(body, "\t\t%s = %lld\n", keys[i], (long long)values[i]->value);
@@ -746,12 +747,12 @@ static int our_ifb_name(const char *name, const char *shaped)
  * 2026-11-07 `radio` (10.748), and 616, 624, then 640 from 2026-11-14 `xfrm`
  * and its `report_writer`, `connection` and `child` (0323, 10.863, 10.864) --
  * configs a synthesised `ifb` never carries, so `bare_ifb` needs no clause for
- * any of them. */
+ * any of them; nor 656 from 2026-11-21, the bridge's `max_age` (10.889). */
 /* Only here, because the point is that whoever adds a field meets it, and the
  * figure is an ABI's: i386 and a 32-bit ARM do not even agree with each other,
  * and a build for a router must not stop over a reminder (10.741). */
 #ifdef __x86_64__
-#define NCFG_RENDER_DEVICE_SIZE 640u /* measured, x86-64, 2026-11-14 */
+#define NCFG_RENDER_DEVICE_SIZE 656u /* measured, x86-64, 2026-11-21 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
     "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
 #endif
