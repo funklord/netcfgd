@@ -1920,6 +1920,31 @@ static void firewall_out_interface_cases(void)
 	    "\toutput {\n\t\tpolicy = \"accept\"\n\t\tdrop \"x\" { out_interface = \"wan0\" }\n\t}\n}\n",
 	    "`interface` is the one it leaves by",
 	    "  and in output, where `interface` already is the leaving one");
+
+	/* `over` (10.885): kept as count and seconds, and only where it means
+	 * stopping somebody else. */
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"ssh-guard\" { protocol = \"tcp\"; port = 22; over = \"8/15m\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "a per-source guard compiles");
+	check(document && document->firewall && document->firewall->input.rule_count == 1 &&
+	        document->firewall->input.rules[0].over &&
+	        strcmp(document->firewall->input.rules[0].over, "8/900s") == 0,
+	    "  its rate kept as count and seconds");
+	if (document) {
+		ncfg_document_free(document);
+	}
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { over = \"8/15m\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "per-source limit", "  and refused on an accept, which would let the excess in");
+	refuses("firewall {\n\tinput { policy = \"accept\" }\n\tforward { policy = \"accept\" }\n"
+	    "\toutput {\n\t\tpolicy = \"accept\"\n\t\tdrop \"x\" { over = \"8/15m\" }\n\t}\n}\n",
+	    "per-source limit", "  and in output, where the source is this host");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { over = \"eight\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "is not a rate", "  and a rate it cannot read is refused by name");
 }
 
 /* A rule's schedule (10.663): normalised as written, days in week order, and

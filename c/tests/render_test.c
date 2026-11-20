@@ -1969,6 +1969,10 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\taccept \"mapped\" { interface = \"wan0\"; translated = true }\n"
 	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so does a rule accepting translated connections (0310)");
+	round_trips("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"ssh-guard\" { protocol = \"tcp\"; port = 22; over = \"8/15m\" }\n"
+	    "\t}\n\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so does a per-source guard (10.885)");
 }
 
 static void a_firewall_round_trips(void)

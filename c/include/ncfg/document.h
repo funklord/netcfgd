@@ -2699,6 +2699,15 @@ typedef struct {
 	 */
 	int      translated;
 	/*
+	 * `over`: the rule matches a source address's packets only past this
+	 * rate, per source, kept as "COUNT/SECONDSs" -- `"8/900s"` -- however it
+	 * was written (project.md 10.885). An nftables meter: a set keyed on the
+	 * source address whose entries carry a limit. What an iptables `recent`
+	 * brute guard did. NULL where unset, and omitted then, so every ruleset
+	 * before it is the document it was.
+	 */
+	char    *over;
+	/*
 	 * The sending station's hardware address, nftables' `ether saddr`
 	 * (project.md 10.592): exact addresses and `aa:bb:cc:*` prefixes,
 	 * normalised and sorted, since a station match is a set. A prefix is

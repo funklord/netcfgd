@@ -472,6 +472,87 @@ static void a_translated_rule_is_written_read_and_digested(void)
 	ncfg_buf_free(&without);
 }
 
+/*
+ * `over` (10.885): a meter per family -- a set keyed on the source address,
+ * in netcfgd's table and passing its audit -- and a rule per family updating
+ * it with a limit, each read back as the rate the document keeps. An address
+ * that names a family makes it one of each.
+ */
+static void an_over_rule_is_a_meter_per_family(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_buf_t           text;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	int64_t              port = 22;
+	char                *states[1] = { (char *)"new" };
+	char                *from[1] = { (char *)"192.0.2.0/24" };
+	char                 err[NCFG_ERROR_MAX];
+	int                  sets = 0, rules = 0, read_back = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"ssh-guard";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_TCP;
+	rule.ports = &port;
+	rule.port_count = 1u;
+	rule.states = states;
+	rule.state_count = 1u;
+	rule.over = (char *)"8/900s";
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.policy = NCFG_FIREWALL_POLICY_ACCEPT;
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "an input chain with a per-source guard is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and its meters pass the audit of what netcfgd may write");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) == NFT_MSG_NEWSET) {
+			sets++;
+		}
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		rules++;
+		if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err)) && strcmp(one.over, "8/900s") == 0) {
+			read_back++;
+		}
+	}
+	check(sets == 2 && rules == 2, "  a meter and a rule for IPv4, and the same for IPv6");
+	check(read_back == 2, "  each rule read back with the rate the document keeps");
+	ncfg_buf_free(&out);
+
+	rule.from = from;
+	rule.from_count = 1u;
+	sets = rules = read_back = 0;
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a guard on an IPv4 source is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		sets += (message.header.kind & 0xffu) == NFT_MSG_NEWSET;
+		rules += (message.header.kind & 0xffu) == NFT_MSG_NEWRULE;
+	}
+	check(sets == 1 && rules == 1, "  as one meter and one rule: its address chose the family");
+	ncfg_buf_free(&out);
+
+	ncfg_buf_init(&text, 0);
+	(void)ncfg_nft_firewall_rule_text("input", &rule, &text);
+	check(strstr(text.data ? text.data : "", "over 8/900s\n") != NULL,
+	    "  and the rate is part of what the rule's digest is taken over");
+	ncfg_buf_free(&text);
+}
+
 /* The comment's digest of a one-rule input chain, at the fixed offset. */
 static void digest_of(ncfg_firewall_rule_t *rule, char *out, size_t out_size)
 {
@@ -1715,6 +1796,7 @@ int main(void)
 	a_rule_is_bounded_in_what_it_becomes();
 	what_is_written_is_read_back();
 	a_translated_rule_is_written_read_and_digested();
+	an_over_rule_is_a_meter_per_family();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

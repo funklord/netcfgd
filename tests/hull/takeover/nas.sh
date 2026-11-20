@@ -110,7 +110,7 @@ check "B: UniFi open (the NAS role)" "$(from_router B unifi-lan)" open
 check "A: NFS over IPv6 on the LAN open, as rules.v6 left it" "$(from_router A nfs-lan-v6)" open
 check "B: NFS over IPv6 on the LAN closed by the inet table" "$(from_router B nfs-lan-v6)" closed
 check "A: the SSH guard drops a burst after 8 new connections" "$(from_router A ssh-burst-opened)" 7
-gap "B: the SSH guard drops a burst after 8 new connections" "$(from_router B ssh-burst-opened)" 7
+check "B: the SSH guard drops a burst after 8 new connections" "$(from_router B ssh-burst-opened)" 7
 
 if [ "$failed" -eq 0 ]; then say "VERDICT ok"; else say "VERDICT bad"; fi
 exit 0

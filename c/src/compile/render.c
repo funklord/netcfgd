@@ -1309,6 +1309,21 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		    rule->name ? rule->name : "(unnamed)", rule->hours);
 		return;
 	}
+	/* `over` the same way (10.885): the shape the compiler keeps,
+	 * "COUNT/SECONDSs" within its bounds, or a refusal. */
+	if (rule->over) {
+		unsigned long count = 0, seconds = 0;
+		char          unit = 0, tail = 0;
+
+		if (sscanf(rule->over, "%lu/%lu%c%c", &count, &seconds, &unit, &tail) != 3 ||
+		    unit != 's' || count == 0 || count > 1000000UL || seconds == 0 ||
+		    seconds > 604800UL) {
+			ncfg_render_refuse(missing, "firewall", chain,
+			    "rule `%s` counts over `%s`, which is not a rate the language writes",
+			    rule->name ? rule->name : "(unnamed)", rule->over);
+			return;
+		}
+	}
 	for (at = 0; at < rule->day_count; at++) {
 		if (ncfg_schedule_day(rule->days[at], NULL) < 0) {
 			ncfg_render_refuse(missing, "firewall", chain,
@@ -1378,6 +1393,9 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 	}
 	if (rule->translated) {
 		ncfg_buf_add_text(body, "\t\t\ttranslated = true\n");
+	}
+	if (rule->over) {
+		ncfg_buf_addf(body, "\t\t\tover = \"%s\"\n", rule->over);
 	}
 	/* The lists named, then what was written beside them; where no list is
 	 * named, `mac` is what was written (10.592). */

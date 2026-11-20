@@ -455,6 +455,11 @@
 #     fine. The kernel's clock is UTC, so netcfgd turns the schedule into the
 #     UTC times it means, and puts it back by itself after a summer-time
 #     change. `ncfg status` shows what the kernel holds, in UTC, and says so.
+#   - `over = "8/15m"` makes a `drop` or `reject` match a source address's
+#     packets only past that rate, counted per source: a brute-force guard,
+#     what an iptables `recent --hitcount` rule did. A count, a slash, and a
+#     duration in s, m, h or d. In `input` and `forward` only, since the
+#     source in `output` is this host.
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
 #
@@ -471,6 +476,14 @@
 #		policy = "drop"
 #		accept "established" {
 #			state = ["established", "related"]
+#		}
+#		# Eight new SSH connections in fifteen minutes from one address,
+#		# and the ninth is dropped.
+#		drop "ssh-guard" {
+#			protocol = "tcp"
+#			port     = 22
+#			state    = ["new"]
+#			over     = "8/15m"
 #		}
 #		accept "ssh" {
 #			protocol = "tcp"

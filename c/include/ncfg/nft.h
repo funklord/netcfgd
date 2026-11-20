@@ -475,6 +475,9 @@ typedef struct {
 	 * language's order -- bit 0 is `new`. */
 	unsigned states;
 	int      translated; /* `ct status dnat`, 0310 */
+	/* An `over` meter's rate as the document keeps it, "COUNT/SECONDSs", or
+	 * empty (10.885). */
+	char     over[48];
 	char     mac[NCFG_STATION_ADDRESS_SIZE];
 	/* One UTC piece of a schedule (10.663, `schedule.h`): `meta hour` in an
 	 * inclusive range of seconds, and `meta day` where one day is matched. */

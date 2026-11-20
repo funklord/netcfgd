@@ -39,6 +39,7 @@
 #include "ncfg/schedule.h"
 #include "ncfg/base.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,6 +61,7 @@ static void rule_free(ncfg_firewall_rule_t *rule)
 	ncfg_strings_free(rule->mac_lists, rule->mac_list_count);
 	ncfg_strings_free(rule->mac_written, rule->mac_written_count);
 	free(rule->hours);
+	free(rule->over);
 	ncfg_strings_free(rule->days, rule->day_count);
 	ncfg_strings_free(rule->utc_pieces, rule->utc_piece_count);
 	memset(rule, 0, sizeof(*rule));
@@ -355,6 +357,47 @@ static void rule_hours(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assig
 }
 
 /*
+ * `over`: "COUNT/DURATION", a duration being a number and `s`, `m`, `h` or
+ * `d` -- `"8/15m"` -- kept as "COUNT/SECONDSs". Bounded so the kernel's limit
+ * arithmetic stays sane: at least one packet, at most a million, over a
+ * second to a week.
+ */
+static void rule_over(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    ncfg_firewall_rule_t *rule)
+{
+	char         *text = ncfg_as_string(ctx, assignment->value);
+	char          normal[48];
+	char          unit = 0;
+	char          tail = 0;
+	unsigned long count = 0, amount = 0, seconds;
+
+	if (!text) {
+		return;
+	}
+	if (sscanf(text, "%lu/%lu%c%c", &count, &amount, &unit, &tail) != 3 ||
+	    (unit != 's' && unit != 'm' && unit != 'h' && unit != 'd') || count == 0 ||
+	    count > 1000000UL || amount == 0 || amount > 604800UL) {
+		ncfg_diag(ctx, assignment->span,
+		    "`%s` is not a rate `over` takes: a count, a slash and a duration in s, m, h "
+		    "or d, such as \"8/15m\"", text);
+		free(text);
+		return;
+	}
+	free(text);
+	seconds = amount * (unit == 's' ? 1UL : unit == 'm' ? 60UL : unit == 'h' ? 3600UL : 86400UL);
+	if (seconds > 604800UL) {
+		ncfg_diag(ctx, assignment->span, "`over` counts over a week at most");
+		return;
+	}
+	(void)snprintf(normal, sizeof(normal), "%lu/%lus", count, seconds);
+	free(rule->over);
+	rule->over = strdup(normal);
+	if (!rule->over) {
+		ncfg_diag(ctx, assignment->span, "out of memory");
+	}
+}
+
+/*
  * `days`, every word checked before any is kept, as `state`'s are; kept in
  * week order from Monday and once each, since a day is in a set or not.
  */
@@ -470,10 +513,12 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			rule_hours(ctx, assignment, &rule);
 		} else if (strcmp(key, "days") == 0) {
 			rule_days(ctx, assignment, &rule);
+		} else if (strcmp(key, "over") == 0) {
+			rule_over(ctx, assignment, &rule);
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, out_interface, state, translated, mac, hours, days", key);
+			    "interface, out_interface, state, translated, mac, hours, days, over", key);
 		}
 	}
 	/* What was written is the resolved set again where no list is named. */
@@ -560,6 +605,20 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				    rule.name, chain_name,
 				    strcmp(chain_name, "output") == 0
 				        ? "; in `output`, `interface` is the one it leaves by" : "");
+				rule_free(&rule);
+				continue;
+			}
+			/* **`over` counts per source**, so it means something only where
+			 * the source is somebody else -- and only as a reason to stop
+			 * them: an `accept` past a rate would let in exactly what the
+			 * rate is there to keep out. */
+			if (rule.over && (strcmp(chain_name, "output") == 0 ||
+			    rule.action == NCFG_FIREWALL_ACCEPT)) {
+				ncfg_diag(ctx, item->as.block.span,
+				    "rule `%s` counts `over` %s: it is a per-source limit, for a `drop` "
+				    "or `reject` in `input` or `forward`", rule.name,
+				    rule.action == NCFG_FIREWALL_ACCEPT ? "on an accept"
+				                                        : "in the output chain");
 				rule_free(&rule);
 				continue;
 			}

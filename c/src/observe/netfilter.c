@@ -349,7 +349,8 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 	    (one->to[0] && !(out->to = observe_dup(one->to))) ||
 	    (one->interface[0] && !(out->interface = observe_dup(one->interface))) ||
 	    (one->out_interface[0] && !(out->out_interface = observe_dup(one->out_interface))) ||
-	    (one->mac[0] && !(out->mac = observe_dup(one->mac)))) {
+	    (one->mac[0] && !(out->mac = observe_dup(one->mac))) ||
+	    (one->over[0] && !(out->over = observe_dup(one->over)))) {
 		return 0;
 	}
 	if (one->has_hours) {

@@ -12747,6 +12747,48 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.885 A firewall rule can count per source: `over`
+
+The one rule of the servers' `rules.v4` with no translation (10.884): an
+SSH chain whose iptables `recent` match dropped an address's ninth new
+connection within 900 s. `over = "8/15m"` on a `drop` or `reject` makes it
+match a source address's packets only past that rate, counted per source;
+kept in the model as `"8/900s"`, written back as that, and part of the
+rule's digest only where set, so no earlier digest moves.
+
+**In the kernel it is nftables' meter**: a set per family in netcfgd's
+table (`over-<digest>-4` and `-6`, flags `timeout` and `eval`, keyed on the
+source address), and per family a rule loading the source address and
+updating the set with a `dynset` that carries a `limit` -- packets, rate
+COUNT per window, burst COUNT, inverted so it matches over the rate. The
+bucket holds COUNT and refills COUNT per window, so the COUNT+1st of a
+burst is the first dropped and a persistent source gets one try per
+window/COUNT after; an entry idle for a window expires. That is near
+enough to `recent --hitcount 9 --seconds 900` to guard the same door,
+and is said in the example as what it is.
+
+**Two things it needed beyond the rule.** The transaction's audit admits a
+`NEWSET` now, only in netcfgd's table and only named `over-`. And the
+reader decodes the `dynset` back into the rate, because the planner
+compares the installed table with the document by decoding both: a rule it
+could not read was "somebody's hand edit" on every pass.
+
+Only in `input` and `forward`, and only on `drop` or `reject`: in `output`
+the source is this host, and an `accept` past a rate lets in what the rate
+is for. A rule naming addresses counts in the families they name; one
+naming none counts in both.
+
+Verified: `nft_test` (two meters and two rules, each read back as
+`8/900s`, the transaction passing the audit; an IPv4 source making it one
+of each; the rate in the digest), red with the reader answering one more
+than written; `lower_test` (kept as `8/900s`, refused on an accept, in
+output and when unreadable; the renderer refusing a rate it cannot write,
+which its extreme-value sweep found); `render_test` round trip; in a
+namespace, `over = "3/1m"` on port 22 opening three connections and
+dropping the next three, with `ncfg plan` converged after; and `make
+hull-takeover`, the guard dropping the same burst after netcfgd took over
+as iptables did before.
+
 ## 10.884 Taking over dl180g6-01: simulated, and what it needs
 
 The holder asked (2026-11-20) whether netcfgd can go onto the servers now
@@ -12795,8 +12837,9 @@ Found on the way, and fixed or open:
   `netcfgd_select.sh` does not do them.
 - **The switcher names the `dhclient` it ends as left by "networkmanager"**
   when ifupdown started it.
-- **Open: the SSH guard has no translation** -- the firewall language has no
-  per-source rate limit. Reported as a GAP by the rig rather than failed.
+- **The SSH guard had no translation**: the firewall language had no
+  per-source rate limit. **Settled by 10.885**, `over`; the rig checks the
+  guard in phase B as in phase A.
 - **Open: IPoIB's connected mode** is not modelled, and nothing here has
   InfiniBand to test it on.
 - hull's microvm kernel has no `nf_tables`, so the rig's machines run

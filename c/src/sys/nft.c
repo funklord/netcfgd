@@ -78,6 +78,18 @@ static void put_be32(ncfg_buf_t *out, uint16_t kind, uint32_t value)
 	ncfg_wire_attr_put(out, kind, &wire, sizeof(wire));
 }
 
+static void put_be64(ncfg_buf_t *out, uint16_t kind, uint64_t value)
+{
+	uint8_t wire[8];
+	int     at;
+
+	for (at = 7; at >= 0; at--) {
+		wire[at] = (uint8_t)(value & 0xffu);
+		value >>= 8;
+	}
+	ncfg_wire_attr_put(out, kind, wire, sizeof(wire));
+}
+
 static int attr_be32(const ncfg_wire_attr_t *attr, uint32_t *out, char *err, size_t err_size)
 {
 	uint32_t wire;
@@ -292,6 +304,23 @@ static int audit_message(const ncfg_wire_message_t *message, char *err, size_t e
 		return name_must_be(&area, NFTA_RULE_TABLE, NCFG_NFT_TABLE, "table", err,
 		    err_size) &&
 		    chain_must_be_ours(&area, NFTA_RULE_CHAIN, err, err_size);
+	case NFT_MSG_NEWSET:
+		/* An `over` rule's meter (10.885): a set in netcfgd's table, named
+		 * as `over_set_name` names one, and nothing else. */
+		{
+			char set_name[NCFG_NFT_NAME_MAX];
+
+			if (!name_must_be(&area, NFTA_SET_TABLE, NCFG_NFT_TABLE, "table", err, err_size) ||
+			    !read_name(&area, NFTA_SET_NAME, set_name, sizeof(set_name), err, err_size)) {
+				return 0;
+			}
+			if (strncmp(set_name, "over-", 5) != 0) {
+				ncfg_error_set(err, err_size, "a set `%s`, which is not an `over` meter",
+				    set_name);
+				return 0;
+			}
+			return 1;
+		}
 	case NFT_MSG_NEWFLOWTABLE:
 		/* One flowtable, by name, in netcfgd's table (0319). */
 		return name_must_be(&area, NFTA_FLOWTABLE_TABLE, NCFG_NFT_TABLE, "table", err,
@@ -1155,6 +1184,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	if (rule->translated) {
 		ncfg_buf_add_text(out, "translated\n");
 	}
+	/* Only where set, so no digest written before 10.885 changes. */
+	if (rule->over) {
+		ncfg_buf_addf(out, "over %s\n", rule->over);
+	}
 	for (at = 0; at < rule->mac_count; at++) {
 		ncfg_buf_addf(out, "mac %s\n", rule->mac[at]);
 	}
@@ -1212,8 +1245,117 @@ static int rule_comment(const char *chain, const ncfg_firewall_rule_t *rule, cha
  * operator would have typed. `comment` is the written rule's identity, the
  * same on every kernel rule it became.
  */
+/* "COUNT/SECONDSs" into its two numbers; 0 where it is not that shape. */
+static int over_parts(const char *over, uint64_t *count, uint64_t *seconds)
+{
+	unsigned long a = 0, b = 0;
+	char          unit = 0, tail = 0;
+
+	if (!over || sscanf(over, "%lu/%lu%c%c", &a, &b, &unit, &tail) != 3 || unit != 's' ||
+	    a == 0 || b == 0) {
+		return 0;
+	}
+	*count = a;
+	*seconds = b;
+	return 1;
+}
+
+/*
+ * The meter an `over` rule counts in, one per family: `over-` and the first
+ * twelve of the rule's digest, then `-4` or `-6`. From the digest so that a
+ * changed rule is a new set, and per family because a set's key has one
+ * length -- four bytes or sixteen.
+ */
+static void over_set_name(const char *comment, uint8_t family, char *out, size_t out_size)
+{
+	const char *digest = comment ? strstr(comment, "sha256=") : NULL;
+
+	(void)snprintf(out, out_size, "over-%.12s-%c", digest ? digest + 7 : "unknown",
+	    family == NFPROTO_IPV6 ? '6' : '4');
+}
+
+/*
+ * `ip saddr` (or `ip6 saddr`) into register 1, and a `dynset` updating the
+ * meter with it, the update carrying a `limit` that matches only past the
+ * rate -- nftables' `meter NAME { ip saddr timeout Ns limit rate over C/N
+ * seconds burst C packets }`. The token bucket holds COUNT packets and
+ * refills COUNT per window, so the COUNT+1st in a burst is the first that
+ * matches: an iptables `recent --hitcount COUNT+1 --seconds WINDOW`, near
+ * enough to guard the same door. An entry left untouched for a window
+ * expires, so a quiet source starts again from a full bucket.
+ */
+static void put_over(ncfg_buf_t *expressions, const char *over, uint8_t family,
+    const char *set_name, uint32_t set_id)
+{
+	ncfg_buf_t data;
+	ncfg_buf_t limit;
+	ncfg_buf_t expr;
+	uint64_t   count = 0, seconds = 0;
+
+	(void)over_parts(over, &count, &seconds);
+	if (family == NFPROTO_IPV6) {
+		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, 8u, 16u);
+	} else {
+		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, 12u, 4u);
+	}
+	ncfg_buf_init(&limit, 0);
+	put_be64(&limit, NFTA_LIMIT_RATE, count);
+	put_be64(&limit, NFTA_LIMIT_UNIT, seconds);
+	put_be32(&limit, NFTA_LIMIT_BURST, (uint32_t)count);
+	put_be32(&limit, NFTA_LIMIT_TYPE, NFT_LIMIT_PKTS);
+	put_be32(&limit, NFTA_LIMIT_FLAGS, NFT_LIMIT_F_INV);
+	ncfg_buf_init(&expr, 0);
+	ncfg_wire_attr_put_str(&expr, NFTA_EXPR_NAME, "limit");
+	ncfg_wire_attr_put_nested(&expr, NFTA_EXPR_DATA, &limit);
+	ncfg_buf_init(&data, 0);
+	ncfg_wire_attr_put_str(&data, NFTA_DYNSET_SET_NAME, set_name);
+	put_be32(&data, NFTA_DYNSET_SET_ID, set_id);
+	put_be32(&data, NFTA_DYNSET_OP, NFT_DYNSET_OP_UPDATE);
+	put_be32(&data, NFTA_DYNSET_SREG_KEY, NFT_REG_1);
+	put_be64(&data, NFTA_DYNSET_TIMEOUT, seconds * 1000u);
+	ncfg_wire_attr_put_nested(&data, NFTA_DYNSET_EXPR, &expr);
+	put_expression(expressions, "dynset", &data);
+	ncfg_buf_free(&data);
+	ncfg_buf_free(&expr);
+	ncfg_buf_free(&limit);
+}
+
+/* The meter itself, in the transaction before the first rule using it. */
+static int over_set_message(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    const char *set_name, uint32_t set_id, uint8_t family, const char *over, char *err,
+    size_t err_size)
+{
+	ncfg_buf_t attrs;
+	ncfg_buf_t desc;
+	uint64_t   count = 0, seconds = 0;
+	int        ok;
+
+	(void)over_parts(over, &count, &seconds);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_NAME, set_name);
+	put_be32(&attrs, NFTA_SET_FLAGS, NFT_SET_TIMEOUT | NFT_SET_EVAL);
+	/* nftables' own datatype numbers: 7 is `ipv4_addr`, 8 `ipv6_addr`. */
+	put_be32(&attrs, NFTA_SET_KEY_TYPE, family == NFPROTO_IPV6 ? 8u : 7u);
+	put_be32(&attrs, NFTA_SET_KEY_LEN, family == NFPROTO_IPV6 ? 16u : 4u);
+	put_be32(&attrs, NFTA_SET_ID, set_id);
+	put_be64(&attrs, NFTA_SET_TIMEOUT, seconds * 1000u);
+	/* A bound on the sources remembered at once, nftables' default for a
+	 * meter. */
+	ncfg_buf_init(&desc, 0);
+	put_be32(&desc, NFTA_SET_DESC_SIZE, 65535u);
+	ncfg_wire_attr_put_nested(&attrs, NFTA_SET_DESC, &desc);
+	ncfg_buf_free(&desc);
+	*last_acked = *seq;
+	ok = build(transaction, NFT_MSG_NEWSET, (uint16_t)(NLM_F_ACK | NLM_F_CREATE), (*seq)++,
+	    NFPROTO_INET, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	return ok;
+}
+
 static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_rule_t *rule,
-    const ncfg_schedule_piece_t *piece, const char *comment, char *err, size_t err_size)
+    const ncfg_schedule_piece_t *piece, const char *comment, uint8_t over_family,
+    uint32_t over_set_id, char *err, size_t err_size)
 {
 	ncfg_buf_t    expressions;
 	ncfg_buf_t    data;
@@ -1235,6 +1377,11 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	}
 	if (rule->to_count) {
 		family = to.nfproto;
+	}
+	/* An `over` rule with no address names its family itself: the meter's
+	 * key is one family's source address. */
+	if (!family && rule->over) {
+		family = over_family;
 	}
 
 	ncfg_buf_init(&expressions, 0);
@@ -1339,6 +1486,12 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	if (piece) {
 		put_schedule(&expressions, piece);
 	}
+	if (rule->over) {
+		char set_name[NCFG_NFT_NAME_MAX];
+
+		over_set_name(comment, family, set_name, sizeof(set_name));
+		put_over(&expressions, rule->over, family, set_name, over_set_id);
+	}
 
 	ncfg_buf_init(&data, 0);
 	if (rule->action == NCFG_FIREWALL_REJECT) {
@@ -1406,7 +1559,9 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 	ncfg_schedule_piece_t pieces[NCFG_SCHEDULE_PIECES_MAX];
 	const long   piece_count = rule_pieces(rule, pieces);
 	const size_t times = piece_count > 0 ? (size_t)piece_count : 1u;
-	size_t       p, f, t, m;
+	size_t       p, f, t, m, fam;
+	size_t       families = 1u;
+	int          has[2] = { 1, 1 };
 	size_t       wrote = 0;
 
 	if (piece_count < 0) {
@@ -1426,52 +1581,102 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 	if (!rule_comment(chain, rule, comment, sizeof(comment), err, err_size)) {
 		return 0;
 	}
-	for (p = 0; p < ports; p++) {
-		for (f = 0; f < froms; f++) {
-			for (t = 0; t < tos; t++) {
-				for (m = 0; m < macs * times; m++) {
-					ncfg_firewall_rule_t one = *rule;
-					const size_t         mac_at = m / times;
-					const ncfg_schedule_piece_t *piece =
-					    piece_count > 0 ? &pieces[m % times] : NULL;
-					nft_address_t        a;
-					nft_address_t        b;
-					ncfg_buf_t           attrs;
-					int                  ok;
+	/* Which families an `over` rule counts in: those its addresses name, or
+	 * both where it names none. */
+	if (rule->over) {
+		char *const *named = rule->from_count ? rule->from : rule->to;
+		const size_t named_count = rule->from_count ? rule->from_count : rule->to_count;
+		nft_address_t one_address;
 
-					one.port_count = rule->port_count ? 1u : 0u;
-					one.ports = rule->port_count ? &rule->ports[p] : NULL;
-					one.from_count = rule->from_count ? 1u : 0u;
-					one.from = rule->from_count ? &rule->from[f] : NULL;
-					one.to_count = rule->to_count ? 1u : 0u;
-					one.to = rule->to_count ? &rule->to[t] : NULL;
-					one.mac_count = rule->mac_count ? 1u : 0u;
-					one.mac = rule->mac_count ? &rule->mac[mac_at] : NULL;
-					/* A source of one family and a destination of the other
-					 * is a combination no packet carries: skipped, not
-					 * written as a rule that can never match. */
-					if (one.from_count && one.to_count) {
-						if (!parse_address(one.from[0], &a, err, err_size) ||
-						    !parse_address(one.to[0], &b, err, err_size)) {
-							return 0;
+		families = 2u;
+		if (named_count) {
+			has[0] = has[1] = 0;
+			for (f = 0; f < named_count; f++) {
+				if (parse_address(named[f], &one_address, NULL, 0)) {
+					has[one_address.nfproto == NFPROTO_IPV6 ? 1 : 0] = 1;
+				}
+			}
+		}
+	}
+	/*
+	 * **An `over` rule is one kernel rule per family as well**, where no
+	 * address has chosen one: the meter's key is a source address, four bytes
+	 * or sixteen, so each family counts in its own set -- made here, once,
+	 * before the first rule that updates it.
+	 */
+	for (fam = 0; fam < families; fam++) {
+		const uint8_t family = fam == 0u ? NFPROTO_IPV4 : NFPROTO_IPV6;
+		const uint32_t set_id = *seq + 1000000u;
+
+		if (rule->over && !has[fam]) {
+			continue;
+		}
+		if (rule->over) {
+			char set_name[NCFG_NFT_NAME_MAX];
+
+			over_set_name(comment, family, set_name, sizeof(set_name));
+			if (!over_set_message(transaction, seq, last_acked, set_name, set_id, family,
+			        rule->over, err, err_size)) {
+				return 0;
+			}
+		}
+		for (p = 0; p < ports; p++) {
+			for (f = 0; f < froms; f++) {
+				for (t = 0; t < tos; t++) {
+					for (m = 0; m < macs * times; m++) {
+						ncfg_firewall_rule_t one = *rule;
+						const size_t         mac_at = m / times;
+						const ncfg_schedule_piece_t *piece =
+						    piece_count > 0 ? &pieces[m % times] : NULL;
+						nft_address_t        a;
+						nft_address_t        b;
+						ncfg_buf_t           attrs;
+						int                  ok;
+
+						one.port_count = rule->port_count ? 1u : 0u;
+						one.ports = rule->port_count ? &rule->ports[p] : NULL;
+						one.from_count = rule->from_count ? 1u : 0u;
+						one.from = rule->from_count ? &rule->from[f] : NULL;
+						one.to_count = rule->to_count ? 1u : 0u;
+						one.to = rule->to_count ? &rule->to[t] : NULL;
+						one.mac_count = rule->mac_count ? 1u : 0u;
+						one.mac = rule->mac_count ? &rule->mac[mac_at] : NULL;
+						/* A source of one family and a destination of the other
+						 * is a combination no packet carries: skipped, not
+						 * written as a rule that can never match. */
+						if (one.from_count && one.to_count) {
+							if (!parse_address(one.from[0], &a, err, err_size) ||
+							    !parse_address(one.to[0], &b, err, err_size)) {
+								return 0;
+							}
+							if (a.nfproto != b.nfproto) {
+								continue;
+							}
 						}
-						if (a.nfproto != b.nfproto) {
+						/* A family the meter is not for: an address of the
+						 * other family is a rule the other set counts. */
+						if (rule->over &&
+						    ((one.from_count && parse_address(one.from[0], &a, NULL, 0) &&
+						    a.nfproto != family) ||
+						    (one.to_count && parse_address(one.to[0], &b, NULL, 0) &&
+						    b.nfproto != family))) {
 							continue;
 						}
+						ncfg_buf_init(&attrs, 0);
+						ok = firewall_rule(&attrs, chain, &one, piece, comment, family, set_id,
+						    err, err_size);
+						if (ok) {
+							*last_acked = *seq;
+							ok = build(transaction, NFT_MSG_NEWRULE,
+							    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), (*seq)++,
+							    NFPROTO_INET, &attrs, err, err_size);
+						}
+						ncfg_buf_free(&attrs);
+						if (!ok) {
+							return 0;
+						}
+						wrote++;
 					}
-					ncfg_buf_init(&attrs, 0);
-					ok = firewall_rule(&attrs, chain, &one, piece, comment, err, err_size);
-					if (ok) {
-						*last_acked = *seq;
-						ok = build(transaction, NFT_MSG_NEWRULE,
-						    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), (*seq)++,
-						    NFPROTO_INET, &attrs, err, err_size);
-					}
-					ncfg_buf_free(&attrs);
-					if (!ok) {
-						return 0;
-					}
-					wrote++;
 				}
 			}
 		}
@@ -2483,6 +2688,78 @@ static int be32_member(const ncfg_wire_attrs_t *area, uint16_t kind, uint32_t *o
 	return attr_be32(&attr, out, NULL, 0);
 }
 
+static int be64_member(const ncfg_wire_attrs_t *area, uint16_t kind, uint64_t *out)
+{
+	ncfg_wire_attr_t attr;
+	const uint8_t   *bytes;
+	size_t           at;
+
+	if (ncfg_wire_attrs_find(area, kind, &attr, NULL, 0) != NCFG_WIRE_OK || attr.length != 8u) {
+		return 0;
+	}
+	bytes = attr.value;
+	*out = 0;
+	for (at = 0; at < 8u; at++) {
+		*out = (*out << 8) | bytes[at];
+	}
+	return 1;
+}
+
+/*
+ * An `over` meter's `dynset`, back into "COUNT/SECONDSs": the source address
+ * loaded just before it, an update with one `limit` that counts packets and
+ * matches over its rate -- exactly `put_over`'s shape, and nothing else.
+ */
+static int read_over(const reading_t *reading, const ncfg_wire_attrs_t *data,
+    ncfg_nft_kernel_rule_t *out)
+{
+	ncfg_wire_attr_t  nest;
+	ncfg_wire_attrs_t one;
+	ncfg_wire_attrs_t limit;
+	ncfg_wire_attr_t  limit_data;
+	char              name[16];
+	uint32_t          op = 0, type = 0, flags = 0;
+	uint64_t          rate = 0, unit = 0;
+
+	if (reading->what != LOADED_PAYLOAD || reading->base != NFT_PAYLOAD_NETWORK_HEADER ||
+	    !((reading->offset == 12u && reading->length == 4u) ||
+	    (reading->offset == 8u && reading->length == 16u)) ||
+	    !be32_member(data, NFTA_DYNSET_OP, &op) || op != NFT_DYNSET_OP_UPDATE) {
+		return 0;
+	}
+	if (ncfg_wire_attrs_find(data, NFTA_DYNSET_EXPR, &nest, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_start(&one, nest.value, nest.length);
+	} else if (ncfg_wire_attrs_find(data, NFTA_DYNSET_EXPRESSIONS, &nest, NULL, 0) ==
+	    NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t list;
+		ncfg_wire_attr_t  element;
+
+		ncfg_wire_attrs_start(&list, nest.value, nest.length);
+		if (ncfg_wire_attrs_next(&list, &element, NULL, 0) != NCFG_WIRE_OK ||
+		    element.kind != NFTA_LIST_ELEM) {
+			return 0;
+		}
+		ncfg_wire_attrs_start(&one, element.value, element.length);
+	} else {
+		return 0;
+	}
+	if (!read_name(&one, NFTA_EXPR_NAME, name, sizeof(name), NULL, 0) ||
+	    strcmp(name, "limit") != 0 ||
+	    ncfg_wire_attrs_find(&one, NFTA_EXPR_DATA, &limit_data, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	ncfg_wire_attrs_start(&limit, limit_data.value, limit_data.length);
+	if (!be64_member(&limit, NFTA_LIMIT_RATE, &rate) ||
+	    !be64_member(&limit, NFTA_LIMIT_UNIT, &unit) || rate == 0u || unit == 0u ||
+	    (be32_member(&limit, NFTA_LIMIT_TYPE, &type) && type != NFT_LIMIT_PKTS) ||
+	    !be32_member(&limit, NFTA_LIMIT_FLAGS, &flags) || !(flags & NFT_LIMIT_F_INV)) {
+		return 0;
+	}
+	(void)snprintf(out->over, sizeof(out->over), "%llu/%llus", (unsigned long long)rate,
+	    (unsigned long long)unit);
+	return 1;
+}
+
 /* The bytes of a nested `NFTA_DATA_VALUE`. */
 static int data_value(const ncfg_wire_attrs_t *area, uint16_t kind, const uint8_t **bytes,
     size_t *length)
@@ -2923,6 +3200,13 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		} else if (strcmp(name, "reject") == 0) {
 			out->action = NCFG_FIREWALL_REJECT;
 			verdict = 1;
+		} else if (strcmp(name, "dynset") == 0) {
+			if (out->over[0] || !read_over(&reading, &data, out)) {
+				ncfg_error_set(err, err_size, "rule `%s` has a `dynset` netcfgd does not "
+				    "write", out->name);
+				return 0;
+			}
+			reading.what = LOADED_NONE;
 		} else {
 			ncfg_error_set(err, err_size, "rule `%s` has a `%s` expression, which netcfgd "
 			    "does not write", out->name, name);
@@ -3373,7 +3657,8 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->interface, observed->interface) ||
 	    !same_text(expected->out_interface, observed->out_interface) ||
 	    !same_text(expected->mac, observed->mac) ||
-	    (expected->translated != 0) != (observed->translated != 0)) {
+	    (expected->translated != 0) != (observed->translated != 0) ||
+	    !same_text(expected->over, observed->over)) {
 		return 0;
 	}
 	{

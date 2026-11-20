@@ -235,7 +235,9 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 			rule->interface = one->interface ? strdup(one->interface) : NULL;
 			rule->out_interface = one->out_interface ? strdup(one->out_interface) : NULL;
 			rule->translated = one->translated;
+			rule->over = one->over ? strdup(one->over) : NULL;
 			if (!rule->name || (one->interface && !rule->interface) ||
+			    (one->over && !rule->over) ||
 			    (one->out_interface && !rule->out_interface)) {
 				ncfg_firewall_free(firewall);
 				return NULL;
