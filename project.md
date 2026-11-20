@@ -958,6 +958,16 @@ somebody else's.
 
 Kept current deliberately: this is the section to read after a break, and the one to rewrite rather than append to.
 
+**This file is past what a session can read, and splitting it is its own
+pass** (measured 2026-11-20, against the holder's rule of that day that
+what was true once moves to `doc/journal.md`): 61,975 lines, about 925k
+tokens, 870 numbered `10.N` sections. 614 of them are cited by number from
+elsewhere -- 419 citations in 319 files, source comments and decision
+records -- so moving only the 256 uncited ones takes 15,550 lines out and
+leaves 46k. A real split rewrites those citations to `doc/journal.md` in
+the same commit, which is a mechanical change across the tree with its own
+proof to carry, not one to make beside other work.
+
 ### Where it stands, 2026-09-01
 
 **Cellular is complete in software and has never met a modem.** The whole path

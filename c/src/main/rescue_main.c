@@ -58,6 +58,10 @@
 #define RESCUE_RESTART_SECONDS  5
 #define RESCUE_STOP_SECONDS     10
 #define RESCUE_DOCUMENT_MAX     16384
+/* Each of the two logs is cut back to nothing past this. A rescue system's
+ * `/run` is memory, and one left climbing for weeks would otherwise fill it
+ * with the same few lines. */
+#define RESCUE_LOG_MAX          (4L * 1024L * 1024L)
 
 typedef struct {
 	const char *dir;
@@ -81,6 +85,30 @@ static void on_stop(int signal_number)
 }
 
 static FILE *log_file;
+
+/*
+ * Cut a log back to empty once it passes `RESCUE_LOG_MAX`, saying so in it.
+ * Both logs are opened `O_APPEND`, so the daemon, which holds its own
+ * descriptor to `netcfgd.log`, goes on writing at the new end.
+ */
+static void bound_log(const char *path)
+{
+	struct stat st;
+
+	if (stat(path, &st) != 0 || st.st_size <= RESCUE_LOG_MAX) {
+		return;
+	}
+	if (truncate(path, 0) == 0) {
+		int fd = open(path, O_WRONLY | O_APPEND | O_CLOEXEC);
+
+		if (fd >= 0) {
+			static const char note[] = "(netrescue: the log passed 4 MiB and was emptied)\n";
+
+			(void)!write(fd, note, sizeof(note) - 1u);
+			(void)close(fd);
+		}
+	}
+}
 static int   to_console;
 
 /* One line of the report, to every place it goes: standard output, the log,
@@ -106,6 +134,12 @@ static void say(const char *format, ...)
 	if (log_file) {
 		(void)fprintf(log_file, "%s %s\n", stamp, line);
 		(void)fflush(log_file);
+		if (ftell(log_file) > RESCUE_LOG_MAX) {
+			(void)fflush(log_file);
+			(void)ftruncate(fileno(log_file), 0);
+			(void)fprintf(log_file, "(netrescue: the log passed 4 MiB and was emptied)\n");
+			(void)fflush(log_file);
+		}
 	}
 	if (to_console) {
 		int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
@@ -991,6 +1025,8 @@ int ncfg_main_rescue(int argc, char **argv)
 				rung_since = now_seconds();
 			}
 		}
+		(void)snprintf(path, sizeof(path), "%s/netcfgd.log", options.dir);
+		bound_log(path);
 		mdns_join(&ports);
 		mdns_serve(&options, &ports, RESCUE_TICK_SECONDS);
 	}
