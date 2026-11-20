@@ -1529,6 +1529,20 @@ int main(void)
 		    "and a regular chain reads with no hook rather than being refused");
 		ncfg_buf_free(&attrs);
 		ncfg_buf_free(&payload);
+
+		/* The family comes with it: iptables-nft makes `ip filter` and `ip6
+		 * filter`, and the warning naming them read as one chain listed
+		 * twice without it (project.md 10.884's rig). */
+		ncfg_buf_init(&payload, 0);
+		ncfg_buf_init(&attrs, 0);
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, "filter");
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, "INPUT");
+		nft_payload(&payload, NFPROTO_IPV6, &attrs);
+		check(ncfg_nft_chain_read(payload.data, payload.length, &chain, err,
+		    sizeof(err)) && chain.family == NFPROTO_IPV6,
+		    "a chain is read with its table's family, so `ip6 filter` is not `ip filter`");
+		ncfg_buf_free(&attrs);
+		ncfg_buf_free(&payload);
 	}
 
 	/* Truncation is a refusal with a sentence, never a partial answer.

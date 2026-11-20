@@ -425,9 +425,18 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 			    : chain.hook == NF_INET_LOCAL_OUT ? "output" : NULL;
 			char        named[2u * NCFG_NFT_NAME_MAX + 16u];
 
+			/* With the family, as `nft list` names a table: iptables-nft makes
+			 * `ip filter` and `ip6 filter`, and without it the two read as
+			 * one chain listed twice (project.md 10.884's rig). */
+			const char *family = chain.family == NFPROTO_IPV4 ? "ip "
+			    : chain.family == NFPROTO_IPV6 ? "ip6 "
+			    : chain.family == NFPROTO_INET ? "inet "
+			    : chain.family == NFPROTO_BRIDGE ? "bridge "
+			    : chain.family == NFPROTO_ARP ? "arp " : "";
+
 			if (hook) {
-				(void)snprintf(named, sizeof(named), "%s/%s (%s)", chain.table, chain.name,
-				    hook);
+				(void)snprintf(named, sizeof(named), "%s%s/%s (%s)", family, chain.table,
+				    chain.name, hook);
 				if (!observe_list_add(&observed->filter_neighbours,
 				        &observed->filter_neighbour_count, named)) {
 					ncfg_observed_firewall_free(found);

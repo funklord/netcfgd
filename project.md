@@ -12888,7 +12888,11 @@ Found on the way, and fixed or open:
 - **The firewall handover is by hand**: netcfgd leaves another program's
   table alone, so `netfilter-persistent flush` and `update-rc.d
   netfilter-persistent disable` are steps of the takeover, and
-  `netcfgd_select.sh` does not do them.
+  `netcfgd_select.sh` does not do them. What makes a forgotten step
+  visible is `ncfg plan`, which names iptables-nft's tables filtering beside
+  netcfgd's -- and named them `filter/INPUT` twice, IPv4's and IPv6's, since
+  the chain record carried no family. It names `ip filter/INPUT` and `ip6
+  filter/INPUT` now, as `nft list` does; the rig checks both.
 - **The switcher named the `dhclient` it ended as left by "networkmanager"**
   when ifupdown had started it: the sweep walks NetworkManager first and
   both start dhclient. It credits a manager now only where its init script

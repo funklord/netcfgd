@@ -2436,6 +2436,7 @@ int ncfg_nft_chain_read(const void *payload, size_t length, ncfg_nft_chain_t *ou
 	    !read_name(&area, NFTA_CHAIN_NAME, out->name, sizeof(out->name), err, err_size)) {
 		return 0;
 	}
+	out->family = ((const uint8_t *)payload)[0];
 	/* The type and the hook are absent on a regular chain, which is not a
 	 * malformed record: a chain with neither is one that only runs when
 	 * another chain jumps to it, and it hooks nothing. */

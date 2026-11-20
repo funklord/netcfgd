@@ -73,6 +73,12 @@ install -d /etc/netcfgd
 install -m 0644 /payload/netcfgd.conf /etc/netcfgd/netcfgd.conf
 ncfg plan > $v/nas-plan.txt 2>&1
 check "B: the translated document compiles and plans" "$(grep -c 'error' $v/nas-plan.txt)" "0"
+# Before the flush, iptables-nft's tables are still there: the plan names
+# them, each with its family, as nft does -- `ip filter` and `ip6 filter`.
+check "B: the plan names iptables' IPv4 table beside netcfgd's" \
+	"$(grep -c '`ip filter/INPUT (input)' $v/nas-plan.txt)" "1"
+check "B: and its IPv6 table, as another" \
+	"$(grep -c 'ip6 filter/INPUT (input)' $v/nas-plan.txt)" "1"
 # The firewall handover, by hand: netcfgd does not touch another program's
 # table, so rules.v4 would go on filtering beside netcfgd's.
 netfilter-persistent flush > $v/nas-flush.log 2>&1

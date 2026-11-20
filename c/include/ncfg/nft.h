@@ -159,7 +159,9 @@ typedef struct {
 
 /* A chain, and enough about it to tell whether it does NAT. */
 typedef struct {
-	/* Which table it belongs to. */
+	/* Which table it belongs to, and that table's family as `NFPROTO_*`:
+	 * iptables-nft makes an `ip filter` and an `ip6 filter`, both `filter`. */
+	uint8_t  family;
 	char     table[NCFG_NFT_NAME_MAX];
 	char     name[NCFG_NFT_NAME_MAX];
 	/* Its type where it is a base chain: `filter`, `nat`, `route`. Empty
