@@ -2633,6 +2633,23 @@ hull-link-modes:
 	sed 's/^/link-modes: /' tests/hull/link-modes/verdict/link-modes; \
 	grep -q '^VERDICT ok' tests/hull/link-modes/verdict/link-modes
 
+# netrescue's last rung (10.879): a driver rebound through the real sysfs, on
+# virtio-net in a vm, with the ladder climbing there because the ports it is
+# handed say the segment NIC has no carrier.
+hull-rescue:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/hwsim)
+	@$(call hull_image,hwsim)
+	@rm -f tests/hull/rescue/verdict/rescue
+	@$(call hull_verdict,tests/hull/rescue/verdict)
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/rescue/hull.conf || true
+	@if [ ! -f tests/hull/rescue/verdict/rescue ]; then \
+		echo "rescue: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/rescue: /' tests/hull/rescue/verdict/rescue; \
+	grep -q '^VERDICT ok' tests/hull/rescue/verdict/rescue
+
 # SLAAC on an interface that forwards (0073), against hull's advertiser rather
 # than dnsmasq (10.624): a second advertiser for tests/live/slaac.sh's half that
 # needs one, and one that answers only when solicited -- on a second segment it
@@ -3143,7 +3160,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

@@ -12737,6 +12737,35 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.879 netrescue rebinds a NIC's driver, and says what the kernel said
+
+The proposal's "reload NIC drivers and log firmware errors", built as
+**rung 5**, the last: for every port still without a carrier,
+`ncfg_rescue_rebind` follows `PORT/device` and its `driver` link and writes
+the device's own name -- a PCI address, `virtio11` -- to the driver's
+`unbind` and then its `bind`. That is a module reload for one device,
+without touching the others the module drives or needing `modprobe`. The
+two writes have nothing between them, since a device left unbound is a port
+gone until reboot. Then three seconds of `/dev/kmsg`, read from where it
+stood before the first rebind, are searched by `ncfg_rescue_kmsg_complaint`
+for records naming the driver or the device and saying something went wrong
+-- firmware, fail, error, timeout, reset -- and up to ten are reported; or
+that the kernel said nothing troubled; or that the log could not be read.
+The document at rung 5 is rung 4's: the rebind is netrescue's own act.
+
+Verified: `rescue_test` against a sysfs tree of real links (unbind then
+bind with the device's name; a device with no driver and a port with no
+device refused with a sentence) and the log matcher; `make hull-rescue`, a
+vm whose segment NIC netrescue is told has no carrier while its `device`
+link is the real one, so the ladder climbs through the forcing rungs on
+virtio-net to rung 5 and rebinds `virtio11` through the real sysfs:
+VERDICT ok, the device bound to `virtio_net` again and `eth1` back **with a
+new ifindex**, which is the evidence the device really went and came back
+-- "bound again" alone would also be true of a rebind that did nothing.
+
+**Open now**: an mDNS announcement and PPP on a serial console, the last
+two rungs of the proposal; and the stick itself, which is the consumer's.
+
 ## 10.878 netrescue listens: an unknown network learned from its ARP
 
 The proposal's rung 4, built as **rung 2**: on a port with a carrier and no
@@ -12864,9 +12893,8 @@ rightly not a port.
 until then `ethtool`'s `autoneg`, `speed` and `duplex` parsed and were
 applied by nothing.
 
-**Open, in the order the ladder needs them**: rebinding a NIC's driver through sysfs and
-reporting firmware errors (rung 3 of the proposal); an mDNS announcement;
-PPP on a serial console. **The stick needs a DHCP client netcfgd drives** --
+**Open, in the order the ladder needs them**: an mDNS announcement; PPP
+on a serial console. The driver rebind is 10.879. **The stick needs a DHCP client netcfgd drives** --
 dhcpcd or busybox's udhcpc; its isc-dhcp-client is not one -- and should
 not also run ifupdown on the same ports. **Not yet ready for the stick**:
 the consumer takes it when this entry says so.

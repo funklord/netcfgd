@@ -7,7 +7,9 @@
 #include "ncfg/base.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <dirent.h>
+#include <limits.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -39,6 +41,8 @@ const char *ncfg_rescue_rung_says(ncfg_rescue_rung_t rung)
 		return "the same, with ports that have no carrier forced to 1000/full";
 	case NCFG_RESCUE_RUNG_FORCE_100:
 		return "the same, with ports that have no carrier forced to 100/full";
+	case NCFG_RESCUE_RUNG_REBIND:
+		return "the same, and the driver of each port still without a carrier bound again";
 	}
 	return "an unknown rung";
 }
@@ -256,7 +260,7 @@ int ncfg_rescue_render(const ncfg_rescue_ports_t *ports, ncfg_rescue_rung_t rung
 	}
 	if (rung == NCFG_RESCUE_RUNG_FORCE_1000) {
 		speed = 1000;
-	} else if (rung == NCFG_RESCUE_RUNG_FORCE_100) {
+	} else if (rung == NCFG_RESCUE_RUNG_FORCE_100 || rung == NCFG_RESCUE_RUNG_REBIND) {
 		speed = 100;
 	}
 	add(&text, "# Written by netrescue, rung %d: %s.\n", (int)rung, ncfg_rescue_rung_says(rung));
@@ -692,5 +696,134 @@ int ncfg_rescue_address_free(const char *port, uint32_t address, int timeout_ms,
 		}
 	}
 	(void)close(fd);
+	return 1;
+}
+
+/* ------------------------------------------------------------- rebinding */
+
+/* The last component of the path a link resolves to. */
+static int link_name(const char *path, char *out, size_t out_size)
+{
+	char        target[PATH_MAX];
+	const char *slash;
+
+	if (!realpath(path, target)) {
+		return 0;
+	}
+	slash = strrchr(target, '/');
+	slash = slash ? slash + 1 : target;
+	if (strlen(slash) >= out_size || slash[0] == '\0') {
+		return 0;
+	}
+	memcpy(out, slash, strlen(slash) + 1u);
+	return 1;
+}
+
+static int write_word(const char *path, const char *word, char *err, size_t err_size)
+{
+	int     fd = open(path, O_WRONLY | O_CLOEXEC);
+	ssize_t wrote;
+
+	if (fd < 0) {
+		ncfg_error_set(err, err_size, "cannot open `%s`: %s", path, strerror(errno));
+		return 0;
+	}
+	wrote = write(fd, word, strlen(word));
+	if (wrote < 0 || (size_t)wrote != strlen(word)) {
+		ncfg_error_set(err, err_size, "writing `%s` to `%s` failed: %s", word, path,
+		    wrote < 0 ? strerror(errno) : "short write");
+		(void)close(fd);
+		return 0;
+	}
+	if (close(fd) != 0) {
+		ncfg_error_set(err, err_size, "writing `%s` to `%s` failed: %s", word, path,
+		    strerror(errno));
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_rescue_rebind(const char *sysfs_net, const char *port, char *driver, size_t driver_size,
+    char *device, size_t device_size, char *err, size_t err_size)
+{
+	char path[PATH_MAX];
+	char driver_dir[PATH_MAX];
+	char control[PATH_MAX + 16];
+
+	if (!sysfs_net || !port || !name_is_plain(port) || strchr(port, '/') || !driver || !device) {
+		ncfg_error_set(err, err_size, "no port to rebind");
+		return 0;
+	}
+	(void)snprintf(path, sizeof(path), "%s/%s/device", sysfs_net, port);
+	if (!link_name(path, device, device_size)) {
+		ncfg_error_set(err, err_size, "%s has no device to rebind", port);
+		return 0;
+	}
+	(void)snprintf(path, sizeof(path), "%s/%s/device/driver", sysfs_net, port);
+	if (!realpath(path, driver_dir) || !link_name(path, driver, driver_size)) {
+		ncfg_error_set(err, err_size, "%s's device %s has no driver bound", port, device);
+		return 0;
+	}
+	(void)snprintf(control, sizeof(control), "%s/unbind", driver_dir);
+	if (!write_word(control, device, err, err_size)) {
+		return 0;
+	}
+	/*
+	 * **Bound again even where this fails**, by the caller seeing the
+	 * sentence: a device left unbound is a port gone until reboot. There is
+	 * nothing between the two writes for that reason -- no wait, no check.
+	 */
+	(void)snprintf(control, sizeof(control), "%s/bind", driver_dir);
+	return write_word(control, device, err, err_size);
+}
+
+/* Whether `haystack` contains `needle`, ignoring case. */
+static int mentions(const char *haystack, const char *needle)
+{
+	size_t length = strlen(needle);
+
+	if (length == 0u) {
+		return 0;
+	}
+	for (; *haystack != '\0'; haystack++) {
+		size_t at;
+
+		for (at = 0; at < length && haystack[at] != '\0'; at++) {
+			if (tolower((unsigned char)haystack[at]) != tolower((unsigned char)needle[at])) {
+				break;
+			}
+		}
+		if (at == length) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ncfg_rescue_kmsg_complaint(const char *record, const char *driver, const char *device,
+    char *out, size_t out_size)
+{
+	static const char *const trouble[] = { "firmware", "fail", "error", "timeout", "timed out",
+		"reset", "hang", "unable", "cannot", "can't" };
+	const char *text;
+	size_t      at;
+	int         troubled = 0;
+
+	if (!record || !out || out_size == 0u) {
+		return 0;
+	}
+	/* `/dev/kmsg`: `prio,seq,usec,flags;text`, continuation lines after. */
+	text = strchr(record, ';');
+	text = text ? text + 1 : record;
+	if (!((driver && mentions(text, driver)) || (device && mentions(text, device)))) {
+		return 0;
+	}
+	for (at = 0; at < sizeof(trouble) / sizeof(trouble[0]) && !troubled; at++) {
+		troubled = mentions(text, trouble[at]);
+	}
+	if (!troubled) {
+		return 0;
+	}
+	(void)snprintf(out, out_size, "%.*s", (int)strcspn(text, "\n"), text);
 	return 1;
 }

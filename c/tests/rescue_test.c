@@ -308,6 +308,73 @@ static void test_render_learned(void)
 	}
 }
 
+static void test_rebind(const char *root)
+{
+	char base[512], path[1024], driver[64], device[64], err[NCFG_ERROR_MAX];
+	char *unbound, *bound;
+
+	/* base/sys/eno1/device -> base/devices/0000:03:00.0, whose driver is
+	 * base/drivers/e1000e with `bind` and `unbind` -- sysfs's shape. */
+	(void)snprintf(base, sizeof(base), "%s/rebind", root);
+	(void)snprintf(path, sizeof(path), "%s/sys/eno1", base);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/sys/eno2", base);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/devices/0000:03:00.0", base);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/devices/0000:04:00.0", base);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/drivers/e1000e", base);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/drivers/e1000e/bind", base);
+	(void)testdir_write(path, "", 0);
+	(void)snprintf(path, sizeof(path), "%s/drivers/e1000e/unbind", base);
+	(void)testdir_write(path, "", 0);
+	(void)snprintf(path, sizeof(path), "%s/sys/eno1/device", base);
+	(void)symlink("../../devices/0000:03:00.0", path);
+	(void)snprintf(path, sizeof(path), "%s/sys/eno2/device", base);
+	(void)symlink("../../devices/0000:04:00.0", path);
+	(void)snprintf(path, sizeof(path), "%s/devices/0000:03:00.0/driver", base);
+	(void)symlink("../../drivers/e1000e", path);
+
+	(void)snprintf(path, sizeof(path), "%s/sys", base);
+	check(ncfg_rescue_rebind(path, "eno1", driver, sizeof(driver), device, sizeof(device), err,
+	          sizeof(err)), "a port's device is rebound");
+	check(strcmp(driver, "e1000e") == 0 && strcmp(device, "0000:03:00.0") == 0,
+	    "named by its driver and its own device name");
+	(void)snprintf(path, sizeof(path), "%s/drivers/e1000e/unbind", base);
+	unbound = testdir_read(path, NULL);
+	(void)snprintf(path, sizeof(path), "%s/drivers/e1000e/bind", base);
+	bound = testdir_read(path, NULL);
+	check(unbound && bound && strcmp(unbound, "0000:03:00.0") == 0 &&
+	    strcmp(bound, "0000:03:00.0") == 0, "the device written to unbind, then to bind");
+	free(unbound);
+	free(bound);
+	(void)snprintf(path, sizeof(path), "%s/sys", base);
+	check(!ncfg_rescue_rebind(path, "eno2", driver, sizeof(driver), device, sizeof(device), err,
+	          sizeof(err)) && strstr(err, "no driver") != NULL,
+	    "a device with no driver bound is refused with a sentence");
+	check(!ncfg_rescue_rebind(path, "eno9", driver, sizeof(driver), device, sizeof(device), err,
+	          sizeof(err)), "and a port with no device");
+}
+
+static void test_kmsg(void)
+{
+	char said[256];
+
+	check(ncfg_rescue_kmsg_complaint("3,812,90210,-;e1000e 0000:03:00.0: failed to load firmware\n"
+	          " SUBSYSTEM=pci\n", "e1000e", "0000:03:00.0", said, sizeof(said)) &&
+	    strcmp(said, "e1000e 0000:03:00.0: failed to load firmware") == 0,
+	    "a driver's complaint is found, its header and continuation left off");
+	check(ncfg_rescue_kmsg_complaint("4,813,90211,-;bnx2 0000:05:00.0 eth2: NIC Copper Link is Down\n",
+	          "bnx2", "0000:05:00.0", said, sizeof(said)) == 0,
+	    "a driver's ordinary news is not a complaint");
+	check(ncfg_rescue_kmsg_complaint("3,814,90212,-;ata1: COMRESET failed (errno=-16)\n", "e1000e",
+	          "0000:03:00.0", said, sizeof(said)) == 0, "another device's trouble is not this one's");
+	check(ncfg_rescue_kmsg_complaint("6,815,90213,-;virtio_net virtio1: Timed out waiting\n",
+	          "virtio_net", "virtio1", said, sizeof(said)), "matched by device name too, any case");
+}
+
 static void test_gateways(void)
 {
 	static const char table[] =
@@ -340,6 +407,8 @@ int main(void)
 	test_render();
 	test_gateways();
 	test_learn();
+	test_rebind(root);
+	test_kmsg();
 	test_render_learned();
 	testdir_remove(root);
 	check(!testdir_exists(root), "the test's directory is gone");

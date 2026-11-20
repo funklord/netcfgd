@@ -70,10 +70,14 @@ typedef enum {
 	/* And autonegotiation off at 1000/full on every port with no carrier. */
 	NCFG_RESCUE_RUNG_FORCE_1000,
 	/* The same at 100/full: an old switch, or a cable with two pairs. */
-	NCFG_RESCUE_RUNG_FORCE_100
+	NCFG_RESCUE_RUNG_FORCE_100,
+	/* And the driver of every port still without a carrier unbound and
+	 * bound again, with what the kernel said about it reported. The
+	 * document is rung 4's: the rebind is netrescue's own act (0326). */
+	NCFG_RESCUE_RUNG_REBIND
 } ncfg_rescue_rung_t;
 
-#define NCFG_RESCUE_RUNG_LAST NCFG_RESCUE_RUNG_FORCE_100
+#define NCFG_RESCUE_RUNG_LAST NCFG_RESCUE_RUNG_REBIND
 
 /* A sentence for the report: what this rung tries. */
 const char *ncfg_rescue_rung_says(ncfg_rescue_rung_t rung);
@@ -181,5 +185,30 @@ int ncfg_rescue_listen(const char *port, int seconds, ncfg_rescue_heard_t *heard
  */
 int ncfg_rescue_address_free(const char *port, uint32_t address, int timeout_ms, char *err,
     size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Rebinding a driver
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Unbind `port`'s device from its driver and bind it again, through
+ * `sysfs_net`/PORT/device and its `driver` link: the device's own name (a PCI
+ * address, `virtio1`, a USB interface) written to the driver's `unbind` and
+ * then its `bind`. What a module reload does for one device, without
+ * touching the others the module drives. `driver` gets the driver's name and
+ * `device` the device's, for the report and for finding what the kernel said.
+ * 0 with a sentence where the port has no device or driver to rebind, or a
+ * write was refused.
+ */
+int ncfg_rescue_rebind(const char *sysfs_net, const char *port, char *driver, size_t driver_size,
+    char *device, size_t device_size, char *err, size_t err_size);
+
+/*
+ * Whether one kernel log record, as `/dev/kmsg` gives it, is about `driver`
+ * or `device` and says something went wrong -- a firmware load, a reset, a
+ * failure. The text after the record's header goes in `out`. Pure.
+ */
+int ncfg_rescue_kmsg_complaint(const char *record, const char *driver, const char *device,
+    char *out, size_t out_size);
 
 #endif /* NCFG_RESCUE_H */

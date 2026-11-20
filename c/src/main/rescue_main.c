@@ -463,6 +463,74 @@ static void listen_all(const rescue_options_t *options, const ncfg_rescue_ports_
 	}
 }
 
+/*
+ * Rebind the driver of every port without a carrier, then report what the
+ * kernel said about those devices in the next three seconds: a firmware that
+ * would not load, a reset that timed out. The log is read from where it stood
+ * before the first rebind, so nothing older is blamed on it.
+ */
+static void rebind_all(const rescue_options_t *options, const ncfg_rescue_ports_t *ports)
+{
+	char   drivers[NCFG_RESCUE_PORT_MAX][64];
+	char   devices[NCFG_RESCUE_PORT_MAX][64];
+	size_t rebound = 0, at, said = 0;
+	int    kmsg = open("/dev/kmsg", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	int    waited;
+
+	if (kmsg >= 0) {
+		(void)lseek(kmsg, 0, SEEK_END);
+	}
+	for (at = 0; at < ports->count && !stop_asked; at++) {
+		char err[NCFG_ERROR_MAX];
+
+		if (ports->ports[at].carrier == 1) {
+			continue;
+		}
+		if (!ncfg_rescue_rebind(options->sysfs, ports->ports[at].name, drivers[rebound],
+		        sizeof(drivers[0]), devices[rebound], sizeof(devices[0]), err, sizeof(err))) {
+			say("cannot rebind %s: %s", ports->ports[at].name, err);
+			continue;
+		}
+		say("rebound %s: device %s unbound from %s and bound again", ports->ports[at].name,
+		    devices[rebound], drivers[rebound]);
+		rebound++;
+	}
+	if (rebound == 0u) {
+		if (kmsg >= 0) {
+			(void)close(kmsg);
+		}
+		return;
+	}
+	if (kmsg < 0) {
+		say("the kernel log cannot be read (%s), so what the drivers said is not reported",
+		    strerror(errno));
+		return;
+	}
+	for (waited = 0; waited < 30 && !stop_asked; waited++) {
+		char    record[2048];
+		ssize_t got;
+
+		while ((got = read(kmsg, record, sizeof(record) - 1u)) > 0) {
+			char complaint[512];
+
+			record[got] = '\0';
+			for (at = 0; at < rebound; at++) {
+				if (said < 10u && ncfg_rescue_kmsg_complaint(record, drivers[at], devices[at],
+				        complaint, sizeof(complaint))) {
+					say("kernel, after rebinding: %s", complaint);
+					said++;
+					break;
+				}
+			}
+		}
+		(void)usleep(100000);
+	}
+	(void)close(kmsg);
+	if (said == 0u) {
+		say("the kernel said nothing troubled about the rebound devices");
+	}
+}
+
 static long long now_seconds(void)
 {
 	struct timespec now;
@@ -488,6 +556,7 @@ int ncfg_main_rescue(int argc, char **argv)
 	int                answered = 0;
 	int                wrapped = 0;
 	int                listened = 0;
+	int                rebound = 0;
 	char               last_why[256] = "";
 
 	if (!parse(argc, argv, &options, &status)) {
@@ -581,6 +650,14 @@ int ncfg_main_rescue(int argc, char **argv)
 			}
 		}
 
+		/* After the rung's document is written, so the report says which
+		 * rung it is before what the rung did. */
+		if (rung == NCFG_RESCUE_RUNG_REBIND && !rebound) {
+			rebind_all(&options, &ports);
+			rebound = 1;
+			rung_since = now_seconds();
+		}
+
 		if (daemon > 0 && waitpid(daemon, &child_status, WNOHANG) == daemon) {
 			say("netcfgd stopped (%s %d); see %s/netcfgd.log",
 			    WIFEXITED(child_status) ? "exit" : "signal",
@@ -617,6 +694,7 @@ int ncfg_main_rescue(int argc, char **argv)
 					rung = NCFG_RESCUE_RUNG_ADDRESS;
 					wrapped = 1;
 					listened = 0;
+					rebound = 0;
 				} else {
 					rung = (ncfg_rescue_rung_t)((int)rung + 1);
 				}
