@@ -12747,6 +12747,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.892 `make check` whole: four gates red, three of them for days
+
+Run whole after the 10.885 and 10.889 misses (gates skipped after a
+commit), it found, besides what 10.889's note covers:
+
+- **module-order** (red since 4e64e931, 2026-11-10): `compile/lower_device.c`
+  and `model/canonical.c` included `ncfg/ops.h`, sys's, for
+  `ncfg_ops_parse_mac` -- a text parser. Moved, byte for byte with its helper
+  renamed (checked by script), to `model/value.c`, declared in `value.h`,
+  which `ops.h` already includes; the name stays, its fourteen callers being
+  mostly in sys and apply.
+- **ledger** (red since 10.877): `socket-protocol.md` 6.3 had no rows for
+  `link.set_link_modes` and `link.set_rings`; both cut traffic, as `action.c`
+  says -- a PHY retrains, a ring resize resets the NIC.
+- **size**: 1,520 bytes over the 3% tolerance on 2,600,016, crossed by
+  10.891; raised to 2,679,536 with the 98 commits since 11-13 named in
+  `size-budget.txt`.
+- **rss-node** (red since fuzznet b54490a, 2026-11-13): measured either side
+  of that pin in worktrees, 6,524-6,540 KB before and 7,304-7,312 after,
+  RssAnon 2,948 to 3,684 -- all of it the pin, level since (this morning's
+  a0587972 reads the same as now). Limit raised by its own rule (peak +
+  328, now 7,704) and the measurement sent to fuzznet's inbox, since 736 KB
+  idle matters on the routers.
+
+**Measuring an old commit in a worktree rewrote the main fuzznet
+submodule's `core.worktree`** to the scratch worktree: the older
+Makefile's submodule step ran there. `git status` in the main tree then
+failed in the submodule. Restored to `../../../fuzznet`, its checkout clean
+at its pin; the nested submodules were untouched. Next time, look at
+`.git/modules/fuzznet/config` after such a measurement.
+
 ## 10.891 Docker on a ring box drops the failover; the plan says so
 
 ml350 runs Docker (read on the box: `dockerd` up, `br_netfilter` loaded,

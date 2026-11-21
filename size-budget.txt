@@ -1122,4 +1122,8 @@ netcfgd
 # through 10.828, inside the tolerance until now), and +94,984 at fuzznet b54490a, all of
 # it fuzznet's 166 commits: calls, relays, the metric layer, binary STATUS and the
 # CMD/SUBCMD split, reachable from the daemon it runs (10.829).
-total 2600016
+# 2026-11-21: 2,679,536, +79,520 over 98 commits, inside the 3% tolerance until the bridge's
+# forward warning (10.891) crossed it by 1,520: netcfgd's own -- netrescue's ladder, link
+# modes and rings, the firewall's per-source meters, the bridge's max_age, the boot's
+# wait-online -- and fuzznet ed93497 and 23e4f46, not measured apart.
+total 2679536

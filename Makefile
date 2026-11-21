@@ -2030,7 +2030,10 @@ rss:
 # load 3: 6400 to 6616 KB, with RssAnon 3056 in every one, so the spread is file-backed
 # pages as above. Ten seconds in it read 6552 to 6712. As `RSS_LIMIT_KB`, the observed
 # peak plus a band wider than the spread: 6712 + 328, the spread being 216.
-RSS_NODE_LIMIT_KB ?= 7040
+# 2026-11-21 (10.892): 7376 + 328. It had been over since fuzznet b54490a
+# (2026-11-13), measured either side of that pin -- 6524-6540 KB before, 7304-7312
+# after, RssAnon 2948 to 3684 -- and level since; signalled to fuzznet.
+RSS_NODE_LIMIT_KB ?= 7704
 rss-node:
 	@$(MAKE) --no-print-directory rss RSS_NAME=rss-node RSS_DAEMON_OPTIONS= \
 		RSS_SOCKET=fuzznet.sock RSS_LIMIT_KB=$(RSS_NODE_LIMIT_KB)
