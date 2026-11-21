@@ -1391,6 +1391,9 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		ncfg_render_list_emit(body, "\t\t\t", "state", &list, 0);
 		ncfg_render_list_free(&list);
 	}
+	if (rule->log) {
+		ncfg_buf_add_text(body, "\t\t\tlog = true\n");
+	}
 	if (rule->translated) {
 		ncfg_buf_add_text(body, "\t\t\ttranslated = true\n");
 	}

@@ -1291,6 +1291,9 @@ typedef struct {
 	/* `over` (10.885): a drop's per-source rate as the document keeps it,
 	 * "8/900s", empty where the rule has none. Read so a Save keeps it. */
 	char *over;
+	/* `log = true` (0330): matches go to the kernel log as well. Read so a
+	 * Save keeps it. */
+	int   log;
 } ncfg_firewall_entry_t;
 
 /* One base chain: its policy and its rules, in the document's order -- which

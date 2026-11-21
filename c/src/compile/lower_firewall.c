@@ -515,11 +515,33 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			rule_days(ctx, assignment, &rule);
 		} else if (strcmp(key, "over") == 0) {
 			rule_over(ctx, assignment, &rule);
+		} else if (strcmp(key, "log") == 0) {
+			int flag;
+
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				rule.log = flag;
+			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, out_interface, state, translated, mac, hours, days, over", key);
+			    "interface, out_interface, state, translated, mac, hours, days, over, log",
+			    key);
 		}
+	}
+	/*
+	 * **`log` beside `over` is not offered yet** (0330). The log is rated in
+	 * a kernel rule of its own ahead of the verdict, because a `limit` in the
+	 * verdict's rule would skip the verdict past its rate. An `over` rule's
+	 * meter counts every time it is evaluated, so a second rule evaluating it
+	 * would count each packet twice and halve the threshold written.
+	 */
+	if (rule.log && rule.over) {
+		ncfg_diag(ctx, block->span,
+		    "rule `%s` logs and counts `over`, which netcfgd cannot do yet: the log's own "
+		    "rule would count each packet against the meter a second time. Log a rule "
+		    "without `over`", rule.name);
+		rule_free(&rule);
+		return 0;
 	}
 	/* What was written is the resolved set again where no list is named. */
 	if (rule.mac_list_count == 0) {

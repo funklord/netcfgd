@@ -100,6 +100,7 @@ private:
 	QLineEdit *days;
 	QCheckBox *translated;
 	QLineEdit *over;
+	QCheckBox *log;
 	QLabel      *note;
 	QPushButton *save_button;
 };

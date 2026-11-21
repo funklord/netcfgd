@@ -1188,6 +1188,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	if (rule->over) {
 		ncfg_buf_addf(out, "over %s\n", rule->over);
 	}
+	/* Only where set, so no digest written before 0330 changes. */
+	if (rule->log) {
+		ncfg_buf_add_text(out, "log\n");
+	}
 	for (at = 0; at < rule->mac_count; at++) {
 		ncfg_buf_addf(out, "mac %s\n", rule->mac[at]);
 	}
@@ -1353,9 +1357,71 @@ static int over_set_message(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *la
 	return ok;
 }
 
+/*
+ * A rule's log, rated: at most LOG_RATE a minute, a burst of LOG_BURST (0330).
+ * Fixed rather than a key, because a rate somebody must choose before they may
+ * log anything is a reason not to; ten a minute says a rule is being hit and
+ * which address hit it, and no flood can take the disk with it.
+ */
+#define LOG_RATE  10u
+#define LOG_BURST 5u
+#define LOG_UNIT  60u
+
+/*
+ * `netcfgd CHAIN/NAME: `, what the kernel log line starts with. **Cut to the
+ * kernel's 127 characters** (NF_LOG_PREFIXLEN less its NUL) rather than
+ * refused: a long name still logs, and the reader cuts the one it expects the
+ * same way, so the two agree.
+ */
+#define LOG_PREFIX_MAX 128u
+
+static void log_prefix(const char *chain, const char *name, char *out, size_t out_size)
+{
+	char   whole[NCFG_NFT_NAME_MAX + NCFG_NFT_COMMENT_MAX + 16u];
+	size_t keep;
+
+	(void)snprintf(whole, sizeof(whole), "netcfgd %s/%s: ", chain, name);
+	keep = strlen(whole);
+	if (keep > LOG_PREFIX_MAX - 1u) {
+		keep = LOG_PREFIX_MAX - 1u;
+	}
+	if (keep > out_size - 1u) {
+		keep = out_size - 1u;
+	}
+	memcpy(out, whole, keep);
+	out[keep] = '\0';
+}
+
+/*
+ * The log's own kernel rule, ahead of the verdict's (0330): the same matches,
+ * then `limit rate 10/minute burst 5 packets log prefix "..."`, and no
+ * verdict. **Its own rule, because a `limit` in the verdict's rule would end
+ * that rule past the rate**, and every packet past ten a minute would go on
+ * to the next rule rather than be dropped.
+ */
+static void put_log(ncfg_buf_t *expressions, const char *chain, const char *name)
+{
+	ncfg_buf_t data;
+	char       prefix[LOG_PREFIX_MAX];
+
+	ncfg_buf_init(&data, 0);
+	put_be64(&data, NFTA_LIMIT_RATE, LOG_RATE);
+	put_be64(&data, NFTA_LIMIT_UNIT, LOG_UNIT);
+	put_be32(&data, NFTA_LIMIT_BURST, LOG_BURST);
+	put_be32(&data, NFTA_LIMIT_TYPE, NFT_LIMIT_PKTS);
+	put_be32(&data, NFTA_LIMIT_FLAGS, 0u);
+	put_expression(expressions, "limit", &data);
+	ncfg_buf_free(&data);
+	log_prefix(chain, name, prefix, sizeof(prefix));
+	ncfg_buf_init(&data, 0);
+	ncfg_wire_attr_put_str(&data, NFTA_LOG_PREFIX, prefix);
+	put_expression(expressions, "log", &data);
+	ncfg_buf_free(&data);
+}
+
 static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_rule_t *rule,
     const ncfg_schedule_piece_t *piece, const char *comment, uint8_t over_family,
-    uint32_t over_set_id, char *err, size_t err_size)
+    uint32_t over_set_id, int as_log, char *err, size_t err_size)
 {
 	ncfg_buf_t    expressions;
 	ncfg_buf_t    data;
@@ -1494,7 +1560,9 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	}
 
 	ncfg_buf_init(&data, 0);
-	if (rule->action == NCFG_FIREWALL_REJECT) {
+	if (as_log) {
+		put_log(&expressions, chain, rule->name);
+	} else if (rule->action == NCFG_FIREWALL_REJECT) {
 		const uint8_t code = NFT_REJECT_ICMPX_PORT_UNREACH;
 
 		put_be32(&data, NFTA_REJECT_TYPE, NFT_REJECT_ICMPX_UNREACH);
@@ -1662,18 +1730,24 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 						    b.nfproto != family))) {
 							continue;
 						}
-						ncfg_buf_init(&attrs, 0);
-						ok = firewall_rule(&attrs, chain, &one, piece, comment, family, set_id,
-						    err, err_size);
-						if (ok) {
-							*last_acked = *seq;
-							ok = build(transaction, NFT_MSG_NEWRULE,
-							    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), (*seq)++,
-							    NFPROTO_INET, &attrs, err, err_size);
-						}
-						ncfg_buf_free(&attrs);
-						if (!ok) {
-							return 0;
+						/* The log's rule first, where there is one (0330): it
+						 * has no verdict, so the packet goes on to the next. */
+						int pass;
+
+						for (pass = rule->log ? 0 : 1; pass < 2; pass++) {
+							ncfg_buf_init(&attrs, 0);
+							ok = firewall_rule(&attrs, chain, &one, piece, comment, family,
+							    set_id, pass == 0, err, err_size);
+							if (ok) {
+								*last_acked = *seq;
+								ok = build(transaction, NFT_MSG_NEWRULE,
+								    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND),
+								    (*seq)++, NFPROTO_INET, &attrs, err, err_size);
+							}
+							ncfg_buf_free(&attrs);
+							if (!ok) {
+								return 0;
+							}
 						}
 						wrote++;
 					}
@@ -3028,6 +3102,8 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 	reading_t         reading;
 	char              name[NCFG_NFT_NAME_MAX];
 	int               verdict = 0;
+	/* 1 once the log's `limit` is read, 2 once its `log` is (0330). */
+	int               logging = 0;
 
 	if (!out) {
 		ncfg_error_set(err, err_size, "a rule read needs somewhere to go");
@@ -3085,6 +3161,12 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		}
 		if (verdict) {
 			ncfg_error_set(err, err_size, "rule `%s` has an expression after its verdict",
+			    out->name);
+			return 0;
+		}
+		/* A log's `limit` is followed by its `log` and by nothing else. */
+		if (logging == 1 && strcmp(name, "log") != 0) {
+			ncfg_error_set(err, err_size, "rule `%s` has a `limit` netcfgd does not write",
 			    out->name);
 			return 0;
 		}
@@ -3200,6 +3282,38 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			verdict = 1;
 		} else if (strcmp(name, "reject") == 0) {
 			out->action = NCFG_FIREWALL_REJECT;
+			verdict = 1;
+		} else if (strcmp(name, "limit") == 0) {
+			/* Only as `put_log` writes it, and only once (0330). */
+			uint64_t rate = 0, unit = 0;
+			uint32_t burst = 0, type = 0, flags = 1;
+
+			if (logging || !be64_member(&data, NFTA_LIMIT_RATE, &rate) || rate != LOG_RATE ||
+			    !be64_member(&data, NFTA_LIMIT_UNIT, &unit) || unit != LOG_UNIT ||
+			    !be32_member(&data, NFTA_LIMIT_BURST, &burst) || burst != LOG_BURST ||
+			    !be32_member(&data, NFTA_LIMIT_TYPE, &type) || type != NFT_LIMIT_PKTS ||
+			    (be32_member(&data, NFTA_LIMIT_FLAGS, &flags) && flags != 0u)) {
+				ncfg_error_set(err, err_size, "rule `%s` has a `limit` netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			logging = 1;
+		} else if (strcmp(name, "log") == 0) {
+			char want[LOG_PREFIX_MAX];
+			char said[LOG_PREFIX_MAX + 1u];
+
+			/* The prefix names the rule, so one that does not is not this
+			 * rule's log: something wrote it, and it is not netcfgd. */
+			log_prefix(out->chain, out->name, want, sizeof(want));
+			if (logging != 1 ||
+			    !read_name(&data, NFTA_LOG_PREFIX, said, sizeof(said), NULL, 0) ||
+			    strcmp(said, want) != 0) {
+				ncfg_error_set(err, err_size, "rule `%s` has a `log` netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			logging = 2;
+			out->log = 1;
 			verdict = 1;
 		} else if (strcmp(name, "dynset") == 0) {
 			if (out->over[0] || !read_over(&reading, &data, out)) {
@@ -3576,6 +3690,11 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 	return 1;
 }
 
+const char *ncfg_nft_kernel_rule_action_word(const ncfg_nft_kernel_rule_t *rule)
+{
+	return rule->log ? "log" : ncfg_nft_action_word(rule->action);
+}
+
 const char *ncfg_nft_action_word(int action)
 {
 	switch (action) {
@@ -3650,7 +3769,7 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	if (!same_text(expected->chain, observed->chain) ||
 	    !same_text(expected->name, observed->name) ||
 	    !same_text(expected->digest, observed->digest) ||
-	    !same_text(ncfg_nft_action_word(expected->action), observed->action) ||
+	    !same_text(ncfg_nft_kernel_rule_action_word(expected), observed->action) ||
 	    !same_text(ncfg_nft_protocol_word(expected->protocol), observed->protocol) ||
 	    expected->has_port != observed->port.has ||
 	    (expected->has_port && (int64_t)expected->port != observed->port.value) ||

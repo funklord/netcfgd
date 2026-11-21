@@ -336,7 +336,7 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 	out->chain = observe_dup(one->chain);
 	out->name = observe_dup(one->name);
 	out->digest = observe_dup(one->digest);
-	out->action = observe_dup(ncfg_nft_action_word(one->action));
+	out->action = observe_dup(ncfg_nft_kernel_rule_action_word(one));
 	out->protocol = observe_dup(ncfg_nft_protocol_word(one->protocol));
 	if (!out->chain || !out->name || !out->digest || !out->action || !out->protocol) {
 		return 0;

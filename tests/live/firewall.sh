@@ -317,6 +317,31 @@ check "a neighbour's filter chain at the input hook is named in the plan" \
 check "and is not touched" "$(nft list tables | grep -c 'inet neighbour' || true)" "1"
 nft delete table inet neighbour
 
+# `log = true` (0330): a rated log rule ahead of the verdict, which the kernel
+# takes, the reader reads back, and the next plan finds converged.
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		drop "telnet" { protocol = "tcp"; port = 23; log = true }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a logged rule is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the log is rated, prefixed with the rule, and carries no verdict" \
+	'tcp dport 23 limit rate 10/minute burst 5 packets log prefix "netcfgd input/telnet: " comment "name=telnet'
+has "and the drop follows it" 'tcp dport 23 drop comment "name=telnet'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the next plan has nothing to do" "$(cat "$work/plan")" "nothing to do"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status shows the log's row before the drop's" \
+	"$(grep -E '^    (log|drop) telnet' "$work/status" | tr '\n' ' ')" \
+	"    log telnet protocol tcp port 23     drop telnet protocol tcp port 23 "
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true

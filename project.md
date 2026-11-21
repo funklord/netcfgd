@@ -7066,6 +7066,13 @@ and ICMP types, MSS clamping, `reject with tcp reset`, then the window's
 missing keys. Each firewall item is a key on 0294's vocabulary rather than a
 new layer, the way `over` was.
 
+**Logging is built**, the same day:
+[0330](doc/decision/0330-a-firewall-rule-may-log-at-ten-a-minute.md), `log = true`,
+a kernel rule of its own ahead of the verdict's, rated at ten a minute. Not yet
+beside `over`, whose meter a second rule would count twice; the way through is a
+packet mark, which waits on the marks question above. Counters wait on the same
+reading-back work in `ncfg status` that would make them worth having.
+
 ## 10.894 A pin move left fuzznet's old objects in the link
 
 `make bridge-test` failed on 2026-11-21 with `multiple definition of

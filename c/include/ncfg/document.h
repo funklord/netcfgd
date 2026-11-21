@@ -2705,6 +2705,13 @@ typedef struct {
 	 */
 	int      translated;
 	/*
+	 * `log = true`: a matching packet is written to the kernel log as well,
+	 * at most ten a minute for the rule, with `netcfgd CHAIN/NAME: ` before
+	 * it (0330). Omitted when false, so every ruleset before it is the
+	 * document it was.
+	 */
+	int      log;
+	/*
 	 * `over`: the rule matches a source address's packets only past this
 	 * rate, per source, kept as "COUNT/SECONDSs" -- `"8/900s"` -- however it
 	 * was written (project.md 10.885). An nftables meter: a set keyed on the

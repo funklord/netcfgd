@@ -96,6 +96,9 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (!rule.over.isEmpty()) {
 		body << QStringLiteral("\t\t\tover = %1").arg(quoted(rule.over));
 	}
+	if (rule.log) {
+		body << QStringLiteral("\t\t\tlog = true");
+	}
 	body << QStringLiteral("\t\t}");
 }
 
@@ -277,6 +280,14 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	    "Match a source address's packets only past this rate, counted per address: "
 	    "a drop with 8/15m lets each address make eight connections a quarter of an hour."));
 	form->addRow(QStringLiteral("only over"), over);
+	/* 0330: rated to ten a minute in the kernel, and not beside `over`,
+	 * which the compiler says why when both are asked for. */
+	log = new QCheckBox(QStringLiteral("write matches to the kernel log"), this);
+	log->setObjectName(QStringLiteral("firewall_log"));
+	log->setToolTip(QStringLiteral(
+	    "Each matching packet is logged with \"netcfgd CHAIN/NAME: \" before it, at most ten "
+	    "a minute for the rule, so a flood cannot fill the disk. Not with \"only over\" yet."));
+	form->addRow(QString(), log);
 	layout->addLayout(form);
 
 	note = new QLabel(this);
@@ -325,6 +336,7 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		days->setText(rule.days.join(QStringLiteral(", ")));
 		translated->setChecked(rule.translated);
 		over->setText(rule.over);
+		log->setChecked(rule.log);
 	}
 	connect(chain, &QComboBox::currentIndexChanged, this,
 	    &ncfg_firewall_rule_dialog::shape_changed);
@@ -412,6 +424,7 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 	rule->days = split_list(days->text());
 	rule->translated = translated->isChecked();
 	rule->over = over->text().trimmed();
+	rule->log = log->isChecked();
 	return true;
 }
 

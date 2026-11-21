@@ -333,6 +333,8 @@ struct ncfg_firewall_rule_row {
 	bool        translated = false;
 	/* `over` (10.885): a drop's per-source rate, "8/900s", empty for none. */
 	QString     over;
+	/* `log = true` (0330). */
+	bool        log = false;
 };
 
 struct ncfg_firewall_chain_row {

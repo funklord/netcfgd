@@ -4155,6 +4155,27 @@ static void vlan_id_cases(void)
  * file is read first, a phase word followed by `=` is a key and not a hook,
  * and a switch naming no interface is refused rather than doing nothing.
  */
+/* `log = true` on a firewall rule (0330), and refused beside `over`. */
+static void firewall_log_cases(void)
+{
+	ncfg_document_t *document;
+
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"telnet\" {\n\t\t\tprotocol = \"tcp\"\n\t\t\tport = 23\n"
+	    "\t\t\tlog = true\n\t\t}\n\t}\n}\n",
+	    "a logged firewall rule compiles, and renders back");
+	if (document) {
+		check(document->firewall && document->firewall->input.rule_count == 1u &&
+		        document->firewall->input.rules[0].log,
+		    "  and the rule logs");
+		ncfg_document_free(document);
+	}
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"ssh\" {\n\t\t\tprotocol = \"tcp\"\n\t\t\tport = 22\n"
+	    "\t\t\tover = \"8/15m\"\n\t\t\tlog = true\n\t\t}\n\t}\n}\n",
+	    "cannot do yet", "a rule that logs and counts `over` is refused, saying why");
+}
+
 static void switch_cases(void)
 {
 	ncfg_document_t        *document;
@@ -4200,6 +4221,7 @@ int main(void)
 	precedence_cases();
 	global_cases();
 	switch_cases();
+	firewall_log_cases();
 	dns_cases();
 	network_cases();
 	access_point_cases();

@@ -477,6 +477,10 @@ typedef struct {
 	 * language's order -- bit 0 is `new`. */
 	unsigned states;
 	int      translated; /* `ct status dnat`, 0310 */
+	/* A log rule, 0330: the rule's matches, a rated `log` and no verdict --
+	 * the kernel rule ahead of the verdict's, carrying its name and digest.
+	 * `action` means nothing in one. */
+	int      log;
 	/* An `over` meter's rate as the document keeps it, "COUNT/SECONDSs", or
 	 * empty (10.885). */
 	char     over[48];
@@ -489,6 +493,9 @@ typedef struct {
 	int      has_day;
 	uint8_t  day; /* 0 Sunday to 6 Saturday */
 } ncfg_nft_kernel_rule_t;
+
+/* "log" for a log rule (0330), else the action's word. */
+const char *ncfg_nft_kernel_rule_action_word(const ncfg_nft_kernel_rule_t *rule);
 
 /*
  * Read one entry of a rule dump as a firewall rule netcfgd wrote.

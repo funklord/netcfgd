@@ -553,6 +553,79 @@ static void an_over_rule_is_a_meter_per_family(void)
 	ncfg_buf_free(&text);
 }
 
+/*
+ * `log = true` (0330): each combination is two kernel rules, the log's first
+ * -- the matches, a rated `log`, no verdict -- then the verdict's, both under
+ * the rule's name and digest. Read back, the first is a log row and the
+ * second the drop; the log word is part of the digest.
+ */
+static void a_logged_rule_is_a_log_then_its_verdict(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_buf_t           text;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	int64_t              ports[2] = { 23, 2323 };
+	char                 err[NCFG_ERROR_MAX];
+	char                 order[16] = "";
+	char                 digests[2][NCFG_NFT_DIGEST_HEX + 1u];
+	int                  rules = 0, unread = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"telnet";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_TCP;
+	rule.ports = ports;
+	rule.port_count = 2u;
+	rule.log = 1;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.policy = NCFG_FIREWALL_POLICY_ACCEPT;
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+	memset(digests, 0, sizeof(digests));
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a logged rule is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and passes the audit of what netcfgd may write");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (!ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			unread++;
+			continue;
+		}
+		if (rules < 4 && strlen(order) + 2u < sizeof(order)) {
+			strcat(order, one.log ? "L" : "V");
+		}
+		if (rules < 2) {
+			(void)snprintf(digests[rules], sizeof(digests[rules]), "%s", one.digest);
+		}
+		rules++;
+	}
+	check(unread == 0, "  every kernel rule reads back");
+	check(rules == 4 && strcmp(order, "LVLV") == 0,
+	    "  as the log's rule then the verdict's, for each port");
+	check(strcmp(digests[0], digests[1]) == 0 && digests[0][0],
+	    "  both under the written rule's one digest");
+	ncfg_buf_free(&out);
+
+	ncfg_buf_init(&text, 0);
+	(void)ncfg_nft_firewall_rule_text("input", &rule, &text);
+	check(strstr(text.data ? text.data : "", "log\n") != NULL,
+	    "  and logging is part of what the digest is taken over");
+	ncfg_buf_free(&text);
+}
+
 /* The comment's digest of a one-rule input chain, at the fixed offset. */
 static void digest_of(ncfg_firewall_rule_t *rule, char *out, size_t out_size)
 {
@@ -1811,6 +1884,7 @@ int main(void)
 	what_is_written_is_read_back();
 	a_translated_rule_is_written_read_and_digested();
 	an_over_rule_is_a_meter_per_family();
+	a_logged_rule_is_a_log_then_its_verdict();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

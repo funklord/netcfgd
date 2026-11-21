@@ -208,6 +208,10 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 		const ncfg_observed_firewall_rule_t *one = &observed->rules[at];
 		ncfg_firewall_chain_t               *chain = NULL;
 		ncfg_firewall_rule_t                *rule;
+		/* A log's kernel rule (0330) is its written rule's `log`, with the
+		 * verdict's row after it carrying the action. */
+		const int                            logs = one->action &&
+		    strcmp(one->action, "log") == 0;
 
 		for (c = 0; c < 3u; c++) {
 			if (strcmp(one->chain, names[c]) == 0) {
@@ -227,6 +231,7 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 				return NULL;
 			}
 			chain->rules = grown;
+			/* The action is the verdict's row's, set below. */
 			rule = &chain->rules[chain->rule_count++];
 			memset(rule, 0, sizeof(*rule));
 			rule->name = strdup(one->name);
@@ -250,6 +255,11 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 			}
 		}
 		rule = &chain->rules[chain->rule_count - 1u];
+		if (logs) {
+			rule->log = 1;
+		} else {
+			rule->action = action_of(one->action);
+		}
 		if (one->port.has) {
 			size_t p;
 			int    seen = 0;
@@ -304,8 +314,10 @@ static size_t observed_in(const ncfg_observed_firewall_t *observed, const char *
 	size_t at;
 	size_t count = 0;
 
+	/* A log's own kernel rule (0330) is not a rule of the chain's. */
 	for (at = 0; observed && at < observed->rule_count; at++) {
-		count += strcmp(observed->rules[at].chain, chain) == 0;
+		count += strcmp(observed->rules[at].chain, chain) == 0 &&
+		    !(observed->rules[at].action && strcmp(observed->rules[at].action, "log") == 0);
 	}
 	return count;
 }

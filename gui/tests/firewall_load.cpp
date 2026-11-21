@@ -126,7 +126,8 @@ static QString dump(const ncfg_firewall_settings &settings)
 				rule.to.join(QLatin1Char(',')), rule.interface, rule.out_interface,
 				rule.states.join(QLatin1Char(',')), rule.stations.join(QLatin1Char(',')),
 				rule.hours, rule.days.join(QLatin1Char(',')),
-				rule.translated ? QStringLiteral("translated") : QString(), rule.over }
+				rule.translated ? QStringLiteral("translated") : QString(), rule.over,
+				rule.log ? QStringLiteral("log") : QString() }
 			             .join(QLatin1Char('|'));
 		}
 	}
@@ -144,7 +145,7 @@ static const char every_key[] =
     "\t\taccept \"established\" { state = [\"established\", \"related\"] }\n"
     "\t\taccept \"ssh\" { protocol = \"tcp\"; port = [22, 2222]; "
     "from = [\"10.0.0.0/8\", \"fd00::/8\"]; interface = \"eth0\" }\n"
-    "\t\treject \"kids\" { mac = [\"@host_list:kids\", \"aa:bb:cc:*\"] }\n"
+    "\t\treject \"kids\" { mac = [\"@host_list:kids\", \"aa:bb:cc:*\"]; log = true }\n"
     "\t\tdrop \"ssh-guard\" { protocol = \"tcp\"; port = 22; state = [\"new\"]; over = \"8/15m\" }\n"
     "\t}\n"
     "\tforward {\n"
@@ -193,7 +194,10 @@ int main(int argc, char **argv)
 	              QString::number(loaded.forward.rules.size()),
 	              QString::number(loaded.output.rules.size())),
 	    QStringLiteral("1 drop drop accept 4/2/0"), "  every chain, its policy and its rules");
-	if (loaded.input.rules.size() == 3 && loaded.forward.rules.size() == 2) {
+	/* The counts the check above asserts. This read `== 3` from before the
+	 * SSH guard was the fourth input rule (10.885), so every check below was
+	 * skipped in silence until 2026-11-21 -- the guard's own among them. */
+	if (loaded.input.rules.size() == 4 && loaded.forward.rules.size() == 2) {
 		const ncfg_firewall_rule_row &ssh = loaded.input.rules.at(1);
 		check(QStringLiteral("%1 %2 %3:%4 %5 %6")
 		          .arg(ssh.name, ssh.action, ssh.protocol)
@@ -220,6 +224,10 @@ int main(int argc, char **argv)
 		 * not read it would have dropped the guard and kept the drop. */
 		check(loaded.input.rules.size() > 3 ? loaded.input.rules.at(3).over : QString(),
 		    QStringLiteral("8/900s"), "  and a guard's per-source rate");
+		/* 0330: a Save that did not read it would stop the rule logging. */
+		check(loaded.input.rules.size() > 2 && loaded.input.rules.at(2).log
+		          ? QStringLiteral("yes") : QStringLiteral("no"),
+		    QStringLiteral("yes"), "  and that a rule logs");
 	}
 
 	/* **Save with no change, and nothing moves.** The block the tab would
