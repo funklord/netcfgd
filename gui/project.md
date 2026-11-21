@@ -155,7 +155,11 @@ Three things about that list are worth knowing before designing screens:
 - **`apply` takes a confirm window.** Commit-confirm exists because a network
   change can cut off the person making it — which is *more* true from a phone than
   from a terminal on the machine. A remote apply should default to a confirm
-  window; **OPEN:** whether the GUI ever offers an apply without one.
+  window. **Settled by the holder, 2026-11-06**
+  ([0316](../doc/decision/0316-a-change-with-no-way-back-and-a-control-protocol-that-does-not-fail.md)):
+  some directives cannot be rolled back, so there is a remote apply with no
+  window -- `ncfg apply --at HOST --no-rollback HOST --reason TEXT`, one host,
+  logged at error level on the target -- and neither the GUI nor the TUI offers it.
 
 ## 6. What the remote protocol is, in outline
 
@@ -545,12 +549,13 @@ to decide, not this tree's.
 
 ## 9. Questions to raise rather than answer alone
 
-- Whether a remote `apply` may ever run without a confirm window (§5).
-  **Still the holder's.** [0312](../doc/decision/0312-the-control-vocabulary-is-one-fuzznet-procedure.md)
-  took the refusing side for an operator of the estate, on 2026-11-03, without
-  having seen that this was listed here to raise. It is one condition in
-  `c/src/main/daemon_ask.c` and one in `c/src/cli/run.c`, so either answer is
-  cheap to make.
+- ~~Whether a remote `apply` may ever run without a confirm window (§5).~~
+  **Answered by the holder, 2026-11-06:** yes, for the rare directive that cannot
+  be rolled back, made hard to reach and logged loudly --
+  [0316](../doc/decision/0316-a-change-with-no-way-back-and-a-control-protocol-that-does-not-fail.md),
+  which amends [0312](../doc/decision/0312-the-control-vocabulary-is-one-fuzznet-procedure.md)'s
+  refusal. `--no-rollback` in `ncfg` only; the GUI and the TUI do not offer it.
+  This entry still read *still the holder's* until 2026-11-21, fifteen days after.
 - ~~How a phone finds a host on the LAN, and how pairing works the first time.~~
   **Answered by the holder, 2026-11-05:** on a phone, pairing by QR code is the
   first thing a person does, and no file or other app's auth data is part of it.

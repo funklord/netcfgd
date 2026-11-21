@@ -1019,7 +1019,7 @@ them because no test had ever carried those keys.
      goes in pieces (10.695).
    - **The operator's side exists**: `ncfg hosts` (10.692), `status --at`
      (10.691), and `--at HOST` for every socket verb (10.694), with nothing
-     falling back to this machine. A remote apply carries a window, which is
+     falling back to this machine. A remote apply carries a window (only `--no-rollback`, 0316, does not), which is
      shown live to arm, confirm and revert (10.697). The GUI and the shim
      read the status over fuzznet first (10.690).
 
