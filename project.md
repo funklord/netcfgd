@@ -8652,12 +8652,16 @@ keeps `.built-from` beside them, and `c/Makefile` adds the commit to the
 change said "fuzznet is at c20c1a66... its objects from before go" and the
 three bridge tests passed.
 
-**Not fixed, and older than this:** a second `make -C bridge` relinks
-`netcfgd-remote`, because its rule lists the phony `fuzznet` and `client` as
-prerequisites. That breaks *a second make writes no file*; making them
-order-only needs the objects themselves as prerequisites, which
-`FUZZNET_OBJS` computes before fuzznet is built, so it wants care rather than
-a one-line change.
+**And older than this:** a second `make -C bridge` relinked
+`netcfgd-remote`, because its rule listed the phony `fuzznet` and `client` as
+prerequisites, breaking *a second make writes no file*. It names files now:
+the client's archive, behind a `FORCE` rule that runs the client's own build
+(which rewrites the archive only when something changed), and a stamp,
+`.fuzznet-built`, touched only when a fuzznet object is newer than it. The
+link line is unchanged -- the objects, not an archive, since an archive would
+drop members nothing references. Measured: a second `make` wrote nothing; a
+touched fuzznet object and a touched client archive each relinked; the three
+bridge tests passed.
 
 ## 10.893 fuzznet c20c1a66: the idle memory back, and 240 KB of text more
 

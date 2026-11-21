@@ -95,7 +95,7 @@ endif
 FUZZNET_DEFS = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 	       -DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
 
-.PHONY: all fuzznet client test clean
+.PHONY: all fuzznet client test clean FORCE
 
 # **The default goal is pinned, and it is not decoration.** A target added
 # above `all` becomes what a bare `make` here does -- which is how `syntax`,
@@ -208,7 +208,25 @@ FUZZNET_LIBS = $(shell nm $(FUZZNET_OBJS) 2>/dev/null | \
 client:
 	@$(MAKE) --no-print-directory -C $(CLIENT)
 
-$(PROGRAM): $(SRCS) $(CORE_SRCS) fuzznet client
+# **Files, not the two phony targets, so a second `make` writes nothing**
+# (build-and-commit.md). The program named `fuzznet` and `client` as its
+# prerequisites, and a phony prerequisite is always out of date, so every
+# `make` here relinked `netcfgd-remote` (project.md 10.894). The client's
+# archive is a file its own build rewrites only when something changed; the
+# fuzznet objects stay on the link line as they are, and a stamp beside the
+# program stands for them, touched only when one of them is newer -- which is
+# `c/Makefile`'s `fuzznet.a` rule, without changing what is linked.
+$(CLIENT_LIB): FORCE
+	@$(MAKE) --no-print-directory -C $(CLIENT)
+
+.fuzznet-built: fuzznet
+	@if [ ! -e $@ ] || [ -n "$$(find $(FUZZNET)/$(FUZZNET_BLD) -name '*.o' -newer $@)" ]; then \
+		touch $@; \
+	fi
+
+FORCE:
+
+$(PROGRAM): $(SRCS) $(CORE_SRCS) .fuzznet-built $(CLIENT_LIB)
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(CORE_SRCS) $(FUZZNET_OBJS) $(CLIENT_LIB) \
 		$(LDFLAGS) $(FUZZNET_LIBS) -o $@
 
@@ -240,7 +258,9 @@ tests/record_emit_test: tests/record_emit_test.c record_emit.c record_encode.c \
 # By name, and nothing by pattern this directory does not own. fuzznet's build
 # output is fuzznet's to remove, through its own clean.
 clean:
-	rm -f $(PROGRAM) tests/peek_test tests/record_encode_test tests/record_emit_test
-	@echo "clean: removed $(PROGRAM), tests/peek_test, tests/record_encode_test and"
-	@echo "clean:   tests/record_emit_test; fuzznet's objects are its own to clean"
+	rm -f $(PROGRAM) tests/peek_test tests/record_encode_test tests/record_emit_test \
+		.fuzznet-built
+	@echo "clean: removed $(PROGRAM), tests/peek_test, tests/record_encode_test,"
+	@echo "clean:   tests/record_emit_test and .fuzznet-built; fuzznet's objects are"
+	@echo "clean:   its own to clean"
 
