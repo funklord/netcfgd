@@ -26,7 +26,7 @@
 #include "ncfg/document.h"
 
 #include "ncfg/base.h"
-#include "ncfg/ops.h"
+#include "ncfg/value.h"
 
 #include <stdlib.h>
 #include <string.h>

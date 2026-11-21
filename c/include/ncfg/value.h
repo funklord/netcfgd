@@ -411,4 +411,14 @@ typedef enum {
 const char *ncfg_dns_mode_name(int mode);
 int ncfg_dns_mode_from_name(const char *name, ncfg_dns_mode_t *out, char *err, size_t err_size);
 
+/*
+ * Parse `de:ad:be:ef:00:01` into six octets.
+ *
+ * Anything that is not six colon-separated hex octets is refused. Strict for
+ * the reason `ncfg_hardware_address_strict` above is strict, and this is
+ * the kernel-facing half of the same job: what it produces goes in
+ * `IFLA_ADDRESS`, where a wrong octet is a link with somebody else's address.
+ */
+int ncfg_ops_parse_mac(const char *text, uint8_t out[6], char *err, size_t err_size);
+
 #endif /* NCFG_VALUE_H */
