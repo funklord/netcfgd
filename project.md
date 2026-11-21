@@ -8622,7 +8622,9 @@ The same pin adds 281,832 bytes installed (text 2,276,451 to 2,517,217),
 all fuzznet's: its node, search, contacts and members work. Taken on the
 11-07 and 11-13 precedent, with the attribution in `size-budget.txt`, and
 the figure sent to fuzznet, since a tenth more flash is what a router
-pays. The whole C suite passes on the pin, and so do the budget, bss,
+pays; fuzznet holds it open as its project.md section 1345, asking which of
+it an embedded node can never reach so its embedded profile (its section
+922) can leave it out. The whole C suite passes on the pin, and so do the budget, bss,
 ledger, module-order and linkage gates.
 
 ## 10.892 `make check` whole: four gates red, three of them for days
