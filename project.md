@@ -7095,7 +7095,19 @@ in the DNS tab's own `50-dns`, and flow offload in the global tab's `50-offload`
 The DNS tab had been listing blanks for the servers it showed: the client read
 each server as a string, and the document holds `{"addr": ...}`. A global block
 holding what the tab cannot write back -- a server's port or SNI, `domains` --
-is refused rather than saved without it. `reject` answers tcp with a reset
+is refused rather than saved without it.
+
+**MSS clamping, measured and not built.** nft 1.1.3 writes `oifname "ppp0" tcp
+flags & (syn | rst) == syn tcp option maxseg size set rt mtu`, in a chain at the
+forward hook, priority mangle, as: `meta load oifname`, `cmp`; `meta load
+l4proto`, `cmp 6`; `payload load 1b @ transport + 13`, `bitwise & 0x06`, `cmp
+0x02`; `rt load tcpmss`; `byteorder hton 2`; `exthdr write tcpopt reg => 2b @ 2
++ 2`. It would be a fourth part of the one transaction that replaces
+netcfgd's table, so it touches the `nftables` op (which the confirm window
+persists), `ncfg_nft_build_replace_all`, the write-audit's chain list, the
+observer, the planner's comparison and the undo copy -- the shape flow offload
+took (0319). Left for when a PPPoE uplink is in front of somebody: nothing the
+holder runs today has one. `reject` answers tcp with a reset
 where asked: [0332](doc/decision/0332-a-reject-may-answer-tcp-with-a-reset.md).
 
 ## 10.894 A pin move left fuzznet's old objects in the link
