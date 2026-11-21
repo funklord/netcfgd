@@ -12747,6 +12747,56 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.890 Taken over from ifupdown, a Devuan box mounted no network filesystem at boot
+
+The takeover rigs (10.884, 10.886) switch within one boot and never boot
+again, so they never saw where netcfgd lands in the boot. Read from the
+images after the switch: `networking` gone from rcS (`K09`), `mountnfs.sh`
+at `S09` in rcS, and netcfgd at `S01` in **rc2** -- its script said
+`Default-Start: 2 3 4 5` and `Required-Start: $remote_fs`. rcS runs whole
+before rc2, so everything in it that wants the network ran before netcfgd
+existed, and `$remote_fs` *is* the network filesystems, which cannot wait
+for the thing they need.
+
+**Worse, nothing mounted them at all.** With `ASYNCMOUNTNFS` at its
+default, Devuan's `mountnfs.sh` only waits for NFS under /usr and /var; the
+mounting is `/etc/network/if-up.d/mountnfs`, which ifupdown runs as each
+interface comes up, once the last `auto` one is up. netcfgd runs no
+if-up.d hook. So a box switched from ifupdown would boot with every NFS
+and `_netdev` line in its fstab unmounted -- ml350, a client of the NAS,
+the first.
+
+Two ways to fill the facility were measured and refused. `$network` is
+`+networking +ifupdown` in /etc/insserv.conf, and a second definition in
+/etc/insserv.conf.d is not merged: Devuan's OpenRC reads LSB headers
+through `lsb2rcconf`, which reads the same files, and run on a header
+with `$network +netcfgd` in insserv.conf.d it still expanded `$network`
+to `networking ifupdown` alone. Providing the name `networking` would
+make netcfgd and ifupdown's script two providers of one name, which
+insserv refuses while both are installed.
+
+So netcfgd takes `networking`'s slot by its own name. Its script starts in
+rcS (`Default-Start: S`, `Required-Start: $local_fs`, `Should-Start: udev`,
+`X-Start-Before: mountnfs`; dbus dropped, being rc2's and only
+netcfgd-nm's), and a new `netcfgd-wait-online` -- the systemd unit's
+counterpart -- runs after it and before mountnfs: `ncfg wait-online 30`,
+then what the if-up.d hook's `do_start` does (rpcbind and nfs-common where
+an NFS line needs locking, `mount -a` of the network types and of
+`_netdev`, between `pre_mountall` and `post_mountall`). It never fails the
+boot. Under OpenRC the switcher now puts a script whose header says
+`Default-Start: S` in `boot`, where Devuan's OpenRC had `networking`,
+rather than `default`, which runs after everything in `boot`; and it
+enables netcfgd-wait-online without starting it, as it does the systemd
+unit.
+
+Held by both rigs: after the switch netcfgd, then netcfgd-wait-online,
+then mountnfs in rcS (sysv-rc), or both in `boot` (OpenRC), and running
+netcfgd-wait-online mounts a `_netdev` tmpfs line in fstab, standing in for
+NFS. `tests/live/select.sh` checks the runlevel and the enable-not-start.
+A real boot is not in either rig: hull machines run their payload as the
+boot, so what is checked is the order insserv and OpenRC computed and the
+script doing its part, not a cold boot end to end.
+
 ## 10.889 The storage ring heals around a cut cable; a bridge takes `max_age`
 
 The holder chose the bridged storage net (2026-11-21: "bridged, possibly

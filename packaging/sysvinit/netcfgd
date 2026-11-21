@@ -1,11 +1,12 @@
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:          netcfgd
-# Required-Start:    $local_fs $remote_fs
-# Required-Stop:     $local_fs $remote_fs
-# Should-Start:      dbus
-# Default-Start:     2 3 4 5
-# Default-Stop:      0 1 6
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Should-Start:      udev
+# X-Start-Before:    mountnfs
+# Default-Start:     S
+# Default-Stop:      0 6
 # Short-Description: network configuration daemon
 # Description:       netcfgd reads one declarative configuration and makes the
 #                    machine match it.
@@ -20,6 +21,18 @@
 # covers both, and the deb ships it. Before it, `apt install netcfgd` on such a
 # machine installed a systemd unit nothing reads and left no way to run the
 # daemon as a service at all.
+#
+# **In rcS, where ifupdown's `networking` starts** (project.md 10.890). It said
+# `Default-Start: 2 3 4 5` and `Required-Start: $remote_fs`, which is the slot
+# a daemon that wants the network takes, not the one that brings it up: on a
+# Devuan machine switched from ifupdown it started after every rcS script,
+# mountnfs.sh included, so the network filesystems were looked for before
+# there was a network -- and $remote_fs is those filesystems, which cannot
+# wait for the thing they need. netcfgd needs only local filesystems (its
+# binary, /etc and /var/log), and udev to have named the interfaces. dbus is
+# not asked for: it starts in runlevel 2, and only netcfgd-nm talks to it.
+# netcfgd-wait-online, after this and before mountnfs, does the mounting
+# ifupdown's if-up.d hook did.
 #
 # It deliberately does not supervise. systemd has Restart=on-failure, OpenRC
 # has its own supervisor and procd has `respawn`; sysvinit has none, and a

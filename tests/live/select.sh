@@ -462,10 +462,16 @@ sysv_run() {
 		if [ "$rc" = openrc ]; then
 			mkdir -p /run/openrc
 		fi
-		for script in netcfgd netcfgd-nm connman networking network-manager dhcpcd; do
+		for script in netcfgd netcfgd-nm netcfgd-wait-online connman networking network-manager dhcpcd; do
 			printf "#!/bin/sh\necho \"init %s \$*\" >> \"\$SEL_LOG\"\n" "$script" > "/etc/init.d/$script"
 			chmod +x "/etc/init.d/$script"
 		done
+		# The headers the switcher reads for an OpenRC runlevel, as the
+		# packages write them: rcS for the three that bring the network up.
+		for script in netcfgd netcfgd-wait-online networking; do
+			echo "# Default-Start:     S" >> "/etc/init.d/$script"
+		done
+		echo "# Default-Start:     2 3 4 5" >> /etc/init.d/network-manager
 		export PATH="$work/sysv-bin:$work/openrc-bin:$work/bin:$PATH"
 		for target in "$@"; do
 			echo "== $target" >> "$SEL_LOG"
@@ -507,9 +513,15 @@ check "sysvinit with rc-update installed and OpenRC not running uses update-rc.d
 	check "and is started" "$(section sysv netcfgd 'init netcfgd start')" "1"
 	check "while its NetworkManager shim is not switched on" \
 		"$(section sysv netcfgd 'init netcfgd-nm start')" "0"
+	check "netcfgd-wait-online gets its boot links, to mount the network filesystems" \
+		"$(section sysv netcfgd 'update-rc.d netcfgd-wait-online defaults')" "1"
+	check "and is not started, which would hold the switch until online" \
+		"$(section sysv netcfgd 'init netcfgd-wait-online start')" "0"
 	check "selecting NetworkManager disables netcfgd" \
 		"$(section sysv networkmanager 'update-rc.d netcfgd disable')" "1"
 	check "and its shim" "$(section sysv networkmanager 'update-rc.d netcfgd-nm disable')" "1"
+	check "and its wait-online" \
+		"$(section sysv networkmanager 'update-rc.d netcfgd-wait-online disable')" "1"
 	check "and enables network-manager" \
 		"$(section sysv networkmanager 'update-rc.d network-manager enable')" "1"
 	check "and starts it" "$(section sysv networkmanager 'init network-manager start')" "1"
@@ -521,7 +533,10 @@ check "OpenRC: selecting netcfgd takes connman out of the default runlevel" \
 	"$(section openrc netcfgd 'rc-update del connman default')" "1"
 check "and ifupdown by its script name, networking, from boot where it is" \
 	"$(section openrc netcfgd 'rc-update del networking boot')" "1"
-check "and puts netcfgd in it" "$(section openrc netcfgd 'rc-update add netcfgd default')" "1"
+check "and puts netcfgd in it, where its Default-Start: S belongs (10.890)" \
+	"$(section openrc netcfgd 'rc-update add netcfgd boot')" "1"
+check "and its wait-online beside it" \
+	"$(section openrc netcfgd 'rc-update add netcfgd-wait-online boot')" "1"
 check "and starts it" "$(section openrc netcfgd 'rc-service netcfgd start')" "1"
 check "and touches no sysv-rc link while OpenRC runs" "$(grep -c '^update-rc.d' "$work/openrc.log" || true)" "0"
 fi

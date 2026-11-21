@@ -64,6 +64,12 @@ fi
 install -m 0755 /repo/c/netcfgd /usr/sbin/netcfgd
 ln -sf /usr/sbin/netcfgd /usr/bin/ncfg
 install -m 0755 /repo/packaging/sysvinit/netcfgd /etc/init.d/netcfgd
+install -m 0755 /repo/packaging/sysvinit/netcfgd-wait-online /etc/init.d/netcfgd-wait-online
+# A filesystem that waits for the network, as the NAS's clients mount it.
+# tmpfs stands in for NFS: what is tested is who mounts a `_netdev` line once
+# ifupdown, whose if-up.d hook did it, is gone (10.890).
+mkdir -p /mnt/netdev
+echo "none /mnt/netdev tmpfs _netdev,size=1m 0 0" >> /etc/fstab
 # dhcpcd's hook, which `make install` and the package place: without it
 # netcfgd refuses to start dhcpcd, saying why (a lease's nameservers would
 # never reach it). The rig's first run missed it, and the log said so.
@@ -102,16 +108,26 @@ check "B: netcfgd is running" "$(pgrep -x netcfgd | wc -l | tr -d ' ')" "1"
 check "B: iptables holds no rules of its own now" "$(iptables -S INPUT | head -1)" "-P INPUT ACCEPT"
 if [ "$rc" = openrc ]; then
 	# The runlevels OpenRC reads, not /etc/rc?.d, which nothing reads here.
-	check "B: netcfgd starts at boot" "$(rc-update show 2>/dev/null | grep -c '^ *netcfgd |')" "1"
+	check "B: netcfgd starts at boot, in boot where networking was" \
+		"$(rc-update show -v 2>/dev/null | grep -c '^ *netcfgd | boot')" "1"
+	check "B: and netcfgd-wait-online beside it" \
+		"$(rc-update show -v 2>/dev/null | grep -c '^ *netcfgd-wait-online | boot')" "1"
 	check "B: ifupdown does not" "$(rc-update show 2>/dev/null | grep -c '^ *networking |')" "0"
 	check "B: iptables-persistent does not" "$(rc-update show 2>/dev/null | grep -c '^ *netfilter-persistent |')" "0"
 else
 	# Start links only: `update-rc.d disable` turns an S link into a K link in
 	# the same directory, so a disabled script is still listed there.
-	check "B: netcfgd starts at boot" "$(ls /etc/rc2.d | grep -c '^S.*netcfgd$')" "1"
+	check "B: netcfgd starts at boot, in rcS where networking was" \
+		"$(ls /etc/rcS.d | grep -c '^S.*netcfgd$')" "1"
+	# The order is the link numbers', which insserv computed from the headers.
+	order=$(ls /etc/rcS.d | sed -n 's/^S[0-9]*//p' | grep -nxE 'netcfgd|netcfgd-wait-online|mountnfs.sh' | cut -d: -f2 | tr '\n' ' ')
+	check "B: netcfgd, then netcfgd-wait-online, then mountnfs" "$order" "netcfgd netcfgd-wait-online mountnfs.sh "
 	check "B: ifupdown does not" "$(ls /etc/rcS.d /etc/rc2.d | grep -c '^S.*networking$')" "0"
 	check "B: iptables-persistent does not" "$(ls /etc/rcS.d /etc/rc2.d | grep -c '^S.*netfilter-persistent$')" "0"
 fi
+/etc/init.d/netcfgd-wait-online start > $v/nas-wait-online.log 2>&1
+check "B: netcfgd-wait-online mounts the _netdev filesystem ifupdown's hook did" \
+	"$(mountpoint -q /mnt/netdev && echo mounted || echo absent)" "mounted"
 ncfg status > $v/nas-status.txt 2>&1
 for f in /run/netcfgd/dhcpcd/* /run/netcfgd/udhcpc/*; do
 	[ -f "$f" ] && { echo "== $f"; cat "$f"; } >> $v/nas-dhcp.txt 2>&1

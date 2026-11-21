@@ -1,0 +1,129 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          netcfgd-wait-online
+# Required-Start:    $local_fs netcfgd
+# Required-Stop:
+# X-Start-Before:    mountnfs
+# Default-Start:     S
+# Default-Stop:
+# Short-Description: wait for netcfgd's network, then mount network filesystems
+# Description:       Blocks until the machine has a global address and a
+#                    default route, then mounts the fstab entries that need
+#                    the network -- what ifupdown's if-up.d hook did.
+### END INIT INFO
+#
+# netcfgd-wait-online.service's counterpart under sysvinit and OpenRC on
+# Debian (project.md 10.890), and one thing more, because sysvinit needs it.
+#
+# **Without ifupdown nothing mounted the network filesystems at boot.**
+# Devuan's mountnfs.sh, with ASYNCMOUNTNFS at its default, mounts nothing: it
+# waits for the NFS mounts under /usr and /var, and the mounting is done by
+# /etc/network/if-up.d/mountnfs, which ifupdown runs as each interface comes
+# up. netcfgd runs no if-up.d hooks, so a machine taken over from ifupdown
+# booted with every NFS and `_netdev` line in its fstab unmounted -- ml350,
+# a client of the NAS, among them. This does what that hook's `do_start`
+# does: nfs-common (and rpcbind) where an NFS line needs locking, then
+# `mount -a` of the network types and of `_netdev`, between the same
+# pre_mountall and post_mountall.
+#
+# Ordered after netcfgd and before mountnfs, in rcS (or OpenRC's `boot`), the
+# slot ifupdown's `networking` held: so with ASYNCMOUNTNFS=no, where
+# mountnfs.sh mounts itself, the network is up first too, and everything in
+# the runlevels after finds the mounts made.
+#
+# HOW IT STOPS: `ncfg wait-online` is bounded by WAIT_ONLINE, 30 seconds as
+# netcfgd_select.sh's own wait, and a mount that cannot reach its server is
+# bounded by its own options; this never fails the boot.
+set -e
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+NCFG=/usr/bin/ncfg
+WAIT_ONLINE=30
+
+[ -x "$NCFG" ] || exit 0
+
+# Guarded as in packaging/sysvinit/netcfgd: a minimal image may lack lsb-base.
+if [ -r /lib/lsb/init-functions ]; then
+	. /lib/lsb/init-functions
+else
+	log_action_begin_msg() { printf '%s...' "$1"; }
+	log_action_end_msg() { [ "$1" = 0 ] && echo "done." || echo "failed."; }
+fi
+
+# The network types if-up.d/mountnfs mounts, and whether an NFS line needs
+# the lock daemon: an `nfs` line without `nolock`, any `nfs4`, or Kerberos.
+network_types=
+needs_nfs_common=
+read_fstab() {
+	while read -r device point type options rest; do
+		case "$device" in
+		"" | \#*) continue ;;
+		esac
+		case ",$options," in
+		*,noauto,*) continue ;;
+		esac
+		case "$type" in
+		nfs)
+			case ",$options," in
+			*,nolock,*) ;;
+			*) needs_nfs_common=yes ;;
+			esac
+			case ",$options," in
+			*,sec=krb5,* | *,sec=krb5i,* | *,sec=krb5p,*) needs_nfs_common=yes ;;
+			esac
+			;;
+		nfs4) needs_nfs_common=yes ;;
+		smbfs | cifs | coda | ncp | ncpfs | ceph) ;;
+		*) continue ;;
+		esac
+		case ",$network_types," in
+		*,"$type",*) ;;
+		*) network_types="$network_types${network_types:+,}$type" ;;
+		esac
+	done < /etc/fstab
+}
+
+mount_network_filesystems() {
+	[ -r /etc/fstab ] || return 0
+	read_fstab
+	if [ -z "$network_types" ] && ! grep -qE '^[^#].*[[:space:],]_netdev([[:space:],]|$)' /etc/fstab; then
+		return 0
+	fi
+	if [ -n "$needs_nfs_common" ] && [ -x /etc/init.d/nfs-common ]; then
+		[ -x /etc/init.d/rpcbind ] && /etc/init.d/rpcbind start || true
+		/etc/init.d/nfs-common start || true
+	fi
+	if [ -r /lib/init/mount-functions.sh ]; then
+		. /lib/init/mount-functions.sh
+		pre_mountall || true
+	fi
+	log_action_begin_msg "Mounting network filesystems"
+	status=0
+	if [ -n "$network_types" ]; then
+		mount -a -t "$network_types" || status=1
+	fi
+	mount -a -O _netdev || status=1
+	log_action_end_msg $status || true
+	command -v post_mountall >/dev/null 2>&1 && post_mountall || true
+}
+
+case "$1" in
+start)
+	log_action_begin_msg "Waiting up to ${WAIT_ONLINE}s for the network"
+	if "$NCFG" wait-online "$WAIT_ONLINE" >/dev/null 2>&1; then
+		log_action_end_msg 0 || true
+	else
+		# Mount anyway: a filesystem on the storage net needs no default
+		# route, and a mount that cannot reach its server says so itself.
+		log_action_end_msg 1 || true
+	fi
+	mount_network_filesystems
+	;;
+stop | restart | force-reload | status)
+	;;
+*)
+	echo "usage: $0 {start|stop}" >&2
+	exit 3
+	;;
+esac
+exit 0

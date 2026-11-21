@@ -549,7 +549,9 @@ install-gui:
 install-sysvinit:
 	install -d $(DESTDIR)$(SYSCONFDIR)/init.d
 	install -m 0755 packaging/sysvinit/netcfgd $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
-	@echo "install-sysvinit: /etc/init.d/netcfgd installed, not enabled"
+	install -m 0755 packaging/sysvinit/netcfgd-wait-online \
+		$(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd-wait-online
+	@echo "install-sysvinit: /etc/init.d/netcfgd and netcfgd-wait-online installed, not enabled"
 	@echo "install-sysvinit:   to run it as a service: update-rc.d netcfgd defaults"
 
 install-sysvinit-nm:
@@ -4020,6 +4022,7 @@ uninstall:
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd.service
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-wait-online.service
 	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd
+	rm -f $(DESTDIR)$(SYSCONFDIR)/init.d/netcfgd-wait-online
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-nm
 	rm -f $(DESTDIR)$(DATADIR)/dbus-1/system.d/netcfgd-nm.conf
 	rm -f $(DESTDIR)/usr/lib/systemd/system/netcfgd-nm.service

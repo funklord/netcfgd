@@ -374,7 +374,7 @@ unit_of() {
 # down stops it, and selecting netcfgd does not switch it on.
 script_of() {
 	case "$1" in
-	netcfgd) echo 'netcfgd netcfgd-nm' ;;
+	netcfgd) echo 'netcfgd netcfgd-nm netcfgd-wait-online' ;;
 	networkmanager) echo 'network-manager networkmanager NetworkManager' ;;
 	connman) echo connman ;;
 	ifupdown) echo networking ;;
@@ -453,6 +453,18 @@ sysv_down() {
 	done
 }
 
+# The OpenRC runlevel an LSB script belongs in: `boot` for one that says
+# `Default-Start: S`, as Devuan's OpenRC put ifupdown's `networking`, and
+# `default` otherwise. netcfgd starts in rcS where `networking` did (10.890),
+# and in `default` it came up after everything in `boot` already wanted the
+# network.
+openrc_level_of() {
+	case "$(sed -n 's/^# Default-Start: *//p' "/etc/init.d/$1" 2>/dev/null | head -n 1)" in
+	S | S\ *) echo boot ;;
+	*) echo default ;;
+	esac
+}
+
 # Started, and started at the next boot -- the first script that exists only,
 # as `bring_up` starts only the first unit. `defaults` makes the links where
 # the package made none, which this tree's deb does not (debian/rules keeps
@@ -464,7 +476,7 @@ sysv_up() {
 			[ -n "$holding" ] || run "/etc/init.d/$script" enable
 			run "/etc/init.d/$script" start
 		elif openrc_runs; then
-			run rc-update add "$script" default
+			run rc-update add "$script" "$(openrc_level_of "$script")"
 			run rc-service "$script" start
 		else
 			if command -v update-rc.d >/dev/null 2>&1; then
@@ -473,8 +485,24 @@ sysv_up() {
 			fi
 			run "/etc/init.d/$script" start
 		fi
+		[ "$1" = netcfgd ] && sysv_enable_only netcfgd-wait-online
 		return 0
 	done
+}
+
+# Enabled for the next boot and not started, as `bring_up` treats
+# netcfgd-wait-online.service: started here it would block the switch until
+# the network is up, and what it mounts at boot is mounted already.
+sysv_enable_only() {
+	[ -x "/etc/init.d/$1" ] || return 0
+	if procd_runs; then
+		return 0
+	elif openrc_runs; then
+		run rc-update add "$1" "$(openrc_level_of "$1")"
+	elif command -v update-rc.d >/dev/null 2>&1; then
+		run update-rc.d "$1" defaults
+		run update-rc.d "$1" enable
+	fi
 }
 
 # The per-interface files a stopped daemon leaves claiming interfaces it no
