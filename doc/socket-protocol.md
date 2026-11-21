@@ -506,7 +506,7 @@ row, and neither file can describe one the build cannot send.
 ### 6.3 The plan's actions
 
 A `plan` response and a `journal` response carry `actions` and `records`, and
-each one names an **op**. Forty-eight names, in `<subject>.<verb>` form, and
+each one names an **op**. Fifty names, in `<subject>.<verb>` form, and
 an operator reading `ncfg plan` sees them verbatim — so they are listed here.
 
 **The two columns are what a name cannot say.** Most of these spell themselves
@@ -542,6 +542,8 @@ are using and one that will cut them off.
 | `link.set_master` | yes |  |
 | `link.set_mtu` | yes |  |
 | `link.set_offloads` |  |  |
+| `link.set_link_modes` | yes |  |
+| `link.set_rings` | yes |  |
 | `link.set_tunnel` | yes |  |
 | `link.set_vxlan` | yes |  |
 | `link.set_wds` |  |  |
@@ -585,7 +587,10 @@ the other way and is not disruptive: toggling an offload re-initialises a
 driver's transmit path on some hardware and drops what is queued, which is a
 packet or two rather than a lost session — and a guard that blocked it would
 block the change most often made to fix a NIC that is already corrupting
-traffic.
+traffic. `link.set_link_modes` and `link.set_rings` (10.877) cut traffic for
+a physical reason rather than a cautious one: a new speed, duplex or
+autonegotiation retrains the PHY, and resizing a ring resets the NIC on most
+drivers, so the carrier drops either way.
 
 **Three answer for their first case, and the other case is the opposite.**
 A row is the op with nothing filled in. `access_control.add` is a station
