@@ -2033,7 +2033,9 @@ rss:
 # 2026-11-21 (10.892): 7376 + 328. It had been over since fuzznet b54490a
 # (2026-11-13), measured either side of that pin -- 6524-6540 KB before, 7304-7312
 # after, RssAnon 2948 to 3684 -- and level since; signalled to fuzznet.
-RSS_NODE_LIMIT_KB ?= 7704
+# 2026-11-21, later (10.893): fuzznet c20c1a66 stopped writing zeroes over calloc'd
+# tables; read 6472-6652 KB, RssAnon 2760, so 6652 + 328.
+RSS_NODE_LIMIT_KB ?= 6980
 rss-node:
 	@$(MAKE) --no-print-directory rss RSS_NAME=rss-node RSS_DAEMON_OPTIONS= \
 		RSS_SOCKET=fuzznet.sock RSS_LIMIT_KB=$(RSS_NODE_LIMIT_KB)

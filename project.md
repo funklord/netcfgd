@@ -8608,6 +8608,23 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.893 fuzznet c20c1a66: the idle memory back, and 240 KB of text more
+
+fuzznet answered 10.892's signal within the hour: the +736 KB was zeroes
+written over calloc'd memory, not a table -- its 1024-row value-rate table
+cleared after calloc, and each persist cache memsetting a 128 KB bucket
+table, which made them resident (fuzznet project.md section 1343). Taken
+at c20c1a66, 274 commits past 23e4f46. `make rss-node` reads 6,472-6,652 KB
+with the daemon's own anonymous memory at 2,760 KB, below the 2,948 of
+before b54490a; the limit comes down by its rule to 6,980.
+
+The same pin adds 281,832 bytes installed (text 2,276,451 to 2,517,217),
+all fuzznet's: its node, search, contacts and members work. Taken on the
+11-07 and 11-13 precedent, with the attribution in `size-budget.txt`, and
+the figure sent to fuzznet, since a tenth more flash is what a router
+pays. The whole C suite passes on the pin, and so do the budget, bss,
+ledger, module-order and linkage gates.
+
 ## 10.892 `make check` whole: four gates red, three of them for days
 
 Run whole after the 10.885 and 10.889 misses (gates skipped after a

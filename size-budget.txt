@@ -1126,4 +1126,7 @@ netcfgd
 # forward warning (10.891) crossed it by 1,520: netcfgd's own -- netrescue's ladder, link
 # modes and rings, the firewall's per-source meters, the bridge's max_age, the boot's
 # wait-online -- and fuzznet ed93497 and 23e4f46, not measured apart.
-total 2679536
+# 2026-11-21: 2,961,368, +281,832 at fuzznet c20c1a66, all of it fuzznet's 274 commits
+# since 23e4f46 (node, search, contacts, members; text 2,276,451 to 2,517,217). Taken
+# for the idle-memory fix it carries (10.893); the growth is signalled to fuzznet.
+total 2961368
