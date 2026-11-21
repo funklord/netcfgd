@@ -140,6 +140,25 @@ fuzznet:
 			exit 1; \
 		}; \
 	fi
+	@# **Objects from another fuzznet commit go first.** FUZZNET_OBJS below
+	@# takes every object under the build directory, and a file fuzznet has
+	@# renamed since leaves its old object there: the pin to c20c1a66 left
+	@# `wire/status.o` beside `wire/status_message.o`, both defining
+	@# `fzn_status_write`, and every link here failed on a multiple
+	@# definition nothing in this tree had changed (project.md 10.894). The
+	@# commit is kept beside the objects, as `c/Makefile` keeps the flags.
+	@[ -n "$(FUZZNET_BLD)" ] || { echo "bridge: FUZZNET_BLD is empty" >&2; exit 1; }; \
+	from=$$(git -C $(FUZZNET) rev-parse HEAD 2>/dev/null); \
+	if [ -n "$$from" ] && [ -d $(FUZZNET)/$(FUZZNET_BLD) ] && \
+	    [ "$$(cat $(FUZZNET)/$(FUZZNET_BLD)/.built-from 2>/dev/null)" != "$$from" ]; then \
+		echo "bridge: fuzznet is at $$from now; its objects from before go"; \
+		find $(FUZZNET)/$(FUZZNET_BLD) -name '*.o' -exec rm -f {} +; \
+	fi; \
+	if [ -n "$$from" ]; then \
+		mkdir -p $(FUZZNET)/$(FUZZNET_BLD); \
+		[ "$$(cat $(FUZZNET)/$(FUZZNET_BLD)/.built-from 2>/dev/null)" = "$$from" ] || \
+			printf '%s\n' "$$from" > $(FUZZNET)/$(FUZZNET_BLD)/.built-from; \
+	fi
 	@$(MAKE) --no-print-directory -C $(FUZZNET) BUILD_DIR=$(FUZZNET_BLD) all
 
 # Every object fuzznet's build produced, minus the ones that define `main`.

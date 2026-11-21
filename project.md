@@ -8619,6 +8619,32 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.894 A pin move left fuzznet's old objects in the link
+
+`make bridge-test` failed on 2026-11-21 with `multiple definition of
+'fzn_status_write'` while nothing in the bridge had changed. fuzznet renamed
+`wire/status.c` to `wire/status_message.c` between the two pins this tree
+moved across (10.893), and the bridge links **every** object under
+`fuzznet/build` (`FUZZNET_OBJS`, asked of `nm` for `main` and nothing else),
+so the old `status.o` from 02:53 sat beside the new one. `c/Makefile` has the
+same shape behind an archive, where it is worse: `ar` keeps both members and
+the linker takes the first that defines a symbol, so a stale copy could be
+the one linked without a word. It cleared its objects only when the compiler
+or flags changed (10.715).
+
+Both now clear fuzznet's objects when the fuzznet commit changes: the bridge
+keeps `.built-from` beside them, and `c/Makefile` adds the commit to the
+`.built-with` it already compared. Measured: the first bridge build after the
+change said "fuzznet is at c20c1a66... its objects from before go" and the
+three bridge tests passed.
+
+**Not fixed, and older than this:** a second `make -C bridge` relinks
+`netcfgd-remote`, because its rule lists the phony `fuzznet` and `client` as
+prerequisites. That breaks *a second make writes no file*; making them
+order-only needs the objects themselves as prerequisites, which
+`FUZZNET_OBJS` computes before fuzznet is built, so it wants care rather than
+a one-line change.
+
 ## 10.893 fuzznet c20c1a66: the idle memory back, and 240 KB of text more
 
 fuzznet answered 10.892's signal within the hour: the +736 KB was zeroes

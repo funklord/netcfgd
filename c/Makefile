@@ -317,7 +317,13 @@ $(FUZZNET_LIB): FORCE
 	@# every later gate linked them: `size` was measuring 64 KB nobody ships.
 	@# The objects go rather than the directory: `find` here reaches only what
 	@# fuzznet's build wrote.
+	@#
+	@# And the fuzznet commit, so that a pin moving past a renamed file does not
+	@# leave the old file's object in the archive beside the new one: an
+	@# archive takes the first member defining a symbol, so the stale copy
+	@# could be the one linked, silently (project.md 10.894).
 	@want='$(CC) $(FUZZNET_CFLAGS)'; \
+	want="$$want $$(git -C $(FUZZNET) rev-parse HEAD 2>/dev/null)"; \
 	if [ -d $(FUZZNET_BUILD) ] && [ "$$(cat $(FUZZNET_BUILD)/.built-with 2>/dev/null)" != "$$want" ]; then \
 		echo "c: fuzznet was built otherwise; building it with $$want"; \
 		find $(FUZZNET_BUILD) -name '*.o' -exec rm -f {} +; \
