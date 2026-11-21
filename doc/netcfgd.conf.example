@@ -464,6 +464,10 @@
 #     what an iptables `recent --hitcount` rule did. A count, a slash, and a
 #     duration in s, m, h or d. In `input` and `forward` only, since the
 #     source in `output` is this host.
+#   - `reset = true` on a `reject` of tcp answers with a TCP reset, as a
+#     closed port does, rather than ICMP port-unreachable (0332). For ident
+#     on 113, say, so a mail exchange does not wait for it.
+#   - A port may be a range, as a string: `port = [27015, "6000-6010"]`.
 #   - `log = true` writes each matching packet to the kernel log, starting
 #     `netcfgd CHAIN/NAME: `, at most ten a minute for the rule so a flood
 #     cannot fill the disk (0330). Not beside `over` yet.

@@ -483,6 +483,8 @@ typedef struct {
 	 * the kernel rule ahead of the verdict's, carrying its name and digest.
 	 * `action` means nothing in one. */
 	int      log;
+	/* `reject with tcp reset`, 0332. */
+	int      reset;
 	/* An `over` meter's rate as the document keeps it, "COUNT/SECONDSs", or
 	 * empty (10.885). */
 	char     over[48];

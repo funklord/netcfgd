@@ -553,10 +553,17 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 				rule.log = flag;
 			}
+		} else if (strcmp(key, "reset") == 0) {
+			int flag;
+
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				rule.reset = flag;
+			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
-			    "interface, out_interface, state, translated, mac, hours, days, over, log",
+			    "interface, out_interface, state, translated, mac, hours, days, over, log, "
+			    "reset",
 			    key);
 		}
 	}
@@ -572,6 +579,17 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 		    "rule `%s` logs and counts `over`, which netcfgd cannot do yet: the log's own "
 		    "rule would count each packet against the meter a second time. Log a rule "
 		    "without `over`", rule.name);
+		rule_free(&rule);
+		return 0;
+	}
+	/* **A reset answers a TCP connection and nothing else** (0332): the kernel
+	 * refuses `reject with tcp reset` on a rule that is not tcp's, and a
+	 * reset for an accept or a drop says nothing anybody can act on. */
+	if (rule.reset && (rule.action != NCFG_FIREWALL_REJECT ||
+	        rule.protocol != NCFG_FIREWALL_PROTO_TCP)) {
+		ncfg_diag(ctx, block->span,
+		    "rule `%s` answers with a `reset`, which only a `reject` of `protocol = "
+		    "\"tcp\"` can: a reset is TCP's way of refusing a connection", rule.name);
 		rule_free(&rule);
 		return 0;
 	}

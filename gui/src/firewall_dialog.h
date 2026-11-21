@@ -101,6 +101,7 @@ private:
 	QCheckBox *translated;
 	QLineEdit *over;
 	QCheckBox *log;
+	QCheckBox *reset;
 	QLabel      *note;
 	QPushButton *save_button;
 };

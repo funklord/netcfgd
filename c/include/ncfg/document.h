@@ -2717,6 +2717,12 @@ typedef struct {
 	 */
 	int      log;
 	/*
+	 * `reset = true` on a `reject` of tcp: the answer is a TCP reset rather
+	 * than ICMP port-unreachable (0332) -- what a closed port says, so the
+	 * caller stops at once instead of retrying. Omitted when false.
+	 */
+	int      reset;
+	/*
 	 * `over`: the rule matches a source address's packets only past this
 	 * rate, per source, kept as "COUNT/SECONDSs" -- `"8/900s"` -- however it
 	 * was written (project.md 10.885). An nftables meter: a set keyed on the

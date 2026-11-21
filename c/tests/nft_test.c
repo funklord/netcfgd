@@ -691,6 +691,47 @@ static void a_port_range_is_one_kernel_rule(void)
 	ncfg_buf_free(&text);
 }
 
+/* A tcp reject answering with a reset (0332), read back as one. */
+static void a_reset_reads_back_as_a_reset(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	int                  resets = 0, rules = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"ident";
+	rule.action = NCFG_FIREWALL_REJECT;
+	rule.protocol = NCFG_FIREWALL_PROTO_TCP;
+	rule.reset = 1;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.policy = NCFG_FIREWALL_POLICY_ACCEPT;
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a tcp reject with a reset is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		rules++;
+		if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err)) && one.reset && one.action == NCFG_FIREWALL_REJECT) {
+			resets++;
+		}
+	}
+	check(rules == 1 && resets == 1, "  and reads back as a reject answering with a reset");
+	ncfg_buf_free(&out);
+}
+
 /* The comment's digest of a one-rule input chain, at the fixed offset. */
 static void digest_of(ncfg_firewall_rule_t *rule, char *out, size_t out_size)
 {
@@ -1951,6 +1992,7 @@ int main(void)
 	an_over_rule_is_a_meter_per_family();
 	a_logged_rule_is_a_log_then_its_verdict();
 	a_port_range_is_one_kernel_rule();
+	a_reset_reads_back_as_a_reset();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

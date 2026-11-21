@@ -1300,6 +1300,8 @@ typedef struct {
 	/* `log = true` (0330): matches go to the kernel log as well. Read so a
 	 * Save keeps it. */
 	int   log;
+	/* `reset = true` (0332): a tcp reject answers with a reset. */
+	int   reset;
 } ncfg_firewall_entry_t;
 
 /* One base chain: its policy and its rules, in the document's order -- which

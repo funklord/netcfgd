@@ -366,6 +366,32 @@ check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothi
 check "ncfg status shows the range" \
 	"$(grep -c '^    accept games protocol udp port 6000-6010' "$work/status" || true)" "1"
 
+# A tcp reject answering with a reset (0332).
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		reject "ident" { protocol = "tcp"; port = 113; reset = true }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a reject with a reset is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the kernel answers with a tcp reset" 'tcp dport 113 reject with tcp reset comment "name=ident'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
+# The same identity answering with ICMP instead is a difference the reader
+# sees, though the comment and its digest are unchanged.
+handle=$(nft -a list chain inet netcfgd input | sed -n 's/.*name=ident.*# handle \([0-9]*\).*/\1/p')
+comment=$(nft list chain inet netcfgd input | sed -n 's/.*comment "\(name=ident[^"]*\)".*/\1/p')
+nft replace rule inet netcfgd input handle "$handle" tcp dport 113 reject comment "\"$comment\""
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a reset swapped for ICMP under the same identity is planned back" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true

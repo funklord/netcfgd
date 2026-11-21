@@ -1589,6 +1589,7 @@ static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t 
 		rule.translated = entry.translated != 0;
 		rule.over = from_c(entry.over);
 		rule.log = entry.log != 0;
+		rule.reset = entry.reset != 0;
 		row.rules << rule;
 	}
 	return row;

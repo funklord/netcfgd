@@ -4216,6 +4216,26 @@ static void firewall_port_range_cases(void)
 	    "no protocol that has them", "a range with no protocol is refused, as a port is");
 }
 
+/* `reset = true` on a tcp reject (0332), and nowhere else. */
+static void firewall_reset_cases(void)
+{
+	ncfg_document_t *document;
+
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\treject \"ident\" { protocol = \"tcp\"; port = 113; reset = true }\n\t}\n}\n",
+	    "a tcp reject answering with a reset compiles, and renders back");
+	check(document && document->firewall && document->firewall->input.rule_count == 1 &&
+	        document->firewall->input.rules[0].reset,
+	    "  and answers with a reset");
+	ncfg_document_free(document);
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tdrop \"x\" { protocol = \"tcp\"; reset = true }\n\t}\n}\n",
+	    "only a `reject`", "a reset on a drop is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\treject \"x\" { protocol = \"udp\"; reset = true }\n\t}\n}\n",
+	    "only a `reject`", "a reset on a udp reject is refused");
+}
+
 static void switch_cases(void)
 {
 	ncfg_document_t        *document;
@@ -4262,6 +4282,7 @@ int main(void)
 	global_cases();
 	switch_cases();
 	firewall_port_range_cases();
+	firewall_reset_cases();
 	firewall_log_cases();
 	dns_cases();
 	network_cases();

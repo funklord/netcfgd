@@ -1196,6 +1196,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	if (rule->log) {
 		ncfg_buf_add_text(out, "log\n");
 	}
+	/* Only where set, so no digest written before 0332 changes. */
+	if (rule->reset) {
+		ncfg_buf_add_text(out, "reset\n");
+	}
 	for (at = 0; at < rule->mac_count; at++) {
 		ncfg_buf_addf(out, "mac %s\n", rule->mac[at]);
 	}
@@ -1585,6 +1589,10 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	ncfg_buf_init(&data, 0);
 	if (as_log) {
 		put_log(&expressions, chain, rule->name);
+	} else if (rule->action == NCFG_FIREWALL_REJECT && rule->reset) {
+		/* `reject with tcp reset` (0332): the type alone, as nft writes it. */
+		put_be32(&data, NFTA_REJECT_TYPE, NFT_REJECT_TCP_RST);
+		put_expression(&expressions, "reject", &data);
 	} else if (rule->action == NCFG_FIREWALL_REJECT) {
 		const uint8_t code = NFT_REJECT_ICMPX_PORT_UNREACH;
 
@@ -3346,6 +3354,16 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			out->action = code == NF_DROP ? NCFG_FIREWALL_DROP : NCFG_FIREWALL_ACCEPT;
 			verdict = 1;
 		} else if (strcmp(name, "reject") == 0) {
+			uint32_t type = NFT_REJECT_ICMPX_UNREACH;
+
+			/* The two answers netcfgd writes, and no other (0332). */
+			(void)be32_member(&data, NFTA_REJECT_TYPE, &type);
+			if (type != NFT_REJECT_TCP_RST && type != NFT_REJECT_ICMPX_UNREACH) {
+				ncfg_error_set(err, err_size, "rule `%s` rejects in a way netcfgd does not "
+				    "write", out->name);
+				return 0;
+			}
+			out->reset = type == NFT_REJECT_TCP_RST;
 			out->action = NCFG_FIREWALL_REJECT;
 			verdict = 1;
 		} else if (strcmp(name, "limit") == 0) {
@@ -3844,7 +3862,8 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->mac, observed->mac) ||
 	    (expected->translated != 0) != (observed->translated != 0) ||
 	    !same_text(expected->over, observed->over) ||
-	    !same_text(expected->port_range, observed->port_range)) {
+	    !same_text(expected->port_range, observed->port_range) ||
+	    (expected->reset != 0) != (observed->reset != 0)) {
 		return 0;
 	}
 	{

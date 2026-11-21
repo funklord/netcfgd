@@ -339,6 +339,8 @@ struct ncfg_firewall_rule_row {
 	QString     over;
 	/* `log = true` (0330). */
 	bool        log = false;
+	/* `reset = true` (0332). */
+	bool        reset = false;
 };
 
 struct ncfg_firewall_chain_row {

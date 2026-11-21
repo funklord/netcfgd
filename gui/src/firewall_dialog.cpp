@@ -103,6 +103,9 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (rule.log) {
 		body << QStringLiteral("\t\t\tlog = true");
 	}
+	if (rule.reset) {
+		body << QStringLiteral("\t\t\treset = true");
+	}
 	body << QStringLiteral("\t\t}");
 }
 
@@ -292,6 +295,14 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	    "Each matching packet is logged with \"netcfgd CHAIN/NAME: \" before it, at most ten "
 	    "a minute for the rule, so a flood cannot fill the disk. Not with \"only over\" yet."));
 	form->addRow(QString(), log);
+	/* 0332: a tcp reject answers with a reset; the compiler refuses it on
+	 * anything else and says why, so the box is not greyed by guesswork. */
+	reset = new QCheckBox(QStringLiteral("refuse a tcp connection with a reset"), this);
+	reset->setObjectName(QStringLiteral("firewall_reset"));
+	reset->setToolTip(QStringLiteral(
+	    "A reject of tcp answers with a reset, as a closed port does, rather than an ICMP "
+	    "port-unreachable. Only for reject with protocol tcp."));
+	form->addRow(QString(), reset);
 	layout->addLayout(form);
 
 	note = new QLabel(this);
@@ -342,6 +353,7 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		translated->setChecked(rule.translated);
 		over->setText(rule.over);
 		log->setChecked(rule.log);
+		reset->setChecked(rule.reset);
 	}
 	connect(chain, &QComboBox::currentIndexChanged, this,
 	    &ncfg_firewall_rule_dialog::shape_changed);
@@ -443,6 +455,7 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 	rule->translated = translated->isChecked();
 	rule->over = over->text().trimmed();
 	rule->log = log->isChecked();
+	rule->reset = reset->isChecked();
 	return true;
 }
 
