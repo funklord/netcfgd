@@ -471,6 +471,9 @@ typedef struct {
 	uint16_t port;
 	/* A destination port range, "LOW-HIGH", or empty (0331). */
 	char     port_range[16];
+	/* An ICMP or ICMPv6 type (0333). */
+	int      has_icmp_type;
+	uint8_t  icmp_type;
 	char     from[64]; /* "" where the rule matches no source address */
 	char     to[64];
 	char     interface[NCFG_NFT_IFNAME_MAX];

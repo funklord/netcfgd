@@ -100,6 +100,7 @@ private:
 	QLineEdit *days;
 	QCheckBox *translated;
 	QLineEdit *over;
+	QLineEdit *icmp_types;
 	QCheckBox *log;
 	QCheckBox *reset;
 	QLabel      *note;

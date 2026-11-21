@@ -4236,6 +4236,40 @@ static void firewall_reset_cases(void)
 	    "only a `reject`", "a reset on a udp reject is refused");
 }
 
+/* ICMP types by name or number, each protocol's names its own (0333). */
+static void firewall_icmp_type_cases(void)
+{
+	ncfg_document_t *document;
+
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ping\" { protocol = \"icmp\"; icmp_type = \"echo-request\" }\n"
+	    "\t\taccept \"nd\" { icmp_type = [\"nd-neighbor-solicit\", 136, \"echo-request\"]; "
+	    "protocol = \"icmpv6\" }\n\t}\n}\n",
+	    "icmp types by name and number compile, and render back");
+	check(document && document->firewall && document->firewall->input.rule_count == 2,
+	    "  as two rules");
+	if (document && document->firewall && document->firewall->input.rule_count == 2) {
+		const ncfg_firewall_rule_t *ping = &document->firewall->input.rules[0];
+		const ncfg_firewall_rule_t *nd = &document->firewall->input.rules[1];
+
+		check(ping->icmp_type_count == 1 && ping->icmp_types[0] == 8,
+		    "  echo-request is 8 for icmp");
+		check(nd->icmp_type_count == 3 && nd->icmp_types[0] == 135 && nd->icmp_types[1] == 136 &&
+		        nd->icmp_types[2] == 128,
+		    "  and 128 for icmpv6, the protocol written after the type");
+	}
+	ncfg_document_free(document);
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"tcp\"; icmp_type = 8 }\n\t}\n}\n",
+	    "no ICMP protocol", "an icmp type on a tcp rule is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"icmp\"; icmp_type = \"nd-router-advert\" }\n\t}\n}\n",
+	    "knows by name", "an icmpv6 name on an icmp rule is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"icmp\"; icmp_type = 300 }\n\t}\n}\n",
+	    "0 to 255", "a type past 255 is refused");
+}
+
 static void switch_cases(void)
 {
 	ncfg_document_t        *document;
@@ -4283,6 +4317,7 @@ int main(void)
 	switch_cases();
 	firewall_port_range_cases();
 	firewall_reset_cases();
+	firewall_icmp_type_cases();
 	firewall_log_cases();
 	dns_cases();
 	network_cases();

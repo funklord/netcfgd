@@ -284,6 +284,12 @@ char *ncfg_as_interface_name(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *valu
 
 /* A block's label, or NULL having said that it needs one. */
 char *ncfg_require_label(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block);
+
+/* An ICMP or ICMPv6 type's name as nft spells it, or NULL for one with none
+ * here; and the number a name stands for, or -1 (0333). `icmpv6` is nonzero
+ * for ICMPv6, whose numbers are its own. */
+const char *ncfg_icmp_type_name(int icmpv6, int64_t type);
+int64_t ncfg_icmp_type_number(int icmpv6, const char *name);
 /* The same, for a block whose label names a link. */
 char *ncfg_require_interface_label(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block);
 

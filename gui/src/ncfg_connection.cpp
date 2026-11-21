@@ -1591,6 +1591,9 @@ static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t 
 		rule.over = from_c(entry.over);
 		rule.log = entry.log != 0;
 		rule.reset = entry.reset != 0;
+		for (const QString &type : firewall_list(entry.icmp_types)) {
+			rule.icmp_types << type.toInt();
+		}
 		row.rules << rule;
 	}
 	return row;

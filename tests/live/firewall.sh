@@ -366,6 +366,33 @@ check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothi
 check "ncfg status shows the range" \
 	"$(grep -c '^    accept games protocol udp port 6000-6010' "$work/status" || true)" "1"
 
+# ICMP types (0333): the kernel takes `icmpv6 type`, and the plan converges.
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		accept "nd" { protocol = "icmpv6"; icmp_type = ["nd-neighbor-solicit", "nd-neighbor-advert"] }
+		accept "ping" { protocol = "icmp"; icmp_type = "echo-request" }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "rules matching icmp types are applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the kernel matches an icmpv6 type" 'icmpv6 type nd-neighbor-solicit accept comment "name=nd'
+has "and an icmp one" 'icmp type echo-request accept comment "name=ping'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the next plan has nothing to do with them" "$(cat "$work/plan")" "nothing to do"
+# Another type under the same identity is a difference the reader sees.
+handle=$(nft -a list chain inet netcfgd input | sed -n 's/.*name=ping.*# handle \([0-9]*\).*/\1/p')
+comment=$(nft list chain inet netcfgd input | sed -n 's/.*comment "\(name=ping[^"]*\)".*/\1/p')
+nft replace rule inet netcfgd input handle "$handle" icmp type echo-reply accept comment "\"$comment\""
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a type swapped under the same identity is planned back" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+
 # A tcp reject answering with a reset (0332).
 write_etc <<'CONF'
 firewall {

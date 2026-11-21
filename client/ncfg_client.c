@@ -3140,6 +3140,7 @@ static void firewall_chain_free(ncfg_firewall_chain_entry_t *chain)
 		free(rule->stations);
 		free(rule->hours);
 		free(rule->days);
+		free(rule->icmp_types);
 		free(rule->over);
 	}
 	free(chain->rules);
@@ -3287,6 +3288,10 @@ static int read_firewall_chain(const ncfg_json_doc_t *doc, uint32_t object,
 		rule->over = member_text(doc, entry, "over");
 		rule->log = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "log"), 0);
 		rule->reset = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "reset"), 0);
+		rule->icmp_types = firewall_ports(doc, ncfg_json_member(doc, entry, "icmp_types"));
+		if (!rule->icmp_types) {
+			return 0;
+		}
 		if (!rule->name || !rule->action || !rule->protocol || !rule->ports || !rule->from ||
 		    !rule->to || !rule->interface || !rule->out_interface || !rule->states ||
 		    !rule->stations || !rule->hours || !rule->days || !rule->over) {

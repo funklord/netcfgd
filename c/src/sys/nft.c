@@ -1148,6 +1148,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	for (at = 0; at < rule->port_count; at++) {
 		ncfg_buf_addf(out, "port %lld\n", (long long)rule->ports[at]);
 	}
+	/* Only where set, so no digest written before 0333 changes. */
+	for (at = 0; at < rule->icmp_type_count; at++) {
+		ncfg_buf_addf(out, "icmp_type %lld\n", (long long)rule->icmp_types[at]);
+	}
 	/* Only where set, so no digest written before 0331 changes. */
 	for (at = 0; at < rule->port_range_count; at++) {
 		ncfg_buf_addf(out, "port_range %s\n", rule->port_ranges[at]);
@@ -1474,6 +1478,13 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 
 		put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 2u, 2u);
 		put_cmp(&expressions, NFT_CMP_EQ, &port, sizeof(port));
+	} else if (rule->icmp_type_count) {
+		/* `icmp type T` / `icmpv6 type T`: the transport header's first
+		 * byte (0333). */
+		const uint8_t type = (uint8_t)rule->icmp_types[0];
+
+		put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 0u, 1u);
+		put_cmp(&expressions, NFT_CMP_EQ, &type, 1u);
 	} else if (rule->port_range_count) {
 		/* `th dport LOW-HIGH`, as nft 1.1.3 writes it: one `range`
 		 * expression over the loaded port, network order both ends (0331). */
@@ -1650,8 +1661,8 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
     const char *chain, const ncfg_firewall_rule_t *rule, char *err, size_t err_size)
 {
-	const size_t ports = rule->port_count + rule->port_range_count
-	    ? rule->port_count + rule->port_range_count : 1u;
+	const size_t ports = rule->port_count + rule->port_range_count + rule->icmp_type_count
+	    ? rule->port_count + rule->port_range_count + rule->icmp_type_count : 1u;
 	const size_t froms = rule->from_count ? rule->from_count : 1u;
 	const size_t tos = rule->to_count ? rule->to_count : 1u;
 	const size_t macs = rule->mac_count ? rule->mac_count : 1u;
@@ -1741,6 +1752,10 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 						    rule->port_range_count && p >= rule->port_count ? 1u : 0u;
 						one.port_ranges = one.port_range_count
 						    ? &rule->port_ranges[p - rule->port_count] : NULL;
+						/* ICMP types share the dimension: a rule has them or
+						 * ports, never both, which the compiler sees to. */
+						one.icmp_type_count = rule->icmp_type_count ? 1u : 0u;
+						one.icmp_types = rule->icmp_type_count ? &rule->icmp_types[p] : NULL;
 						one.from_count = rule->from_count ? 1u : 0u;
 						one.from = rule->from_count ? &rule->from[f] : NULL;
 						one.to_count = rule->to_count ? 1u : 0u;
@@ -3050,6 +3065,14 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 			out->port = ntohs(port);
 			return 1;
 		}
+		/* An ICMP type, the transport header's first byte (0333). */
+		if (reading->base == NFT_PAYLOAD_TRANSPORT_HEADER && reading->offset == 0u &&
+		    reading->length == 1u && length == 1u && reading->mask_length == 0u &&
+		    !out->has_icmp_type) {
+			out->has_icmp_type = 1;
+			out->icmp_type = value[0];
+			return 1;
+		}
 		if (reading->base == NFT_PAYLOAD_NETWORK_HEADER &&
 		    ((reading->length == 4u && reading->family == NFPROTO_IPV4 &&
 		    (reading->offset == 12u || reading->offset == 16u)) ||
@@ -3863,7 +3886,9 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    (expected->translated != 0) != (observed->translated != 0) ||
 	    !same_text(expected->over, observed->over) ||
 	    !same_text(expected->port_range, observed->port_range) ||
-	    (expected->reset != 0) != (observed->reset != 0)) {
+	    (expected->reset != 0) != (observed->reset != 0) ||
+	    expected->has_icmp_type != observed->icmp_type.has ||
+	    (expected->has_icmp_type && (int64_t)expected->icmp_type != observed->icmp_type.value)) {
 		return 0;
 	}
 	{

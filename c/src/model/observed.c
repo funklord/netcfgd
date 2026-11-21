@@ -1406,6 +1406,9 @@ static const ncfg_field_t observed_firewall_rule_fields[] = {
 	/* Absent where unset (0331). */
 	{ .name = "port_range", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_firewall_rule_t, port_range) },
+	/* Absent where unset (0333). */
+	{ .name = "icmp_type", .kind = NCFG_F_OPT_INT, R_U8,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, icmp_type) },
 	{ .name = "from", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_rule_t, from) },
 	{ .name = "to", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_rule_t, to) },
 	{ .name = "interface", .kind = NCFG_F_STR,

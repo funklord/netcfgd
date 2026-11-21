@@ -280,6 +280,25 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 				rule->ports[rule->port_count++] = one->port.value;
 			}
 		}
+		if (one->icmp_type.has) {
+			size_t   t;
+			int      known = 0;
+
+			for (t = 0; t < rule->icmp_type_count; t++) {
+				known = known || rule->icmp_types[t] == one->icmp_type.value;
+			}
+			if (!known) {
+				int64_t *grown = realloc(rule->icmp_types, (rule->icmp_type_count + 1u) *
+				    sizeof(*rule->icmp_types));
+
+				if (!grown) {
+					ncfg_firewall_free(firewall);
+					return NULL;
+				}
+				rule->icmp_types = grown;
+				rule->icmp_types[rule->icmp_type_count++] = one->icmp_type.value;
+			}
+		}
 		if (!add_text(&rule->port_ranges, &rule->port_range_count, one->port_range)) {
 			ncfg_firewall_free(firewall);
 			return NULL;

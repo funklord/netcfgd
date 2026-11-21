@@ -2673,6 +2673,11 @@ typedef struct {
 	 * every ruleset before it is the document it was. */
 	char   **port_ranges;
 	size_t   port_range_count;
+	/* ICMP or ICMPv6 message types, 0 to 255, for a rule of that protocol
+	 * (0333) -- written by name or number, kept as numbers. Omitted when
+	 * empty. */
+	int64_t *icmp_types;
+	size_t   icmp_type_count;
 	/* Addresses or CIDRs as the document spells them, either family. Held as
 	 * written rather than parsed, for the reason `addressing` is: the renderer
 	 * has to put back what the operator wrote. */

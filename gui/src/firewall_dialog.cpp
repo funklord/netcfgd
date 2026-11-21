@@ -106,6 +106,13 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (rule.reset) {
 		body << QStringLiteral("\t\t\treset = true");
 	}
+	if (!rule.icmp_types.isEmpty()) {
+		QStringList numbers;
+		for (int type : rule.icmp_types) {
+			numbers << QString::number(type);
+		}
+		body << QStringLiteral("\t\t\ticmp_type = [%1]").arg(numbers.join(QStringLiteral(", ")));
+	}
 	body << QStringLiteral("\t\t}");
 }
 
@@ -280,6 +287,15 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	form->addRow(QString(), translated);
 	/* 10.885: counted per source address, on a drop or a reject; the compiler
 	 * refuses it elsewhere and says why. */
+	/* 0333: by number here, which is what the document keeps; the language
+	 * takes names too, and the compiler names the protocol a type needs. */
+	icmp_types = new QLineEdit(this);
+	icmp_types->setObjectName(QStringLiteral("firewall_icmp_types"));
+	icmp_types->setPlaceholderText(QStringLiteral("8 -- echo-request; blank for every type"));
+	icmp_types->setToolTip(QStringLiteral(
+	    "ICMP message types by number, for an icmp or icmpv6 rule: 8 is a ping over "
+	    "IPv4, 128 over IPv6, and 133 to 136 are IPv6 neighbour discovery."));
+	form->addRow(QStringLiteral("ICMP types"), icmp_types);
 	over = new QLineEdit(this);
 	over->setObjectName(QStringLiteral("firewall_over"));
 	over->setPlaceholderText(QStringLiteral("8/15m -- blank to match every packet"));
@@ -354,6 +370,11 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		over->setText(rule.over);
 		log->setChecked(rule.log);
 		reset->setChecked(rule.reset);
+		QStringList types;
+		for (int type : rule.icmp_types) {
+			types << QString::number(type);
+		}
+		icmp_types->setText(types.join(QStringLiteral(", ")));
 	}
 	connect(chain, &QComboBox::currentIndexChanged, this,
 	    &ncfg_firewall_rule_dialog::shape_changed);
@@ -456,6 +477,16 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 	rule->over = over->text().trimmed();
 	rule->log = log->isChecked();
 	rule->reset = reset->isChecked();
+	for (const QString &text : split_list(icmp_types->text())) {
+		bool      number = false;
+		const int type = text.toInt(&number);
+		if (!number || type < 0 || type > 255) {
+			note->setText(QStringLiteral("\"%1\" is not an ICMP type: a number, 0 to 255")
+			                  .arg(text));
+			return false;
+		}
+		rule->icmp_types << type;
+	}
 	return true;
 }
 

@@ -52,6 +52,7 @@ static void rule_free(ncfg_firewall_rule_t *rule)
 {
 	free(rule->name);
 	free(rule->ports);
+	free(rule->icmp_types);
 	ncfg_strings_free(rule->port_ranges, rule->port_range_count);
 	ncfg_strings_free(rule->from, rule->from_count);
 	ncfg_strings_free(rule->to, rule->to_count);
@@ -244,6 +245,131 @@ static void rule_ports(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assig
 		}
 		rule->ports[rule->port_count++] = port;
 	}
+}
+
+/*
+ * The ICMP and ICMPv6 types a rule may name in words (0333): the ones an
+ * operator writes, as nft spells them. Anything else is written as its number.
+ */
+static const struct {
+	int         icmpv6;
+	int         type;
+	const char *name;
+} icmp_names[] = {
+	{ 0, 0, "echo-reply" },
+	{ 0, 3, "destination-unreachable" },
+	{ 0, 5, "redirect" },
+	{ 0, 8, "echo-request" },
+	{ 0, 11, "time-exceeded" },
+	{ 0, 12, "parameter-problem" },
+	{ 1, 1, "destination-unreachable" },
+	{ 1, 2, "packet-too-big" },
+	{ 1, 3, "time-exceeded" },
+	{ 1, 4, "parameter-problem" },
+	{ 1, 128, "echo-request" },
+	{ 1, 129, "echo-reply" },
+	{ 1, 133, "nd-router-solicit" },
+	{ 1, 134, "nd-router-advert" },
+	{ 1, 135, "nd-neighbor-solicit" },
+	{ 1, 136, "nd-neighbor-advert" },
+};
+
+const char *ncfg_icmp_type_name(int icmpv6, int64_t type)
+{
+	size_t at;
+
+	for (at = 0; at < sizeof(icmp_names) / sizeof(icmp_names[0]); at++) {
+		if ((icmp_names[at].icmpv6 != 0) == (icmpv6 != 0) && icmp_names[at].type == type) {
+			return icmp_names[at].name;
+		}
+	}
+	return NULL;
+}
+
+int64_t ncfg_icmp_type_number(int icmpv6, const char *name)
+{
+	size_t at;
+
+	for (at = 0; name && at < sizeof(icmp_names) / sizeof(icmp_names[0]); at++) {
+		if ((icmp_names[at].icmpv6 != 0) == (icmpv6 != 0) &&
+		    strcmp(icmp_names[at].name, name) == 0) {
+			return icmp_names[at].type;
+		}
+	}
+	return -1;
+}
+
+/*
+ * `icmp_type`: a name, a number, or a list of either (0333). Names are read
+ * once the protocol is known, at the end of the rule, so the order the two
+ * keys are written in does not matter; this keeps the words as written.
+ */
+static void rule_icmp_types(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    const ncfg_ast_value_t **out)
+{
+	(void)ctx;
+	*out = assignment->value;
+}
+
+/* The words kept by `rule_icmp_types`, as numbers, for the protocol the rule
+ * names. 0 where any is refused, with the diagnostic said. */
+static int resolve_icmp_types(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value,
+    ncfg_firewall_rule_t *rule)
+{
+	ncfg_ast_value_t *const *entries;
+	ncfg_ast_value_t        *one[1];
+	size_t                   count;
+	size_t                   i;
+	const int                icmpv6 = rule->protocol == NCFG_FIREWALL_PROTO_ICMPV6;
+
+	if (value->kind == NCFG_AST_LIST) {
+		entries = value->entries.at;
+		count = value->entries.count;
+	} else {
+		one[0] = (ncfg_ast_value_t *)value;
+		entries = one;
+		count = 1u;
+	}
+	free(rule->icmp_types);
+	rule->icmp_types = count ? calloc(count, sizeof(*rule->icmp_types)) : NULL;
+	rule->icmp_type_count = 0;
+	if (count && !rule->icmp_types) {
+		ncfg_lower_oom(ctx);
+		return 0;
+	}
+	for (i = 0; i < count; i++) {
+		int64_t type = -1;
+
+		if (entries[i]->kind == NCFG_AST_STRING) {
+			char *text = ncfg_as_string(ctx, entries[i]);
+
+			type = ncfg_icmp_type_number(icmpv6, text);
+			if (type < 0) {
+				ncfg_diag(ctx, entries[i]->span,
+				    "`%s` is not an %s type netcfgd knows by name: write its number, "
+				    "0 to 255", text ? text : "", icmpv6 ? "ICMPv6" : "ICMP");
+				free(text);
+				return 0;
+			}
+			free(text);
+		} else if (entries[i]->kind == NCFG_AST_NUMBER) {
+			if (!ncfg_as_i64(ctx, entries[i], &type)) {
+				return 0;
+			}
+			if (type < 0 || type > 255) {
+				ncfg_diag(ctx, entries[i]->span,
+				    "%lld is not an ICMP type: 0 to 255", (long long)type);
+				return 0;
+			}
+		} else {
+			ncfg_diag(ctx, entries[i]->span,
+			    "an ICMP type is a name or a number, found %s",
+			    ncfg_ast_value_describe(entries[i]));
+			return 0;
+		}
+		rule->icmp_types[rule->icmp_type_count++] = type;
+	}
+	return 1;
 }
 
 static void rule_states(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
@@ -483,8 +609,10 @@ static void rule_days(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assign
 static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int action,
     ncfg_firewall_rule_t *out)
 {
-	ncfg_firewall_rule_t rule;
-	size_t               i;
+	ncfg_firewall_rule_t    rule;
+	size_t                  i;
+	/* `icmp_type` as written, read once the protocol is known (0333). */
+	const ncfg_ast_value_t *icmp_written = NULL;
 
 	memset(&rule, 0, sizeof(rule));
 	rule.action = action;
@@ -553,6 +681,8 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 				rule.log = flag;
 			}
+		} else if (strcmp(key, "icmp_type") == 0) {
+			rule_icmp_types(ctx, assignment, &icmp_written);
 		} else if (strcmp(key, "reset") == 0) {
 			int flag;
 
@@ -563,7 +693,7 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			ncfg_diag(ctx, assignment->span,
 			    "`%s` is not a firewall rule key: one of protocol, port, from, to, "
 			    "interface, out_interface, state, translated, mac, hours, days, over, log, "
-			    "reset",
+			    "reset, icmp_type",
 			    key);
 		}
 	}
@@ -581,6 +711,22 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 		    "without `over`", rule.name);
 		rule_free(&rule);
 		return 0;
+	}
+	/* **An ICMP type belongs to an ICMP rule** (0333), and its names are the
+	 * protocol's: `echo-request` is 8 for one and 128 for the other. */
+	if (icmp_written) {
+		if (rule.protocol != NCFG_FIREWALL_PROTO_ICMP &&
+		    rule.protocol != NCFG_FIREWALL_PROTO_ICMPV6) {
+			ncfg_diag(ctx, block->span,
+			    "rule `%s` matches an ICMP type with no ICMP protocol: add `protocol = "
+			    "\"icmp\"` or `\"icmpv6\"`", rule.name);
+			rule_free(&rule);
+			return 0;
+		}
+		if (!resolve_icmp_types(ctx, icmp_written, &rule)) {
+			rule_free(&rule);
+			return 0;
+		}
 	}
 	/* **A reset answers a TCP connection and nothing else** (0332): the kernel
 	 * refuses `reject with tcp reset` on a rule that is not tcp's, and a

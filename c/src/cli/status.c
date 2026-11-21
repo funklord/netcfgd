@@ -238,6 +238,9 @@ static void print_firewall(const ncfg_observed_t *observed)
 			if (rule->reset) {
 				ncfg_out_writef(" with a reset");
 			}
+			if (rule->icmp_type.has) {
+				ncfg_out_writef(" type %lld", (long long)rule->icmp_type.value);
+			}
 			if (rule->from) {
 				ncfg_out_writef(" from %s", rule->from);
 			}

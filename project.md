@@ -7085,8 +7085,10 @@ kind's own table, which is how all of it got past; it holds both now.
 **Port ranges are built**:
 [0331](doc/decision/0331-a-port-range-is-a-string-in-the-port-list.md), `port =
 [27015, "6000-6010"]`, one kernel rule per range as per port, read back as
-`port_range`. Source ports and ICMP types are what is left of the matching the
-inventory found missing, then MSS clamping. `reject` answers tcp with a reset
+`port_range`. ICMP types are built too:
+[0333](doc/decision/0333-an-icmp-rule-may-name-its-types.md). What is left of
+what the inventory found missing is MSS clamping, marks, counters and the rest
+it lists; source ports wait for somebody to ask (0331). `reject` answers tcp with a reset
 where asked: [0332](doc/decision/0332-a-reject-may-answer-tcp-with-a-reset.md).
 
 ## 10.894 A pin move left fuzznet's old objects in the link

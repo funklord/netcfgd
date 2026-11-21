@@ -1302,6 +1302,8 @@ typedef struct {
 	int   log;
 	/* `reset = true` (0332): a tcp reject answers with a reset. */
 	int   reset;
+	/* ICMP types (0333) as numbers, ", "-joined, empty where none. */
+	char *icmp_types;
 } ncfg_firewall_entry_t;
 
 /* One base chain: its policy and its rules, in the document's order -- which

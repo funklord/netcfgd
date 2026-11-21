@@ -691,6 +691,49 @@ static void a_port_range_is_one_kernel_rule(void)
 	ncfg_buf_free(&text);
 }
 
+/* ICMP types (0333): one kernel rule each, each read back as its type. */
+static void icmp_types_are_one_kernel_rule_each(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	int64_t              types[2] = { 135, 136 };
+	char                 err[NCFG_ERROR_MAX];
+	int                  sum = 0, rules = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"nd";
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	rule.protocol = NCFG_FIREWALL_PROTO_ICMPV6;
+	rule.icmp_types = types;
+	rule.icmp_type_count = 2u;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.policy = NCFG_FIREWALL_POLICY_DROP;
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "an icmpv6 rule with two types is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		rules++;
+		if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err)) && one.has_icmp_type) {
+			sum += one.icmp_type;
+		}
+	}
+	check(rules == 2 && sum == 135 + 136, "  as two kernel rules, each read back as its type");
+	ncfg_buf_free(&out);
+}
+
 /* A tcp reject answering with a reset (0332), read back as one. */
 static void a_reset_reads_back_as_a_reset(void)
 {
@@ -1993,6 +2036,7 @@ int main(void)
 	a_logged_rule_is_a_log_then_its_verdict();
 	a_port_range_is_one_kernel_rule();
 	a_reset_reads_back_as_a_reset();
+	icmp_types_are_one_kernel_rule_each();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

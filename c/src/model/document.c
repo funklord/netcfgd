@@ -2835,6 +2835,10 @@ static const ncfg_field_t firewall_rule_fields[] = {
 	{ .name = "ports", .kind = NCFG_F_INT_LIST, R_U16, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_firewall_rule_t, ports),
 	    .count_offset = offsetof(ncfg_firewall_rule_t, port_count) },
+	/* Absent when empty (0333). */
+	{ .name = "icmp_types", .kind = NCFG_F_INT_LIST, R_U8, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, icmp_types),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, icmp_type_count) },
 	/* Absent when empty (0331). */
 	{ .name = "port_ranges", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_firewall_rule_t, port_ranges),

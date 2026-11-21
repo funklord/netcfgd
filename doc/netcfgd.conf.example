@@ -468,6 +468,9 @@
 #     closed port does, rather than ICMP port-unreachable (0332). For ident
 #     on 113, say, so a mail exchange does not wait for it.
 #   - A port may be a range, as a string: `port = [27015, "6000-6010"]`.
+#   - `icmp_type` on an `icmp` or `icmpv6` rule names its message types, by
+#     name or number: `icmp_type = ["nd-neighbor-solicit", 136]` (0333).
+#     The names are the protocol's own -- echo-request is 8 or 128.
 #   - `log = true` writes each matching packet to the kernel log, starting
 #     `netcfgd CHAIN/NAME: `, at most ten a minute for the rule so a flood
 #     cannot fill the disk (0330). Not beside `over` yet.

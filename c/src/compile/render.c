@@ -1398,6 +1398,22 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 		ncfg_render_list_emit(body, "\t\t\t", "state", &list, 0);
 		ncfg_render_list_free(&list);
 	}
+	if (rule->icmp_type_count) {
+		/* By name where the type has one, so the file reads as written
+		 * (0333). */
+		ncfg_buf_add_text(body, "\t\t\ticmp_type = [");
+		for (at = 0; at < rule->icmp_type_count; at++) {
+			const char *name = ncfg_icmp_type_name(
+			    rule->protocol == NCFG_FIREWALL_PROTO_ICMPV6, rule->icmp_types[at]);
+
+			if (name) {
+				ncfg_buf_addf(body, "%s\"%s\"", at ? ", " : "", name);
+			} else {
+				ncfg_buf_addf(body, "%s%lld", at ? ", " : "", (long long)rule->icmp_types[at]);
+			}
+		}
+		ncfg_buf_add_text(body, "]\n");
+	}
 	if (rule->log) {
 		ncfg_buf_add_text(body, "\t\t\tlog = true\n");
 	}

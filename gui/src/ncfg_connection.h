@@ -341,6 +341,8 @@ struct ncfg_firewall_rule_row {
 	bool        log = false;
 	/* `reset = true` (0332). */
 	bool        reset = false;
+	/* ICMP types (0333), as numbers. */
+	QList<int>  icmp_types;
 };
 
 struct ncfg_firewall_chain_row {

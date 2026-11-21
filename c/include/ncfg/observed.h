@@ -1592,6 +1592,8 @@ typedef struct {
 	ncfg_optint_t port;
 	/* A destination port range, "LOW-HIGH", NULL where none (0331). */
 	char         *port_range;
+	/* An ICMP or ICMPv6 type, absent where none (0333). */
+	ncfg_optint_t icmp_type;
 	char         *from;
 	char         *to;
 	char         *interface;

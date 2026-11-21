@@ -345,6 +345,10 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 		out->port.has = 1;
 		out->port.value = one->port;
 	}
+	if (one->has_icmp_type) {
+		out->icmp_type.has = 1;
+		out->icmp_type.value = one->icmp_type;
+	}
 	if ((one->from[0] && !(out->from = observe_dup(one->from))) ||
 	    (one->to[0] && !(out->to = observe_dup(one->to))) ||
 	    (one->interface[0] && !(out->interface = observe_dup(one->interface))) ||
