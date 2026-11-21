@@ -38,7 +38,7 @@ making silently; a disagreement would have been a finding rather than a
 cleanup.
 
 **The C's table is designated rather than ordered**, which is what makes it
-readable here: `[NCFG_PROTO_REQ_HELLO] = NCFG_TIER_OBSERVE` names both halves
+readable here: `[NCFG_PROTO_REQ_HELLO] = NCFG_TIER_VIEW` names both halves
 on one line. The enum member becomes a wire name through `request_names[]`,
 which is indexed by the same enum -- and because that is an ordering
 assumption, the reader checks it against a second derivation (the member's own
@@ -121,7 +121,7 @@ def tabled():
 	"""Wire name to tier, read from the document's table."""
 	out = {}
 	for line in DOC.read_text().splitlines():
-		row = re.match(r"^\|\s*`(observe|wifi|admin)`\s*\|(.*)\|\s*$", line)
+		row = re.match(r"^\|\s*`(view|laptop|root)`\s*\|(.*)\|\s*$", line)
 		if not row:
 			continue
 		for name in re.findall(r"`([a-z_]+)`", row.group(2)):

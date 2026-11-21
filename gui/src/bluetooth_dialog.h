@@ -15,7 +15,7 @@
  * headphones and walk away expecting sound would be the window lying about
  * what the daemon does.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_BLUETOOTH_DIALOG_H
 #define NCFG_BLUETOOTH_DIALOG_H

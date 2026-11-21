@@ -7,7 +7,7 @@
  * caching what it last saw. A datagram socket and a `PING` cost a round trip
  * on a local socket, which is nothing next to the scan they precede.
  *
- * The one rule that shapes all of this: a caller in the `wifi` tier can join a
+ * The one rule that shapes all of this: a caller in the `laptop` tier can join a
  * network the configuration already describes, and nothing else. Nothing in
  * this file can create a network, so the tier cannot be talked into writing
  * config (0013).

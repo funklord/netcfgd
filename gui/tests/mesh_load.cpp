@@ -132,7 +132,7 @@ int main(int argc, char **argv)
 	QTemporaryDir work;
 	QProcess      daemon;
 	const QString socket = start(&daemon, work.path(),
-	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+	    QStringLiteral("global { control { root = \"any\" } }\n"
 	                   "interface wlan2 { config = \"10.20.0.1/24\" }\n"),
 	    QStringLiteral("mesh \"backhaul\" {\n\tdevice = \"wlan2\"\n\tchannel = 36\n"
 	                   "\tband = \"5\"\n\twifi {\n\t\tpsk = \"@secret:keyring:mesh\"\n\t}\n}\n"));

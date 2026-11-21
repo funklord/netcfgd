@@ -459,12 +459,12 @@ struct ncfg_globals {
 	QString hostname;
 	QString on_drift;
 	int     confirm = 0;
-	QString control_observe;
-	QString control_wifi;
-	QString control_admin;
-	bool    remote_observe = false;
-	bool    remote_wifi = false;
-	bool    remote_admin = false;
+	QString control_view;
+	QString control_laptop;
+	QString control_root;
+	bool    remote_view = false;
+	bool    remote_laptop = false;
+	bool    remote_root = false;
 	/* The pinned country (0296), empty where it follows the machine. */
 	QString regdom;
 	/* UPnP (0310): the uplink, empty where it is off, and the LAN
@@ -1189,8 +1189,8 @@ public:
 	 * The only call here that carries a secret, and it carries it one way:
 	 * the daemon writes it through the provider and the config keeps an
 	 * `@secret:` reference, so nothing reads one back (0029, 0031). Needs
-	 * the `wifi` tier, which 0124 moved it to: a request carrying an SSID
-	 * and a credential is not what `admin` exists to bound. A refusal names
+	 * the `laptop` tier, which 0124 moved it to: a request carrying an SSID
+	 * and a credential is not what `root` exists to bound. A refusal names
 	 * the tier that would have been needed.
 	 *
 	 * `ssid` is lowercase hex because an SSID is arbitrary octets --
@@ -1213,7 +1213,7 @@ public:
 	 * Store a credential under a name, which is how a certificate gets to
 	 * where an `eap` block can refer to it.
 	 *
-	 * **`admin`, while wifi_add() is `wifi`**, so a window may be able to add
+	 * **`root`, while wifi_add() is `laptop`**, so a window may be able to add
 	 * a network and not to do this. The difference is the blast radius of the
 	 * name: an add writes a secret it also names and refuses if either the
 	 * network file or the secret is already there, and this writes any name
@@ -1236,7 +1236,7 @@ public:
 	 */
 	bool radios(QList<ncfg_radio_row> *out, QString *error);
 
-	/* Take a radio on, or hand it back. `wifi` tier: what it writes is a
+	/* Take a radio on, or hand it back. `laptop` tier: what it writes is a
 	 * `device` block, but what crosses is a name and a flag, which can name
 	 * no hook, no path and no `run_as`. */
 	bool set_radio(const QString &interface, bool activate, QString *error);
@@ -1263,7 +1263,7 @@ public:
 	bool wifi_connect(const QString &interface, const QString &network, QString *error);
 	bool wifi_disconnect(const QString &interface, QString *error);
 	/* Forget a saved network: its block, and its credential with it when
-	 * nothing else refers to one. `wifi` tier, like adding it.
+	 * nothing else refers to one. `laptop` tier, like adding it.
 	 *
 	 * **`add`'s mirror, which this class did not have.** What existed was
 	 * `config_put`, so a view could write a network and had nothing to remove
@@ -1273,14 +1273,14 @@ public:
 
 	/* Remove a stored credential, by name.
 	 *
-	 * **`admin`, and the protocol says that is the whole of what guards it.**
+	 * **`root`, and the protocol says that is the whole of what guards it.**
 	 * There is no `replace` to withhold and no second question, because
 	 * replacing is recoverable by whoever knows the value and removing is not
 	 * (0042) -- so a view offering this owns the confirmation. Ask `tiers()`
 	 * before offering it at all. */
 	bool secret_delete(const QString &name, QString *error);
 
-	/* Why is this interface the way it is. Needs `observe`.
+	/* Why is this interface the way it is. Needs `view`.
 	 *
 	 * **The question no other client of this daemon can answer.** `links()`
 	 * says what is; this says which line of which file asked for it, what the
@@ -1298,7 +1298,7 @@ public:
 	 * remote code execution with a nicer font.
 	 */
 	bool config_put(const QString &name, const QString &text, bool replace, QString *error);
-	/* Take a drop-in away, by the name it was stored under. Needs `admin`.
+	/* Take a drop-in away, by the name it was stored under. Needs `root`.
 	 *
 	 * **No view offers this yet**, and that is deliberate: the window writes
 	 * drop-ins from dialogs and lists them nowhere, so a button would have
@@ -1307,7 +1307,7 @@ public:
 	 * reason the call exists before the view does. */
 	bool config_delete(const QString &name, QString *error);
 	/* Every configuration file netcfgd reads, in the order it reads them.
-	 * Needs `observe`.
+	 * Needs `view`.
 	 *
 	 * **The order is the point, not a detail of the listing.** A later file
 	 * overrides an earlier one, so the sequence is the answer to "which of
@@ -1334,7 +1334,7 @@ public:
 	/*
 	 * Write a link-detection script, through the daemon.
 	 *
-	 * Needs root on this machine, not merely `admin`: a probe is a program
+	 * Needs root on this machine, not merely `root`: a probe is a program
 	 * netcfgd runs as root on an interval. A gui running as an ordinary user
 	 * gets a refusal saying so, which is the right answer -- and the reason
 	 * this goes over the socket at all is 0127, a client cannot write system
@@ -1372,7 +1372,7 @@ public:
 	bool modems(QList<ncfg_modem_row> *out, QString *error);
 	/*
 	 * The stations associated with the access point on `interface`, and which
-	 * way its list reads ("allow", "deny" or empty) in `policy`. `observe`,
+	 * way its list reads ("allow", "deny" or empty) in `policy`. `view`,
 	 * and what it shows is other people's devices -- see the socket
 	 * protocol's own warning about that tier.
 	 */
@@ -1401,12 +1401,12 @@ public:
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);
 	/*
-	 * The same hooks with their scripts, which needs `admin`.
+	 * The same hooks with their scripts, which needs `root`.
 	 *
 	 * A heavier tier than the listing, and deliberately: this returns a
 	 * program netcfgd runs as root, from a file kept at 0700 because nobody
 	 * else needs to read it. A view that shows what runs and when calls
-	 * `hooks`; this is for the editor, which is `admin` to save anyway.
+	 * `hooks`; this is for the editor, which is `root` to save anyway.
 	 */
 	bool hook_scripts(QList<ncfg_hook_script> *out, QString *error);
 	/* The host-wide policy the configuration declares. */
@@ -1424,17 +1424,17 @@ public:
 	 * no field that could carry one. */
 	bool secrets(QList<ncfg_secret_row> *out, QString *error);
 	/* Write what this machine is running into a profile, and select it.
-	 * Needs `admin`. */
+	 * Needs `root`. */
 	bool profile_save(const QString &name, bool replace, QString *error);
 	/*
-	 * Choose a profile, or stop using one with an empty name. Needs `admin`.
+	 * Choose a profile, or stop using one with an empty name. Needs `root`.
 	 *
 	 * A verb rather than a write of netcfgd's own filename, so the gui never
 	 * spells it. The network is reconfigured as soon as this returns -- the
 	 * daemon reconciles a changed configuration on its own -- so ask first.
 	 */
 	bool profile_set(const QString &name, QString *error);
-	/* Delete a profile that `profile_save` made (10.801). Needs `admin`; the
+	/* Delete a profile that `profile_save` made (10.801). Needs `root`; the
 	 * daemon refuses the one in use, a shipped one, and one written by hand. */
 	bool profile_delete(const QString &name, QString *error);
 
@@ -1457,7 +1457,7 @@ public:
 	 * What this connection may do, asked once at the handshake.
 	 *
 	 * Three independent answers rather than a level: netcfgd's tiers are three
-	 * group memberships, and a machine may grant `admin` to a group the
+	 * group memberships, and a machine may grant `root` to a group the
 	 * operator is in while `wifi` goes to one they are not.
 	 *
 	 * A daemon that does not answer -- one older than the field -- grants

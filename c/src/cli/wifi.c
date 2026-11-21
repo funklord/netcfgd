@@ -4,7 +4,7 @@
  *
  * NONE OF THESE COMPILE OR APPLY ANYTHING
  *   They reach the supplicant and hostapd through netcfgd, which is what makes
- *   them available to the `wifi` tier without giving that tier the ability to
+ *   them available to the `laptop` tier without giving that tier the ability to
  *   change configuration (0013). So every function here renders an answer that
  *   arrived over the socket, and nothing here reads a file.
  *

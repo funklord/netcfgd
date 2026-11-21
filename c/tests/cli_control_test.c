@@ -232,16 +232,16 @@ static void policy(ncfg_control_t *control)
 	char why[NCFG_ERROR_MAX];
 
 	memset(control, 0, sizeof(*control));
-	(void)ncfg_cli_principal_parse("group:netcfgd", &control->observe, why, sizeof(why));
-	(void)ncfg_cli_principal_parse("any", &control->wifi, why, sizeof(why));
-	(void)ncfg_cli_principal_parse("root", &control->admin, why, sizeof(why));
+	(void)ncfg_cli_principal_parse("group:netcfgd", &control->view, why, sizeof(why));
+	(void)ncfg_cli_principal_parse("any", &control->laptop, why, sizeof(why));
+	(void)ncfg_cli_principal_parse("root", &control->root, why, sizeof(why));
 }
 
 static void policy_free(ncfg_control_t *control)
 {
-	free(control->observe.name);
-	free(control->wifi.name);
-	free(control->admin.name);
+	free(control->view.name);
+	free(control->laptop.name);
+	free(control->root.name);
 	memset(control, 0, sizeof(*control));
 }
 
@@ -301,7 +301,9 @@ static void a_principal_is_spelled_one_way(void)
 	}
 }
 
-/* And the renderer writes the same word into a configuration file. */
+/* And the renderer writes the same word into a configuration file. The
+ * policy is written in the words 0327 replaced, deliberately: they are still
+ * read, and what comes back out is in the new ones. */
 static void the_renderer_agrees_about_how_a_principal_is_written(void)
 {
 	static const char *const text =
@@ -329,7 +331,7 @@ static void the_renderer_agrees_about_how_a_principal_is_written(void)
 		detail("said", err);
 		return;
 	}
-	(void)ncfg_cli_principal_render(&document->globals.control.observe, rendered,
+	(void)ncfg_cli_principal_render(&document->globals.control.view, rendered,
 	    sizeof(rendered));
 	check(strcmp(rendered, "group:netcfgd") == 0,
 	    "what the compiler read back is what this renders");
@@ -337,9 +339,9 @@ static void the_renderer_agrees_about_how_a_principal_is_written(void)
 	ncfg_buf_init(&written, 0);
 	ncfg_unrenderable_init(&missing);
 	if (ncfg_render(document, NULL, &written, &missing, err, sizeof(err))) {
-		check(strstr(ncfg_buf_text(&written), "observe = \"group:netcfgd\"") != NULL,
+		check(strstr(ncfg_buf_text(&written), "view = \"group:netcfgd\"") != NULL,
 		    "and the configuration renderer writes the same word");
-		check(strstr(ncfg_buf_text(&written), "wifi = \"user:alice\"") != NULL,
+		check(strstr(ncfg_buf_text(&written), "laptop = \"user:alice\"") != NULL,
 		    "for a user as well as a group");
 	} else {
 		check(0, "the witness policy renders");
@@ -379,7 +381,7 @@ static void the_drop_in_it_writes_says_how_to_undo_it(void)
 	check(strstr(ncfg_buf_text(&text),
 	    "delete it. Deleting it restores the default, which is root only.") != NULL,
 	    "and that deleting it restores the root-only default");
-	check(strstr(ncfg_buf_text(&text), "observe -- ask what the network looks like") != NULL,
+	check(strstr(ncfg_buf_text(&text), "view   -- ask what the network looks like") != NULL,
 	    "and says what each tier is for, since nothing else will");
 
 	file.name = (char *)(uintptr_t)"00-control.conf";
@@ -391,7 +393,7 @@ static void the_drop_in_it_writes_says_how_to_undo_it(void)
 	document = ncfg_config_compile(&sources, ncfg_hook_sink_unwritten(), NULL, err,
 	    sizeof(err));
 	if (document) {
-		(void)ncfg_cli_principal_render(&document->globals.control.observe, rendered,
+		(void)ncfg_cli_principal_render(&document->globals.control.view, rendered,
 		    sizeof(rendered));
 		check(strcmp(rendered, "group:netcfgd") == 0,
 		    "and what it compiles to is the policy it was given");
@@ -447,7 +449,7 @@ static void a_missing_control_block_is_inserted_without_touching_the_rest(void)
 	check(strstr(out, "# mine") != NULL, "a comment before the block is kept");
 	check(strstr(out, "dns { mode = \"none\" }") != NULL, "and so is the block beside it");
 	check(strstr(out, "interface eth0 { }") != NULL, "and everything after the block");
-	check(strstr(out, "observe = \"group:netcfgd\"") != NULL, "and the policy went in");
+	check(strstr(out, "view = \"group:netcfgd\"") != NULL, "and the policy went in");
 	free(out);
 }
 
@@ -462,8 +464,8 @@ static void an_existing_control_block_is_replaced_not_doubled(void)
 		return;
 	}
 	check(times(out, "control {") == 1, "one control block, not two");
-	check(strstr(out, "observe = \"group:netcfgd\"") != NULL, "with the new policy in it");
-	check(strstr(out, "observe = \"root\"") == NULL, "and the old one gone");
+	check(strstr(out, "view = \"group:netcfgd\"") != NULL, "with the new policy in it");
+	check(strstr(out, "view = \"root\"") == NULL, "and the old one gone");
 	check(strstr(out, "dns { mode = \"none\" }") != NULL, "and the block beside it kept");
 	free(out);
 }
@@ -629,9 +631,9 @@ static void show_prints_three_tiers_and_says_what_root_only_means(void)
 	capture_begin();
 	check(ncfg_cli_control(options, positional, 1u, err, sizeof(err)), "`control show` runs");
 	printed = capture_end();
-	line(printed, "observe  root", "a default policy is root at every tier");
-	line(printed, "wifi     root", "including wifi");
-	line(printed, "admin    root", "including admin");
+	line(printed, "view    root", "a default policy is root at every tier");
+	line(printed, "laptop  root", "including laptop");
+	line(printed, "root    root", "including root");
 	line(printed, "every tier is root, so the socket is root-only and no client run",
 	    "and the note says why no client can reach the socket");
 	fixture_clear();
@@ -648,7 +650,7 @@ static void set_writes_the_drop_in_it_owns_and_reports_the_path(void)
 
 	fixture(&base, base_config);
 	options = *base;
-	options.control.observe = "group:netcfgd";
+	options.control.view = "group:netcfgd";
 	positional[0] = "set";
 
 	capture_begin();
@@ -661,8 +663,8 @@ static void set_writes_the_drop_in_it_owns_and_reports_the_path(void)
 	(void)snprintf(expected, sizeof(expected), "%s/conf.d/00-control.conf", config_dir);
 	line(printed, expected, "it reports the drop-in it owns, by the path it composed");
 	check(testdir_exists(expected), "and the file is there");
-	line(printed, "observe  group:netcfgd", "the tier that was named changed");
-	line(printed, "wifi     root", "and one that was not is left alone");
+	line(printed, "view    group:netcfgd", "the tier that was named changed");
+	line(printed, "laptop  root", "and one that was not is left alone");
 	line(printed, "netcfgd applies this when it next reads its configuration. A member of",
 	    "and a policy beyond root says what still has to happen");
 
@@ -672,7 +674,7 @@ static void set_writes_the_drop_in_it_owns_and_reports_the_path(void)
 	positional[0] = "show";
 	(void)ncfg_cli_control(&options, positional, 1u, err, sizeof(err));
 	printed = capture_end();
-	line(printed, "observe  group:netcfgd", "and `control show` reads it back");
+	line(printed, "view    group:netcfgd", "and `control show` reads it back");
 	fixture_clear();
 }
 
@@ -720,14 +722,14 @@ static void json_prints_the_tiers_and_nothing_addressed_to_a_person(void)
 	    "`control show --json` runs");
 	printed = capture_end();
 	check(one_json_line(printed), "  it prints one object on one line and nothing else");
-	line(printed, "{\"observe\":\"root\",\"wifi\":\"root\",\"admin\":\"root\"}",
+	line(printed, "{\"view\":\"root\",\"laptop\":\"root\",\"root\":\"root\"}",
 	    "  the three tiers, in the order the block writes them");
 	check(strstr(printed, "every tier is root") == NULL,
 	    "  and the paragraph explaining root-only is not on the stream");
 	check(strstr(printed, "\"path\"") == NULL,
 	    "  and `show` names no file: it compiled the whole layered configuration");
 
-	options.control.observe = "group:netcfgd";
+	options.control.view = "group:netcfgd";
 	positional[0] = "set";
 	capture_begin();
 	check(ncfg_cli_control(&options, positional, 1u, err, sizeof(err)),
@@ -739,9 +741,9 @@ static void json_prints_the_tiers_and_nothing_addressed_to_a_person(void)
 	check(strstr(printed, wanted) != NULL,
 	    "  and names the drop-in it wrote, which the table printed on its own line");
 	check(testdir_exists(expected), "  and the file is there");
-	check(strstr(printed, "\"observe\":\"group:netcfgd\"") != NULL,
+	check(strstr(printed, "\"view\":\"group:netcfgd\"") != NULL,
 	    "  the tier that was named is spelled as the renderer spells it");
-	check(strstr(printed, "\"wifi\":\"root\"") != NULL,
+	check(strstr(printed, "\"laptop\":\"root\"") != NULL,
 	    "  and one that was not is left alone");
 	check(strstr(printed, "netcfgd applies this") == NULL &&
 	    strstr(printed, "log out") == NULL,
@@ -753,7 +755,7 @@ static void json_prints_the_tiers_and_nothing_addressed_to_a_person(void)
 	capture_begin();
 	(void)ncfg_cli_control(&options, positional, 1u, err, sizeof(err));
 	printed = capture_end();
-	check(strstr(printed, "\"observe\":\"group:netcfgd\"") != NULL,
+	check(strstr(printed, "\"view\":\"group:netcfgd\"") != NULL,
 	    "  and `control show --json` reads back what `set --json` wrote");
 	fixture_clear();
 }
@@ -769,7 +771,7 @@ static void set_with_no_tier_named_refuses(void)
 	err[0] = '\0';
 	check(!ncfg_cli_control(options, positional, 1u, err, sizeof(err)),
 	    "`control set` with nothing named is refused");
-	check(strstr(err, "--observe") != NULL && strstr(err, "control show") != NULL,
+	check(strstr(err, "--view") != NULL && strstr(err, "control show") != NULL,
 	    "and the sentence names the flags and how to read the policy now");
 	fixture_clear();
 }
@@ -811,7 +813,7 @@ static void a_global_block_in_the_writable_layer_is_edited_in_place(void)
 	fixture(&base, "global {\n\tdns { mode = \"none\" }\n}\n"
 	    "interface eth0 {\n\tconfig = \"dhcp\"\n}\n");
 	options = *base;
-	options.control.admin = "group:netcfgd";
+	options.control.root = "group:netcfgd";
 	positional[0] = "set";
 
 	capture_begin();
@@ -830,7 +832,7 @@ static void a_global_block_in_the_writable_layer_is_edited_in_place(void)
 	(void)snprintf(path, sizeof(path), "%s/netcfgd.conf", config_dir);
 	line(printed, path, "and the file it reports is the one that had the block");
 	now = testdir_read(path, NULL);
-	check(now != NULL && strstr(now, "admin = \"group:netcfgd\"") != NULL,
+	check(now != NULL && strstr(now, "root = \"group:netcfgd\"") != NULL,
 	    "the policy is in it");
 	check(now != NULL && strstr(now, "dns { mode = \"none\" }") != NULL,
 	    "and the DNS mode beside it is still there, which is the whole invariant");
@@ -863,7 +865,7 @@ static void a_global_block_that_is_only_shipped_is_not_edited(void)
 
 	fixture(&base, base_config);
 	options = *base;
-	options.control.admin = "group:netcfgd";
+	options.control.root = "group:netcfgd";
 	positional[0] = "set";
 
 	(void)mkdir(factory_dir, 0755);

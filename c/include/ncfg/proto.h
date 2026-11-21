@@ -585,7 +585,7 @@ typedef struct {
  *
  * `configured` is decision 0013's boundary made visible: it names the
  * `network` block describing this access point, and a caller holding only the
- * `wifi` tier can join exactly the entries where it is set. A client that
+ * `laptop` tier can join exactly the entries where it is set. A client that
  * shows the difference saves the operator discovering it by being refused.
  */
 typedef struct {

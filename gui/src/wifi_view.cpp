@@ -618,7 +618,7 @@ void ncfg_wifi_view::refresh()
 		 * this return used to reach none of it.** Three of the four ways out
 		 * of `refresh` call `selection_changed` and this one did not, so a
 		 * daemon that stopped answering -- or refused `links` for want of the
-		 * observe tier -- left `scan`, `join`, `leave` and `add` enabled
+		 * view tier -- left `scan`, `join`, `leave` and `add` enabled
 		 * exactly as the last good refresh had them, pointing at a radio this
 		 * view can no longer see. */
 		reachable = false;

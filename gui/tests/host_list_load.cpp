@@ -131,7 +131,7 @@ int main(int argc, char **argv)
 	QTemporaryDir work;
 	QProcess      daemon;
 	const QString socket = start(&daemon, work.path(),
-	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+	    QStringLiteral("global { control { root = \"any\" } }\n"
 	                   "firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
 	                   "\t\tdrop \"kids\" { mac = [\"@host_list:kids\"] }\n\t}\n"
 	                   "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n"),

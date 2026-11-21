@@ -126,10 +126,10 @@ check $? "  and --json is a list of them"
 # whose request carries a comma for fuzznet's grammar to pass through.
 said=$(ask "$B" "rrpc ask at $host 0 {\"request\":\"plan\"}")
 echo "$said" | grep -q '^ok ok%20[0-9]*%200%20[0-9]*%20[0-9a-f]\{16\}%0a{"response":"plan"'
-check $? "rrpc ask at A answers a plan, A's remote observe tier open ($(echo "$said" | cut -c1-30))"
+check $? "rrpc ask at A answers a plan, A's remote view tier open ($(echo "$said" | cut -c1-30))"
 said=$(ask "$B" "rrpc ask at $host 0 {\"request\":\"apply\",\"confirm\":90}")
-echo "$said" | grep -q 'error.*admin'
-check $? "  and refuses an apply, its remote admin tier closed"
+echo "$said" | grep -qE 'error.*(`|%60)root(`|%60)'
+check $? "  and refuses an apply, its remote root tier closed"
 
 # `ncfg --at` (10.694): a socket verb asked of A through B, as A's socket
 # would answer it. `modem` is A's observe tier, open; `reload` its admin
@@ -137,8 +137,8 @@ check $? "  and refuses an apply, its remote admin tier closed"
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" modem --at "$host" > "$R/modem.out" 2>&1
 check $? "ncfg modem --at A is answered by A ($(head -c 50 "$R/modem.out"))"
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" reload --at "$host" > "$R/reload.out" 2>&1
-[ $? -ne 0 ] && grep -q 'admin' "$R/reload.out"
-check $? "  ncfg reload --at A is refused by A's closed remote admin tier"
+[ $? -ne 0 ] && grep -q '`root` tier' "$R/reload.out"
+check $? "  ncfg reload --at A is refused by A's closed remote root tier"
 XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" show --at "$host" 2>&1 | grep -q 'works on this machine'
 check $? "  a command that works here is refused with --at, not done here"
 XDG_RUNTIME_DIR=$R/xdg timeout 10 "$C" apply --at "$host" 2>&1 | grep -q 'confirm-within'
@@ -194,7 +194,7 @@ mkdir "$R/bconf"
 printf 'device lo {\n\tmanaged = false\n}\n' > "$R/drop.conf"
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" config put --at "$host" --config-dir "$R/bconf" \
 	lab "$R/drop.conf" > "$R/put.out" 2>&1
-[ $? -ne 0 ] && grep -q 'admin' "$R/put.out" && [ -z "$(ls -A "$R/bconf")" ]
+[ $? -ne 0 ] && grep -q '`root` tier' "$R/put.out" && [ -z "$(ls -A "$R/bconf")" ]
 check $? "  config put --at A is A's refusal, and nothing is written here"
 XDG_RUNTIME_DIR=$R/xdg timeout 60 "$C" profile list --at "$host" --config-dir "$R/bconf" \
 	> "$R/profiles.out" 2>&1
@@ -227,8 +227,8 @@ while [ "$(date +%s)" -lt $deadline ]; do
 	echo "$said" | grep -q 'denied' && break
 	sleep 1
 done
-echo "$said" | grep -q 'denied.*observe'
-check $? "with A's remote observe tier closed, A denies it, naming the tier"
+echo "$said" | grep -q 'denied.*`view`'
+check $? "with A's remote view tier closed, A denies it, naming the tier"
 # The GUI's fleet tab (10.710) tells a refusal from a dead node by exactly this
 # command's first line of standard error; its probe has only a stand-in.
 XDG_RUNTIME_DIR=$R/xdg timeout 30 "$C" status --at "$host" --json 2> "$R/denied.err" > "$R/denied.out"
@@ -237,7 +237,7 @@ code=$?
 check $? "  status --at A --json says so on the first line of stderr ($(head -c 50 "$R/denied.err"))"
 
 # Propagation (10.708): `reload --at estate` through B is fuzznet's `rrpc do
-# at estate`, and A, its remote admin tier closed, is reported as failed --
+# at estate`, and A, its remote root tier closed, is reported as failed --
 # not as ok, which `ask`'s page for a refusal would have read as.
 key16=$(echo "$host" | cut -c1-16)
 XDG_RUNTIME_DIR=$R/xdg timeout 90 "$C" reload --at estate > "$R/estate1.out" 2>&1

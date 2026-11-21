@@ -159,13 +159,13 @@ typedef struct {
  *
  * What is not named here is left alone, so a tier nobody mentioned keeps
  * whatever it had. NULL is that "not named", which is why these are pointers
- * rather than strings with an empty default: `--observe ""` would be a
+ * rather than strings with an empty default: `--view ""` would be a
  * principal nobody can be.
  */
 typedef struct {
-	const char *observe;
-	const char *wifi;
-	const char *admin;
+	const char *view;
+	const char *laptop;
+	const char *root;
 } ncfg_cli_control_t;
 
 /* A repeatable option's values, pointing into `argv`. */

@@ -61,8 +61,8 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 	memset(&ask, 0, sizeof(ask));
 	memset(&root, 0, sizeof(root));
 	root.groups_known = 1;
-	remote.observe = 1;
-	remote.admin = 1;
+	remote.view = 1;
+	remote.root = 1;
 	ask.answer = answer;
 	ask.control = &control;
 	ask.remote = &remote;

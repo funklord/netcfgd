@@ -113,7 +113,7 @@ int main(int argc, char **argv)
 	QTemporaryDir work;
 	QProcess      daemon;
 	const QString socket = start(&daemon, work.path(),
-	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"),
+	    QStringLiteral("global { control { root = \"any\" } }\n"),
 	    QString());
 	ncfg_connection connection;
 	QString         error;
@@ -151,7 +151,7 @@ int main(int argc, char **argv)
 	QProcess        routed;
 	ncfg_connection upnp_connection;
 	const QString   lan_wan = QStringLiteral(
-	    "global { control { observe = \"any\"; admin = \"any\" } }\n"
+	    "global { control { root = \"any\" } }\n"
 	    "interface lan0 { config = \"192.168.1.1/24\" }\n"
 	    "interface wan0 { config = \"81.0.0.1/24\"\n%1 }\n");
 	const QString upnp_socket = start(&routed, router.path(), lan_wan.arg(QString()), QString());

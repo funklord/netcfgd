@@ -82,11 +82,14 @@ static const char usage_text[] =
     "                           wireless device.\n"
     "  ncfg control SUBCOMMAND  who may ask netcfgd for what. SUBCOMMAND is one of:\n"
     "                             show                what the policy is now\n"
-    "                             set --observe P     change a tier; P is one of\n"
-    "                                 --wifi P        root, any, user:NAME or\n"
-    "                                 --admin P       group:NAME. Repeatable, and\n"
+    "                             set --view P        change a tier; P is one of\n"
+    "                                 --laptop P      root, any, user:NAME or\n"
+    "                                 --root P        group:NAME. Repeatable, and\n"
     "                                                 what is not named is left\n"
-    "                                                 alone. Needs root: this is\n"
+    "                                                 alone. Each tier includes\n"
+    "                                                 the ones before it, and\n"
+    "                                                 --root is root on the\n"
+    "                                                 machine. Needs root: this is\n"
     "                                                 what grants a desktop client\n"
     "                                                 access in the first place\n"
     "  ncfg config SUBCOMMAND   configuration netcfgd stores for you. SUBCOMMAND is:\n"
@@ -402,29 +405,31 @@ int ncfg_cli_parse(int count, char *const *arguments, ncfg_cli_options_t *option
 			options->yes = 1;
 		} else if (strcmp(argument, "--replace") == 0) {
 			options->replace = 1;
-		} else if (strcmp(argument, "--observe") == 0) {
+		} else if (strcmp(argument, "--view") == 0 || strcmp(argument, "--observe") == 0) {
 			/*
-			 * The control tiers. Named here rather than parsed inside the
-			 * subcommand because this parser refuses a flag it does not know,
-			 * which is what stops a mistyped one being ignored.
+			 * The control tiers (0327). Named here rather than parsed inside
+			 * the subcommand because this parser refuses a flag it does not
+			 * know, which is what stops a mistyped one being ignored. The
+			 * words 0327 replaced still name the same tiers, as they do in a
+			 * `control` block.
 			 */
-			if (!(value = take_value("--observe", count, arguments, &index, err,
+			if (!(value = take_value(argument, count, arguments, &index, err,
 			    err_size))) {
 				return 0;
 			}
-			options->control.observe = value;
-		} else if (strcmp(argument, "--wifi") == 0) {
-			if (!(value = take_value("--wifi", count, arguments, &index, err,
+			options->control.view = value;
+		} else if (strcmp(argument, "--laptop") == 0 || strcmp(argument, "--wifi") == 0) {
+			if (!(value = take_value(argument, count, arguments, &index, err,
 			    err_size))) {
 				return 0;
 			}
-			options->control.wifi = value;
-		} else if (strcmp(argument, "--admin") == 0) {
-			if (!(value = take_value("--admin", count, arguments, &index, err,
+			options->control.laptop = value;
+		} else if (strcmp(argument, "--root") == 0 || strcmp(argument, "--admin") == 0) {
+			if (!(value = take_value(argument, count, arguments, &index, err,
 			    err_size))) {
 				return 0;
 			}
-			options->control.admin = value;
+			options->control.root = value;
 		} else if (strcmp(argument, "--id") == 0) {
 			if (!(value = take_value("--id", count, arguments, &index, err,
 			    err_size))) {

@@ -194,15 +194,23 @@ static void lower_control_key(ncfg_lower_ctx_t *ctx, ncfg_control_t *control,
 		return;
 	}
 	free(text);
-	if (strcmp(assignment->key, "observe") == 0) {
-		target = &control->observe;
-	} else if (strcmp(assignment->key, "wifi") == 0) {
-		target = &control->wifi;
-	} else if (strcmp(assignment->key, "admin") == 0) {
-		target = &control->admin;
+	/*
+	 * `view`, `laptop`, `root` (0327), and the words they replaced, read as
+	 * the same tier. A file saying `admin = "group:netcfgd"` recorded a choice
+	 * somebody made, and reading it as `root` keeps that choice exactly while
+	 * the tier now says what it always was. `ncfg control set` writes the new
+	 * words.
+	 */
+	if (strcmp(assignment->key, "view") == 0 || strcmp(assignment->key, "observe") == 0) {
+		target = &control->view;
+	} else if (strcmp(assignment->key, "laptop") == 0 ||
+	    strcmp(assignment->key, "wifi") == 0) {
+		target = &control->laptop;
+	} else if (strcmp(assignment->key, "root") == 0 || strcmp(assignment->key, "admin") == 0) {
+		target = &control->root;
 	} else {
 		ncfg_diag(ctx, assignment->span,
-		    "unknown control key `%s`: the tiers are observe, wifi and admin",
+		    "unknown control key `%s`: the tiers are view, laptop and root",
 		    assignment->key);
 		free(principal.name);
 		return;
@@ -254,15 +262,17 @@ static void lower_remote_key(ncfg_lower_ctx_t *ctx, ncfg_remote_policy_t *remote
 		free(text);
 		return;
 	}
-	if (strcmp(assignment->key, "observe") == 0) {
-		tier = &remote->observe;
-	} else if (strcmp(assignment->key, "wifi") == 0) {
-		tier = &remote->wifi;
-	} else if (strcmp(assignment->key, "admin") == 0) {
-		tier = &remote->admin;
+	/* The same words as `control`, old ones included (0327). */
+	if (strcmp(assignment->key, "view") == 0 || strcmp(assignment->key, "observe") == 0) {
+		tier = &remote->view;
+	} else if (strcmp(assignment->key, "laptop") == 0 ||
+	    strcmp(assignment->key, "wifi") == 0) {
+		tier = &remote->laptop;
+	} else if (strcmp(assignment->key, "root") == 0 || strcmp(assignment->key, "admin") == 0) {
+		tier = &remote->root;
 	} else {
 		ncfg_diag(ctx, assignment->span,
-		    "unknown remote key `%s`: the tiers are observe, wifi and admin; `agent` says "
+		    "unknown remote key `%s`: the tiers are view, laptop and root; `agent` says "
 		    "who may connect", assignment->key);
 		return;
 	}

@@ -153,8 +153,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	check(!ca_choose->isEnabled(),
-	      "which is disabled without the admin tier rather than absent");
-	check(ca_choose->toolTip().contains(QStringLiteral("admin")),
+	      "which is disabled without the root tier rather than absent");
+	check(ca_choose->toolTip().contains(QStringLiteral("root tier")),
 	      "and says which tier is missing");
 	check(ca_choose->toolTip().contains(QStringLiteral("ncfg secret set")),
 	      "and what somebody who has it would run");

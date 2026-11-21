@@ -531,7 +531,7 @@ static int principal_is_root(const ncfg_principal_t *principal)
 
 static void render_control(const ncfg_control_t *control, ncfg_buf_t *body)
 {
-	static const char *const keys[] = { "observe", "wifi", "admin" };
+	static const char *const keys[] = { "view", "laptop", "root" };
 	const ncfg_principal_t  *tiers[3];
 	/*
 	 * A loop over one of these indexes the other, and the sibling's length is
@@ -555,9 +555,9 @@ static void render_control(const ncfg_control_t *control, ncfg_buf_t *body)
 	    "a tiers per keys");
 	size_t                   i;
 
-	tiers[0] = &control->observe;
-	tiers[1] = &control->wifi;
-	tiers[2] = &control->admin;
+	tiers[0] = &control->view;
+	tiers[1] = &control->laptop;
+	tiers[2] = &control->root;
 	if (principal_is_root(tiers[0]) && principal_is_root(tiers[1]) &&
 	    principal_is_root(tiers[2])) {
 		return;
@@ -597,16 +597,16 @@ static void render_upnp(const ncfg_upnp_t *upnp, ncfg_buf_t *body)
 
 static void render_remote(const ncfg_remote_policy_t *remote, ncfg_buf_t *body)
 {
-	static const char *const keys[] = { "observe", "wifi", "admin" };
+	static const char *const keys[] = { "view", "laptop", "root" };
 	int                      tiers[3];
 	/* Paired, as above. */
 	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(tiers),
 	    "a tiers per keys");
 	size_t                   i;
 
-	tiers[0] = remote->observe;
-	tiers[1] = remote->wifi;
-	tiers[2] = remote->admin;
+	tiers[0] = remote->view;
+	tiers[1] = remote->laptop;
+	tiers[2] = remote->root;
 	if (!tiers[0] && !tiers[1] && !tiers[2] && principal_is_root(&remote->agent)) {
 		return;
 	}
@@ -1481,7 +1481,7 @@ static void render_firewall(const ncfg_document_t *document, ncfg_buf_t *text,
 static void refuse_unwritable_strings(const ncfg_document_t *document,
     ncfg_unrenderable_t *missing)
 {
-	static const char *const tiers[] = { "observe", "wifi", "admin" };
+	static const char *const tiers[] = { "view", "laptop", "root" };
 	const ncfg_principal_t  *who[4];
 	ncfg_address_t           address;
 	char                     normal[64];
@@ -1496,9 +1496,9 @@ static void refuse_unwritable_strings(const ncfg_document_t *document,
 
 	/* A `user:` or `group:` principal is the word and then a name, so an empty
 	 * one renders as `user:` and the parser has nothing to take. */
-	who[0] = &document->globals.control.observe;
-	who[1] = &document->globals.control.wifi;
-	who[2] = &document->globals.control.admin;
+	who[0] = &document->globals.control.view;
+	who[1] = &document->globals.control.laptop;
+	who[2] = &document->globals.control.root;
 	who[3] = &document->globals.remote.agent;
 	for (i = 0; i < NCFG_COUNT_OF(who); i++) {
 		if (who[i]->kind != NCFG_PRINCIPAL_USER && who[i]->kind != NCFG_PRINCIPAL_GROUP) {

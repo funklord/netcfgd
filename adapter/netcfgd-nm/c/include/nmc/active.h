@@ -28,7 +28,7 @@ int nmc_active_exists(const nmc_device_slot_t *slot);
  * a network activation is taken down through netcfgd's own disconnect, while
  * an interface is up because the configuration says so and taking it down
  * means changing that. Promoted from `static` rather than copied, for
- * `nmc_admin_principal`'s reason -- the nuance about a block only counting
+ * `nmc_root_principal`'s reason -- the nuance about a block only counting
  * when it is served is the part a second copy would lose.
  */
 int nmc_active_profile_of(const nmc_device_slot_t *slot, nmc_profile_kind_t *kind, char *id,

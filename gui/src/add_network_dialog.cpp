@@ -40,7 +40,7 @@ static QWidget *with_chooser(QLineEdit *field, bool may_store, QPushButton **out
 	button->setEnabled(may_store);
 	if (!may_store) {
 		button->setToolTip(QStringLiteral(
-		    "Storing a certificate needs the admin tier, and this connection has "
+		    "Storing a certificate needs the root tier, and this connection has "
 		    "the wifi tier. Somebody who has it can store one with "
 		    "`ncfg secret set NAME < file`, and its name goes in the field."));
 	}
@@ -121,11 +121,11 @@ ncfg_add_network_dialog::ncfg_add_network_dialog(ncfg_connection *connection,
 		/* What crosses the socket is a *name*: a path would be an
 		 * instruction to open a file as root. `Choose...` reads the file
 		 * here, with this operator's own permissions, and sends the
-		 * content -- which is 0127 in one control. Storing is `admin`
-		 * while adding is `wifi`, so the button appears only where the
+		 * content -- which is 0127 in one control. Storing is `root`
+		 * while adding is `laptop`, so the button appears only where the
 		 * connection holds it and the field still takes a typed name
 		 * where it does not. */
-		const bool may_store = connection->tiers().admin != 0;
+		const bool may_store = connection->tiers().root != 0;
 
 		eap_ca_cert = new QLineEdit(this);
 		eap_ca_cert->setObjectName(QStringLiteral("eap_ca_cert"));
@@ -488,7 +488,7 @@ void ncfg_add_network_dialog::submit()
 	                       eap_method ? &eap : nullptr, &error, owe);
 	if (!done) {
 		/* The daemon's own sentence. A refusal names the tier that would have
-		 * been needed, and `admin` is one a desktop session often does not
+		 * been needed, and `root` is one a desktop session often does not
 		 * have -- replacing that with wording of this dialog's own would throw
 		 * away the part that says what to do about it. */
 		note->setText(error);

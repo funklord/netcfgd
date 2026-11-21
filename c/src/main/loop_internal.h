@@ -951,8 +951,8 @@ void ncfg_main_signals_restore(void);
  *
  * Generous for what subscribes -- a tray, a window, a TUI is three -- and a
  * bound rather than a list that grows, for the reason the Rust's does not
- * have one: `monitor` needs only the `observe` tier, which
- * `control { observe = "any" }` opens to every local user, and the only
+ * have one: `monitor` needs only the `view` tier, which
+ * `control { view = "any" }` opens to every local user, and the only
  * pruning the Rust does is inside a broadcast. A converged machine broadcasts
  * nothing, so a client that subscribes and hangs up sits in the list until
  * something happens. Here the list cannot outgrow this, and the refusal to

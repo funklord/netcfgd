@@ -12,7 +12,7 @@
  * a secret reference, as everywhere, and is kept as written, provider and all
  * -- the access point dialog lost the provider until 10.628.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_MESH_DIALOG_H
 #define NCFG_MESH_DIALOG_H

@@ -543,7 +543,7 @@ static void the_hello(void)
 {
 	/* `observe` and `admin`, which is what the witness says this connection
 	 * holds. */
-	static const ncfg_tier_t tiers[] = { NCFG_TIER_OBSERVE, NCFG_TIER_ADMIN };
+	static const ncfg_tier_t tiers[] = { NCFG_TIER_VIEW, NCFG_TIER_ROOT };
 	ncfg_buf_t               out;
 	char                     err[NCFG_ERROR_MAX] = "";
 

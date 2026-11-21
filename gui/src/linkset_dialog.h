@@ -15,7 +15,7 @@
  * window's: "why am I on the modem" is answered by the members that lost, and
  * recomputing it here would be a second opinion about a failover (0248).
  *
- * `admin`, because it writes configuration. The refusal comes from the daemon
+ * `root`, because it writes configuration. The refusal comes from the daemon
  * with the tier it needed in it, and is shown as it arrives.
  */
 #ifndef NCFG_LINKSET_DIALOG_H

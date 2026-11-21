@@ -32,7 +32,7 @@
  *   would be an instruction to open a file as root, which is a far larger
  *   permission than "remember this certificate".
  *
- *   Storing one is the `admin` tier while adding a network is `wifi`, so the
+ *   Storing one is the `root` tier while adding a network is `laptop`, so the
  *   button is offered only where the connection holds it. Where it does not,
  *   the field still takes a name somebody else stored -- and says so, rather
  *   than presenting a button that fails after the operator picked a file.
@@ -161,7 +161,7 @@ private:
 	 * client-certificate row shown only for `tls`. */
 	QLabel     *passphrase_label;
 	QLabel     *client_cert_label;
-	/* Null where the connection does not hold `admin`, which is the same
+	/* Null where the connection does not hold `root`, which is the same
 	 * test the constructor makes once rather than each time. */
 	QPushButton *ca_cert_button;
 	QPushButton *client_cert_button;

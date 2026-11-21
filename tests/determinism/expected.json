@@ -15,14 +15,14 @@
     "networking": "on",
     "hostname_policy": "none",
     "control": {
-      "observe": "root",
-      "wifi": "root",
-      "admin": "root"
+      "view": "root",
+      "laptop": "root",
+      "root": "root"
     },
     "remote": {
-      "observe": false,
-      "wifi": false,
-      "admin": false,
+      "view": false,
+      "laptop": false,
+      "root": false,
       "agent": "root"
     }
   },

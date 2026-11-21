@@ -22,16 +22,16 @@ ncfg_config_view::ncfg_config_view(ncfg_connection *connection, QWidget *parent)
 	        << QStringLiteral("name") << QStringLiteral("removable");
 	table = new ncfg_table_view(columns, QStringLiteral("config_note"), this);
 
-	/* **`admin`, so the button is off without it** rather than offering an
+	/* **`root`, so the button is off without it** rather than offering an
 	 * action the daemon will refuse. The tooltip names the tier, because a
 	 * greyed control with no reason is indistinguishable from a broken one
 	 * (0092). */
 	remove_button = new QPushButton(QStringLiteral("remove"), this);
 	remove_button->setObjectName(QStringLiteral("remove_drop_in"));
 	remove_button->setEnabled(false);
-	if (connection->tiers().admin == 0) {
+	if (connection->tiers().root == 0) {
 		remove_button->setToolTip(
-		    QStringLiteral("removing a drop-in needs the `admin` tier, which this "
+		    QStringLiteral("removing a drop-in needs the `root` tier, which this "
 		               "connection does not have"));
 	}
 	table->add_control(remove_button);
@@ -110,7 +110,7 @@ void ncfg_config_view::show_selected()
 	const bool chosen = row >= 0 && row < shown.size();
 	contents->setPlainText(chosen ? shown.at(row).text : QString());
 	remove_button->setEnabled(chosen && shown.at(row).removable
-	    && connection->tiers().admin != 0);
+	    && connection->tiers().root != 0);
 }
 
 void ncfg_config_view::remove_selected()

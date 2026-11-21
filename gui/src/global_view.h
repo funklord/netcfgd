@@ -62,7 +62,7 @@ signals:
 	void changed();
 
 private slots:
-	/* Turn the machine's networking off, or back on. Needs `admin`. */
+	/* Turn the machine's networking off, or back on. Needs `root`. */
 	void toggle_networking();
 	/* Pin the country typed, or follow the machine again where it is blank. */
 	void set_country();

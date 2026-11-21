@@ -44,14 +44,14 @@ signals:
 	void changed();
 
 private slots:
-	/* Switch to the selected profile, asking first. Needs `admin`. */
+	/* Switch to the selected profile, asking first. Needs `root`. */
 	void use_selected();
 	/* Write what this machine is running into a profile, and select it.
-	 * Needs `admin`. The verb is the daemon's: what gets written is the
+	 * Needs `root`. The verb is the daemon's: what gets written is the
 	 * effective document rendered back out, which only the machine holding
 	 * it can produce -- this client does not have the text. */
 	void save_current();
-	/* Delete the selected profile, asking first. Needs `admin` (10.801). */
+	/* Delete the selected profile, asking first. Needs `root` (10.801). */
 	void delete_selected();
 
 public:

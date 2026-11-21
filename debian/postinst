@@ -127,7 +127,7 @@ configure)
 	echo "netcfgd:   no network to look anything up with."
 	echo "netcfgd:"
 	echo "netcfgd:   a client run by an ordinary user is refused until you say so:"
-	echo "netcfgd:     ncfg control set --observe group:netcfgd --wifi group:netcfgd"
+	echo "netcfgd:     ncfg control set --laptop group:netcfgd"
 	echo "netcfgd:     usermod -aG netcfgd USER   # then log out and back in"
 	echo "netcfgd:   that covers scanning, joining and adding a network. Changing"
 	echo "netcfgd:   anything else stays root; ncfg control show prints the policy"

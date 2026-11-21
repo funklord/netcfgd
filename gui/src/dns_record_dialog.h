@@ -10,7 +10,7 @@
  * **The name is fixed once written**, as a host list's is: it is the record's
  * identity, and a new name is a new record.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_DNS_RECORD_DIALOG_H
 #define NCFG_DNS_RECORD_DIALOG_H

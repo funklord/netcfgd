@@ -800,8 +800,8 @@ static void the_status_and_the_document_are_the_witness_shape(void)
 	    "\"globals\":{\"dns\":{\"mode\":\"none\",\"servers\":[],\"search\":[],"
 	    "\"domains\":[],\"options\":[]},"
 	    "\"confirm_default\":null,\"networking\":\"on\",\"hostname_policy\":\"none\","
-	    "\"control\":{\"observe\":\"root\",\"wifi\":\"root\",\"admin\":\"root\"},"
-	    "\"remote\":{\"observe\":false,\"wifi\":false,\"admin\":false,"
+	    "\"control\":{\"view\":\"root\",\"laptop\":\"root\",\"root\":\"root\"},"
+	    "\"remote\":{\"view\":false,\"laptop\":false,\"root\":false,"
 	    "\"agent\":\"root\"}},\"devices\":[],\"interfaces\":[],\"networks\":[],"
 	    "\"rules\":[],\"access_points\":[]}";
 	static char          said[] = "netcfgd.conf:3: `mtu` wants a number";

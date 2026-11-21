@@ -1071,7 +1071,7 @@ static int list_connections(DBusConnection *connection, DBusMessage *call, DBusM
 }
 
 /*
- * The `admin` principal is `nmc_admin_principal` in `authorize.c` now.
+ * The `root` principal is `nmc_root_principal` in `authorize.c` now.
  *
  * It was `static` here and `manager.c` needs the same answer for
  * `ActivateConnection`, so it moved rather than being copied: two definitions
@@ -1115,7 +1115,7 @@ static int refuse_write(DBusConnection *connection, DBusMessage *call, DBusMessa
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -1225,7 +1225,7 @@ static int refuse_read_only(DBusConnection *connection, DBusMessage *call, DBusM
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(slot ? slot->state : NULL, &admin);
+	nmc_root_principal(slot ? slot->state : NULL, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -1457,7 +1457,7 @@ static int created(DBusConnection *connection, DBusMessage *call, void *object, 
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -1588,7 +1588,7 @@ static int refuse_unsaved(DBusConnection *connection, DBusMessage *call, DBusMes
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -2149,7 +2149,7 @@ static int delete_connection(DBusConnection *connection, DBusMessage *call, DBus
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -2316,7 +2316,7 @@ static int updated(DBusConnection *connection, DBusMessage *call, DBusMessage *r
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;

@@ -103,7 +103,7 @@ int main(int argc, char **argv)
 	             "\"primary\":{\"interface\":\"wan0\"}},\"links\":[{\"carrier\":true},"
 	             "{\"carrier\":false}]}\\n';;\n"
 	             "bb*) echo 'ncfg: the answer is not a page of the status: denied: this "
-	             "needs the observe tier' >&2; "
+	             "needs the view tier' >&2; "
 	             "echo - >> \"$FLEET_LOG\"; exit 1;;\n"
 	             "cc*) exec sleep 30;;\n"
 	             "*) sleep 0.2;;\n"
@@ -135,7 +135,7 @@ int main(int argc, char **argv)
 	      "a node answering shows its name, rung, primary link and links up",
 	      cell(cells, 0, 0) + QStringLiteral(" / ") + cell(cells, 0, 1));
 	check(cell(cells, 1, 1).startsWith(QStringLiteral("refused: denied")) &&
-	          cell(cells, 1, 1).contains(QStringLiteral("observe")),
+	          cell(cells, 1, 1).contains(QStringLiteral("view")),
 	      "a node refusing is refused, in its own words", cell(cells, 1, 1));
 	check(cell(cells, 2, 1).startsWith(QStringLiteral("no answer")) &&
 	          cell(cells, 2, 5) == QStringLiteral("never"),

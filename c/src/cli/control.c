@@ -176,22 +176,22 @@ static int principal_copy(const ncfg_principal_t *from, ncfg_principal_t *to)
 
 static void control_reset(ncfg_control_t *control)
 {
-	principal_reset(&control->observe);
-	principal_reset(&control->wifi);
-	principal_reset(&control->admin);
+	principal_reset(&control->view);
+	principal_reset(&control->laptop);
+	principal_reset(&control->root);
 }
 
 static int control_copy(const ncfg_control_t *from, ncfg_control_t *to)
 {
 	memset(to, 0, sizeof(*to));
-	return principal_copy(&from->observe, &to->observe) &&
-	    principal_copy(&from->wifi, &to->wifi) && principal_copy(&from->admin, &to->admin);
+	return principal_copy(&from->view, &to->view) &&
+	    principal_copy(&from->laptop, &to->laptop) && principal_copy(&from->root, &to->root);
 }
 
 static int control_same(const ncfg_control_t *one, const ncfg_control_t *other)
 {
-	return principal_same(&one->observe, &other->observe) &&
-	    principal_same(&one->wifi, &other->wifi) && principal_same(&one->admin, &other->admin);
+	return principal_same(&one->view, &other->view) &&
+	    principal_same(&one->laptop, &other->laptop) && principal_same(&one->root, &other->root);
 }
 
 /*
@@ -203,24 +203,24 @@ static int control_same(const ncfg_control_t *one, const ncfg_control_t *other)
  */
 static int control_opens_beyond_root(const ncfg_control_t *control)
 {
-	return control->observe.kind != NCFG_PRINCIPAL_ROOT ||
-	    control->wifi.kind != NCFG_PRINCIPAL_ROOT ||
-	    control->admin.kind != NCFG_PRINCIPAL_ROOT;
+	return control->view.kind != NCFG_PRINCIPAL_ROOT ||
+	    control->laptop.kind != NCFG_PRINCIPAL_ROOT ||
+	    control->root.kind != NCFG_PRINCIPAL_ROOT;
 }
 
 /* The three tiers, in the order they are written and printed. */
 static const ncfg_principal_t *tier_of(const ncfg_control_t *control, size_t which)
 {
 	if (which == 0) {
-		return &control->observe;
+		return &control->view;
 	}
 	if (which == 1) {
-		return &control->wifi;
+		return &control->laptop;
 	}
-	return &control->admin;
+	return &control->root;
 }
 
-static const char *const tier_names[] = { "observe", "wifi", "admin" };
+static const char *const tier_names[] = { "view", "laptop", "root" };
 
 /* ------------------------------------------------------------------------ *
  * Rendering
@@ -250,9 +250,12 @@ void ncfg_cli_control_render(const ncfg_control_t *control, ncfg_buf_t *out)
 	    "# Ordinary netcfgd configuration: read it, diff it, commit it, or\n"
 	    "# delete it. Deleting it restores the default, which is root only.\n"
 	    "#\n"
-	    "# observe -- ask what the network looks like\n"
-	    "# wifi    -- join, leave and scan networks the configuration describes\n"
-	    "# admin   -- change anything else, including adding a network\n");
+	    "# Each tier includes the ones above it in this list.\n"
+	    "#\n"
+	    "# view   -- ask what the network looks like\n"
+	    "# laptop -- join, add and forget networks, radios and tunnels up and down\n"
+	    "# root   -- change anything else. This is root on this machine: whoever\n"
+	    "#           chooses its routes and resolvers chooses where its traffic goes\n");
 	ncfg_buf_add_text(out, "\nglobal {\n");
 	render_inner(control, "\t", out);
 	ncfg_buf_add_text(out, "}\n");
@@ -927,12 +930,12 @@ static void print_tiers(const ncfg_control_t *control)
 {
 	char rendered[NCFG_CLI_TEXT_MAX];
 
-	ncfg_out_writef("observe  %s\n",
-	    ncfg_cli_principal_render(&control->observe, rendered, sizeof(rendered)));
-	ncfg_out_writef("wifi     %s\n",
-	    ncfg_cli_principal_render(&control->wifi, rendered, sizeof(rendered)));
-	ncfg_out_writef("admin    %s\n",
-	    ncfg_cli_principal_render(&control->admin, rendered, sizeof(rendered)));
+	ncfg_out_writef("view    %s\n",
+	    ncfg_cli_principal_render(&control->view, rendered, sizeof(rendered)));
+	ncfg_out_writef("laptop  %s\n",
+	    ncfg_cli_principal_render(&control->laptop, rendered, sizeof(rendered)));
+	ncfg_out_writef("root    %s\n",
+	    ncfg_cli_principal_render(&control->root, rendered, sizeof(rendered)));
 }
 
 /*
@@ -1021,7 +1024,7 @@ static void report(const ncfg_control_t *control)
 	}
 }
 
-/* Parse `--observe`, `--wifi` and `--admin`, leaving what was not named alone. */
+/* Parse `--view`, `--laptop` and `--root`, leaving what was not named alone. */
 static int set(const ncfg_cli_options_t *options, char *err, size_t err_size)
 {
 	ncfg_control_t   control;
@@ -1042,9 +1045,9 @@ static int set(const ncfg_cli_options_t *options, char *err, size_t err_size)
 	}
 	ncfg_document_free(document);
 
-	given[0] = options->control.observe;
-	given[1] = options->control.wifi;
-	given[2] = options->control.admin;
+	given[0] = options->control.view;
+	given[1] = options->control.laptop;
+	given[2] = options->control.root;
 	for (which = 0; which < 3u; which++) {
 		ncfg_principal_t parsed;
 		char             why[NCFG_ERROR_MAX];
@@ -1061,21 +1064,21 @@ static int set(const ncfg_cli_options_t *options, char *err, size_t err_size)
 			return 0;
 		}
 		if (which == 0) {
-			principal_reset(&control.observe);
-			control.observe = parsed;
+			principal_reset(&control.view);
+			control.view = parsed;
 		} else if (which == 1) {
-			principal_reset(&control.wifi);
-			control.wifi = parsed;
+			principal_reset(&control.laptop);
+			control.laptop = parsed;
 		} else {
-			principal_reset(&control.admin);
-			control.admin = parsed;
+			principal_reset(&control.root);
+			control.root = parsed;
 		}
 		named = 1;
 	}
 	if (!named) {
 		control_reset(&control);
 		ncfg_error_set(err, err_size,
-		    "`ncfg control set` needs at least one of --observe, --wifi or --admin. "
+		    "`ncfg control set` needs at least one of --view, --laptop or --root. "
 		    "`ncfg control show` prints the policy now");
 		return 0;
 	}
@@ -1110,16 +1113,16 @@ static int set(const ncfg_cli_options_t *options, char *err, size_t err_size)
 int ncfg_cli_control_command(const char *line, const ncfg_cli_options_t *options, char *path_out,
     size_t path_size, char *err, size_t err_size)
 {
-	static const char *const tiers[] = { "observe", "wifi", "admin" };
+	static const char *const tiers[] = { "view", "laptop", "root" };
 	ncfg_control_t           control;
 	ncfg_principal_t        *into[3];
 	const char              *at = line;
 	size_t                   which;
 
 	memset(&control, 0, sizeof(control));
-	into[0] = &control.observe;
-	into[1] = &control.wifi;
-	into[2] = &control.admin;
+	into[0] = &control.view;
+	into[1] = &control.laptop;
+	into[2] = &control.root;
 
 	while (*at != '\0' && is_space(*at)) {
 		at++;

@@ -93,9 +93,9 @@ private:
 
 	ncfg_connection *connection;
 	QFrame          *frame;
-	QComboBox       *observe;
-	QComboBox       *wifi;
-	QComboBox       *admin;
+	QComboBox       *view_choice;
+	QComboBox       *laptop_choice;
+	QComboBox       *root_choice;
 	QLabel          *note;
 	/* TDE's RootInfoWidget: the read-only state saying why it is read-only. */
 	QLabel          *notice;

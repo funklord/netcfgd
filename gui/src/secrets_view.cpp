@@ -42,7 +42,7 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 	columns << QStringLiteral("name") << QStringLiteral("state") << QStringLiteral("used by");
 	table = new ncfg_table_view(columns, QStringLiteral("secrets_note"), this);
 
-	/* **`admin`, and the protocol says that is all that guards it** -- so the
+	/* **`root`, and the protocol says that is all that guards it** -- so the
 	 * button is off where the connection does not hold it, rather than
 	 * offering an action that will be refused. The tooltip says which tier,
 	 * because a greyed control with no reason is indistinguishable from a
@@ -50,9 +50,9 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 	forget_button = new QPushButton(QStringLiteral("forget"), this);
 	forget_button->setObjectName(QStringLiteral("forget_secret"));
 	forget_button->setEnabled(false);
-	if (connection->tiers().admin == 0) {
+	if (connection->tiers().root == 0) {
 		forget_button->setToolTip(
-		    QStringLiteral("removing a credential needs the `admin` tier, which this "
+		    QStringLiteral("removing a credential needs the `root` tier, which this "
 		               "connection does not have"));
 	}
 	table->add_control(forget_button);
@@ -65,9 +65,9 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 	store_button = new QPushButton(QStringLiteral("store..."), this);
 	store_button->setObjectName(QStringLiteral("store_secret"));
 	store_button->setEnabled(false);
-	if (connection->tiers().admin == 0) {
+	if (connection->tiers().root == 0) {
 		store_button->setToolTip(
-		    QStringLiteral("storing a credential needs the admin tier, which this "
+		    QStringLiteral("storing a credential needs the root tier, which this "
 		               "connection does not have"));
 	}
 	table->add_control(store_button);
@@ -82,12 +82,12 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 		 * live for it would be offering to fix the wrong half of the fault.
 		 */
 		const bool stored = row >= 0 && row < shown.size() && shown.at(row).stored;
-		forget_button->setEnabled(stored && connection->tiers().admin != 0);
+		forget_button->setEnabled(stored && connection->tiers().root != 0);
 		/* And the other half: a MISSING row is what `store` mends. A stored
 		 * one is replaced by forgetting it first, so a value nobody else has
 		 * is never overwritten by a click (0042). */
 		store_button->setEnabled(row >= 0 && row < shown.size() && !stored &&
-		                         connection->tiers().admin != 0);
+		                         connection->tiers().root != 0);
 	});
 
 	auto *layout = new QVBoxLayout(this);

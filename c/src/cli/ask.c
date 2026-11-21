@@ -5,7 +5,7 @@
  *   Design section 4.4 makes daemon-optional a property rather than a
  *   fallback: `ncfg plan` and `ncfg status` are meant to work without one. What
  *   is here is the set that cannot -- the wireless verbs, which reach the
- *   supplicant through netcfgd so that the `wifi` tier gets them without being
+ *   supplicant through netcfgd so that the `laptop` tier gets them without being
  *   able to change configuration (0013); the modem report; and a confirm window,
  *   which has to outlive the process that opened it.
  *

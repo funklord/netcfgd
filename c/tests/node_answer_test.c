@@ -5,7 +5,7 @@
  * the policy as this node's configuration would set it.
  *
  * What has to hold: the node's own `remote` block decides (each node is
- * configured in detail, the holder's word), so `observe` closed is a denial
+ * configured in detail, the holder's word), so `view` closed is a denial
  * and open is the status; a contact is no operator; and the status comes in
  * pages that put back together are exactly what the control socket's status
  * says, however small the reply it has to fit.
@@ -102,10 +102,10 @@ int main(void)
 	whole_status = &whole;
 
 	n = ask(&policy, &observed, 0, "get status", reply, sizeof(reply));
-	check(n > 0 && strncmp(reply, "denied ", 7) == 0 && strstr(reply, "`observe`") != NULL,
-	    "with the node's remote observe tier closed, an operator is denied");
+	check(n > 0 && strncmp(reply, "denied ", 7) == 0 && strstr(reply, "`view`") != NULL,
+	    "with the node's remote view tier closed, an operator is denied");
 
-	policy.remote.observe = 1;
+	policy.remote.view = 1;
 	n = ask(&policy, &observed, 1, "get status", reply, sizeof(reply));
 	check(n > 0 && strncmp(reply, "denied ", 7) == 0 && strstr(reply, "contact") != NULL,
 	    "a contact is no operator, whatever the tier");

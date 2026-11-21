@@ -12,7 +12,7 @@
  *
  * The modes are a fixed list rather than a text box, and that is a privilege
  * decision rather than a convenience: this writes a drop-in through the daemon
- * at the `admin` tier, and a box that let somebody type a block would be
+ * at the `root` tier, and a box that let somebody type a block would be
  * 0117's remote code execution with a nicer font. Composing the text here
  * means the shape of what can be written is bounded by this file.
  */

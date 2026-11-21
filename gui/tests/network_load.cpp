@@ -177,7 +177,7 @@ int main(int argc, char **argv)
 	                   "\t}\n"
 	                   "}\n"));
 	const QString socket = start(&daemon, work.path(),
-	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"), owned);
+	    QStringLiteral("global { control { root = \"any\" } }\n"), owned);
 	ncfg_connection connection;
 	QString         error;
 	if (socket.isEmpty() || !connection.open(socket, &error)) {

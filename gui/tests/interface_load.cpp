@@ -174,7 +174,7 @@ int main(int argc, char **argv)
 		 * was refused for permission, and "saveable" could only mean "not
 		 * refused for an unmodelled key" (10.608). */
 		const QString socket = start(&daemon, work.path(),
-		    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+		    QStringLiteral("global { control { root = \"any\" } }\n"
 		                   "device eth0 { kind = \"physical\" }\n"
 		                   "block_list \"ads\" { domain = [\"ads.example\"] }\n"
 		                   "block_list \"malware\" { domain = [\"bad.example\"] }\n"),
@@ -389,7 +389,7 @@ int main(int argc, char **argv)
 		    /* `wan0`, because a delegated address names the interface whose
 		     * delegation it comes from, and the compiler refuses one naming an
 		     * interface that asks for none. */
-		    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+		    QStringLiteral("global { control { root = \"any\" } }\n"
 		                   "device eth0 { kind = \"physical\" }\n"
 		                   "interface wan0 { config = [\"dhcp6 pd\"] }\n"),
 		    QStringLiteral("interface eth0 {\n"

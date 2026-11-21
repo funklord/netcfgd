@@ -223,11 +223,17 @@
 
 # WHO MAY ASK NETCFGD FOR WHAT
 #
-# Three independent tiers, not a ladder:
+# Three tiers, and each includes the ones above it in this list (0327):
 #
-#   observe   ask what the network looks like
-#   wifi      scan, join, leave, and add a wireless network
-#   admin     change anything else -- apply, reload, revert
+#   view      ask what the network looks like
+#   laptop    what a person at their own machine needs: scan, join, leave,
+#             add and forget a wireless network, radios and tunnels on and off
+#   root      change anything else -- apply, reload, revert. This IS root on
+#             the machine: whoever chooses its routes and resolvers chooses
+#             where its traffic goes. Open it to a group only if you mean that
+#             group to have root.
+#
+# The words `observe`, `wifi` and `admin` are still read as these three.
 #
 # Everything defaults to `root`, so a fresh install refuses a desktop client
 # and the socket is mode 0600. That is the single most common reason a GUI
@@ -235,9 +241,8 @@
 
 #global {
 #	control {
-#		observe = "group:netcfgd"
-#		wifi    = "group:netcfgd"
-#		admin   = "root"
+#		laptop = "group:netcfgd"
+#		root   = "root"
 #	}
 #}
 
@@ -250,9 +255,8 @@
 
 #global {
 #	remote {
-#		observe = true
-#		wifi    = true
-#		admin   = false
+#		laptop = true
+#		root   = false
 #	}
 #}
 
@@ -264,7 +268,7 @@
 # remote can ever do. That bound holds even if the agent is wrong about
 # identity, which is the half worth having.
 #
-# `ncfg control set --observe group:netcfgd --wifi group:netcfgd` writes
+# `ncfg control set --laptop group:netcfgd` writes
 # exactly that for you, and `ncfg control show` prints it back. The package
 # creates the `netcfgd` group empty; `usermod -aG netcfgd USER` puts somebody
 # in it, and they have to log out and back in before the kernel agrees.

@@ -42,9 +42,9 @@ public:
 	TQString error() const { return m_error; }
 
 	//! what this connection may do. Three independent grants, not a ladder.
-	bool may_observe() const { return m_observe; }
-	bool may_wifi() const { return m_wifi; }
-	bool may_admin() const { return m_admin; }
+	bool may_view() const { return m_view; }
+	bool may_laptop() const { return m_laptop; }
+	bool may_root() const { return m_root; }
 
 	//! one line for the tray tooltip and the module's header
 	TQString status_line();
@@ -110,9 +110,9 @@ public:
 private:
 	ncfg_client *m_client;
 	TQString     m_error;
-	bool         m_observe;
-	bool         m_wifi;
-	bool         m_admin;
+	bool         m_view;
+	bool         m_laptop;
+	bool         m_root;
 	TQString     m_radio;
 	TQString     m_network;
 	TQString     m_notice;

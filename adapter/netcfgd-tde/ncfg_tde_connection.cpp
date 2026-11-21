@@ -10,7 +10,7 @@ extern "C" {
 #include <tdelocale.h>
 
 ncfg_tde_connection::ncfg_tde_connection()
-    : m_client(0), m_observe(false), m_wifi(false), m_admin(false), m_known(false),
+    : m_client(0), m_view(false), m_laptop(false), m_root(false), m_known(false),
       m_rung(0)
 {
 }
@@ -27,9 +27,9 @@ void ncfg_tde_connection::forget_tiers()
 	 * what it may do should offer less rather than more, which is what
 	 * ncfg_client_tiers() itself does on failure.
 	 */
-	m_observe = false;
-	m_wifi = false;
-	m_admin = false;
+	m_view = false;
+	m_laptop = false;
+	m_root = false;
 }
 
 bool ncfg_tde_connection::is_open() const
@@ -80,9 +80,9 @@ bool ncfg_tde_connection::refresh_tiers()
 		return false;
 	}
 
-	m_observe = tiers.observe != 0;
-	m_wifi = tiers.wifi != 0;
-	m_admin = tiers.admin != 0;
+	m_view = tiers.view != 0;
+	m_laptop = tiers.laptop != 0;
+	m_root = tiers.root != 0;
 	return true;
 }
 

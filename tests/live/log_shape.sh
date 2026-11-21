@@ -90,7 +90,7 @@ contains() {
 	esac
 }
 
-printf 'global { control { observe = "any" } }\n' > "$work/etc/netcfgd.conf"
+printf 'global { control { view = "any" } }\n' > "$work/etc/netcfgd.conf"
 
 # One daemon, started, given a moment to say what it says at startup, stopped.
 say() {

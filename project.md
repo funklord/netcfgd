@@ -112,13 +112,13 @@ Globals {
                                       // `confirm = 0` in the file both say no
                                       // window (0094, 0157)
   hostname_policy  : enum { None, FromDhcp, Static(string) }
-  control          : Control          // who may do what; see 0013
+  control          : Control          // who may do what; see 0327
 }
 
-Control {                             // every tier defaults to Root
-  observe : Principal                 // ask what the network looks like
-  wifi    : Principal                 // join, leave and scan known networks
-  admin   : Principal                 // change anything else
+Control {                             // every tier defaults to Root; they nest
+  view   : Principal                  // ask what the network looks like
+  laptop : Principal                  // join, add, forget; radio, tunnel up/down
+  root   : Principal                  // everything else, and it is root
 }
 
 Principal = Root | Any | User(string) | Group(string)
@@ -129,13 +129,15 @@ Written in a config as a `control` block inside `global`:
 ```
 global {
 	control {
-		observe = "any"
-		wifi    = "group:netdev"
-		admin   = "root"
+		view   = "any"
+		laptop = "group:netcfgd"
+		root   = "root"
 	}
 }
 ```
 
+A caller holding a tier holds the ones before it (0327); `observe`, `wifi`
+and `admin`, the words 0327 replaced, are still read as the same three.
 Everything defaults to `root`, so a machine that never edits this block behaves exactly as design §13 describes. The socket's mode and group follow the policy, and netcfgd complains loudly at startup if it cannot make the policy reachable — a config that says `group:netdev` over a root-only socket is a lie that costs an afternoon to diagnose.
 
 ```
@@ -637,7 +639,7 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M5** | Embedded | ~~Getting `netcfgd-embedded` under 1 MB~~ — one multi-call binary took the install from 2.89 MB to 1.75 MB (40%); 1 MB measured as unreachable, [0024](doc/decision/0024-one-binary-and-what-a-megabyte-would-actually-cost.md). ~~procd integration~~ (done, `packaging/procd/`), ~~read-only-root support~~ (done: factory layer under the writable one, `ncfg reset`, `tests/live/readonly.sh`). ~~Nano consumer without compiler~~ — dropped, [0021](doc/decision/0021-no-nano-tier.md). ~~`uci` import~~ — dropped, [0019 amendment](doc/decision/0019-no-importers-for-config-stores-that-rewrite-themselves.md): OpenWrt provisioning generates uci and never reads it, and the factory config layer is the netcfgd shape of that flow. |
 | **M6** | TUI | ~~`ncfg tui` including the interactive plan-preview pane~~ — done: four panes over the public socket only, 80x24, no colour required. Drawing and key decoding are ncurses behind a default-on cargo feature; with it off nothing links beyond libc ([0025](doc/decision/0025-the-audited-crate-is-the-libc-boundary-not-netlink.md)). |
 | **M7** | NetworkManager shim | `netcfgd-nm`, tier 1 (`nmcli`, `nm-applet`, `plasma-nm` wifi flows). **Tier 1 is essentially there:** bus name, object tree, `ObjectManager` at `/org/freedesktop`, every device with its properties, `AccessPoint` objects with `RequestScan`, connection profiles with derived UUIDs, and activation -- all driven by a real `nmcli` in `tests/live/nm.sh`. The write path is in too: `nmcli connection add` writes a netcfgd `network` block, with the passphrase going to the secret provider and a `@secret:` reference into the block ([0030](doc/decision/0030-a-gui-is-an-editor-of-config-files.md)) — the files are `conf.d/nm-*.conf`, flat, because `conf.d` is not read recursively and making it so would be a core change justified only by an adapter. `GetSecrets` refuses, which is a security property rather than a gap ([0029](doc/decision/0029-a-profile-is-a-projection-and-secrets-do-not-travel.md)). The `AgentManager` secret bridge is in as well: an agent supplies a credential netcfgd lacks, it goes to the provider at 0600, and the block keeps its `@secret:` reference — inbound only, since `GetSecrets` still refuses ([0031](doc/decision/0031-the-secret-bridge-runs-one-way.md)). That closes tier 1. Tier 2 has started: `IP4Config`/`IP6Config` objects make a settings panel's Details tab show the addresses, gateway, routes and nameservers netcfgd actually applied ([0032](doc/decision/0032-the-details-panel-is-the-observation.md)). Static addressing round-trips too — a panel sees a profile's configured address and can write one back, with the default route moving between netcfgd's route list and NM's `gateway` field ([0033](doc/decision/0033-nm-splits-what-netcfgd-keeps-together.md)). Per-connection options round-trip too — metered, autoconnect priority and per-profile DNS, with an MTU named in the file as unexpressible rather than dropped ([0034](doc/decision/0034-libnm-validates-what-the-shim-projects.md)). **Tier 2 is done.** Tier 3 has started with the part that was a live defect: `Managed` now reads the document, and an unmanaged device reports `UNMANAGED` ([0035](doc/decision/0035-managed-false-means-it.md)) — which needed a core fix first, because `managed = false` did not actually stop the planner. **Tier 3 bounds the shim, not netcfgd** ([0036](doc/decision/0036-the-shim-is-not-the-roadmap.md)): VPN, modems and complete wifi are wanted in netcfgd and simply will not be projected through NM's interfaces. `AddConnection` creates wifi networks only. Each adapter is its own cargo workspace so its dependencies cannot reach the core, enforced by `make nm-containment` ([0027](doc/decision/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md)). A scan's security detail is lost at the socket, so the shim reads it from the document rather than growing the socket an adapter wanted ([0028](doc/decision/0028-the-scan-is-lossy-and-the-document-is-not.md)) -- which leaves `ncfg wifi scan`'s own lossiness as work with a local justification. |
-| **M8** | Desktop | GUI + tray applet; NM shim tier 2. **The shim half is done** (0032-0034). **The desktop half is in progress**: the GUI has a wifi tab, a tray applet, and adds a network itself (`8de3d003`, under the `wifi` tier); what keeps a person who does not understand networking from meeting a tier at all is the permission overhaul the holder has deferred (*Open: the permission system needs an overhaul*). The GUI is Qt Widgets, C++17, desktop and Android from one source, in the style of the sibling `fuzzypickles`/`hydra`/`beerssh` trees -- brief in [gui/project.md](gui/project.md). Remote access was planned as an agent terminating a remote protocol beside an unchanged daemon; **0308 and 0309 superseded that**: fuzznet is linked into the daemon, which speaks fuzznet to local and remote clients alike (10.668, 10.676), and [doc/remote-access-feasibility.md](doc/remote-access-feasibility.md) is the earlier reading. |
+| **M8** | Desktop | GUI + tray applet; NM shim tier 2. **The shim half is done** (0032-0034). **The desktop half is in progress**: the GUI has a wifi tab, a tray applet, and adds a network itself (`8de3d003`, under the `laptop` tier). The permission overhaul the holder released on 2026-11-21 is [0327](doc/decision/0327-three-tiers-view-laptop-root.md): `view`, `laptop` and `root`, nested, with `root` called what it is (*Settled: the permission system's overhaul*). The GUI is Qt Widgets, C++17, desktop and Android from one source, in the style of the sibling `fuzzypickles`/`hydra`/`beerssh` trees -- brief in [gui/project.md](gui/project.md). Remote access was planned as an agent terminating a remote protocol beside an unchanged daemon; **0308 and 0309 superseded that**: fuzznet is linked into the daemon, which speaks fuzznet to local and remote clients alike (10.668, 10.676), and [doc/remote-access-feasibility.md](doc/remote-access-feasibility.md) is the earlier reading. |
 | **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. **No longer the fleet answer** ([0311](doc/decision/0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md)): the fleet is the fuzznet estate, an authenticated operator managing every node of it; this milestone is a northbound interface for sites that want one. |
 
 **The M4 freeze's four inert features are all closed**, after M6 rather than at M4 — the schema had to carry them before the freeze, the behaviour did not. Policy routing rules, `ipv6_token` and the ethtool offloads are netlink; access points are hostapd, configured by a generated file under `/run` ([0026](doc/decision/0026-an-access-point-is-a-file-hostapd-reads.md)). What is still recognised and not applied is the half of the `ethtool` block that needs a physical NIC to exercise, and `ncfg plan` names those fields individually.
@@ -1058,9 +1060,9 @@ them because no test had ever carried those keys.
    and `tun`, writing a secret as its `@secret:` reference and refusing only
    one with no name to refer to. This item stood open after both, which is the
    cost of a decision taken under another name (`working-practice.md`).
-3. **The permission tiers**, deferred by the holder with the shape already
-   given -- `view` / `laptop` / `root`, replacing the current gradient. Written
-   up under *Open: the permission system needs an overhaul*.
+3. ~~The permission tiers~~ -- **done 2026-11-21**, released by the holder
+   ("go ahead with the permission overhaul"): [0327](doc/decision/0327-three-tiers-view-laptop-root.md),
+   under *Settled: the permission system's overhaul*.
 4. ~~Being told *why* you are being stopped~~ -- **answered by placement,
    re-read 2026-10-28.** 0134 decided an unannounced stop holds, and 0163
    moved the one thing that needed the intent -- the commit-confirm window --
@@ -2706,9 +2708,18 @@ both files and suggests the word. It is worth knowing because it is the
 opposite of the rule for `global`, and because it is the first thing an
 operator writing a profile will hit.
 
-## Open: the permission system needs an overhaul
+## Settled: the permission system's overhaul
 
-**Deferred by the holder, and the shape of the answer is already given.**
+**Done 2026-11-21, released by the holder ("go ahead with the permission
+overhaul") with the shape below already given:
+[0327](doc/decision/0327-three-tiers-view-laptop-root.md).** `observe`,
+`wifi` and `admin` became `view`, `laptop` and `root` in the config, on the
+wire (`hello`'s `tiers`, the document's `globals.control` and
+`globals.remote`), in `ncfg control` and in every client; the tiers nest; the
+old words are still read as the same tiers; `check_content` stays and no
+longer claims to make a tier survivable. Each inversion below is answered in
+0327's *What this settles*. What follows is the argument as it stood while
+the work was deferred, kept because 0327 rests on it.
 
 ### What the tiers actually mean
 
@@ -9492,14 +9503,36 @@ requests carry the same two members. What the window says is what it asked,
 not that the tunnel is up; the tunnel's addresses in `links` say that.
 The TUI has them too, being these widgets (gui/project.md section 7a).
 
-**Open, and the holder's: the same for OpenVPN and WireGuard.** `tunnel_set`
+**The same for OpenVPN and WireGuard: the tier is decided by 0327; the mechanism is the holder's.** `tunnel_set`
 answers only an `xfrm` device. netcfgd runs those two tunnels itself, so
 "take it down" from the `wifi` tier would be that tier writing the
 interface's `enabled`, as `radio_set` writes a `device` block -- precedent
-for yes. It widens what the `wifi` tier may write, which sits inside the
-deferred permission overhaul (*Open: the permission system needs an
-overhaul*), so it is asked rather than built. Until answered, neither has an
+for yes. It widens what the `wifi` tier may write, which sat inside the
+deferred permission overhaul, so it was asked rather than built. **0327
+answers it**: the `laptop` tier is defined as what a person at their own
+machine needs, the VPN on and off among it. Until answered, neither has an
 on/off control in `ncfg` or the window short of editing the file.
+
+**Why it is not built, measured 2026-11-21.** Two things stand between the
+tier and the switch, and the first is a language decision. *A drop-in cannot
+change one key of an interface*: a second `interface wg0` block must say
+`override`, and `override` replaces the block wholesale (merge.c, section 3)
+-- so the radio's shape, a drop-in of its own written whole and removed
+whole, has no `interface` to write without restating the operator's. The
+options, each a change to the configuration language: (a) a block of its own
+per interface, `switch wg0 { up = false }`, which a drop-in `tunnel-wg0`
+holds as `radio-wlan0` holds a `device` block; (b) an explicit key-level
+form, `amend interface wg0 { enabled = false }`, which section 3's rule
+against *silent* last-wins does not forbid but which no block has had; (c) a
+`global` list such as `held_down = ["wg0"]`, in one netcfgd-owned file
+rewritten whole as `ncfg control set` writes `00-control`. (a) is the
+recommendation: it is the radio's pattern, needs no read-modify-write, and
+removing the file restores the operator's word. *And `enabled = false` only
+takes the link down* (`plan_disable` in plan/link.c): a WireGuard link down
+carries nothing, which is off; an `openvpn` daemon keeps running and keeps
+its session behind a down `tun`, so "off" for OpenVPN also has to stop the
+backend. Until the language question is answered, neither has an on/off
+control short of editing the file.
 
 On the devices tab rather than a tab of its own: the row is the tunnel's,
 and a VPN tab with one kind in it would be the first of several kinds nobody

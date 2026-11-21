@@ -162,13 +162,13 @@ int ncfg_fuzznet_status(const char *run_dir, char **out, size_t *length, char *e
  * This machine's daemon's events, held (0309, 10.729): `get events` on the
  * fuzznet socket in `run_dir`, fuzznet's sec 899. The descriptor, blocking, past
  * its `ok events`; -1 with a sentence. Read by whoever `local/events` lets,
- * which follows the `observe` tier, and `any` has no such grant.
+ * which follows the `view` tier, and `any` has no such grant.
  */
 int ncfg_fuzznet_events_hold(const char *run_dir, char *why, size_t why_size);
 
 /*
  * For a caller fuzznet will not hold, with no control socket to turn to, as under
- * `observe = "any"`, which has no read to grant: the same stream's shape, a line
+ * `view = "any"`, which has no read to grant: the same stream's shape, a line
  * every two seconds that says only to look, read through `eventlog` as a held
  * line is. What the tier lets call, so no permit stands in the way. The descriptor,
  * or -1 with a sentence.

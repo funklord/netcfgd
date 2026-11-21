@@ -8,7 +8,7 @@
  * **The name is fixed once written**, as a DNS record's is: the servers name
  * the list by it, and a new name is a new list.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_BLOCK_LIST_DIALOG_H
 #define NCFG_BLOCK_LIST_DIALOG_H

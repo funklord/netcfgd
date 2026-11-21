@@ -148,7 +148,7 @@ int main(int argc, char **argv)
 	QTemporaryDir work;
 	QProcess      daemon;
 	const QString socket = start(&daemon, work.path(),
-	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+	    QStringLiteral("global { control { root = \"any\" } }\n"
 	                   "interface wlan0 { config = \"192.168.50.1/24\" }\n"
 	                   "host_list \"kids\" { mac = [\"00:11:22:33:44:01\"] }\n"),
 	    QStringLiteral("access_point \"Home\" {\n"

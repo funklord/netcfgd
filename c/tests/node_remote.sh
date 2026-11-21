@@ -106,7 +106,7 @@ check $? "and with nothing opened it binds no port"
 check $? "and \`ncfg pair\` says what to open rather than draw a code nothing answers"
 
 one open '	remote {
-		observe = true
+		view   = true
 	}
 '
 grep -q '^ok ' "$R/open/prekey"

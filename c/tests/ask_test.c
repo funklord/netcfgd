@@ -200,14 +200,14 @@ int main(void)
 
 	runs = 0;
 	said = once(&ask, operator_key, NULL, "{\"request\":\"plan\"}", 80000u);
-	check(runs == 0u && strstr(said, "error") && strstr(said, "observe"),
-	    "an operator is judged by the node's remote block: observe closed, denied");
-	remote.observe = 1;
+	check(runs == 0u && strstr(said, "error") && strstr(said, "view"),
+	    "an operator is judged by the node's remote block: view closed, denied");
+	remote.view = 1;
 	said = once(&ask, operator_key, NULL, "{\"request\":\"plan\"}", 81000u);
 	check(runs == 1u && strncmp(said, "{\"response\":\"x\"", 15) == 0,
 	    "  and with it open, answered");
 
-	remote.admin = 1;
+	remote.root = 1;
 	runs = 0;
 	said = once(&ask, operator_key, NULL, "{\"request\":\"apply\",\"confirm\":null}", 82000u);
 	check(runs == 0u && strstr(said, "confirm window") != NULL,
@@ -252,7 +252,7 @@ int main(void)
 
 	runs = 0;
 	said = once(&ask, NULL, &root, "{\"request\":\"hello\"}", 86000u);
-	check(runs == 0u && strstr(said, "hello") != NULL && strstr(said, "admin") != NULL,
+	check(runs == 0u && strstr(said, "hello") != NULL && strstr(said, "root") != NULL,
 	    "hello is answered here, with the tiers this caller holds");
 	said = once(&ask, NULL, &root, "{\"request\":\"monitor\"}", 87000u);
 	check(runs == 0u && strstr(said, "stream") != NULL, "monitor is refused as the stream it is");
@@ -367,18 +367,18 @@ int main(void)
 		static const char apply[] = "{\"request\":\"apply\",\"confirm\":60}";
 
 		runs = 0;
-		remote.admin = 1;
+		remote.root = 1;
 		ask.answer = ok_answer;
 		n = ncfg_main_do(&ask, operator_key, NULL, apply, strlen(apply), reply, sizeof(reply),
 		    120000u);
 		check(n == 3u && memcmp(reply, "ok\n", 3u) == 0 && runs == 1u,
 		    "do answers ok where the daemon carried the request out");
-		remote.admin = 0;
+		remote.root = 0;
 		n = ncfg_main_do(&ask, operator_key, NULL, apply, strlen(apply), reply, sizeof(reply),
 		    120001u);
 		check(n == 0u && runs == 1u,
 		    "  and nothing where the node's remote tier refused it, so fuzznet says failed");
-		remote.admin = 1;
+		remote.root = 1;
 		n = ncfg_main_do(&ask, operator_key, NULL, "{\"request\":\"apply\",\"confirm\":null}",
 		    strlen("{\"request\":\"apply\",\"confirm\":null}"), reply, sizeof(reply), 120002u);
 		check(n == 0u && runs == 1u, "  nor where an operator's apply had no window");

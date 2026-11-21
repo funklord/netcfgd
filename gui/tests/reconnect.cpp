@@ -53,7 +53,7 @@ static QString start(QProcess *daemon, const QString &work)
 	if (!conf.open(QIODevice::WriteOnly)) {
 		return QString();
 	}
-	conf.write("global { control { observe = \"any\" } }\n");
+	conf.write("global { control { view = \"any\" } }\n");
 	conf.close();
 
 	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();

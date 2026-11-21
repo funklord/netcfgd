@@ -84,7 +84,7 @@ check() {
 	fi
 }
 
-printf 'global { control { observe = "any" } }\n' > "$work/etc/netcfgd.conf"
+printf 'global { control { view = "any" } }\n' > "$work/etc/netcfgd.conf"
 "$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
@@ -107,7 +107,7 @@ base_threads=$(threads)
 burst() {
 	round=0
 	while [ "$round" -lt "$1" ]; do
-		printf 'global { control { observe = "any" } }\n#%d\n' "$round" \
+		printf 'global { control { view = "any" } }\n#%d\n' "$round" \
 			> "$work/etc/netcfgd.conf"
 		"$build/ncfg" control show > /dev/null 2>&1 || true
 		round=$((round + 1))
@@ -141,7 +141,7 @@ check "and no more threads" "$(threads)" "$base_threads"
 # The control: the measurements above mean nothing if the daemon was not
 # actually serving during them.
 check "the daemon was answering throughout" \
-	"$("$build/ncfg" control show 2>&1 | grep -c '^observe')" "1"
+	"$("$build/ncfg" control show 2>&1 | grep -c '^view')" "1"
 
 if [ "$failures" -eq 0 ]; then
 	echo "steady_state.sh: all checks passed"

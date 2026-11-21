@@ -423,7 +423,7 @@ int ncfg_lower_wifi_block(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	 */
 	if (chosen == 0) {
 		ncfg_diag(ctx, block->span,
-		    "this `wifi` block names no security, so it would be an open network: add "
+		    "this `laptop` block names no security, so it would be an open network: add "
 		    "`psk = \"@secret:NAME\"`, or `open = true` if that is meant; `open = false` says "
 		    "which kind it is not, not which it is");
 		ncfg_wifi_keys_free(&keys);

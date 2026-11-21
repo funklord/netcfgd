@@ -454,7 +454,7 @@ int nmc_agents_supply(nmc_agents_t *agents, DBusConnection *connection, nmc_stat
 	 * agent answering a request for a credential, so a value already on disk
 	 * means the request should not have been made -- and overwriting a
 	 * credential is the one thing 0042 says nobody can undo. The caller
-	 * authorized for `admin` before this was reached, which is the same
+	 * authorized for `root` before this was reached, which is the same
 	 * permission storing it needs: a desktop that may not change the
 	 * configuration may not fill in its secrets either, and the second is how
 	 * you would work around the first.

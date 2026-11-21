@@ -2189,8 +2189,8 @@ static void a_daemon_refusal_is_a_zero_and_its_own_message(void)
 	ncfg_journal_t journal;
 
 	static const char refusal[] =
-	    "{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n"
-	    "{\"response\":\"error\",\"message\":\"the admin tier is root's\"}\n";
+	    "{\"response\":\"error\",\"message\":\"the root tier is root's\"}\n"
+	    "{\"response\":\"error\",\"message\":\"the root tier is root's\"}\n";
 
 	if (!staged_open(&staged, "a refusal can be staged", refusal)) {
 		return;
@@ -2200,13 +2200,13 @@ static void a_daemon_refusal_is_a_zero_and_its_own_message(void)
 	 * away the half that says what to do about it. */
 	ok("a refused plan is a zero, not a failure to reach anything",
 	   ncfg_client_plan_of(staged.client, &plan, err, sizeof(err)) == 0, NULL);
-	equals("and err holds the daemon's own words", err, "the admin tier is root's");
+	equals("and err holds the daemon's own words", err, "the root tier is root's");
 	ok("and the model is left empty rather than half filled in",
 	   plan.actions == NULL && plan.action_count == 0u, NULL);
 
 	ok("the same for an apply",
 	   ncfg_client_apply(staged.client, 0, NULL, &journal, err, sizeof(err)) == 0, NULL);
-	equals("with the same message", err, "the admin tier is root's");
+	equals("with the same message", err, "the root tier is root's");
 	staged_close(&staged);
 }
 
@@ -2341,7 +2341,7 @@ static void the_monitor_hands_over_one_event_at_a_time(void)
  * What this connection may do, read off the handshake.
  *
  * Three independent answers and not a level. netcfgd's tiers are three group
- * memberships, and a machine may grant `admin` to a group somebody is in while
+ * memberships, and a machine may grant `root` to a group somebody is in while
  * `wifi` goes to one they are not -- so a client that filled in everything
  * "below" the highest would offer something the daemon refuses.
  */
@@ -2364,9 +2364,9 @@ static void the_handshake_says_what_this_connection_may_do(void)
 
 	ok("the tiers are read", ncfg_client_tiers(staged.client, &tiers, err, sizeof(err)) == 1,
 	   err);
-	ok("and a tier the daemon named is held", tiers.observe == 1 && tiers.admin == 1, NULL);
+	ok("and a tier the daemon named is held", tiers.view == 1 && tiers.root == 1, NULL);
 	ok("and one it did not name is not, whatever its neighbours say",
-	   tiers.wifi == 0, NULL);
+	   tiers.laptop == 0, NULL);
 
 	/* A daemon older than the field. Reported as success with nothing set, so
 	 * the caller decides -- greying out every button against a daemon that
@@ -2374,12 +2374,12 @@ static void the_handshake_says_what_this_connection_may_do(void)
 	ok("a daemon that says nothing is not a failure",
 	   ncfg_client_tiers(staged.client, &tiers, err, sizeof(err)) == 1, err);
 	ok("and grants nothing of its own accord",
-	   tiers.observe == 0 && tiers.wifi == 0 && tiers.admin == 0, NULL);
+	   tiers.view == 0 && tiers.laptop == 0 && tiers.root == 0, NULL);
 
 	/* And a refusal is a failure, with nothing granted. */
 	ok("a refused handshake is a failure",
 	   ncfg_client_tiers(staged.client, &tiers, err, sizeof(err)) == 0, NULL);
-	ok("and grants nothing", tiers.observe == 0 && tiers.wifi == 0 && tiers.admin == 0,
+	ok("and grants nothing", tiers.view == 0 && tiers.laptop == 0 && tiers.root == 0,
 	   NULL);
 	staged_close(&staged);
 }
@@ -2497,14 +2497,14 @@ static void a_refused_stream_says_which_tier_it_wanted(void)
 	}
 	(void)received(server, sent, sizeof(sent));
 
-	send_bytes(server, "{\"response\":\"error\",\"message\":\"monitor needs the observe "
+	send_bytes(server, "{\"response\":\"error\",\"message\":\"monitor needs the view "
 	           "tier; you are in none of its groups\"}\n");
 	close(server);
 
 	int got = ncfg_monitor_next(monitor, &event, err, sizeof(err));
 	ok("a refusal is a failure of the stream, not an event on it", got == -1, NULL);
 	equals("and arrives as the daemon's own sentence", err,
-	       "monitor needs the observe tier; you are in none of its groups");
+	       "monitor needs the view tier; you are in none of its groups");
 
 	ncfg_monitor_close(monitor);
 	close(listener);
@@ -3352,7 +3352,7 @@ static void an_unreachable_daemon_says_what_to_do(void)
 /*
  * Removing a credential names it and carries nothing else.
  *
- * **The message is the whole of the bound.** `secret_delete` is `admin` and
+ * **The message is the whole of the bound.** `secret_delete` is `root` and
  * the protocol says that is all that guards it: no `replace` to withhold, no
  * second question, because replacing is recoverable by whoever knows the value
  * and removing is not (0042). So what this pins is that the request cannot

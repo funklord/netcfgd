@@ -2429,10 +2429,12 @@ typedef struct {
 	char *name; /* for USER and GROUP */
 } ncfg_principal_t;
 
+/* The three tiers of 0327, one principal each; a higher grant includes the
+ * lower ones. */
 typedef struct {
-	ncfg_principal_t observe;
-	ncfg_principal_t wifi;
-	ncfg_principal_t admin;
+	ncfg_principal_t view;
+	ncfg_principal_t laptop;
+	ncfg_principal_t root;
 } ncfg_control_t;
 
 /*
@@ -2444,9 +2446,9 @@ typedef struct {
  * caller arrives as the agent. Everything is false by default.
  */
 typedef struct {
-	int              observe;
-	int              wifi;
-	int              admin;
+	int              view;
+	int              laptop;
+	int              root;
 	/* A principal where the tiers are booleans, and not the asymmetry 0128
 	 * rejected: this describes the process on *this* machine holding the other
 	 * end of the unix socket, which is exactly what `SO_PEERCRED` answers.

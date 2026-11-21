@@ -165,15 +165,15 @@ void ncfg_global_view::refresh()
 		{ QStringLiteral("confirm window"),
 		    globals.confirm ? ncfg_counted(globals.confirm, "second", "seconds")
 		                    : QStringLiteral("none") },
-		{ QStringLiteral("observe"), globals.control_observe },
-		{ QStringLiteral("wifi"), globals.control_wifi },
-		{ QStringLiteral("admin"), globals.control_admin },
-		{ QStringLiteral("observe, remotely"),
-		    globals.remote_observe ? QStringLiteral("yes") : QStringLiteral("no") },
-		{ QStringLiteral("wifi, remotely"),
-		    globals.remote_wifi ? QStringLiteral("yes") : QStringLiteral("no") },
-		{ QStringLiteral("admin, remotely"),
-		    globals.remote_admin ? QStringLiteral("yes") : QStringLiteral("no") },
+		{ QStringLiteral("view"), globals.control_view },
+		{ QStringLiteral("laptop"), globals.control_laptop },
+		{ QStringLiteral("root"), globals.control_root },
+		{ QStringLiteral("view, remotely"),
+		    globals.remote_view ? QStringLiteral("yes") : QStringLiteral("no") },
+		{ QStringLiteral("laptop, remotely"),
+		    globals.remote_laptop ? QStringLiteral("yes") : QStringLiteral("no") },
+		{ QStringLiteral("root, remotely"),
+		    globals.remote_root ? QStringLiteral("yes") : QStringLiteral("no") },
 	};
 	constexpr int row_count = static_cast<int>(sizeof(rows) / sizeof(rows[0]));
 
@@ -210,8 +210,9 @@ void ncfg_global_view::refresh()
 	table->horizontalHeader()->setStretchLastSection(true);
 
 	note->setText(QStringLiteral(
-	    "`observe`, `wifi` and `admin` are who may ask this machine to do what. Config "
-	    "access to a network daemon is close to root on it, so read `admin` that way. "
+	    "`view`, `laptop` and `root` are who may ask this machine to do what, and "
+	    "each includes the ones before it. `root` is root: whoever may change the "
+	    "routes and resolvers chooses where this machine's traffic goes. "
 	    "The dns settings are on their own tab: several files may contribute to the "
 	    "`global` block, which is what stops two tools locking each other out."));
 	emit reported(networking_on ? QStringLiteral("networking is on")

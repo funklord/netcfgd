@@ -703,9 +703,9 @@ static void the_control_policy_is_copied_and_outlives_its_document(void)
 	err[0] = '\0';
 	check(ncfg_main_policy_copy(NULL, &policy, err, sizeof(err)),
 	    "a machine with no compiled configuration still has a policy");
-	check(policy.control.observe.kind == NCFG_PRINCIPAL_ROOT &&
-	    policy.control.wifi.kind == NCFG_PRINCIPAL_ROOT &&
-	    policy.control.admin.kind == NCFG_PRINCIPAL_ROOT,
+	check(policy.control.view.kind == NCFG_PRINCIPAL_ROOT &&
+	    policy.control.laptop.kind == NCFG_PRINCIPAL_ROOT &&
+	    policy.control.root.kind == NCFG_PRINCIPAL_ROOT,
 	    "and it is root everywhere, which is the safe reading of a file that would "
 	    "not compile");
 	check(!ncfg_main_remote_is_open(&policy.remote),
@@ -714,8 +714,8 @@ static void the_control_policy_is_copied_and_outlives_its_document(void)
 
 	(void)snprintf(text, sizeof(text),
 	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"globals\":{\"control\":"
-	    "{\"observe\":{\"group\":\"netdev\"},\"wifi\":\"any\"},\"remote\":"
-	    "{\"observe\":true,\"agent\":{\"user\":\"agent\"}}},"
+	    "{\"view\":{\"group\":\"netdev\"},\"laptop\":\"any\"},\"remote\":"
+	    "{\"view\":true,\"agent\":{\"user\":\"agent\"}}},"
 	    "\"devices\":[],\"interfaces\":[],\"networks\":[]}");
 	err[0] = '\0';
 	document = ncfg_document_read(text, strlen(text), err, sizeof(err));
@@ -729,10 +729,10 @@ static void the_control_policy_is_copied_and_outlives_its_document(void)
 	    "a document's control policy is copied");
 	ncfg_document_free(document);
 
-	check(policy.control.observe.kind == NCFG_PRINCIPAL_GROUP &&
-	    policy.control.observe.name && strcmp(policy.control.observe.name, "netdev") == 0,
+	check(policy.control.view.kind == NCFG_PRINCIPAL_GROUP &&
+	    policy.control.view.name && strcmp(policy.control.view.name, "netdev") == 0,
 	    "and the copy is readable after the document it came from is gone");
-	check(policy.control.wifi.kind == NCFG_PRINCIPAL_ANY,
+	check(policy.control.laptop.kind == NCFG_PRINCIPAL_ANY,
 	    "with every tier carried over, not just the first");
 	check(ncfg_main_remote_is_open(&policy.remote),
 	    "a remote policy that opens one tier is open");
@@ -749,7 +749,7 @@ static void the_control_policy_is_copied_and_outlives_its_document(void)
 		check(!ncfg_main_remote_is_open(&shut),
 		    "a remote policy that opens nothing is not open");
 		check(!ncfg_main_remote_is_open(NULL), "and neither is none at all");
-		shut.admin = 1;
+		shut.root = 1;
 		check(ncfg_main_remote_is_open(&shut),
 		    "one that opens only admin is open, which is the arm a two-tier check "
 		    "would miss");

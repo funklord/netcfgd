@@ -20,7 +20,7 @@
  * `neighbour` blocks are not, and an access point carrying either is refused
  * on Save rather than written without it (10.606).
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_ACCESS_POINT_DIALOG_H
 #define NCFG_ACCESS_POINT_DIALOG_H

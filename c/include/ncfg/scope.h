@@ -52,7 +52,7 @@ typedef enum {
 	 * configuration the author never offered to anyone, and narrowing it only
 	 * fails to share something. The safe default is therefore the narrowest,
 	 * and it sits at zero so an omission and the test that catches omissions
-	 * point the same way -- the arrangement `NCFG_TIER_OBSERVE` does not have
+	 * point the same way -- the arrangement `NCFG_TIER_VIEW` does not have
 	 * and `NCFG_ORDER_AT_MOST_ONCE` does.
 	 */
 	NCFG_SCOPE_HOST_PRIVATE = 0,

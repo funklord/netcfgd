@@ -159,8 +159,8 @@ static int pair_open(const ncfg_cli_options_t *options, const char *run_dir, cha
 {
 	static const char text[] = "# `ncfg pair open`: devices of this machine's estate may read\n"
 	                           "# and change its network. Remove this file to close it again.\n"
-	                           "global {\n\tremote {\n\t\tobserve = true\n\t\tadmin = true\n"
-	                           "\t}\n}\n";
+	                           "# `root` includes reading: the tiers nest (0327).\n"
+	                           "global {\n\tremote {\n\t\troot = true\n\t}\n}\n";
 	ncfg_cli_wrote_t  wrote = { 0, 0, NULL, NULL };
 	int               ok = ncfg_cli_put_text("remote", text, 1, "`remote`", options, &wrote, err,
 	                       err_size);
@@ -325,7 +325,7 @@ static int pair_join(const char *socket_path, const char *given, char *err, size
 	if (!port_is_served()) {
 		ncfg_error_set(err, err_size,
 		    "this machine is not open to its estate, so a join has no port to ask from: "
-		    "`ncfg pair open`, or `remote { observe = true }` in the `global` block, and "
+		    "`ncfg pair open`, or `remote { view = true }` in the `global` block, and "
 		    "restart netcfgd");
 		return 0;
 	}
@@ -402,7 +402,7 @@ int ncfg_cli_pair(const ncfg_cli_options_t *options, const char **positional, si
 	if (!port_is_served()) {
 		ncfg_error_set(err, err_size,
 		    "this machine is not open to devices: `ncfg pair open` opens it, or write "
-		    "`remote { observe = true; admin = true }` in the `global` block yourself and "
+		    "`remote { root = true }` in the `global` block yourself and "
 		    "restart netcfgd");
 		return 0;
 	}

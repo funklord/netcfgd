@@ -261,13 +261,17 @@ check $? "and every local user holds the events, rather than being read to ($sai
 kill -TERM $pid
 wait $pid
 
-# ---- the observe tier closed: the same verb denied ----
+# ---- the view tier closed: the same verb denied ----
 # A daemon of its own, because the control policy is read once at start (the
 # socket's servers hold the same copy), so an edit would not close it. With a
 # service and product named, as every phase here: without them fuzznet routes
 # no request to an extension's verbs and answers its own status line instead
 # (measured, 10.682).
-printf 'global {\n\tcontrol {\n\t\tadmin = "any"\n\t}\n}\n' > "$R/conf/netcfgd.conf"
+#
+# Every tier root's, written out. This phase opened `admin` to anybody and
+# left `observe` root's while the tiers were separate; they nest since 0327,
+# so any grant at all grants `view`, and the closed case is all three closed.
+printf 'global {\n\tcontrol {\n\t\tview = "root"\n\t\tlaptop = "root"\n\t\troot = "root"\n\t}\n}\n' > "$R/conf/netcfgd.conf"
 timeout -k 5 60 "$N" --run-dir "$R/run" --config-dir "$R/conf" --no-apply-on-start \
 	--fuzznet-dir "$R/store" --fuzznet-serve --fuzznet-arg "--socket=$R/fz.sock" \
 	--fuzznet-arg --no-log-file --fuzznet-arg --fuzznet-service=1 \
@@ -276,8 +280,8 @@ pid=$!
 n=0
 until [ -S "$R/fz.sock" ] || [ $n -gt 50 ]; do sleep 0.2; n=$((n + 1)); done
 said=$(ask "$R/fz.sock" "get status $R/out/denied.json")
-echo "$said" | grep -q '^denied .*observe' && [ ! -e "$R/out/denied.json" ]
-check $? "  and is denied where the observe tier is not the caller's ($said)"
+echo "$said" | grep -q '^denied .*view' && [ ! -e "$R/out/denied.json" ]
+check $? "  and is denied where the view tier is not the caller's ($said)"
 said=$(ask "$R/fz.sock" "get setting host local/permit/status")
 echo "$said" | grep -q '^ok absent$'
 check $? "  and the status permit is cleared, the tier being root's ($said)"

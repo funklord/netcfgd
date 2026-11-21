@@ -490,7 +490,7 @@ int main(void)
 	{
 		static const char witness[] =
 		    "{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":3},"
-		    "\"schema\":{\"major\":1,\"minor\":1},\"tiers\":[\"observe\",\"admin\"]}";
+		    "\"schema\":{\"major\":1,\"minor\":1},\"tiers\":[\"view\",\"root\"]}";
 		ncfg_buf_t buf;
 		ncfg_json_writer_t writer;
 		ncfg_json_doc_t *first;
@@ -520,8 +520,8 @@ int main(void)
 		        ncfg_json_member(again, ncfg_json_root(again), "tiers")) == 2u,
 		    "and both tiers, in order");
 		check(again && ncfg_json_string_equals(again, ncfg_json_at(again,
-		        ncfg_json_member(again, ncfg_json_root(again), "tiers"), 1u), "admin"),
-		    "the second of them still being admin");
+		        ncfg_json_member(again, ncfg_json_root(again), "tiers"), 1u), "root"),
+		    "the second of them still being root");
 		ncfg_json_free(first);
 		ncfg_json_free(again);
 		ncfg_buf_free(&buf);

@@ -112,15 +112,15 @@ void ncfg_tde_kcm::load()
 	m_status->setText(m_connection->state_line(reach));
 
 	/*
-	 * Three independent grants, not a level, so they are listed rather than
-	 * summarised. A module that said "you are an administrator" would be
-	 * wrong on a machine that grants admin without wifi.
+	 * Listed as the daemon reported them rather than summarised: they nest
+	 * since 0327, but an older daemon reported each on its own, and a module
+	 * that said "you are an administrator" would hide which.
 	 */
 	if (m_connection->is_open()) {
 		TQStringList held;
-		if (m_connection->may_observe()) held.append(i18n("observe"));
-		if (m_connection->may_wifi())  held.append(i18n("wifi"));
-		if (m_connection->may_admin()) held.append(i18n("admin"));
+		if (m_connection->may_view()) held.append(i18n("view"));
+		if (m_connection->may_laptop()) held.append(i18n("laptop"));
+		if (m_connection->may_root()) held.append(i18n("root"));
 		m_tiers->setText(held.isEmpty()
 		    ? i18n("This account holds none of netcfgd's permissions.")
 		    : i18n("This account holds: %1").arg(held.join(", ")));
@@ -141,8 +141,8 @@ void ncfg_tde_kcm::load()
 		}
 	}
 
-	m_profile->setEnabled(m_connection->may_admin());
-	m_switch->setEnabled(m_connection->may_admin());
+	m_profile->setEnabled(m_connection->may_root());
+	m_switch->setEnabled(m_connection->may_root());
 
 	/*
 	 * Default true, matching the condition in the autostart file. The two

@@ -99,9 +99,9 @@ static ncfg_control_t control_of(ncfg_principal_t observe, ncfg_principal_t wifi
 {
 	ncfg_control_t control;
 
-	control.observe = observe;
-	control.wifi = wifi;
-	control.admin = admin;
+	control.view = observe;
+	control.laptop = wifi;
+	control.root = admin;
 	return control;
 }
 
@@ -164,40 +164,40 @@ static void every_request_has_the_tier_the_document_gives_it(void)
 		ncfg_proto_request_kind_t kind;
 		ncfg_tier_t               tier;
 	} expected[] = {
-		{ NCFG_PROTO_REQ_HELLO, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_STATUS, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_PLAN, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_SHOW, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_EXPLAIN, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_MONITOR, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_WIFI_STATUS, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_AP_STATIONS, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_RADIOS, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_PROBE_LIST, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_CONFIG_LIST, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_PROFILE_LIST, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_MODEM_LIST, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_SECRET_LIST, NCFG_TIER_OBSERVE },
-		{ NCFG_PROTO_REQ_WIFI_SCAN, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_WIFI_CONNECT, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_WIFI_DISCONNECT, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_WIFI_ADD, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_WIFI_FORGET, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_RADIO_SET, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_TUNNEL_SET, NCFG_TIER_WIFI },
-		{ NCFG_PROTO_REQ_APPLY, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_CONFIRM, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_REVERT, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_RELOAD, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_PROFILE_SET, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_PROFILE_SAVE, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_HOOK_LIST, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_CONFIG_PUT, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_PROBE_PUT, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_SECRET_PUT, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_CONFIG_DELETE, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_SECRET_DELETE, NCFG_TIER_ADMIN },
-		{ NCFG_PROTO_REQ_PROFILE_DELETE, NCFG_TIER_ADMIN }
+		{ NCFG_PROTO_REQ_HELLO, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_STATUS, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_PLAN, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_SHOW, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_EXPLAIN, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_MONITOR, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_WIFI_STATUS, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_AP_STATIONS, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_RADIOS, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_PROBE_LIST, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_CONFIG_LIST, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_PROFILE_LIST, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_MODEM_LIST, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_SECRET_LIST, NCFG_TIER_VIEW },
+		{ NCFG_PROTO_REQ_WIFI_SCAN, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_WIFI_CONNECT, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_WIFI_DISCONNECT, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_WIFI_ADD, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_WIFI_FORGET, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_RADIO_SET, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_TUNNEL_SET, NCFG_TIER_LAPTOP },
+		{ NCFG_PROTO_REQ_APPLY, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_CONFIRM, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_REVERT, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_RELOAD, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_PROFILE_SET, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_PROFILE_SAVE, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_HOOK_LIST, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_CONFIG_PUT, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_PROBE_PUT, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_SECRET_PUT, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_CONFIG_DELETE, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_SECRET_DELETE, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_PROFILE_DELETE, NCFG_TIER_ROOT }
 	};
 	unsigned char seen[NCFG_PROTO_REQ_COUNT];
 	int           agreed = 1;
@@ -246,7 +246,7 @@ static void every_request_has_the_tier_the_document_gives_it(void)
  */
 static void apply_is_admin_whatever_it_would_do(void)
 {
-	check(ncfg_tier_of(NCFG_PROTO_REQ_APPLY) == NCFG_TIER_ADMIN,
+	check(ncfg_tier_of(NCFG_PROTO_REQ_APPLY) == NCFG_TIER_ROOT,
 	    "apply is admin whatever the plan would do");
 }
 
@@ -304,7 +304,7 @@ static void the_wifi_tier_adds_a_network_and_nothing_else(void)
 	join.u.wifi_connect.interface = ncfg_proto_str("wlan0");
 	join.u.wifi_connect.network = ncfg_proto_str("Cafe");
 
-	check(ncfg_tier_of(NCFG_PROTO_REQ_WIFI_ADD) == NCFG_TIER_WIFI, "adding a network is wifi");
+	check(ncfg_tier_of(NCFG_PROTO_REQ_WIFI_ADD) == NCFG_TIER_LAPTOP, "adding a network is wifi");
 	check(check_local(&control, &member, &add, err, sizeof(err)),
 	    "and a wifi-tier caller may add one");
 	/* Joining what it just wrote, which is the point of the change: adding
@@ -377,9 +377,9 @@ static void every_tier_against_every_principal(void)
 
 			/* One tier open and the other two shut, so a pass cannot come
 			 * from the tier next door. */
-			control.observe = (tier == 0) ? open : shut;
-			control.wifi = (tier == 1) ? open : shut;
-			control.admin = (tier == 2) ? open : shut;
+			control.view = (tier == 0) ? open : shut;
+			control.laptop = (tier == 1) ? open : shut;
+			control.root = (tier == 2) ? open : shut;
 			request.u.interface = ncfg_proto_str("wlan0");
 
 			got = check_local(&control, &alice_peer, &request, err, sizeof(err)) ? 1 : 0;
@@ -596,27 +596,41 @@ static void what_a_peer_is_told_it_may_do_is_what_check_allows(void)
 }
 
 /*
- * The tiers are three memberships, not a ladder.
+ * The tiers nest (0327).
  *
- * A machine may grant `admin` to a group somebody is in and `wifi` to one they
- * are not. Reporting a highest tier, or filling in the ones below it, would
- * tell them they can do something they cannot.
+ * `root` opened to anybody and `laptop` to a group the peer is not in: the
+ * peer holds `laptop` all the same, because whoever may write the whole
+ * configuration may certainly join a network. They used to be three separate
+ * memberships, and this test asserted the opposite -- that the middle one was
+ * out of reach -- which described a policy where somebody could apply any
+ * configuration and not take the radio on.
+ *
+ * And the other way: `laptop` held does not give `root`.
  */
-static void the_tiers_are_not_a_ladder(void)
+static void the_tiers_nest(void)
 {
 	static char          netdev[] = "netdev";
-	ncfg_control_t       control = control_of(principal(NCFG_PRINCIPAL_ANY, NULL),
+	ncfg_control_t       control = control_of(principal(NCFG_PRINCIPAL_ROOT, NULL),
 	    principal(NCFG_PRINCIPAL_GROUP, netdev), principal(NCFG_PRINCIPAL_ANY, NULL));
+	ncfg_control_t       laptop_only = control_of(principal(NCFG_PRINCIPAL_ROOT, NULL),
+	    principal(NCFG_PRINCIPAL_ANY, NULL), principal(NCFG_PRINCIPAL_ROOT, NULL));
 	ncfg_authz_roots_t   roots = fixture_roots();
 	ncfg_remote_policy_t remote = remote_default();
-	/* In no group, so the tier that is out of reach is the middle one. */
+	/* In no group, so only the nesting can grant the lower two. */
 	ncfg_peer_t          user = peer_of(1000, 1000, NULL, 0);
 	ncfg_tier_t          told[NCFG_TIER_COUNT];
 	size_t               count = ncfg_authz_granted(&roots, &control, &remote,
 	    NCFG_ARRIVED_LOCAL, &user, told);
 
-	check(count == 2 && told[0] == NCFG_TIER_OBSERVE && told[1] == NCFG_TIER_ADMIN,
-	    "a peer may hold admin and not wifi, and is told exactly that");
+	check(count == 3 && told[0] == NCFG_TIER_VIEW && told[1] == NCFG_TIER_LAPTOP &&
+	    told[2] == NCFG_TIER_ROOT, "a peer holding root holds laptop and view too");
+	count = ncfg_authz_granted(&roots, &laptop_only, &remote, NCFG_ARRIVED_LOCAL, &user, told);
+	check(count == 2 && told[0] == NCFG_TIER_VIEW && told[1] == NCFG_TIER_LAPTOP,
+	    "and one holding laptop holds view and not root");
+	/* From off the machine the same: `root = true` opens the lower two. */
+	remote.root = 1;
+	count = ncfg_authz_granted(&roots, &control, &remote, NCFG_ARRIVED_REMOTE, &user, told);
+	check(count == 3, "and remotely, `root = true` opens laptop and view as well");
 }
 
 /*
@@ -631,8 +645,8 @@ static void a_refusal_says_what_to_do_about_it(void)
 	ncfg_principal_t group = principal(NCFG_PRINCIPAL_GROUP, netdev);
 	char             message[NCFG_ERROR_MAX];
 
-	ncfg_authz_refusal(NCFG_TIER_WIFI, &group, message, sizeof(message));
-	check(strstr(message, "wifi") != NULL, "a refusal names the tier that was needed");
+	ncfg_authz_refusal(NCFG_TIER_LAPTOP, &group, message, sizeof(message));
+	check(strstr(message, "laptop") != NULL, "a refusal names the tier that was needed");
 	check(strstr(message, "group:netdev") != NULL, "and what the configuration opens it to");
 	check(strstr(message, "netcfgd.conf") != NULL, "and where to change it");
 }
@@ -698,7 +712,7 @@ static void a_remote_caller_that_is_root_is_still_bounded_by_the_remote_policy(v
 	ncfg_proto_request_t reload = request_of(NCFG_PROTO_REQ_RELOAD);
 	char                 err[NCFG_ERROR_MAX];
 
-	remote.observe = 1;
+	remote.view = 1;
 	check(ncfg_authz_check(&roots, &control, &remote, NCFG_ARRIVED_REMOTE, &root, &status, err,
 	          sizeof(err)),
 	    "a remote caller reaches what the remote policy names");
@@ -726,10 +740,10 @@ static void a_remote_peer_is_told_what_the_remote_policy_allows(void)
 	ncfg_tier_t          told[NCFG_TIER_COUNT];
 	size_t               count;
 
-	remote.observe = 1;
-	remote.wifi = 1;
+	remote.view = 1;
+	remote.laptop = 1;
 	count = ncfg_authz_granted(&roots, &control, &remote, NCFG_ARRIVED_REMOTE, &caller, told);
-	check(count == 2 && told[0] == NCFG_TIER_OBSERVE && told[1] == NCFG_TIER_WIFI,
+	check(count == 2 && told[0] == NCFG_TIER_VIEW && told[1] == NCFG_TIER_LAPTOP,
 	    "a remote peer is told what the remote policy allows, not what local does");
 }
 
@@ -1205,7 +1219,7 @@ int main(void)
 	no_groups_and_unknown_groups_are_different_answers();
 
 	what_a_peer_is_told_it_may_do_is_what_check_allows();
-	the_tiers_are_not_a_ladder();
+	the_tiers_nest();
 	a_refusal_says_what_to_do_about_it();
 
 	an_open_local_policy_opens_nothing_remotely();

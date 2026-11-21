@@ -55,13 +55,13 @@ tree compiles both in a container that has them (`packaging/tde/Dockerfile`).
   list, from the same rule in `client/` -- with the radio's network ticked,
   `Scan for networks`, and `Another network...`, which opens the Qt window
   for the dialog a new network needs. Nothing scans until asked. `Disconnect
-  wifi` sits beside it. Both are the `wifi` tier.
+  wifi` sits beside it. Both are the `laptop` tier.
 - **A notice when the network comes and goes**, in the Qt tray's words,
   which are the client library's.
 - **Profile**, an exclusive submenu -- the same mode switcher the Qt tray
   offers, with "this machine's own configuration" at the top because a null
   selection is the default rather than a profile named none. Greyed when the
-  connection lacks the admin tier, so the operator can see that profiles
+  connection lacks the root tier, so the operator can see that profiles
   exist and that they may not change them.
 - **Open netcfgd Window**, which runs `netcfgd-gui`. It starts one every
   time rather than raising an existing window, and **that is intended**:

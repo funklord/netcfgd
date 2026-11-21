@@ -18,7 +18,7 @@
  *   At FROM 0, and kept for that caller until it has been read to its end or
  *   a minute has passed; later pages are cut from the copy. A later page
  *   with no copy behind it is answered afresh only for a read -- an
- *   `observe`-tier request, by `ncfg_tier_of` -- the digest keeping pages of
+ *   `view`-tier request, by `ncfg_tier_of` -- the digest keeping pages of
  *   two answers apart, and refused for anything else, which is never run a
  *   second time to make a page. Not the order class (10.351): `apply` is
  *   idempotent there, and rightly, but running it again for a page would open
@@ -608,7 +608,7 @@ size_t ncfg_main_ask(ncfg_main_ask_t *ask, const uint8_t *key, const ncfg_peer_t
 	/* **Only a read is made again for a page.** Anything else -- even a change
 	 * the order table calls idempotent, as `apply` is -- has its effect again
 	 * when run again, and a page is no reason for that. */
-	if (from > 0u && ncfg_tier_of(message.u.request.kind) != NCFG_TIER_OBSERVE) {
+	if (from > 0u && ncfg_tier_of(message.u.request.kind) != NCFG_TIER_VIEW) {
 		ncfg_proto_message_free(&message);
 		if (staged) {
 			part_clear(staged);

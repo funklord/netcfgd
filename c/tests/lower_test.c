@@ -662,8 +662,8 @@ static void precedence_cases(void)
 		printf("    said:\n%s", said);
 	} else {
 		check(document->globals.dns.mode.mode == NCFG_DNS_MODE_RESOLVED &&
-		    document->globals.control.observe.kind == NCFG_PRINCIPAL_GROUP &&
-		    strcmp(document->globals.control.observe.name, "netdev") == 0,
+		    document->globals.control.view.kind == NCFG_PRINCIPAL_GROUP &&
+		    strcmp(document->globals.control.view.name, "netdev") == 0,
 		    "two files may each contribute to global");
 		ncfg_document_free(document);
 	}
@@ -801,12 +801,26 @@ static void global_cases(void)
 	refuses("global { profile = \"../escape\" }\n", "cannot be a profile name",
 	    "a profile name carrying a separator is refused");
 
-	document = compiles("global {\n\tcontrol {\n\t\tobserve = \"group:netcfgd\"\n"
-	    "\t\twifi = \"any\"\n\t\tadmin = \"root\"\n\t}\n}\n", "the control tiers compile");
+	document = compiles("global {\n\tcontrol {\n\t\tview = \"group:netcfgd\"\n"
+	    "\t\tlaptop = \"any\"\n\t\troot = \"user:alice\"\n\t}\n}\n",
+	    "the control tiers compile");
 	if (document) {
-		check(document->globals.control.wifi.kind == NCFG_PRINCIPAL_ANY &&
-		    document->globals.control.admin.kind == NCFG_PRINCIPAL_ROOT,
+		check(document->globals.control.view.kind == NCFG_PRINCIPAL_GROUP &&
+		    document->globals.control.laptop.kind == NCFG_PRINCIPAL_ANY &&
+		    document->globals.control.root.kind == NCFG_PRINCIPAL_USER,
 		    "  each as its own principal");
+		ncfg_document_free(document);
+	}
+	/* The words 0327 replaced name the same tiers: a policy somebody wrote
+	 * before the rename keeps meaning what they chose. */
+	document = compiles("global {\n\tcontrol {\n\t\tobserve = \"group:netcfgd\"\n"
+	    "\t\twifi = \"any\"\n\t\tadmin = \"user:alice\"\n\t}\n}\n",
+	    "the old words for the control tiers still compile");
+	if (document) {
+		check(document->globals.control.view.kind == NCFG_PRINCIPAL_GROUP &&
+		    document->globals.control.laptop.kind == NCFG_PRINCIPAL_ANY &&
+		    document->globals.control.root.kind == NCFG_PRINCIPAL_USER,
+		    "  observe as view, wifi as laptop, admin as root");
 		ncfg_document_free(document);
 	}
 	refuses("global { control { observe = \"wombat\" } }\n", "user:NAME or group:NAME",
@@ -819,16 +833,23 @@ static void global_cases(void)
 	 * point: a remote caller arrives as the agent, so `user:alice` here would
 	 * be a sentence the daemon cannot evaluate.
 	 */
-	document = compiles("global {\n\tremote {\n\t\tobserve = true\n\t\tadmin = false\n"
+	document = compiles("global {\n\tremote {\n\t\tview = true\n\t\troot = false\n"
 	    "\t\tagent = \"user:alice\"\n\t}\n}\n", "the remote tiers are booleans");
 	if (document) {
-		check(document->globals.remote.observe && !document->globals.remote.admin &&
+		check(document->globals.remote.view && !document->globals.remote.root &&
 		    document->globals.remote.agent.kind == NCFG_PRINCIPAL_USER,
 		    "  and `agent` is a principal");
 		ncfg_document_free(document);
 	}
 	refuses("global { remote { observe = \"user:alice\" } }\n",
 	    "no principal to check", "a principal on a remote tier is refused with the reason");
+	document = compiles("global {\n\tremote {\n\t\twifi = true\n\t}\n}\n",
+	    "an old word in `remote` still compiles");
+	if (document) {
+		check(document->globals.remote.laptop && !document->globals.remote.view,
+		    "  as the tier it names, and only that one: nesting is the gate's, not the file's");
+		ncfg_document_free(document);
+	}
 
 	/* **Writing `ignore` replaces the default list rather than adding to
 	 * it.** `docker0` is why `ignore` exists at all. */

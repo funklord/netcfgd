@@ -361,7 +361,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 
 	/*
 	 * Do not offer what will be refused. gui/project.md sec 4 asks for exactly
-	 * this: a connection holding `observe` should not have an apply button
+	 * this: a connection holding `view` should not have an apply button
 	 * whose first effect is a refusal.
 	 *
 	 * Asked once, at startup, because it cannot change for a connection -- the
@@ -376,11 +376,11 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * useless on it.
 	 */
 	const ncfg_tiers_t held = connection->tiers();
-	const bool asked = held.observe || held.wifi || held.admin;
-	if (asked && !held.admin) {
+	const bool asked = held.view || held.laptop || held.root;
+	if (asked && !held.root) {
 		apply_button->setEnabled(false);
 		apply_button->setToolTip(QStringLiteral(
-		    "This connection does not hold the `admin` control tier, so netcfgd "
+		    "This connection does not hold the `root` control tier, so netcfgd "
 		    "would refuse an apply from it."));
 	}
 

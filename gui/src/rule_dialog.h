@@ -17,7 +17,7 @@
  * offering it would write a block netcfgd refuses. Recorded rather than
  * quietly added: giving the parser a key is a decision about the language.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_RULE_DIALOG_H
 #define NCFG_RULE_DIALOG_H

@@ -1435,12 +1435,16 @@ int ncfg_client_tiers(ncfg_client_t *client, ncfg_tiers_t *out, char *err, size_
 		if (!name) {
 			continue;
 		}
-		if (length == 7u && !memcmp(name, "observe", 7)) {
-			out->observe = 1;
-		} else if (length == 4u && !memcmp(name, "wifi", 4)) {
-			out->wifi = 1;
-		} else if (length == 5u && !memcmp(name, "admin", 5)) {
-			out->admin = 1;
+		/* The names of 0327, and the ones a daemon from before it sends. */
+		if ((length == 4u && !memcmp(name, "view", 4)) ||
+		    (length == 7u && !memcmp(name, "observe", 7))) {
+			out->view = 1;
+		} else if ((length == 6u && !memcmp(name, "laptop", 6)) ||
+		    (length == 4u && !memcmp(name, "wifi", 4))) {
+			out->laptop = 1;
+		} else if ((length == 4u && !memcmp(name, "root", 4)) ||
+		    (length == 5u && !memcmp(name, "admin", 5))) {
+			out->root = 1;
 		}
 	}
 	ncfg_json_free(doc);
@@ -3825,6 +3829,14 @@ int ncfg_client_bluetooth(ncfg_client_t *client, ncfg_bluetooths_t *out, char *e
  * spelling rather than to something this file invents, so that what a table
  * shows is what an operator would type.
  */
+/* `now` where the object has it, else `before` -- a tier's name since 0327
+ * and the one it replaced. */
+static const char *tier_member_name(const ncfg_json_doc_t *doc, uint32_t object, const char *now,
+    const char *before)
+{
+	return ncfg_json_member(doc, object, now) != NCFG_JSON_NONE ? now : before;
+}
+
 static char *principal_text(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
 {
 	uint32_t member = ncfg_json_member(doc, object, name);
@@ -3860,9 +3872,9 @@ void ncfg_globals_free(ncfg_globals_t *globals)
 	free(globals->upnp_lan);
 	free(globals->hostname);
 	free(globals->on_drift);
-	free(globals->control_observe);
-	free(globals->control_wifi);
-	free(globals->control_admin);
+	free(globals->control_view);
+	free(globals->control_laptop);
+	free(globals->control_root);
 	memset(globals, 0, sizeof(*globals));
 }
 
@@ -5453,7 +5465,7 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	 * client could carry one: a form that loaded the keys it knew and saved
 	 * the block deleted the hooks. Since 0258 the interface editor renders
 	 * them, and what it cannot get hold of -- a body netcfgd would not hand
-	 * over, which is the `admin` tier saying no -- it refuses on for itself,
+	 * over, which is the `root` tier saying no -- it refuses on for itself,
 	 * because that refusal is about the caller rather than about the block. */
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");
@@ -5510,15 +5522,23 @@ int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, s
 		out->hostname = member_text(doc, hostname, "static");
 	}
 
+	/* The tiers' names since 0327, and the ones a daemon from before it
+	 * writes, so a newer window still reads an older machine's policy. */
 	uint32_t control = ncfg_json_member(doc, globals, "control");
-	out->control_observe = principal_text(doc, control, "observe");
-	out->control_wifi = principal_text(doc, control, "wifi");
-	out->control_admin = principal_text(doc, control, "admin");
+	out->control_view = principal_text(doc, control,
+	    tier_member_name(doc, control, "view", "observe"));
+	out->control_laptop = principal_text(doc, control,
+	    tier_member_name(doc, control, "laptop", "wifi"));
+	out->control_root = principal_text(doc, control,
+	    tier_member_name(doc, control, "root", "admin"));
 
 	uint32_t remote = ncfg_json_member(doc, globals, "remote");
-	out->remote_observe = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "observe"), 0);
-	out->remote_wifi = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "wifi"), 0);
-	out->remote_admin = ncfg_json_bool(doc, ncfg_json_member(doc, remote, "admin"), 0);
+	out->remote_view = ncfg_json_bool(doc, ncfg_json_member(doc, remote,
+	    tier_member_name(doc, remote, "view", "observe")), 0);
+	out->remote_laptop = ncfg_json_bool(doc, ncfg_json_member(doc, remote,
+	    tier_member_name(doc, remote, "laptop", "wifi")), 0);
+	out->remote_root = ncfg_json_bool(doc, ncfg_json_member(doc, remote,
+	    tier_member_name(doc, remote, "root", "admin")), 0);
 	out->regdom = member_text(doc, globals, "regdom");
 
 	uint32_t upnp = ncfg_json_member(doc, globals, "upnp");

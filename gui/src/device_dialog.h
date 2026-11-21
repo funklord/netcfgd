@@ -21,7 +21,7 @@
  * shaping. Each refuses to save for the reason the interface editor refuses a
  * block carrying what it has no field for -- saving would delete it.
  *
- * `admin`, because it writes configuration. The refusal comes from the daemon
+ * `root`, because it writes configuration. The refusal comes from the daemon
  * with the tier it needed in it, and is shown as it arrives.
  */
 #ifndef NCFG_DEVICE_DIALOG_H

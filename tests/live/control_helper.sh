@@ -76,7 +76,7 @@ echo "control_helper.sh: end of file ends it"
 # 3. The command it exists for.
 printf 'set group:netcfgd any root\n' | $helper > "$work/out" 2>&1
 grep -q '^ok ' "$work/out" || fail "a valid set was not accepted: $(cat "$work/out")"
-grep -q 'observe = "group:netcfgd"' "$policy" || fail "the policy was not written"
+grep -q 'view = "group:netcfgd"' "$policy" || fail "the policy was not written"
 echo "control_helper.sh: writes a policy"
 
 # 4. A bound on what it will read, because this is a root process reading a

@@ -12,7 +12,7 @@
  * answer to a question. The place to change what it says is the interface
  * editor, one button along.
  *
- * `observe`, so there is no tier to check: a connection with no rows to select
+ * `view`, so there is no tier to check: a connection with no rows to select
  * never reaches this.
  */
 #ifndef NCFG_EXPLAIN_DIALOG_H

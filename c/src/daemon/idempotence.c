@@ -113,7 +113,7 @@ ncfg_order_class_t ncfg_order_class_of(ncfg_proto_request_kind_t kind)
 	if ((int)kind < 0 || (int)kind >= (int)NCFG_PROTO_REQ_COUNT) {
 		/* A kind outside the enum is not a request this build knows, and the
 		 * direction that refuses to retry is the one to take -- the same
-		 * reasoning `ncfg_tier_of` gives for answering `admin`. */
+		 * reasoning `ncfg_tier_of` gives for answering `root`. */
 		return NCFG_ORDER_AT_MOST_ONCE;
 	}
 	return order_table[kind];

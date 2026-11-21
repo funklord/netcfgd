@@ -15,12 +15,12 @@
 const char *ncfg_tier_name(int tier)
 {
 	switch (tier) {
-	case NCFG_TIER_OBSERVE:
-		return "observe";
-	case NCFG_TIER_WIFI:
-		return "wifi";
-	case NCFG_TIER_ADMIN:
-		return "admin";
+	case NCFG_TIER_VIEW:
+		return "view";
+	case NCFG_TIER_LAPTOP:
+		return "laptop";
+	case NCFG_TIER_ROOT:
+		return "root";
 	case NCFG_TIER_COUNT:
 	default:
 		return NULL;
@@ -37,8 +37,9 @@ const char *ncfg_tier_name(int tier)
  * exhaustive `match` the Rust gets from its compiler.
  *
  * **The test is what the caller is asking netcfgd to do, and nothing else.**
- * An observer may request the data netcfgd holds; an admin may write all of it
- * through netcfgd. A file's mode is not an argument for a tier -- it is a fact
+ * A viewer may request the data netcfgd holds; `root` may write all of it
+ * through netcfgd, and `laptop` sits between only in the sense that its
+ * requests are typed and carry no configuration text (0327). A file's mode is not an argument for a tier -- it is a fact
  * about the filesystem, and these tiers are about netcfgd, which is answering
  * over a socket a remote caller may be on the other end of (0128).
  */
@@ -47,129 +48,135 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	 * Reading. `hello` is here rather than unauthenticated because even
 	 * knowing which versions a daemon speaks is more than a stranger needs.
 	 */
-	[NCFG_PROTO_REQ_HELLO] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_STATUS] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_PLAN] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_SHOW] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_EXPLAIN] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_MONITOR] = NCFG_TIER_OBSERVE,
+	[NCFG_PROTO_REQ_HELLO] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_STATUS] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_PLAN] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_SHOW] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_EXPLAIN] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_MONITOR] = NCFG_TIER_VIEW,
 	/* Asking what the radio is doing is reading, and a status display that
-	 * needs the wifi tier is a status display that ends up being given it. */
-	[NCFG_PROTO_REQ_WIFI_STATUS] = NCFG_TIER_OBSERVE,
+	 * needs the laptop tier is a status display that ends up being given it. */
+	[NCFG_PROTO_REQ_WIFI_STATUS] = NCFG_TIER_VIEW,
 	/*
 	 * Listing associated stations is reading too. It is worth naming what it
 	 * exposes, because it is not the same kind of reading as the rest of this
 	 * tier: other people's hardware addresses and how strong their signal is,
-	 * which is a proximity sensor for anybody granted `observe`. Under the
-	 * default policy that is root; a site that opens `observe` to `any` is
-	 * opening this too, deliberately.
+	 * which is a proximity sensor for anybody granted `view`. The shipped
+	 * policy opens `view` to the `netcfgd` group (0118); a site that opens it
+	 * to `any` is opening this too, deliberately.
 	 */
-	[NCFG_PROTO_REQ_AP_STATIONS] = NCFG_TIER_OBSERVE,
+	[NCFG_PROTO_REQ_AP_STATIONS] = NCFG_TIER_VIEW,
 	/* Listing radios is the list a client needs before it can offer anything
 	 * wireless at all, and nothing in it is other people's: an interface
 	 * name, whether netcfgd was given it, and whether a supplicant answers.
 	 * All three are visible to anybody who can run `ip link`. */
-	[NCFG_PROTO_REQ_RADIOS] = NCFG_TIER_OBSERVE,
+	[NCFG_PROTO_REQ_RADIOS] = NCFG_TIER_VIEW,
 	/* Listing the link-detection scripts is reading what netcfgd holds. */
-	[NCFG_PROTO_REQ_PROBE_LIST] = NCFG_TIER_OBSERVE,
+	[NCFG_PROTO_REQ_PROBE_LIST] = NCFG_TIER_VIEW,
 	/* `show` already returns the compiled result; what this adds is which
 	 * file each part came from, which is the provenance `explain` gives per
-	 * interface and is `observe` for the same reason. */
-	[NCFG_PROTO_REQ_CONFIG_LIST] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_PROFILE_LIST] = NCFG_TIER_OBSERVE,
-	[NCFG_PROTO_REQ_MODEM_LIST] = NCFG_TIER_OBSERVE,
+	 * interface and is `view` for the same reason. */
+	[NCFG_PROTO_REQ_CONFIG_LIST] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_PROFILE_LIST] = NCFG_TIER_VIEW,
+	[NCFG_PROTO_REQ_MODEM_LIST] = NCFG_TIER_VIEW,
 	/* Names only, never values -- and the names are already in the document
 	 * `show` returns, since `@secret:` references live there. What this adds
 	 * is whether the file behind each one exists, which is a diagnostic
 	 * rather than a disclosure. */
-	[NCFG_PROTO_REQ_SECRET_LIST] = NCFG_TIER_OBSERVE,
+	[NCFG_PROTO_REQ_SECRET_LIST] = NCFG_TIER_VIEW,
 
 	/*
+	 * **The laptop tier: what a person at their own machine must be able to
+	 * do** (0327). Wide and dangerous, and necessary anyway -- joining a
+	 * network chooses where the machine's traffic goes. What bounds it is the
+	 * shape of these requests: each is typed and carries no configuration
+	 * text, so none can name a hook, a path, a `run_as`, a resolver or a
+	 * control policy (0117).
+	 *
 	 * Scanning is not reading: it transmits probe requests and interrupts
 	 * whatever the radio was doing.
 	 *
-	 * `wifi_add` is here since 0124. It was `admin` because 0013 wrote the
-	 * wifi tier as "join, leave and scan *known* networks" -- but 0013 named
-	 * that a gap and said "until that exists", waiting on a mechanism that
-	 * could write a network safely. 0117 built one: a typed request whose
-	 * privilege is bounded by the shape of the message rather than by the
-	 * caller's manners. What the tier now grants is exactly one `network`
-	 * block and one secret at 0600; there is no field here that could name a
-	 * hook, a path, a `run_as`, an interface, a device or a control policy.
-	 * Adding does not apply -- `apply` stays `admin` -- so a wifi-tier caller
-	 * writes a network and joins it, and can apply nothing else.
+	 * `wifi_add` writes exactly one `network` block and one secret at 0600,
+	 * since 0124; there is no field in it for anything else. Adding does not
+	 * apply -- `apply` is `root` -- so a laptop-tier caller writes a network
+	 * and joins it, and can apply nothing else.
 	 */
-	[NCFG_PROTO_REQ_WIFI_SCAN] = NCFG_TIER_WIFI,
-	[NCFG_PROTO_REQ_WIFI_CONNECT] = NCFG_TIER_WIFI,
-	[NCFG_PROTO_REQ_WIFI_DISCONNECT] = NCFG_TIER_WIFI,
-	[NCFG_PROTO_REQ_WIFI_ADD] = NCFG_TIER_WIFI,
-	/* **Forgetting one is `wifi` because adding one is.** The message is an
+	[NCFG_PROTO_REQ_WIFI_SCAN] = NCFG_TIER_LAPTOP,
+	[NCFG_PROTO_REQ_WIFI_CONNECT] = NCFG_TIER_LAPTOP,
+	[NCFG_PROTO_REQ_WIFI_DISCONNECT] = NCFG_TIER_LAPTOP,
+	[NCFG_PROTO_REQ_WIFI_ADD] = NCFG_TIER_LAPTOP,
+	/* **Forgetting one is `laptop` because adding one is.** The message is an
 	 * id and nothing else, and what it removes is the block that id names
 	 * plus a credential nothing else refers to -- strictly less reach than
 	 * the request that wrote both. A tier that may create a network and not
 	 * remove one leaves a client able to fill a machine with networks it
 	 * cannot take back. */
-	[NCFG_PROTO_REQ_WIFI_FORGET] = NCFG_TIER_WIFI,
-	/* Taking a radio on is `wifi` for the same reason. What it writes is a
+	[NCFG_PROTO_REQ_WIFI_FORGET] = NCFG_TIER_LAPTOP,
+	/* Taking a radio on is `laptop` for the same reason. What it writes is a
 	 * `device` block, and a client sending one as *text* would be sending
-	 * configuration -- 0117's remote code execution, and `admin`. An
+	 * configuration -- 0117's remote code execution, and `root`. An
 	 * interface name and a boolean can name no hook, no path and no `run_as`,
 	 * so a member of the `netcfgd` group can turn on the radio in their own
 	 * laptop without being able to decide who else may. */
-	[NCFG_PROTO_REQ_RADIO_SET] = NCFG_TIER_WIFI,
+	[NCFG_PROTO_REQ_RADIO_SET] = NCFG_TIER_LAPTOP,
 	/* Connecting the VPN is the act joining a network is, for a person at
 	 * their own machine (10.864): a device name and up or down, no text. */
-	[NCFG_PROTO_REQ_TUNNEL_SET] = NCFG_TIER_WIFI,
+	[NCFG_PROTO_REQ_TUNNEL_SET] = NCFG_TIER_LAPTOP,
 
 	/*
-	 * Everything that changes the machine. `apply` is `admin` even when the
-	 * only thing in the plan is a wifi association: a tier that could call it
-	 * could apply any config change at all, which would make the wifi tier
-	 * `admin` wearing a hat.
+	 * **The root tier: everything else, and it is root** (0327). Writing
+	 * configuration chooses the machine's routes, resolvers, NAT and which
+	 * access point a credential is offered to, and a machine whose traffic
+	 * somebody else chooses is theirs by an ordinary path. A site may open
+	 * this to a group; that hands the group root, and the word says so.
+	 *
+	 * `apply` is here even when the only thing in the plan is a wifi
+	 * association: a tier that could call it could apply any config change at
+	 * all, which would make `laptop` root wearing a hat.
 	 */
-	[NCFG_PROTO_REQ_APPLY] = NCFG_TIER_ADMIN,
-	[NCFG_PROTO_REQ_CONFIRM] = NCFG_TIER_ADMIN,
-	[NCFG_PROTO_REQ_REVERT] = NCFG_TIER_ADMIN,
-	[NCFG_PROTO_REQ_RELOAD] = NCFG_TIER_ADMIN,
-	[NCFG_PROTO_REQ_PROFILE_SET] = NCFG_TIER_ADMIN,
-	[NCFG_PROTO_REQ_PROFILE_SAVE] = NCFG_TIER_ADMIN,
+	[NCFG_PROTO_REQ_APPLY] = NCFG_TIER_ROOT,
+	[NCFG_PROTO_REQ_CONFIRM] = NCFG_TIER_ROOT,
+	[NCFG_PROTO_REQ_REVERT] = NCFG_TIER_ROOT,
+	[NCFG_PROTO_REQ_RELOAD] = NCFG_TIER_ROOT,
+	[NCFG_PROTO_REQ_PROFILE_SET] = NCFG_TIER_ROOT,
+	[NCFG_PROTO_REQ_PROFILE_SAVE] = NCFG_TIER_ROOT,
 	/*
-	 * **Reading a hook body is `admin`, where reading a probe is not.** Both
+	 * **Reading a hook body is `root`, where reading a probe is not.** Both
 	 * are programs netcfgd runs as root, and the difference is who wrote them
 	 * into what. A probe is a command the document states in the open, in a
 	 * file netcfgd keeps at 0755 so somebody debugging a link can run it by
 	 * hand; a hook body is whatever an operator put in it, in a file the
 	 * materialiser opens 0700 because nobody else needs to read it. Serving
-	 * that at `observe` would publish the contents of the one file this
+	 * that at `view` would publish the contents of the one file this
 	 * daemon takes care to keep to itself, and the client that wants it is an
-	 * editor, which is `admin` to save anyway.
+	 * editor, which is `root` to save anyway.
 	 */
-	[NCFG_PROTO_REQ_HOOK_LIST] = NCFG_TIER_ADMIN,
-	/* Writing configuration is what `admin` names, and `config_put` writes
-	 * arbitrary configuration -- which is why the tier is not the whole
-	 * answer for it. `ncfg_authz_check_content` runs afterwards. */
-	[NCFG_PROTO_REQ_CONFIG_PUT] = NCFG_TIER_ADMIN,
-	/* Writing a probe is `admin` for the tier system's sake and root in fact:
-	 * the content gate refuses it from anyone else. A probe is a program
+	[NCFG_PROTO_REQ_HOOK_LIST] = NCFG_TIER_ROOT,
+	/* Writing configuration is what `root` names. `ncfg_authz_check_content`
+	 * runs afterwards and refuses the productions that name a program netcfgd
+	 * would run as root to anybody but uid 0. */
+	[NCFG_PROTO_REQ_CONFIG_PUT] = NCFG_TIER_ROOT,
+	/* Writing a probe is the `root` tier and uid 0 in fact: the content gate
+	 * refuses it from anyone else. A probe is a program
 	 * netcfgd runs as root on an interval, which is strictly more than the
 	 * privileged *productions* that rule exists for -- those name a program,
 	 * and this one is the program. */
-	[NCFG_PROTO_REQ_PROBE_PUT] = NCFG_TIER_ADMIN,
-	/* Storing a credential is `admin` and not `wifi`, even though `wifi_add`
-	 * carries one at the wifi tier. The difference is the blast radius of the
+	[NCFG_PROTO_REQ_PROBE_PUT] = NCFG_TIER_ROOT,
+	/* Storing a credential is `root` and not `laptop`, even though `wifi_add`
+	 * carries one at the laptop tier. The difference is the blast radius of the
 	 * *name*: `wifi_add` writes a secret it also names, for a network it is
 	 * creating, and this writes any name the configuration might refer to --
 	 * including one a `wireguard` block reads, which 0042 calls the one thing
 	 * on a machine nobody can get back. */
-	[NCFG_PROTO_REQ_SECRET_PUT] = NCFG_TIER_ADMIN,
+	[NCFG_PROTO_REQ_SECRET_PUT] = NCFG_TIER_ROOT,
 	/* Deleting is writing. `secret_delete` in particular is the one verb here
 	 * with no way back, and no `replace` flag to make somebody say it twice,
 	 * because a caller asking to delete has already said it once. What guards
 	 * it is this tier and nothing else. */
-	[NCFG_PROTO_REQ_CONFIG_DELETE] = NCFG_TIER_ADMIN,
+	[NCFG_PROTO_REQ_CONFIG_DELETE] = NCFG_TIER_ROOT,
 	/* As `profile_save`, which made what this takes away. */
-	[NCFG_PROTO_REQ_PROFILE_DELETE] = NCFG_TIER_ADMIN,
-	[NCFG_PROTO_REQ_SECRET_DELETE] = NCFG_TIER_ADMIN
+	[NCFG_PROTO_REQ_PROFILE_DELETE] = NCFG_TIER_ROOT,
+	[NCFG_PROTO_REQ_SECRET_DELETE] = NCFG_TIER_ROOT
 };
 
 ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind)
@@ -177,7 +184,7 @@ ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind)
 	if ((int)kind < 0 || (int)kind >= (int)NCFG_PROTO_REQ_COUNT) {
 		/* A kind outside the enum is not a request this build knows, and the
 		 * direction that denies is the one to take. */
-		return NCFG_TIER_ADMIN;
+		return NCFG_TIER_ROOT;
 	}
 	return tier_table[kind];
 }
@@ -263,42 +270,81 @@ void ncfg_authz_refusal(ncfg_tier_t tier, const ncfg_principal_t *principal, cha
 	ncfg_error_set(err, err_size,
 	    "not permitted: this needs the `%s` tier, which the configuration opens to `%s`. "
 	    "Change it in the `control` block of netcfgd.conf.",
-	    name ? name : "admin", rendered);
+	    name ? name : "root", rendered);
 }
 
-/* Which tiers the remote policy opens. */
-static int remote_allows(const ncfg_remote_policy_t *remote, ncfg_tier_t tier)
+/* Whether the remote policy opens exactly this tier, before nesting. */
+static int remote_flag(const ncfg_remote_policy_t *remote, ncfg_tier_t tier)
 {
-	if (!remote) {
-		return 0;
-	}
 	switch (tier) {
-	case NCFG_TIER_OBSERVE:
-		return remote->observe != 0;
-	case NCFG_TIER_WIFI:
-		return remote->wifi != 0;
-	case NCFG_TIER_ADMIN:
-		return remote->admin != 0;
+	case NCFG_TIER_VIEW:
+		return remote->view != 0;
+	case NCFG_TIER_LAPTOP:
+		return remote->laptop != 0;
+	case NCFG_TIER_ROOT:
+		return remote->root != 0;
 	case NCFG_TIER_COUNT:
 	default:
 		return 0;
 	}
+}
+
+/*
+ * Which tiers the remote policy opens. **They nest** (0327): `root = true`
+ * opens `laptop` and `view` from off the machine as well, since a caller who
+ * may write the configuration remotely and not read it is a policy nobody
+ * means.
+ */
+static int remote_allows(const ncfg_remote_policy_t *remote, ncfg_tier_t tier)
+{
+	int at;
+
+	if (!remote || (int)tier < 0 || (int)tier >= (int)NCFG_TIER_COUNT) {
+		return 0;
+	}
+	for (at = (int)tier; at < (int)NCFG_TIER_COUNT; at++) {
+		if (remote_flag(remote, (ncfg_tier_t)at)) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 /* The principal a control policy opens a tier to. */
 static const ncfg_principal_t *principal_of(const ncfg_control_t *control, ncfg_tier_t tier)
 {
 	switch (tier) {
-	case NCFG_TIER_OBSERVE:
-		return &control->observe;
-	case NCFG_TIER_WIFI:
-		return &control->wifi;
-	case NCFG_TIER_ADMIN:
-		return &control->admin;
+	case NCFG_TIER_VIEW:
+		return &control->view;
+	case NCFG_TIER_LAPTOP:
+		return &control->laptop;
+	case NCFG_TIER_ROOT:
+		return &control->root;
 	case NCFG_TIER_COUNT:
 	default:
-		return &control->admin;
+		return &control->root;
 	}
+}
+
+/*
+ * Whether a local peer holds a tier: its own principal, or any above it
+ * (0327). The one place the nesting is decided, so `ncfg_authz_check` and
+ * `ncfg_authz_granted` cannot come to disagree about it.
+ */
+static int local_holds(const ncfg_authz_roots_t *roots, const ncfg_control_t *control,
+    const ncfg_peer_t *peer, ncfg_tier_t tier)
+{
+	int at;
+
+	if ((int)tier < 0 || (int)tier >= (int)NCFG_TIER_COUNT) {
+		return 0;
+	}
+	for (at = (int)tier; at < (int)NCFG_TIER_COUNT; at++) {
+		if (ncfg_authz_satisfies(roots, peer, principal_of(control, (ncfg_tier_t)at))) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 /*
@@ -324,7 +370,7 @@ static int check_remote(const ncfg_remote_policy_t *remote, const ncfg_proto_req
 	    "not permitted from off this machine: this needs the `%s` tier, which the "
 	    "configuration does not open remotely. Change it in the `remote` block of "
 	    "netcfgd.conf.",
-	    name ? name : "admin");
+	    name ? name : "root");
 	return 0;
 }
 
@@ -350,10 +396,10 @@ int ncfg_authz_check(const ncfg_authz_roots_t *roots, const ncfg_control_t *cont
 		return check_remote(remote, request, err, err_size);
 	}
 	tier = ncfg_tier_of(request->kind);
-	principal = principal_of(control, tier);
-	if (ncfg_authz_satisfies(roots, peer, principal)) {
+	if (local_holds(roots, control, peer, tier)) {
 		return 1;
 	}
+	principal = principal_of(control, tier);
 	ncfg_authz_refusal(tier, principal, err, err_size);
 	return 0;
 }
@@ -384,8 +430,9 @@ int ncfg_authz_check_content(ncfg_arrival_t arrival, const ncfg_peer_t *peer,
 		    (int)(request->u.put.name.length < 200u ? request->u.put.name.length : 200u),
 		    request->u.put.name.bytes ? request->u.put.name.bytes : "");
 		ncfg_error_set(err, err_size,
-		    "writing the link-detection script `%s` needs root on this machine: a probe "
-		    "is a program netcfgd runs as root, on an interval. Send it as root.",
+		    "writing the link-detection script `%s` needs uid 0 on this machine, not only "
+		    "the `root` tier: a probe is a program netcfgd runs as root, on an interval. "
+		    "Send it as root.",
 		    name);
 		return 0;
 	}
@@ -414,7 +461,9 @@ int ncfg_authz_check_content(ncfg_arrival_t arrival, const ncfg_peer_t *peer,
 		return 1;
 	}
 	/*
-	 * **Root on this machine, and nothing else.** Asked after the
+	 * **Uid 0 on this machine, and nothing else** -- not the `root` tier
+	 * opened to a group, since these name a program netcfgd runs as root and
+	 * refusing that closes the direct route (0327). Asked after the
 	 * classification rather than before it so that the refusal has something
 	 * to name -- and asked about the arrival as well as the peer, because a
 	 * remote caller's uid is the agent's and there is no version of "is this
@@ -432,13 +481,14 @@ int ncfg_authz_check_content(ncfg_arrival_t arrival, const ncfg_peer_t *peer,
 	 * not know their configuration could do.
 	 */
 	if (findings.total > 1) {
-		ncfg_error_set(err, err_size, "`%s` needs root on this machine: %s. %lu such "
-		    "productions in this configuration.",
+		ncfg_error_set(err, err_size, "`%s` needs uid 0 on this machine, not only the "
+		    "`root` tier: %s. %lu such productions in this configuration.",
 		    findings.at[0].what, why ? why : "it grants more than configuring a network",
 		    (unsigned long)findings.total);
 	} else {
 		ncfg_error_set(err, err_size,
-		    "`%s` needs root on this machine: %s. Send it as root, or leave it out.",
+		    "`%s` needs uid 0 on this machine, not only the `root` tier: %s. Send it as "
+		    "root, or leave it out.",
 		    findings.at[0].what, why ? why : "it grants more than configuring a network");
 	}
 	ncfg_privilege_findings_free(&findings);
@@ -459,7 +509,7 @@ size_t ncfg_authz_granted(const ncfg_authz_roots_t *roots, const ncfg_control_t 
     const ncfg_remote_policy_t *remote, ncfg_arrival_t arrival, const ncfg_peer_t *peer,
     ncfg_tier_t *out)
 {
-	static const ncfg_tier_t every[] = { NCFG_TIER_OBSERVE, NCFG_TIER_WIFI, NCFG_TIER_ADMIN };
+	static const ncfg_tier_t every[] = { NCFG_TIER_VIEW, NCFG_TIER_LAPTOP, NCFG_TIER_ROOT };
 	size_t                   written = 0;
 	size_t                   at;
 
@@ -475,7 +525,7 @@ size_t ncfg_authz_granted(const ncfg_authz_roots_t *roots, const ncfg_control_t 
 		 */
 		int allowed = (arrival == NCFG_ARRIVED_REMOTE)
 		    ? remote_allows(remote, every[at])
-		    : ncfg_authz_satisfies(roots, peer, principal_of(control, every[at]));
+		    : local_holds(roots, control, peer, every[at]);
 
 		if (allowed) {
 			out[written] = every[at];

@@ -120,7 +120,7 @@ static const member_list_t request_members[NCFG_PROTO_REQ_COUNT] = {
 	LIST(members_wifi_add),
 	LIST(members_wifi_connect),
 	LIST(members_interface),/* wifi_disconnect */
-	/* The id and nothing else, which is what keeps it at the `wifi` tier --
+	/* The id and nothing else, which is what keeps it at the `laptop` tier --
 	 * the shape of the message is the bound. */
 	LIST(members_id),       /* wifi_forget */
 	LIST(members_put),      /* config_put */
@@ -380,7 +380,7 @@ static int encode_payload(const ncfg_proto_request_t *request, ncfg_json_writer_
 		/* By id in the configuration, never by SSID and never with a
 		 * credential: the request cannot be used to join something the
 		 * configuration does not already describe, which is what keeps it
-		 * inside the `wifi` tier (0013). */
+		 * inside the `laptop` tier (0013). */
 		if (!request->u.wifi_connect.interface.bytes) {
 			return missing(err, err_size, kind, "interface");
 		}

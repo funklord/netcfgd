@@ -115,15 +115,15 @@ stop_daemon() {
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	control {
-		observe = "any"
-		wifi    = "any"
-		admin   = "any"
+		view   = "any"
+		laptop = "any"
+		root   = "any"
 	}
 	remote {
 		agent   = "any"
-		observe = true
-		wifi    = true
-		admin   = false
+		view   = true
+		laptop = true
+		root   = false
 	}
 }
 CONF
@@ -134,14 +134,14 @@ check "the remote socket exists when a remote policy does" \
 
 check "a local connection gets the local policy" \
 	"$("$bridge" --tiers "$work/run/netcfgd.sock" 2>&1)" \
-	"observe 1  wifi 1  admin 1"
+	"view 1  laptop 1  root 1"
 
 # The case the file exists for, and the one the daemon's own tests could not
-# reach: admin is refused because of where the connection arrived, not because
+# reach: root is refused because of where the connection arrived, not because
 # of who made it -- the same process, the same uid, one socket apart.
 check "and the same daemon bounds the same caller on the remote socket" \
 	"$("$bridge" --tiers "$work/run/remote.sock" 2>&1)" \
-	"observe 1  wifi 1  admin 0"
+	"view 1  laptop 1  root 0"
 
 stop_daemon
 
@@ -151,9 +151,9 @@ stop_daemon
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	control {
-		observe = "any"
-		wifi    = "any"
-		admin   = "any"
+		view   = "any"
+		laptop = "any"
+		root   = "any"
 	}
 }
 CONF

@@ -317,7 +317,7 @@ int ncfg_main_netcfgd_where(const struct ncfg_main_options *options, ncfg_main_w
  *
  * It also means the socket's permissions do not follow a reload, which is the
  * Rust's behaviour as well -- it clones the policy before binding -- and is
- * worth knowing rather than discovering: opening `control { observe = "any" }`
+ * worth knowing rather than discovering: opening `control { view = "any" }`
  * takes effect when the daemon is restarted.
  */
 typedef struct {
@@ -370,7 +370,7 @@ size_t ncfg_main_node_status(const ncfg_main_policy_t *policy, const ncfg_observ
     size_t escaped_cap);
 /*
  * fuzznet's grant for the `status` procedure (its sec 852, 10.688) from the
- * `observe` tier: 1 with `KIND:NAME=x` in `out`; 0 where the tier is root's,
+ * `view` tier: 1 with `KIND:NAME=x` in `out`; 0 where the tier is root's,
  * the node's own user, who needs none; -1 where no grant can say it -- `any`,
  * or a name fuzznet's grants cannot carry.
  */

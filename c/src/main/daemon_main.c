@@ -620,12 +620,12 @@ int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *o
 	control = document ? &document->globals.control : &root;
 	remote = document ? &document->globals.remote : &closed;
 
-	out->remote.observe = remote->observe;
-	out->remote.wifi = remote->wifi;
-	out->remote.admin = remote->admin;
-	if (!principal_copy(&control->observe, &out->control.observe) ||
-	    !principal_copy(&control->wifi, &out->control.wifi) ||
-	    !principal_copy(&control->admin, &out->control.admin) ||
+	out->remote.view = remote->view;
+	out->remote.laptop = remote->laptop;
+	out->remote.root = remote->root;
+	if (!principal_copy(&control->view, &out->control.view) ||
+	    !principal_copy(&control->laptop, &out->control.laptop) ||
+	    !principal_copy(&control->root, &out->control.root) ||
 	    !principal_copy(&remote->agent, &out->remote.agent)) {
 		ncfg_main_policy_free(out);
 		ncfg_error_set(err, err_size, "there was not enough memory for the control policy");
@@ -639,9 +639,9 @@ void ncfg_main_policy_free(ncfg_main_policy_t *policy)
 	if (!policy) {
 		return;
 	}
-	free(policy->control.observe.name);
-	free(policy->control.wifi.name);
-	free(policy->control.admin.name);
+	free(policy->control.view.name);
+	free(policy->control.laptop.name);
+	free(policy->control.root.name);
 	free(policy->remote.agent.name);
 	memset(policy, 0, sizeof(*policy));
 }
@@ -651,7 +651,7 @@ int ncfg_main_remote_is_open(const ncfg_remote_policy_t *remote)
 	if (!remote) {
 		return 0;
 	}
-	return remote->observe || remote->wifi || remote->admin;
+	return remote->view || remote->laptop || remote->root;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -995,7 +995,7 @@ typedef struct {
 	 * control socket's servers hold, read here on the loop's own thread. */
 	const ncfg_main_policy_t *policy;
 	ncfg_authz_roots_t        roots;
-	/* Whether the `status` permit has been put in step with `observe`. */
+	/* Whether the `status` permit has been put in step with the tiers. */
 	int                       permitted;
 	/* `ask` (0312): the socket's dispatcher on this daemon's desk, and the
 	 * answers kept for callers paging through them. */
@@ -1070,35 +1070,47 @@ static void node_permit(const char *subject, int want, const char *grant)
 	node_setting(setting, want, grant);
 }
 
-/* `status` follows `observe`; `ask` and its pieces admit every tier's holder,
- * and netcfgd's gate judges each request behind them. */
+/* `status` follows `view`, and so does `ask`: the tiers nest (0327), so
+ * whoever holds `laptop` or `root` may read too, and every one of the three
+ * is a principal to admit. netcfgd's gate judges each request behind them. */
 static void node_permits(const ncfg_main_policy_t *policy)
 {
 	const ncfg_principal_t *tiers[3];
 	char                    grant[320];
+	char                   *mark;
 	int                     want;
 
-	want = ncfg_main_node_permit(policy ? &policy->control.observe : NULL, grant, sizeof(grant));
+	if (!policy) {
+		want = ncfg_main_node_permit(NULL, grant, sizeof(grant));
+		node_permit("status", want, grant);
+		node_permit("eventlog", want, grant);
+		node_permit("hosts", want, grant);
+		node_setting("local/events", want, grant);
+		return;
+	}
+	tiers[0] = &policy->control.view;
+	tiers[1] = &policy->control.laptop;
+	tiers[2] = &policy->control.root;
+	want = ncfg_main_node_permit_any_of(tiers, 3u, grant, sizeof(grant));
 	node_permit("status", want, grant);
 	node_permit("eventlog", want, grant);
 	node_permit("hosts", want, grant);
+	node_permit("ask", want, grant);
+	node_permit("askpart", want, grant);
 	/* And the events netcfgd publishes follow it too, held by whoever may read
 	 * the status they say to read: the same grant as a read, in a setting of its
 	 * own (fuzznet's sec 899). The node's own user holds them with no grant,
-	 * and `any=r` is every local user's, there and nowhere else (its sec 933). */
+	 * and `any=r` is every local user's, there and nowhere else (its sec 933).
+	 * Every entry's `=x` becomes `=r`, not only the last one's: with three
+	 * tiers there may be three. */
 	if (want == 1) {
-		grant[strlen(grant) - 1u] = 'r';
+		for (mark = grant; (mark = strstr(mark, "=x")) != NULL; mark += 2) {
+			if (mark[2] == ' ' || mark[2] == '\0') {
+				mark[1] = 'r';
+			}
+		}
 	}
 	node_setting("local/events", want, grant);
-	if (!policy) {
-		return;
-	}
-	tiers[0] = &policy->control.observe;
-	tiers[1] = &policy->control.wifi;
-	tiers[2] = &policy->control.admin;
-	want = ncfg_main_node_permit_any_of(tiers, 3u, grant, sizeof(grant));
-	node_permit("ask", want, grant);
-	node_permit("askpart", want, grant);
 }
 
 /* An operator of the estate, over fuzznet's remote hop (`daemon_node.c`). */
@@ -1166,7 +1178,7 @@ static size_t node_call(void *context, const char *name, const uint8_t *key,
  * 0309's first verb, on fuzznet's framing (its sec 843): `get status PATH`
  * writes the observation -- what the control socket's `status` answers -- to
  * PATH and answers `ok LENGTH`. Judged by netcfgd's own tiers against the
- * caller fuzznet read (`observe`, as on the socket), and written only where
+ * caller fuzznet read (`view`, as on the socket), and written only where
  * that caller could have put it (`ncfg_caller_file_create`, 10.680), because
  * this daemon is root and the caller need not be. Answered on the loop's
  * thread between steps of fuzznet's loop, where the state is whole.
@@ -1786,9 +1798,9 @@ static int start(const options_t *options)
 		goto done;
 	}
 
-	reach[0] = &policy.control.observe;
-	reach[1] = &policy.control.wifi;
-	reach[2] = &policy.control.admin;
+	reach[0] = &policy.control.view;
+	reach[1] = &policy.control.laptop;
+	reach[2] = &policy.control.root;
 	/*
 	 * **One protocol (0309).** A daemon with a node is reached through fuzznet and
 	 * binds nothing of its own, which leaves `netcfgd.sock` to a daemon with none:
@@ -1826,10 +1838,10 @@ static int start(const options_t *options)
 		 * an operator reads the line for.
 		 */
 		ncfg_log_emitf("control", NCFG_LOG_NOTE,
-		    "remote access is open on %s to `%s` -- observe %d, wifi %d, admin %d",
+		    "remote access is open on %s to `%s` -- view %d, laptop %d, root %d",
 		    where.remote_socket,
 		    ncfg_cli_principal_render(&policy.remote.agent, rendered, sizeof(rendered)),
-		    policy.remote.observe, policy.remote.wifi, policy.remote.admin);
+		    policy.remote.view, policy.remote.laptop, policy.remote.root);
 	}
 	/* One line, carrying how the configuration is watched and where the
 	 * daemon can be reached -- the shape the Rust emits. `has_watch` is false

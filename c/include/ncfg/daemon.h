@@ -15,14 +15,14 @@
  *   nothing else in this library decides who may do what.
  *
  * THE THREE TIERS, AND WHY THE SECOND GATE EXISTS
- *   0013 splits what a caller may ask into `observe`, `wifi` and `admin`, and
- *   a site may open each to a principal. That is enough for every request but
- *   one: `config_put` carries *text*, and the same request can hold a wifi
- *   network or a shell script. So the text is classified and a production
- *   granting more than configuring a network needs **root on this machine** --
- *   not the `admin` tier, which a site may have opened to a group. That is
- *   what makes opening `admin` survivable rather than equivalent to handing
- *   out root (0117, 0127), and it is why `ncfg_authz_permitted` exists as one
+ *   0327 splits what a caller may ask into `view`, `laptop` and `root`, and
+ *   a site may open each to a principal. `config_put` carries *text*, and the
+ *   same request can hold a wifi network or a shell script, so the text is
+ *   classified and a production naming a program netcfgd would run as root
+ *   needs **uid 0 on this machine** -- not merely the `root` tier, which a
+ *   site may have opened to a group. That closes the *direct* route and no
+ *   more: the `root` tier is root by the indirect one (resolvers, routes,
+ *   NAT), which is why it is called that. It is why `ncfg_authz_permitted` exists as one
  *   call: the Rust briefly had two, and a caller that forgot the second was
  *   invisible -- every test of the content gate called it directly and passed
  *   whether or not the daemon did.
@@ -195,29 +195,41 @@ int ncfg_peer_user_id(const char *passwd_file, const char *name, uid_t *out);
 /* ------------------------------------------------------- tiers and arrival */
 
 /*
- * What a caller is trying to do.
+ * What a caller is trying to do (0327).
  *
- * Three separate memberships, **not a ladder**. A machine may grant `admin`
- * to a group somebody is in and `wifi` to one they are not, so nothing here
- * reports a highest tier or fills in the ones below it.
+ * **They nest.** A caller who satisfies `root`'s principal holds `laptop` and
+ * `view` too, and `laptop` holds `view`; a site writes one principal per tier
+ * and a higher grant includes the lower. Each was assigned independently
+ * once, which let `admin = "any"` beside `observe = "root"` describe a writer
+ * who could not read -- a policy nobody means.
+ *
+ * - `view` reads, and nothing else.
+ * - `laptop` is what a person at their own machine must be able to do: join,
+ *   add and forget a network, take a radio or a tunnel up and down. It is
+ *   bounded by the *shape* of its requests -- typed, carrying no
+ *   configuration text (0117) -- and not by being called safe.
+ * - `root` is everything else, and is root: configuration access to a network
+ *   tool chooses the machine's resolvers, routes and NAT, and a machine whose
+ *   traffic somebody else chooses is theirs by an ordinary path. Opening it
+ *   to a group hands that group root, and the word says so.
  */
 typedef enum {
-	NCFG_TIER_OBSERVE = 0,
-	NCFG_TIER_WIFI,
-	NCFG_TIER_ADMIN,
+	NCFG_TIER_VIEW = 0,
+	NCFG_TIER_LAPTOP,
+	NCFG_TIER_ROOT,
 	/* Not a tier: the bound every walk over them uses. */
 	NCFG_TIER_COUNT
 } ncfg_tier_t;
 
-/* `observe`, `wifi`, `admin`. NULL outside the enum. */
+/* `view`, `laptop`, `root`. NULL outside the enum. */
 const char *ncfg_tier_name(int tier);
 
 /*
  * Which tier a request belongs to.
  *
  * **The test is what the caller is asking netcfgd to do, and nothing else.**
- * An observer may *request* the data netcfgd holds; an admin may *write* all
- * of it through netcfgd. A file's mode is not an argument for a tier: that is
+ * A viewer may *request* the data netcfgd holds; `root` may *write* all of it
+ * through netcfgd. A file's mode is not an argument for a tier: that is
  * a fact about the filesystem, these tiers are about netcfgd, and the
  * reasoning evaporates the moment a mode changes while the tier it justified
  * stays.
@@ -229,7 +241,7 @@ const char *ncfg_tier_name(int tier);
  * `authorize_test.c` asserts that every one is classified. That assertion is the
  * `match`, moved from the compiler to a test.
  *
- * A kind outside the enum answers `NCFG_TIER_ADMIN`, which is the direction
+ * A kind outside the enum answers `NCFG_TIER_ROOT`, which is the direction
  * that denies.
  */
 ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind);
@@ -260,7 +272,7 @@ ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind);
 typedef enum {
 	/*
 	 * **Zero on purpose, and it is the one improvement on `ncfg_tier_of`'s
-	 * shape.** `NCFG_TIER_OBSERVE` is 0, so a request kind missing from that
+	 * shape.** `NCFG_TIER_VIEW` is 0, so a request kind missing from that
 	 * table silently becomes the weakest tier and only a test stands between
 	 * that and a new verb arriving unguarded. Here the silent default is the
 	 * refusing one: a verb nobody classified will not be leased, will stall,
@@ -446,10 +458,11 @@ int ncfg_authz_check(const ncfg_authz_roots_t *roots, const ncfg_control_t *cont
 /*
  * The content gate: may this caller send *this content*?
  *
- * **Root on this machine, and nothing else.** Not the `admin` tier, which a
- * site may have opened to a group -- that is the whole point, since 0127's
- * architecture only survives an open local policy if opening it cannot grant
- * root. And never from off the machine whatever the remote policy says: a
+ * **Uid 0 on this machine, and nothing else.** Not the `root` tier, which a
+ * site may have opened to a group: a hook or a probe is a program netcfgd runs
+ * as root, chosen by the caller, and refusing it to anybody but root closes
+ * that direct route. It does not make the tier less than root (0327) -- the
+ * resolvers and routes it may choose are an indirect one. And never from off the machine whatever the remote policy says: a
  * remote caller has no uid the daemon can check, so there is no version of
  * "is this root" to ask, and inventing one would be trusting the agent for
  * the one thing the split exists to avoid.
@@ -710,7 +723,7 @@ int ncfg_daemon_modems_encode(const ncfg_proto_modem_t *modems, size_t count, nc
  * slot the cap allows and the daemon answers "too many connections" to
  * everybody else -- measured against a real daemon, with `ncfg reload`
  * refused for as long as they were held. On a machine whose policy opens
- * `observe` to `any`, that is any local user.
+ * `view` to `any`, that is any local user.
  *
  * Generous, because it is only about *silence*: the deadline is cleared once
  * a request has been read, so a tray holding an idle connection between
@@ -764,7 +777,7 @@ typedef int (*ncfg_daemon_answer_fn)(void *context, const ncfg_proto_request_t *
  *
  * It is called **after `ncfg_authz_permitted` has said yes**, so an
  * implementation never re-decides authorization; `monitor` needs the
- * `observe` tier and the gate has already asked.
+ * `view` tier and the gate has already asked.
  *
  * **The descriptor becomes the seam's on success**, and stays the server's on
  * failure. Return 1 and this server never touches that number again -- it is
@@ -792,7 +805,7 @@ typedef int (*ncfg_daemon_stream_fn)(void *context, int fd, char *err, size_t er
  * local socket passes its three principals because those are the people the
  * local policy speaks about; the remote socket passes one, naming who may act
  * as the agent. Passing the *local* policy for both is what 0159 fixes: a
- * `control` block opening `observe` was opening a socket that grants the
+ * `control` block opening `view` was opening a socket that grants the
  * remote tiers, since a remote connection consults no principal at all.
  */
 typedef struct {
@@ -1859,10 +1872,9 @@ size_t ncfg_resolv_sweep(const char *run_dir, const ncfg_resolv_machine_t *machi
  * a `PING` cost a round trip on a local socket, which is nothing next to the
  * scan they precede.
  *
- * **A caller in the `wifi` tier can join a network the configuration already
- * describes, and nothing else.** Nothing below can create one -- `wifi_add`
- * writes a `network` block and is `admin` -- so the tier cannot be talked into
- * writing config (0013).
+ * **Nothing below creates a network: they join one the configuration
+ * already describes.** Creating one is `wifi_add`, a typed request of its
+ * own (0117, 0124), so these cannot be talked into writing config.
  *
  * WHY THESE FILL A BUFFER RATHER THAN RETURNING A RESPONSE
  *   The Rust returns `Response`, an enum with an `Error` arm, so a refusal and

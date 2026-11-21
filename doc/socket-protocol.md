@@ -134,18 +134,34 @@ policy checked against `SO_PEERCRED` alone would deny nearly everybody it is
 meant to allow while looking configured. **Groups that could not be read are
 treated as no membership**, which denies.
 
-Three tiers, each independently assigned to a principal
-([0013](decision/0013-three-things-a-caller-may-be-allowed-to-do.md)). Root
-satisfies every one of them, and that is not a bolted-on special case: a
-configuration naming a group and thereby locking root out would be
+Three tiers ([0327](decision/0327-three-tiers-view-laptop-root.md), which
+renamed and reshaped [0013](decision/0013-three-things-a-caller-may-be-allowed-to-do.md)'s),
+each assigned to a principal, and **they nest**: a caller satisfying `root`'s
+principal holds `laptop` and `view` too, and one satisfying `laptop` holds
+`view`. Root satisfies every one of them, and that is not a bolted-on special
+case: a configuration naming a group and thereby locking root out would be
 unrecoverable without editing the file the daemon is refusing to let you
 reach.
 
+- **`view`** reads, and nothing else.
+- **`laptop`** is what a person at their own machine must be able to do. It is
+  bounded by the shape of its requests -- each typed, carrying no
+  configuration text (0117) -- and not by being called safe: joining a network
+  chooses where the machine's traffic goes.
+- **`root`** is everything else, and it is root. Configuration access to a
+  network tool chooses the machine's routes, resolvers and NAT, and a machine
+  whose traffic somebody else chooses is theirs by an ordinary path. Opening
+  it to a group hands that group root.
+
+The words `observe`, `wifi` and `admin` that 0327 replaced are still read in a
+`control` or `remote` block as the same three tiers, and a client reads either
+spelling in `hello`'s `tiers`; netcfgd writes and sends only the new ones.
+
 | Tier | Requests |
 |---|---|
-| `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
-| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set`, `tunnel_set` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
+| `view` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
+| `laptop` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set`, `tunnel_set` |
+| `root` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
 
 **All thirty-two, and it stayed at twenty-three for a long time.** The nine
 that were missing -- the five listings, `radio_set`, and the three that write a
@@ -158,35 +174,35 @@ now.
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
 
-- **`wifi_status` and `ap_stations` are reading, so they are `observe`.** A
-  status display that needed the `wifi` tier is a status display that ends up
+- **`wifi_status` and `ap_stations` are reading, so they are `view`.** A
+  status display that needed the `laptop` tier is a status display that ends up
   being given it. What `ap_stations` exposes is worth naming, though: other
   people's hardware addresses and signal strengths, which is a proximity
-  sensor for anybody granted `observe`. **Since project.md 10.602 it carries
+  sensor for anybody granted `view`. **Since project.md 10.602 it carries
   the name and address netcfgd's DHCP server leased each station as well**,
   and a device's name is very often its owner's -- "Anna's iPhone". A site
-  opening `observe` to `any` opens all of that too.
+  opening `view` to `any` opens all of that too.
 - **`wifi_scan` is not reading.** It transmits probe requests and interrupts
   whatever the radio was doing.
-- **`apply` is `admin` even when the only thing in the plan is a wifi
+- **`apply` is `root` even when the only thing in the plan is a wifi
   association.** A tier that could call `apply` could apply any config change,
-  which would make the `wifi` tier `admin` wearing a hat.
-- **`wifi_add` is `wifi`, and was `admin` until
+  which would make the `laptop` tier `root` wearing a hat.
+- **`wifi_add` is `laptop`, and was `root` until
   [0124](decision/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md).**
-  It writes configuration, which is what `admin` names -- but it writes
+  It writes configuration, which is what `root` names -- but it writes
   exactly one `network` block and one secret, because those are the only
-  fields it has. 0013 put it in `admin` when writing config meant writing a
+  fields it has. 0013 put it in `admin` (now `root`) when writing config meant writing a
   file that could name a hook, called that a gap, and said "until that
   exists". 0117's typed request is what exists. Adding is still not applying:
   a wifi-tier caller writes a network and joins it, and cannot apply anything
   else.
-- **`wifi_forget` is `wifi` because `wifi_add` is.** It carries an id and
+- **`wifi_forget` is `laptop` because `wifi_add` is.** It carries an id and
   nothing else, and what it removes is the `network` block that id names plus
   a credential nothing else refers to -- strictly less reach than the request
   that created both. A tier that may add a network and not remove one leaves a
   caller able to fill a machine with networks it cannot take back, and leaves
   the only removal spelled `config_delete` of `wifi-<id>`, which is netcfgd's
-  own filing and `admin`.
+  own filing and `root`.
 
   The credential is the part worth stating: it goes when the configuration
   after the removal refers to it from nowhere, and stays when anything still
@@ -195,11 +211,10 @@ first glance:
   every credential stays; removing one on a guess is the one thing here
   nobody can undo.
 
-- **`config_list` is `observe`, while `config_put` and `config_delete` are
-  `admin`.** The tiers divide on what the caller asks netcfgd to do: an
-  observer may request the data netcfgd holds, and an admin may write all of
-  it through netcfgd. Listing is a request for data, so it is `observe`; the
-  two that write are `admin`.
+- **`config_list` is `view`, while `config_put` and `config_delete` are
+  `root`.** The tiers divide on what the caller asks netcfgd to do: a viewer may request the data netcfgd holds, and `root` may write all of
+  it through netcfgd. Listing is a request for data, so it is `view`; the
+  two that write are `root`.
 
   **The mode of the files behind it is not part of that argument**, and this
   bullet used to say it was. netcfgd bridges the host gap: the caller may be
@@ -225,14 +240,16 @@ first glance:
   drop-in, no request writes or removes it, and giving it a name would offer a
   client a verb that does not exist for it.
 
-- **`config_put` is `admin`, and the tier is not the whole answer for it.**
+- **`config_put` is `root`, and the tier is not the whole answer for it.**
   It carries configuration, and the same request can hold a wifi network or a
   shell script, so a second gate runs after the tier one: the text is parsed
-  and classified, and any production granting more than configuring a network
-  needs **root on this machine** -- not the `admin` tier, which a site may have
-  opened to a group. That is what makes opening `admin` survivable rather than
-  equivalent to handing out root, and it is 0117's principle surviving 0127
-  intact. The productions and their reasons are in `netcfgd-compile`'s
+  and classified, and a production naming a program netcfgd would run as root
+  -- a hook, a `run_as`, a probe -- needs **uid 0 on this machine**, not only
+  the `root` tier, which a site may have opened to a group. That closes the
+  direct route to running a program as root and no more: it does not make the
+  tier less than root, since the routes and resolvers it may choose are an
+  indirect one (0327). This bullet used to say the gate made opening the tier
+  survivable, and that was the claim 0327 exists to withdraw. The productions and their reasons are in `netcfgd-compile`'s
   `privilege` module; `tool/privilege_gate.py` refuses a config key that is
   classified nowhere.
 
@@ -240,7 +257,7 @@ first glance:
   and the name is checked by the rule a wifi profile's id follows, so it cannot
   contain a separator, traverse upwards or begin with a dot.
 
-- **`secret_put` is `admin`, not `wifi`**, even though `wifi_add` carries a
+- **`secret_put` is `root`, not `laptop`**, even though `wifi_add` carries a
   passphrase at the wifi tier. The difference is the blast radius of the
   *name*: `wifi_add` writes a secret it also names, for a network it is
   creating, while this writes any name the configuration might refer to --
@@ -253,7 +270,7 @@ first glance:
   is not going to be: 0031's bridge runs one way, `GetSecrets` refuses, and the
   document carries references rather than values.
 
-- **`hook_list` is `admin`, and it is the one *reading* verb at this tier.**
+- **`hook_list` is `root`, and it is the one *reading* verb at this tier.**
   It returns the hook scripts themselves, which is the one thing a
   desired-state document cannot carry: a document holding shell would be
   remote code execution with extra steps, so the compiler materialises a body
@@ -261,14 +278,14 @@ first glance:
   verb no client can show an operator what a hook does, and an editor that
   loaded the fields it knew and saved the block would delete the body.
 
-  The tier is not `observe`, where `probe_list` sits, and the difference is
+  The tier is not `view`, where `probe_list` sits, and the difference is
   what is in the file rather than where it is. A probe is a command the
   document states in the open, in a file netcfgd keeps at 0755 so somebody
   debugging a link judged down can run it by hand. A hook body is whatever an
   operator wrote, in a file the materialiser opens 0700 because it runs as
-  root and nobody else needs to read it -- serving that to `observe` would
+  root and nobody else needs to read it -- serving that to `view` would
   publish the contents of the one file this daemon takes care to keep to
-  itself. The client that wants it is an editor, which is `admin` to save
+  itself. The client that wants it is an editor, which is `root` to save
   anyway.
 
   This is not the mode argument the `config_list` bullet rules out. That one
@@ -292,7 +309,7 @@ first glance:
   ([0042](decision/0042-only-a-key-nobody-can-revoke-stops-a-plan.md)), and
   unlike `secret_put` it has no `replace` flag to make somebody say it twice --
   a caller asking to delete has said it once already. What guards it is the
-  `admin` tier and nothing else, which is worth knowing before a client offers
+  `root` tier and nothing else, which is worth knowing before a client offers
   a button for it.
 
 - **`profile_delete` is `profile_save` undone**, at its tier (10.801). It
@@ -799,10 +816,10 @@ is the operator discovering it by being refused.
 SSID and never with a credential. That is
 [0013](decision/0013-three-things-a-caller-may-be-allowed-to-do.md)'s boundary
 expressed as a message: the request cannot be used to join something the
-configuration does not already describe, so it stays inside the `wifi` tier.
+configuration does not already describe, so it stays inside the `laptop` tier.
 
 **`wifi_add` adds one, and it is the only request carrying a credential.** It
-is `admin`, it takes **typed fields — never config text and never a path** —
+is `root`, it takes **typed fields — never config text and never a path** —
 and the daemon renders the block itself, storing the passphrase through the
 secret provider so the file holds an `@secret:` reference and nothing else
 ([0117](decision/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)).

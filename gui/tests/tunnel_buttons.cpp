@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 	QDir().mkpath(run);
 	QDir().mkpath(wpa);
 	if (!write_file(etc + QStringLiteral("/netcfgd.conf"),
-	        QStringLiteral("global { control { observe = \"any\"; wifi = \"any\" } }\n"
+	        QStringLiteral("global { control { laptop = \"any\" } }\n"
 	                       "device ipsec0 {\n\txfrm { if_id = 7; connection = \"home\"; "
 	                       "child = \"all\" }\n}\n"
 	                       "device dum0 { kind = \"dummy\" }\n")) ||

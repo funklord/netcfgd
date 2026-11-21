@@ -96,13 +96,13 @@ int nmc_may_write(unsigned long uid, const nmc_principal_t *admin, char *err, si
 			return 1;
 		}
 		(void)snprintf(err, err_size,
-		    "not permitted: changing netcfgd's configuration needs the `admin` tier, "
+		    "not permitted: changing netcfgd's configuration needs the `root` tier, "
 		    "which this machine opens to the user `%s`",
 		    admin->name);
 		return 0;
 	case NMC_PRINCIPAL_ROOT:
 		(void)snprintf(err, err_size,
-		    "not permitted: changing netcfgd's configuration needs the `admin` tier, "
+		    "not permitted: changing netcfgd's configuration needs the `root` tier, "
 		    "which this machine keeps to root. Open it in the `control` block, or edit "
 		    "the configuration directly");
 		return 0;
@@ -118,7 +118,7 @@ int nmc_may_write(unsigned long uid, const nmc_principal_t *admin, char *err, si
 		 * a unix socket and can do this; a bus cannot.
 		 */
 		(void)snprintf(err, err_size,
-		    "not permitted here: the `admin` tier is open to the group `%s`, and a "
+		    "not permitted here: the `root` tier is open to the group `%s`, and a "
 		    "message bus reports a caller's user but not its groups -- so this cannot "
 		    "tell whether you are in it, and will not guess. `ncfg` sees your groups "
 		    "over the socket and can do this",
@@ -127,14 +127,14 @@ int nmc_may_write(unsigned long uid, const nmc_principal_t *admin, char *err, si
 	case NMC_PRINCIPAL_UNKNOWN:
 	default:
 		(void)snprintf(err, err_size,
-		    "not permitted: this build does not understand the `admin` principal in "
+		    "not permitted: this build does not understand the `root` principal in "
 		    "netcfgd's `control` block, and an unrecognised one is refused rather than "
 		    "widened");
 		return 0;
 	}
 }
 
-void nmc_admin_principal(nmc_state_t *state, nmc_principal_t *out)
+void nmc_root_principal(nmc_state_t *state, nmc_principal_t *out)
 {
 	ncfg_client_t *client = nmc_state_client(state);
 	ncfg_globals_t globals;
@@ -151,6 +151,6 @@ void nmc_admin_principal(nmc_state_t *state, nmc_principal_t *out)
 	if (!ncfg_client_globals(client, &globals, problem, sizeof(problem))) {
 		return;
 	}
-	nmc_principal_parse(globals.control_admin, out);
+	nmc_principal_parse(globals.control_root, out);
 	ncfg_globals_free(&globals);
 }

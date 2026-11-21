@@ -203,7 +203,7 @@ int main(int argc, char **argv)
 	 * is in four-address mode; the dummy is shaped at a rate that is not a
 	 * whole kbit. */
 	const QString socket = start(&daemon, work.path(),
-	    QStringLiteral("global { control { observe = \"any\"; admin = \"any\" } }\n"
+	    QStringLiteral("global { control { root = \"any\" } }\n"
 	                   "device br0 { bridge { members = [\"eth0\"]; vlan_filtering = true } }\n"),
 	    owned);
 	if (socket.isEmpty()) {

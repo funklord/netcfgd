@@ -1495,12 +1495,12 @@ bool ncfg_connection::globals(ncfg_globals *out, QString *error)
 	out->hostname = from_c(found.hostname);
 	out->on_drift = from_c(found.on_drift);
 	out->confirm = found.confirm;
-	out->control_observe = from_c(found.control_observe);
-	out->control_wifi = from_c(found.control_wifi);
-	out->control_admin = from_c(found.control_admin);
-	out->remote_observe = found.remote_observe != 0;
-	out->remote_wifi = found.remote_wifi != 0;
-	out->remote_admin = found.remote_admin != 0;
+	out->control_view = from_c(found.control_view);
+	out->control_laptop = from_c(found.control_laptop);
+	out->control_root = from_c(found.control_root);
+	out->remote_view = found.remote_view != 0;
+	out->remote_laptop = found.remote_laptop != 0;
+	out->remote_root = found.remote_root != 0;
 	ncfg_globals_free(&found);
 	return true;
 }

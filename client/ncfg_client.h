@@ -592,10 +592,10 @@ typedef struct {
 /*
  * What this connection may do, asked once.
  *
- * Three independent answers and not a level: netcfgd's tiers are three group
- * memberships, and a machine may grant `admin` to a group somebody is in while
- * `wifi` goes to one they are not. A client that treated them as a ladder would
- * offer something the daemon refuses.
+ * Three answers, as the daemon gives them. They nest since 0327 -- a daemon
+ * reports `view` and `laptop` to whoever holds `root` -- but a client reads
+ * each as reported rather than filling in the ones below, so an older daemon
+ * that did not nest is read for what it said.
  *
  * Why a screen needs this at all: without it the only way to learn what an
  * operator may do is to try it and read the refusal, so a window offers an
@@ -603,9 +603,9 @@ typedef struct {
  * gui/project.md sec 4 asks for the opposite.
  */
 typedef struct {
-	int observe;
-	int wifi;
-	int admin;
+	int view;
+	int laptop;
+	int root;
 } ncfg_tiers_t;
 
 /*
@@ -649,7 +649,7 @@ int ncfg_client_confirm_default(ncfg_client_t *client, unsigned *out, char *err,
  *   `configured` is the id of the `network` block describing it, and empty when
  *   the configuration has none. It is what decides whether this entry can be
  *   joined at all: decision 0013 puts joining a *known* network in the `wifi`
- *   tier, and writing config for an unknown one in `admin`. The proto's own note
+ *   tier, and writing config for an unknown one in `root`. The proto's own note
  *   on this field asks the client to show the difference, because the
  *   alternative is the operator discovering it by being refused.
  */
@@ -774,7 +774,7 @@ char *ncfg_access_point_display(int named, const char *name, const char *ssid);
  * how this project's clients came to spell one access point three ways.
  *
  * - Only access points a network names. The join is by that id -- it is what
- *   `ncfg_client_wifi_connect` takes and what keeps it in the `wifi` tier --
+ *   `ncfg_client_wifi_connect` takes and what keeps it in the `laptop` tier --
  *   so an access point with none has nothing to send.
  * - One entry per network, at the strongest signal any of its access points
  *   was heard at: the supplicant picks the BSS, and two identical names offer
@@ -808,7 +808,7 @@ void ncfg_join_choices_free(ncfg_join_choices_t *choices);
  * What a tray offers under "connect to" below the saved ones: the networks a
  * scan heard that the configuration does not name yet.
  *
- * Choosing one adds it -- `wifi_add`, the `wifi` tier since 0124, through the
+ * Choosing one adds it -- `wifi_add`, the `laptop` tier since 0124, through the
  * add dialog -- and then joins it. Same reason as ncfg_join_choices() for
  * being here rather than in a tray.
  *
@@ -932,8 +932,8 @@ int ncfg_client_plan_of(ncfg_client_t *client, ncfg_plan_t *out, char *err, size
  *   so it grants nothing new.
  *
  *   Putting it there is ncfg_client_secret_put(), or `ncfg secret set NAME <
- *   file` at a terminal. Note the tier: storing a secret is `admin` and adding
- *   a network is `wifi`, so a client may well be able to do the second and not
+ *   file` at a terminal. Note the tier: storing a secret is `root` and adding
+ *   a network is `laptop`, so a client may well be able to do the second and not
  *   the first. Ask ncfg_client_tiers() before offering it.
  *
  *   There is no field here a path could be written in. That is the difference
@@ -1008,8 +1008,8 @@ typedef struct {
  * The **only** call in this library that carries a secret, and it carries it
  * one way: the daemon writes it through the secret provider and the config
  * file keeps an `@secret:` reference, so nothing reads one back out (0029,
- * 0031). Needs the `wifi` tier: 0124 moved it there, because a request
- * carrying an SSID and a credential is not the thing `admin` exists to
+ * 0031). Needs the `laptop` tier: 0124 moved it there, because a request
+ * carrying an SSID and a credential is not the thing `root` exists to
  * bound -- that is a request carrying config *text*. A refusal names the
  * tier that would have been needed.
  *
@@ -1028,7 +1028,7 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * writes it at 0600.
  *
  * WHICH TIER, AND WHY IT IS NOT THE WIFI ONE
- *   `admin`, while ncfg_client_wifi_add() is `wifi`, and the difference is the
+ *   `root`, while ncfg_client_wifi_add() is `laptop`, and the difference is the
  *   blast radius of the **name**. An add writes a secret it also names, for a
  *   network it is creating, and refuses outright if either the network file or
  *   the secret already exists -- so it cannot touch anything that was already
@@ -1036,7 +1036,7 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  *   one a `wireguard` block reads, which 0042 calls the one thing on a machine
  *   nobody can get back.
  *
- *   So a client may hold `wifi` and not `admin`, and offering this without
+ *   So a client may hold `laptop` and not `root`, and offering this without
  *   asking ncfg_client_tiers() first produces a refusal after the operator has
  *   already done the work of choosing a file.
  *
@@ -1057,11 +1057,12 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * `replace` allows overwriting one that is already there, so that a client
  * cannot clobber a file by forgetting it existed.
  *
- * **This is `admin`, and the tier is not the whole guard.** It writes
+ * **This is `root`, and the tier is not the whole guard.** It writes
  * configuration, so the daemon runs `check_content` over the text afterwards
  * and refuses anything granting more than configuring a network -- a hook, a
- * path, a `run_as`. That is what makes opening `admin` to a group survivable
- * rather than equivalent to handing it root (0117).
+ * path, a `run_as` -- from anybody but uid 0. That closes the direct route to
+ * running a program as root; it does not make the tier less than root, which
+ * is why it is called that (0327).
  *
  * The daemon re-reads its configuration on success, so a caller does not
  * follow this with a reload.
@@ -1252,7 +1253,7 @@ typedef struct {
 void ncfg_rules_free(ncfg_rules_t *rules);
 
 /*
- * The routing rules the configuration declares. Needs `observe`.
+ * The routing rules the configuration declares. Needs `view`.
  *
  * From the document rather than from the kernel, deliberately: this is what
  * netcfgd was asked for. What the kernel currently has is a different question
@@ -1312,7 +1313,7 @@ typedef struct {
 void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall);
 
 /*
- * The firewall the configuration declares. Needs `observe`.
+ * The firewall the configuration declares. Needs `view`.
  *
  * From the document, for the editor that saves the block whole: a key this
  * reader did not take is one Save would delete, so `tool/form_coverage_gate.py`
@@ -1377,7 +1378,7 @@ typedef struct {
 void ncfg_leases_free(ncfg_leases_t *leases);
 
 /* The leases netcfgd's DHCP servers hold, from the observation. Needs
- * `observe`. */
+ * `view`. */
 int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, size_t err_size);
 
 /* One port a UPnP or NAT-PMP client had mapped (0310, 10.675): `protocol`
@@ -1399,11 +1400,11 @@ typedef struct {
 
 void ncfg_mappings_free(ncfg_mappings_t *mappings);
 
-/* The ports UPnP has mapped, from the observation. Needs `observe`. */
+/* The ports UPnP has mapped, from the observation. Needs `view`. */
 int ncfg_client_upnp_mappings(ncfg_client_t *client, ncfg_mappings_t *out, char *err,
     size_t err_size);
 
-/* The DNS records the configuration declares. Needs `observe`. */
+/* The DNS records the configuration declares. Needs `view`. */
 int ncfg_client_dns_records(ncfg_client_t *client, ncfg_dns_records_t *out, char *err,
                             size_t err_size);
 
@@ -1423,7 +1424,7 @@ typedef struct {
 
 void ncfg_block_lists_free(ncfg_block_lists_t *lists);
 
-/* The block lists the configuration declares. Needs `observe`. */
+/* The block lists the configuration declares. Needs `view`. */
 int ncfg_client_block_lists(ncfg_client_t *client, ncfg_block_lists_t *out, char *err,
                             size_t err_size);
 
@@ -1448,11 +1449,11 @@ typedef struct {
 
 void ncfg_meshes_free(ncfg_meshes_t *meshes);
 
-/* The meshes the configuration declares. Needs `observe`. */
+/* The meshes the configuration declares. Needs `view`. */
 int ncfg_client_meshes(ncfg_client_t *client, ncfg_meshes_t *out, char *err, size_t err_size);
 
 /*
- * The host lists the configuration declares. Needs `observe`. From the
+ * The host lists the configuration declares. Needs `view`. From the
  * document, for the editor that saves each list whole.
  */
 int ncfg_client_host_lists(ncfg_client_t *client, ncfg_host_lists_t *out, char *err,
@@ -1474,7 +1475,7 @@ typedef struct {
 void ncfg_bluetooths_free(ncfg_bluetooths_t *devices);
 
 /*
- * The bluetooth devices the configuration declares. Needs `observe`.
+ * The bluetooth devices the configuration declares. Needs `view`.
  */
 int ncfg_client_bluetooth(ncfg_client_t *client, ncfg_bluetooths_t *out, char *err,
                           size_t err_size);
@@ -1568,13 +1569,13 @@ typedef struct {
 	int   confirm;
 	/* Who may do what, as the configuration spells it: "root", "any",
 	 * "user:name" or "group:name". */
-	char *control_observe;
-	char *control_wifi;
-	char *control_admin;
+	char *control_view;
+	char *control_laptop;
+	char *control_root;
 	/* Whether each tier is reachable from off this machine. */
-	int   remote_observe;
-	int   remote_wifi;
-	int   remote_admin;
+	int   remote_view;
+	int   remote_laptop;
+	int   remote_root;
 	/* The country the machine is pinned to (0296), or empty where it
 	 * follows what its radios hear. */
 	char *regdom;
@@ -2069,7 +2070,7 @@ void ncfg_secrets_free(ncfg_secrets_t *secrets);
 
 /*
  * The credentials this machine holds, by name and never by value. Needs
- * `observe`.
+ * `view`.
  *
  * The union of what the store holds and what the configuration refers to,
  * because the two interesting faults are opposite ways round: a referenced
@@ -2104,7 +2105,7 @@ typedef struct {
 void ncfg_client_explanation_free(ncfg_explanation_t *explanation);
 
 /*
- * Why is this interface the way it is. Needs `observe`.
+ * Why is this interface the way it is. Needs `view`.
  *
  * **netcfgd's own question, and the one thing no other client of this daemon
  * can answer.** `status` says what is; this says which line of which file
@@ -2123,7 +2124,7 @@ int ncfg_client_explain(ncfg_client_t *client, const char *interface, ncfg_expla
 
 /*
  * Take a configuration drop-in away, by the name it was stored under. Needs
- * `admin`.
+ * `root`.
  *
  * The mirror of ncfg_client_config_put(), and a name rather than a path for
  * the same reason: netcfgd chose where it went (0127), and a client that knew
@@ -2162,7 +2163,7 @@ void ncfg_configs_free(ncfg_configs_t *configs);
 
 /*
  * Every configuration file netcfgd reads, in the order it reads them. Needs
- * `observe`.
+ * `view`.
  *
  * **The listing netcfgd had for everything but its own configuration.** A
  * client could write a drop-in and remove one and never find out what was
@@ -2177,7 +2178,7 @@ int ncfg_client_configs(ncfg_client_t *client, ncfg_configs_t *out, char *err, s
 
 /*
  * Write what this machine is running into a profile, and select it. Needs
- * `admin`.
+ * `root`.
  *
  * A verb rather than a write of a rendered file, and not only because netcfgd
  * owns where a profile lives: the caller does not have the text. What gets
@@ -2195,30 +2196,30 @@ int ncfg_client_profile_save(ncfg_client_t *client, const char *name, int replac
                              size_t err_size);
 
 /*
- * The host-wide policy the configuration declares. Needs `observe`.
+ * The host-wide policy the configuration declares. Needs `view`.
  */
 int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, size_t err_size);
 
 /*
- * Every hook on every interface, in interface order. Needs `observe`.
+ * Every hook on every interface, in interface order. Needs `view`.
  */
 int ncfg_client_hooks(ncfg_client_t *client, ncfg_hooks_t *out, char *err, size_t err_size);
 
 /*
- * The same hooks with their scripts. Needs `admin`.
+ * The same hooks with their scripts. Needs `root`.
  *
  * A heavier tier than the listing above, and deliberately: what this returns
  * is a program netcfgd runs as root, out of a file the materialiser keeps at
  * 0700 because nobody else needs to read it. A client that only wants to show
  * what runs and when asks `ncfg_client_hooks`; this is for one that offers to
- * change it, which is `admin` to save in any case.
+ * change it, which is `root` to save in any case.
  */
 int ncfg_client_hook_scripts(ncfg_client_t *client, ncfg_hook_scripts_t *out, char *err,
                              size_t err_size);
 
 /*
  * The modem devices, their SIM order, and which source is in use. Needs
- * `observe`.
+ * `view`.
  *
  * Asked of the daemon rather than assembled here, for the reason
  * `ncfg_client_probes` gives and one more: the order comes from the document
@@ -2234,7 +2235,7 @@ int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
 
 /*
  * The stations associated with the access point on `interface`, sorted by
- * address, as `ncfg wifi clients` shows them. Needs `observe` -- which is
+ * address, as `ncfg wifi clients` shows them. Needs `view` -- which is
  * other people's hardware addresses, signal strengths and, with a DHCP
  * server, their devices' names: the socket protocol's own warning applies.
  */
@@ -2242,7 +2243,7 @@ int ncfg_client_ap_stations(ncfg_client_t *client, const char *interface, ncfg_s
                             char *err, size_t err_size);
 
 /*
- * The profiles netcfgd can see, and which one is chosen. Needs `observe`.
+ * The profiles netcfgd can see, and which one is chosen. Needs `view`.
  *
  * Asked of the daemon rather than read off the disk, for the reason
  * `ncfg_client_probes` gives: a client listing its own /etc/netcfgd/profile
@@ -2251,13 +2252,13 @@ int ncfg_client_ap_stations(ncfg_client_t *client, const char *interface, ncfg_s
  *
  * Choosing one is not a verb of its own -- it is `ncfg_client_config_put` of a
  * drop-in named "90-profile", which is an ordinary configuration write and
- * needs `admin` like any other.
+ * needs `root` like any other.
  */
 int ncfg_client_profiles(ncfg_client_t *client, ncfg_profiles_t *out, char *err,
                          size_t err_size);
 
 /*
- * Choose a profile, or stop using one. `name` NULL means stop. Needs `admin`.
+ * Choose a profile, or stop using one. `name` NULL means stop. Needs `root`.
  *
  * **A verb rather than a write of a known filename.** netcfgd owns the drop-in
  * the selection lives in; a client that spelled that name would be a second
@@ -2273,7 +2274,7 @@ int ncfg_client_profile_set(ncfg_client_t *client, const char *name, char *err,
                             size_t err_size);
 
 /*
- * Delete a profile `ncfg_client_profile_save` made (10.801). Needs `admin`.
+ * Delete a profile `ncfg_client_profile_save` made (10.801). Needs `root`.
  * The daemon refuses the one in use, a shipped one and one written by hand;
  * one already gone is success, as for config_delete.
  */
@@ -2281,7 +2282,7 @@ int ncfg_client_profile_delete(ncfg_client_t *client, const char *name, char *er
                    size_t err_size);
 
 /*
- * The link-detection scripts netcfgd can see. Needs `observe`.
+ * The link-detection scripts netcfgd can see. Needs `view`.
  *
  * **Asked of the daemon rather than read off the disk, and that is the whole
  * point.** A client only ever talks to netcfgd; these files belong to the
@@ -2302,11 +2303,11 @@ int ncfg_client_probes(ncfg_client_t *client, ncfg_probes_t *out, char *err, siz
  * (`/etc/netcfgd/probe`) and a name carrying a separator is refused, because
  * otherwise the caller would be choosing where an executable lands.
  *
- * **Needs root on this machine, not merely the `admin` tier.** A probe is a
+ * **Needs root on this machine, not merely the `root` tier.** A probe is a
  * program netcfgd runs as root on an interval, which is the most dangerous
  * payload this socket carries -- more than the privileged *productions*
  * `config_put` is checked for, since those name a program and this one is the
- * program. A site that opened `admin` to a group has not thereby granted this.
+ * program. A site that opened `root` to a group has not thereby granted this.
  *
  * It exists rather than letting a client write the file because that is 0127:
  * a client cannot write system files, and system configuration cannot live
@@ -2332,7 +2333,7 @@ int ncfg_client_secret_put(ncfg_client_t *client, const char *name, const char *
  * ncfg_client_wifi_connect() names the network by its **id in the document**,
  * never by SSID and never with a credential. That is decision 0013's boundary
  * expressed as a signature: this call cannot be used to join something the
- * configuration does not already describe, so it stays inside the `wifi` tier,
+ * configuration does not already describe, so it stays inside the `laptop` tier,
  * and no passphrase ever crosses this interface in either direction (0029,
  * 0031). Joining something new is writing a config file (0069) and is not a
  * socket operation at all.
@@ -2373,7 +2374,7 @@ void ncfg_radios_free(ncfg_radios_t *radios);
  *
  * Every wireless interface the kernel reports, because the list exists so that
  * somebody can turn one on: a list of only the ones already on could not offer
- * that. Needs `observe`.
+ * that. Needs `view`.
  */
 int ncfg_client_radios(ncfg_client_t *client, ncfg_radios_t *out, char *err, size_t err_size);
 
@@ -2509,7 +2510,7 @@ typedef struct {
 	 * left is what the language cannot write.
 	 */
 	char                  *unmodelled;
-	/* How many hooks the network declares. The bodies are `admin` and come
+	/* How many hooks the network declares. The bodies are `root` and come
 	 * from `ncfg_client_hook_scripts`, which names the network; this is the
 	 * count a dialog checks them against (10.616). */
 	size_t                 hook_count;
@@ -2604,7 +2605,7 @@ typedef struct {
 void ncfg_saved_networks_free(ncfg_saved_networks_t *networks);
 
 /*
- * Every wireless network the configuration describes. Needs `observe`.
+ * Every wireless network the configuration describes. Needs `view`.
  */
 int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out, char *err,
     size_t err_size);
@@ -2652,17 +2653,17 @@ void ncfg_dns_free(ncfg_dns_t *dns);
 
 /*
  * How name resolution is configured, and whether netcfgd is doing it.
- * Needs `observe`.
+ * Needs `view`.
  */
 int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t err_size);
 
 /*
  * Take a radio on, or hand it back.
  *
- * Needs the `wifi` tier rather than `admin`, and the reason is the shape of
+ * Needs the `laptop` tier rather than `root`, and the reason is the shape of
  * this call. What activation writes is a `device` block, and a client that
  * sent one as *text* would be sending configuration -- which is remote code
- * execution and is `admin`. An interface name and a flag can name no hook, no
+ * execution and is `root`. An interface name and a flag can name no hook, no
  * path and no `run_as`, so the message bounds what it can ask for.
  */
 int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
@@ -2673,7 +2674,7 @@ int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int acti
  *
  * The daemon asks strongSwan for the `connection` and `child` the tunnel's
  * `xfrm` block names, and answers once it has asked -- not once the tunnel is
- * up, which strongSwan reports through the tunnel's addressing. `wifi` tier,
+ * up, which strongSwan reports through the tunnel's addressing. `laptop` tier,
  * for radio_set's reason: an interface name and a flag, and nothing else. A
  * device that is not a tunnel is refused, by name.
  */
@@ -2703,7 +2704,7 @@ int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, ch
  * reported here, because what a client shows for it is the secrets list,
  * where a credential left behind is already named as the fault it is.
  *
- * `wifi` tier, for 0124's reason: the message carries an id and nothing else,
+ * `laptop` tier, for 0124's reason: the message carries an id and nothing else,
  * so its shape is what bounds it.
  */
 int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, size_t err_size);
@@ -2711,7 +2712,7 @@ int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, si
 /*
  * Remove a stored credential, by name.
  *
- * **`admin`, and that is the whole of what guards it.** The protocol says so
+ * **`root`, and that is the whole of what guards it.** The protocol says so
  * where the request is defined: unlike a store, this refuses nothing and asks
  * nothing twice, because replacing is recoverable by whoever knows the value
  * and removing is not (0042). A caller offering a button for it owns the

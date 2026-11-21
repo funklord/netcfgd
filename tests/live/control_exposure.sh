@@ -12,8 +12,8 @@
 # `Origin::Remote` connection -- consulting no principal and no peer. So a
 # `control` block opening `observe` to a group or to `any`, which is the shape
 # `debian/postinst` ships, opened a socket that grants whatever `remote` allows.
-# Measured before the fix, as an ordinary user against `observe = "any"` with
-# `admin = "root"`: `reload` refused on the local socket and accepted on the
+# Measured before the fix, as an ordinary user against `view = "any"` with
+# `root = "root"`: `reload` refused on the local socket and accepted on the
 # remote one.
 #
 # **The mode is the property, not the connect.** The daemon under test runs as
@@ -160,14 +160,14 @@ mode() {
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	control {
-		observe = "any"
-		wifi    = "root"
-		admin   = "root"
+		view   = "any"
+		laptop = "root"
+		root   = "root"
 	}
 	remote {
-		observe = true
-		wifi    = true
-		admin   = true
+		view   = true
+		laptop = true
+		root   = true
 	}
 }
 CONF
@@ -205,7 +205,7 @@ done
 # connection that is not one.** `handle` blocked in `read_request` with no
 # deadline, so a caller that connected and stayed silent held a slot for ever
 # -- and sixty-four of them held every slot the cap allows. Any local user can
-# do it wherever the policy opens the socket, which `observe = "any"` above
+# do it wherever the policy opens the socket, which `view = "any"` above
 # does. Decision 0183.
 #
 # Two things are asserted, and they were two separate faults. That the slots
@@ -259,13 +259,13 @@ stop_daemon
 cat > "$work/etc/netcfgd.conf" <<CONF
 global {
 	control {
-		observe = "root"
-		wifi    = "root"
-		admin   = "root"
+		view   = "root"
+		laptop = "root"
+		root   = "root"
 	}
 	remote {
-		observe = true
-		admin   = true
+		view   = true
+		root   = true
 		agent   = "group:$group"
 	}
 }
@@ -284,9 +284,9 @@ stop_daemon
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	control {
-		observe = "any"
-		wifi    = "any"
-		admin   = "any"
+		view   = "any"
+		laptop = "any"
+		root   = "any"
 	}
 }
 CONF
@@ -318,7 +318,7 @@ stop_daemon
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	control {
-		observe = "any"
+		view   = "any"
 	}
 }
 CONF

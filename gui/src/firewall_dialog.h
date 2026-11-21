@@ -17,7 +17,7 @@
  * refusal says where the first one is. Overriding it would leave the hand-
  * written block in place and silently dead.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_FIREWALL_DIALOG_H
 #define NCFG_FIREWALL_DIALOG_H

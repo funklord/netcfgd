@@ -24,7 +24,7 @@
 
 #include <dbus/dbus.h>
 
-/* `nmc_admin_principal` takes the state the client hangs off. `nmc_state_t` is
+/* `nmc_root_principal` takes the state the client hangs off. `nmc_state_t` is
  * an anonymous struct typedef, so there is no `struct nmc_state` to forward
  * declare -- an attempt at one compiles and is a different, unrelated type. */
 #include "nmc/state.h"
@@ -89,6 +89,6 @@ int nmc_may_write(unsigned long uid, const nmc_principal_t *admin, char *err, si
  * definitions of who may write is the one duplication this file exists to
  * prevent.
  */
-void nmc_admin_principal(nmc_state_t *state, nmc_principal_t *out);
+void nmc_root_principal(nmc_state_t *state, nmc_principal_t *out);
 
 #endif /* NMC_AUTHORIZE_H */

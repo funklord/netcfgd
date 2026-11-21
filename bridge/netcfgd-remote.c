@@ -108,7 +108,7 @@ static int tiers_of(const char *socket_path)
 		(void)fprintf(stderr, "netcfgd-remote: %s\n", message);
 		return 1;
 	}
-	(void)printf("observe %d  wifi %d  admin %d\n", tiers.observe, tiers.wifi, tiers.admin);
+	(void)printf("view %d  laptop %d  root %d\n", tiers.view, tiers.laptop, tiers.root);
 	return 0;
 }
 

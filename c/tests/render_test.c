@@ -2908,7 +2908,7 @@ static void a_block_at_every_default_is_left_out(void)
 	/* And the positive half, so the assertions above cannot pass by the
 	 * renderer having lost the blocks altogether. */
 	plain = rendering_of("global {\n\tcontrol { wifi = \"group:netdev\" }\n}\n");
-	check(plain && holds(plain, "control {") && holds(plain, "wifi = \"group:netdev\""),
+	check(plain && holds(plain, "control {") && holds(plain, "laptop = \"group:netdev\""),
 	    "while one that sets a tier keeps the block and the tier");
 	free(plain);
 }

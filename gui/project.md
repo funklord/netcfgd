@@ -117,7 +117,7 @@ line for line. **The seam goes below the widgets.**
 | carries | `AF_UNIX` stream, newline-delimited JSON | encrypted datagrams over UDP |
 | pinned by | `doc/schema/socket.json` | this tree's own format |
 | authenticated by | the socket's peer credentials, `SO_PEERCRED` | a signed envelope, verified by the agent |
-| authorised by | the daemon, against 0013's `observe`/`wifi`/`admin` tiers | the same tiers, reached through the capability the envelope carries |
+| authorised by | the daemon, against 0327's `view`/`laptop`/`root` tiers | the same tiers, reached through the capability the envelope carries |
 
 The local hop is **pre-authenticated by construction** — the kernel says which uid
 and gid is on the other end, and `netcfgd-daemon`'s `authorize.rs` decides from
@@ -132,7 +132,7 @@ things that must be visible in the UI rather than hidden by the abstraction:
 
 - **which machine this is** — a client that can configure a router across the room
   must never leave the operator unsure whose wifi they are about to change;
-- **which tier the operator holds** — a connection with `observe` should not offer
+- **which tier the operator holds** — a connection with `view` should not offer
   an apply button that will be refused.
 
 ## 5. What the daemon already offers
@@ -503,9 +503,9 @@ to decide, not this tree's.
 
    ~~What is not there yet: **nothing asks the operator's tier**~~ **Done**
    ([0092](../doc/decision/0092-a-client-is-told-what-it-may-do.md)): `hello`
-   reports the tiers a connection satisfies, three independent answers and not
-   a level, and the Apply button is disabled with the reason in its tooltip
-   where `admin` is absent. A daemon too old to answer leaves the button
+   reports the tiers a connection satisfies, each one it holds (they nest
+   since 0327, but each is reported), and the Apply button is disabled with
+   the reason in its tooltip where `root` is absent. A daemon too old to answer leaves the button
    enabled -- being refused produces a sentence naming what was needed, and a
    greyed-out button produces silence.
 

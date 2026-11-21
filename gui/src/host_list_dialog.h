@@ -14,7 +14,7 @@
  * Deleting a list something still names is refused by the daemon, in its
  * words, for the same reason.
  *
- * `admin`, because it writes configuration.
+ * `root`, because it writes configuration.
  */
 #ifndef NCFG_HOST_LIST_DIALOG_H
 #define NCFG_HOST_LIST_DIALOG_H

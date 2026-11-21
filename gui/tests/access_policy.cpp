@@ -4,7 +4,7 @@
  * The access tab has three combo boxes, one per control tier, and `apply()`
  * sends all three. They were filled once in the constructor and left at index
  * 0 -- `root only` -- and nothing ever read the machine's policy into them. So
- * an operator who opened the tab to change `admin` alone sent
+ * an operator who opened the tab to change `admin` (now `root`) alone sent
  * `set root root <their choice>` and reset the other two.
  *
  * Measured before the fix, on a machine whose policy was
@@ -91,8 +91,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "access_policy: cannot write the configuration\n");
 		return 1;
 	}
-	conf.write("global {\n\tcontrol {\n\t\tobserve = \"any\"\n"
-	           "\t\twifi    = \"group:netcfgd\"\n\t\tadmin   = \"any\"\n\t}\n}\n");
+	conf.write("global {\n\tcontrol {\n\t\tview   = \"any\"\n"
+	           "\t\tlaptop = \"group:netcfgd\"\n\t\troot   = \"any\"\n\t}\n}\n");
 	conf.close();
 
 	QProcess daemon;
@@ -137,12 +137,12 @@ int main(int argc, char **argv)
 	view.show();
 	view.refresh();
 
-	check(shown(&view, "access_observe"), QStringLiteral("any"),
-	      "observe shows what the machine has");
-	check(shown(&view, "access_wifi"), QStringLiteral("group:netcfgd"),
-	      "wifi shows what the machine has");
-	check(shown(&view, "access_admin"), QStringLiteral("any"),
-	      "admin shows what the machine has");
+	check(shown(&view, "access_view"), QStringLiteral("any"),
+	      "view shows what the machine has");
+	check(shown(&view, "access_laptop"), QStringLiteral("group:netcfgd"),
+	      "laptop shows what the machine has");
+	check(shown(&view, "access_root"), QStringLiteral("any"),
+	      "root shows what the machine has");
 
 	daemon.kill();
 	daemon.waitForFinished(2000);

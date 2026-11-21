@@ -91,7 +91,7 @@ ncfg_links_view::ncfg_links_view(ncfg_connection *connection, QWidget *parent)
 	configure_button->setObjectName(QStringLiteral("configure_interface"));
 	configure_button->setEnabled(false);
 	table->add_control(configure_button);
-	/* `observe`, so it needs no tier check: a connection that cannot observe
+	/* `view`, so it needs no tier check: a connection that cannot observe
 	 * has no rows to select. */
 	explain_button = new QPushButton(QStringLiteral("why"), this);
 	explain_button->setObjectName(QStringLiteral("explain_interface"));

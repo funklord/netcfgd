@@ -94,10 +94,10 @@ NetworkManager shim does for D-Bus. No new authority layer inside the daemon.
 The consequence for you is that the library is linked by an unprivileged
 bridge, never by the process holding `CAP_NET_ADMIN`.
 
-**Authorisation is capability → tier, and the tiers already exist.** 0013
-defines three: `observe`, `wifi`, `admin`. They are **independent, not a
-ladder** — a machine may grant `admin` to a group somebody is in and `wifi` to
-one they are not, so there is no maximum to report (0092). A remote capability
+**Authorisation is capability → tier, and the tiers already exist.** 0327
+defines three: `view`, `laptop`, `root` (0013's `observe`, `wifi`, `admin`,
+renamed). They **nest** — a caller holding `root` holds the other two — but
+the daemon still reports each one it holds rather than a maximum (0092). A remote capability
 must map onto that vocabulary rather than introduce a parallel one; the
 daemon's existing enforcement then does the security-critical work, where it
 already has tests.

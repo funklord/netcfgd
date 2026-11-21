@@ -472,7 +472,7 @@ static void a_response_is_read_leniently(void)
 	char err[NCFG_ERROR_MAX];
 	static const char future[] =
 	    "{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":9},"
-	    "\"schema\":{\"major\":1,\"minor\":1},\"tiers\":[\"observe\"],"
+	    "\"schema\":{\"major\":1,\"minor\":1},\"tiers\":[\"view\"],"
 	    "\"quota\":{\"connections\":64},\"motd\":\"hello from a newer daemon\"}";
 	static const char ok_line[] = "{\"response\":\"ok\",\"bogus\":1}";
 	static const char unknown[] = "{\"response\":\"telemetry\",\"rows\":[]}";
@@ -487,7 +487,7 @@ static void a_response_is_read_leniently(void)
 	    "a response carrying members this build never heard of is accepted");
 	check(message.u.response.u.hello.protocol.minor == 9 &&
 	        message.u.response.u.hello.tiers.count == 1u &&
-	        ncfg_proto_str_equals(message.u.response.u.hello.tiers.items[0], "observe"),
+	        ncfg_proto_str_equals(message.u.response.u.hello.tiers.items[0], "view"),
 	    "and everything this build does know is still there");
 	ncfg_proto_message_free(&message);
 

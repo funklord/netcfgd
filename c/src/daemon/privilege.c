@@ -84,6 +84,14 @@ static const struct {
 	/* The authorization policy itself, local and remote. Everything that
 	 * decides who may do what is decided by root and nobody else, or the
 	 * tiers below it mean nothing. */
+	{ "control", "view", NCFG_PRIV_AUTHORIZATION },
+	{ "control", "laptop", NCFG_PRIV_AUTHORIZATION },
+	{ "control", "root", NCFG_PRIV_AUTHORIZATION },
+	{ "remote", "view", NCFG_PRIV_AUTHORIZATION },
+	{ "remote", "laptop", NCFG_PRIV_AUTHORIZATION },
+	{ "remote", "root", NCFG_PRIV_AUTHORIZATION },
+	/* The words 0327 replaced, still read as the same tiers, so still
+	 * privileged: an alias left out of this table is a way round it. */
 	{ "control", "observe", NCFG_PRIV_AUTHORIZATION },
 	{ "control", "wifi", NCFG_PRIV_AUTHORIZATION },
 	{ "control", "admin", NCFG_PRIV_AUTHORIZATION },

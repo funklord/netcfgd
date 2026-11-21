@@ -256,7 +256,7 @@ void ncfg_tde_tray::rebuild_join()
 	 * the Qt window's; this tray opens it rather than growing a second. */
 	m_join->insertItem(i18n("&Another network..."), ID_JOIN_OTHER);
 	/* Joining is the `wifi` tier. Greyed rather than hidden, as profiles are. */
-	m_join->setEnabled(m_connection->may_wifi());
+	m_join->setEnabled(m_connection->may_laptop());
 }
 
 void ncfg_tde_tray::scan()
@@ -360,7 +360,7 @@ void ncfg_tde_tray::rebuild_profiles()
 	 * menu greyed rather than hiding it is the honest form: the operator
 	 * can see the machine has profiles and that they may not change them.
 	 */
-	m_profiles->setEnabled(m_connection->may_admin());
+	m_profiles->setEnabled(m_connection->may_root());
 }
 
 void ncfg_tde_tray::profile_chosen( int id )

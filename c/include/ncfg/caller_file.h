@@ -5,7 +5,7 @@
  *   0309 carries netcfgd's requests over fuzznet, whose framing answers a
  *   document by writing it to a path the client names (fuzznet sec 843:
  *   `get status PATH`, answered `ok` with the length). netcfgd runs as root,
- *   and the caller may hold only the `observe` tier. Writing to whatever path
+ *   and the caller may hold only the `view` tier. Writing to whatever path
  *   it names would let it make root create or overwrite any file -- a symlink
  *   left in /tmp is enough -- so the path is held to a rule before a byte is
  *   written (project.md 10.680).

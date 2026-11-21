@@ -125,7 +125,7 @@ export NCFG_FACTORY_DIR="$work/factory"
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 global {
 	control {
-		admin = "any"
+		root   = "any"
 	}
 }
 device lo {

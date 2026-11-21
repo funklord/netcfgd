@@ -236,7 +236,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	 * It was constructed a hundred lines further down, so the branch its own
 	 * comment calls "not fatal" dereferenced an uninitialised member pointer
 	 * and segfaulted -- reached whenever the daemon will not list the probe
-	 * scripts, which is every ordinary user on a machine whose `observe` tier
+	 * scripts, which is every ordinary user on a machine whose `view` tier
 	 * is the default `root`. Found by a probe that opened this dialog as such
 	 * a user.
 	 */
@@ -765,7 +765,7 @@ void ncfg_interface_dialog::load_existing()
 
 /*
  * This interface's hooks, and their scripts: how many the document declares,
- * which is `observe`, and then the bodies, which are `admin` -- the editor's
+ * which is `view`, and then the bodies, which are `root` -- the editor's
  * `load` says why both are needed.
  */
 void ncfg_interface_dialog::load_hooks()
@@ -1318,7 +1318,7 @@ void ncfg_interface_dialog::submit()
 	/* **A hook whose body this form does not have.** The block is written
 	 * whole, so saving would write the hook with nothing in it -- which is to
 	 * say, delete the script. The tier is usually why: reading a hook body is
-	 * `admin`, and a client below it could not have saved this anyway. */
+	 * `root`, and a client below it could not have saved this anyway. */
 	if (hooks_unknown || hooks->withheld()) {
 		note->setText(QStringLiteral(
 		    "this interface declares a hook whose script netcfgd would not hand over, "

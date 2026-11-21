@@ -102,13 +102,15 @@ ncfg_access_view::ncfg_access_view(ncfg_connection *connection, QWidget *parent)
 	 * frame of its own and deliberately without colour. Only the privileged
 	 * frame is red, so red keeps meaning one thing. */
 	/* **Whatever this connection holds** (10.788): the walk read "require
-	 * root" beside "this connection holds: observe wifi admin" as a
-	 * contradiction. It is not one -- who may ask netcfgd for what is
-	 * outside what `admin` may write -- but nothing on the tab said so. */
+	 * root" beside "this connection holds: view laptop root" as a
+	 * contradiction. It is not one -- who may ask netcfgd for what is uid
+	 * 0's alone, outside what even the `root` tier may write when a site has
+	 * opened it to a group -- but nothing on the tab said so. */
 	notice = new QLabel(
 	    QStringLiteral("<b>Changes here require root, whatever this connection holds.</b><br>"
-	               "Who may ask netcfgd for what is root's to decide, and `admin` cannot "
-	               "widen its own reach. Click \"Administrator Mode\" to start a "
+	               "Who may ask netcfgd for what is the machine's root user's to decide, "
+	               "and a group given the root tier cannot widen its own reach. "
+	               "Click \"Administrator Mode\" to start a "
 	               "privileged helper and edit them."),
 	    this);
 	notice->setFrameShape(QFrame::Box);
@@ -137,22 +139,24 @@ ncfg_access_view::ncfg_access_view(ncfg_connection *connection, QWidget *parent)
 	frame->setMidLineWidth(2);
 	auto *form = new QFormLayout(frame);
 
-	observe = new QComboBox(frame);
-	wifi = new QComboBox(frame);
-	admin = new QComboBox(frame);
+	view_choice = new QComboBox(frame);
+	laptop_choice = new QComboBox(frame);
+	root_choice = new QComboBox(frame);
 	/* Named so a test can ask for one by name. The alternative is
 	 * `findChildren<QComboBox *>().first()`, which returns whichever was
 	 * constructed first and is how a probe elsewhere in this project ended up
 	 * reading a different table than the one it meant. */
-	observe->setObjectName(QStringLiteral("access_observe"));
-	wifi->setObjectName(QStringLiteral("access_wifi"));
-	admin->setObjectName(QStringLiteral("access_admin"));
-	fill(observe);
-	fill(wifi);
-	fill(admin);
-	form->addRow(QStringLiteral("observe -- what the network looks like"), observe);
-	form->addRow(QStringLiteral("wifi -- join, leave and scan known networks"), wifi);
-	form->addRow(QStringLiteral("admin -- change anything, including adding a network"), admin);
+	view_choice->setObjectName(QStringLiteral("access_view"));
+	laptop_choice->setObjectName(QStringLiteral("access_laptop"));
+	root_choice->setObjectName(QStringLiteral("access_root"));
+	fill(view_choice);
+	fill(laptop_choice);
+	fill(root_choice);
+	form->addRow(QStringLiteral("view -- what the network looks like"), view_choice);
+	form->addRow(QStringLiteral("laptop -- join, add and forget networks; radio and VPN on and off"),
+	    laptop_choice);
+	form->addRow(QStringLiteral("root -- change anything else: this is root on this machine"),
+	    root_choice);
 	layout->addWidget(frame);
 
 	note = new QLabel(this);
@@ -213,9 +217,9 @@ void ncfg_access_view::set_administrator_mode(bool live)
 		frame->setPalette(palette());
 	}
 
-	observe->setEnabled(live);
-	wifi->setEnabled(live);
-	admin->setEnabled(live);
+	view_choice->setEnabled(live);
+	laptop_choice->setEnabled(live);
+	root_choice->setEnabled(live);
 	apply_button->setEnabled(live);
 	unlock_button->setEnabled(!live);
 	leave_button->setEnabled(live);
@@ -259,9 +263,9 @@ void ncfg_access_view::stop_helper()
  * **Without this the editors were an empty form that overwrites.** They are
  * filled once in the constructor and left at index 0, which is `root only`, and
  * `apply()` sends all three tiers -- so an operator who opened this tab to
- * change `admin` alone sent `set root root <their choice>` and reset the other
- * two. Measured end to end: on a machine with `observe = any`, changing only
- * `admin` left every non-root client locked out, this window included, with the
+ * change `root` alone sent `set root root <their choice>` and reset the other
+ * two. Measured end to end: on a machine with `view = any`, changing only
+ * `root` left every non-root client locked out, this window included, with the
  * note reporting success. Recovery needed `sudo ncfg control set` in a
  * terminal.
  *
@@ -281,7 +285,7 @@ void ncfg_access_view::load_policy()
 	/* Only while the editors are shut. Once `unlock()` has opened them the
 	 * operator may have chosen something, and a refresh -- which a tab switch
 	 * triggers -- would throw it away. */
-	if (observe->isEnabled()) {
+	if (view_choice->isEnabled()) {
 		return;
 	}
 
@@ -313,15 +317,15 @@ void ncfg_access_view::load_policy()
 
 	/* Rebuilt rather than adjusted, so a value inserted for one policy does
 	 * not accumulate across refreshes. */
-	for (QComboBox *box : { observe, wifi, admin }) {
+	for (QComboBox *box : { view_choice, laptop_choice, root_choice }) {
 		const bool was_enabled = box->isEnabled();
 		box->clear();
 		fill(box);
 		box->setEnabled(was_enabled);
 	}
-	select(observe, globals.control_observe);
-	select(wifi, globals.control_wifi);
-	select(admin, globals.control_admin);
+	select(view_choice, globals.control_view);
+	select(laptop_choice, globals.control_laptop);
+	select(root_choice, globals.control_root);
 }
 
 void ncfg_access_view::refresh()
@@ -330,15 +334,15 @@ void ncfg_access_view::refresh()
 	ncfg_tiers_t held = connection->tiers();
 	const QString summary =
 	    QStringLiteral("this connection holds:%1%2%3")
-	        .arg(held.observe ? QStringLiteral(" observe") : QString())
-	        .arg(held.wifi ? QStringLiteral(" wifi") : QString())
-	        .arg(held.admin ? QStringLiteral(" admin") : QString());
+	        .arg(held.view ? QStringLiteral(" view") : QString())
+	        .arg(held.laptop ? QStringLiteral(" laptop") : QString())
+	        .arg(held.root ? QStringLiteral(" root") : QString());
 
 	/* What this connection was granted, which is the question somebody on this
 	 * tab is asking. The policy itself lives in a file this client cannot read
 	 * -- it is root's -- so the honest thing to show is the answer the daemon
 	 * gave at the handshake rather than a guess at the file. */
-	note->setText(held.observe || held.wifi || held.admin
+	note->setText(held.view || held.laptop || held.root
 	              ? summary
 	              : QStringLiteral("this connection holds nothing, which is what a "
 	                       "default install gives an ordinary user"));
@@ -355,8 +359,8 @@ void ncfg_access_view::unlock()
 	if (elevate.isEmpty()) {
 		note->setText(QStringLiteral(
 		    "nothing here can ask for root (no pkexec, no kdesu, no SUDO_ASKPASS). "
-		    "Run this in a terminal instead:\n\nsudo ncfg control set --observe ... "
-		    "--wifi ... --admin ..."));
+		    "Run this in a terminal instead:\n\nsudo ncfg control set --view ... "
+		    "--laptop ... --root ..."));
 		return;
 	}
 
@@ -464,9 +468,9 @@ void ncfg_access_view::apply()
 	};
 
 	if (me.isEmpty()) {
-		const bool wants_me = observe->currentData().toString().isEmpty()
-		                  || wifi->currentData().toString().isEmpty()
-		                  || admin->currentData().toString().isEmpty();
+		const bool wants_me = view_choice->currentData().toString().isEmpty()
+		                  || laptop_choice->currentData().toString().isEmpty()
+		                  || root_choice->currentData().toString().isEmpty();
 		if (wants_me) {
 			note->setText(QStringLiteral(
 			    "this account has no name in the password database, so `this user` "
@@ -481,7 +485,7 @@ void ncfg_access_view::apply()
 	 * for the same reason: a config file may name a hook whose `run_as`
 	 * defaults to root. */
 	const QString command = QStringLiteral("set %1 %2 %3\n")
-	                        .arg(chosen(observe), chosen(wifi), chosen(admin));
+	                        .arg(chosen(view_choice), chosen(laptop_choice), chosen(root_choice));
 	helper->write(command.toUtf8());
 	note->setText(QStringLiteral("writing..."));
 }

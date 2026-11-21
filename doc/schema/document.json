@@ -38,18 +38,18 @@
       "static": "host.example"
     },
     "control": {
-      "observe": "any",
-      "wifi": {
+      "view": "any",
+      "laptop": {
         "group": "netdev"
       },
-      "admin": {
+      "root": {
         "user": "root"
       }
     },
     "remote": {
-      "observe": true,
-      "wifi": true,
-      "admin": false,
+      "view": true,
+      "laptop": true,
+      "root": false,
       "agent": {
         "group": "netcfgd-agent"
       }

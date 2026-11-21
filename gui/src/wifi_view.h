@@ -10,8 +10,8 @@
  * WHAT IT DELIBERATELY CANNOT DO
  *   Join a network the configuration does not already describe. That is not a
  *   gap to fill in later: the socket has no request for it, because decision
- *   0013 puts joining a *known* network in the `wifi` tier and writing config
- *   in `admin`, and decision 0069 makes adding a network *writing a file*
+ *   0013 puts joining a *known* network in the `laptop` tier and writing config
+ *   in `root`, and decision 0069 makes adding a network *writing a file*
  *   rather than a socket operation at all. So no passphrase is entered here and
  *   none can be read back (0029, 0031).
  *
@@ -66,7 +66,7 @@ private slots:
 	/* A network that does not broadcast its name, so no scan row can stand
 	 * for it: the name is typed, and `wifi_add` carries `hidden`. The `wifi`
 	 * tier, as `add` is -- "add by hand" writes a whole block and needs
-	 * `admin`, which a laptop's owner usually does not hold. */
+	 * `root`, which a laptop's owner usually does not hold. */
 	void add_hidden();
 	/* Join the network just added, once the daemon has loaded it: the tray's
 	 * `join_added`, for the window (10.774). */

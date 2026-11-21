@@ -21,7 +21,7 @@
  *   The last case pins `NCFG_ORDER_AT_MOST_ONCE == 0`. That is not a spelling
  *   detail: it is what makes a FORGOTTEN verb stall instead of being leased,
  *   so the table's silent default and the assertion above point the same way.
- *   `NCFG_TIER_OBSERVE` is 0 and points the other way, which is why this is
+ *   `NCFG_TIER_VIEW` is 0 and points the other way, which is why this is
  *   worth a check of its own rather than a comment.
  */
 #include "ncfg/daemon.h"
@@ -148,7 +148,7 @@ static void every_kind_is_classified_exactly_once(void)
 
 /*
  * The property that outlives this file: a verb nobody classified must stall,
- * not be leased. `NCFG_TIER_OBSERVE` is 0 and defaults the other way, which is
+ * not be leased. `NCFG_TIER_VIEW` is 0 and defaults the other way, which is
  * what makes this worth pinning rather than trusting.
  */
 static void the_unclassified_direction_is_the_refusing_one(void)

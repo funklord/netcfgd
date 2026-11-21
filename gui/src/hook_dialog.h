@@ -115,8 +115,8 @@ public:
 	 * `network` is true. `declared` is how many the document says it has.
 	 *
 	 * **Two questions, two tiers, and both answers are needed.** Whether
-	 * there are hooks comes from the document, which is `observe`; what is in
-	 * them comes from the file the compiler materialised, which is `admin` --
+	 * there are hooks comes from the document, which is `view`; what is in
+	 * them comes from the file the compiler materialised, which is `root` --
 	 * netcfgd keeps it at 0700 because it runs as root. An editor that can see
 	 * the first and not the second knows there is a hook and not what it
 	 * says, and `withheld` is then true: its block must not be saved, since

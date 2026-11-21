@@ -571,7 +571,7 @@ static int activate_connection(DBusConnection *connection, DBusMessage *call,
 		snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		snprintf(err, err_size, "%s", why);
 		return 0;
@@ -704,7 +704,7 @@ static int deactivate_connection(DBusConnection *connection, DBusMessage *call,
 		snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	nmc_admin_principal(state, &admin);
+	nmc_root_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		snprintf(err, err_size, "%s", why);
 		return 0;

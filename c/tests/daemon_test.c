@@ -120,9 +120,9 @@ static ncfg_control_t control_of(int observe, int wifi, int admin)
 	ncfg_control_t control;
 
 	memset(&control, 0, sizeof(control));
-	control.observe.kind = observe;
-	control.wifi.kind = wifi;
-	control.admin.kind = admin;
+	control.view.kind = observe;
+	control.laptop.kind = wifi;
+	control.root.kind = admin;
 	return control;
 }
 
@@ -265,7 +265,7 @@ static void a_connection_carries_a_request_and_its_answer(const char *base)
 	check(send_text(fd, "{\"request\":\"hello\"}\n"), "a hello goes out");
 	check(read_line(fd, line, sizeof(line)), "and is answered");
 	check(strstr(line, "\"response\":\"hello\"") != NULL &&
-	        strstr(line, "\"tiers\":[\"observe\",\"wifi\",\"admin\"]") != NULL,
+	        strstr(line, "\"tiers\":[\"view\",\"laptop\",\"root\"]") != NULL,
 	    "with the tiers this connection satisfies");
 	detail("hello", line);
 	check(seen.calls == 0, "and the seam was never asked for it");
@@ -330,16 +330,17 @@ static void a_refusal_arrives_as_an_answer_and_names_the_tier(const char *base)
 
 	memset(&remote, 0, sizeof(remote));
 	/*
-	 * `observe` and `admin` open, `wifi` shut. Two tiers rather than one
-	 * because the two refusals below are different gates and each needs its
-	 * own request: `wifi_scan` is stopped by the tier, and `config_put` gets
-	 * through the tier and is stopped by what its text says. A policy that
-	 * shut everything would refuse both at the first gate and the second
-	 * would never be reached -- which is exactly the way this test could pass
-	 * while proving nothing about the gate it is named for.
+	 * `view` open and nothing above it, first. The two refusals below are
+	 * different gates and each needs its own policy: `wifi_scan` is stopped
+	 * by the tier, and `config_put` has to get through the tier to be stopped
+	 * by what its text says. A policy that shut everything would refuse both
+	 * at the first gate and the second would never be reached -- which is
+	 * exactly the way this test could pass while proving nothing about the
+	 * gate it is named for. One policy served both while the tiers were
+	 * separate (`observe` and `admin` open, `wifi` shut); they nest since
+	 * 0327, so the second half opens `root` on a second socket.
 	 */
-	remote.observe = 1;
-	remote.admin = 1;
+	remote.view = 1;
 	memset(&how, 0, sizeof(how));
 	how.path = testdir_in(base, "remote.sock", path, sizeof(path));
 	how.arrival = NCFG_ARRIVED_REMOTE;
@@ -363,7 +364,7 @@ static void a_refusal_arrives_as_an_answer_and_names_the_tier(const char *base)
 	    "a request in a tier the remote policy does not open goes out");
 	check(read_line(fd, line, sizeof(line)), "and something comes back");
 	check(strstr(line, "\"response\":\"error\"") != NULL, "which is an error response");
-	check(strstr(line, "`wifi` tier") != NULL, "naming the tier it would have needed");
+	check(strstr(line, "`laptop` tier") != NULL, "naming the tier it would have needed");
 	check(strstr(line, "off this machine") != NULL, "and saying it came from off the machine");
 	detail("refusal", line);
 	check(seen.calls == 0, "and the seam was never asked, so the gate is before it");
@@ -374,18 +375,33 @@ static void a_refusal_arrives_as_an_answer_and_names_the_tier(const char *base)
 	check(read_line(fd, line, sizeof(line)) && strcmp(line, "{\"response\":\"ok\"}") == 0,
 	    "and is answered on the same connection");
 	check(seen.calls == 1, "and reached the seam");
+	(void)close(fd);
+	ncfg_daemon_server_stop(server);
 
 	/*
 	 * And the content gate is on the same path, which is the half that is
 	 * invisible when it is missing: the request is inside a tier the policy
 	 * opened, and what stops it is what the text says.
 	 */
+	remote.root = 1;
+	server = ncfg_daemon_serve(&how, err, sizeof(err));
+	check(server != NULL, "a socket opening `root` remotely binds");
+	if (!server) {
+		detail("because", err);
+		return;
+	}
+	fd = connect_to(path);
+	if (fd < 0) {
+		check(0, "a client connects to it");
+		ncfg_daemon_server_stop(server);
+		return;
+	}
 	check(send_text(fd, "{\"request\":\"config_put\",\"name\":\"from-a-client\",\"text\":"
 	    "\"interface eth0 {\\n\\tpost_up {\\n\\t\\tid\\n\\t}\\n}\\n\",\"replace\":false}\n"),
 	    "a config_put carrying a hook goes out");
 	check(read_line(fd, line, sizeof(line)), "and is answered");
 	check(strstr(line, "\"response\":\"error\"") != NULL &&
-	        strstr(line, "root on this machine") != NULL,
+	        strstr(line, "uid 0 on this machine") != NULL,
 	    "with the content gate's refusal, not the tier gate's");
 	detail("refusal", line);
 
@@ -1011,9 +1027,9 @@ static void a_wide_local_policy_leaves_the_remote_socket_shut(const char *base)
 
 	memset(&closed, 0, sizeof(closed));
 	closed.agent.kind = NCFG_PRINCIPAL_ROOT;
-	local_reach[0] = &wide.observe;
-	local_reach[1] = &wide.wifi;
-	local_reach[2] = &wide.admin;
+	local_reach[0] = &wide.view;
+	local_reach[1] = &wide.laptop;
+	local_reach[2] = &wide.root;
 	remote_reach[0] = &closed.agent;
 
 	memset(&how, 0, sizeof(how));
@@ -1447,13 +1463,13 @@ static void the_answers_this_module_writes_are_the_shapes_the_witness_pins(void)
 	detail("error", ncfg_buf_text(&out));
 	ncfg_buf_free(&out);
 
-	tiers[0] = NCFG_TIER_OBSERVE;
-	tiers[1] = NCFG_TIER_ADMIN;
+	tiers[0] = NCFG_TIER_VIEW;
+	tiers[1] = NCFG_TIER_ROOT;
 	ncfg_buf_init(&out, 0);
 	check(ncfg_daemon_hello_encode(tiers, 2u, &out, err, sizeof(err)) &&
 	        strcmp(ncfg_buf_text(&out),
 	            "{\"response\":\"hello\",\"protocol\":{\"major\":1,\"minor\":3},"
-	            "\"schema\":{\"major\":1,\"minor\":1},\"tiers\":[\"observe\",\"admin\"]}") == 0,
+	            "\"schema\":{\"major\":1,\"minor\":1},\"tiers\":[\"view\",\"root\"]}") == 0,
 	    "and so is `hello`, tiers and all");
 	detail("hello", ncfg_buf_text(&out));
 	ncfg_buf_free(&out);

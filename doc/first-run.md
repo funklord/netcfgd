@@ -259,9 +259,15 @@ Two ways to change that, and neither is the only one.
 until a policy points at it:
 
 ```sh
-sudo ncfg control set --observe group:netcfgd --wifi group:netcfgd
+sudo ncfg control set --laptop group:netcfgd
 sudo usermod -aG netcfgd "$USER"   # adduser on Alpine
 ```
+
+`laptop` is what a person at their own machine needs -- joining, adding and
+forgetting networks, the radio and the VPN on and off -- and it includes
+`view`, reading. The third tier is `root`, and it is called that because it
+is: whoever may change the routes and resolvers chooses where the machine's
+traffic goes. Open it to a group only if you mean that group to have root.
 
 Then log out and back in -- the kernel gives a session its group memberships
 when it starts, so a shell you already had open still has the old set. `ncfg
@@ -273,22 +279,24 @@ control show` prints the policy at any time, and `ncfg control set` edits the
 runs that same command as root. Use whichever you prefer; they write the same
 file, and it is ordinary configuration you can read, diff and delete.
 
-**What that does not give you is `admin`**, and the difference matters more
+**What that does not give you is `root`**, and the difference matters more
 than it looks:
 
 | tier | what a client can then do |
 |---|---|
-| `observe` | see what the network is doing |
-| `wifi` | scan, join, leave, and **add** a wireless network |
-| `admin` | everything else -- apply, reload, revert |
+| `view` | see what the network is doing |
+| `laptop` | `view`, and scan, join, leave, **add** and forget a wireless network, radios and the VPN on and off |
+| `root` | `laptop`, and everything else -- apply, reload, revert |
 
-So with the two tiers above a desktop session can watch the network, switch
-between networks, and add the one it is standing in front of -- which is what
-a laptop actually needs. It still cannot apply an unrelated configuration
-change, revert one, or reload the daemon; those are `admin`, which is root
-unless you say otherwise.
+So with `laptop` a desktop session can watch the network, switch between
+networks, and add the one it is standing in front of -- which is what a laptop
+actually needs. It still cannot apply an unrelated configuration change,
+revert one, or reload the daemon; those are `root`, and the tier is named for
+what it is: whoever may change the routes and resolvers chooses where the
+machine's traffic goes, so opening `root` to a group gives that group root
+([0327](decision/0327-three-tiers-view-laptop-root.md)).
 
-Adding a network used to need `admin` as well, which meant granting a desktop
+Adding a network used to need the top tier as well, which meant granting a desktop
 group the whole machine's networking in order to join a cafe. What changed is
 [0124](decision/0124-adding-a-network-is-the-wifi-tier-because-0117-made-it-safe.md):
 the request that adds a network carries an SSID and a passphrase and cannot
@@ -668,7 +676,7 @@ table, NAT included, so try `"software"` first. Decision 0319.
 
 **A router has no screen to show a pairing code, so it takes yours.** Make the code on
 the phone or desktop that runs your estate, then give it to the router over SSH, with
-`remote { observe = true }` in its `global` block so its node has a port to ask from:
+`remote { view = true }` in its `global` block so its node has a port to ask from:
 
     ssh root@192.168.1.1 ncfg pair join -    # paste the code, then Ctrl-D
 
@@ -840,7 +848,7 @@ changes nothing on netcfgd's side.
 up or take it down, once the `xfrm` block names the connection and its child
 (`connection = "home"`, `child = "all"`); the addressing follows through the
 report as above. `start_action = start` in the connection brings it up with
-charon instead. Both are in the `wifi` tier, beside joining a network. In the
+charon instead. Both are in the `laptop` tier, beside joining a network. In the
 window, the same two are `bring up` and `take down` in the `devices` tab, on the
 tunnel's row.
 

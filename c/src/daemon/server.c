@@ -118,7 +118,7 @@ static void apply_policy_permissions(const char *path, const ncfg_principal_t *c
 			/*
 			 * Deduplicated over the whole set rather than against the first
 			 * one, because the count is what a warning reads. The policy
-			 * `debian/postinst` prints names the same group for `observe`
+			 * `debian/postinst` once printed named the same group for `observe`
 			 * and `wifi`, which is the ordinary desktop case -- and it
 			 * produced "the control policy names 2 groups (netcfgd,
 			 * netcfgd)", warning about others that do not exist. A
@@ -419,7 +419,7 @@ static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *pe
 
 	/*
 	 * **After the gate and before anything else**, which is the order that
-	 * matters: `monitor` needs the `observe` tier, and a connection handed to
+	 * matters: `monitor` needs the `view` tier, and a connection handed to
 	 * the event stream before that was asked would be a subscription nobody
 	 * checked. Like `hello`, it never reaches the answer seam -- see
 	 * `serve_monitor` for why it cannot.

@@ -134,7 +134,7 @@ static QString dump(const ncfg_firewall_settings &settings)
 }
 
 static const char base[] =
-    "global { control { observe = \"any\"; admin = \"any\" } }\n"
+    "global { control { root = \"any\" } }\n"
     "host_list \"kids\" { mac = [\"00:11:22:33:44:01\"] }\n";
 
 static const char every_key[] =

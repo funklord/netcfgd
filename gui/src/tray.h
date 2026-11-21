@@ -22,10 +22,10 @@
  *   **Applying.** A menu is the wrong place to change a machine without
  *   showing the plan first, which is the whole product. Disconnecting, and
  *   joining a network the configuration already names, are offered because
- *   they are the `wifi` tier and need no plan to understand: the join is by
+ *   they are the `laptop` tier and need no plan to understand: the join is by
  *   the network's id, exactly as the wifi tab's, and writes nothing.
  *   Joining a network the configuration does *not* name needs a block
- *   written, which is `wifi_add` -- the `wifi` tier too since 0124, and
+ *   written, which is `wifi_add` -- the `laptop` tier too since 0124, and
  *   typed fields rather than config text. So the networks the last scan heard
  *   that nothing names are offered below the saved ones: choosing one opens
  *   the window's own add dialog on that access point, which is the review a
@@ -35,7 +35,7 @@
  *
  * THE ONE ADMIN-TIER THING IT DOES, AND WHY
  *   **Switching profiles**, which is a configuration write and therefore the
- *   `admin` tier. This paragraph used to say the tray did nothing of the kind.
+ *   `root` tier. This paragraph used to say the tray did nothing of the kind.
  *   It does now, by instruction, and the reason it is the right exception is
  *   that a profile is the one change whose entire value is being one click
  *   away: an operator moving between office, home and offline is doing it
@@ -99,7 +99,7 @@ enum class ncfg_reach {
  *
  * **Saved networks only, and keyed by the network's id rather than its
  * SSID.** The id is what `wifi_connect` takes and what keeps the join inside
- * the `wifi` tier; an access point nothing in the configuration names has no
+ * the `laptop` tier; an access point nothing in the configuration names has no
  * id to send. Several access points carrying one network are one entry, at
  * the strongest signal any of them was heard at, because the supplicant picks
  * the BSS and an operator choosing between two identical names has nothing to

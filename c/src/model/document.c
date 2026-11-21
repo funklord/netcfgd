@@ -2569,19 +2569,19 @@ static const ncfg_custom_t principal_custom = { principal_read, principal_write,
 	principal_release, NULL };
 
 static const ncfg_field_t control_fields[] = {
-	{ .name = "observe", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
-	    .offset = offsetof(ncfg_control_t, observe) },
-	{ .name = "wifi", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
-	    .offset = offsetof(ncfg_control_t, wifi) },
-	{ .name = "admin", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
-	    .offset = offsetof(ncfg_control_t, admin) }
+	{ .name = "view", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
+	    .offset = offsetof(ncfg_control_t, view) },
+	{ .name = "laptop", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
+	    .offset = offsetof(ncfg_control_t, laptop) },
+	{ .name = "root", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
+	    .offset = offsetof(ncfg_control_t, root) }
 };
 static const ncfg_type_t control_type = TYPE("control policy", control_fields);
 
 static const ncfg_field_t remote_fields[] = {
-	{ .name = "observe", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_remote_policy_t, observe) },
-	{ .name = "wifi", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_remote_policy_t, wifi) },
-	{ .name = "admin", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_remote_policy_t, admin) },
+	{ .name = "view", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_remote_policy_t, view) },
+	{ .name = "laptop", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_remote_policy_t, laptop) },
+	{ .name = "root", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_remote_policy_t, root) },
 	{ .name = "agent", .kind = NCFG_F_CUSTOM, .custom = &principal_custom,
 	    .offset = offsetof(ncfg_remote_policy_t, agent) }
 };

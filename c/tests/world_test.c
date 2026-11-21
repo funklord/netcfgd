@@ -755,9 +755,9 @@ static void a_monitor_becomes_a_subscriber_and_is_told(void)
 	}
 
 	memset(&control, 0, sizeof(control));
-	control.observe.kind = NCFG_PRINCIPAL_ANY;
-	control.wifi.kind = NCFG_PRINCIPAL_ANY;
-	control.admin.kind = NCFG_PRINCIPAL_ANY;
+	control.view.kind = NCFG_PRINCIPAL_ANY;
+	control.laptop.kind = NCFG_PRINCIPAL_ANY;
+	control.root.kind = NCFG_PRINCIPAL_ANY;
 	memset(&remote, 0, sizeof(remote));
 	memset(&how, 0, sizeof(how));
 	(void)snprintf(path, sizeof(path), "%s/monitor.sock", base);

@@ -379,7 +379,7 @@ static int list(const ncfg_cli_options_t *options, char *err, size_t err_size)
  * 0127's collapse, because `/etc/netcfgd` is root's and a client is not root.
  * `save` wrote locally unconditionally, so an unprivileged operator with
  * netcfgd running got "Permission denied" for a request the daemon already
- * serves and already authorizes at the `admin` tier.
+ * serves and already authorizes at the `root` tier.
  */
 static int save(const char **rest, size_t count, const ncfg_cli_options_t *options, char *err,
     size_t err_size)

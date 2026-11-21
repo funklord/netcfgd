@@ -144,12 +144,12 @@ unshare -rm sh -c '
 	# The tightest grant a hardened unit could write: the config file alone.
 	mount --bind "$work/rw2/netcfgd.conf" "$work/etc2/netcfgd/netcfgd.conf"
 	NCFG_CONFIG_DIR="$work/etc2/netcfgd" NCFG_RUN_DIR="$work/run2" \
-		"$build/ncfg" control set --observe any > "$work/control.log" 2>&1 || true
+		"$build/ncfg" control set --view any > "$work/control.log" 2>&1 || true
 	cat "$work/etc2/netcfgd/netcfgd.conf" > "$work/seen2"
 ' sh "$work" "$repo"
 
 check "a config file granted alone is written" \
-	"$(grep -c 'observe = "any"' "$work/seen2" || true)" "1"
+	"$(grep -c 'view = "any"' "$work/seen2" || true)" "1"
 check "and nothing complains about a read-only filesystem" \
 	"$(grep -ci 'read-only file system' "$work/control.log" || true)" "0"
 
