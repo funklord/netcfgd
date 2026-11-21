@@ -93,6 +93,9 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (rule.translated) {
 		body << QStringLiteral("\t\t\ttranslated = true");
 	}
+	if (!rule.over.isEmpty()) {
+		body << QStringLiteral("\t\t\tover = %1").arg(quoted(rule.over));
+	}
 	body << QStringLiteral("\t\t}");
 }
 
@@ -265,6 +268,15 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	    "Matches a connection whose destination was rewritten by a port forward or a UPnP "
 	    "mapping -- what lets mapped traffic through a forward chain that drops."));
 	form->addRow(QString(), translated);
+	/* 10.885: counted per source address, on a drop or a reject; the compiler
+	 * refuses it elsewhere and says why. */
+	over = new QLineEdit(this);
+	over->setObjectName(QStringLiteral("firewall_over"));
+	over->setPlaceholderText(QStringLiteral("8/15m -- blank to match every packet"));
+	over->setToolTip(QStringLiteral(
+	    "Match a source address's packets only past this rate, counted per address: "
+	    "a drop with 8/15m lets each address make eight connections a quarter of an hour."));
+	form->addRow(QStringLiteral("only over"), over);
 	layout->addLayout(form);
 
 	note = new QLabel(this);
@@ -312,6 +324,7 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		hours->setText(rule.hours);
 		days->setText(rule.days.join(QStringLiteral(", ")));
 		translated->setChecked(rule.translated);
+		over->setText(rule.over);
 	}
 	connect(chain, &QComboBox::currentIndexChanged, this,
 	    &ncfg_firewall_rule_dialog::shape_changed);
@@ -398,6 +411,7 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 	rule->hours = hours->text().trimmed();
 	rule->days = split_list(days->text());
 	rule->translated = translated->isChecked();
+	rule->over = over->text().trimmed();
 	return true;
 }
 

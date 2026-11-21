@@ -126,7 +126,7 @@ static QString dump(const ncfg_firewall_settings &settings)
 				rule.to.join(QLatin1Char(',')), rule.interface, rule.out_interface,
 				rule.states.join(QLatin1Char(',')), rule.stations.join(QLatin1Char(',')),
 				rule.hours, rule.days.join(QLatin1Char(',')),
-				rule.translated ? QStringLiteral("translated") : QString() }
+				rule.translated ? QStringLiteral("translated") : QString(), rule.over }
 			             .join(QLatin1Char('|'));
 		}
 	}
@@ -145,6 +145,7 @@ static const char every_key[] =
     "\t\taccept \"ssh\" { protocol = \"tcp\"; port = [22, 2222]; "
     "from = [\"10.0.0.0/8\", \"fd00::/8\"]; interface = \"eth0\" }\n"
     "\t\treject \"kids\" { mac = [\"@host_list:kids\", \"aa:bb:cc:*\"] }\n"
+    "\t\tdrop \"ssh-guard\" { protocol = \"tcp\"; port = 22; state = [\"new\"]; over = \"8/15m\" }\n"
     "\t}\n"
     "\tforward {\n"
     "\t\tpolicy = \"drop\"\n"
@@ -191,7 +192,7 @@ int main(int argc, char **argv)
 	              QString::number(loaded.input.rules.size()),
 	              QString::number(loaded.forward.rules.size()),
 	              QString::number(loaded.output.rules.size())),
-	    QStringLiteral("1 drop drop accept 3/2/0"), "  every chain, its policy and its rules");
+	    QStringLiteral("1 drop drop accept 4/2/0"), "  every chain, its policy and its rules");
 	if (loaded.input.rules.size() == 3 && loaded.forward.rules.size() == 2) {
 		const ncfg_firewall_rule_row &ssh = loaded.input.rules.at(1);
 		check(QStringLiteral("%1 %2 %3:%4 %5 %6")
@@ -215,6 +216,10 @@ int main(int argc, char **argv)
 		 * `form_coverage_gate` found for this one (10.684). */
 		check(loaded.forward.rules.at(0).translated ? QStringLiteral("yes") : QStringLiteral("no"),
 		    QStringLiteral("yes"), "  and that it matches translated connections (10.670)");
+		/* The SSH guard of the holder's servers (10.885): a Save that did
+		 * not read it would have dropped the guard and kept the drop. */
+		check(loaded.input.rules.size() > 3 ? loaded.input.rules.at(3).over : QString(),
+		    QStringLiteral("8/900s"), "  and a guard's per-source rate");
 	}
 
 	/* **Save with no change, and nothing moves.** The block the tab would
@@ -249,7 +254,7 @@ int main(int argc, char **argv)
 		dialog.findChild<QCheckBox *>(QStringLiteral("firewall_state_new"))->setChecked(true);
 		check(press(&dialog, "submit"), QStringLiteral("saved"), "a new input rule saves");
 	}
-	check(connection.firewall(&again, &error) && again.input.rules.size() == 4
+	check(connection.firewall(&again, &error) && again.input.rules.size() == 5
 	        ? QStringLiteral("%1 %2 %3")
 	              .arg(again.input.rules.last().name, again.input.rules.last().protocol,
 	                  again.input.rules.last().states.join(QLatin1Char(',')))
@@ -277,7 +282,7 @@ int main(int argc, char **argv)
 	}
 	/* Moving a rule to another chain takes it out of the first. */
 	{
-		ncfg_firewall_rule_dialog dialog(&connection, again, QStringLiteral("input"), 3);
+		ncfg_firewall_rule_dialog dialog(&connection, again, QStringLiteral("input"), 4);
 		auto *chain = dialog.findChild<QComboBox *>(QStringLiteral("firewall_chain"));
 		chain->setCurrentIndex(chain->findData(QStringLiteral("forward")));
 		check(press(&dialog, "submit"), QStringLiteral("saved"),
@@ -289,7 +294,7 @@ int main(int argc, char **argv)
 	              .arg(again.forward.rules.size())
 	              .arg(again.forward.rules.isEmpty() ? QString() : again.forward.rules.last().name)
 	        : error,
-	    QStringLiteral("3/3 dns"), "  and is in the one it was moved to only");
+	    QStringLiteral("4/3 dns"), "  and is in the one it was moved to only");
 	/* Delete, confirmed: the dialog asks first, so the write is made here as
 	 * the dialog would make it, with the rule taken out. */
 	{

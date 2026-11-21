@@ -1287,6 +1287,9 @@ typedef struct {
 	/* `translated = true` (10.670): the rule matches a connection whose
 	 * destination NAT rewrote. Read so a Save keeps it. */
 	int   translated;
+	/* `over` (10.885): a drop's per-source rate as the document keeps it,
+	 * "8/900s", empty where the rule has none. Read so a Save keeps it. */
+	char *over;
 } ncfg_firewall_entry_t;
 
 /* One base chain: its policy and its rules, in the document's order -- which

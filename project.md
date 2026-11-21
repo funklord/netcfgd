@@ -12802,6 +12802,17 @@ three alone: it waits 60 s for a pressure that comes down a step per 30 s,
 which is tight under the suite's load. Nothing here touches it; noted as
 intermittent, not explained.
 
+**`make packaging` had been red since 10.885, and I had not run it.** Its
+privilege gate named `over` and `max_age` as keys nobody had classified
+(both ordinary: one narrows what a drop matches, the other is a timer like
+`hello_time`), and its form gate named `over` as a member the GUI's
+firewall dialog neither read nor declared -- so saving any rule in the
+firewall tab rewrote the document without the SSH guard, leaving its
+drop to match every new connection. The client reads `over`, the dialog
+shows it as "only over" and writes it back, and `firewall_load` loads a
+guard, saves unchanged and compares; it fails with the dialog's write
+line removed.
+
 ## 10.888 The plan offers the whole-machine remedy that works on this machine
 
 On the Devuan rig (10.884) `ncfg plan`'s warning that ifupdown also holds

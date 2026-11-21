@@ -226,3 +226,8 @@ phy
 # privileged outside netcfgd's own directory, and `file` is a privileged
 # name (10.761).
 url
+#
+# A firewall rule's per-source rate (10.885), which only narrows what a
+# drop matches, and a bridge's max_age (10.889), a timer like hello_time.
+over
+max_age

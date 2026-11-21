@@ -3131,6 +3131,7 @@ static void firewall_chain_free(ncfg_firewall_chain_entry_t *chain)
 		free(rule->stations);
 		free(rule->hours);
 		free(rule->days);
+		free(rule->over);
 	}
 	free(chain->rules);
 	free(chain->policy);
@@ -3255,9 +3256,10 @@ static int read_firewall_chain(const ncfg_json_doc_t *doc, uint32_t object,
 		rule->hours = member_text(doc, entry, "hours");
 		rule->days = join_strings(doc, ncfg_json_member(doc, entry, "days"));
 		rule->translated = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "translated"), 0);
+		rule->over = member_text(doc, entry, "over");
 		if (!rule->name || !rule->action || !rule->protocol || !rule->ports || !rule->from ||
 		    !rule->to || !rule->interface || !rule->out_interface || !rule->states ||
-		    !rule->stations || !rule->hours || !rule->days) {
+		    !rule->stations || !rule->hours || !rule->days || !rule->over) {
 			return 0;
 		}
 		/* The document omits `any`; the editor shows the word. */

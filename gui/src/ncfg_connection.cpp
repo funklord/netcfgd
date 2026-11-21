@@ -1577,6 +1577,7 @@ static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t 
 		rule.hours = from_c(entry.hours);
 		rule.days = firewall_list(entry.days);
 		rule.translated = entry.translated != 0;
+		rule.over = from_c(entry.over);
 		row.rules << rule;
 	}
 	return row;

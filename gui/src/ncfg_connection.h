@@ -331,6 +331,8 @@ struct ncfg_firewall_rule_row {
 	QString     hours;
 	QStringList days;
 	bool        translated = false;
+	/* `over` (10.885): a drop's per-source rate, "8/900s", empty for none. */
+	QString     over;
 };
 
 struct ncfg_firewall_chain_row {

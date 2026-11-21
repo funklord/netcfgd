@@ -99,6 +99,7 @@ private:
 	QLineEdit *hours;
 	QLineEdit *days;
 	QCheckBox *translated;
+	QLineEdit *over;
 	QLabel      *note;
 	QPushButton *save_button;
 };
