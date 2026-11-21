@@ -32,5 +32,5 @@ HEADERS += ../src/device_dialog.h ../src/ncfg_connection.h
 # **The C daemon, which is the one that ships** (0266). This named the Rust
 # one under `target/debug`, which `make check`'s cargo step happened to
 # build, so these probes tested the GUI against a daemon nothing installs --
-# and one that has never heard of `dhcp_server` (project.md 10.606).
+# and one that has never heard of `dhcp_server` (doc/journal.md 10.606).
 DEFINES += NETCFGD_BINARY=\\\"$$PWD/../../c/netcfgd\\\"

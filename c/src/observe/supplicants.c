@@ -136,7 +136,7 @@ static ncfg_optbool_t record_says(const char *run_dir, const char *interface,
  *
  *   **Disabled.** A network the document says to join automatically, which the
  *   supplicant has been told to leave alone, is a machine that has stopped
- *   matching its configuration -- project.md 10.337. The record says netcfgd
+ *   matching its configuration -- doc/journal.md 10.337. The record says netcfgd
  *   handed the set over and it did; what the record cannot say is that
  *   something disabled one afterwards.
  *
@@ -265,7 +265,7 @@ static void note_association(ncfg_observed_t *observed, ncfg_supplicant_client_t
  * writes as root, says `answering: true` and names the network, while
  * `ncfg status` run as an ordinary user said false five times out of five.
  * Both readings were correct about what their own process could reach, and one
- * of them was reported as a fact about the machine. project.md 10.333.
+ * of them was reported as a fact about the machine. doc/journal.md 10.333.
  *
  * `observed.h` already has the vocabulary: absent means "nothing asked", which
  * is exactly what a refused connection is.

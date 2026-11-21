@@ -34,7 +34,7 @@
  *   being told. A service is often started with neither variable set; the
  *   account's home from the password database stands in for `$HOME` then,
  *   which is where a fuzznetd run from that account's shell looks.
- *   `ncfg_node_where` decides it; project.md 10.669 has the reasons.
+ *   `ncfg_node_where` decides it; doc/journal.md 10.669 has the reasons.
  *
  * WHAT A FAILURE COSTS
  *   Nothing on the network. A node that cannot open is logged and the daemon

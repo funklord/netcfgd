@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-30
-Milestone: the router side, after hairpin (project.md 10.618)
+Milestone: the router side, after hairpin (doc/journal.md 10.618)
 Follows: [0298](0298-a-port-forward-is-translation-on-the-uplink.md)
 
 ## Context

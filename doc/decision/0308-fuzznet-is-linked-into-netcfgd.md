@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-02
-Milestone: fuzznet integration (project.md 10.668)
+Milestone: fuzznet integration (doc/journal.md 10.668)
 Supersedes: [0269](0269-the-remote-half-is-a-separate-program.md)
 
 ## The holder's words

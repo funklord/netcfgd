@@ -50,7 +50,7 @@ cleanup() {
 	[ -n "$client" ] && kill "$client" 2>/dev/null || true
 	for p in $(carrying); do kill "$p" 2>/dev/null || true; done
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$client" 2>/dev/null || true
 	rm -rf "$work"
 }

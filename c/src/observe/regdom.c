@@ -4,7 +4,7 @@
  *
  * WHY IT IS OBSERVED, AND NOT ASKED BY A CLIENT
  *   Decision 0296: what the domain is gets reported, because the failure it
- *   is about is invisible -- project.md 10.585 measured a country set by hand
+ *   is about is invisible -- doc/journal.md 10.585 measured a country set by hand
  *   stranding a machine in that country's gaps, and the world domain having
  *   no 6 GHz, and either way the access point is simply not there. The daemon
  *   takes this observation on every tick and every client is answered from

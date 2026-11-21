@@ -1,6 +1,6 @@
 /*
  * mesh_peer_test.c -- a mesh point's peers and its making, against bytes
- * rather than against a radio (`src/sys/mesh_peer.c`, project.md 10.686 and
+ * rather than against a radio (`src/sys/mesh_peer.c`, doc/journal.md 10.686 and
  * 10.687).
  *
  * WHAT IS CHECKED

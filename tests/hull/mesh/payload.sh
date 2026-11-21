@@ -1,5 +1,5 @@
 #!/bin/sh
-# netcfgd joining an 802.11s mesh (project.md 10.588).
+# netcfgd joining an 802.11s mesh (doc/journal.md 10.588).
 #
 # Two hwsim radios in one vm. netcfgd's node is wlan0, configured by a `mesh`
 # block and an `interface` block and joined by `ncfg apply`. The other node is

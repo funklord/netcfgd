@@ -236,7 +236,7 @@ typedef struct {
 	 * shim needs it to fill NM's `Gateway`, and it is independently the answer
 	 * to "which gateway does this interface use" -- which `ncfg status` makes a
 	 * reader cross-reference two sections for. Settled by the copyright holder
-	 * 2026-10-19; project.md 10.491 priced the alternatives.
+	 * 2026-10-19; doc/journal.md 10.491 priced the alternatives.
 	 *
 	 * NULL and not `0.0.0.0`: a link with no default route has no next hop, and
 	 * a zero would be a claim where NULL is the absence of one.
@@ -333,7 +333,7 @@ typedef struct {
 	 * The prefixes an upstream delegated over this link, comma-joined in the
 	 * order the lease listed them; "" where none. What a router's operator
 	 * asks first -- "which prefix did the ISP give me" -- and the daemon
-	 * observed it long before any client read it (project.md 10.660).
+	 * observed it long before any client read it (doc/journal.md 10.660).
 	 */
 	char *delegated;
 } ncfg_link_t;
@@ -866,7 +866,7 @@ char *ncfg_connectivity_notice(ncfg_rung_t before, const char *before_label, ncf
  * A signal in dBm as the 0-100 strength a person reads, on NetworkManager's
  * curve (`nm_wifi_utils_level_to_quality`): -40 dBm or better is 100, -100 or
  * worse is 0, linear between and truncated -- so -53 is 79, the figure a real
- * NM gave for it (project.md 10.775). That curve rather than the
+ * NM gave for it (doc/journal.md 10.775). That curve rather than the
  * `2 * (dBm + 100)` everybody writes, because every applet's bars are
  * calibrated against NM's numbers and a laptop's owner has met those. Here
  * for the reason the rules above are: both trays show it.
@@ -1170,7 +1170,7 @@ void ncfg_modems_free(ncfg_modems_t *modems);
  * One station associated with an access point netcfgd runs.
  *
  * `hostname` and `ipv4` are the lease netcfgd's own DHCP server gave it, and
- * empty where it gave none (project.md 10.602). Every number is optional, as
+ * empty where it gave none (doc/journal.md 10.602). Every number is optional, as
  * hostapd omits its statistics where the driver cannot read them: a station
  * with none is still a station, and `has_*` says which were said.
  */
@@ -1713,7 +1713,7 @@ typedef struct {
 	int   probe_up_after;
 	int   probe_hold_down;
 	int   probe_require_lease;
-	/* A DHCP server on it (0297, project.md 10.608): `dhcp_range` as the
+	/* A DHCP server on it (0297, doc/journal.md 10.608): `dhcp_range` as the
 	 * language writes it, "A-B", or "" for the default; `dhcp_lease` -1 for
 	 * the default; `dhcp_dns` space-joined. Reservations are not carried and
 	 * are named in `unmodelled`. */
@@ -2473,7 +2473,7 @@ typedef struct {
 	/*
 	 * The credential's reference **as the language writes it** --
 	 * `@secret:home`, `@secret:keyring:eduroam` -- for a PSK's passphrase or
-	 * an EAP network's password, "" where there is none (project.md 10.611).
+	 * an EAP network's password, "" where there is none (doc/journal.md 10.611).
 	 * `credential` above is the bare name, which loses the provider and so
 	 * cannot be written back: an editor that rebuilt the reference from the
 	 * network's id repointed every network whose secret had another name.
@@ -2578,7 +2578,7 @@ typedef struct {
 	size_t                  neighbour_count;
 	/* What the access point dialog has no field for, comma-joined, as on a
 	 * saved network: fast roaming with its domain and key, and `neighbour`
-	 * blocks (project.md 10.606). Empty for one the dialog can write back
+	 * blocks (doc/journal.md 10.606). Empty for one the dialog can write back
 	 * whole. */
 	char *unmodelled;
 } ncfg_access_point_config_t;

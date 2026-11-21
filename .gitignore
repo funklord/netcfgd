@@ -30,7 +30,7 @@ gui/build-*/
 c/src/*/*.o
 c/src/*/*/*.o
 # The dependency files beside them, added 2026-09-29 when `c/` grew header
-# tracking at all -- project.md 10.328. Same two levels and the same reason:
+# tracking at all -- doc/journal.md 10.328. Same two levels and the same reason:
 # a build writes one per object, and one per test binary and example beside
 # their sources.
 c/src/*/*.d

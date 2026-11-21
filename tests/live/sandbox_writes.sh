@@ -422,7 +422,7 @@ else
 		"$etc_state" "rw"
 
 	# **And what HOME a root service has**, because the fuzznet store is
-	# found from it (project.md 10.677): procd and a boot-time sysvinit
+	# found from it (doc/journal.md 10.677): procd and a boot-time sysvinit
 	# script hand a service init's HOME=/, which put the store at
 	# //.local/share/fuzznet. A system unit is meant to have none, so the
 	# daemon takes root's home from the password database. Asked of

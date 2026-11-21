@@ -7,7 +7,7 @@
  *   lets a radio with many channels be described at all; that a part is read
  *   only when it names its radio; that HT is any band's `HT_CAPA`, and a part
  *   carrying no bands is a part about something else rather than "no HT"
- *   (project.md 10.596).
+ *   (doc/journal.md 10.596).
  */
 #include "ncfg/wiphy.h"
 

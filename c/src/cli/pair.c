@@ -1,6 +1,6 @@
 /*
  * pair.c -- `ncfg pair`: draw a one-use code a device joins this host's estate by
- * (project.md 10.722, 10.723).
+ * (doc/journal.md 10.722, 10.723).
  *
  * The terminal displays and the phone scans, and nothing goes back by hand:
  * fuzznet's invite (its sec 896) carries the device's key home over the network.

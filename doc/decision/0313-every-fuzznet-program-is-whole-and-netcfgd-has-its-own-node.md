@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-06
-Milestone: fuzznet integration (project.md 10.734 to 10.736)
+Milestone: fuzznet integration (doc/journal.md 10.734 to 10.736)
 Amends: [0308](0308-fuzznet-is-linked-into-netcfgd.md) and [0311](0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md), which left the user's node to a fuzznetd
 
 ## The holder's words

@@ -141,7 +141,7 @@ pid_t ncfg_dhcp_server_running_pid(const char *run, const char *iface);
 
 /*
  * The name and address netcfgd's DHCP servers have given the host with this
- * MAC (project.md 10.602): read out of every lease file under
+ * MAC (doc/journal.md 10.602): read out of every lease file under
  * `<run>/dhcp-server/`, which dnsmasq keeps as `<expiry> <mac> <address>
  * <name> <client id>`, so it answers for a station on a radio that is itself the served interface
  * and on one bridged into it alike -- a MAC is one host, whichever interface

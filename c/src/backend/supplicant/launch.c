@@ -421,7 +421,7 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
  * ------------------------------------------------------------------------ */
 
 /*
- * **The stop waits for the supplicant to go** (project.md 10.650), which is
+ * **The stop waits for the supplicant to go** (doc/journal.md 10.650), which is
  * 10.649's fault found in hostapd and the same shape here: `TERMINATE` is
  * answered `OK` before the process has exited, and the pid file was removed
  * at once -- so the next observation read a supplicant still exiting as

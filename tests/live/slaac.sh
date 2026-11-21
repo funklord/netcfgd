@@ -14,7 +14,7 @@
 # decision 0073, and finding out took an hour the first time -- there is a comment
 # in `delegation.sh` that says so.
 #
-# **Its twin is `make hull-slaac`** (tests/hull/slaac, project.md 10.624), with
+# **Its twin is `make hull-slaac`** (tests/hull/slaac, doc/journal.md 10.624), with
 # hull answering the router solicitation in place of dnsmasq: an advertiser that
 # sends nothing unasked, and one that runs where this script would skip.
 #
@@ -123,7 +123,7 @@ router=
 cleanup() {
 	if [ -n "$router" ]; then kill "$router" 2>/dev/null || true; fi
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$router" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that

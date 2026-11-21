@@ -1,6 +1,6 @@
 #!/bin/sh
 # A station on an access point netcfgd runs, given an address by the DHCP
-# server netcfgd configures, and named by it (project.md 10.601, 10.602).
+# server netcfgd configures, and named by it (doc/journal.md 10.601, 10.602).
 #
 # Each half had been run alone: `hull-dhcp-server` serves a veth, and the
 # access point rigs associate a station that asks for no address. What no rig

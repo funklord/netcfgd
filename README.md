@@ -470,7 +470,7 @@ sudo make install-gui
 [fmake](../fmake) is one Python file with nothing beyond the standard
 library, so it builds the client on a machine that has not got this
 project's toolchain set up. The daemon is built with `make build`; what fmake
-makes of it is in [project.md](project.md) 10.421 and 10.424.
+makes of it is in [project.md](doc/journal.md) 10.421 and 10.424.
 
 Then pick your init: `make install-systemd`, `install-openrc` or
 `install-procd`. Installing does **not** enable or start anything, and does

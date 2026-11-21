@@ -314,7 +314,7 @@ int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t 
  * the kernel; and the name servers and search domains, as the interface-report
  * fragment `report` -- `<run>/reported.d/<iface>/odhcp6c`, beside dhcpcd's
  * `dhcpcd6` (0086). odhcp6c configures nothing itself; this is its whole
- * configuration step, as the udhcpc script is udhcpc's (project.md 10.822,
+ * configuration step, as the udhcpc script is udhcpc's (doc/journal.md 10.822,
  * 10.823).
  *
  * One prefix per line into `target`, written to a temporary beside it and
@@ -325,7 +325,7 @@ int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t 
  * **The reader end of this file already existed and the writer did not.**
  * `ncfg_state_read_reports` walks `<run>/prefixes/` and has since the host
  * module landed; nothing wrote into it, because the C refused to start a
- * DHCPv6 client at all (project.md 10.290).
+ * DHCPv6 client at all (doc/journal.md 10.290).
  *
  * Allocated; free it. NULL with a sentence.
  */
@@ -664,7 +664,7 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
  *     to odhcp6c with `-s`, rather than the shipped dhcpcd hook. It is the
  *     writer of `<run>/prefixes/<iface>`, whose reader
  *     (`ncfg_state_read_reports`) existed for several waves with nothing
- *     writing into it because this function did not exist (project.md 10.290).
+ *     writing into it because this function did not exist (doc/journal.md 10.290).
  *
  * `request` is the `-P` argument `ncfg_dhcp_prefix_request` built, or NULL
  * where the document asked for no prefix -- and an absent one means no `-P` at

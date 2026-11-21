@@ -1094,7 +1094,7 @@ static void this_build_does_not_reconcile(void)
 		 * body** rather than anywhere in the file -- `mark_as_ours` is called
 		 * by the netlink path too, so a search of the whole file finds it
 		 * whether or not the tun arm reaches it. That is the Rust's defect
-		 * exactly (project.md 10.204): its tun arm returns twenty lines above
+		 * exactly (doc/journal.md 10.204): its tun arm returns twenty lines above
 		 * the block that marks a created link, so the one kind whose
 		 * ownership has nowhere else to live is the one kind without a mark.
 		 * A sabotage that deleted the call from `create_tun` alone went

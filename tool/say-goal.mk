@@ -7,6 +7,6 @@
 #
 # Naming the target on the command line is what keeps it side-effect free --
 # nothing in the real build runs. `make default-goal` at the root is the gate
-# that uses it, and project.md 10.535 is the morning that paid for it.
+# that uses it, and doc/journal.md 10.535 is the morning that paid for it.
 ncfg-say-goal:
 	@echo $(.DEFAULT_GOAL)

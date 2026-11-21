@@ -328,7 +328,7 @@ def announce(server, attached, lines):
 		# nothing about what it was told, so a test asserting on an event
 		# sequence had nothing to read and passed whether or not the sequence
 		# was ever sent. Measured -- removing the EAP exchange entirely left
-		# `network_arrives.sh` green. project.md 10.335.
+		# `network_arrives.sh` green. doc/journal.md 10.335.
 		print("-> %s" % line, flush=True)
 
 

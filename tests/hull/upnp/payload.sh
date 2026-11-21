@@ -1,5 +1,5 @@
 #!/bin/sh
-# UPnP and NAT-PMP on a router netcfgd runs (project.md 10.670, decision 0310).
+# UPnP and NAT-PMP on a router netcfgd runs (doc/journal.md 10.670, decision 0310).
 #
 # One vm, three namespaces' worth of hosts: the router is the vm's own
 # namespace, with `lan0` towards a host in `lan` (192.168.7.10) and `wan0`

@@ -1,12 +1,12 @@
 /*
  * seen.h -- the hosts this machine sees, written down in fuzznet's records
- * (project.md 10.591, 10.664, 10.666).
+ * (doc/journal.md 10.591, 10.664, 10.666).
  *
  * WHO WRITES, AND WHERE
  *   The daemon, as the holder settled on 2026-11-02: it is root that runs
  *   netcfgd and observes the stations and leases, so it is root that writes
  *   down what it saw. **Into the face of the daemon's own fuzznet store**
- *   (0308, project.md 10.669): netcfgd is a node but holds no claim, since
+ *   (0308, doc/journal.md 10.669): netcfgd is a node but holds no claim, since
  *   it does not run fuzznet's loop yet, so a record goes where any
  *   follower's would -- to the socket the store's `face` file names, read
  *   again before each write (`ncfg_seen_use_store`). Without a node, the
@@ -80,7 +80,7 @@ ncfg_seen_t *ncfg_seen_new(const char *socket_path);
  */
 void ncfg_seen_use_store(ncfg_seen_t *seen, const char *dir);
 /*
- * This process is now its store's face (project.md 10.676): the socket the
+ * This process is now its store's face (doc/journal.md 10.676): the socket the
  * `face` file names is served by this process's own loop, so a line asked
  * through it would wait on the thread asking. `local` answers a line
  * in-process instead -- fuzznet's `fzn_daemon_local`, through

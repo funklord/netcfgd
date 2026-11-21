@@ -1,5 +1,5 @@
 #!/bin/sh
-# Band steering between two access points netcfgd runs (project.md 10.595
+# Band steering between two access points netcfgd runs (doc/journal.md 10.595
 # item 2).
 #
 # One SSID on two hwsim radios, 2.4 GHz channel 1 and 5 GHz channel 36, both

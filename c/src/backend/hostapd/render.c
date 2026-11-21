@@ -310,7 +310,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *key_mgm
  * 802.11r by FT-PSK, and 802.11v's transition management advertised beside it.
  *
  * **Each line is measured, not read off the manual**, in a two-access-point
- * hwsim experiment (project.md 10.587):
+ * hwsim experiment (doc/journal.md 10.587):
  *
  *   * `nas_identifier` is required -- without it hostapd refuses the file, "FT
  *     (IEEE 802.11r) requires nas_identifier to be configured as a 1..48 octet

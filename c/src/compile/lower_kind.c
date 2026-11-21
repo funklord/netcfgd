@@ -996,7 +996,7 @@ drop:
 
 /*
  * `mesh_point { parent = "wlan2" }`: a second interface on that radio's phy,
- * as a mesh point (project.md 10.687), which is what lets a `mesh` block and
+ * as a mesh point (doc/journal.md 10.687), which is what lets a `mesh` block and
  * an `access_point` share one radio -- the mesh on this interface, the access
  * point on the parent. Made over nl80211, so it has nothing to configure but
  * where it lives.

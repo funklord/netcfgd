@@ -1,5 +1,5 @@
 #!/bin/sh
-# A DHCP server netcfgd configures (decision 0297, project.md 10.601).
+# A DHCP server netcfgd configures (decision 0297, doc/journal.md 10.601).
 #
 # netcfgd is given `lan0`, one end of a veth pair, with a static address and a
 # `dhcp_server` block; a dhcpcd client takes the other end in a namespace.

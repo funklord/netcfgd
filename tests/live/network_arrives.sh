@@ -5,7 +5,7 @@
 #
 # ## Why this exists
 #
-# This is project.md 10.338's own shape, which `config_arrives.sh` deliberately
+# This is doc/journal.md 10.338's own shape, which `config_arrives.sh` deliberately
 # does not have. That script proves a written file reaches the machine, on
 # dummy links and ordinary keys. What 10.338 actually held was a `network`
 # block written into `conf.d/` while the daemon ran, where the work lands on a
@@ -318,7 +318,7 @@ check "and netcfgd sees the station on the network it moved to" \
 # network carries `EAP` flags -- STARTED, a proposed method refused, the one
 # selected, three certificates, the subject-alt names, SUCCESS -- and netcfgd
 # reads none of them: its reader knows six event kinds and no EAP one
-# (project.md 10.366). So what this asserts is that it survives them, which is
+# (doc/journal.md 10.366). So what this asserts is that it survives them, which is
 # the risk a reader of unknown lines carries and which no test drove before the
 # fake could produce any.
 
@@ -362,7 +362,7 @@ check "and netcfgd comes through eleven events it does not read" \
 
 # ----------------------------- a network left disabled, which nothing saw
 #
-# **project.md 10.337.** `ncfg wifi connect` sends `SELECT_NETWORK`, which
+# **doc/journal.md 10.337.** `ncfg wifi connect` sends `SELECT_NETWORK`, which
 # disables every other network on purpose -- and nothing re-enables them and
 # nothing looked. The supplicant's own list is the only place it shows, so
 # `ncfg status` asks and says so.

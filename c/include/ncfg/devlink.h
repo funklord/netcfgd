@@ -13,7 +13,7 @@
  * READ ONLY
  *   Setting the type is `DEVLINK_CMD_PORT_SET`, implemented in mainline by
  *   mlx4 alone, and it destroys the netdev it replaces. That is not built;
- *   project.md 10.586 says what would have to be decided first.
+ *   doc/journal.md 10.586 says what would have to be decided first.
  *
  * THE NUMBERS ARE THE KERNEL'S
  *   From <linux/devlink.h>, for `genl.h`'s reason.

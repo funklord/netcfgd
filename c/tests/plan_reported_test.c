@@ -18,7 +18,7 @@
  *   the kernel prints it. A report went through nothing: it is the text
  *   somebody's shell script produced.
  *
- *   project.md 10.200 is what that costs when the comparison is `strcmp`,
+ *   doc/journal.md 10.200 is what that costs when the comparison is `strcmp`,
  *   measured against the shipped Rust -- `0000:0000:...:0001/128` and
  *   `::1/128` read as two addresses, so an `addr.add` is planned for one the
  *   kernel is already holding, and where netcfgd owns it the teardown plans an

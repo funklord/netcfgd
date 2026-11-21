@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-29
-Milestone: the router side, after 802.11ax (project.md 10.601)
+Milestone: the router side, after 802.11ax (doc/journal.md 10.601)
 Amends: [0009](0009-router-side-addressing.md)
 
 ## Context
@@ -16,7 +16,7 @@ Since then netcfgd has come to run the rest of a router: access points with
 station lists, steering and every width up to 160 MHz, NAT and a firewall in
 its own table, router advertisements and delegated prefixes. **A station that
 associates with a netcfgd access point is given no address**, and the tree
-says so in its own words (project.md 10.95, "netcfgd serves no DHCP ... so
+says so in its own words (doc/journal.md 10.95, "netcfgd serves no DHCP ... so
 an address is necessary and not sufficient"). The README's claim -- that
 netcfgd configures the router as fully as the laptop -- had one row missing,
 and it was this one.

@@ -57,7 +57,7 @@ cleanup() {
 	[ -n "${daemon:-}" ] && kill "$daemon" 2>/dev/null
 	[ -n "${radio:-}" ] && kill "$radio" 2>/dev/null
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$daemon" 2>/dev/null || true
 	wait "$radio" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`

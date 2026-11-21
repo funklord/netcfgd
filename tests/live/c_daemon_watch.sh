@@ -58,7 +58,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-watch.XXXXXX")
 # `$work/bin/fake-netcfgd` now, which no other run can be carrying.
 #
 # **The retry around the removal is the shape nineteen sibling scripts carry**
-# (project.md 10.476), and this script was added to `make live` after that pass
+# (doc/journal.md 10.476), and this script was added to `make live` after that pass
 # so it never got it. Unlike theirs, the race it guards has NOT been
 # demonstrated here, and the honest version of that is worth writing down
 # because the comfortable version was written first:

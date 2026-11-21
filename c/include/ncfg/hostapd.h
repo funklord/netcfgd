@@ -345,7 +345,7 @@ void ncfg_hostapd_recorded_policy(const char *run, const char *device,
     ncfg_observed_policy_t *out);
 
 /*
- * The stations netcfgd has steered off an access point (project.md 10.595
+ * The stations netcfgd has steered off an access point (doc/journal.md 10.595
  * item 2), `<run>/hostapd/<device>.steered`: one `<station> <unix time>
  * <imminent>` line each, the last steer of each station only. The record is
  * what keeps a station that came back from being moved again every round, so
@@ -501,7 +501,7 @@ typedef struct {
 	ncfg_optint_t tx_bytes;
 	/* It takes BSS transition requests: bit 19 of its extended capabilities
 	 * (`ext_capab`, hex, least significant octet first), measured on a
-	 * wpa_supplicant station (project.md 10.595). */
+	 * wpa_supplicant station (doc/journal.md 10.595). */
 	int           bss_transition;
 } ncfg_hostapd_station_t;
 

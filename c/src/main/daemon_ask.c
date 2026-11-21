@@ -1,6 +1,6 @@
 /*
  * daemon_ask.c -- the control vocabulary as one fuzznet procedure, `ask`
- * (decision 0312, project.md 10.693).
+ * (decision 0312, doc/journal.md 10.693).
  *
  * `rrpc ask FROM REQUEST`: REQUEST is the line the control socket reads, and
  * it is answered as the socket answers it -- the same reader, the same gate,

@@ -576,7 +576,7 @@ int main(int argc, char **argv)
 		 * enumerator is a third copy of the table's length in a check whose
 		 * comment says in as many words that a second copy is what it is here
 		 * to stop having, and `--supported` reported eight backend kinds of
-		 * ten for two releases on exactly this (project.md 10.480).
+		 * ten for two releases on exactly this (doc/journal.md 10.480).
 		 *
 		 * So the walk ends where both tables do, and the count is checked
 		 * against the enumerator below instead. The constant cannot track the

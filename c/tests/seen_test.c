@@ -1,6 +1,6 @@
 /*
  * seen_test.c -- the hosts this machine sees, written down for fuzznet
- * (project.md 10.666).
+ * (doc/journal.md 10.666).
  *
  * A stand-in fuzznetd, forked: it accepts a counted number of connections,
  * writes each request line to a file and answers `ok`, or a refusal where the

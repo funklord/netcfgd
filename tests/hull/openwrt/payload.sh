@@ -1,5 +1,5 @@
 #!/bin/sh
-# netcfgd under OpenWrt's procd (project.md 10.672).
+# netcfgd under OpenWrt's procd (doc/journal.md 10.672).
 #
 # The shipped init script, `packaging/procd/netcfgd`, as an OpenWrt package
 # would install it, and these, each with what makes it mean something:

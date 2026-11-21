@@ -7,7 +7,7 @@
  *   A VPI card runs each port as Ethernet or as InfiniBand, and one in
  *   InfiniBand mode has no Ethernet interface at all -- a configuration naming
  *   one meets an interface that is not there, and nothing else in the
- *   observation says why (`devlink.h`, project.md 10.586). One dump of every
+ *   observation says why (`devlink.h`, doc/journal.md 10.586). One dump of every
  *   port of every device, so the cost is one message whatever the machine.
  *
  * A KERNEL THAT WILL NOT SAY IS NOT A FAILURE

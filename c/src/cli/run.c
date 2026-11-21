@@ -1174,7 +1174,7 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
  * Say so if a network the document wants joined has been left disabled.
  *
  * WHY THIS IS A NOTE AND NOT A PLAN ACTION
- *   project.md 10.337. `ncfg wifi connect` sends `SELECT_NETWORK`, which
+ *   doc/journal.md 10.337. `ncfg wifi connect` sends `SELECT_NETWORK`, which
  *   disables every other network -- deliberately, because that is what "join
  *   this one" means. Nothing re-enables them: the supplicant's network set is
  *   rewritten only when its recorded hash changes, and the hash is over the
@@ -2186,7 +2186,7 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 	 * saying a window is open would be a false statement about the safety net.
 	 */
 	/*
-	 * **A window over nothing is said as one** (project.md 10.41.3). The
+	 * **A window over nothing is said as one** (doc/journal.md 10.41.3). The
 	 * daemon applies an edited file the moment it is written, so `ncfg apply
 	 * --confirm-within N` run after an edit usually finds the change already
 	 * in effect: the journal is `commit.arm` alone, and the window has nothing
@@ -2230,7 +2230,7 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
  * this process whatever was running, and that made two programs apply one
  * configuration: a daemon started with `--no-apply-on-start` was released by
  * a request and never by a local apply, so its watcher went on ignoring every
- * later edit (project.md 10.41.2), and a document's own `confirm = N` was
+ * later edit (doc/journal.md 10.41.2), and a document's own `confirm = N` was
  * armed by one path and not the other. `ncfg` is a client; the daemon applies.
  * With no daemon, or with `--config-dir` naming a tree the daemon is not
  * reading, the apply is this process's -- running without a daemon is a
@@ -2389,7 +2389,7 @@ static void release_serialisation(void)
  * instruction in it that outlived it -- **do not write a count of what this
  * build cannot do into a comment**, because a number has to be swept whenever
  * a pass lands and the ones written here went stale inside a wave
- * (project.md 10.291).
+ * (doc/journal.md 10.291).
  */
 static int command_apply(const ncfg_cli_options_t *options)
 {

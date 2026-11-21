@@ -22,7 +22,7 @@
  *   spelling of whatever was installed. So `0000:0000:...:0001/128` and
  *   `::1/128` are one address here and two to `strcmp`, and comparing them as
  *   text plans an `addr.add` for something the kernel already holds, on every
- *   single run. project.md 10.200 is that defect measured against the shipped
+ *   single run. doc/journal.md 10.200 is that defect measured against the shipped
  *   Rust, which compares both halves -- the forward pass and the teardown --
  *   as strings.
  *

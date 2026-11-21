@@ -364,7 +364,7 @@ int main(int argc, char **argv)
 	 * **A key name carrying a newline**, which is the shape that found the
 	 * configuration injection: the dropped-settings note wrote the name into a
 	 * comment, the newline ended the comment, and the rest was configuration
-	 * the client chose (project.md 10.509). Kept as a seed so the fuzzer
+	 * the client chose (doc/journal.md 10.509). Kept as a seed so the fuzzer
 	 * starts from it rather than having to rediscover that a key name is a
 	 * place to put one, and as a regression input: the note sanitises now, and
 	 * `fuzz/shape.c` asserts the block is still one block.

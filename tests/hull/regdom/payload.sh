@@ -1,6 +1,6 @@
 #!/bin/sh
 # What cfg80211 lets a running machine do with its regulatory domain, for
-# decision 0296 (project.md 10.585): which sources move it, whether it follows
+# decision 0296 (doc/journal.md 10.585): which sources move it, whether it follows
 # a machine from one country's access points to another's, what a disconnect
 # does, and whether a country set by hand blocks what the radio hears.
 #
@@ -377,7 +377,7 @@ echo "=== channels 12 and 13 under each domain, on a radio that follows it"
 # domain and it could not beacon there. A plain radio's channels are the global
 # domain's, and a country set by hand reaches every radio, so one kernel cannot
 # hold an access point on a channel its station is forbidden. Measuring the
-# station against one needs a second kernel (project.md 10.585).
+# station against one needs a second kernel (doc/journal.md 10.585).
 #
 # So this is the table those readings rest on, with channel 14 as its control:
 # it is Japan's alone, and a parser that read it as usable elsewhere would be

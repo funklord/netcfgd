@@ -13,7 +13,7 @@
 # WHERE IT RUNS
 #   Only in a machine of its own that can suspend and be woken: `make
 #   hull-suspend`, on hull's (sleep true), which hull built at netcfgd's asking
-#   (f741a47; project.md 10.809). As root, with mac80211_hwsim, dnsmasq,
+#   (f741a47; doc/journal.md 10.809). As root, with mac80211_hwsim, dnsmasq,
 #   wpa_supplicant and dhcpcd -- the hwsim image has all four.
 #
 # HOW IT IS WOKEN

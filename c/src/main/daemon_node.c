@@ -1,6 +1,6 @@
 /*
  * daemon_node.c -- what the daemon answers an operator of its estate, over
- * fuzznet's remote hop (decision 0311, project.md 10.685).
+ * fuzznet's remote hop (decision 0311, doc/journal.md 10.685).
  *
  * THE FLEET'S SIMPLE CASE
  *   Every node of one estate does what an authenticated operator of that

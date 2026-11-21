@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds netcfgd with OpenWrt's arm64 toolchain and boots OpenWrt's armsr-armv8
-# kernel with it, running the router test there (project.md 10.814): malta's
+# kernel with it, running the router test there (doc/journal.md 10.814): malta's
 # payload.sh with arm64's names, and malta's guest.sh and wider.conf, so the two
 # tiers run one test on two machines.
 #

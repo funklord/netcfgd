@@ -1,6 +1,6 @@
 /*
  * schedule.h -- when a firewall rule applies, written in local time and held
- * by the kernel in UTC (project.md 10.663).
+ * by the kernel in UTC (doc/journal.md 10.663).
  *
  * THE LANGUAGE
  *   `hours = "22:00-07:00"` and `days = ["mon", "tue"]` on a firewall rule,

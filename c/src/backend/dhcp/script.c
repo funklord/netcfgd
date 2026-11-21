@@ -130,7 +130,7 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, const char *rep
 	 * `prefix/len,gateway,valid,priority` each. Nothing installed it: the
 	 * kernel's own processing is off on an interface that forwards unless
 	 * `accept_ra` is 2, a router forwards, and OpenWrt's netifd had zeroed it
-	 * besides. So a router given a prefix had no way out (project.md 10.822).
+	 * besides. So a router given a prefix had no way out (doc/journal.md 10.822).
 	 * The udhcpc script installs IPv4's default route for the same reason:
 	 * the client has no configuration step of its own.
 	 *
@@ -140,7 +140,7 @@ char *ncfg_dhcp_pd_script(const char *iface, const char *target, const char *rep
 	 * or the lease going, both arrive here with no `::/0` in the list.
 	 */
 	/*
-	 * **And what the lease gave the uplink itself** (project.md 10.823).
+	 * **And what the lease gave the uplink itself** (doc/journal.md 10.823).
 	 * `ADDRESSES` is IA_NA's, `addr/len,preferred,valid` each, and odhcp6c
 	 * puts none of them on the interface: installed here, recorded under a
 	 * leading dot as the router is, and one that leaves the list removed and

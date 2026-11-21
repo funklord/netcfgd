@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-30
-Milestone: the router side, after reservation names (project.md 10.619)
+Milestone: the router side, after reservation names (doc/journal.md 10.619)
 Amends: [0009](0009-router-side-addressing.md), [0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md)
 
 ## Context

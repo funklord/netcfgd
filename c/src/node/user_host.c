@@ -1,5 +1,5 @@
 /*
- * user_host.c -- `ncfg host`: this user's host (project.md 10.734).
+ * user_host.c -- `ncfg host`: this user's host (doc/journal.md 10.734).
  *
  * WHAT IT IS
  *   fuzznet's node, which is a call, with netcfgd's numbers written in. A

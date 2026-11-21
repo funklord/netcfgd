@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-31
-Milestone: the router side, after the DNS forwarder (project.md 10.619)
+Milestone: the router side, after the DNS forwarder (doc/journal.md 10.619)
 Amends: [0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md), [0301](0301-the-lan-is-answered-by-a-dns-forwarder.md)
 
 ## Context

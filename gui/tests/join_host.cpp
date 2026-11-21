@@ -1,5 +1,5 @@
 /*
- * join_host.cpp -- the desktop's "Another host..." button (project.md 10.735).
+ * join_host.cpp -- the desktop's "Another host..." button (doc/journal.md 10.735).
  *
  * WHY THIS EXISTS
  *   A desktop opens on this machine, and this button is how one reaches a host

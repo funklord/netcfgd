@@ -9,7 +9,7 @@
 # and nothing here needs OpenWrt's build system to make one.
 #
 # **Installing configures nothing and starts nothing**, as with the Debian and
-# Alpine packages (project.md 10.750): the init script is left disabled, because
+# Alpine packages (doc/journal.md 10.750): the init script is left disabled, because
 # netifd is holding the network and a daemon that took over on `opkg install`
 # could take a router off it.
 #

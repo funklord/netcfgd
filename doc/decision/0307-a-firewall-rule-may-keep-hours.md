@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-03
-Milestone: the router side (project.md 10.663)
+Milestone: the router side (doc/journal.md 10.663)
 Amends: [0294](0294-layer-one-is-named-rules-in-netcfgds-own-table.md)
 
 ## Context

@@ -1394,7 +1394,7 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 	 * The same constant then becomes the witness it could not be as a bound
 	 * -- it cannot grow with the enum, so an op appended without being
 	 * answered fails the count. `--supported` had the other half of this
-	 * arrangement and nothing to catch it (project.md 10.480).
+	 * arrangement and nothing to catch it (doc/journal.md 10.480).
 	 */
 	for (kind = 0;; kind++) {
 		ncfg_op_t   op;
@@ -1578,7 +1578,7 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		 * permanent. It was not refused in both: the Rust intercepts that kind
 		 * one match arm before the refusal and starts a client with the
 		 * request its context carries, and this port had copied the arm that
-		 * is never reached (project.md 10.290). The sentence that made a gap
+		 * is never reached (doc/journal.md 10.290). The sentence that made a gap
 		 * look like a fixed point was in a test's own comment, which is where
 		 * nobody re-reads it.
 		 *
@@ -1860,7 +1860,7 @@ static char *first_line_of(const char *path)
  * reconcile runner took them as an argument and dropped them for several
  * waves, because `ncfg_hook_env_t` had four fixed members and nowhere to put a
  * name it did not know -- so a `roam` hook read `$NCFG_BSSID` and got nothing,
- * and nothing said so (project.md 10.291).
+ * and nothing said so (doc/journal.md 10.291).
  *
  * Driven through a real script, because that is the only thing that can say
  * what a child's environment held.
@@ -2539,7 +2539,7 @@ static void the_folding_rules(void)
 	 * second is the one the whole observation hangs off: `observed.backends`
 	 * is filled from this record and from nowhere else, so a start that
 	 * counted a restart and recorded no backend left six observation passes
-	 * with an empty list to walk (project.md 10.214).
+	 * with an empty list to walk (doc/journal.md 10.214).
 	 */
 	check(owned.backend_count == 1u && owned.backends[0].kind == (int)NCFG_BACKEND_DHCP4 &&
 	    owned.backends[0].interface && strcmp(owned.backends[0].interface, "eth0") == 0,

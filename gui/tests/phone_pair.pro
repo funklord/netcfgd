@@ -1,4 +1,4 @@
-# gui/tests/phone_pair.pro -- the phone's first screen (project.md 10.720).
+# gui/tests/phone_pair.pro -- the phone's first screen (doc/journal.md 10.720).
 #
 # Its sources are named, since `gui/src/phone/` is Android's and no other probe
 # takes it. qr.c is fuzznet's encoder, so what is read back is what a host draws.

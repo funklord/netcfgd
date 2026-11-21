@@ -14,7 +14,7 @@
  *   whole `network` block of its own, in a file a privileged daemon reads.
  *   Nothing crashed, every assertion about labels and credentials held, and
  *   the fuzzer ran happily past it for millions of executions
- *   (project.md 10.509).
+ *   (doc/journal.md 10.509).
  *
  * WHY A LINE RULE RATHER THAN A PARSE
  *   The honest check would be to compile the text with the daemon's own

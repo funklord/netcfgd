@@ -3,7 +3,7 @@
 #
 #     unshare -rn sh tests/live/firewall.sh
 #
-# project.md 10.592 slice 2. `ncfg_nft_build_replace` writes the three filter
+# doc/journal.md 10.592 slice 2. `ncfg_nft_build_replace` writes the three filter
 # chains and every rule expression layer one has, and the only honest proof of
 # those bytes is a kernel taking them and a reader that is not netcfgd listing
 # them back. A user and network namespace can hold an nftables table -- measured

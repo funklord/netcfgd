@@ -28,7 +28,7 @@ record changes the adapter only.
 0264 set the condition under which it would change, and the condition was met
 the day before this: `tests/live/nm.sh` is 0264's acceptance test, and the C
 shim passed it 124 of 124 with the whole guest tier at 214 of 214 and seven
-scripts of seven (project.md 10.503). 0264's own text and 0243's and 0229's and
+scripts of seven (doc/journal.md 10.503). 0264's own text and 0243's and 0229's and
 0107's all describe the Rust in the present tense and are left exactly as they
 are -- a record is not edited once accepted, and this is the one that overtakes
 them.

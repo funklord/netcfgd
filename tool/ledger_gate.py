@@ -115,7 +115,7 @@ def witnessed_tagged(tag):
 	second and one of each of the first -- so a filter for the wrapped form
 	alone sees one event kind where there are five. That is not hypothetical:
 	it is how the monitor fuzz target came to be seeded with one kind out of
-	five (project.md 10.514).
+	five (doc/journal.md 10.514).
 	"""
 	seen = set()
 	for line in (SCHEMA / "socket.json").read_text().splitlines():

@@ -496,7 +496,7 @@ ncfg_json_doc_t *ncfg_client_hello(ncfg_client_t *client, char *err, size_t err_
 }
 
 /*
- * **Over fuzznet first** (0311, project.md 10.689): the `status` procedure on
+ * **Over fuzznet first** (0311, doc/journal.md 10.689): the `status` procedure on
  * the fuzznet socket of the daemon whose control socket this is -- the run
  * directory is the same -- judged by its tiers and fuzznet's permit; the
  * control socket where fuzznet does not answer this caller. The document is
@@ -2490,7 +2490,7 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
 /*
  * The station list as an editor should show it: what the block says.
  *
- * **Not `stations` where the block names a host list** (project.md 10.591).
+ * **Not `stations` where the block names a host list** (doc/journal.md 10.591).
  * That field is the lists resolved, so a dialog filled from it and saved
  * writes the addresses a list stood for and drops the list -- the access point
  * then stops following it, and nothing says so. Where `lists` is present the

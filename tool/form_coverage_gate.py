@@ -8,7 +8,7 @@ WHAT THIS ENFORCES
   no field for, the client must name in `unmodelled` so the dialog can refuse;
   what the client never reads, it cannot name, and Save deletes it.
 
-  That is not hypothetical. project.md 10.606: the network and access point
+  That is not hypothetical. doc/journal.md 10.606: the network and access point
   dialogs had no such guard at all, and the interface reader's list had not
   gained `dhcp_server`, so a DHCP server, an access point's `width` and
   `steering`, and a network's pinned `bssid` and routes were each deleted by

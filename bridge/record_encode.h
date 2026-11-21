@@ -23,7 +23,7 @@
  *   source file out of `c/` for the registry.
  *
  * THE BODY IS THE VALUE AS THE LANGUAGE SPELLS IT
- *   Not a second encoding. project.md 10.355 settles the mirror: netcfgd's
+ *   Not a second encoding. doc/journal.md 10.355 settles the mirror: netcfgd's
  *   format is what records are rendered into and read back from, so a record
  *   whose body is the language's own text round-trips through `render.c` and
  *   `parse.c`, which are already disciplined against each other. A second
@@ -53,7 +53,7 @@
  *   unprivileged network-facing program that section 3 exists to keep small.
  *   The refusal belongs wherever a document field becomes a value -- which is
  *   not written yet, so the three keys stay unregistered and this refuses them
- *   as unregistered like any other. project.md 10.327.
+ *   as unregistered like any other. doc/journal.md 10.327.
  */
 #ifndef NCFG_RECORD_ENCODE_H
 #define NCFG_RECORD_ENCODE_H
@@ -99,7 +99,7 @@
  * A SUBJECT IS A CONFIGURED OBJECT, NOT A MACHINE
  *
  * **Settled by the copyright holder 2026-09-29: fold the instance into the
- * subject.** project.md 10.359 measured what the first version cost -- fuzznet
+ * subject.** doc/journal.md 10.359 measured what the first version cost -- fuzznet
  * addresses a cell by `(issuer, subject, kind)`, a kind names the KEY, and
  * with a host for a subject `wlan0`'s MTU and `eth0`'s MTU were one cell. The
  * second write won and every host in the estate agreed about the wrong answer.
@@ -215,7 +215,7 @@ typedef struct {
  * measured by sabotage, a trailing-NUL scheme passes every test in this
  * module, because only the label is length-taken and it is last. The prefix
  * stays correct if a root ever becomes length-taken or a component is added
- * after the label -- project.md 10.360 records that the tests cannot tell the
+ * after the label -- doc/journal.md 10.360 records that the tests cannot tell the
  * two schemes apart, so the claim is not stronger than that.
  *
  * `hash` is the caller's binding, as every other fuzznet seam takes it.

@@ -441,7 +441,7 @@ int main(void)
 	}
 
 	/*
-	 * The fingerprint on its own (project.md 10.672): what the daemon takes
+	 * The fingerprint on its own (doc/journal.md 10.672): what the daemon takes
 	 * before its first compile and again once its watch is open, so that an
 	 * edit landing between the two is compiled rather than lost.
 	 */

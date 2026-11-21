@@ -1,5 +1,5 @@
 #!/bin/sh
-# The C suite as big-endian 32-bit MIPS code, under qemu (project.md 10.742).
+# The C suite as big-endian 32-bit MIPS code, under qemu (doc/journal.md 10.742).
 #
 # Copies the tree's sources into the guest, builds them with Debian's MIPS
 # compiler and runs `make -C c test`, with `binfmt_misc` handing every MIPS

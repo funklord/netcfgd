@@ -1,5 +1,5 @@
 /*
- * phone_pair.cpp -- the phone's first screen, on real nodes (project.md 10.720).
+ * phone_pair.cpp -- the phone's first screen, on real nodes (doc/journal.md 10.720).
  *
  * WHY THIS EXISTS
  *   Everything a phone does hangs off this screen, and the camera is the one

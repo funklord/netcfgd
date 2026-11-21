@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-03
-Milestone: fuzznet integration (project.md 10.688 to 10.692), and 0311's fleet
+Milestone: fuzznet integration (doc/journal.md 10.688 to 10.692), and 0311's fleet
 Builds on: [0311](0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md), [0309](0309-one-protocol-the-local-socket-is-fuzznets-too.md), 0128's remote tiers
 
 ## The question

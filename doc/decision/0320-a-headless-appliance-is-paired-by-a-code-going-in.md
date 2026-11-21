@@ -5,7 +5,7 @@ into a close-by network estate", the refinement below; its network half is fuzzn
 and fuzznet takes the decision from the holder directly; the code-in primitive is built
 Date: 2026-11-13
 Milestone: M5 (routers), and the microcontroller trial after it
-Extends: [project.md 10.720 to 10.723](../../project.md) (pairing a phone)
+Extends: [doc/journal.md 10.720 to 10.723](../journal.md) (pairing a phone)
 
 ## Context
 

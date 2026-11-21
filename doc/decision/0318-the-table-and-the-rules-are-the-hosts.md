@@ -10,7 +10,7 @@ Extends: [0165](0165-the-file-netcfgd-owns-is-defended.md)'s list of host-wide c
 On OpenWrt 25.12, `/etc/init.d/firewall stop` runs `fw4 flush`, which deletes **every**
 nftables table on the machine -- netcfgd's `inet netcfgd` with the rest -- and `restart` is
 a stop and a start. The router guide tells a person to stop `firewall` once netcfgd's
-`firewall` block does its work. Measured in `hull-armsr` (project.md 10.820): after it, a
+`firewall` block does its work. Measured in `hull-armsr` (doc/journal.md 10.820): after it, a
 router's NAT, port forwards and `firewall` block were gone, `ncfg plan` listed
 `nftables.replace` as the repair, and no drift pass made it. The masquerade came back only
 when the next edit of the document forced an apply, minutes later.

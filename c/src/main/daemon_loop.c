@@ -652,7 +652,7 @@ static int look_at(ncfg_main_source_t *source, ncfg_main_ready_t ready,
 /*
  * Steps 4 to 6: the requests, the sweep, the pass, the answers. Every round
  * ends here, whichever loop waited for it -- this daemon's own `poll` below,
- * or a loop it runs inside (`ncfg_main_outside_tick`, project.md 10.676) --
+ * or a loop it runs inside (`ncfg_main_outside_tick`, doc/journal.md 10.676) --
  * so the order `loop_test.c` reads back is one order and not two.
  */
 static void round_end(const ncfg_main_run_t *run, ncfg_main_harvest_t *harvest,
@@ -953,7 +953,7 @@ int ncfg_main_serve(const ncfg_main_run_t *run, char *err, size_t err_size)
 }
 
 /* ------------------------------------------------------------------------ *
- * A loop this daemon runs inside (project.md 10.676)
+ * A loop this daemon runs inside (doc/journal.md 10.676)
  * ------------------------------------------------------------------------ */
 
 void ncfg_main_outside_begin(const ncfg_main_run_t *run, ncfg_main_outside_t *outside)

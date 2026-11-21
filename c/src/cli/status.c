@@ -425,7 +425,7 @@ static void print_report(const ncfg_observed_t *observed, const char *name)
  *
  * Said because one in InfiniBand mode has no Ethernet interface, and a
  * configuration naming one meets an interface that is not there with nothing
- * else on this screen saying why (project.md 10.586). A port running as
+ * else on this screen saying why (doc/journal.md 10.586). A port running as
  * Ethernet names the interface it became; one running as InfiniBand says so,
  * names its RDMA device, and gives the command that switches it -- devlink's,
  * the vendor-neutral one, which lasts until the driver reloads.
@@ -491,7 +491,7 @@ static const char *regdom_setter_text(const char *set_by)
 /*
  * The wireless regulatory domain the observation read.
  *
- * Decision 0296 is why it is said: project.md 10.585 measured that a country
+ * Decision 0296 is why it is said: doc/journal.md 10.585 measured that a country
  * set by hand strands a machine in that country's gaps and that the world
  * domain has no 6 GHz, and either way the network is simply not there. This
  * line is what makes that something to act on. The world domain gets the

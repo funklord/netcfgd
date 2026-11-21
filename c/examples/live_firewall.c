@@ -2,7 +2,7 @@
  * live_firewall.c -- send a configuration's firewall to the kernel, the way
  * the executor will, and nothing else.
  *
- * project.md 10.592 slice 2: the bytes `ncfg_nft_build_replace` writes are only
+ * doc/journal.md 10.592 slice 2: the bytes `ncfg_nft_build_replace` writes are only
  * proved by a kernel taking them, and only read back honestly by something
  * that is not netcfgd. So `tests/live/firewall.sh` runs this in an unprivileged
  * user and network namespace -- which can hold an nftables table, measured --

@@ -132,7 +132,7 @@
  * hold smaller than the drain overflows on every burst the drain exists to
  * handle. It was 16 against a drain of 64, so a supplicant losing an access
  * point (0240, which is why the drain is a drain) reliably lost the tail:
- * `tests/live/roam.sh` asks for thirty and counted twenty (project.md 10.296).
+ * `tests/live/roam.sh` asks for thirty and counted twenty (doc/journal.md 10.296).
  * Naming the relationship is what stops the two drifting apart again.
  */
 #define NCFG_MAIN_ROAMS_MAX NCFG_MAIN_EVENT_BURST
@@ -750,7 +750,7 @@ typedef struct {
 	 * `ncfg status` polled from a status bar, a chatty kernel -- ended every
 	 * round before its deadline, and the backstop never fired: measured, no
 	 * observation at all in fourteen seconds of `status` every half second
-	 * (project.md 10.678). That is the chattiness the tick is described above
+	 * (doc/journal.md 10.678). That is the chattiness the tick is described above
 	 * as surviving. With this set, a round that ends after the deadline has
 	 * passed ticks as well as reporting what woke it.
 	 */

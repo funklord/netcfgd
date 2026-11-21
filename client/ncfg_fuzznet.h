@@ -1,7 +1,7 @@
 /*
  * ncfg_fuzznet.h -- netcfgd's daemon over fuzznet's local socket: one line
  * asked, its %XX escape, the store's face, and the daemon's status a page at
- * a time put back together (project.md 10.664, 10.688, 10.689).
+ * a time put back together (doc/journal.md 10.664, 10.688, 10.689).
  *
  * WHY IT IS IN client/
  *   0311 puts everything internal on fuzznet's protocols, and three programs

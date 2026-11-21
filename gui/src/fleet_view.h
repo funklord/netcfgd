@@ -1,5 +1,5 @@
 /*
- * fleet_view.h -- every node of the estate at once (project.md 10.710).
+ * fleet_view.h -- every node of the estate at once (doc/journal.md 10.710).
  *
  * The node box moves the window to one node, so a person minding ten routers
  * had to visit ten to learn which one was down. This is the look across: one

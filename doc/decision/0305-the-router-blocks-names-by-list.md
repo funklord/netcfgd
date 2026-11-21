@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-31
-Milestone: the router side (project.md 10.640)
+Milestone: the router side (doc/journal.md 10.640)
 Amends: [0303](0303-the-lan-server-offers-what-a-router-offers.md)
 
 ## Context

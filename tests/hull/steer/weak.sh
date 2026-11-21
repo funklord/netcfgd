@@ -1,5 +1,5 @@
 #!/bin/sh
-# Advisory steering (project.md 10.595 item 2): a weak station is asked to
+# Advisory steering (doc/journal.md 10.595 item 2): a weak station is asked to
 # move, is not disconnected, and goes because where it is asked to go is
 # better.
 #

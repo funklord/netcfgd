@@ -612,7 +612,7 @@ static int run_pd_hook(const char *script, const char *env_path, const char *pre
 
 /*
  * The ISP's router from its advertisement, which is the uplink's only IPv6
- * default route (project.md 10.822). Run against a stand-in `ip` through the
+ * default route (doc/journal.md 10.822). Run against a stand-in `ip` through the
  * three things an advertisement does: name a router, name another, and take it
  * away -- and what is asserted is what the kernel would have been asked, which
  * a reading of the text could not tell from a script that never got there.

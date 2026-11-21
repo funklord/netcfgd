@@ -55,7 +55,7 @@ set -eu
 
 # The daemons and `tc` live in sbin, which an ordinary user's PATH lacks: run by
 # hand without this, the check below said a tool was missing that was there
-# (project.md 10.625). `make live` adds it too; this is for every other way in.
+# (doc/journal.md 10.625). `make live` adds it too; this is for every other way in.
 PATH="$PATH:/usr/sbin:/sbin"
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)

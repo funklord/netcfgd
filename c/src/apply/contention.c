@@ -20,7 +20,7 @@
  *   netifd keeps no state file: it answers over ubus, and section 1 constraint 3
  *   keeps a bus off the core's path. Its configuration says what it was told to
  *   hold, which is the claim. This reads UCI only to answer that, naming no
- *   setting and importing nothing, so 0019 stands (project.md 10.746).
+ *   setting and importing nothing, so 0019 stands (doc/journal.md 10.746).
  *
  * WHY A PROCESS NAME IS CONSULTED AT ALL
  *   `process.h` forbids finding a process by name, and is right to: an

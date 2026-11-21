@@ -47,7 +47,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-acl.XXXXXX")
 cleanup() {
 	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$fake" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that
@@ -619,7 +619,7 @@ check "and nothing is stopped or started on the strength of it" \
 
 # ------------------------------------------------- a host list converges too
 
-# project.md 10.591. The access point names a list rather than the stations,
+# doc/journal.md 10.591. The access point names a list rather than the stations,
 # and the stations are resolved from it at compile time -- so what is worth
 # checking here is the edit that touches **only the list**: the access point's
 # block is byte for byte the same, and the running hostapd must still be told.

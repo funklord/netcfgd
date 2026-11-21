@@ -1,5 +1,5 @@
 #!/bin/sh
-# 160 MHz on an access point netcfgd runs (project.md 10.599).
+# 160 MHz on an access point netcfgd runs (doc/journal.md 10.599).
 #
 # One `access_point` on 5 GHz channel 100 with `width = 160`, in the US
 # domain. Its block, 100 to 128, is all radar channels, so hostapd listens a

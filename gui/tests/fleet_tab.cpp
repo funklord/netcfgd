@@ -1,5 +1,5 @@
 /*
- * fleet_view.cpp -- every node of the estate at once (project.md 10.710).
+ * fleet_view.cpp -- every node of the estate at once (doc/journal.md 10.710).
  *
  * WHY THIS EXISTS
  *   The tab has one job a person relies on without checking: it says which

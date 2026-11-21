@@ -7,7 +7,7 @@
  *   seven thousand lines and thirty passes; this is four of them", and it went
  *   on saying it while most of the rest landed -- so a reader was told a pass
  *   was missing that had been there for waves, which is the same way the block
- *   list in `daemon_main.c` rotted (project.md 10.223).
+ *   list in `daemon_main.c` rotted (doc/journal.md 10.223).
  *
  *   `warn_unported` below and each pass's own held-block warning are the list,
  *   and they cannot go stale for the reason the next paragraph gives: a pass
@@ -779,7 +779,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * the first pass over `observed->backend_count` is where a NULL
 	 * observation landed -- a crash on the daemon's startup converge, which
 	 * had never been observed because the C suite always hands this function
-	 * something (project.md 10.296).
+	 * something (doc/journal.md 10.296).
 	 *
 	 * Refused rather than treated as an empty observation. The Rust cannot
 	 * reach this state at all -- its daemon holds an `Observed` by value and

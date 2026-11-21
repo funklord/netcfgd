@@ -1,5 +1,5 @@
 /*
- * mesh_peer.h -- a mesh point's peers, asked of nl80211 (project.md 10.686).
+ * mesh_peer.h -- a mesh point's peers, asked of nl80211 (doc/journal.md 10.686).
  *
  * WHY IT IS HERE
  *   netcfgd joins an 802.11s mesh through wpa_supplicant (10.588), and until

@@ -1,7 +1,7 @@
 /*
  * node_answer_test.c -- what the daemon answers an operator of its estate
  * over fuzznet's remote hop (`src/main/daemon_node.c`, decision 0311,
- * project.md 10.685), asked without a node: the line as fuzznet would hand it,
+ * doc/journal.md 10.685), asked without a node: the line as fuzznet would hand it,
  * the policy as this node's configuration would set it.
  *
  * What has to hold: the node's own `remote` block decides (each node is

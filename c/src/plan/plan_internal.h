@@ -370,7 +370,7 @@ void ncfg_plan_nat(ncfg_builder_t *builder);
 void ncfg_plan_upnp(ncfg_builder_t *builder);
 /*
  * The services netcfgd runs, against an `input` chain that drops by default
- * (project.md 10.620): a warning for each the operator's rules would starve.
+ * (doc/journal.md 10.620): a warning for each the operator's rules would starve.
  * `ncfg_plan_input_accepts` is the test, shared with the DHCP server's
  * warnings: whether some accept rule could let new traffic of `protocol` to
  * `port` (-1 for none) in on `iface` (NULL for any). True where the chain
@@ -653,7 +653,7 @@ void ncfg_plan_reported(ncfg_builder_t *builder, const ncfg_interface_t *interfa
  *
  * The teardown's half of the pass above, and **compared canonically**: a
  * report's text is whatever its writer printed and never went through the
- * compiler, while the kernel reports its own spelling. project.md 10.200 is
+ * compiler, while the kernel reports its own spelling. doc/journal.md 10.200 is
  * what comparing the two as text costs.
  */
 int ncfg_plan_reported_holds(const ncfg_observed_t *observed, const char *interface,

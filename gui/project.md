@@ -532,7 +532,7 @@ to decide, not this tree's.
 2. **`wire/` plus `agent/`, LAN first**, with the fuzzing standard from the
    first commit.
 3. **Android**, which by then is a kit and a transport choice rather than a port.
-   **It builds and starts** (project.md 10.714), pairs by a code it scans or is
+   **It builds and starts** (doc/journal.md 10.714), pairs by a code it scans or is
    typed (10.720, 10.722), and a change saved on it from the emulator was written
    into a paired host's configuration (10.728) -- not applied, that host being
    unprivileged; a remote apply is `c/tests/node_fleet.sh`'s.
@@ -554,7 +554,7 @@ to decide, not this tree's.
 - ~~How a phone finds a host on the LAN, and how pairing works the first time.~~
   **Answered by the holder, 2026-11-05:** on a phone, pairing by QR code is the
   first thing a person does, and no file or other app's auth data is part of it.
-  The code says where the host is. Built: [project.md 10.720 to 10.723](../project.md).
+  The code says where the host is. Built: [doc/journal.md 10.720 to 10.723](../doc/journal.md).
 - Whether `agent/` ships in netcfgd's own packages or as a separate one. It is a
   daemon that listens on a network, which is a thing this project has deliberately
   never had.

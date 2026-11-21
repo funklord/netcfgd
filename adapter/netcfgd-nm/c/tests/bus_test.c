@@ -1626,7 +1626,7 @@ int main(void)
 		/*
 		 * **Configuration a client wrote into the file by naming a key**, and
 		 * the two paths that let it. Found by fuzzing on 2026-10-21; the
-		 * reproduction and the reasoning are project.md 10.509.
+		 * reproduction and the reasoning are doc/journal.md 10.509.
 		 *
 		 * The shim renders a client's dictionary into netcfgd configuration
 		 * that a privileged daemon then compiles. So any client text reaching

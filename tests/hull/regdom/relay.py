@@ -6,7 +6,7 @@ with hwsim over generic netlink, which makes the kernel hand every frame its
 radios transmit to this process instead of delivering it, and it forwards
 each one to the relay in the other vm, which injects it into its own radios.
 
-It exists for one reason (project.md 10.585): the regulatory domain is one
+It exists for one reason (doc/journal.md 10.585): the regulatory domain is one
 setting per kernel, so an access point transmitting on a channel the
 station's domain forbids needs a kernel of its own.
 

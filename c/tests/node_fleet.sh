@@ -1,6 +1,6 @@
 #!/bin/sh
 # node_fleet.sh -- an operator of the estate asks a netcfgd node for its
-# status (decision 0311, project.md 10.691). Run by `make test` and `make
+# status (decision 0311, doc/journal.md 10.691). Run by `make test` and `make
 # node-fleet-test` against the program the build made; needs no privilege.
 #
 # Two hosts on localhost, as fuzznet's own `tool/live_ext.py` phase c sets

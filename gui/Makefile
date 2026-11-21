@@ -175,7 +175,7 @@ clean:
 
 # ------------------------------------------------------------------- Android
 #
-# The same client as an APK (project.md 10.714). Here and not in the root
+# The same client as an APK (doc/journal.md 10.714). Here and not in the root
 # Makefile, since this is where the window is built, and below `all` because an
 # `include` is where make first sees a target: above it, a bare `make` would be
 # the Android preflight.

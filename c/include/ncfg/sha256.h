@@ -4,7 +4,7 @@
  *
  * It lived in `host` beside the hook runner, its first caller, and `hooks.h`
  * declared it. The model needed it once fast roaming derived a mobility domain
- * from an SSID (project.md 10.587), and a model including a host header is the
+ * from an SSID (doc/journal.md 10.587), and a model including a host header is the
  * layering 0263 forbids -- `tool/module_order_gate.py` said so. A digest is a
  * primitive with no opinion about hooks, so it moved down rather than the
  * derivation moving up. `hooks.h` includes this, so its callers are unchanged.

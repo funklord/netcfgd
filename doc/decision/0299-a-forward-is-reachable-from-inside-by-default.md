@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-30
-Milestone: the router side, after port forwards (project.md 10.610)
+Milestone: the router side, after port forwards (doc/journal.md 10.610)
 Follows: [0298](0298-a-port-forward-is-translation-on-the-uplink.md)
 
 ## Context

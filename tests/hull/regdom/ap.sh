@@ -1,6 +1,6 @@
 #!/bin/sh
 # The access point's machine for the two-kernel half of the regdom rig
-# (project.md 10.585): DE in its own kernel, so channel 13 is allowed here
+# (doc/journal.md 10.585): DE in its own kernel, so channel 13 is allowed here
 # whatever the station's domain is, and hostapd configured as a real access
 # point would be -- `country_code` and all, which the one-kernel half could
 # not use because it sets the domain for every radio in the kernel.

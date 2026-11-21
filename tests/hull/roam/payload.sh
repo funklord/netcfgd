@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fast roaming between two access points netcfgd runs (project.md 10.587).
+# Fast roaming between two access points netcfgd runs (doc/journal.md 10.587).
 #
 # Two `access_point` blocks offer one SSID on two hwsim radios with
 # `fast_roaming = true`, as two machines would -- each derives its mobility

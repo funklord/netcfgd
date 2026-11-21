@@ -71,7 +71,7 @@ was given.
 ## Consequence
 
 No behaviour changes. The comments in `authorize.rs`, the doc on
-`Request::ConfigList`, `doc/socket-protocol.md` and project.md 10.64 say why
+`Request::ConfigList`, `doc/socket-protocol.md` and doc/journal.md 10.64 say why
 each tier is what it is in terms of netcfgd, and the two that appealed to file
 modes say what was wrong with doing so -- because the argument is what gets
 copied, and this one was copied once already.

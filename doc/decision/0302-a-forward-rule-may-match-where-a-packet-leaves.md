@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-30
-Milestone: the router side, after the input-chain warnings (project.md 10.623)
+Milestone: the router side, after the input-chain warnings (doc/journal.md 10.623)
 Amends: [0294](0294-layer-one-is-named-rules-in-netcfgds-own-table.md)
 
 ## Context

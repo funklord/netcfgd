@@ -95,7 +95,7 @@ static ncfg_record_rootref_t named_root(ncfg_record_root_t kind, const char *nam
 /*
  * **THE CASE THE DECISION WAS TAKEN FOR.** With a host for a subject, these
  * two were one cell: same kind, same subject, second write wins, every host in
- * the estate agreeing about the wrong answer. project.md 10.359 measured it
+ * the estate agreeing about the wrong answer. doc/journal.md 10.359 measured it
  * and 10.360 is the fix.
  */
 static void two_interfaces_no_longer_share_a_cell(void)
@@ -168,7 +168,7 @@ static void one_label_under_two_blocks_is_two_objects(void)
  * correct if a root ever becomes length-taken, or if a fourth component is
  * added after the label. **What is asserted below is that these inputs do not
  * collide, which is true and useful; the choice of scheme is not what makes it
- * true, and no test here shows otherwise.** project.md 10.329.
+ * true, and no test here shows otherwise.** doc/journal.md 10.329.
  */
 static void the_components_separate(void)
 {

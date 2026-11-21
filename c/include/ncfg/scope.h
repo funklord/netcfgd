@@ -2,7 +2,7 @@
  * scope.h -- how far a configuration key travels.
  *
  * WHY SCOPES AND NOT A BOOLEAN
- *   project.md 10.322. netcfgd serves a machine that will only ever be one
+ *   doc/journal.md 10.322. netcfgd serves a machine that will only ever be one
  *   machine and an estate of thousands, both in full, and the strength is in
  *   merging them without custom scripting. A local/network boolean cannot
  *   express the case that breaks it: **a fact about one host that the estate
@@ -21,14 +21,14 @@
  *   retyping onto `fzn_scope_t` would put fuzznet's include paths, and through
  *   `state/scope.h` its record and commitment headers, on the compiler and on
  *   everything that includes this file, where today only `src/node/` sees a
- *   fuzznet header (project.md 10.669). So the four values are asserted equal
+ *   fuzznet header (doc/journal.md 10.669). So the four values are asserted equal
  *   at compile time in `c/src/node/node.c`, in the program that ships, and in
  *   `bridge/record_encode.c`: a drift stops the build rather than replicating
  *   a key under the wrong scope. What is netcfgd's is the
  *   **table**, because which scope `prefix` belongs to is a fact about
  *   netcfgd's language that no other consumer can know.
  *
- *   Signalled to fuzznet rather than assumed -- project.md 10.323.
+ *   Signalled to fuzznet rather than assumed -- doc/journal.md 10.323.
  *
  * A SCOPE IS A CELL'S SUBJECT, WHICH IS WHY THE SET CAN GROW
  *   fuzznet's `state/` is `(issuer, subject, kind) -> value`. Estate-wide is a
@@ -120,7 +120,7 @@ const char *ncfg_block_name(int block);
  * supplicant inside a radio's `wifi`; `dns` is a key, a sub-block, and a key
  * inside that sub-block. A flat name collapses those, which is how the first
  * version of this table came to carry six entries that were not keys at all
- * and to give one number to two meanings (project.md 10.357).
+ * and to give one number to two meanings (doc/journal.md 10.357).
  *
  * So `key` is `"mtu"`, `"advertise.prefix"`, `"wifi.roam.signal"`. NULL asks
  * for the block's default.
@@ -197,7 +197,7 @@ ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block);
  * is not among them, which is what would have caught the first version of this
  * table registering `address`, `radvd` and `auto` -- one a key that does not
  * exist and two that are values. What it cannot check is the NESTING: it sees
- * the leaf, not which sub-block the leaf belongs to. project.md 10.356 and
+ * the leaf, not which sub-block the leaf belongs to. doc/journal.md 10.356 and
  * 10.326.
  */
 #define NCFG_KIND_NONE 0u

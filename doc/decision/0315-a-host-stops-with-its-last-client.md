@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-06
-Milestone: fuzznet integration (project.md 10.738)
+Milestone: fuzznet integration (doc/journal.md 10.738)
 Amends: [0314](0314-a-client-configures-this-machine-or-is-a-host-of-its-own.md), whose ten seconds after nobody holds the lock this removes
 
 ## Decision

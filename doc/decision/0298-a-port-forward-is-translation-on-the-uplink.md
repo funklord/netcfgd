@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-30
-Milestone: the router side, after reservations (project.md 10.609)
+Milestone: the router side, after reservations (doc/journal.md 10.609)
 Amends: [0294](0294-layer-one-is-named-rules-in-netcfgds-own-table.md)
 
 ## Context

@@ -1,6 +1,6 @@
 /*
  * plan_input_test.c -- what netcfgd runs, against what its own firewall drops
- * (project.md 10.620).
+ * (doc/journal.md 10.620).
  *
  * WHAT IS CHECKED
  *   An `input` chain that drops by default is said, once, where it accepts no

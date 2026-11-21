@@ -1,6 +1,6 @@
 /*
  * A page of fuzznet's `list record` reply, which is what any host of the
- * estate can put into this machine's store (project.md 10.674, 10.681).
+ * estate can put into this machine's store (doc/journal.md 10.674, 10.681).
  *
  * WHY THIS DESERVES A TARGET OF ITS OWN
  *   A record is a setting its own host signs about itself, and a station

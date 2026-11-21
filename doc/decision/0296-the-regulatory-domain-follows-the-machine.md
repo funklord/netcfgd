@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-27
-Milestone: found while re-reading project.md 10.173's last open half
+Milestone: found while re-reading doc/journal.md 10.173's last open half
 Follows: [0061](0061-a-key-that-compiles-does-something-or-says-it-does-not.md), [0263](0263-the-c-port.md)
 
 ## Context
@@ -47,7 +47,7 @@ one setting per kernel rather than per radio, and how far a running system
 can move it -- which sources cfg80211 accepts once a country is set, what a
 disconnect does, which drivers ignore it -- decides whether this is a daemon
 feature or needs a kernel patch. That is measured first, by the `regdom` hull
-rig (project.md 10.585), and the mechanism is designed from what it finds.
+rig (doc/journal.md 10.585), and the mechanism is designed from what it finds.
 
 Also open: whether the radio's `regdom` key survives as the override or
 becomes a machine-wide one, since a per-device key cannot express a

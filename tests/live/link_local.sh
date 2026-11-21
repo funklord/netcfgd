@@ -186,7 +186,7 @@ check "  and it carries both of the arguments netcfgd identifies it by" \
 # one hand, which `evidence.md` calls one witness rather than two. The flags
 # came from `avahi-autoipd`'s upstream documentation, because it is not
 # installed on the machine this was written on and has no local man page
-# (project.md 10.479). Only a real client can say they are right.
+# (doc/journal.md 10.479). Only a real client can say they are right.
 #
 # What makes that an acceptable gap rather than a hidden one is that being
 # wrong about a flag cannot be quiet: `ncfg_autoip_start` turns a non-zero exit

@@ -592,7 +592,7 @@ typedef struct {
 	 * bridge member (10.587 item 4). Asked of nl80211, and only of radios. */
 	int     wds;
 	/* A mesh point's peers with an established link (`mesh plink ESTAB`),
-	 * as MACs in the kernel's spelling (project.md 10.686). Asked of nl80211,
+	 * as MACs in the kernel's spelling (doc/journal.md 10.686). Asked of nl80211,
 	 * and only of mesh points; empty elsewhere and where it was not answered. */
 	char  **mesh_peers;
 	size_t  mesh_peer_count;
@@ -668,7 +668,7 @@ typedef struct {
 	 * `link.set_offloads` on every pass for ever, and one naming an
 	 * unsupported feature `on` did the same -- measured on this workstation,
 	 * where `rx-checksum` is active and unwanted on the loopback, on
-	 * `docker0` and on both WireGuard devices (project.md 10.216, 10.229).
+	 * `docker0` and on both WireGuard devices (doc/journal.md 10.216, 10.229).
 	 *
 	 * A subset of `offloads` only for the first direction; the second names
 	 * features that are *not* in it. Empty where every request took, which is
@@ -762,7 +762,7 @@ typedef struct {
  * family -- runs each port as Ethernet or as InfiniBand, and a port in
  * InfiniBand mode has no Ethernet interface at all: the configuration naming
  * one meets an interface that is not there, and nothing in rtnetlink says why.
- * This is where the observation says it (`devlink.h`, project.md 10.586).
+ * This is where the observation says it (`devlink.h`, doc/journal.md 10.586).
  *
  * Physical ports only. A CPU port, a switch's internal ones and a virtual
  * function's representor are devlink ports too, and none of them is a socket
@@ -1514,7 +1514,7 @@ typedef struct {
 	 * a drift report needs to know which mechanism produced it (0002). */
 	int   address_proto_supported;
 	/* The firewall netcfgd's table holds, read back rule by rule (0295 A,
-	 * project.md 10.592). NULL where the table has no filter chain, which
+	 * doc/journal.md 10.592). NULL where the table has no filter chain, which
 	 * is every machine whose document has no `firewall`. */
 	struct ncfg_observed_firewall *firewall;
 	/* netcfgd's flowtable, read back (0319): NULL where the table has none,
@@ -1653,7 +1653,7 @@ void ncfg_observed_forwards_free(ncfg_observed_forward_t *forwards, size_t count
  * it in the DNS backend, so `src/plan/host_wide.c` included a backend header
  * to reach it and got the renderers and the deliverer with it. That is the
  * arrangement `src/model/device.c` records the cost of, met a second time
- * (project.md 10.286, 10.287).
+ * (doc/journal.md 10.286, 10.287).
  */
 
 /* The scope that is not an interface. `resolvconf` keys on an interface name

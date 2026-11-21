@@ -1,5 +1,5 @@
 /*
- * pair_view.h -- the first thing a phone shows (project.md 10.720).
+ * pair_view.h -- the first thing a phone shows (doc/journal.md 10.720).
  *
  * The holder, 2026-11-05: on a phone, pairing by QR code is the first thing a
  * person does, because it is the main platform for this use, and files do not

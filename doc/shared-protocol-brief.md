@@ -467,5 +467,5 @@ where `fzn_scope_t` is available. The submodule is pinned at `97719d9`,
 2026-09-28 -- **five days before `state/scope.h` landed** -- so the real type
 is not in this tree's build and nothing says so. The remedy is a reviewable
 pin bump and then the retyping, measured against fuzznet's section 728, which
-is a breaking change to the setting object. `project.md` 10.567 has the
+is a breaking change to the setting object. `doc/journal.md` 10.567 has the
 measurement and the cost.

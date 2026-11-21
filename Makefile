@@ -1965,7 +1965,7 @@ footprint:
 # nothing resident. So the limit is the observed peak plus a band wider than
 # the observed spread (3064 + 264, the spread being 252), and still a ratchet.
 #
-# **Re-derived 2026-11-04, for the same reason** (project.md 10.706). Ten
+# **Re-derived 2026-11-04, for the same reason** (doc/journal.md 10.706). Ten
 # back-to-back `make rss` runs at load 4 read 3124 3124 3184 3204 3248 3248
 # 3360 3360 3376 3380, and the day's `make check` runs 3168 to 3352, so four
 # runs in ten failed a gate nothing had changed under. `RssAnon` read 396 to
@@ -2041,7 +2041,7 @@ rss-node:
 		RSS_SOCKET=fuzznet.sock RSS_LIMIT_KB=$(RSS_NODE_LIMIT_KB)
 
 # **What the kernel must promise before main, and it is not what `rss` reads**
-# (project.md 10.740). An untouched table costs no resident memory, so `rss`
+# (doc/journal.md 10.740). An untouched table costs no resident memory, so `rss`
 # passed at 173 MB of bss -- and on a machine smaller than that the kernel
 # refuses the mapping at exec, and the daemon and `ncfg` both segfault. `size`
 # cannot see it either, measuring what is installed. 32 MiB is fuzznet's own
@@ -2468,7 +2468,7 @@ hull-hwsim:
 	exit $$rc
 
 # What cfg80211 lets a running machine do with its regulatory domain, for
-# 0296 (project.md 10.585). It measures the kernel, not netcfgd, so nothing is
+# 0296 (doc/journal.md 10.585). It measures the kernel, not netcfgd, so nothing is
 # built first. It fails only when one of its own instruments did not work --
 # no database, no access point, a country nobody heard -- and otherwise prints
 # what the kernel did, whatever that was.
@@ -2847,7 +2847,7 @@ hull-upnp:
 # starting, respawning, reloading and stopping a statically linked daemon,
 # and an edit made as procd respawns it applied. The guest runs this host's
 # kernel with none of its modules, so it is handed the host's dummy module.
-# apk-tools 3, for the OpenWrt 25.12 package (project.md 10.813). OpenWrt's own
+# apk-tools 3, for the OpenWrt 25.12 package (doc/journal.md 10.813). OpenWrt's own
 # apk is built without `mkpkg`, so this builds Alpine's release from source, as
 # the holder agreed 2026-11-12: pinned by version and by the hash of its tarball,
 # fetched once into $(APK_TOOLS_DIR) and saying so, and built out of tree with
@@ -3019,7 +3019,7 @@ hull-mips:
 	sed 's/^/mips: /' tests/hull/mips/verdict/mips; \
 	grep -q '^VERDICT ok' tests/hull/mips/verdict/mips
 
-# netcfgd across a real suspend and resume (project.md 10.790): a laptop's lid,
+# netcfgd across a real suspend and resume (doc/journal.md 10.790): a laptop's lid,
 # with a station joined and leased, a confirm window open and the rfkill watcher
 # listening. **Needs a hull whose vm guest wakes on its RTC alarm with its
 # devices intact** -- 50071a9 does not (10.773), and the holder has said hull
@@ -3256,7 +3256,7 @@ hull-clean:
 #   them across 24 files, and only 2 of those files drive a binary at all; the
 #   rest call Rust functions directly. These scripts drive a binary, and they
 #   are therefore the whole of the Rust's suite that the C can be put under
-#   (project.md 10.293).
+#   (doc/journal.md 10.293).
 #
 #   **The default is the C build and this block said the opposite.** Counted
 #   2026-10-10 across the 83 scripts: 69 take `$${NCFG_LIVE_BUILD:-$$repo/c}`,
@@ -3346,13 +3346,13 @@ live:
 	@# bind-mounts a sentinel over `/etc/resolv.conf` before it runs anything
 	@# and checks the sentinel afterwards. A test for the defect that sends a
 	@# delivery to the wrong place must not be able to cause it -- which is not
-	@# hypothetical here (project.md 10.277).
+	@# hypothetical here (doc/journal.md 10.277).
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rmn sh -c "NCFG_LIVE=1 sh tests/live/c_dns_delivery.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
 	@# Layer one's firewall, written by the C probe and read back by nft
-	@# (project.md 10.592). The probe is an example, so it is built here.
+	@# (doc/journal.md 10.592). The probe is an example, so it is built here.
 	@$(MAKE) --no-print-directory -C c examples
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/firewall.sh"
 	@# Port forwards (0298): applied by ncfg, read back, and a connection from
@@ -3407,7 +3407,7 @@ live:
 	@# Write a file, touch nothing else, does the machine change. Thirty
 	@# scripts here write configuration while a daemon runs and every one of
 	@# them then calls `ncfg apply` or drives the daemon by hand, so the one
-	@# question project.md 10.338 asks had no witness at all. It calls `apply`
+	@# question doc/journal.md 10.338 asks had no witness at all. It calls `apply`
 	@# nowhere, which is the point of it.
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
 	@# **The same eleven questions of the other config-watching mechanism.**
@@ -3419,7 +3419,7 @@ live:
 	@#
 	@# That gap is specific to this machine's history rather than theoretical:
 	@# two real defects were found only because it had run out of inotify
-	@# instances and the daemon was therefore polling (project.md 10.477), and
+	@# instances and the daemon was therefore polling (doc/journal.md 10.477), and
 	@# the fixed sleeps in that script are 6 seconds for the same reason. With
 	@# the instances back, nothing exercised the slower path at all.
 	@#

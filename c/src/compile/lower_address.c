@@ -703,7 +703,7 @@ int ncfg_lower_route(ncfg_lower_ctx_t *ctx, const ncfg_word_t *entry, ncfg_route
 				goto refused;
 			}
 			/* **Once each.** A second `via` replaced the first and leaked it,
-			 * found by fuzzing `config_parse` (project.md 10.621); and a route
+			 * found by fuzzing `config_parse` (doc/journal.md 10.621); and a route
 			 * with two gateways is a mistake to say, not a choice to make
 			 * silently by taking the last. */
 			if ((word[0] == 'v' && route.via) || (word[0] == 's' && route.src)) {

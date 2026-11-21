@@ -152,7 +152,7 @@ void ncfg_reconcile_hook_run(void *context, const ncfg_hook_ref_t *hook,
 	 * them is `NCFG_ACTION`, `NCFG_BSSID` and `NCFG_URL` -- three names
 	 * section 5.2 fixes as a contract, so a `roam` hook written against
 	 * `$NCFG_BSSID` was told nothing and nothing said so. `ncfg_hook_env_t`
-	 * carries a general pair now (project.md 10.291).
+	 * carries a general pair now (doc/journal.md 10.291).
 	 *
 	 * Copied rather than cast: the env is the caller's and `const`, and this
 	 * is the one place the phase's own variable is joined to it.
@@ -372,7 +372,7 @@ static void resolve_window(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *repo
  * board enablement. So while nothing published it, a modem device that had
  * never advanced had no file at all and the hook had nothing to read -- and a
  * device that left the document kept a stale one, read as current by a hook
- * with no other way of knowing (project.md 10.238).
+ * with no other way of knowing (doc/journal.md 10.238).
  *
  * `ncfg_sims_advance` publishes the one device it moves, and its own comment
  * relies on this to republish from the index afterwards: without it a `/run`
@@ -407,7 +407,7 @@ static void publish_sims(ncfg_reconcile_t *loop)
  * that was the whole of the telling.** A reload that cannot compile leaves the
  * previous document standing and the machine exactly as it was -- so from
  * outside it is indistinguishable from a write nobody noticed, which is
- * project.md 10.338's shape and was measured in `config_arrives.sh`: a
+ * doc/journal.md 10.338's shape and was measured in `config_arrives.sh`: a
  * deliberately broken drop-in, a machine that correctly did not move, and a
  * journal with nothing in it at all.
  *
@@ -1559,7 +1559,7 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	 * apply -- and the planner walked it. A daemon started without
 	 * `--no-apply-on-start` crashed on its first converge; with the flag it
 	 * never came here, which is why the scripts that pass it were the ones
-	 * that worked (project.md 10.296).
+	 * that worked (doc/journal.md 10.296).
 	 *
 	 * `reobserve` logs its own failure and leaves the previous observation
 	 * standing, so this is the same call the ordinary pass makes and needs no

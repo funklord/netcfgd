@@ -18,7 +18,7 @@
  *     * that giving a contended radio back **asks who is contending before it
  *       opens an executor** -- the Rust does it the other way round, so every
  *       laptop with wifi takes the global apply lock every five seconds to
- *       find out there is nothing to do (project.md 10.200). The proof is a
+ *       find out there is nothing to do (doc/journal.md 10.200). The proof is a
  *       measurement rather than a reading: this test holds the apply lock, and
  *       a pass that tried to open an executor could not get it;
  *     * that an event is written the way `proto.h` reads one, decoded back by
@@ -1910,7 +1910,7 @@ static void an_unmanaged_tunnel_is_not_netcfgds_to_start(void)
  * socket -- as soon as netcfgd is running any backend at all, and only then
  * asks who is contending; on a laptop with wifi the answer is "nobody", five
  * seconds later it is "nobody" again, and in between an operator's `ncfg
- * apply` is waiting on that lock (0184, project.md 10.200).
+ * apply` is waiting on that lock (0184, doc/journal.md 10.200).
  *
  * So the check is not that the code reads a certain way. This test **holds the
  * apply lock itself** and gives the world a patience of 50ms: a pass that

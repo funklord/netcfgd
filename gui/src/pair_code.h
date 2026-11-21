@@ -1,5 +1,5 @@
 /*
- * pair_code.h -- the code `ncfg pair` draws, as a picture (project.md 10.724).
+ * pair_code.h -- the code `ncfg pair` draws, as a picture (doc/journal.md 10.724).
  *
  * The desktop's window shows the code by reading what `ncfg pair` printed, half
  * blocks and all: `ncfg` is what can reach the node's verbs, as root, and this way

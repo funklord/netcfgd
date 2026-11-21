@@ -24,7 +24,7 @@
  *   the device list accordingly -- so a clearing device stayed in the list,
  *   read as wanted, and was never deleted. `on_unmanage = "clear"` withdrew the
  *   addresses and routes and left the device standing, which is the one thing
- *   it exists to take away. project.md 10.16 is that defect; this port is
+ *   it exists to take away. doc/journal.md 10.16 is that defect; this port is
  *   written with it already closed.
  *
  * WHY THE FORWARD PASSES MUST NOT SEE THE FILTER

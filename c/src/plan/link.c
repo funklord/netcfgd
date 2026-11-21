@@ -207,7 +207,7 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 		return;
 	}
 	/*
-	 * **Its parent first** (project.md 10.839). Rule 1 of the device walk is
+	 * **Its parent first** (doc/journal.md 10.839). Rule 1 of the device walk is
 	 * that every link is created before anything references it, and the walk
 	 * runs in name order -- so a VLAN `guest10` on a dummy `lan0` was created
 	 * first, failed "lan0 is not an interface this kernel knows", and stopped
@@ -548,7 +548,7 @@ uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name)
  * raised, followed down the chain. The kernel will not bring a VLAN, a VXLAN,
  * a macvlan, a tunnel or a PPPoE session up over a parent that is down
  * (`ENETDOWN`), so a parent with no block of its own was left down and the
- * device on it failed `link.up` on every pass (project.md 10.835) -- and a
+ * device on it failed `link.up` on every pass (doc/journal.md 10.835) -- and a
  * guest bridge's VLAN, itself only a port, left its parent down the same way
  * (10.839). A mesh point's parent is a radio, which the radio's own pass
  * brings up.

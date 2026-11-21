@@ -25,7 +25,7 @@
  *     one line, at the end -- and the list of removals is written from what
  *     `unlink` actually returned. A dry run's document has `would_remove` and
  *     no `removed` member at all; a run that removed has `removed` and no
- *     `would_remove`. project.md section 10.206 is why that is asserted as an
+ *     `would_remove`. doc/journal.md section 10.206 is why that is asserted as an
  *     absence rather than only as a presence: the Rust prints `removed` over the
  *     whole list before the loop that removes anything, and a document
  *     claiming a removal is worse than a sentence doing it because a script

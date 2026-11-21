@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-02
-Milestone: fuzznet integration (project.md 10.668)
+Milestone: fuzznet integration (doc/journal.md 10.668)
 Supersedes: `doc/socket-protocol.md` section 3.1, and answers 0308's open question
 
 ## The holder's words

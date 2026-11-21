@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-02
-Milestone: the desktop client (project.md 10.655)
+Milestone: the desktop client (doc/journal.md 10.655)
 Amends: [0227](0227-a-scan-had-two-words-for-three-things.md)
 
 ## Context

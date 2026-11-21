@@ -928,7 +928,7 @@ typedef struct {
  * One schedule piece, as nft writes `meta hour "08:00"-"09:30" meta day 1`:
  * the hour loaded, swapped to network order -- `meta hour` is a host-order
  * register and `range` compares bytes -- and ranged; then the day compared.
- * Measured against nft 1.1.3's own encoding (project.md 10.663).
+ * Measured against nft 1.1.3's own encoding (doc/journal.md 10.663).
  */
 static void put_schedule(ncfg_buf_t *list, const ncfg_schedule_piece_t *piece)
 {

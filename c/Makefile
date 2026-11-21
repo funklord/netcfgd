@@ -92,7 +92,7 @@ SHARED_OBJS = $(notdir $(SHARED_SRCS:.c=.o))
 # symbols, and anything linking the pair got a duplicate-symbol error rather
 # than one copy. `code-style.md` calls that a landmine that only detonates
 # when one link pulls both sides, and fmake building the whole tree as one
-# target set is that link arriving (project.md 10.421).
+# target set is that link arriving (doc/journal.md 10.421).
 #
 # Nothing outside this directory links `libncfg.a`, so the fix is here and is
 # cheap: the archive holds what this directory compiled, and the shared object
@@ -130,13 +130,13 @@ CFLAGS  ?= -Os
 CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client -MMD -MP
 # A 32-bit glibc's `off_t` and `time_t` otherwise stay 32 bits: `readdir` can fail
 # on ext4's offsets, and a lease stops making sense in 2038. Nothing on a 64-bit
-# machine or on musl, where they are 64 bits already (project.md 10.741). In
+# machine or on musl, where they are 64 bits already (doc/journal.md 10.741). In
 # `FUZZNET_CFLAGS` too, since the two share structures holding them.
 LARGE_TYPES = -D_FILE_OFFSET_BITS=64 -D_TIME_BITS=64
 CFLAGS  += $(LARGE_TYPES)
 
 # **Each function and datum in a section of its own, and the ones nothing
-# reaches dropped at link** (fuzznet sec 860, project.md 10.702). fuzznet links
+# reaches dropped at link** (fuzznet sec 860, doc/journal.md 10.702). fuzznet links
 # its daemons this way, and asked that a program linking its loop do the same
 # to get the same effect: most of what the node module pulls in serves verbs
 # netcfgd never calls. Appended rather than defaulted, as `-std=c11` is: it is
@@ -241,14 +241,14 @@ FUZZNET_LIB   = fuzznet.a
 FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 		-DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
 # **The consumer services off: `FZN_STICKERS`, `FZN_CATALOG`, `FZN_NOTES`,
-# `FZN_GROUPS` all 0** (fuzznet secs 856, 860; project.md 10.702). netcfgd uses
+# `FZN_GROUPS` all 0** (fuzznet secs 856, 860; doc/journal.md 10.702). netcfgd uses
 # none of them, and 0311 took the reduction when it came. Each removes that
 # service's verbs and the node's own use of its data, while the estate's data
 # stays carried and relayed, so a fuzzypickles host in the same estate loses
 # nothing through this node. The flags reach fuzznet's `.c` files only and no
 # header, so `src/node/` compiled with this tree's flags still agrees with it.
 #
-# **`FZN_LOG_PACK=0`: no zstd** (project.md 10.684). fuzznet packs its closed
+# **`FZN_LOG_PACK=0`: no zstd** (doc/journal.md 10.684). fuzznet packs its closed
 # log segments with libzstd wherever its probe finds it, and with the node loop
 # always linked (0311) that made netcfgd link `libzstd.so.1` -- a mandatory
 # library constraint 3 does not allow, found by `make linkage`. Packing logs is
@@ -258,7 +258,7 @@ FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 # **Without `-g`, unless this build is a debug one.** fuzznet's own default is
 # `-Os -g`, and its debug sections rode into the daemon: the first link of the
 # node grew the installed program by 366 KB, of which about 21 KB was code
-# (project.md 10.669). Given through the environment because fuzznet sets
+# (doc/journal.md 10.669). Given through the environment because fuzznet sets
 # `CFLAGS ?=` and then appends its warnings and `-std=c11`, which a
 # command-line `CFLAGS` would discard.
 #
@@ -278,7 +278,7 @@ FUZZNET_SYSLIBS = $(shell nm $(FUZZNET_LIB) 2>/dev/null | grep -q ' U ZSTD_' && 
 # nothing else in this tree may reach a fuzznet header (`ncfg/node.h` names no
 # fuzznet type), and the flags stay out of every other object.
 NODE_CFLAGS = -I$(FUZZNET) -I$(FUZZNET)/wire/generated $(FUZZNET_DEFS) $(FUZZNET_BOUNDS)
-# **fuzznet's node loop is always linked** (decision 0311, project.md 10.684):
+# **fuzznet's node loop is always linked** (decision 0311, doc/journal.md 10.684):
 # fuzznet is netcfgd's store and its protocols, not an option. It was a build
 # option, `NODE_SERVE=1`, while what it cost was open: the installed program
 # grows by about 980 KB, most of it the consumer services `fzn_daemon_main`
@@ -350,7 +350,7 @@ $(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
 	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The program linked statically, for a system whose libc is not this one --
-# OpenWrt's is musl (`make hull-openwrt`, project.md 10.672). Not in `all`: it
+# OpenWrt's is musl (`make hull-openwrt`, doc/journal.md 10.672). Not in `all`: it
 # is a test artifact until a package wants it. glibc warns that the account
 # and address lookups need its NSS modules at run time; without them they
 # answer nothing, which every caller here already takes as "none".
@@ -424,7 +424,7 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
-# netcfgd in fuzznet's loop (project.md 10.676 to 10.684), against the program
+# netcfgd in fuzznet's loop (doc/journal.md 10.676 to 10.684), against the program
 # this build made: `tests/node_serve.sh`, run by `test` as well. Its own target
 # too, for running it alone.
 node-serve-test: $(PROGRAM) $(PROGRAM_LINK)

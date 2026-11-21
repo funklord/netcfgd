@@ -1555,7 +1555,7 @@ static int start(const options_t *options)
 	 * below and the watch opened much further down are not one moment: an
 	 * edit landing between them raises no event, and before this it was
 	 * applied by nobody until the next edit. Measured under procd in an
-	 * OpenWrt vm (project.md 10.672): a config edited as procd respawned the
+	 * OpenWrt vm (doc/journal.md 10.672): a config edited as procd respawned the
 	 * daemon was never applied. The fingerprint is taken again once the watch
 	 * is open, and a difference is a second compile. The probe writes into
 	 * the directory, so it runs before the first fingerprint and not between
@@ -1946,7 +1946,7 @@ static int start(const options_t *options)
 	run.refresh = node_again_refresh;
 	run.refresh_context = &again;
 	/* Kept across rounds, so a daemon asked something every second still
-	 * ticks (`ncfg_main_run_t::next_tick`, project.md 10.678). */
+	 * ticks (`ncfg_main_run_t::next_tick`, doc/journal.md 10.678). */
 	run.next_tick = &next_tick;
 	err[0] = '\0';
 	if (!serve_node(node, options, &run, loop.seen, &policy, &desk, where.run) &&

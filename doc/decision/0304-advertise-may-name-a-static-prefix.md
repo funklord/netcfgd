@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-31
-Milestone: the router side, with DHCPv6 (project.md 10.636)
+Milestone: the router side, with DHCPv6 (doc/journal.md 10.636)
 Amends: [0009](0009-router-side-addressing.md)
 
 ## Context

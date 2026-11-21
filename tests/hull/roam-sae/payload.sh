@@ -1,6 +1,6 @@
 #!/bin/sh
 # WPA3 fast roaming (FT-SAE) between two access points netcfgd runs, each on
-# its own "machine" (project.md 10.587).
+# its own "machine" (doc/journal.md 10.587).
 #
 # Access point A is wlan0 in the root namespace, in bridge brA; access point B
 # is wlan1 in namespace `b`, in bridge brB, run by a second netcfgd with a run

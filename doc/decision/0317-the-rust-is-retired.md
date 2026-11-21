@@ -88,7 +88,7 @@ what it compared.
 ## What is not decided here
 
 **The no-node daemon's `netcfgd.sock`.** 0309 left it to a daemon with no
-node, and project.md 10.738 records that what such a daemon should do -- stop,
+node, and doc/journal.md 10.738 records that what such a daemon should do -- stop,
 or keep the socket -- is the holder's. The Rust's comparisons were one of its
 callers and are gone; the live scripts and the unit tests still wait on it,
 and the decision is unchanged by this one.

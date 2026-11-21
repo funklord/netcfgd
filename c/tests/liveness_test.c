@@ -362,7 +362,7 @@ static void a_client_netcfgd_gave_no_pid_file_is_left_alone(void)
  * was *told* -- which is there before the first exchange has installed
  * anything. The second had no producer at all until this pass read it, so a
  * client started with the wrong metric was left alone until it managed to
- * install a route with the wrong metric (project.md 10.237).
+ * install a route with the wrong metric (doc/journal.md 10.237).
  *
  * The client here is a dhcpcd one, which is deliberate twice over: it is the
  * only client netcfgd gives a metric to, and it is the one this pass cannot

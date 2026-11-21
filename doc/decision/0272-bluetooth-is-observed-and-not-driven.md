@@ -4,7 +4,7 @@ Status: accepted
 Date: 2026-10-15
 Milestone: M10; the port's remaining scope
 
-Decided by the copyright holder, from the costing in project.md 10.484. Settles
+Decided by the copyright holder, from the costing in doc/journal.md 10.484. Settles
 scope rather than deferring it: the `bluetooth` block stays in the language,
 netcfgd keeps observing adapters, and nothing pairs a device, connects one, or
 brings a `pan` link up.

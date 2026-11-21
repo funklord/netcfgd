@@ -1,6 +1,6 @@
 #!/bin/sh
 # node_remote.sh -- a stock netcfgd has fuzznet's verbs, and listens on the
-# network only where the config opens `global { remote }` (project.md 10.721).
+# network only where the config opens `global { remote }` (doc/journal.md 10.721).
 # Run by `make test`. Each daemon runs in a network namespace of its own, so the
 # fixed port cannot meet another run's; where namespaces are not allowed the
 # script says so and fails, since a port not looked at is no pass.

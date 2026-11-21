@@ -375,7 +375,7 @@ static int is_writable_label(const char *id)
  *
  * Found by fuzzing, 2026-10-21: a `dns-search` entry went into
  * `search = ["..."]` unchecked, and a client could close the list, close the
- * block and open a `network` block of its own. project.md 10.509 has the
+ * block and open a `network` block of its own. doc/journal.md 10.509 has the
  * reproduction.
  */
 /* The longest group or key name the note writes before it says `...`. NM's own
@@ -526,7 +526,7 @@ static int says_nothing(DBusMessageIter *value)
  * protect a comment. What matters is that the comment stays a comment: a
  * newline in a key name ended the line and let a client write a `network`
  * block of its own into the file, which is the defect fuzzing found
- * (project.md 10.509).
+ * (doc/journal.md 10.509).
  *
  * Anything outside printable ASCII becomes `?`, so the reader sees that the
  * name had bytes in it rather than seeing a name that was never sent. The

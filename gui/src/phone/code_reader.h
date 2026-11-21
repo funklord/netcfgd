@@ -1,5 +1,5 @@
 /*
- * code_reader.h -- a pairing code read off a camera (project.md 10.720).
+ * code_reader.h -- a pairing code read off a camera (doc/journal.md 10.720).
  *
  * On a phone the first thing a person does is point it at a host's screen, so
  * this is the app's front door. Qt Multimedia gives the frames and quirc reads

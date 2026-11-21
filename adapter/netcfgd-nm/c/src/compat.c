@@ -62,7 +62,7 @@ static int say_claimed_version(DBusMessageIter *into, void *object, char *err, s
  * `this interface has no such method in this build` -- worse than being told
  * no, because a refusal a client was promised would not happen is one it has
  * no branch for. Decided by the copyright holder 2026-10-17, from the finding
- * in project.md 10.486.
+ * in doc/journal.md 10.486.
  *
  * It goes back in the same commit as the method, not before it. The Rust shim
  * listed it because it implemented the method, and the two lists differing was

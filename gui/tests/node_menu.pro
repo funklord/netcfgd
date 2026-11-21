@@ -1,4 +1,4 @@
-# gui/tests/node_menu.pro -- the window's node box (project.md 10.699).
+# gui/tests/node_menu.pro -- the window's node box (doc/journal.md 10.699).
 #
 # The whole window, so every source of it, and none of `main.cpp`: taken with
 # `files()` rather than listed, so the probe builds what the window is made of

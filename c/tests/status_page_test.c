@@ -1,6 +1,6 @@
 /*
  * status_page_test.c -- a status page read, and pages joined
- * (`client/ncfg_fuzznet.c`, project.md 10.689), against a fake source.
+ * (`client/ncfg_fuzznet.c`, doc/journal.md 10.689), against a fake source.
  *
  * WHAT HAS TO HOLD
  *   A page is read only in its exact shape; a steady status joins byte for

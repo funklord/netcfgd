@@ -49,7 +49,7 @@ _Static_assert(NCFG_FUZZNET_PRODUCT == FZN_PRODUCT_NETCFGD, "netcfgd's product i
 
 /*
  * **netcfgd's scope copy held to fuzznet's, in the daemon's own build** (0308,
- * project.md 10.669). The language's table keeps `ncfg_scope_t` so that the
+ * doc/journal.md 10.669). The language's table keeps `ncfg_scope_t` so that the
  * compiler -- and everything that includes `ncfg/scope.h` -- needs no fuzznet
  * header; this module is the one place both are visible in the program that
  * ships, so it is where the build refuses a drift. `bridge/record_encode.c`
@@ -381,7 +381,7 @@ void ncfg_node_close(ncfg_node_t *node)
 }
 
 /* ------------------------------------------------------------------------ *
- * Serving the store, inside fuzznet's loop (project.md 10.676)
+ * Serving the store, inside fuzznet's loop (doc/journal.md 10.676)
  * ------------------------------------------------------------------------ */
 
 /*

@@ -1844,7 +1844,7 @@ static void the_sentence_that_stopped_being_true_is_gone(void)
 	 * the compiler had been recording positions for waves. The sentence and
 	 * the argument are asserted together on purpose: deleting the comment
 	 * without passing the table would leave the command exactly as wrong and
-	 * this check green (project.md 10.239).
+	 * this check green (doc/journal.md 10.239).
 	 */
 	check(strstr(source, "does not port `compile_with_provenance`") == NULL,
 	    "no arm still says the compiler records no positions, which it does");
@@ -2303,7 +2303,7 @@ static const char *answered(const char *answer, char **argv, int argc, int *code
  * printed is the fake's, which a local apply could not have produced -- and a
  * window asked for over a journal that changed nothing says it covers nothing
  * rather than "window open": `commit.arm` alone is the change the watcher
- * applied before the request arrived (project.md 10.41.3).
+ * applied before the request arrived (doc/journal.md 10.41.3).
  */
 static void an_apply_is_the_daemon_s_where_there_is_one(void)
 {

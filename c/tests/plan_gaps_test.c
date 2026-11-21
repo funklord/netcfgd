@@ -456,7 +456,7 @@ static void clearing_removes_what_netcfgd_owns_and_then_the_device(void)
 	check(plan && has_name(plan, "addr.del"),
 	    "`on_unmanage = \"clear\"` withdraws an address carrying netcfgd's tag");
 	/*
-	 * **And the device itself.** This is project.md 10.16: the Rust filtered
+	 * **And the device itself.** This is doc/journal.md 10.16: the Rust filtered
 	 * only the interface list, which was complete while a link's existence was
 	 * stated there. 0155 moved that onto the device, `teardown_links` reads
 	 * the device list, and a clearing device stayed in it -- so `clear`
@@ -722,7 +722,7 @@ static void an_ipv4ll_client_follows_the_document(void)
  * permissive arm and the diagnostic cannot both exist. When `link_local` was
  * added, five switches over this taxonomy named the missing arm and gcc
  * pointed at every one of them; this one it could not see, and the arm was
- * found by reading (project.md 10.480).
+ * found by reading (doc/journal.md 10.480).
  *
  * So the taxonomy is walked rather than listed, and the question is asked of
  * the build rather than of a list somebody maintains here: for each kind,

@@ -251,7 +251,7 @@ ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind);
  *
  * A queued order may be leased and retried, or it must stall rather than risk
  * running twice. **That is a property of the verb and never a field a caller
- * sets** -- settled by the copyright holder 2026-09-29, project.md 10.320. A
+ * sets** -- settled by the copyright holder 2026-09-29, doc/journal.md 10.320. A
  * class a caller never writes is a class a caller cannot write wrong, and a
  * field would be the thing a compromised caller marks idempotent to have its
  * non-idempotent order retried, which turns a queue's failure mitigation into
@@ -1428,7 +1428,7 @@ const char *ncfg_confirm_dir(const char *run_dir, char *out, size_t out_size);
  * a clock step moves an open window, which `confirm_test.c` pins in both
  * directions.
  *
- * **And it pauses while the machine sleeps** (project.md 10.665, the holder's
+ * **And it pauses while the machine sleeps** (doc/journal.md 10.665, the holder's
  * "do what makes sense for each confirm window"). It used to close during a
  * suspend, so the first pass after the lid opened reverted a change the
  * operator had been living with all night, at the one moment they were back
@@ -1970,7 +1970,7 @@ int ncfg_wifi_check_backend(const ncfg_document_t *document, const char *interfa
  * the BSSID rule and the first-match fallback and stops there, so the two
  * implementations answer differently for exactly the configuration this was
  * added for. Recorded rather than changed there, which is this branch's rule
- * for the Rust (project.md 10.266).
+ * for the Rust (doc/journal.md 10.266).
  *
  * **This is `netcfgd_model::wifi::network_for` and it belongs in the model**,
  * which is where the Rust keeps it and says why: the socket answers "which
@@ -3048,7 +3048,7 @@ typedef struct {
 	 *
 	 * A reload that cannot compile leaves the previous document standing and
 	 * the machine exactly as it was, which from outside is indistinguishable
-	 * from a write nobody noticed -- project.md 10.338 and 10.331. So it is
+	 * from a write nobody noticed -- doc/journal.md 10.338 and 10.331. So it is
 	 * said in the log, and this is what stops it being said again on every
 	 * pass for as long as the file stays broken: the watch fires per event
 	 * and a broken file does not fix itself.

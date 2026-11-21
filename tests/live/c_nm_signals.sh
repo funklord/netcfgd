@@ -72,7 +72,7 @@ cleanup() {
 	[ -n "$bus" ] && kill "$bus" 2>/dev/null || true
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$monitor" 2>/dev/null || true
 	wait "$shim_pid" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true

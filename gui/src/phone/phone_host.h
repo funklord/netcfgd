@@ -1,6 +1,6 @@
 /*
  * phone_host.h -- the phone's fuzznet node, which the app starts
- * (project.md 10.720): `ncfg host`'s core under a main of its own (10.734), since
+ * (doc/journal.md 10.720): `ncfg host`'s core under a main of its own (10.734), since
  * no fuzznet program but a product's own is carried.
  *
  * WHY THE APP STARTS IT

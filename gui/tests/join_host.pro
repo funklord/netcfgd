@@ -1,4 +1,4 @@
-# gui/tests/join_host.pro -- the button that reaches another host (project.md 10.735).
+# gui/tests/join_host.pro -- the button that reaches another host (doc/journal.md 10.735).
 #
 # The whole window, so every source of it, and none of `main.cpp`: taken with
 # `files()` rather than listed, so the probe builds what the window is made of

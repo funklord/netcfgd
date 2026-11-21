@@ -426,7 +426,7 @@ void ncfg_plan_write_interface_kind(ncfg_json_writer_t *writer, const ncfg_inter
 	 * these was redundant and cost only the diagnostic: a sixteenth kind with
 	 * attributes would have written `{"kind":"..."}` and silently none of
 	 * them, which is the shape that made `--supported` report eight kinds of
-	 * ten (project.md 10.480). */
+	 * ten (doc/journal.md 10.480). */
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_DUMMY:
 	case NCFG_KIND_IFB:

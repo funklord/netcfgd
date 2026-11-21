@@ -5,7 +5,7 @@
  * rule for what earns one, and because they are a different question from the
  * wifi tab's. That tab is this machine as a client and the access points it
  * is configured to run; this one is the other machines, on those access
- * points, right now (project.md 10.603). `ncfg wifi clients` and the TUI's
+ * points, right now (doc/journal.md 10.603). `ncfg wifi clients` and the TUI's
  * access-point pane already answer it; the GUI was the one client that could
  * configure an access point and not say who was on it.
  *

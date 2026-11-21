@@ -1,6 +1,6 @@
 /*
  * caller_file_test.c -- the rule a root daemon holds a client-named path to
- * before writing a document there (caller_file.h, project.md 10.680).
+ * before writing a document there (caller_file.h, doc/journal.md 10.680).
  *
  * Run as whoever runs the suite, which is the caller here: its uid owns the
  * scratch directory, and a directory it does not own is /, which nobody but

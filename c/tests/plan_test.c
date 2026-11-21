@@ -2086,7 +2086,7 @@ static void a_link_that_is_already_down_is_not_cycled(void)
  * before anything has read the machine. Every daemon-driven live script that
  * did not pass `--no-apply-on-start` died on its first converge, which is what
  * `tests/live/roam.sh` was really reporting when it said netcfgd never
- * attached to the supplicant (project.md 10.296).
+ * attached to the supplicant (doc/journal.md 10.296).
  *
  * Refused rather than treated as an empty observation: an empty observation
  * and a machine nobody has read are different facts, and planning against the
@@ -2381,7 +2381,7 @@ static void a_carrier_hook_fires_when_the_cable_moves(void)
 /*
  * `global { regdom }` is set while no radio is associated, and only then.
  *
- * project.md 10.585 measured why that is the rule: an associated radio holds
+ * doc/journal.md 10.585 measured why that is the rule: an associated radio holds
  * the access point's country over one set by hand, and goes back to the one
  * set by hand when it is idle -- so setting it while associated would fight
  * the access point on every pass. The control cases are the two in which

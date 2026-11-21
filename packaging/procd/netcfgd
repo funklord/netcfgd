@@ -18,7 +18,7 @@ start_service() {
 	# The fuzznet store, named rather than left to the default. procd starts a
 	# service with HOME=/, so the default would be //.local/share/fuzznet --
 	# a second node, where a fuzznetd run from root's shell never looks
-	# (project.md 10.677). Root's home from the password database is where it
+	# (doc/journal.md 10.677). Root's home from the password database is where it
 	# does look. Made here because netcfgd never makes a store it is told to
 	# use: a mistyped one is refused rather than becoming a second node.
 	home=$(awk -F: '$1 == "root" { print $6; exit }' /etc/passwd)

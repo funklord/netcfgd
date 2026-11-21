@@ -5,7 +5,7 @@
 #
 # ## Why this exists
 #
-# project.md 10.338 is fifty-two minutes in which a machine did not match its
+# doc/journal.md 10.338 is fifty-two minutes in which a machine did not match its
 # own configuration and netcfgd said nothing. The configuration was correct by
 # 12:55:17; what applied it was a daemon restart at 13:47 for an unrelated
 # reason. 10.361 closed the "nothing said so" half for the policies that do not
@@ -64,7 +64,7 @@ build="${NCFG_LIVE_BUILD:-$repo/c}"
 # and not end to end, on a machine with inotify to spare. That mattered here
 # more than anywhere: two real defects were found only because this machine was
 # once exhausted of inotify instances and the daemon was therefore polling
-# (project.md 10.477), and the fixed sleeps below are 6 seconds precisely
+# (doc/journal.md 10.477), and the fixed sleeps below are 6 seconds precisely
 # because of it. The waits are sized for the slower path, so asking these
 # questions of it is the cheaper direction rather than the harder one.
 daemon_flags="${NCFG_LIVE_DAEMON_FLAGS:-}"

@@ -1,6 +1,6 @@
 /*
  * upnp_test.c -- the ports miniupnpd has mapped, read from its lease file
- * (project.md 10.675): what `ncfg status` and the GUI show of the openings
+ * (doc/journal.md 10.675): what `ncfg status` and the GUI show of the openings
  * no document wrote.
  *
  * The lines are miniupnpd's own shape, `PROTO:EXTPORT:INTADDR:INTPORT:

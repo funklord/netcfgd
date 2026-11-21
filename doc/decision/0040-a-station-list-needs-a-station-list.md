@@ -1,6 +1,6 @@
 # 0040: A station list needs a station list
 
-Status: accepted, amended 2026-10-29 by project.md 10.602 (see the end)
+Status: accepted, amended 2026-10-29 by doc/journal.md 10.602 (see the end)
 Date: 2026-07-31
 Milestone: completes what 0039 started
 
@@ -115,7 +115,7 @@ than on regression teaches people to re-run the build.
 [0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md) gave netcfgd a DHCP
 server, so the friendly name this record could not have now has a source that
 is not invented: the lease netcfgd's own server gave the station. Each station
-carries `hostname` and `ipv4` from it where there is one (project.md 10.602).
+carries `hostname` and `ipv4` from it where there is one (doc/journal.md 10.602).
 The rule above survives in its half that matters: **nothing is invented** -- a
 station no server of netcfgd's leased to has neither, and a name the client
 sent that is not a plain host name is left out rather than shown.

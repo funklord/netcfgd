@@ -1,5 +1,5 @@
 /*
- * A status page, as another host's bytes (project.md 10.689, 10.701).
+ * A status page, as another host's bytes (doc/journal.md 10.689, 10.701).
  *
  * WHY THIS DESERVES A TARGET OF ITS OWN
  *   `ncfg_status_page_read` reads what a node of the estate answered -- or

@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-03
-Milestone: the router side (project.md 10.667, 10.670)
+Milestone: the router side (doc/journal.md 10.667, 10.670)
 Amends: [0283](0283-firewall-and-queuing-are-in-scope.md), in one table more
 
 ## Context

@@ -1,6 +1,6 @@
 #!/bin/sh
 # A repeater through four-address (WDS) mode, both ends netcfgd's in turn
-# (project.md 10.587 item 4).
+# (doc/journal.md 10.587 item 4).
 #
 # Four hwsim radios in one vm, two halves, each against a reference end so
 # that what is under test is whether netcfgd's end works with a standard one:

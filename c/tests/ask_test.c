@@ -1,6 +1,6 @@
 /*
  * ask_test.c -- `ask`, the control vocabulary as one fuzznet procedure
- * (`src/main/daemon_ask.c`, decision 0312, project.md 10.693), driven with an
+ * (`src/main/daemon_ask.c`, decision 0312, doc/journal.md 10.693), driven with an
  * answer of its own that counts how often it ran.
  *
  * WHAT HAS TO HOLD

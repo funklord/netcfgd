@@ -1,5 +1,5 @@
 /*
- * layout.h -- one window, in a desktop or a mobile shape (project.md 10.736).
+ * layout.h -- one window, in a desktop or a mobile shape (doc/journal.md 10.736).
  *
  * The phone and the desktop run the same window (gui/project.md section 1: no
  * lite client). What differs falls in two kinds, and they are kept apart here

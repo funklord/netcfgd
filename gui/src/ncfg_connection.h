@@ -658,7 +658,7 @@ struct ncfg_access_point_config {
 	QString roaming_key;
 	QList<QPair<QString, int>> neighbours;
 	/* What the access point dialog has no field for, comma-joined; empty for
-	 * one it can write back whole (project.md 10.606). */
+	 * one it can write back whole (doc/journal.md 10.606). */
 	QString unmodelled;
 };
 
@@ -869,7 +869,7 @@ struct ncfg_saved_network_row {
 	QString client_cert;
 	QString private_key;
 	/* What the network dialog has no field for, comma-joined; empty for a
-	 * network it can write back whole (project.md 10.606). */
+	 * network it can write back whole (doc/journal.md 10.606). */
 	QString unmodelled;
 };
 
@@ -1087,7 +1087,7 @@ public:
 	 * `ncfg` cannot disagree about which daemon they are talking to. */
 	bool open(const QString &socket_path, QString *error);
 	/*
-	 * Another node of the estate, `key` in hex (`--at`, project.md 10.698):
+	 * Another node of the estate, `key` in hex (`--at`, doc/journal.md 10.698):
 	 * every request asked of that node through this user's host and
 	 * judged by its `remote` block. A reopen reopens the node, never the
 	 * default socket -- which would be this machine, shown as the other.

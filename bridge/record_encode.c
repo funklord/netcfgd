@@ -39,7 +39,7 @@ _Static_assert((int)NCFG_SCOPE_HOST_PRIVATE == (int)FZN_SCOPE_HOST_PRIVATE &&
  * subject silently re-points every cell -- the records would still verify and
  * would be about something else.
  *
- * **v2 as of 2026-09-29**, when the instance was folded in (project.md 10.360).
+ * **v2 as of 2026-09-29**, when the instance was folded in (doc/journal.md 10.360).
  * v1 hashed a scope and a name and had no room for a label, so two interfaces
  * shared a cell. Nothing had ever derived a v1 subject outside a test, so
  * nothing is stranded -- and the tag is bumped anyway, because a reader

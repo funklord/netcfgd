@@ -1,6 +1,6 @@
 /*
  * mesh.c -- each mesh point's peers, in the same generic netlink round as
- * four-address mode and the radios' capabilities (project.md 10.686).
+ * four-address mode and the radios' capabilities (doc/journal.md 10.686).
  *
  * Asked only where the observation has a radio, for `regdom.c`'s reason. One
  * `GET_INTERFACE` dump says which interfaces are mesh points; each is then

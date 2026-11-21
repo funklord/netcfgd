@@ -1488,7 +1488,7 @@ taken.
   so pointing the socket at the document's own block would read freed memory
   the first time somebody wrote in the configuration directory. The Rust clones
   it for the same reason. **What the copy costs is a defect in both** and is
-  written up in project.md 10.202: the socket's mode and group are decided once
+  written up in doc/journal.md 10.202: the socket's mode and group are decided once
   and authorization follows the reload, so a widened policy is in force in the
   daemon and unreachable through the file.
 * **A remote socket is bound beside the control socket, not under the run
@@ -2032,7 +2032,7 @@ taken.
   place this deliberately does not copy the Rust: its `Op::LinkCreate` returns
   from the tun arm twenty lines above the block that marks a created link, so
   the one kind whose ownership most needs the kernel's mark is the one kind
-  without it (project.md 10.204). `create_tun` calls `mark_as_ours` exactly as
+  without it (doc/journal.md 10.204). `create_tun` calls `mark_as_ours` exactly as
   the netlink path does, after the device exists and never before.
 
   **What is not tested, and cannot be here:** that a device actually appears.
@@ -2117,7 +2117,7 @@ taken.
   the next hop.** `reported` is the one addressing source whose value went
   through no compiler: every other address netcfgd installs came through
   `canonical_address` and already reads the way the kernel prints it, while a
-  report is the text somebody's shell script produced. project.md 10.200
+  report is the text somebody's shell script produced. doc/journal.md 10.200
   measures what `strcmp` costs there against the shipped Rust -- an `addr.add`
   planned for an address the kernel is already holding, and, because the
   address is netcfgd's, an `addr.del` for it in the same plan, on every
@@ -2224,7 +2224,7 @@ taken.
   refusing**: an empty list written by a command that never looked is a finding
   nobody made, and a script cannot tell it from one that did.
 * **`ncfg reset --json` writes `removed` from what `unlink` answered, and never
-  beside `would_remove`.** project.md 10.206 is the reason and it is the worst
+  beside `would_remove`.** doc/journal.md 10.206 is the reason and it is the worst
   case this flag has: the Rust prints the word `removed` over the whole list
   *before* the loop that removes anything, so a reset that stops on its second
   file has already reported that all of them are gone. A document claiming a
@@ -2380,7 +2380,7 @@ taken.
   chosen.** The Rust resolves it at the top of the `Dhcp4` arm, before the three
   candidates are tried at all, so a machine whose only client is busybox udhcpc
   is refused its lease over a file it would never have run -- the hook is
-  `-c`'s, and udhcpc has no equivalent. Reported in project.md 10.178. Here the
+  `-c`'s, and udhcpc has no equivalent. Reported in doc/journal.md 10.178. Here the
   check is inside the dhcpcd candidate, so a missing hook still refuses the
   machine that would have used one, by name and quoting the path, and no longer
   refuses the machine that would not.
@@ -2421,7 +2421,7 @@ taken.
   its own `argv`. Two markers for one process, and the weaker one is where the
   signal goes. netcfgd puts that path there, busybox does not call
   `setproctitle`, and `ncfg_process_pid_of` already applies the whole-argument
-  rule to it, so there is nothing to invent. Reported in project.md 10.178.
+  rule to it, so there is nothing to invent. Reported in doc/journal.md 10.178.
 * **How long a stop waits for `dhcpcd -k` is an argument.** The Rust sleeps
   100ms at a time for three seconds against a live socket, which is why nothing
   exercises it; `patience_ms` lets a check drive both outcomes -- a client that
@@ -2641,7 +2641,7 @@ taken.
   So an operator who deletes `band = "5"` gets `access_point.band:  (was 5)`,
   with an empty field where the value that caused the restart should be. This
   prints `2.4`, which is the value compared and the band the radio is about to
-  come up in. project.md 10.212 has the measurement.
+  come up in. doc/journal.md 10.212 has the measurement.
 * **`ncfg_hostapd_key_mgmt_of` is published by the hostapd backend, not by the
   model.** The Rust keeps `key_mgmt_of` in `netcfgd-model` and says why: the
   planner compares the document's generation against the record of what hostapd
@@ -2731,7 +2731,7 @@ taken.
   `observe.h` entry that named the deferred passes had been wrong for several
   waves in two directions at once -- it said six of eleven and listed nine,
   while all eleven were deferred -- and the blockers it named had been
-  overtaken by the backend modules landing. project.md 10.213 has the count
+  overtaken by the backend modules landing. doc/journal.md 10.213 has the count
   and the real blocker, which is that `ncfg_owned_state_t` carries no backends
   and so `observed.backends` is empty on every machine: six of the ten
   remaining passes walk that list, a seventh walks `observed.dns` beside it,
@@ -3243,7 +3243,7 @@ each, in the order they appear.
   having a writer for one, and this one had none -- so `observed.dns`, which is
   filled from that record and from nowhere else, was empty on every machine and
   the planner asked for a delivery it had already made, on every pass, for ever
-  (project.md 10.236). It is folded now: `ncfg_apply_record` takes the scope
+  (doc/journal.md 10.236). It is folded now: `ncfg_apply_record` takes the scope
   list an apply delivered, because `dns.apply` is the one op that is not its
   own effect. The entry's own argument for deferring it -- that a deep copy of
   an `ncfg_dns_policy_t` "exists nowhere in this port" -- was sound and is

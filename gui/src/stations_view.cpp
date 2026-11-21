@@ -31,7 +31,7 @@ QString connected_of(const ncfg_station_row &station)
 }
 
 /* Seconds, because idle is the number steering reads: a station silent for
- * more than 30 s is not steered (project.md 10.597), and that threshold is
+ * more than 30 s is not steered (doc/journal.md 10.597), and that threshold is
  * only checkable against a column in the same unit. */
 QString idle_of(const ncfg_station_row &station)
 {

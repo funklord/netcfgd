@@ -1,6 +1,6 @@
 /*
  * wiphy.c -- whether each radio has 802.11n (HT), in the same generic netlink
- * round as four-address mode (project.md 10.596).
+ * round as four-address mode (doc/journal.md 10.596).
  *
  * Two dumps: `GET_INTERFACE` says which radio each interface is on, and a
  * split `GET_WIPHY` says what each radio can do. Asked only where the

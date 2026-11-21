@@ -9,7 +9,7 @@ is deterministic. The second is what keeps a crash fixed: the input goes in
 nightly.
 
 Design note in `c/fuzz/fuzz.h`. The gap this closes is named in
-`netcfgd-design.md` section 12 and project.md 10.508.
+`netcfgd-design.md` section 12 and doc/journal.md 10.508.
 
 WHAT GOES IN THE CORPUS, AND WHAT DOES NOT
 
@@ -29,7 +29,7 @@ What belongs in `corpus/<target>/` is an input somebody CHOSE:
     carried the word `ACCEPT` where the reader wants a `# netcfgd policy:`
     marker, and two nftables seeds had an eight-byte header where `nfgenmsg`
     is four. A corpus that does not reach the function reports success exactly
-    as loudly as one that does, which project.md 10.511 paid to learn;
+    as loudly as one that does, which doc/journal.md 10.511 paid to learn;
   * a reproducer for something that went wrong, named after what it does
     rather than after its hash. `attr-longer-than-the-area.bin` is nine bytes
     that claim more than the message holds; it reached that refusal, and it is

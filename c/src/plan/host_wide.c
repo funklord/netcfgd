@@ -187,7 +187,7 @@ static const char *dns_difference(ncfg_plan_t *plan, const ncfg_dns_policy_t *wa
 	 * this function was written to stop: a `dns.apply` whose reason read
 	 * `dns: write_resolv_conf (was write_resolv_conf)` was watched running on
 	 * a real machine, and the search domain that had actually changed was
-	 * named nowhere (project.md 10.381).
+	 * named nowhere (doc/journal.md 10.381).
 	 */
 	*desired = "differs";
 	*observed = "differs";
@@ -439,7 +439,7 @@ void ncfg_plan_dns(ncfg_builder_t *builder)
  * `global { regdom }`: the country this machine is held to.
  *
  * **Set only with no radio associated, and so never against an access
- * point** (project.md 10.585, measured). While a radio is associated the
+ * point** (doc/journal.md 10.585, measured). While a radio is associated the
  * kernel takes the access point's country over one set by hand -- E10 -- and
  * on going idle it returns to the one set here by itself -- E21. So a
  * difference while associated is the kernel doing what it should, and

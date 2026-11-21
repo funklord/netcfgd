@@ -1,6 +1,6 @@
 /*
  * node_connection.cpp -- a connection to another node of the estate
- * (`--at`, project.md 10.698).
+ * (`--at`, doc/journal.md 10.698).
  *
  * WHY THIS EXISTS
  *   The window shows `where()` so the operator is never unsure whose network

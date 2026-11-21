@@ -828,7 +828,7 @@ typedef struct {
 	char *group;
 } ncfg_tun_config_t;
 
-/* A second interface on a radio, as a mesh point (project.md 10.687):
+/* A second interface on a radio, as a mesh point (doc/journal.md 10.687):
  * `parent` the radio's interface whose phy it is made on. What lets one radio
  * mesh and run an access point at once. */
 typedef struct {
@@ -994,7 +994,7 @@ int ncfg_station_address_normalize(const char *text, char *out, size_t out_size,
 
 /*
  * An OUI prefix, `aa:bb:cc:*`: every station whose address begins with those
- * three octets (project.md 10.591).
+ * three octets (doc/journal.md 10.591).
  *
  * **Written with the star, and held with it**, so the one spelling in a
  * document is the one an operator wrote and a reader cannot mistake a prefix
@@ -1437,7 +1437,7 @@ typedef struct {
  * 249th host. `lease` is seconds, absent for 12 hours. `dns` is the servers
  * offered and is never guessed: empty offers none (measured, dnsmasq with its
  * DNS side off offers no server unless one is named). `hosts` are the
- * reservations (project.md 10.605), a set sorted by name.
+ * reservations (doc/journal.md 10.605), a set sorted by name.
  */
 /*
  * One reservation: the host with this MAC is always given this address, and
@@ -1848,7 +1848,7 @@ typedef struct {
 	char  **prefixes;
 	size_t  prefix_count;
 	/*
-	 * The `host_list`s this block names, by name, sorted (project.md 10.591).
+	 * The `host_list`s this block names, by name, sorted (doc/journal.md 10.591).
 	 *
 	 * **`stations` above is still the whole answer**: the lowerer resolves
 	 * every list into it, so the planner, hostapd's list file and `ap_stations`
@@ -1879,7 +1879,7 @@ typedef struct {
 int ncfg_access_control_names(const ncfg_access_control_t *acl, const char *address);
 
 /*
- * A named list of hosts that other blocks refer to (project.md 10.591).
+ * A named list of hosts that other blocks refer to (doc/journal.md 10.591).
  *
  * `mac` holds lowercase `aa:bb:cc:dd:ee:ff` addresses and `aa:bb:cc:*` OUI
  * prefixes, sorted and deduplicated as an access point's station list is.
@@ -2005,7 +2005,7 @@ typedef struct {
 	 */
 	ncfg_secret_ref_t     *roaming_key;
 	/*
-	 * 802.11k neighbour reports (project.md 10.595): hostapd's
+	 * 802.11k neighbour reports (doc/journal.md 10.595): hostapd's
 	 * `rrm_neighbor_report`, so a station can ask which other access points
 	 * of the network it may move to. Off unless asked for, because changing
 	 * the file restarts the access point. Omitted when off.
@@ -2030,13 +2030,13 @@ typedef struct {
 	struct ncfg_neighbour *neighbours;
 	size_t                 neighbour_count;
 	/*
-	 * Moving stations to a better access point (project.md 10.595 item 2),
+	 * Moving stations to a better access point (doc/journal.md 10.595 item 2),
 	 * by BSS transition request, which the daemon sends. NULL is off, which
 	 * is the default: moving people's devices is a choice to make.
 	 */
 	struct ncfg_steering  *steering;
 	/*
-	 * The channel width in MHz, 20, 40 or 80 (project.md 10.597, 10.598).
+	 * The channel width in MHz, 20, 40 or 80 (doc/journal.md 10.597, 10.598).
 	 * Absent is netcfgd's choice: on 5 GHz the widest the radio can do, and
 	 * 20 on 2.4, where three channels do not overlap and a 40 MHz one takes
 	 * two of them. Each is given only where the radio can do it and the
@@ -2075,7 +2075,7 @@ typedef struct ncfg_neighbour {
 } ncfg_neighbour_t;
 
 /*
- * An 802.11s mesh one radio joins (project.md 10.588).
+ * An 802.11s mesh one radio joins (doc/journal.md 10.588).
  *
  * **Bound to a device, as an access point is**: a mesh is a thing one radio
  * does, and that radio does nothing else -- it neither joins `network`s nor
@@ -2229,7 +2229,7 @@ typedef struct {
 } ncfg_channel_plan_t;
 
 /*
- * The channel plan an access point is given (project.md 10.597, 10.598). One
+ * The channel plan an access point is given (doc/journal.md 10.597, 10.598). One
  * answer for the file and for the planner that compares it with what hostapd
  * was started with.
  *
@@ -2561,7 +2561,7 @@ typedef struct {
 	 * the configuration leaves it to the kernel.
 	 *
 	 * **In `global` because the domain is one setting per kernel** (0296,
-	 * project.md 10.585): a radio's own `regdom` was a per-device key for a
+	 * doc/journal.md 10.585): a radio's own `regdom` was a per-device key for a
 	 * per-machine fact. Measured there too, and it decides how this is set:
 	 * while a radio is associated the kernel follows the access point's
 	 * country, and on going idle it returns to the one set here by itself.
@@ -2715,7 +2715,7 @@ typedef struct {
 	char    *over;
 	/*
 	 * The sending station's hardware address, nftables' `ether saddr`
-	 * (project.md 10.592): exact addresses and `aa:bb:cc:*` prefixes,
+	 * (doc/journal.md 10.592): exact addresses and `aa:bb:cc:*` prefixes,
 	 * normalised and sorted, since a station match is a set. A prefix is
 	 * matched as a mask, which nftables does natively -- unlike hostapd, so
 	 * here it works on every action. Resolved from `mac_lists` as an access
@@ -2730,7 +2730,7 @@ typedef struct {
 	char   **mac_written;
 	size_t   mac_written_count;
 	/*
-	 * When the rule applies, in the machine's local time (project.md 10.663,
+	 * When the rule applies, in the machine's local time (doc/journal.md 10.663,
 	 * `schedule.h`): `hours` normalised as "HH:MM-HH:MM", NULL for the whole
 	 * day; `days` as `mon` to `sun` in week order, empty for every day. Both
 	 * omitted when unset, so an unscheduled ruleset is the document it was.

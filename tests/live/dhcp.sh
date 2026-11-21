@@ -19,7 +19,7 @@ set -eu
 
 # The daemons and `tc` live in sbin, which an ordinary user's PATH lacks: run by
 # hand without this, the check below said a tool was missing that was there
-# (project.md 10.625). `make live` adds it too; this is for every other way in.
+# (doc/journal.md 10.625). `make live` adds it too; this is for every other way in.
 PATH="$PATH:/usr/sbin:/sbin"
 
 # Is that pid a process that is still running?
@@ -129,7 +129,7 @@ cleanup() {
 	# here -- it bit `dhcpcd.sh`, which stops its own before exiting.
 	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$server" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that

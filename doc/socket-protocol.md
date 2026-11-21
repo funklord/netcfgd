@@ -178,7 +178,7 @@ first glance:
   status display that needed the `laptop` tier is a status display that ends up
   being given it. What `ap_stations` exposes is worth naming, though: other
   people's hardware addresses and signal strengths, which is a proximity
-  sensor for anybody granted `view`. **Since project.md 10.602 it carries
+  sensor for anybody granted `view`. **Since doc/journal.md 10.602 it carries
   the name and address netcfgd's DHCP server leased each station as well**,
   and a device's name is very often its owner's -- "Anna's iPhone". A site
   opening `view` to `any` opens all of that too.
@@ -466,7 +466,7 @@ emit. It holds this table to the same list, so a sixth event cannot arrive
 without this section gaining a row. 6.2's table is held to `response_names[]`
 the same way, by the same reader. The claim used to be prose nobody checked,
 and a fuzz corpus seeded from the witness was built on a filter that found one
-kind of five (project.md 10.514).
+kind of five (doc/journal.md 10.514).
 
 ### 6.2 The responses
 

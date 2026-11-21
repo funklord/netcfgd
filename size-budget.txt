@@ -964,7 +964,7 @@ netcfgd
 # not recorded -- three other gates were red over the same days -- and this
 # file is a ratchet only while something runs it.
 #
-# Then host lists, 2026-10-29, +4,392 bytes to 1,238,664 (project.md 10.591):
+# Then host lists, 2026-10-29, +4,392 bytes to 1,238,664 (doc/journal.md 10.591):
 # the `host_list` block, `@host_list:` references resolved into an access
 # point's stations, and rendering both back. text +3,366, data +480 (the
 # field tables), the rest alignment.
@@ -972,7 +972,7 @@ netcfgd
 # Recorded at 1238700 rather than left riding the tolerance.
 #
 # Then OUI prefixes on a deny list, 2026-10-29, +4,392 bytes to 1,243,056
-# (project.md 10.591) -- the same figure as host lists, measured twice rather
+# (doc/journal.md 10.591) -- the same figure as host lists, measured twice rather
 # than copied: the prefix normaliser and its refusals, the planner's expansion,
 # and the station walk moving from the daemon to the observer, which is a move
 # and costs nothing but the observation's half of it.
@@ -980,7 +980,7 @@ netcfgd
 # Recorded at 1243100 rather than left riding the tolerance.
 #
 # Then the firewall, enforced, 2026-10-29, +22,304 bytes to 1,265,360
-# (project.md 10.592): the `mac` match and its host lists, the filter chains
+# (doc/journal.md 10.592): the `mac` match and its host lists, the filter chains
 # and every rule expression written to nftables with its identity, the decoder
 # that reads them back, the observation and `ncfg status` lines for them, and
 # the planner's comparison and the op's inverse. Most of it is the writer and
@@ -992,7 +992,7 @@ netcfgd
 # Then the wireless day, 2026-10-29, +38,936 bytes to 1,304,296, measured by
 # building each commit from `git archive` (the firewall's 1,265,360 came back
 # exact, so the method reproduces the entry above): 802.11k neighbour reports
-# +17,000 (project.md 10.595), steering with the access_control fix +8,864,
+# +17,000 (doc/journal.md 10.595), steering with the access_control fix +8,864,
 # 802.11n +240 (10.596), 40 MHz with steering's silent-station skip +8,296
 # (10.597), 802.11ac and the channel plan +64 (10.598), 160 MHz and the
 # daemon's neighbour lists +24 (10.599), and 802.11ax with the hostapd
@@ -1007,7 +1007,7 @@ netcfgd
 # instruction. Measured by building each commit from `git archive` again; the
 # wireless day's 1,304,296 came back exact, and so did the tree's own
 # 1,339,296. The hostapd keyword probe +176 and its use of netcfgd's own
-# hostapd -80 (project.md 10.600's follow-ups); the DHCP server, dnsmasq as
+# hostapd -80 (doc/journal.md 10.600's follow-ups); the DHCP server, dnsmasq as
 # netcfgd's eleventh backend, +13,216 (10.601, decision 0297); hostnames from
 # the leases +56 (10.602); reservations +4,264 (10.605); port forwards, the
 # prerouting chain with its writer, decoder, observation and plan, +13,072
@@ -1069,7 +1069,7 @@ netcfgd
 # And DNS interception over IPv6, an IPv6 forward in the rule builder and
 # its decoder (decision 0305), +24.
 # And fuzznet linked in, the daemon a node with an identity of its own
-# (decision 0308, project.md 10.669): Monocypher, the identity, the claim
+# (decision 0308, doc/journal.md 10.669): Monocypher, the identity, the claim
 # and the file store, +78,016 over the 1,409,376 the tree measured just
 # before it -- which was itself 17,952 over the total above, inside the
 # tolerance, from the commits since that line was written. Linked from an

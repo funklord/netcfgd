@@ -32,7 +32,7 @@ from_router() { sed -n "s/^$2 //p" $v/router-$1; }
 say "     pid 1: $(cat /proc/1/comm), $(cat /etc/devuan_version 2>/dev/null)"
 say "     kernel $(uname -r); modules $(ls /lib/modules 2>&1 | tr '\n' ' '); nf_tables: $(modprobe nf_tables 2>&1 && echo loaded)"
 # **sysv-rc or OpenRC under sysvinit**: the DL180s run the first, ml350 the
-# second (project.md 10.845), and `hull-takeover-openrc` boots this payload
+# second (doc/journal.md 10.845), and `hull-takeover-openrc` boots this payload
 # on an image of that shape. Either way init reaches runlevel 2; OpenRC also
 # records its own softlevel.
 if ! waitfor '[ "$(runlevel 2>/dev/null | cut -d" " -f2)" = 2 ]' 120; then

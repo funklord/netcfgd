@@ -269,7 +269,7 @@ static void mark_as_ours(ncfg_kernel_t *kernel, const char *name, int op_kind)
  * is which of the two to call.
  *
  * **Marked exactly as every other created link is**, which is the divergence
- * project.md 10.204 reports against the Rust: its `Op::LinkCreate` returns
+ * doc/journal.md 10.204 reports against the Rust: its `Op::LinkCreate` returns
  * from the tun arm twenty lines above the block that adds `netcfgd:<name>` as
  * an alternative name, so the one link kind whose ownership most needs the
  * kernel's mark is the one kind that does not get it. `mark_as_ours` is the

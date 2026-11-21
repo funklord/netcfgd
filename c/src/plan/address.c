@@ -266,7 +266,7 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 	 * seventh absorbed by a `default` -- so nothing could say the file was
 	 * short when `link_local` arrived. It was found by reading, which is the
 	 * one way `--supported` missed a backend kind for two releases
-	 * (project.md 10.480).
+	 * (doc/journal.md 10.480).
 	 */
 	case NCFG_ADDRESS_SOURCE_SLAAC:
 		return;
@@ -657,7 +657,7 @@ static void teardown_links(ncfg_builder_t *builder)
 	int    depth;
 
 	/*
-	 * **What rides on a link goes before the link** (project.md 10.840), the
+	 * **What rides on a link goes before the link** (doc/journal.md 10.840), the
 	 * reverse of creation's parent first. In the kernel's order a parent could
 	 * go first, `apar` before its VLAN `zvlan`: deleting it took the VLAN with
 	 * it, the VLAN's own delete then failed, and the apply stopped on a

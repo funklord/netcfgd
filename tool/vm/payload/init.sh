@@ -70,7 +70,7 @@ ok() { echo "    ok   $1"; }
 bad() { echo "    FAIL $1"; fail=$((fail + 1)); }
 
 # The fuzznet store the daemon opened, as `<run>/node` names it, after
-# waiting for the file. Root's own (project.md 10.677): the LSB script names
+# waiting for the file. Root's own (doc/journal.md 10.677): the LSB script names
 # it, because a script run at boot inherits init's HOME=/; openrc-run clears
 # the environment, so there the daemon's own default finds root's home.
 node_store() {

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds netcfgd with OpenWrt's toolchain and boots OpenWrt's malta-be kernel with
-# it, running the router test there (project.md 10.742).
+# it, running the router test there (doc/journal.md 10.742).
 #
 # `vmlinux.elf` carries the stock rootfs as its initramfs, and an `-initrd` is
 # unpacked on top of it, so the test's files arrive with nothing of OpenWrt's

@@ -1,6 +1,6 @@
 /*
  * schedule_test.c -- a firewall rule's schedule, written in local time and
- * expanded into what the kernel holds in UTC (project.md 10.663).
+ * expanded into what the kernel holds in UTC (doc/journal.md 10.663).
  *
  * The cases are the ones where the arithmetic can go wrong: a window past
  * local midnight, one pushed past UTC midnight by the offset in either

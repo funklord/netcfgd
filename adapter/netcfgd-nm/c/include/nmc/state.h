@@ -63,7 +63,7 @@ void nmc_state_free(nmc_state_t *state);
  *
  * Every getter asked netcfgd directly, which made a `GetAll` on one device
  * sixty-two socket round trips -- thirty-one properties times a device list and
- * a link list each. That is what starved the loop (project.md 10.395): a sweep
+ * a link list each. That is what starved the loop (doc/journal.md 10.395): a sweep
  * took longer than the tick, so `read_write_dispatch` never ran and the shim
  * answered nothing while looking alive.
  *

@@ -33,7 +33,7 @@ a claim a commit can close. It is closed by a decision or not at all.
 What has accumulated in the meantime is the nearest thing to evidence this
 tree can produce without running the daemon on somebody's machine: the live
 suite runs 79 scripts against both programs, 1269 checks each, and **no check
-fails for the C port and passes for the Rust** (`project.md` 10.322, 10.323).
+fails for the C port and passes for the Rust** (`doc/journal.md` 10.322, 10.323).
 The executor refuses nothing that is a port gap; every configuration block the
 planner holds is one the Rust holds too; the two programs now agree byte for
 byte on the canonical encoding and therefore on a configuration's identity

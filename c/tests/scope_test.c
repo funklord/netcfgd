@@ -28,7 +28,7 @@
  *   C connects these strings to `compile/lower_*.c`, and the first version of
  *   the registry carried six rows that were not keys -- `tool/registry_gate.py`
  *   reads the lowering's own `strcmp` chains and is what catches that class.
- *   project.md 10.326.
+ *   doc/journal.md 10.326.
  */
 #include "ncfg/scope.h"
 

@@ -12,7 +12,7 @@
 #   went on shipping until this passed `tests/live/nm.sh`, 0264's acceptance
 #   test. That test passed on 2026-10-20 at 124 checks of 124, with the whole
 #   guest tier at 214 of 214 and seven scripts of seven, and the copyright
-#   holder retired the Rust the next day (0276, project.md 10.503 and 10.504).
+#   holder retired the Rust the next day (0276, doc/journal.md 10.503 and 10.504).
 #
 #   The directory is still `netcfgd-nm/c/` rather than `netcfgd-nm/`, because
 #   moving it would rewrite every path in the gates, the live scripts and the

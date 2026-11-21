@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-11-03
-Milestone: fuzznet integration (project.md 10.676 to 10.684), and M9
+Milestone: fuzznet integration (doc/journal.md 10.676 to 10.684), and M9
 Amends: [0308](0308-fuzznet-is-linked-into-netcfgd.md), which linked fuzznet and left serving opt-in
 
 ## The holder's words

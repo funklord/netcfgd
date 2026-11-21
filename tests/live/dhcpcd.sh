@@ -182,7 +182,7 @@ cleanup() {
 	if [ -n "$dnsmasq_pid" ]; then kill "$dnsmasq_pid" 2>/dev/null || true; fi
 	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$dnsmasq_pid" 2>/dev/null || true
 	wait "$server" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`

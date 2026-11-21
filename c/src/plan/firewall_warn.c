@@ -10,7 +10,7 @@
  *   an address the request did not go to, IPv6 itself once neighbour
  *   discovery is dropped, a WireGuard peer whose handshake arrives as new.
  *   Each is a plan warning naming the rule that would let it in -- warned,
- *   never opened, as 0298 does for a forward (project.md 10.620).
+ *   never opened, as 0298 does for a forward (doc/journal.md 10.620).
  *
  * WHAT COUNTS AS ACCEPTING
  *   Deliberately generous, because this warns where nothing could let the

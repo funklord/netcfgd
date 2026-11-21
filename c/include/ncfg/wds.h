@@ -8,7 +8,7 @@
  *   measured, `ip link set wlan1 master br` left the bridge without it and
  *   nothing crossed. Four-address mode is the radio's own setting, `4addr` in
  *   `iw`, and it is read and written here: `NL80211_ATTR_4ADDR` on an
- *   interface (project.md 10.587 item 4). It can be changed while the station
+ *   interface (doc/journal.md 10.587 item 4). It can be changed while the station
  *   is up and associated, which a vm measured, so it needs no link cycle; what
  *   it must precede is the radio joining its bridge.
  *

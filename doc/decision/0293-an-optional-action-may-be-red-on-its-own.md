@@ -8,7 +8,7 @@ Follows: [0010](0010-interface-guards.md), [0283](0283-firewall-and-queuing-are-
 ## The instruction, and what it was answering
 
 The copyright holder, 2026-10-25: *"do the standing thing for optional ops
-then"*, closing the question project.md 10.554 had raised and 0292 had left
+then"*, closing the question doc/journal.md 10.554 had raised and 0292 had left
 open.
 
 What raised it was a measurement rather than a theory. `tests/hull/natcap/`

@@ -483,7 +483,7 @@ long ncfg_seen_parse_listing(const char *reply, char **out, size_t *count, size_
 	/*
 	 * **Digits only, and a count a `long` can carry.** `%lu` takes a leading
 	 * minus and wraps it, so `ok 8 -3 1` read SHOWN as a huge count that came
-	 * back as -3 -- outside "the count, or -1" (project.md 10.681, found by
+	 * back as -3 -- outside "the count, or -1" (doc/journal.md 10.681, found by
 	 * `fuzz/seen_listing.c`).
 	 */
 	if (memchr(reply + 3, '-', (size_t)used) != NULL || shown > (unsigned long)LONG_MAX) {

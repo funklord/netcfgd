@@ -1,4 +1,4 @@
-# gui/tests/fleet_tab.pro -- every node at once (project.md 10.710).
+# gui/tests/fleet_tab.pro -- every node at once (doc/journal.md 10.710).
 #
 # The whole window, so every source of it, and none of `main.cpp`: taken with
 # `files()` rather than listed, so the probe builds what the window is made of

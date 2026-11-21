@@ -459,7 +459,7 @@ static int plan_touches(const ncfg_plan_t *plan, const char *interface)
 }
 
 /*
- * A bridge's members come with it (project.md 10.833). The members are links
+ * A bridge's members come with it (doc/journal.md 10.833). The members are links
  * with no `interface` block, so on their own nothing reconciles them, and the
  * bridge's actions depend on theirs -- which left the router guide's `br-lan`
  * down under the daemon while `ncfg apply` put it up. What the bridge asked

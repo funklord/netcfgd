@@ -19,7 +19,7 @@ would want in their own config file.
 ## Why it needed deciding at all
 
 The holder has set local and network-wide configuration as two first-class use
-cases, both to be met in full (project.md 10.346). A site-scoped concept fails
+cases, both to be met in full (doc/journal.md 10.346). A site-scoped concept fails
 constraint 6's test by construction: *"this WLAN spans forty access points"* is
 not something a single-machine operator wants in their file, and no amount of
 design will make it so.

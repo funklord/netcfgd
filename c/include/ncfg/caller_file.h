@@ -8,7 +8,7 @@
  *   and the caller may hold only the `view` tier. Writing to whatever path
  *   it names would let it make root create or overwrite any file -- a symlink
  *   left in /tmp is enough -- so the path is held to a rule before a byte is
- *   written (project.md 10.680).
+ *   written (doc/journal.md 10.680).
  *
  * THE RULE
  *   - The path is absolute, and names a file, not a directory.

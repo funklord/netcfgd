@@ -155,4 +155,4 @@ What that settles for the slices that follow:
 - **The two are checked against each other**: a rule A decodes and B's digest
   disagrees with is a defect in one of them, and the suite says which.
 
-Nothing here is implemented yet; project.md 10.592 tracks the slices.
+Nothing here is implemented yet; doc/journal.md 10.592 tracks the slices.

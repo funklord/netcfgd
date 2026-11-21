@@ -8,7 +8,7 @@
  *   HT is something the radio reports and netcfgd did not read. A radio that
  *   has it is given it; one that does not is not, so no document needs to say
  *   either way. The capability is `NL80211_BAND_ATTR_HT_CAPA` in a band of
- *   `NL80211_ATTR_WIPHY_BANDS` (project.md 10.596).
+ *   `NL80211_ATTR_WIPHY_BANDS` (doc/journal.md 10.596).
  *
  * THE DUMP IS SPLIT
  *   `NL80211_ATTR_SPLIT_WIPHY_DUMP` asks for each radio in several messages,

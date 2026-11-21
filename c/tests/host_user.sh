@@ -1,6 +1,6 @@
 #!/bin/sh
 # host_user.sh -- `ncfg host`: this user's host, with no fuzznetd installed, and
-# then beside one on the same store (project.md 10.734). Run by `make test`.
+# then beside one on the same store (doc/journal.md 10.734). Run by `make test`.
 #
 # fuzznetd is here as any other fuzznet program is: the holder's word is that
 # all of them have their full function and coexist on the same files and the

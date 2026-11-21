@@ -1,6 +1,6 @@
 #!/bin/sh
 # SLAAC on an interface that forwards, against hull's advertiser (0073,
-# project.md 10.624). The twin of tests/live/slaac.sh, which needs dnsmasq to
+# doc/journal.md 10.624). The twin of tests/live/slaac.sh, which needs dnsmasq to
 # advertise and so skips on a machine without it; here hull answers the
 # kernel's router solicitation with the segment's /64 for SLAAC.
 #

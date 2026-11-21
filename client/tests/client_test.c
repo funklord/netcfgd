@@ -451,7 +451,7 @@ static int listen_at(const char *path)
 }
 
 /*
- * The status over fuzznet first (project.md 10.690): beside a control socket
+ * The status over fuzznet first (doc/journal.md 10.690): beside a control socket
  * at `<run>/netcfgd.sock`, a fuzznet at `<run>/fuzznet.sock` that answers
  * `rrpc status FROM` in pages, and the two statuses say which they are. The
  * fuzznet one is taken; once fuzznet refuses, the control socket's is.
@@ -1878,7 +1878,7 @@ static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
  * `ap_stations` line (doc/schema/socket.json), so the decoder is held to the
  * real shape rather than to a copy of it. One station with a lease name, one
  * whose name was not a plain host name and so carries only its address, and
- * one with no statistics at all (project.md 10.602).
+ * one with no statistics at all (doc/journal.md 10.602).
  */
 static void a_station_list_carries_who_and_the_lease_they_hold(void)
 {

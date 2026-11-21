@@ -1,5 +1,5 @@
 /*
- * node_menu.cpp -- the window's node box (project.md 10.699).
+ * node_menu.cpp -- the window's node box (doc/journal.md 10.699).
  *
  * WHY THIS EXISTS
  *   The box moves the whole window between this machine and another node,

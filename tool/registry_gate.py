@@ -11,7 +11,7 @@ WHAT THIS ENFORCES
   That is not hypothetical. The first version of the kind registry carried six
   such rows -- `address`, which is not a key at all, and `radvd`, `odhcpd` and
   `auto`, which are values of `advertise.backend` -- alongside twelve keys
-  registered a level too shallow. project.md 10.326.
+  registered a level too shallow. doc/journal.md 10.326.
 
   So this reads the same `strcmp` chains the lowering recognises keys by, and
   refuses a registered path whose leaf is not among the ones reachable from
@@ -172,7 +172,7 @@ CONTROL = (
 	# A real key OF ANOTHER BLOCK -- a routing rule's. A pooled key list
 	# accepts it. **This was `address`, bluetooth's, the row that prompted the
 	# gate, until an interface gained one** -- `dhcp_server.host.address`
-	# (project.md 10.605) -- after which a top-level `interface.address` row
+	# (doc/journal.md 10.605) -- after which a top-level `interface.address` row
 	# would pass here: the nesting blind spot the header names, now with an
 	# instance. The control moved to a key no interface file supplies.
 	("NCFG_BLOCK_INTERFACE", "lookup", False, "another block's key"),

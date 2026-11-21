@@ -4,7 +4,7 @@
 #
 # fuzznet sizes these for a person's thousands of notes and shares, and a mapping
 # larger than the machine is refused at exec: `__vm_enough_memory` at 128 MB, a
-# segfault before main, and `ncfg` with it, being one program (project.md 10.740).
+# segfault before main, and `ncfg` with it, being one program (doc/journal.md 10.740).
 # They are the services both builds leave out, at fuzznet's own embedded values
 # (its sec 922), so a node here gives up nothing it used. `FZND_PULL_TARGETS_MAX`
 # and `FZND_SIBLING_TARGETS_MAX` stay at fuzznet's eight: those are the estate's

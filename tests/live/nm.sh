@@ -85,7 +85,7 @@ cleanup() {
 	[ -n "$bus" ] && kill "$bus" 2>/dev/null || true
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
-	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	# stopped writing, and the `rm` below then races it (doc/journal.md 10.476).
 	wait "$fake" 2>/dev/null || true
 	wait "$shim_pid" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
@@ -135,7 +135,7 @@ check() {
 # failure reported `actual: 0` and nmcli's own sentence sat unread in a file.
 # Measured once that sentence was let through for the scan check:
 # `Error: this interface has no such method in this build` -- which named the
-# cause of the whole band in six words (project.md 10.486).
+# cause of the whole band in six words (doc/journal.md 10.486).
 #
 # A count makes a good assertion and a poor diagnostic. This keeps the
 # assertion and adds the diagnostic, rather than replacing one with the other.
@@ -413,7 +413,7 @@ if command -v busctl >/dev/null 2>&1; then
 	# a client that gated on the key was told yes and refused with "this
 	# interface has no such method in this build" -- and the checks here
 	# asserted the list was SERVED without ever asserting it was TRUE, which is
-	# why nothing caught it (project.md 10.486).
+	# why nothing caught it (doc/journal.md 10.486).
 	#
 	# **Turned round by the thing it was written for.** It pinned the key OUT
 	# while `ActivateConnection` did not exist; the method landed, so the key
@@ -1015,7 +1015,7 @@ else
 		# reported only the first for a long time, so a client editing this
 		# profile was told nothing about its IPv6 -- and a client that is
 		# told nothing about a group sends its own defaults back, which is
-		# how a static address becomes a lease (project.md 10.497).
+		# how a static address becomes a lease (doc/journal.md 10.497).
 		ip6() {
 			busctl --user --address="$address" --json=short call \
 				org.freedesktop.NetworkManager "$probe_profile" \
@@ -1078,7 +1078,7 @@ else
 	# trip rather than either half of it. A profile whose addressing a client
 	# cannot read is one it will overwrite with its own defaults the next time
 	# somebody opens it: measured, a static network came back as DHCP with its
-	# routes and nameservers gone (project.md 10.497).
+	# routes and nameservers gone (doc/journal.md 10.497).
 	check "and a client reading it back is told the address it wrote" \
 		"$(nmcli --terse --get-values ipv4.addresses connection show Office 2>/dev/null)" \
 		"192.0.2.5/24"
@@ -1191,7 +1191,7 @@ else
 	# Both shims wrote `autoconnect = false` at network level, where the
 	# model's JSON carries it, and netcfgd refused the whole file: `unknown
 	# network key`. So this add failed outright and nothing noticed, the band
-	# having set metered and the priority and never this (project.md 10.498).
+	# having set metered and the priority and never this (doc/journal.md 10.498).
 	# Both were fixed; one of them has since been retired (0276).
 	nmcli connection add type wifi ifname '*' con-name Manual ssid Manual \
 		connection.autoconnect no > "$work/manual.log" 2>&1 || true

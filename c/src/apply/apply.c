@@ -188,7 +188,7 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
  * holder in favour of the comments being accurate. The flag is worth less than
  * it looks: a `default:` suppresses `-Wswitch` even where the controlling
  * expression is cast, 107 of this tree's 114 bare switches carry one, and it
- * would have caught none of the defects in project.md 10.480. What the rule
+ * would have caught none of the defects in doc/journal.md 10.480. What the rule
  * above buys is a named omission in the build log, which is worth having and
  * is not a gate.
  */
