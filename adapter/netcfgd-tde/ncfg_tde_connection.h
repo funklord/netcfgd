@@ -97,9 +97,9 @@ public:
 	 * daemon's reason where the results are the previous scan's.
 	 */
 	bool scan( TQValueList<join_choice> &out, TQString &stale );
-	//! join a saved network by its id; the `wifi` tier
+	//! join a saved network by its id; the `laptop` tier
 	bool wifi_connect( const TQString &network );
-	//! leave whatever the radio is on; the `wifi` tier
+	//! leave whatever the radio is on; the `laptop` tier
 	bool wifi_disconnect();
 
 	//! profiles on this machine, and which is in effect
