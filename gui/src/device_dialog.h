@@ -101,6 +101,11 @@ private:
 	QCheckBox *vlan_filtering;
 	QComboBox *bond_mode;
 	QSpinBox  *miimon;
+	QSpinBox  *forward_delay;
+	QSpinBox  *hello_time;
+	QSpinBox  *max_age;
+	QSpinBox  *ageing_time;
+	QSpinBox  *bridge_priority;
 	/* vlan, macvlan, vxlan, tunnel */
 	QLineEdit *parent_link;
 	QSpinBox  *vlan_id;

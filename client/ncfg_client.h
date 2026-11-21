@@ -1243,6 +1243,10 @@ typedef struct {
 	int   fwmask;
 	int   suppress_prefixlength;
 	int   l3mdev;
+	/* `invert = true`: the rule matches what its selectors do not. Read so a
+	 * Save keeps it -- dropped, a rule that kept traffic out of a table would
+	 * send exactly that traffic there. */
+	int   invert;
 } ncfg_rule_t;
 
 typedef struct {
@@ -1905,6 +1909,14 @@ typedef struct {
 	/* bridge. */
 	int   stp;
 	int   vlan_filtering;
+	/* bridge, seconds except `priority`; -1 where the document states none.
+	 * Read so a Save keeps them: until 2026-11-21 none was, and a bridge
+	 * saved in the window lost its spanning-tree timing. */
+	int   forward_delay;
+	int   hello_time;
+	int   max_age;
+	int   ageing_time;
+	int   bridge_priority;
 	/* bond. */
 	char *bond_mode;
 	int   miimon; /* 0 where the document states none */

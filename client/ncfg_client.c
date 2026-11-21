@@ -3087,6 +3087,8 @@ int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_
 		    doc, ncfg_json_member(doc, entry, "suppress_prefixlength"), -1);
 		out->items[i].l3mdev =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "l3mdev"), 0);
+		out->items[i].invert =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "invert"), 0);
 
 		char phrase[256];
 		phrase[0] = '\0';
@@ -3111,6 +3113,9 @@ int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_
 		}
 		if (out->items[i].l3mdev) {
 			append_selector(phrase, sizeof(phrase), "l3mdev", dup_string("yes"));
+		}
+		if (out->items[i].invert) {
+			append_selector(phrase, sizeof(phrase), "invert", dup_string("yes"));
 		}
 		out->items[i].selector = dup_string(phrase);
 	}
@@ -4666,6 +4671,11 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 {
 	out->vlan_id = -1;
 	out->vxlan_id = -1;
+	out->forward_delay = -1;
+	out->hello_time = -1;
+	out->max_age = -1;
+	out->ageing_time = -1;
+	out->bridge_priority = -1;
 	if (kind == NCFG_JSON_NONE || ncfg_json_type(doc, kind) != NCFG_JSON_OBJECT) {
 		out->members = dup_string("");
 		out->bond_mode = dup_string("");
@@ -4697,6 +4707,11 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 	out->members = joined_words(doc, ncfg_json_member(doc, kind, "members"));
 	out->stp = ncfg_json_bool(doc, ncfg_json_member(doc, kind, "stp"), 0);
 	out->vlan_filtering = ncfg_json_bool(doc, ncfg_json_member(doc, kind, "vlan_filtering"), 0);
+	out->forward_delay = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "forward_delay"), -1);
+	out->hello_time = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "hello_time"), -1);
+	out->max_age = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "max_age"), -1);
+	out->ageing_time = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "ageing_time"), -1);
+	out->bridge_priority = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "priority"), -1);
 	out->bond_mode = member_text(doc, kind, "mode");
 	out->miimon = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "miimon"), 0);
 	out->parent = member_text(doc, kind, "parent");
@@ -5056,6 +5071,14 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 	 * so there is nothing for a form to write and the sentence says which of
 	 * the two reasons this is.
 	 */
+	/* **Two kinds the dialog cannot choose** (project.md 10.895): an IPsec
+	 * tunnel's `xfrm` and a radio's `radio`. Their blocks hold an interface id,
+	 * a swanctl connection, a phy -- no field of the form's -- so Save would
+	 * write the device back without them. Refused until it has their fields. */
+	if (out->kind && (strcmp(out->kind, "xfrm") == 0 || strcmp(out->kind, "radio") == 0)) {
+		note_unmodelled(&out->unmodelled, strcmp(out->kind, "xfrm") == 0
+		    ? "xfrm (its if_id, connection and child)" : "radio (its phy)");
+	}
 	if (out->kind && strcmp(out->kind, "ifb") == 0) {
 		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "
 		    "interface it belongs to)");

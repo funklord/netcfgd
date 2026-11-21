@@ -5,3 +5,8 @@ interface_fields.hooks	the interface dialog carries hooks itself, through the ho
 qdisc_fields.ingress_bandwidth_bits	never held by a written device: the compiler moves the arriving rate onto the ifb it synthesises (lower.c) and clears it here; the reader joins it back from that ifb's bandwidth_bits
 qdisc_fields.ingress	set only on the synthesised ifb's own qdisc, a device the reader names unmodelled because nobody writes one
 firewall_rule_fields.utc_pieces	never in a compiled document: only an undo copy rebuilt from the kernel carries it (10.663), and no dialog reads an undo copy
+radio_fields.phy	the device reader names a `radio` device unmodelled as a whole, so the dialog refuses it rather than saving without its phy
+xfrm_fields.if_id	the device reader names an `xfrm` device unmodelled as a whole, so the dialog refuses it rather than saving without its block
+xfrm_fields.report_writer	as xfrm_fields.if_id: the whole kind is refused
+xfrm_fields.connection	as xfrm_fields.if_id: the whole kind is refused
+xfrm_fields.child	as xfrm_fields.if_id: the whole kind is refused

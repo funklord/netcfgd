@@ -311,6 +311,8 @@ struct ncfg_rule_row {
 	int     fwmask = -1;
 	int     suppress_prefixlength = -1;
 	bool    l3mdev = false;
+	/* `invert = true`: matches what the selectors do not. */
+	bool    invert = false;
 };
 
 /* One firewall rule (0294), as the editor carries it. Lists are their members
@@ -709,6 +711,13 @@ struct ncfg_device_config {
 	QString kind;
 	QString members;
 	bool    stp = false;
+	/* A bridge's spanning-tree timing, seconds but `bridge_priority`; -1 for
+	 * none stated. */
+	int     forward_delay = -1;
+	int     hello_time = -1;
+	int     max_age = -1;
+	int     ageing_time = -1;
+	int     bridge_priority = -1;
 	bool    vlan_filtering = false;
 	QString bond_mode;
 	int     miimon = 0;

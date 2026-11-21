@@ -55,6 +55,13 @@ int main(int argc, char **argv)
 		 * choice by omission. */
 		check(block.contains(QStringLiteral("family = \"inet\"")),
 		    "and the family is stated rather than left to the default");
+		check(!block.contains(QStringLiteral("invert")), "and a rule not inverted says nothing");
+
+		/* An inverted rule keeps the word: dropped, the rule would send to
+		 * the table exactly the traffic it was written to keep out. */
+		vpn.invert = true;
+		check(ncfg_rule_block(vpn).contains(QStringLiteral("\tinvert = true")),
+		    "an inverted rule is written inverted");
 	}
 
 	/* The three actions that consult nothing. A table beside one of them would

@@ -343,6 +343,19 @@ QStringList ncfg_device_kind_body(const ncfg_device_config &settings)
 		if (settings.vlan_filtering) {
 			body << QStringLiteral("\t\tvlan_filtering = true");
 		}
+		const struct {
+			const char *key;
+			int         value;
+		} timing[] = {
+			{ "forward_delay", settings.forward_delay }, { "hello_time", settings.hello_time },
+			{ "max_age", settings.max_age }, { "ageing_time", settings.ageing_time },
+			{ "priority", settings.bridge_priority },
+		};
+		for (const auto &one : timing) {
+			if (one.value >= 0) {
+				body << QStringLiteral("\t\t%1 = %2").arg(QLatin1String(one.key)).arg(one.value);
+			}
+		}
 		body << QStringLiteral("\t}");
 	} else if (kind == QLatin1String("bond")) {
 		body << QStringLiteral("\tbond {");
@@ -709,6 +722,30 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	vlan_filtering = new QCheckBox(QStringLiteral("vlan filtering"), this);
 	vlan_filtering->setObjectName(QStringLiteral("device_vlan_filtering"));
 	form->addRow(QString(), vlan_filtering);
+	/* The spanning-tree timing, each "unset" at -1 so a value nobody chose
+	 * is not written as one (working-practice: a config records choices). */
+	{
+		const struct {
+			QSpinBox  **field;
+			const char *object;
+			const char *label;
+			int         most;
+		} timing[] = {
+			{ &forward_delay, "device_forward_delay", "forward delay, s", 30 },
+			{ &hello_time, "device_hello_time", "hello time, s", 10 },
+			{ &max_age, "device_max_age", "max age, s", 40 },
+			{ &ageing_time, "device_ageing_time", "ageing time, s", 1000000 },
+			{ &bridge_priority, "device_bridge_priority", "bridge priority", 65535 },
+		};
+		for (const auto &one : timing) {
+			*one.field = new QSpinBox(this);
+			(*one.field)->setObjectName(QLatin1String(one.object));
+			(*one.field)->setRange(-1, one.most);
+			(*one.field)->setValue(-1);
+			(*one.field)->setSpecialValueText(QStringLiteral("unset"));
+			form->addRow(QLatin1String(one.label), *one.field);
+		}
+	}
 
 	bond_mode = new QComboBox(this);
 	bond_mode->setObjectName(QStringLiteral("device_bond_mode"));
@@ -1190,6 +1227,11 @@ void ncfg_device_dialog::kind_changed()
 		{ parent_link, "vlan macvlan vxlan tunnel pppoe" },
 		{ stp, "bridge" },
 		{ vlan_filtering, "bridge" },
+		{ forward_delay, "bridge" },
+		{ hello_time, "bridge" },
+		{ max_age, "bridge" },
+		{ ageing_time, "bridge" },
+		{ bridge_priority, "bridge" },
 		{ bond_mode, "bond" },
 		{ miimon, "bond" },
 		{ vlan_id, "vlan" },
@@ -1259,6 +1301,11 @@ void ncfg_device_dialog::load()
 	members->setText(existing.members);
 	stp->setChecked(existing.stp);
 	vlan_filtering->setChecked(existing.vlan_filtering);
+	forward_delay->setValue(existing.forward_delay);
+	hello_time->setValue(existing.hello_time);
+	max_age->setValue(existing.max_age);
+	ageing_time->setValue(existing.ageing_time);
+	bridge_priority->setValue(existing.bridge_priority);
 	select(bond_mode, existing.bond_mode);
 	miimon->setValue(existing.miimon);
 	parent_link->setText(existing.parent);
@@ -1386,6 +1433,11 @@ QString ncfg_device_dialog::block_text() const
 	settings.members = members->text().trimmed();
 	settings.stp = stp->isChecked();
 	settings.vlan_filtering = vlan_filtering->isChecked();
+	settings.forward_delay = forward_delay->value();
+	settings.hello_time = hello_time->value();
+	settings.max_age = max_age->value();
+	settings.ageing_time = ageing_time->value();
+	settings.bridge_priority = bridge_priority->value();
 	settings.bond_mode = bond_mode->currentData().toString();
 	settings.miimon = miimon->value();
 	settings.parent = parent_link->text().trimmed();

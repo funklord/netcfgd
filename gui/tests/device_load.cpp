@@ -184,6 +184,15 @@ int main(int argc, char **argv)
 	                   "\tvlans = [\"10 pvid untagged\", \"20-22\"]\n}\n"));
 	owned << qMakePair(QStringLiteral("device-wlan0"),
 	    QStringLiteral("device wlan0 { wifi { wds = true } }\n"));
+	/* A bridge's spanning-tree timing, which a Save deleted until the reader
+	 * read it (2026-11-21), and an IPsec tunnel's device, which the dialog
+	 * has no fields for and must refuse rather than save emptied. */
+	owned << qMakePair(QStringLiteral("device-br1"),
+	    QStringLiteral("device br1 {\n\tbridge {\n\t\tstp = true\n\t\tforward_delay = 4\n"
+	                   "\t\thello_time = 2\n\t\tmax_age = 20\n\t\tageing_time = 300\n"
+	                   "\t\tpriority = 4096\n\t}\n}\n"));
+	owned << qMakePair(QStringLiteral("device-ipsec1"),
+	    QStringLiteral("device ipsec1 { xfrm { if_id = 9; connection = \"home\" } }\n"));
 	owned << qMakePair(QStringLiteral("device-dum0"),
 	    QStringLiteral("device dum0 {\n\tkind = \"dummy\"\n"
 	                   "\tqdisc { kind = \"cake\"; bandwidth = \"1234567bit\" }\n}\n"));
@@ -269,6 +278,14 @@ int main(int argc, char **argv)
 	        ? QStringLiteral("written")
 	        : member,
 	    QStringLiteral("written"), "  without restating the membership");
+
+	check(save(&connection, QStringLiteral("br1"), work.path()), QStringLiteral("saved"),
+	    "a bridge saves with its spanning-tree timing unchanged");
+	{
+		const QString said = save(&connection, QStringLiteral("ipsec1"), work.path());
+		check(said.contains(QStringLiteral("xfrm")) ? QStringLiteral("refused") : said,
+		    QStringLiteral("refused"), "an IPsec tunnel's device is refused, naming its xfrm block");
+	}
 
 	/* Four-address mode, which a save used to drop. */
 	check(save(&connection, QStringLiteral("wlan0"), work.path()), QStringLiteral("saved"),

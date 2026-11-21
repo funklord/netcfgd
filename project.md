@@ -7073,6 +7073,15 @@ beside `over`, whose meter a second rule would count twice; the way through is a
 packet mark, which waits on the marks question above. Counters wait on the same
 reading-back work in `ncfg status` that would make them worth having.
 
+**Two of the window's gaps were data loss, not gaps, and are fixed.** The rule
+dialog and the device dialog save a block whole, and their readers never read a
+rule's `invert` or a bridge's `forward_delay`, `hello_time`, `max_age`,
+`ageing_time` and `priority` -- so a Save turned an inverted rule inside out and
+took a bridge's spanning-tree timing away. Both are fields now. An `xfrm` or
+`radio` device is refused by the dialog rather than saved without its block.
+`tool/form_coverage_gate.py` had not looked at routing rules or at any device
+kind's own table, which is how all of it got past; it holds both now.
+
 ## 10.894 A pin move left fuzznet's old objects in the link
 
 `make bridge-test` failed on 2026-11-21 with `multiple definition of

@@ -1921,6 +1921,10 @@ static void firewall_out_interface_cases(void)
 	    "\toutput { policy = \"accept\" }\n}\n",
 	    "a forward rule matching where a packet arrives and where it leaves compiles");
 
+	/* Asserted, not only tested: a guard that is false skips every check
+	 * under it in silence, which firewall_load's did for weeks. */
+	check(document && document->firewall && document->firewall->forward.rule_count == 1,
+	    "  as one rule");
 	if (document && document->firewall && document->firewall->forward.rule_count == 1) {
 		const ncfg_firewall_rule_t *rule = &document->firewall->forward.rules[0];
 
@@ -1979,6 +1983,8 @@ static void firewall_schedule_cases(void)
 	    "\toutput { policy = \"accept\" }\n}\n",
 	    "a rule with hours and days compiles");
 
+	check(document && document->firewall && document->firewall->forward.rule_count == 1,
+	    "  as one rule");
 	if (document && document->firewall && document->firewall->forward.rule_count == 1) {
 		const ncfg_firewall_rule_t *rule = &document->firewall->forward.rules[0];
 
@@ -2019,6 +2025,8 @@ static void firewall_mac_cases(void)
 	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n"
 	    "host_list \"banned\" { mac = [\"de:ad:be:*\", \"00:00:00:00:00:07\", \"aa:bb:cc:*\"] }\n",
 	    "a firewall rule names a host list declared after it, and a prefix");
+	check(document && document->firewall && document->firewall->input.rule_count == 1,
+	    "  as one rule");
 	if (document && document->firewall && document->firewall->input.rule_count == 1) {
 		rule = &document->firewall->input.rules[0];
 		check(rule->mac_count == 3 && strcmp(rule->mac[0], "00:00:00:00:00:07") == 0 &&

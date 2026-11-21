@@ -106,6 +106,9 @@ QString ncfg_rule_block(const ncfg_rule_row &settings)
 	if (settings.l3mdev) {
 		body << QStringLiteral("\tl3mdev = true");
 	}
+	if (settings.invert) {
+		body << QStringLiteral("\tinvert = true");
+	}
 	/* The same rule as the mark: `suppress_prefixlength = 0` is the one that
 	 * drops a table's default route so a more specific rule below can catch
 	 * it, and it is the commonest use of the key. */
@@ -200,6 +203,12 @@ ncfg_rule_dialog::ncfg_rule_dialog(ncfg_connection *connection, const ncfg_rule_
 	l3mdev = new QCheckBox(QStringLiteral("packets belonging to a VRF master"), this);
 	l3mdev->setObjectName(QStringLiteral("rule_l3mdev"));
 	form->addRow(QString(), l3mdev);
+	/* **Read and written, or a Save turns the rule inside out**: an inverted
+	 * rule that lost the key matches exactly what it was written to leave
+	 * alone. */
+	invert = new QCheckBox(QStringLiteral("match what the selectors do not"), this);
+	invert->setObjectName(QStringLiteral("rule_invert"));
+	form->addRow(QString(), invert);
 
 	action = new QComboBox(this);
 	action->setObjectName(QStringLiteral("rule_action"));
@@ -254,6 +263,7 @@ ncfg_rule_dialog::ncfg_rule_dialog(ncfg_connection *connection, const ncfg_rule_
 		fwmark->setValue(existing.fwmark);
 		fwmask->setValue(existing.fwmask);
 		l3mdev->setChecked(existing.l3mdev);
+		invert->setChecked(existing.invert);
 		select(action, existing.action);
 		table->setValue(existing.table.toInt());
 		suppress_prefixlength->setValue(existing.suppress_prefixlength);
@@ -286,6 +296,7 @@ QString ncfg_rule_dialog::block_text() const
 	settings.fwmark = fwmark->value();
 	settings.fwmask = fwmask->value();
 	settings.l3mdev = l3mdev->isChecked();
+	settings.invert = invert->isChecked();
 	settings.action = action->currentData().toString();
 	settings.table = QString::number(table->value());
 	settings.suppress_prefixlength =

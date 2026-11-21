@@ -1252,6 +1252,11 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->vlan_filtering = found.vlan_filtering != 0;
 	out->bond_mode = from_c(found.bond_mode);
 	out->miimon = found.miimon;
+	out->forward_delay = found.forward_delay;
+	out->hello_time = found.hello_time;
+	out->max_age = found.max_age;
+	out->ageing_time = found.ageing_time;
+	out->bridge_priority = found.bridge_priority;
 	out->parent = from_c(found.parent);
 	out->vlan_id = found.vlan_id;
 	out->vlan_protocol = from_c(found.vlan_protocol);
@@ -1540,6 +1545,7 @@ bool ncfg_connection::rules(QList<ncfg_rule_row> *out, QString *error)
 		row.fwmask = found.items[i].fwmask;
 		row.suppress_prefixlength = found.items[i].suppress_prefixlength;
 		row.l3mdev = found.items[i].l3mdev != 0;
+		row.invert = found.items[i].invert != 0;
 		row.action = from_c(found.items[i].action);
 		row.table = from_c(found.items[i].table);
 		out->append(row);

@@ -71,6 +71,10 @@ FORMS = {
 	"mesh_fields": ("ncfg_client_meshes", []),
 	"dns_record_fields": ("ncfg_client_dns_records", []),
 	"block_list_fields": ("ncfg_client_block_lists", []),
+	# The rule dialog writes conf.d/rule-NAME whole, with `replace`, so a
+	# member its reader skips is a selector deleted -- `invert` was, until
+	# 2026-11-21, which turned an inverted rule inside out on Save.
+	"rule_fields": ("ncfg_client_rules", []),
 }
 
 # Sub-blocks a dialog reads field by field, held to the same rule. Each names
@@ -87,6 +91,24 @@ NESTED = {
 	"link_settings_fields": DEVICE_READER,
 	"qdisc_fields": DEVICE_READER,
 	"bridge_vlan_fields": DEVICE_READER,
+	# Every kind's own table, since 2026-11-21: a bridge saved in the window
+	# had lost its spanning-tree timing, and an `xfrm` device its whole
+	# block, with nothing here looking. A kind the dialog cannot edit is named
+	# unmodelled by the reader and appears in it by name.
+	"bridge_fields": DEVICE_READER,
+	"bond_fields": DEVICE_READER,
+	"macvlan_fields": DEVICE_READER,
+	"radio_fields": DEVICE_READER,
+	"tunnel_fields": DEVICE_READER,
+	"veth_fields": DEVICE_READER,
+	"vlan_fields": DEVICE_READER,
+	"vrf_fields": DEVICE_READER,
+	"vxlan_fields": DEVICE_READER,
+	"xfrm_fields": DEVICE_READER,
+	"wireguard_fields": DEVICE_READER,
+	"pppoe_fields": DEVICE_READER,
+	"openvpn_fields": DEVICE_READER,
+	"tun_fields": DEVICE_READER,
 	# Since 10.617: every sub-block the other three dialogs read field by
 	# field. `routes` and `dns` are shared by an interface and a network and
 	# read by the same helpers, so one entry each covers both.

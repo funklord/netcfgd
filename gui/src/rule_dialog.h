@@ -71,6 +71,7 @@ private:
 	QSpinBox  *table;
 	QSpinBox  *suppress_prefixlength;
 	QCheckBox *l3mdev;
+	QCheckBox *invert;
 	QLabel      *note;
 	QPushButton *save_button;
 	QPushButton *remove_button;
