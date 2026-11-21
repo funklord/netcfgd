@@ -3078,6 +3078,41 @@ static void dns_reports_that_it_is_not_managing_resolution(void)
 }
 
 /*
+ * Configured servers are objects, and their addresses come back (10.895).
+ * Read as strings until 2026-11-21, so the DNS tab listed blanks; a server's
+ * port, and a `domains` list, are named as what the tab cannot write back.
+ */
+static void dns_servers_are_read_from_their_objects(void)
+{
+	struct staged staged;
+	ncfg_dns_t dns = {};
+	char err[NCFG_ERROR_MAX];
+
+	if (!staged_open(&staged, "a client asking about dns servers connects",
+	    "{\"response\":\"document\",\"schema_version\":1,\"globals\":{\"dns\":"
+	    "{\"mode\":\"none\",\"servers\":[{\"addr\":\"9.9.9.9\"},"
+	    "{\"addr\":\"2620:fe::fe\",\"port\":853}],\"search\":[\"home.example\"],"
+	    "\"domains\":[\"corp.example\"]}}}\n"
+	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[],"
+	    "\"dns\":[]}\n")) {
+		return;
+	}
+	int got = ncfg_client_dns(staged.client, &dns, err, sizeof(err));
+	ok("the dns servers arrive", got == 1, err);
+	if (got == 1) {
+		ok("as two addresses",
+		   dns.server_count == 2 && dns.servers[0] && strcmp(dns.servers[0], "9.9.9.9") == 0 &&
+		       dns.servers[1] && strcmp(dns.servers[1], "2620:fe::fe") == 0,
+		   NULL);
+		ok("and a port and the domains are named as what the tab cannot write",
+		   dns.unmodelled && strstr(dns.unmodelled, "port") && strstr(dns.unmodelled, "domains"),
+		   dns.unmodelled);
+		ncfg_dns_free(&dns);
+	}
+	staged_close(&staged);
+}
+
+/*
  * An access point's station list, as an editor should show it (10.591).
  *
  * The GUI's dialog is filled from this and writes it back as the block. Where
@@ -3487,6 +3522,7 @@ int main(int argc, char **argv)
 	what_the_wifi_dialogs_cannot_carry_is_named();
 	an_access_point_keeps_the_lists_it_names();
 	dns_reports_that_it_is_not_managing_resolution();
+	dns_servers_are_read_from_their_objects();
 	a_link_knows_whether_a_default_route_leaves_through_it();
 	an_apply_becomes_a_journal();
 	a_network_s_hook_is_listed_as_the_network_s();

@@ -2651,11 +2651,18 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
  */
 typedef struct {
 	char  *mode;         /* "none", "write_resolv_conf", "resolved", ... */
-	char **servers;      /* configured servers, if the document names any */
+	char **servers;      /* configured servers' addresses, if the document names any */
 	size_t server_count;
 	char **search;
 	size_t search_count;
 	int    managing;     /* netcfgd holds resolver state right now */
+	/*
+	 * What the global `dns` block holds that the tab cannot write back -- a
+	 * server's port or SNI name, `domains`, `options` -- comma-joined, empty
+	 * where there is none. A tab that saved the block without them would
+	 * delete them, so it refuses instead.
+	 */
+	char  *unmodelled;
 	/*
 	 * **What resolution is using now**, from the observation rather than the
 	 * document -- the same split `managing` is about, carried through to the

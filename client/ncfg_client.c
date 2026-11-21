@@ -2776,6 +2776,7 @@ void ncfg_dns_free(ncfg_dns_t *dns)
 		return;
 	}
 	free(dns->mode);
+	free(dns->unmodelled);
 	for (size_t i = 0; i < dns->server_count; i++) {
 		free(dns->servers[i]);
 	}
@@ -2878,8 +2879,35 @@ int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t er
 	uint32_t globals = ncfg_json_member(doc, ncfg_json_root(doc), "globals");
 	uint32_t dns = ncfg_json_member(doc, globals, "dns");
 	out->mode = member_text(doc, dns, "mode");
-	out->servers = string_list(doc, ncfg_json_member(doc, dns, "servers"), &out->server_count);
+	/* **Each server is an object**, `{"addr": ...}` with an optional port and
+	 * SNI name. This read them as strings until 2026-11-21, so the DNS tab
+	 * listed as many blanks as there were servers. */
+	{
+		uint32_t servers = ncfg_json_member(doc, dns, "servers");
+		uint32_t total = ncfg_json_count(doc, servers);
+
+		out->servers = total ? calloc(total, sizeof(*out->servers)) : NULL;
+		for (uint32_t i = 0; out->servers && i < total; i++) {
+			uint32_t server = ncfg_json_at(doc, servers, i);
+
+			out->servers[i] = member_text(doc, server, "addr");
+			out->server_count++;
+			if (ncfg_json_member(doc, server, "port") != NCFG_JSON_NONE ||
+			    ncfg_json_member(doc, server, "sni") != NCFG_JSON_NONE) {
+				note_unmodelled(&out->unmodelled, "servers (a port or an SNI name)");
+			}
+		}
+	}
 	out->search = string_list(doc, ncfg_json_member(doc, dns, "search"), &out->search_count);
+	if (ncfg_json_count(doc, ncfg_json_member(doc, dns, "domains")) > 0) {
+		note_unmodelled(&out->unmodelled, "domains");
+	}
+	if (ncfg_json_count(doc, ncfg_json_member(doc, dns, "options")) > 0) {
+		note_unmodelled(&out->unmodelled, "options");
+	}
+	if (!out->unmodelled) {
+		out->unmodelled = dup_string("");
+	}
 	ncfg_json_free(doc);
 
 	/* The observed half, from a second request: the document says what was

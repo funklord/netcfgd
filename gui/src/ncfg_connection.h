@@ -904,6 +904,9 @@ struct ncfg_dns_row {
 	QStringList servers;
 	QStringList search;
 	bool        managing = false;
+	/* What the global block holds that the tab cannot write back, empty for
+	 * nothing: the tab refuses to save over it. */
+	QString     unmodelled;
 
 	/* One sentence for a screen, composed here so the tray and any pane
 	 * cannot drift into two descriptions of one setting. */

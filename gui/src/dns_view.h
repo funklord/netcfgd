@@ -24,6 +24,7 @@
 
 class QComboBox;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 class ncfg_connection;
 
@@ -49,9 +50,15 @@ private slots:
 private:
 	ncfg_connection *connection;
 	QComboBox       *mode;
+	/* The global servers and search domains (10.895), written with the mode
+	 * into this tab's one file. */
+	QLineEdit       *servers;
+	QLineEdit       *search;
 	QLabel          *current;
 	QLabel          *detail;
 	QPushButton     *apply_button;
+	/* What the last refresh found that this tab cannot write back. */
+	QString          unmodelled;
 };
 
 #endif

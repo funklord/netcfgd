@@ -7088,7 +7088,14 @@ kind's own table, which is how all of it got past; it holds both now.
 `port_range`. ICMP types are built too:
 [0333](doc/decision/0333-an-icmp-rule-may-name-its-types.md). What is left of
 what the inventory found missing is MSS clamping, marks, counters and the rest
-it lists; source ports wait for somebody to ask (0331). `reject` answers tcp with a reset
+it lists; source ports wait for somebody to ask (0331).
+
+**The window sets the global DNS servers and search domains** beside the mode,
+in the DNS tab's own `50-dns`, and flow offload in the global tab's `50-offload`.
+The DNS tab had been listing blanks for the servers it showed: the client read
+each server as a string, and the document holds `{"addr": ...}`. A global block
+holding what the tab cannot write back -- a server's port or SNI, `domains` --
+is refused rather than saved without it. `reject` answers tcp with a reset
 where asked: [0332](doc/decision/0332-a-reject-may-answer-tcp-with-a-reset.md).
 
 ## 10.894 A pin move left fuzznet's old objects in the link

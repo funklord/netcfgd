@@ -893,6 +893,7 @@ bool ncfg_connection::dns(ncfg_dns_row *out, QString *error)
 		out->search << QString::fromUtf8(answer.search[i] ? answer.search[i] : "");
 	}
 	out->managing = answer.managing != 0;
+	out->unmodelled = QString::fromUtf8(answer.unmodelled ? answer.unmodelled : "");
 	ncfg_dns_free(&answer);
 	return true;
 }

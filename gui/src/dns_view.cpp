@@ -3,6 +3,9 @@
 #include "ncfg_connection.h"
 
 #include <QComboBox>
+#include <QRegularExpression>
+#include <QLineEdit>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -65,11 +68,25 @@ ncfg_dns_view::ncfg_dns_view(ncfg_connection *connection, QWidget *parent)
 	}
 	controls->addWidget(mode);
 
-	apply_button = new QPushButton(QStringLiteral("set mode"), this);
+	apply_button = new QPushButton(QStringLiteral("set"), this);
 	apply_button->setObjectName(QStringLiteral("dns_apply"));
 	controls->addWidget(apply_button);
 	controls->addStretch();
 	layout->addLayout(controls);
+
+	/* The servers and search domains every interface's own are added to.
+	 * Shown from the document and written with the mode, so pressing set
+	 * without touching them writes back what is there. */
+	auto *lists = new QFormLayout();
+	servers = new QLineEdit(this);
+	servers->setObjectName(QStringLiteral("dns_servers"));
+	servers->setPlaceholderText(QStringLiteral("9.9.9.9, 2620:fe::fe -- blank for none"));
+	lists->addRow(QStringLiteral("servers"), servers);
+	search = new QLineEdit(this);
+	search->setObjectName(QStringLiteral("dns_search"));
+	search->setPlaceholderText(QStringLiteral("home.example -- blank for none"));
+	lists->addRow(QStringLiteral("search"), search);
+	layout->addLayout(lists);
 
 	/* Said in the tab rather than in a dialog afterwards, because taking over
 	 * /etc/resolv.conf on a machine that is working is the sort of thing an
@@ -123,6 +140,9 @@ void ncfg_dns_view::refresh()
 	if (at >= 0) {
 		mode->setCurrentIndex(at);
 	}
+	servers->setText(row.servers.join(QStringLiteral(", ")));
+	search->setText(row.search.join(QStringLiteral(", ")));
+	unmodelled = row.unmodelled;
 }
 
 void ncfg_dns_view::apply_mode()
@@ -131,13 +151,48 @@ void ncfg_dns_view::apply_mode()
 	if (chosen.isEmpty()) {
 		return;
 	}
+	/* The block is written whole, so what it cannot hold would be deleted:
+	 * refused, naming it, as the dialogs refuse a block they cannot carry. */
+	if (!unmodelled.isEmpty()) {
+		emit reported(QStringLiteral("the global dns block holds %1, which this tab does not "
+		                             "edit and would delete: change it in the file").arg(unmodelled));
+		return;
+	}
 
-	/* Composed here, from a key this file chose out of a fixed list. Nothing
-	 * an operator typed reaches the daemon, which is what keeps this inside
-	 * the shape 0117 bounds rather than inside "a client sent configuration
-	 * as text". */
-	const QString text =
-	    QStringLiteral("global {\n\tdns {\n\t\tmode = \"%1\"\n\t}\n}\n").arg(chosen);
+	/* **Composed here, from a mode out of a fixed list and values that cannot
+	 * leave their strings**: an address in its own characters, a search
+	 * domain in letters, digits, dots and dashes. */
+	const QRegularExpression split(QStringLiteral("[,\\s]+"));
+	QStringList              server_list;
+	QStringList              search_list;
+	/* The characters an address is made of and no others, so nothing typed
+	 * can close the string; whether it is an address the compiler says, as it
+	 * does for every dialog's. */
+	const QRegularExpression address(QStringLiteral("^[0-9A-Fa-f.:]+$"));
+	for (const QString &one : servers->text().split(split, Qt::SkipEmptyParts)) {
+		if (!address.match(one).hasMatch()) {
+			emit reported(QStringLiteral("\"%1\" is not an address: a server is an IPv4 or "
+			                             "IPv6 address").arg(one));
+			return;
+		}
+		server_list << QStringLiteral("\"%1\"").arg(one);
+	}
+	const QRegularExpression domain(QStringLiteral("^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$"));
+	for (const QString &one : search->text().split(split, Qt::SkipEmptyParts)) {
+		if (!domain.match(one).hasMatch()) {
+			emit reported(QStringLiteral("\"%1\" is not a domain to search").arg(one));
+			return;
+		}
+		search_list << QStringLiteral("\"%1\"").arg(one);
+	}
+	QString block = QStringLiteral("global {\n\tdns {\n\t\tmode = \"%1\"\n").arg(chosen);
+	if (!server_list.isEmpty()) {
+		block += QStringLiteral("\t\tservers = [%1]\n").arg(server_list.join(QStringLiteral(", ")));
+	}
+	if (!search_list.isEmpty()) {
+		block += QStringLiteral("\t\tsearch = [%1]\n").arg(search_list.join(QStringLiteral(", ")));
+	}
+	const QString text = block + QStringLiteral("\t}\n}\n");
 
 	QString error;
 	/* `replace` because this file is this tab's own and setting the mode twice
@@ -147,8 +202,10 @@ void ncfg_dns_view::apply_mode()
 		return;
 	}
 
-	emit reported(QStringLiteral("wrote %1: dns mode is now \"%2\". netcfgd puts it in effect itself; Apply... shows anything it holds back.")
-	          .arg(QString::fromLatin1(drop_in_name), chosen));
+	emit reported(QStringLiteral("wrote %1: dns mode is now \"%2\"%3. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
+	          .arg(QString::fromLatin1(drop_in_name), chosen,
+	              server_list.isEmpty() ? QString()
+	                                    : QStringLiteral(", with %1 server(s)").arg(server_list.size())));
 	emit changed();
 	refresh();
 }
