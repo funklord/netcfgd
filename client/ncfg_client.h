@@ -1594,6 +1594,8 @@ typedef struct {
 	 * it is off, and the LAN interfaces it listens on, comma-separated. */
 	char *upnp_uplink;
 	char *upnp_lan;
+	/* Flow offload (0319): "software", "hardware", or empty where it is off. */
+	char *flow_offload;
 } ncfg_globals_t;
 
 void ncfg_globals_free(ncfg_globals_t *globals);

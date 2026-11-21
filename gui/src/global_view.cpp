@@ -6,6 +6,7 @@
 #include "counted.h"
 #include "ncfg_connection.h"
 
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -31,6 +32,10 @@ const char *const country_drop_in = "50-regdom";
 
 /* UPnP's drop-in (0310), for the same reason: off is removing it. */
 const char *const upnp_drop_in = "50-upnp";
+
+/* Flow offload's (0319), likewise: off is the default and is removing it, so
+ * the file holds a choice and never the default written out. */
+const char *const offload_drop_in = "50-offload";
 
 /* The holder's condition for UPnP (10.664 item 5), the plan's own warning in
  * the words a person deciding needs. */
@@ -97,6 +102,22 @@ ncfg_global_view::ncfg_global_view(ncfg_connection *connection, QWidget *parent)
 	upnp_row->addStretch();
 	layout->addLayout(upnp_row);
 
+	auto *offload_row = new QHBoxLayout();
+	offload = new QComboBox(this);
+	offload->setObjectName(QStringLiteral("global_offload"));
+	offload->addItem(QStringLiteral("flow offload off"), QString());
+	offload->addItem(QStringLiteral("software flow offload"), QStringLiteral("software"));
+	offload->addItem(QStringLiteral("hardware flow offload"), QStringLiteral("hardware"));
+	offload->setToolTip(QStringLiteral(
+	    "Forwarded connections skip the firewall after their first packets: faster "
+	    "routing on a slow CPU. Hardware asks the network card to do it, where it can."));
+	offload_row->addWidget(offload);
+	offload_button = new QPushButton(QStringLiteral("set offload"), this);
+	offload_button->setObjectName(QStringLiteral("global_set_offload"));
+	offload_row->addWidget(offload_button);
+	offload_row->addStretch();
+	layout->addLayout(offload_row);
+
 	note = new QLabel(this);
 	note->setObjectName(QStringLiteral("global_note"));
 	note->setWordWrap(true);
@@ -106,6 +127,7 @@ ncfg_global_view::ncfg_global_view(ncfg_connection *connection, QWidget *parent)
 	    &ncfg_global_view::toggle_networking);
 	connect(country_button, &QPushButton::clicked, this, &ncfg_global_view::set_country);
 	connect(upnp_button, &QPushButton::clicked, this, &ncfg_global_view::toggle_upnp);
+	connect(offload_button, &QPushButton::clicked, this, &ncfg_global_view::set_offload);
 }
 
 void ncfg_global_view::refresh()
@@ -132,12 +154,15 @@ void ncfg_global_view::refresh()
 	QList<ncfg_config_row> files;
 	pinned = false;
 	upnp_ours = false;
+	offload_ours = false;
 	if (connection->configs(&files, nullptr)) {
 		for (const ncfg_config_row &file : files) {
 			pinned = pinned || file.name == QLatin1String(country_drop_in);
 			upnp_ours = upnp_ours || file.name == QLatin1String(upnp_drop_in);
+			offload_ours = offload_ours || file.name == QLatin1String(offload_drop_in);
 		}
 	}
+	offload->setCurrentIndex(qMax(0, offload->findData(globals.flow_offload)));
 	upnp_on = !globals.upnp_uplink.isEmpty();
 	upnp_button->setText(upnp_on ? QStringLiteral("turn UPnP off")
 	                             : QStringLiteral("turn UPnP on"));
@@ -161,6 +186,8 @@ void ncfg_global_view::refresh()
 		    upnp_on ? QStringLiteral("on: mapped on %1, for %2")
 		                  .arg(globals.upnp_uplink, globals.upnp_lan)
 		            : QStringLiteral("off") },
+		{ QStringLiteral("flow offload"),
+		    globals.flow_offload.isEmpty() ? QStringLiteral("off") : globals.flow_offload },
 		{ QStringLiteral("on drift"), globals.on_drift },
 		{ QStringLiteral("confirm window"),
 		    globals.confirm ? ncfg_counted(globals.confirm, "second", "seconds")
@@ -377,6 +404,45 @@ void ncfg_global_view::write_upnp()
 	}
 	emit reported(QStringLiteral("wrote %1: UPnP is on, mapped on %2. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	        .arg(QString::fromLatin1(upnp_drop_in), uplink));
+	emit changed();
+	refresh();
+}
+
+void ncfg_global_view::set_offload()
+{
+	const QString chosen = offload->currentData().toString();
+	QString       error;
+
+	/* **Off is the absence of this tab's file**, not `flow_offload` written
+	 * as anything: there is no word for off, and a file holding the default
+	 * would pin it. Another file's choice is shown and can be overridden
+	 * here -- a later file wins a scalar -- but not removed from here. */
+	if (chosen.isEmpty()) {
+		if (!offload_ours) {
+			emit reported(QStringLiteral("flow offload is not turned on from here; another "
+			                             "file turns it on, or it is already off"));
+			return;
+		}
+		if (!connection->config_delete(QString::fromLatin1(offload_drop_in), &error)) {
+			emit reported(error);
+			return;
+		}
+		emit reported(QStringLiteral("removed %1: flow offload is off. netcfgd puts it in "
+		                             "effect itself; Apply... shows anything it holds back.")
+		        .arg(QString::fromLatin1(offload_drop_in)));
+		emit changed();
+		refresh();
+		return;
+	}
+	const QString text =
+	    QStringLiteral("global {\n\tflow_offload = \"%1\"\n}\n").arg(chosen);
+	if (!connection->config_put(QString::fromLatin1(offload_drop_in), text, true, &error)) {
+		emit reported(error);
+		return;
+	}
+	emit reported(QStringLiteral("wrote %1: %2 flow offload. netcfgd puts it in effect "
+	                             "itself; Apply... shows anything it holds back.")
+	        .arg(QString::fromLatin1(offload_drop_in), chosen));
 	emit changed();
 	refresh();
 }

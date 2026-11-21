@@ -41,6 +41,7 @@
 
 #include <QWidget>
 
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -71,6 +72,8 @@ private slots:
 	/* The write alone, which is what a test drives: the question is the
 	 * button's. */
 	void write_upnp();
+	/* Write the flow offload chosen, or remove this tab's file for off. */
+	void set_offload();
 
 private:
 	ncfg_connection *connection;
@@ -88,6 +91,10 @@ private:
 	 * `50-upnp` was what turned it on, which is the only file it removes. */
 	bool             upnp_on = false;
 	bool             upnp_ours = false;
+	QComboBox       *offload;
+	QPushButton     *offload_button;
+	/* Whether `50-offload` was there at the last refresh: off removes it. */
+	bool             offload_ours = false;
 	QLabel          *note;
 	/* What the last refresh read, so the button knows which way it points
 	 * without re-asking the daemon at the moment it is clicked. */

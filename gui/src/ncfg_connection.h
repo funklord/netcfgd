@@ -479,6 +479,8 @@ struct ncfg_globals {
 	 * interfaces as the client joins them, "lan0, lan1". */
 	QString upnp_uplink;
 	QString upnp_lan;
+	/* Flow offload (0319): "software", "hardware", empty for off. */
+	QString flow_offload;
 };
 
 /*

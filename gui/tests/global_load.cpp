@@ -15,6 +15,7 @@
 #include "../src/ncfg_connection.h"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -143,6 +144,31 @@ int main(int argc, char **argv)
 	check(QFile::exists(work.path() + QStringLiteral("/etc/conf.d/50-regdom.conf"))
 	        ? QStringLiteral("left") : QStringLiteral("removed"),
 	    QStringLiteral("removed"), "  by removing the drop-in");
+
+	/* Flow offload (0319): chosen, written to its own file, and off by
+	 * removing it rather than by writing the default out. */
+	{
+		auto *offload = view.findChild<QComboBox *>(QStringLiteral("global_offload"));
+		auto  offload_of = [&connection]() {
+			ncfg_globals globals;
+			QString      why;
+			if (!connection.globals(&globals, &why)) {
+				return why;
+			}
+			return globals.flow_offload.isEmpty() ? QStringLiteral("<off>")
+			                                      : globals.flow_offload;
+		};
+		const QString file = work.path() + QStringLiteral("/etc/conf.d/50-offload.conf");
+		check(offload_of(), QStringLiteral("<off>"), "flow offload starts off");
+		offload->setCurrentIndex(offload->findData(QStringLiteral("software")));
+		QMetaObject::invokeMethod(&view, "set_offload");
+		check(offload_of(), QStringLiteral("software"), "software flow offload is set");
+		offload->setCurrentIndex(0);
+		QMetaObject::invokeMethod(&view, "set_offload");
+		check(offload_of(), QStringLiteral("<off>"), "and off again");
+		check(QFile::exists(file) ? QStringLiteral("left") : QStringLiteral("removed"),
+		    QStringLiteral("removed"), "  by removing its file, not by writing off");
+	}
 	stop(&daemon);
 
 	/* UPnP: an uplink without NAT first, which the compiler refuses and the

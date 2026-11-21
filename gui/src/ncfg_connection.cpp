@@ -1497,6 +1497,7 @@ bool ncfg_connection::globals(ncfg_globals *out, QString *error)
 	out->regdom = from_c(found.regdom);
 	out->upnp_uplink = from_c(found.upnp_uplink);
 	out->upnp_lan = from_c(found.upnp_lan);
+	out->flow_offload = from_c(found.flow_offload);
 	out->hostname = from_c(found.hostname);
 	out->on_drift = from_c(found.on_drift);
 	out->confirm = found.confirm;
