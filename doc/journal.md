@@ -13284,3 +13284,14284 @@ backend with real-time priority, a CPU latency hold, EF marking and Wi-Fi power 
 a stream is the estate's, played on another node by `audio "NAME" { play = "hw:0" }`.
 **Who may: the `wifi` tier and `admin`, the holder's word** -- typed requests, as joining a
 network is. Waits on the receiving end, which the holder is working on.
+
+## 10.12 What the live suite actually executes here, and what it never has
+
+**2026-09-03, measured on the development machine**, prompted by asking whether
+the wifi and ethernet work is tested. "The suite passes" and "this code has
+been exercised" are different claims, and nothing wrote down which of them
+`make live` supports. This is that, so the next reader inherits a number
+rather than an impression.
+
+**What runs, and what it proves.** Each script invoked the way the Makefile
+invokes it, `NCFG_LIVE=1` where the Makefile sets it:
+
+- **Wireless, 128 checks against a real `wpa_supplicant`** — `wifi` 13,
+  `wifi_journey` 22, `enterprise` 23, `roam` 9, `displace` 16, `revive` 10,
+  `dot1x` 20, `stations` 15. All pass.
+- **Wired, 162 checks** — `links` 108, `switch` 4, `drift` 12, `dhcpcd` 38.
+  All pass.
+
+**Three never execute on a machine like this one**, and that is the part worth
+knowing:
+
+- **`association.sh`, which is the only live test of a network's `metric`
+  outranking its interface's `preference` (0153).** The planner half is
+  properly covered — `crates/netcfgd-plan/tests/fixtures.rs` asserts that a
+  metric outranks a preference, that an absent metric leaves the preference
+  alone, and that an association to an undescribed network falls back — but
+  those are fixtures, and the field they read is filled by resolving a live
+  association. That resolution has been exercised exactly once, by hand, on
+  the machine its author was sitting at.
+
+  **Its first blocker was measured rather than predicted, and it was not the
+  one this entry first named.** `cargo build -p netcfgd-host --example
+  live_association` takes five seconds, and with the probe present the script
+  advances two gates and stops at a third: *no netcfgd is running to compare
+  against*. It wants `/run/netcfgd/netcfgd.sock` so it can set the observation
+  path's answer beside `ncfg wifi status`, and on this machine netcfgd is
+  installed and `enabled` but `inactive`, with NetworkManager holding the
+  radio.
+
+  So the remaining distance is not a build. It is **starting netcfgd on a
+  machine somebody is using, over the radio in question** — which is the same
+  act 10.9 says is the holder's call rather than a worker's, for the same
+  reason. Two of the script's assertions were verified without going there:
+  the probe refuses unprivileged, exiting 2 with the documented message, which
+  is the refusal that stops a powerless run reporting a clean pass; and the
+  probe writes nothing, checked by reading it for `File`, `OpenOptions` and
+  any persist call rather than by trusting the comment that says so.
+- **`hwsim.sh`**, needing real root for module loading and phy namespace moves.
+  It is the one that drives actual virtual radios.
+- **`ap.sh`**, needing `hostapd`, which is not installed.
+
+All three skip honestly and none is invoked with `NCFG_LIVE`, so they are
+allowed to.
+
+**Read this next to 10.9.** Those 290 live checks pass against virtual
+interfaces inside a namespace; the one time this code met a real radio for an
+hour it lost carrier nine times and nothing could say why. The suite is not
+weak — it is aimed at what a namespace can hold, and a radio that stops
+associating is not that.
+
+### The invocation is part of the test, and getting it wrong invents findings
+
+**Three different launch forms are in use and they are not interchangeable**,
+which is the reusable part of this measurement:
+
+    unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"   # most of them
+    sh tests/live/dhcpcd.sh                                 # makes its own
+    sh tests/live/hwsim.sh                                  # wants real root
+
+Taking the same measurement three times with the wrong form produced three
+confident wrong answers in one sitting, every one of which read as a defect in
+somebody else's correct code:
+
+- **A pipeline's `$?` is the last process's.** `... | tail -3; echo $?` reported
+  `association.sh` exiting **0** under `NCFG_LIVE=1` — the exact vacuous-skip
+  fault fixed hours earlier — and it was `tail`'s status. That script's `skip()`
+  is correct and exits 1. Capturing into a variable and reading the status of
+  the command itself is what settled it.
+- **Bare, where the Makefile uses a namespace.** Run without `unshare -rn`,
+  every wireless script skips for want of a dummy link, which reads exactly
+  like "the wifi suite does not run here". Under the real invocation all eight
+  run and pass.
+- **Namespaced, where the script makes its own.** `dhcpcd.sh` refuses inside a
+  plain `unshare -rn`, because `setgroups` is forbidden there and `dhcpcd`
+  cannot drop privileges. Its refusal names the cause and says to run it bare,
+  which is the only reason this took one command to resolve rather than an
+  afternoon.
+
+**A fifth, from asking the machine what hardware it has**, and it is the one
+that would have done real damage to this section. `ls /sys/class/net/*/wireless`
+returned nothing and was very nearly written down as *this machine has no
+wireless hardware*, which would have made the paragraph above claim the live
+suite runs on virtual interfaces because there is nothing else. There is a
+radio: `wlp0s20f3`, up, with `lspci` naming the controller.
+
+**The mechanism first written here for that was also wrong**, which is why it
+is worth the space. The draft said the glob asked the wrong sysfs node — that
+cfg80211 creates `phy80211` and `wireless` is the older interface. Plausible,
+and false: both nodes exist on this machine. The real cause is that `ls`
+without `-d` lists a directory's *contents*, and `wireless/` is empty, so the
+path matched and printed nothing. `ls -d` shows it. A reduction that fires
+reliably tells you *where* to look and nothing about *why*, and the wrong
+mechanism was caught only by verifying the sentence before committing it —
+having already been written into this file as fact.
+
+**An empty result from a wrong instrument reads exactly like an empty result
+from a right one**, whichever way the instrument is wrong, and the sibling
+probe that disagrees — `ip -br link` — took one command.
+
+The same slip a sixth time, in the same sitting, checking whether root was
+reachable: `sudo -n true 2>&1 | head -1 && echo yes` printed **yes** while the
+output beside it said `sudo: a password is required`. The `&&` reads the
+pipeline's status, which is `head`'s. This is the first error in this list
+repeating after being written down, which is worth more than the error: a note
+about a fault does not stop the hand that makes it, and the only thing that has
+actually caught this one is reading the output rather than the status.
+
+The shape is `evidence.md`'s, met six times across two sittings: **a probe
+checked against the mechanism its author had in mind rather than against the
+failure it is meant to catch.** So a coverage claim about this tree has to name
+its invocation, and a surprising result about a test's own honesty should be
+re-measured before it is written down — three times here the apparatus was
+wrong and the code was right, and the sixth was a repeat of the first after it
+had been written down.
+
+The count is the point rather than an embarrassment. Six wrong instruments and
+zero wrong findings about the software, in a sitting whose whole subject was
+measurement, is the ratio `evidence.md` predicts: *"when a result surprises
+you, the apparatus is where the error usually is."* Every one of them was
+caught by a second reading that cost one command — `ip -br link` against the
+sysfs glob, a captured status against a pipeline's, the script's own refusal
+message against a wrapper. None was caught by being careful.
+
+---
+
+## 10.14 Bluetooth is written and has never run
+
+Recorded because the README now points here for what is proven. The
+`bluetooth` block compiles and is covered by fixtures, and
+`tests/live/bluetooth.sh` exists — but it needs real root for
+`/dev/vhci` and **has never been executed**, on this machine or any other. Its
+skip was one of the two that reported success under `NCFG_LIVE=1` until
+2026-09-03 (10.11), which is how it stayed invisible: the suite was reporting a
+pass for a script that ran nothing.
+
+So Bluetooth's status is *written, unverified* — a weaker claim than every
+other feature in the README, and the one to say out loud if anybody asks what
+to try first.
+
+> **Corrected 2026-09-18: it was weaker than that.** This paragraph said "the
+> two backends and the adapter compile", and **neither backend exists**.
+> [0148](doc/decision/0148-bluetooth-is-two-backends-and-an-adapter.md) names
+> them and settles their shape; nothing was ever written, and
+> `git log --diff-filter=D` finds no bluetooth backend ever deleted, so they
+> have never been in the tree. What does exist is the model type, the
+> compiler's lowering and rendering, the observer listing adapters, the GUI
+> dialog, and `warn_bluetooth` -- whose own sentence is that "nothing pairs the
+> device, connects it, or brings a `pan` link up".
+>
+> So the status is **specified and not written**, a step below *written,
+> unverified*, and this was the sentence a reader would otherwise have used to
+> believe there was code to run. Found while porting the planner: a worker
+> deciding whether the C should act on a `bluetooth` block went looking for
+> what the Rust does and found nothing acting in either language.
+
+---
+
+## 10.18 Two wifi faults, both a generation that stopped being pinned
+
+**2026-09-04**, from a sweep of wifi and the gui using the lens the day's
+earlier bugs suggested: *a value with two consumers where only some are wired*.
+Both instances are the same field, `proto`, and both weaken a network rather
+than merely changing it -- the default is WPA2 and WPA3 together, so anything
+that loses the pin lets WPA2 back in on a network whose operator excluded it.
+
+**The renderer dropped it.** `render_network` wrote the passphrase and not the
+generation, so `ncfg profile save` on any network with `proto` set could not
+reproduce the machine. Nothing was lost on disk -- the round-trip proof refused
+the save, which is what that proof is for -- but the feature was unusable for
+those networks, and the refusal did not say which block was at fault.
+
+**The gui dropped it on every edit.** `ncfg_network_dialog` restored the
+security *kind* from the document when opening an existing network and did not
+restore the generation, so the combo showed "negotiate WPA2 and WPA3" whatever
+the document said. `block_text` writes the generation only when the combo names
+one. So opening a `proto = "wpa3"` network and pressing save -- to change the
+metric, or nothing at all -- silently widened it. One of two fields on the same
+object was wired.
+
+The gui half needed the value carried four layers: the document JSON already
+had it beside `type`, and the C client, its header, the gui's row and the
+dialog each had to learn it.
+
+**Both are covered by a check that fails without the fix**, confirmed by
+sabotage with the edit verified as applied first -- twice, because the first
+attempt at sabotaging the renderer used a regex that did not match, and a
+sabotage that did not apply is indistinguishable from a check that cannot
+fail. The gui probe is the sharper of the two: it pins the fixture network to
+WPA3 when creating it, asserts the dialog reopens on WPA3, edits *something
+else*, and asserts the generation survived.
+
+**And the refusal now names the block.** Finding the renderer fault meant
+halving a configuration by hand six times, because the proof said only that the
+two documents differed. It reports the section and the name now -- `network
+"Home"` -- which is the question somebody actually has.
+
+**Three lenses came up empty and are recorded so the next sweep starts
+elsewhere**: every `match` on `Security` is exhaustive but one, and that one is
+a passphrase extractor where `None` is right for the other three kinds --
+hostapd refuses `Eap` by name and renders `Owe`, so there is no silent-open
+path; all 28 gui signals are connected, checked by fully qualified
+`&class::signal` rather than by name, since `changed` alone appears on four
+classes and a bare name check passes vacuously; and every method on
+`ncfg_connection` has a caller but `is_open`, which is an unused inline
+accessor rather than a gap.
+
+---
+
+## 10.19 A SIM cycle note that only one of its two readers cleared
+
+**2026-09-04**, from sweeping the modem code with the same lens. It is a real
+asymmetry, and the symptom is narrower than it first looked -- which is the
+part worth writing down, because three reproduction attempts failed before the
+narrowing.
+
+`Sims::pending` records that a modem's link has to be cycled for a new SIM
+source to take. It is read at two sites. `reconcile_drift` takes the list
+before planning and calls `cycled()` after applying, deliberately in that
+order so a plan that could not be applied leaves the note for the next pass.
+`apply_request` -- a deliberate `ncfg apply` -- passed the same list into its
+plan options and **never cleared it**. There is exactly one call to `cycled()`
+in the tree, which is how this was found.
+
+**What it costs is a lie in the modems tab, not a flapping link.** The note's
+other reader is `Sims::status`, which fills `cycle_pending` on every
+`modem_list`, and the gui's `state_of` tests that field *first*: a stale note
+makes the tab report **"switching"** for ever, where the truth is "fallen
+back". That view's own comment says telling those two apart is the whole
+reason it exists -- *"a fallback that succeeded looks like a machine
+configured that way unless something says otherwise"*.
+
+**Why it could not be reproduced, which took a verb to find out.** Five
+fixtures failed to make a stale note do anything -- `config = "null"`, a
+static address, `on_drift = "report"` so the loop could not reconcile, each
+with two applies -- and then `ncfg modem --json` polled every 50ms for six
+seconds never once saw `cycle_pending` set, though the log showed the advance
+happening.
+
+The answer is in `reconciling_interfaces`, and it is not a race that happens
+to go one way: **setting the note is itself what makes the loop act.** That
+filter includes any interface where `sims.is_pending`, deliberately, so the
+cycle is not planned and then dropped by `restrict`. So `advance` sets the
+note, the same pass finds the interface reconcilable *because* the note is
+set, cycles it and clears. A deliberate apply cannot get there first.
+
+**The window that is left is real and narrow**, and it is the one the fix
+closes: an `ncfg apply` that performs the cycle leaves the note, and the next
+loop pass finds the interface still pending, plans nothing -- the cycle having
+already happened -- and returns on `restricted.actions.is_empty()` before
+reaching the clear. The note then survives indefinitely, and `cycle_pending`
+with it. So the symptom is the status field, permanently, and the flapping
+link is not a consequence at all: by the time the note is stale the cycle has
+been done.
+
+So the fix is the two paths agreeing, and the honest claim is the status
+field. Recorded this way because a fix whose symptom is asserted rather than
+shown is the kind that gets quoted later as though it had been measured -- and
+the first version of this entry said "the window is narrow" without being able
+to say why, which is the same fault one step smaller.
+
+**`ncfg modem` exists because of this.** `cycle_pending` was reachable only
+through the gui's modems tab, so a fault that left it set had nothing that
+could see it from a script -- and the six seconds of polling that finally
+explained the timing were not possible until the verb was there. It reports
+and does not choose: 0152 makes the order the operator's and the choice
+netcfgd's, and a command that overrode the choice would be netcfgd's fallback
+being fought by hand.
+
+---
+
+## 10.22 Fixed: every backend can be reclaimed now, and one was dialled twice
+
+**2026-09-04**, from sweeping the vpn and tunnel code. Established by reading
+and **not demonstrated**, for the reason `ppp.sh` gives about itself: `/dev/ppp`
+needs real root, so no session can be dialled on this machine and no second
+`pppd` can be produced to watch.
+
+It is 10.13's family, one backend over. `backend_pid_file` -- the table 0140's
+recovery reads -- answers for `OpenVpn`, `RouterAdvert`, `Supplicant`,
+`AccessPoint`, `Dhcp4` and `Dhcp6`, and falls through to `None` for the rest.
+`WireGuard` is kernel-side and `Dns` is host-wide, so neither wants an entry.
+**`Pppoe` is a per-interface process netcfgd starts, and has none.**
+
+`start_pppoe` has no guard of its own either, where `start_supplicant` refuses
+by name -- *"is already managing `<iface>`, so netcfgd will not start a second
+supplicant on it"*. So nothing between the plan and the exec asks whether one
+is already running.
+
+**What decides it is where the running list comes from.** `observed.backends`
+is `prior.backends.clone()` -- what the previous run *recorded starting*, kept
+in `/run/netcfgd` -- rather than anything probed from the system. So
+`backend_running(Pppoe, iface)` answers from a file, and
+`RuntimeDirectoryPreserve=restart` keeps that file across a `systemctl
+restart` and removes it on a real stop. A stop then start therefore meets a
+live `pppd` it has no record of, cannot adopt, and is not stopped from
+starting again -- with `persist` and `maxfail 0` in the options file both
+sessions retry for ever.
+
+**The window is narrower than the supplicant's** and worth stating as such: a
+restart preserves the record, so only a deliberate stop-then-start, or a
+package removal and reinstall, reaches it. That is exactly the sequence 10.13
+was found in.
+
+**The marker it would need already exists.** `write_ppp_options` composes
+`/run/netcfgd/ppp/<iface>` and `pppd` carries it in `argv` as `file <path>`
+for as long as it lives, which is the same shape 0140 uses everywhere else --
+so the recovery is a table entry rather than a new mechanism. What it also
+needs is a `backend_is_reachable` answer for pppoe, since adoption is gated on
+being able to talk to what is adopted, and pppoe has none of that plumbing.
+
+**Fixed, and looking for the guard found two larger faults above it.**
+
+**First: the adoption ran for two kinds out of seven.** `execute` answers
+`Op::BackendStart` for pppoe, hostapd, radvd, dhcp6 and openvpn and returns
+early, *before* `start_backend` -- and the adoption block lived inside
+`start_backend`. So 0140's recovery reached the supplicant and dhcp4 and
+nothing else, although `backend_pid_file` answers for six kinds. It is its own
+function now, called once at the top of the `BackendStart` arm where every
+kind passes.
+
+Measured with `openvpn.sh`'s fake, counting from `/proc` rather than `pgrep`
+-- which matches its own command line: one apply, then the run directory
+cleared, which is what a stop and a start leave behind. **Two processes became
+four.** After the fix the second apply says *"adopted the OpenVpn backend
+already running on vpn0"* and there is one.
+
+**Second: a tunnel that was not up was dialled twice, on every apply.** The
+device walk plans the dial unconditionally since 0155 pass 1b -- so a tunnel
+whose daemon died is restarted -- and the interface walk still planned it when
+the link was absent. Both fired on a machine whose tunnel had never come up.
+
+`plan_interface_attributes` carries a comment saying this exact fault was
+found and fixed once, *"and the fixture that covered this asserted the action
+was present rather than how many there were"*. **The fixture counts, and had
+gone blind anyway**: its configuration is a bare `device` block, so after 0155
+split the walks the duplicate needed both an interface and a device to appear,
+and it had only the device. It passed with the fault reintroduced, measured.
+Giving it an `interface` block is the whole repair, and it fails properly now.
+
+**Third, and the original finding: `Pppoe` has a table entry.** The marker is
+the options file `pppd` carries in its own argv as `file <path>`; the pid file
+is netcfgd's own record, because pppd daemonises and the pid seen at exec is
+not the one that survives.
+
+One more came out of the measurement: adoption fell through to starting when
+the pid file *did* check out, which is the "already running" case. It returns
+early there now -- reachable whenever one apply carries two starts for one
+backend, which is how it was seen at all.
+
+---
+
+## 10.23 dhcp and addressing: a sweep that found nothing, and what it looked at
+
+**2026-09-04.** Written down because an empty sweep and an unperformed one read
+identically otherwise, and because the four lenses used here had each found a
+fault somewhere else the same day. What they license is starting the next
+sweep elsewhere.
+
+**Duplicate actions between the two walks**, which is the lens the tunnel
+double-dial in 10.22 came from. Plans built for `dhcp`, `dhcp6`, `slaac`,
+`link_local`, two static addresses, and all four composed on one interface:
+no action and no warning appears twice in any of them.
+
+**Fields carried by one consumer and not another**, which found the wifi
+generation and the empty dns block. Every addressing form round-trips through
+`ncfg profile save` -- dhcp, dhcp6, slaac, link_local, static, `null`, and a
+composed list -- and `reported` is refused by name rather than dropped. The
+model fields absent from the renderer are absent from the *config language*
+too: `client_id`, `hostname_mode`, `request_options` and `rapid_commit` have
+no keys in the compiler, so a compiled document always holds their defaults
+and a round trip cannot lose them. `Dhcp4::metric` is derived from the
+interface's preference rather than written, which `dhcpcd_start_args` records.
+
+**An address somebody else put there.** A third party's `10.0.0.1/24` on an
+interface whose document asks for the same address plans nothing, applies
+nothing and converges -- no second add, no fight.
+
+**Ownership across a wiped run directory**, which is the shape that produced
+10.13, 10.19 and 10.22. Apply an address, clear `/run/netcfgd` as a stop and
+start would, change the document, apply again: netcfgd removes the address it
+put there and adds the new one. Ownership survives the loss of the run state
+here, where the backend records did not.
+
+**One thing this sweep did check about its own author's work.** 10.22's hoist
+gives adoption to four kinds that never had it, so their markers were read
+rather than assumed: `AccessPoint`, `RouterAdvert`, `OpenVpn` and `Pppoe` all
+carry an absolute path netcfgd composed, which is what 0140 asks for, while
+`Dhcp4` and `Dhcp6` carry a bare interface name and are excluded by the
+`starts_with('/')` guard -- so neither DHCP client's behaviour moved. Verified
+by reading both entries, and by the live suite passing `dhcpcd.sh`,
+`dhcp.sh` and `openvpn.sh` afterwards.
+
+**`ap.sh` has since been run, without installing anything.** It needs the
+hostapd *binary* and not the service, and both it and
+`netcfgd_hostapd::binary` fall back to `PATH` after the four sbin
+directories -- so the package can be fetched and unpacked as an ordinary
+user and put on `PATH` for the one run:
+
+    apt-get download hostapd && dpkg-deb -x hostapd_*.deb root
+    PATH="$PWD/root/usr/sbin:$PATH" sh tests/live/ap.sh
+
+Checked before relying on it: the two search orders agree, which is the thing
+`ap.sh`'s own comment warns about -- *"a test that found hostapd somewhere
+netcfgd does not look would pass while netcfgd reported it missing"*. Against
+a real hostapd 2.10 it passes 32 checks.
+
+**What that closed, and what it did not.** The apply reaches
+`Op::BackendStart` for an access point, so the adoption hoisted in 10.22 now
+executes for `AccessPoint` -- on its *nothing to adopt* branch, since no
+hostapd is running. That is worth something precise: `ap.sh` asserts *"the
+apply failed"* and *"a failed start is still asked for on the next plan"*, and
+both would break if the hoist wrongly reported an adoption, so the run is
+evidence the new call does not misfire there. **Adopting a live hostapd is
+still unexercised**, and cannot be here: hostapd needs a radio to come up, and
+`unshare -rn` has none.
+
+---
+
+## 10.25 Bluetooth: three lists that had to agree, and none of them did
+
+Swept the Bluetooth code on 2026-09-04. It found the worst defect of this
+sweep series, and it was not in the Bluetooth code -- it was in `Document`,
+where every block meets.
+
+**`Document::eq` did not compare `bluetooth`.** The impl is hand-written so
+that `generated_by` can be excluded from equality, with a comment saying
+exactly why. `bluetooth` was simply absent from the list of fields it does
+compare, and had been for as long as the field existed. So **two documents
+whose only difference was a Bluetooth device compared equal**, which means
+anything asking "has the configuration changed" answered no.
+
+The reachable consequence today is `ncfg profile save`. Its proof is that
+what the machine compiles to after the save must equal what it was running,
+and that proof was blind: a snapshot rendering a **wrong address** was
+written to disk and accepted, verified by sabotage. Before the renderer
+learned Bluetooth this could not bite, because a document with a Bluetooth
+block was refused outright -- which is why an eight-month-old omission
+surfaced on the day the refusal was lifted.
+
+**And fixing equality immediately exposed a second omission of the same
+shape.** `canonicalize()` sorts `devices`, `interfaces`, `networks`, `rules`
+and `access_points`, and did not sort `bluetooth` -- while the field's own
+doc comment says "sorted by id". That could not produce a symptom while
+equality ignored the field: with neither walk covering it, order could not
+make two documents differ because nothing could make them differ. So the
+two are one repair rather than two, and the second was found only by the
+first.
+
+**The guard is structural rather than another test.** `eq` now destructures
+`Self`, so adding a field to `Document` is a compile error in the impl
+instead of a silent omission -- the proof lives in the code rather than in
+somebody remembering. A compile-time guard leaves no failing test behind to
+show it was ever alive, so `a_bluetooth_device_is_part_of_a_document_s_identity`
+asserts the case that was actually broken, and it fails when the field is
+removed from the comparison.
+
+Three more lists were behind, all found by the same question:
+
+- **The planner said nothing at all.** `warn_unapplied` covers
+  eap-without-ca, access points, unfired hooks and ethtool, and had no
+  Bluetooth arm -- so a `bluetooth` block compiled, appeared in `ncfg show`,
+  and `ncfg plan` was silent about it. That is decision 0061 broken by
+  omission: a recognised key that is inert must say so at plan time.
+  `warn_bluetooth` now emits one warning per device naming what does not
+  happen.
+- **The renderer refused the block wholesale**, so `ncfg profile save`
+  failed on any machine with one -- and a machine with headphones written
+  down is a laptop, which is what profiles are for. Four fields and a closed
+  set of five profile names; the refusal cost more than the rendering does.
+- **The override set in `write_snapshot` did not list Bluetooth ids.** With
+  the renderer fixed, the save was then refused for a *redefinition*: a
+  block the base defines and the snapshot restates needs `override`, exactly
+  as an interface does. A new capability defeated by a list that had not
+  moved -- the same shape as the other three, one layer up.
+
+`difference()` also gained a Bluetooth arm, so the refusal names the block
+rather than saying it cannot. That is what turned the wrong-address sabotage
+from a silent pass into `` `bluetooth "phone"` is what differs ``.
+
+**What this sweep did not touch, said plainly.** Nothing pairs a device,
+connects it, or brings a `pan` link up; there is still no backend. The
+warning says so in as many words, which is the point of it. `bluetooth.sh`
+remains unrun for the reason in 10.14 -- it needs real root for `/dev/vhci`
+-- so adapter observation is still proved only by that script's own
+reasoning and not by a run.
+
+**The lens that found it, for whoever sweeps next.** Every defect this
+series has produced is *two walks over the same set where one was updated
+and the other was not*: the teardown filter against the device list, the
+shim's removal list against the eight link flavours, the renderer against
+the GUI for wifi `proto`, and now four walks against `Document`'s fields.
+The productive query was not "read the Bluetooth code" -- the Bluetooth
+code is fine -- but **"which hand-maintained list has to agree with a struct
+definition, and what makes it stay agreeing?"** Grepping for files that
+mention `access_points` and then asking which never mention `bluetooth` put
+`canonical.rs` on the page in one command. Where such a list exists,
+destructuring turns the next omission into a compile error, and that is
+worth more than the test that catches this one.
+
+## 10.28 bridge and bond: three settings nobody compared, and the bug under them
+
+Swept on 2026-09-04. The bond is complete. The bridge had a field list short
+by half, and closing it uncovered a second fault the first had been hiding
+-- the same two-layer shape as 10.25, where fixing `Document::eq` exposed
+`canonicalize`.
+
+**`plan_bridge` compared three of the six settings.** `stp`, `forward_delay`
+and `hello_time` were in the chain; `ageing_time`, `priority` and
+`vlan_filtering` were not. All six are parsed, all six are sent inside
+`link.create`, and the observer reads all six back -- so a freshly created
+bridge got them and an existing one silently did not. Measured: editing
+`hello_time` planned `link.set_bridge`; editing only `ageing_time` and
+`priority` gave `nothing to do`.
+
+The tell is in the function's own doc comment, which explains the gap it was
+written to close: "a bridge's `stp` and `forward_delay` are sent inside
+`link.create` and were never sent again". Those are exactly the two it
+compares, plus one added later. The other three arrived with the model and
+nothing said they had to be added here as well. The walk destructures
+`BridgeConfig` now, so a seventh field is a compile error rather than a
+setting nobody compares.
+
+**And the first plan after that fix did not converge.** `bridge.priority:
+200 (was <absent>)` came back on every pass: the apply set it and the
+observation still said absent. `IFLA_BR_PRIORITY` is a `__u16` in
+`if_link.h`, the writer sends two bytes, and the reader asked for a `u32` --
+which returns nothing rather than a truncated value, so **a bridge's
+priority read as absent on every kernel, always**. The accessor's own
+documentation names the trap: netlink is not consistent about integer widths
+and the header gives no hint.
+
+It could not be seen while the planner ignored the field. That is what makes
+it worth recording as a pair rather than as two bugs: the missing comparison
+was not merely beside the width fault, it was what made the width fault
+unobservable. `ip -d link show` reports `priority 200` on the same bridge,
+which is the independent witness that the value lands and the reader was the
+half at fault.
+
+**A width sweep over the whole attribute table, since one had gone wrong.**
+Every constant `ops.rs` writes was paired with the accessor `dump.rs` reads
+it through: 16 attributes across bridge, bond, VLAN, VXLAN, GRE, GENEVE,
+IPTUN and macvlan. No other mismatch. The two written as raw
+`to_ne_bytes()` -- `IFLA_BR_PRIORITY` and `IFLA_VLAN_ID` -- are both `u16`
+on both sides. The first version of that sweep printed nothing at all, which
+reads exactly like a clean result and was a pairing bug in the probe: the
+reader's module prefix is `ifla_br` and the writer's constant is
+`IFLA_BR_...`, so nothing matched. A probe that produces an empty table is
+not evidence until it has been shown to produce a full one.
+
+**Where it came up empty, with what was looked at.** `plan_bond` compares
+both fields the model has, and guards the mode against the kernel's refusal
+to change it on a bond with members -- a warning rather than an action,
+which is the same idiom `plan_vxlan` uses for a VNI. Bond widths agree on
+both sides. A bridge's membership can be written two ways, `members` on the
+bridge and `master` on the device, and `expand_members` refuses a device
+that lists itself and reports a conflict where the two disagree, so they
+cannot drift apart in silence. Both kinds round-trip through the renderer
+with every field.
+
+## 10.29 vlan and macvlan: a plan that could never converge
+
+Swept on 2026-09-04. The VLAN and macvlan code is sound -- both kinds create
+correctly alongside their parent in one plan, apply their protocol and mode,
+and converge. What the sweep found is next to them, in the per-port VLANs a
+bridge port carries.
+
+**`vlans` on a device in no bridge produced a plan that could not
+converge.** `plan_bridge_vlans` planned for anything carrying the key. A
+device that is neither a bridge nor enslaved to one has no per-port vlans,
+so the kernel answers EOPNOTSUPP, the apply fails, and the identical action
+is planned again on the next reconcile and every one after. Measured as
+three applies running, each red on the same line, with no state the machine
+could reach that would stop it.
+
+The failure an operator actually meets is the *removal* rather than the
+addition: `plan_bridge_vlans` pre-emptively clears the kernel's default vlan
+1 on a link it is creating, so that runs first and fails first. And only the
+add path explained EOPNOTSUPP -- the del path reported the bare errno. Both
+explain it now.
+
+The guard asks the document and the kernel, because either can hold the
+honest answer: the document says `master` for a port netcfgd enslaves
+itself, and a device already in a bridge reports one whether or not netcfgd
+put it there. Only when both are silent is the configuration certainly
+impossible, and then it is said once as a warning rather than attempted for
+ever -- 0061's rule, that a key netcfgd recognises and cannot act on is
+named at plan time.
+
+**A warning rather than a compile-time refusal, deliberately.** Refusing at
+compile time was the first instinct and was rejected on a case that cannot
+be seen from the parser: a port whose enslavement netcfgd does not perform
+still has per-port vlans, and the document need not say `master` for the
+kernel to. A warning cannot break that configuration; a refusal could. The
+test pins both directions -- a guard dropped fails it, and a guard widened
+to `!on_self` fails it too, because that widening would close a working
+feature to silence a broken one.
+
+**Where the sweep came up empty, with what was looked at.** `VlanConfig`'s
+three fields are all applied and all compared -- `id` and `protocol` through
+`recreation_reason`, which recreates rather than edits because the kernel
+takes both on a live device and ignores them, and `parent` the same way.
+`MacvlanConfig`'s two are covered: the mode by `plan_macvlan`, which
+documents the kernel's refusal to move between `passthru` and the rest, and
+the parent by the same recreation path. `plan_bridge_vlans` compares all
+three fields of a `BridgeVlan` on the add side and matches on `vid` alone on
+the remove side, which is right rather than asymmetric -- an add with the
+same vid replaces the flags.
+
+The VLAN protocol is big-endian on both the writing and reading sides, and
+was checked because 10.28's priority fault was a width disagreement: it did
+not appear in that sweep's table, since the reader decodes it through
+`be_u16` rather than through the accessor the sweep paired on. A sweep that
+pairs on one spelling says nothing about the values written in another.
+`MacvlanMode`'s numbering matches in both directions, 1/2/4/8, and the
+kernel's fifth mode `source` at 16 is deliberately absent from the model --
+`plan_macvlan` says so and declines to compare a mode it has no word for.
+
+### 10.29.1 A "harmless" wait added to a test, which broke it
+
+Found while gating 10.29 and worth keeping for the shape rather than the
+defect: `openvpn.sh`'s check that a daemon refusing to stop is reported
+failed under `make live`, in a suite nothing in this sweep touches.
+
+**The comfortable explanation fit and was wrong.** The script starts a fake
+openvpn with `FAKE_OPENVPN_REFUSES_SIGNAL=1` and applies the teardown
+immediately after, with no wait for the management socket to appear -- while
+the same script waits for exactly that in two other places. A stop reaching
+a daemon that has not bound its socket is correctly reported as "already
+stopped", a success, so the error line the check greps for never appears.
+That story fit the symptom and fit the file's own idiom.
+
+A wait was added on the strength of it. The check then failed again on the
+next full run, and removing the wait made `make live` green. **The edit was
+the cause rather than the cure**, in a suite whose timing its author
+understood and the editor did not. Measured under `make live`: green on the
+committed tree and green again with the wait removed (1079 checks, four runs
+today), red on both runs that carried it.
+
+Why a wait breaks it is not established, and no third guess is recorded
+here. What is established is that it does.
+
+**Two method errors on the way, both mine.** Running the suite after
+`git stash` and seeing it still fail read as "not mine" -- but stash removes
+only *uncommitted* work, and there was a committed change from an hour
+earlier that a real baseline had to predate. And the standalone rate, 2
+failures in 5 runs, was quoted as evidence about the same thing the
+`make live` runs were measuring; standalone and under-make-live are
+different populations, and the suite is green in the second and flaky in the
+first even with nothing edited.
+
+**So the standalone flake is real, unexplained and still open.** The next
+lead is that it passes standalone in isolation and fails after other suites
+have run, which points at state one of them leaves. The machine was carrying
+a `netcfgd --no-apply-on-start` 13 hours old plus several `udhcpc` and
+fake-supplicant processes between 13 and 22 hours old, all orphaned to init
+from earlier live runs, with 27 `ncfg-*` directories in `/tmp`. Reported
+rather than killed: they are not this session's to reap, and `/tmp` here is
+a 16 GB tmpfs at 2%, so nothing is at risk yet.
+
+## 10.31 qdisc and shaping: one message nobody would get, and a lifecycle that holds
+
+Swept on 2026-09-04. This is the first area this week where the sweep's main
+lens found almost nothing: the qdisc and shaping code is in good order, and
+what it turned up is a diagnostic that stopped being reachable when the
+schema moved.
+
+**The ifb collision check read the retired spelling.** Asking for
+`ingress_bandwidth` makes netcfgd synthesise a device called `ifb-<name>`,
+and `expand_ingress_shapers` refuses rather than merging when the operator
+already declares something by that name -- "netcfgd would otherwise take
+over a device somebody else declared". The check looked in
+`document.interfaces` only, and 0155 pass 1a made `device` the block that
+declares a link.
+
+The collision was still caught, which is why this is a diagnostic bug rather
+than a safety one: the generic duplicate-device check refuses the
+configuration. What it says is `duplicate device entry: ifb-e0`, about a
+device the operator wrote exactly once, with nothing about the ingress
+shaping that needs the name. The whole purpose of the dedicated check is
+that sentence, so firing only for the spelling nobody writes any more made
+it a sentence nobody would get. Verified with a control, which is what
+separated the two: the `interface` form produced the good message all along
+and the `device` form produced the confusing one.
+
+**The rest holds, and was checked against an independent witness rather than
+against netcfgd's own observation.** `tc` is not installed on this machine,
+so the readings are `ip link show`'s, which is iproute2 asking the kernel:
+
+    fq_codel with no rate      set, converges
+    cake at 100mbit            replaces fq_codel, converges
+    cake at 50mbit             rate change only, converges
+    qdisc removed              reset to noqueue, converges
+
+and the ingress path end to end, which is the more interesting half because
+it is three objects rather than one:
+
+    ingress_bandwidth on       ifb-e0 created, both qdiscs set, redirect made
+    rate changed               only the ifb's qdisc replanned
+    ingress_bandwidth off      redirect cleared, ifb deleted
+
+Every step converged on the next plan. That matters more than the individual
+actions: three of this week's findings were plans that could never converge,
+and this is the subsystem where that lens came up empty.
+
+**Where else it was pointed.** `plan_qdisc` compares kind, rate and the
+ingress flag, and does not compare `ingress_bandwidth_bits` -- correctly,
+because the compiler moves that onto the synthesised ifb's own qdisc, which
+is a device in `desired.devices` and so is compared by the same walk. The
+planner reads devices rather than interfaces, which 0155 pass 1b already
+corrected here. A missing scheduler module is diagnosed by name rather than
+by errno, and retrying it on the next reconcile is right where it was wrong
+for `gre0`: a module can be installed, where the kernel's fallback tunnel
+device can never be configured.
+
+### 10.31.1 The live suites' orphaned-process leak, found and closed
+
+Every run of five suites left a process behind, orphaned to init, holding a
+work directory the run had just deleted. 55 of them had accumulated on this
+machine, the oldest 23 hours, with 88 deleted files held open. The count is
+zero now, and a full `make live` creates none.
+
+**The mechanism, established by instrumenting rather than by reasoning.**
+Two different faults wore the same symptom:
+
+- **A cleanup that globbed one program.** Five scripts killed whatever
+  `$work/run/supplicant/*.pid` named. netcfgd records a pid at
+  `$work/run/<program>/<iface>.pid` for `udhcpc`, `odhcp6c`, `dhcpcd` and
+  `pppd` in exactly the same way, so every client that was not a supplicant
+  survived. `gui_wifi.sh` leaked a `udhcpc` per run for this reason -- and
+  it was found only by listing what actually leaked, because instrumenting
+  its cleanup showed the pid file present, the pid correct and the kill
+  landing. The suspect was the supplicant; the leak was the DHCP client.
+
+- **A record the scenario destroys on purpose.** `displace.sh` section 3 and
+  `orphan.sh` both erase netcfgd's run directory while a supplicant is still
+  running -- that *is* the case they exercise, since netcfgd tears nothing
+  down when it stops (0134). Instrumenting the trap showed
+  `pidfiles=[] alive=[1]`: the file gone, the process there, and nothing
+  left for the loop to read.
+
+**The fixes are shaped by which fault they answer.** The five cleanups now
+walk `$work/run/*/*.pid`, and kill only where `/proc/<pid>/cmdline` still
+mentions this run's work directory -- a pid file outlives the process it
+names and pids are recycled, so the command line is what makes the kill safe,
+which is netcfgd's own ownership test. `displace.sh` stops the supplicant
+*before* erasing the record that names it, which also makes its own scenario
+honest: section 3 asks what netcfgd does when nothing is running, and a stray
+supplicant from section 2 was not that. `orphan.sh`, whose whole subject is
+the record being destroyed, sweeps `/proc` for its own `mktemp` path -- a
+sweep that cannot reach a concurrent run, because the path is unique to this
+one.
+
+**Measured per suite, before and after**, each run standalone with the
+process table diffed across it:
+
+    displace      1 leaked per run  ->  0, over three runs
+    gui_wifi      1 leaked per run  ->  0
+    orphan        1 leaked per run  ->  0
+    enterprise, wifi_journey, revive, stations   0 -> 0
+    full `make live`                             0 created
+
+**And the openvpn flake is partly explained by it, which is worth
+separating.** With 55 orphans on the machine, `openvpn.sh` failed 5 and 6
+checks; with the machine clean it fails 1 -- the single long-standing check
+recorded in 10.29.1, which predates all of this and remains open. So the
+debris was aggravating a flake rather than causing it, and the aggravation
+is gone.
+
+**The 71 abandoned processes were reaped, by a criterion rather than by
+hand.** Each was signalled only after its work directory was confirmed
+deleted, which is what makes it certainly abandoned: no live run can be
+using a tree that is not there. The one exception -- a `fake_hostapd` whose
+directory still existed -- was 19 hours old, from a cleanup whose own retry
+loop had given up, and its directory was removed with it. Earlier in the day
+the same processes were deliberately left alone, correctly: the newest was
+then two minutes old and belonged to a run in flight.
+
+**The container failure recorded in section 10 is untouched by this sweep**
+and stays open. It has two structural causes closed under it (0121 and
+0122), three passes and two failures across five container runs, and the
+note there already says the useful thing: if it recurs it is something else.
+Re-running the same instrument would not have added to that.
+
+## 10.32 openvpn: a tunnel whose config went missing, said nothing
+
+Swept on 2026-09-04, starting from the one live check that had been failing
+all week. It produced a real netcfgd defect and an explanation for the flake,
+and only one of the two is closed.
+
+**A `.ovpn` that cannot be read was passed over in silence.** Point a
+running tunnel's `config` at a file that does not exist and `ncfg apply`
+answers `nothing to do`, on every apply, for ever. The daemon goes on
+running the configuration it was started with, the machine does not match
+the document, and netcfgd calls it converged. Reproduced deterministically
+outside the flaky suite, twice running.
+
+Both gates that could have caught it decline, each for a good reason.
+`backend.start` is not planned because the backend is running.
+`config_matches` is `None` because the desired file cannot be hashed -- and
+its doc comment says why that is deliberate: "restarting a working tunnel on
+that would be a VPN dropped for a question nobody answered". Neither is
+wrong. What was missing is that nobody said anything.
+
+So the observation carries `config_present` beside `config_matches`: the
+half of that `None` which is a fault rather than an unknown. The planner
+turns it into a sentence and **still does not restart** -- the tunnel that is
+up remains the best thing available while the document names a file that is
+not there. The test pins both directions, because warning on every healthy
+tunnel would be worse than the silence it replaces.
+
+**The planner cannot read the filesystem, and that is why the fact travels
+through the observation.** `netcfgd-plan` contains no `fs::` call at all;
+the comparison is made where the file is and only the answer moves. Adding
+the field cost one line at each of 32 construction sites, 30 of them in
+tests.
+
+### 10.32.1 The openvpn suite's flake: the cascade closed, the residue open
+
+The mechanism is established. Several sections leave a tunnel running on
+purpose -- a daemon that refuses to stop is the whole subject of one -- and
+netcfgd then does the correct thing with the leftover on the next section's
+first apply: it recognises the process as its own by the socket path in its
+argv and **adopts** it (0140), starting nothing and reporting success. The
+section that follows is then asking its question of the previous section's
+daemon.
+
+Two signatures, both instrumented rather than reasoned:
+
+    passing runs   sock=yes   two `argv` lines in the fake's log
+    failing runs   sock=no    one `argv` line
+
+One line is netcfgd never having started that section's daemon. The fake
+removes its own socket when told to stop, as openvpn does, so for a moment
+it is a live process carrying the marker and holding no socket -- adopted,
+and no socket ever appears, so the teardown finds nothing running and plans
+nothing. That is the `nothing to do` the refusal check has been reporting.
+
+`settle` -- pkill, then wait for the absence rather than assume it -- is
+called before the four sections that need a clean slate. Measured over
+fourteen runs each:
+
+    baseline    8 of 14 runs failed, 28 failed checks, five cascades of five
+    settle      6 of 14 runs failed,  6 failed checks, no cascade at all
+
+Re-measured 2026-09-05 while landing 0157, six runs each way, because two
+consecutive full-suite runs failed here and a change to the daemon's command
+loop is exactly the sort of thing that could have made it worse:
+
+    with the 0157 changes     3 of 6 runs failed
+    with them stashed         3 of 6 runs failed
+
+Re-measured again the same day while landing 0158, the same way:
+
+    with the 0158 guard       3 of 6 runs failed
+    with it stashed           2 of 6 runs failed
+
+Also unchanged. Two changes to processes and pid handling have now each been
+put to this test and cleared by it, which is the point of running the control
+rather than reaching for the known flake: **non-reproduction is not evidence
+against an intermittent fault**, so the comfortable explanation only counts
+once the experiment that would have refuted it has been run.
+
+Worth keeping for a second reason: a
+smaller sample taken earlier in that session put the rate at one in four and
+was reported that way, which is the figure above measured badly rather than a
+rate that moved. **A flake rate is a number nobody re-derives**, and four runs
+cannot tell a quarter from a half.
+
+**`make -k` does not help, and it is the obvious thing to reach for.** Measured
+2026-09-06 on a full-suite run: `-k` continues with other *targets*, and every
+script is a line in one recipe, so the first failing line still abandons `live`.
+The run stopped at openvpn.sh with 41 passed and the remaining eighteen
+unreached; running those eighteen by hand took the tally to 53 passed, 1 failed,
+6 skipped for absent packages or real root. Anyone wanting the whole suite past
+a flake has to invoke the rest directly.
+
+**The cost is not the failed check. It is that `make live` stops there, and
+eighteen scripts after it never run.** Make abandons the target at the first
+failing recipe line, and `openvpn.sh` sits two thirds of the way down:
+
+    a complete run          1114 checks
+    a run that flakes here   743 checks, then nothing
+    scripts after openvpn.sh in the Makefile   18 of them
+
+counted with `grep -oE 'tests/live/[a-z_0-9]+\.(sh|py)' Makefile` and the
+duplicates dropped. The digit in the character class is not decoration: the
+first count of this used `[a-z_]`, silently lost `dot1x.sh`, and reported
+seventeen -- a wrong number in a document, produced by a pattern that could
+not match one of the things it was counting.
+
+So about half of all `make live` runs cover two thirds of the suite, and **the
+two outcomes look alike unless somebody compares the counts** -- both end in a
+wall of `ok` lines, and the aborted one's last screen is as green as the
+complete one's. That is this workspace's vacuous-pass shape wearing a flake's
+clothes: the failure is loud, and what it hides is silent.
+
+**That stopping is make's default rather than a decision anybody recorded.**
+Section 4's "execution stops at the first failed action" is about a *plan*, not
+about this target, and nothing in the Makefile or here says the live suite
+should abandon the rest on one failure. It is not obviously wrong either: the
+cascade this section opens with is a leftover tunnel being adopted by the next
+script, so carrying on after a failure is exactly how one broken script
+poisoned four more. Flipping it to run everything and report at the end would
+buy back the missing third and risk turning one real failure into five
+confusing ones. Worth deciding deliberately rather than leaving as a property
+of the tool.
+
+Until the residue is fixed, a run that stops here has not tested `tunnel`,
+`ppp`, `strand`, `wireguard`, `tui.py`, `wifi_add.py`, `wifi`, `dot1x`,
+`stations`, `acl`, `ap`, `nm`, `modem_at`, `umbim`, `bluetooth`, `hwsim`,
+`association` or `delegation` -- the eighteen above, by name. Either re-run until it passes, or run those
+scripts individually and say which -- reporting a suite as green off a run that
+stopped at 743 would be reporting a third of it as passed without having run
+it.
+
+**The cascade is gone and the single check is not.** Every remaining failure
+is the same refusal check, and it is left open rather than explained away.
+
+**Two fixes were tried and withdrawn, and the numbers are why.** Waiting for
+the management socket after the start looked exact -- `sock=no` and `nothing
+to do` went together on every failing run -- and measured 3 failures in 12
+against 6 in 14 without it, which is not a difference at this sample size;
+the socket is absent because of adoption rather than slowness, so waiting
+cannot help. Calling `settle` inside the stopping section as well measured 6
+in 14, the same. Small samples produced a 1-in-8 reading for one variant and
+6-in-14 for the same code later, which is the whole reason the baseline was
+re-measured at the same sample size before anything was claimed.
+
+### 10.32.2 `ncfg apply` prints no warnings, and every warning this week is one
+
+Found while checking that the new warning reaches an operator. `print_plan`
+renders `plan.warnings` and is called by `ncfg plan` alone; `ncfg apply`
+prints the journal, which carries none. Warnings do reach every other client
+-- they travel in the `Plan` response, which is how the GUI gets them, and
+0086's note records a gap of exactly this shape being closed for contention
+warnings.
+
+It matters because "say it rather than emitting an action that must fail" is
+the idiom four of this week's fixes chose: `vlans` on a device in no bridge,
+the kernel's fallback tunnel devices, a veth whose peer name is taken, and
+now this one. An operator who runs `ncfg apply` and not `ncfg plan` sees
+none of them.
+
+Not changed here: a command's output is an interface, and adding lines to it
+is the copyright holder's call rather than a sweep's.
+
+## 10.33 dns: a resolver entry that outlived the block that asked for it
+
+Swept on 2026-09-04. 10.21 had already swept this area for the rendering
+lens and cleared `DnsMode` exhaustiveness, routing domains and `same_rule`,
+so this one used the lens that has paid all week -- **a plan that can never
+converge, and a state that can never be taken back**.
+
+**Removing a `dns` block left its nameservers in `/etc/resolv.conf` for
+ever.** Measured end to end: set `servers = ["10.0.0.53"]` on an interface,
+apply, remove the block, apply again -- the file still says `nameserver
+10.0.0.53` and `ncfg plan` says `nothing to do`. The machine resolves
+through a server the configuration no longer mentions and netcfgd calls it
+converged.
+
+**What separated the executor from the planner is one experiment.** Forcing
+an unrelated change -- a `search` domain on `globals` -- made the file
+correct immediately: any `dns.apply` delivers *every* scope, so the file is
+written whole and the departed entry vanishes. The executor had been right
+all along; `plan_dns` walks what is desired, so a scope that went away was
+never visited and nothing asked for the delivery that would have swept it
+out.
+
+**The repair exposed a second fault underneath it**, the same two-layer
+shape as 10.25 and 10.28. Asking for a re-delivery made the file correct
+and the plan non-convergent: `dns.apply globals` on every pass, for ever.
+`State::absorb` recorded delivered scopes by retain-and-push, so the applied
+record was **add-only** -- a scope that stopped being delivered stayed in it,
+the planner saw it departed on every pass, and nothing could ever take it
+out. It replaces the record with what was delivered now, which is right
+because a delivery writes the file whole: a scope absent from one is absent
+from the file, and a record saying otherwise is simply wrong.
+
+**The safety case is not a detail, and it is what the second half of the
+test pins.** With no scope left to deliver, netcfgd manages no DNS at all,
+and asking for a delivery would write the empty `resolv.conf` that
+`plan_dns` already carries a warning to prevent -- a machine's DNS gone
+because its last `dns` block went. So a document that stops managing DNS
+entirely leaves the file alone, which is the answer `plan_qdisc` gives for a
+qdisc netcfgd did not set.
+
+**The first version of that test passed with the fix removed**, and the
+reason is worth keeping: the fixture left `globals` with no applied record,
+so the ordinary loop planned a delivery for it and the assertion read that
+as the repair working. The departed scope has to be the *only* thing that
+can produce an action, which means recording `globals` as already delivered
+and matching. Caught by sabotaging the fix and watching the test not care.
+
+**Where the sweep looked and found nothing.** Every resolver path netcfgd
+writes is redirectable for testing -- `NCFG_RESOLV_CONF`, `NCFG_DNSMASQ_CONF`
+and `NCFG_UNBOUND_CONF` -- and the comment on the second pair says the first
+exists "because a test very nearly rewrote this machine's", which is why
+nothing here ran without checking that first. The `write_resolv_conf`
+lifecycle converges at every step now: servers set, servers changed, search
+dropped, block removed. The one-write lag in `observed.json` after a
+clearing apply is the snapshot rather than the plan -- the next command
+writes it correctly and the plan was already right.
+
+## 10.43 A seven-lens sweep of wifi, the GUI and the core, and what survived checking
+
+Asked to check wifi, the core networking paths and the GUI exhaustively. Seven
+parallel sweeps, each given the same five lenses -- the ones this workspace's
+recent history says pay out -- and each told to report only defects a fix would
+change behaviour for.
+
+**They returned about forty candidates. This section records the ones I checked
+myself**, because a sweep's output is a list of hypotheses: the last review in
+this tree produced real defects alongside claims that did not survive a second
+look, and two of the claims below were wrong in exactly that way.
+
+### Fixed, each verified before and after by running it
+
+**A stored certificate was written to a filename naming its role, not its
+credential.** `path_for(ca_cert, "ca.pem")` -- a literal -- so every network
+with a stored CA wrote one `/run/netcfgd/certs/ca.pem` and every network's
+`ca_cert=` pointed at it. One supplicant is handed every network in a single
+loop, so the last one rendered won for all of them: a machine with a work
+network and a university network validated **both** servers against whichever
+CA was written last. That is the corporate network trusting an authority it was
+never configured to trust, which is the whole of what pinning a CA is for. The
+same held for `client.pem` and `client.key`, so an EAP-TLS client key intended
+for one authenticator was presented to another. Two of the seven sweeps found
+this independently, which is what moved it to the top. Named after the secret
+now; the test asserts two different CAs land in two files *and* that each file
+holds its own bytes, and goes red against the old behaviour.
+
+**`ncfg secret set NAME < cert.pem` stored the first line.** `read_line` stops
+at a newline, and the command's own help prints exactly that redirect as the
+way to store a certificate. Measured: an 80-byte PEM stored as 27 bytes,
+`-----BEGIN CERTIFICATE-----` and nothing else, which `path_for` then
+materialised for wpa_supplicant. The reader half was already right --
+`read_file` takes the whole file -- so a hand-placed PEM always worked and only
+the writer could not produce one. A redirect now reads to end of file; a typed
+passphrase still ends at Enter, checked both ways.
+
+**`wifi { open = false }` compiled to an open network.** The guard counts *at
+most* one security key and never *at least* one, and the guard that refuses a
+network with no `wifi` block is keyed on the block being present. Measured:
+`wifi { }`, `wifi { open = false }` and `wifi { owe = false }` all compiled to
+`security: open`. The middle one is why this is a refusal rather than a
+warning -- an operator who writes `false` against `open` has said the opposite
+of what they got, and the machine then associates in the clear with anything
+broadcasting that name. Access points share the lowering, so it was an open AP
+there, which is worse. `open = true` and a real `psk` still compile.
+
+**A geneve tunnel's `ttl` was written into `IFLA_GENEVE_TOS`.** The header on
+this machine numbers the enum UNSPEC, ID, REMOTE, TTL, TOS -- so TTL is 3 and
+netcfgd said 4. **The reader carried the same wrong number**, so the read-back
+agreed, the plan converged, and nothing was ever reported. Measured against a
+real kernel, which is the only witness that could tell: with the old constant
+`ip -d link show` says `tos 0x40` and no ttl; with the fix, `ttl 64`. Two wrong
+halves round-tripping is a state no comparison in this codebase can see, which
+is why the constant is now checked against the header rather than against
+ourselves.
+
+### Confirmed and fixed on instruction, after being recorded as a design decision
+
+**A device with no `interface` block is created, enslaved, and never brought
+up.** Measured against real devices: with `device br0 { bridge { members =
+["p0","p1"] } }` and an `interface br0` block, the plan is `link.create br0`,
+`link.set_master p0`, `link.set_master p1`, `link.up br0` -- and afterwards
+`p0 master=br0 state=DOWN`, `p1 master=br0 state=DOWN`. A bridge port that is
+down forwards nothing, so `br0` never gets carrier. **That is the arrangement
+`doc/netcfgd.conf.example` ships**, and the same shape takes the uplink away
+under `qdisc { ingress_bandwidth = ... }`, where the synthesised `ifb-` device
+is likewise left down and `tc mirred` drops every inbound packet to a down
+target.
+
+`Op::LinkUp` is emitted only from the interface walk, and 0155 pass 1b moved
+both synthesised objects from `Interface` to `Device`. Why no test caught it:
+`tests/live/links.sh` writes `interface X { config = "null" }` for every device
+including bridge ports, so the suite cannot express the failing arrangement, and
+`ingress.sh` asserts the ifb exists and the filter points at it but never reads
+its link state and never passes a packet.
+
+**Fixed, on the holder's instruction, and deliberately narrow.** A device is
+brought up when it is a port (`master` is set) or an `ifb` -- the two cases
+where netcfgd's own configuration cannot work unless the link is up and where
+no `interface` block could ever say so, because neither carries an address. An
+arbitrary `device eth9 { mtu = 9000 }` is an operator saying something about
+the hardware and nothing about connecting over it, and `enabled` lives on the
+interface, so it is left alone; that is the control in the fixture. A device
+that *does* have an interface block is left to the interface walk, which knows
+about `enabled`, about `pre_up` hooks and about the SIM cycle -- checked, one
+`link.up` and not two.
+
+The new action waits for the creation gate and for this device's own
+enslavement. The first attempt used `push_root`, which declares no edges at
+all: an `ifb` has to exist before it can be brought up, and a port brought up
+before it is enslaved is briefly a live link outside the bridge. `plan_master`
+returns the enslavement id now so the port's bring-up can name it.
+
+**Two things this taught, both about the tests rather than the code.**
+
+An existing fixture, `a_bridge_waits_for_its_members_even_though_it_sorts_first`,
+went from failing to passing while testing something other than its name. It
+finds its subject with `position(&plan, "link.up")` -- the *first* one -- which
+used to be the bridge's and is now the port's, and a port's bring-up also waits
+for its enslavement, so the assertion held for the wrong action. It names `br0`
+explicitly now. This is 9's positional-assertion lesson arriving from a new
+direction: the assertion did not rot, the plan grew a second action of the same
+kind underneath it.
+
+And the first sabotage of the new fixtures **passed**, which would have shipped
+two vacuous tests as proven. `make fmt-fix` had joined the guard onto one line
+between writing the test and breaking it, so a two-line search-and-replace
+matched nothing and the "sabotaged" build was the unmodified one. The
+replacement is asserted now. `evidence.md` says to confirm the sabotage landed;
+what made it bite here is that the formatter, not the author, moved the target.
+
+### Two claims that did not survive checking
+
+**"`make live` covers the suite."** It does not when `openvpn.sh` flakes, which
+is about half of runs -- see 10.32.1, where the count and its method are now
+recorded. I reported seventeen scripts lost and the number is eighteen: the
+pattern `[a-z_]` silently dropped `dot1x.sh` for its digit.
+
+**A rate of one in four for that flake.** Re-measured six runs each way: 3 of 6
+with the 0157 changes and 3 of 6 without. The earlier figure was a four-run
+sample, and four runs cannot tell a quarter from a half.
+
+### What is recorded but not yet checked
+
+The seven sweeps returned far more than the above, and **the rest is
+unverified**: a GUI access tab that resets two control tiers to root whenever
+one is changed, an interface dialog that opens blank and saves with
+`replace=true`, a profile name interpolated raw into generated configuration, a
+remote socket whose permissions come from the local control policy, backend
+adoption that trusts a marker any local user can put in their own argv, a wifi
+network's `metric` making the planner delete the default route it just
+installed, non-canonical IPv6 addresses oscillating between add and delete, and
+`/etc/netcfgd/conf.d` not being watched on a stock install. Each is written
+with a file, a line and a scenario in the sweep output.
+
+**They are listed here as leads, not as findings.** Every one of the four fixed
+above was checked by running it, and one of the sweeps' claims was wrong about
+which build a measurement came from. A lead that has not been reproduced is
+worth exactly the next person's time to reproduce it, and no more.
+
+## 10.47 Hook materialisation leaves compilation
+
+Instructed by the copyright holder 2026-09-06, choosing between the two shapes
+10.46 recorded. The compiler is pure now: `grep` for `std::fs`, `File::`,
+`Command::` and `std::env` across `netcfgd-compile/src` returns nothing, and
+its dependencies are the model and serde.
+
+**`HookSink::materialise` became `HookSink::record`, and the rename is the
+contract.** Both halves of what the document needs -- the path and the sha256
+-- are computable from the body and a naming rule, so writing was folded in
+only because the sink happened to be there. It cost three things:
+
+- **Five of the six CLI paths that compile are read-only** -- `plan`, `show`,
+  `explain`, and the helpers behind `wireless_interface` and
+  `observe_with_document` -- and every one wrote hook scripts under `/run` as
+  a side effect of being asked what *would* happen. Measured before and after,
+  with a config carrying one `post_up`:
+
+      before   ncfg plan   ->  /run/netcfgd/hooks/hk0.post_up.0
+      after    ncfg plan   ->  no hooks directory at all
+               ncfg show   ->  no hooks directory at all
+               ncfg apply  ->  hk0.post_up.0
+
+  This is the lead recorded earlier about read-only commands materialising
+  hook scripts, and it is closed by the refactor rather than by a guard.
+
+- **A compile that failed had already written some of them**, because the
+  writes happened as each hook was reached rather than after the document was
+  known good. The daemon's reload now writes after the compile succeeds, so a
+  bad configuration leaves `/run/netcfgd/hooks` as it was.
+
+- **A pure compiler can run somewhere with no privileges**, which is what this
+  was for. 10.46 records why that is wanted: the release profile is
+  `panic = "abort"` with `overflow-checks = true`, so a panic anywhere in the
+  compiler takes the daemon down and `catch_unwind` cannot help.
+
+**The directory is created only when there is something to put in it.** `apply`
+calls `write` unconditionally and most machines have no hooks; creating an
+empty `hooks/` for them would put a side effect back on a path that had just
+lost one.
+
+**The compiler found the call sites, which is why the count is trustworthy.**
+Changing `compile`'s return type turned every caller into a type error --
+thirteen of them, five in `control.rs` alone that a first reading had missed --
+so each had to state whether it wanted the files. One does.
+
+## 10.49 A promise has nothing in the world to rebuild it from
+
+Found 2026-09-06 while looking for what would consume the *why am I being
+stopped* intent that §10's item 4 is about. It is a gap in the thing that
+question exists to protect, and it needed no new mechanism to find.
+
+**Fixed the same day on the holder's instruction, by moving the window out of
+the directory systemd manages** ([0163](doc/decision/0163-a-promise-lives-outside-the-runtime-directory.md)).
+The finding is kept as it was written, because the reasoning that found it is
+worth more than the patch; what changed is recorded at the end.
+
+**An unresolved commit-confirm window does not survive a real stop.** Measured,
+with the restart case as the positive control, in a `unshare -rn` namespace
+against the freshly built daemon:
+
+    case A  restart, /run kept       window found  -> reverted, address gone
+    case B  real stop, /run removed  no window     -> the change stands
+
+Both cases arm a 300-second window over a first apply, kill the daemon with
+`kill -9`, and start an ordinary daemon -- no `--no-apply-on-start`, because
+that is what an init starts. The only difference between them is whether
+`/run/netcfgd` is removed in between. **A came back and reverted; B came back
+and kept the change nobody confirmed.**
+
+**The systemd half is this document's own established fact and was not
+re-measured**: `RuntimeDirectoryPreserve=restart` keeps `/run/netcfgd` across a
+`systemctl restart` and removes it on a real stop, which §10.26 already relies
+on and 0135 quotes `systemd.exec(5)` for. There is no systemd on this machine,
+so the probe models the directory removal directly rather than driving a unit.
+What is new here is not that fact but a consumer nobody had checked against it.
+
+**So `systemctl restart netcfgd` and `systemctl stop netcfgd && systemctl start
+netcfgd` differ in whether an operator's unconfirmed change is taken back.** Two
+spellings of one intent, opposite safety outcomes, and the dangerous one is the
+one somebody types when they are being careful.
+
+**And the answer differs by init system, which is the worse half.** systemd is
+the only one of the four that removes the directory: OpenRC's `start_pre` runs
+`checkpath --directory` and never removes it, procd's `start_service` runs
+`mkdir -p` and never removes it, and sysvinit removes only the pid file -- read
+in full rather than grepped. So the same operator action reverts on OpenWrt and
+does not on Debian.
+
+**Why this consumer and not the others, which is the part worth keeping.**
+Everything else in `/run/netcfgd` that matters has been given a way to be
+rebuilt from the world: 0135 reads addresses and routes back from the kernel's
+protocol tag, 0136 gives a link its own mark, 0140 finds a backend by scanning
+`/proc` for the marker it was started with. Those all work because the state is
+**a claim about an object that still exists**, so the object can be asked.
+
+0139 already named the window as a different kind -- *a promise that was never
+kept* -- and settled that it must not be boot-scoped. What follows from its own
+taxonomy and was not drawn: **a promise has no object in the world to rebuild it
+from.** There is nothing to tag and nothing to scan for, because what it asserts
+is that somebody did *not* come back. So it is the one kind of state in the
+directory for which losing the file is losing the thing itself, and it is the
+one kind that has no fallback.
+
+**The reasoning is inconsistent rather than merely thin, which is what makes it
+a finding rather than a wish.** 0139 declines to boot-scope the window on the
+grounds that a reboot does not make the promise false and boot-scoping "would
+remove the protection exactly where the outage was worst". A stop and a start
+are strictly *less* disruptive than a reboot, and the protection is removed
+there today.
+
+**What is not settled, and is not a worker's to settle.** The fix is a choice
+between at least three, each touching something already decided:
+
+- **Move the window and the last-good document out of the directory systemd
+  manages.** Cleanest for this fault, and it makes part of `/run/netcfgd`
+  outlive a stop, which is constraint 1's "derived and disposable" needing an
+  explicit exception rather than an implicit one.
+- **`RuntimeDirectoryPreserve=yes`.** One line, and it changes the lifetime of
+  everything else in there -- including the backend records whose removal
+  §10.13 and §10.26 are written about, in both directions.
+- **The item-4 intent.** A stopper that says whether this is an upgrade or a
+  final stop is exactly the information that decides whether a promise should
+  outlive the process, and this is the first concrete consumer found for it.
+  That is an argument for the feature and not yet a design.
+
+**No test was added at first, deliberately.** One asserting today's behaviour
+would pin a defect and one asserting tomorrow's would fail `make live`, so the
+reproduction was written down and the check waited for the fix. `confirm.sh`
+case 6 already covered the restart half; what it had never done is remove the
+directory, which is the one line between the two cases.
+
+### What the fix turned out to be, and the three things it cost
+
+The holder chose the first option. `netcfgd_host::confirm::dir` composes a
+sibling of the run directory -- final component plus `-confirm`, so
+`/run/netcfgd` gives `/run/netcfgd-confirm` -- and the window and the last-good
+document are written there. It is derived from the run directory rather than
+hard-coded, so `NCFG_RUN_DIR` keeps working and every test gets the sibling
+without being told. `write_atomically` already creates parent directories and
+`ProtectSystem=full` leaves `/run` writable, so no init script and no
+`ReadWritePaths=` had to change. `make live`'s `confirm.sh` is 53 checks and
+all pass.
+
+**A round trip cannot see this fix, which is why it needed its own
+assertion.** `a_window_round_trips_through_the_file` passes just as well with
+both files back inside the runtime directory -- confirmed by sabotaging `dir`
+to return the run directory and watching that test stay green while the two
+new ones went red. The new assertions are that the directory is not inside the
+run directory, that both files really are over there, and that removing the run
+directory outright leaves the window readable.
+
+**Three test paths named the old location and one of them was mine.** The live
+suite's `window_open` and a `last-good.json` grep pointed at `$work/run`, and
+the first draft of the new case checked that `run/confirm.json` was absent
+after the wipe -- which passes for the wrong reason once the fix is in, because
+it was never there. It asserts instead that the runtime directory had something
+to lose, that the wipe emptied it, and that the promise is elsewhere.
+
+**And the fault has a natural one-line reintroduction**: adding
+`RuntimeDirectory=netcfgd-confirm` to the unit, which is what somebody does on
+noticing a second directory the daemon writes to. `killmode.sh` refuses that,
+and refuses a rename in Rust that would leave the guard pointing at a path
+nobody writes -- a guard over the wrong name is green and guards nothing. Both
+were made to fail independently before being written down.
+
+**One process failure worth keeping.** The control run -- the suite without the
+change, to establish that three later failures were mine -- was done by
+stashing, rebuilding and running. Restoring the stash afterwards left the
+*control* binary in place, and the next run reported the fix not working. That
+is this document's own rule about never concluding from a binary the build step
+did not rebuild, met from the direction nobody writes it down for: not a stale
+binary from an old edit, but a correctly built one from a deliberate control.
+**A control run leaves the wrong artifact behind, and the artifact does not
+know it was a control.**
+
+## 10.52 Installing netcfgd now selects netcfgd
+
+Instructed by the copyright holder: *"when netcfgd is installed I want it to
+work 100%, and any other processes that interfere with it are to be killed,
+disabled and if they still persist, renamed"* -- and then the constraint that
+shaped the whole design: *"we keep NM around only because many desktops have a
+built in wireless/network configurator applet for NM which works with
+netcfgd-nm too, but depends on NM."*
+
+**`packaging/netcfgd_select.sh` is the answer, and it goes both ways**
+([0168](doc/decision/0168-installing-netcfgd-selects-netcfgd.md)). `postinst`
+runs it on a first install; `prerm` runs it with `none` on the way out; an
+operator runs `netcfgd_select.sh networkmanager` to hand the machine back. A
+takeover with no way back is what leaves a machine unusable, and this project
+already has the record for that.
+
+**It stands down eleven services and touches no package and no binary.** The
+holder's NM constraint is what forces that, and following it honestly emptied
+the rename rung: netcfgd *runs* `wpa_supplicant`, `dhcpcd`, `hostapd`, `pppd`,
+`openvpn`, `udhcpc`, `odhcp6c` and `resolvconf`, and `dnsmasq` and `unbound`
+are DNS backends 0007 offers as modes. Cross those against the daemons that
+actually contest the network and what is left safely divertible is `connmand`
+and `dhclient`. **The daemons that fight netcfgd are the ones it delegates to
+or impersonates**, so masking is the rung that does the work -- it survives
+reboots and upgrades and is reversible, where a rename needs `dpkg-divert` and
+leaves a package database to repair.
+
+**Three defects in my own work, each caught by running the thing rather than
+reading it:**
+
+- **`--dry-run` on this machine proposed deleting `/run/network/ifstate` for
+  `eth0`, `ib0` and `lo`.** I had listed it as a stale claim beside NM's and
+  networkd's. It is not: it is ifupdown's *live* record of what it brought up,
+  and netcfgd never reads it -- so removing it buys netcfgd nothing and costs
+  ifupdown the ability to bring those interfaces down. The two that stay are
+  there because netcfgd *does* read them, which is 0145.
+- **The unmasking was in `postrm` and would never have run.** For `remove`,
+  dpkg deletes the package's files first and runs `postrm` after, so the
+  switcher would already be gone, the `-x` guard would skip silently, and the
+  machine would keep every network daemon masked with nothing able to undo it.
+  It is in `prerm` now.
+- **The new gate's third check could not fail.** A non-greedy regex from
+  `unmask_all() {` with no end anchor ran past the closing brace and matched
+  an identical loop further down the file, so the function could be sabotaged
+  to walk a hard-coded pair and the gate still passed. Found by sabotaging it
+  *and confirming the edit had landed* -- the first sabotage silently did not
+  apply, and a check that reports success against an unapplied sabotage looks
+  exactly like a check that works.
+
+**What is not tested is everything systemd.** This machine has no systemd, so
+every `systemctl` path is exercised only through `--dry-run`. The argument
+handling, the refusal without root, all three directions and the gate are run.
+That is the same bar §*What would prove it* sets for the daemon.
+
+## 10.53 A check that had never counted anything
+
+`orphan.sh`'s *"there is exactly one supplicant carrying that mark"* failed
+with **`expected: 1, actual:`** and nothing after it. It failed identically at
+`962bbe1`, so it was not caused by the work around it -- a control build
+settled that before anything else was looked at.
+
+**It had never counted anything, and could not have.** The expression opened
+with `grep -lc . /proc/[0-9]*/cmdline` whose output was discarded -- vestigial,
+doing nothing at all except **exiting 2**, because some `/proc` entries are
+unreadable and others vanish between the glob and the read. Under `set -e` a
+failing command inside `$( )` kills the substitution, so the `echo $c` at the
+end never ran and the empty string reached the comparison.
+
+**The shape of the lie is the part worth keeping.** An empty `actual` against
+`expected: 1` reads as *no supplicant is running* -- a defect in netcfgd, in
+the exact area the test covers. It does not read as *this check did not
+execute*. So a broken test impersonated a plausible bug in the thing it was
+testing, which is worse than a test that simply fails.
+
+Three changes. The dead `grep` is gone. The count is a named function using an
+`if` rather than `cmd && c=$((c+1))`, so no future reading of `set -e` can make
+the loop's own exit status decide whether the total is printed. And `check`
+now says so when it sees an empty actual against a non-empty expected:
+
+    note: the actual value is empty, which usually means
+    note:   its $( ) failed rather than that the machine
+    note:   is in the state above
+
+Proven both ways: the count reports a real number (asserting 2 gives
+`actual: 1`, where it gave nothing before), and reintroducing the vestigial
+`grep` brings the empty back with the note underneath it.
+
+**The same counting shape is in `dot1x.sh` and is left alone.** It has no
+failing opener, so it works today; changing correct code in a passing test to
+match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
+edited, because the hazard is real and one added line away.
+
+## 10.59 The GUI could add and could not remove, and the daemon said "is it running?"
+
+Two things, from one instruction to improve the gui and two reports that
+arrived while it was underway.
+
+### Picking the work by measurement
+
+The gui's own order of work is finished through item 1 and item 2 is a
+different subsystem, so "what should the gui do next" had no answer in the
+documents. What answered it was enumerating the daemon's request verbs against
+the client's API surface. Four are unreachable from the gui -- `config_delete`,
+`secret_delete`, `explain`, and a removal for a wifi network that does not
+exist at all -- and the last is the one an operator meets: a **saved networks**
+table with `view / change` and `add by hand` above it and no way to remove a
+row.
+
+**A query would not have found it.** There is no "cannot forget" message to
+grep for; the absence is a verb nobody wrote. What found it was listing both
+populations and looking at the difference, which is *Re-derive the scope
+number*'s remedy applied to a feature set rather than to a count.
+
+Decision 0172 has the verb. What belongs here is why it was shaped as one at
+all: the removal already existed as `ncfg config rm wifi-<id>`, and a gui
+button that sent that would have been a client spelling netcfgd's own file
+layout -- the thing 0127 exists to prevent. **A feature that is reachable only
+by knowing where the daemon keeps its files is not reachable**, and the cost of
+pretending otherwise is a table nobody can delete from.
+
+### The report that arrived mid-change
+
+*"I installed netcfgd now, and netcfgd-gui says it is not running as usual"*,
+then *"I always have to mess around to start it when NM is running"*, on a
+machine that is not this one.
+
+The gui was telling the truth and being useless about it. `client/` produced:
+
+    cannot reach netcfgd at /run/netcfgd/netcfgd.sock: No such file or
+    directory. Is the daemon running?
+
+**That is the right question and the wrong sentence.** The answer is no --
+nothing else produces `ENOENT` on a path netcfgd creates at startup -- and the
+reader is left to work out what to type. Worse, the gui put it in a critical
+box and **exited**, so somebody who then started the daemon had to find the
+program again. That round trip is the "messing around".
+
+It names both remedies now (`systemctl enable --now netcfgd`, or
+`netcfgd_select.sh netcfgd` when another daemon still holds the machine) and
+the dialog offers **Retry** rather than quitting.
+
+**Both remedies, and no guess at which.** A stale `/run/NetworkManager`
+outlives the daemon that made it, so a directory is a proxy that would name
+the wrong cause with the authority of a diagnosis -- *A wrong guess is a cheap
+way to make a tree explain itself* says to check a suspicion rather than act on
+it, and there is nothing here to check it with. Naming only `systemctl` would
+send somebody to start a daemon on a machine NetworkManager owns, which is the
+case they reported.
+
+**Why an install leaves this state at all** is worth writing down, because it
+is not a bug: `debian/postinst` runs the selector only when `$2` is empty --
+a *first* install. An upgrade does `try-restart`, which does nothing when
+netcfgd was never started. So a machine that had the package before the
+selector existed keeps whatever is running, which is NetworkManager, for ever.
+Whether an upgrade should select is a packaging decision and not one to make
+while fixing a message.
+
+### The rss gate was failing on where the measurement landed
+
+`make check` went red at 4880 KB of a 4864 limit, and five runs of `make rss`
+on the same build gave 4716..4764. The change had not moved it: the mean was
+indistinguishable from the mean before it.
+
+**The band had stopped covering the noise**, which is the failure that limit's
+own headroom exists to prevent -- its comment says so, and says to re-derive
+from measurement. Under a concurrent `make check` the same binary measures
+4808 and 4880, because `VmHWM` is peak resident including text and page
+reclaim under pressure is exactly what the band was sized for. This machine
+runs more sessions than it did when 4864 was chosen.
+
+Raised to 5120 with all three figures recorded: the idle spread, the loaded
+peak, and `RssAnon` -- 532 KB against 500 when the limit was last set, which is
+the honest answer to "is it using more memory" and is 32 KB of it. **A gate
+that goes red at random is one people re-run until it is green**, which is
+worse than no gate.
+
+## 10.61 The build fetches what it needs, and the package puts its unit in force
+
+*"Submodules should be handled automatically by makefiles, same with
+permissions. That is the path of least resistance."* Then, narrowing it:
+*"permissions should be applied by the package to its files and the relevant
+system, regardless of there being an older version."*
+
+**Telling somebody to type a command the build could type itself is the
+failure, not the message.** 10.60 fixed the silence about a missing qtty
+submodule by printing an instruction; the instruction was still the wrong
+answer. `gui/Makefile` fetches it now when the directory has never been
+checked out.
+
+Two conditions, and both are the interesting part:
+
+  * **Only when it is empty.** `git submodule update` moves HEAD, so a qtty
+    developer with the submodule on their own branch would find the build had
+    moved it under them. An empty directory belongs to nobody.
+  * **It must not ask a question.** Pointed at a remote that does not exist,
+    `git submodule update` did not fail -- it *waited*, for credentials it was
+    never going to be given, until an outer timeout killed the build. So it is
+    told not to ask: `GIT_TERMINAL_PROMPT=0`, `BatchMode=yes`, and a
+    `GIT_ASKPASS` that answers nothing. **A fetch that stops to ask in the
+    middle of `make` is worse than one that fails.**
+
+The timeout is a backstop rather than the mechanism, and it is generous:
+a first fetch of qtty over ssh measured **177s** here, so a build that killed
+a working clone at two minutes would be the fault this rule exists to remove.
+
+### The package was writing a unit systemd never loaded
+
+The second half turned out to be the report from 10.60, root-caused.
+
+`debian/rules` passes `dh_installsystemd --no-enable --no-start`, deliberately:
+installing this package must not start the shim, which takes NetworkManager's
+bus name. Reading debhelper rather than assuming, `--no-start` does more than
+that. `RESTART_AFTER_UPGRADE` defaults to true only when `--no-start` is
+absent, so both branches that would emit a postinst snippet are skipped -- and
+what those snippets carry, besides the start nobody wanted, is
+`systemctl --system daemon-reload`.
+
+**So an upgrade wrote a new `netcfgd.service` and systemd went on running the
+old one**, and the postinst's own `try-restart` re-executed the daemon under
+the stale unit: new binary, previous sandbox. That is the machine that reported
+netcfgd refusing every write with "Read-only file system" naming
+`/etc/netcfgd/conf.d`, months after the unit on disk started granting `/etc`.
+
+The postinst reloads before it restarts now, and applies its permissions on
+every `configure` rather than on a first install -- dpkg sets modes for files
+the package ships and knows nothing about the ones netcfgd creates as it runs.
+The credential store is the one that matters: an older version's mode outlives
+the version that made it, and no later tightening takes back a private key
+somebody already copied.
+
+**A correct unit that is not loaded costs exactly what a wrong unit costs**,
+which is why the check lives in `sandbox_gate.py` beside the unit-versus-code
+comparison rather than in a packaging gate of its own. Same symptom, same
+place to look.
+
+### And the gate could not fail, which the sabotage found
+
+The first version reused `strip_comments`, which strips **Rust** `//` and
+leaves `#` alone. So both new checks read the comment that explains them: the
+paragraph above the reload names `daemon-reload` and then `try-restart`,
+dozens of lines before the code does. "Is there a reload" was satisfied by
+prose, and "is it before the restart" compared two sentences.
+
+Moving the real reload to the end of the script and watching the gate stay
+green is what showed it. **A gate that reads a file's comments is testing its
+own documentation** -- and the better the comment, the more reliably it
+passes.
+
+Worth keeping beyond this instance: a helper named `strip_comments` in a tool
+that has only ever read one language is a helper whose name promises more than
+it does. It reads `strip_shell_comments` beside it now, and the new one says
+in its own docstring which mistake produced it.
+
+## 10.62 The credentials tab could name a fault and not fix it
+
+The same shape as 10.59's saved-networks table, found by the same
+enumeration and worth recording separately because the *reason* it was
+read-only was a good one that had stopped applying.
+
+`secrets_view.h` says storing a credential here would be "a value in a process
+that did not need to hold one", and that is right: no value crosses the socket
+in this direction, and `ncfg_secret_row` has no field that could carry one. So
+the view is read-only, deliberately.
+
+**But removing carries no value, only a name.** The view's own subject is the
+credential nothing refers to -- "stored, unused", which its header calls "a
+credential still on the machine after whatever wanted it was deleted" -- and
+its note answered that with *"removing the file is how a machine forgets it"*:
+a client told to go behind the socket, which is the one thing 0127 exists to
+stop. `Request::SecretDelete` has been served all along.
+
+**A rule with a reason attached is easy to over-apply**, and this is the
+cheap check for it: ask what the reason forbids rather than what the rule
+says. "No value in this process" forbids a text field. It says nothing about a
+button that sends a name.
+
+### What the protocol said to do about it
+
+The request's own documentation carried the instruction:
+
+> What guards it is the `admin` tier and nothing else, which is worth knowing
+> before a client offers a button for it.
+
+So the button is off without `admin` and says which tier in its tooltip, and
+the confirmation is the strong one 0042 asks for -- a private key nobody has a
+copy of cannot be got back, and unlike a store there is no `replace` to
+withhold and no second question from the protocol.
+
+**Two questions in one, chosen by the row.** A credential nothing refers to is
+the tidy case. One something still refers to is a network that will stop
+joining -- so the question names what refers to it rather than warning in the
+abstract, and it is still offered, because rotating a credential means
+removing the old one while the reference stays.
+
+**MISSING rows are not offered at all.** A name the configuration refers to
+and the store does not hold has no file to remove, and a live button there
+would be offering to fix the wrong half of the fault.
+
+### The probe, and what it deliberately cannot assert
+
+`gui/tests/live/live_secrets.cpp` is the fifth live GUI probe and needed no
+edit to `gui_wifi.sh`: that runner finds every `.pro` in the directory, which
+its own comment promised and this is the first time anything tested.
+
+It never reads a value, because nothing in this direction can. What it asserts
+instead is the **store's** answer through the daemon -- listed, then not --
+rather than the table's, so that "the row went" and "the credential went" stay
+two claims. A view that stopped drawing a row it still held would pass the
+first and fail the second.
+
+Cancel is pressed before Yes, for the reason the wifi probe learned the hard
+way: a probe that only ever answers Yes passes with the dialog deleted.
+
+    reverted                        which check goes red
+    the confirmation bypassed       "answering no keeps the credential"
+    the call to the daemon removed  "answering yes removes it from the store"
+                                    and "and the view says so"
+
+### An intermittent seen in passing, not chased
+
+During one sabotage run `live_wifi` failed "activating scans straight away, so
+the table is already filled" and "and pressing scan again refills it", and
+passed them on every other run of the day. Nothing in `secrets_view` can reach
+the wifi scan, so this is that probe's own timing rather than anything the
+sabotage did. Recorded rather than investigated: an intermittent named in a
+document is one the next person can recognise instead of rediscovering, and
+non-reproduction is not evidence against it. **Explained in 10.614**: what the
+sabotage run supplied was load, and the fake supplicant's `-B` lost a race
+under it.
+
+## 10.69 The switch works, and what the two empty-resolver faults were
+
+The retry of 10.68's switch, with both halves of the DNS failure fixed. The
+machine is on netcfgd now: associated to `OpenPC.se`, leased `10.0.125.56`,
+routed, and resolving through a `resolv.conf` netcfgd wrote from the lease.
+
+**The empty resolver was two independent faults, stacked, and fixing the first
+changed nothing visible.** That is the part worth carrying: 0178 shipped the
+hook so it could be *executed*, and the machine still came up unable to resolve,
+which read as the fix having failed. It had not. The hook now ran and had
+nothing to report.
+
+### `CAP_NET_BIND_SERVICE` was missing, so the lease carried no options
+
+A DHCP client binds UDP 68, which is privileged, and dhcpcd does it from the
+privilege-separated child that owns the socket. The unit's bounding set did not
+carry `CAP_NET_BIND_SERVICE` and neither did its ambient set:
+
+    dhcpcd: ps_inet_listenin: Permission denied
+    dhcpcd: BOOTP proxy 10.0.125.56 exited unexpectedly from PID ..., code=1
+    dhcpcd: ps_root_recvmsg: Permission denied
+
+**The lease still arrives**, over the raw socket `CAP_NET_RAW` allows, so the
+address and the routes appear and netcfgd reports success. What dies is the
+proxy carrying the lease's *options* -- so the hook is invoked, writes its
+report, and the report holds a header and not one `dns=` line. Addressed,
+routed, resolving nothing, with netcfgd's own log clean.
+
+Ambient rather than only bounded: the client is a child that needs it
+effective, and a bounding-set entry nobody holds grants nothing. Confirmed by
+binding UDP 68 under each set -- `EACCES` without, `OK` with -- and then
+end-to-end: the report went from a bare header to `dns=10.0.0.1` and
+`search=vibes.se`, and `dhcpcd: [BOOTP proxy]` now sits in the cgroup where it
+used to exit at once.
+
+### `ncfg wifi activate` wrote a radio that could not resolve
+
+A lease's nameservers are *offered* to an interface and taken only where one
+asks. The block netcfgd's own activation command writes had `config = "dhcp"`
+and no `dns { }`, so the radio came up addressed and resolving nothing -- on a
+machine whose global block said `write_resolv_conf`, which reads as though it
+had been asked for.
+
+netcfgd said so, in a `ncfg plan` warning naming the exact remedy, about a file
+netcfgd had written itself. **A diagnostic that names a remedy for a file the
+program generates is a defect report against the generator**, and it went unread
+for as long as the two were separate things to look at.
+
+The existing test could not see it: it asserts that what activation writes plans
+a *supplicant*, and a supplicant was always planned. The new one asks whether,
+given a lease that offered nameservers, the resolver gets written.
+
+### Fixed: dhcpcd is stopped by its own verb, because argv cannot name it
+
+`sweep_children` decides ownership from the `/run/netcfgd/` marker a backend
+carries in its argv (0140). **dhcpcd calls `setproctitle` and destroys argv**:
+its command line reads `dhcpcd: wlp0s20f3 [ip4]`, and the BOOTP proxy has no
+interface in it either. So the marker is gone and the test cannot answer.
+
+**A test that cannot answer does not abstain.** `is_netcfgds` returns false,
+which reads as "somebody else's" -- so the sweep classified netcfgd's own client
+as another manager's leftover, and `--dry-run netcfgd` on a machine already
+running netcfgd proposed killing the client netcfgd had just started, five
+processes at a time. That is also why *"I STILL had to kill orphaned dhcpcd"*
+survived the sweep being fixed in 10.68: the fix worked for the supplicant and
+could never work for this one.
+
+dhcpcd leaves `children_of` entirely and is stopped from netcfgd's own
+bookkeeping -- `/run/netcfgd/dhcpcd/<iface>-<family>.conf`, one per client it
+started -- with `dhcpcd -4 -k <iface>`, which takes the privilege-separated
+children with it where a signal to the pid leaves them. **The list is captured
+before anything is stopped**, because `RuntimeDirectoryPreserve=restart` deletes
+`/run/netcfgd` on a real stop; measured, an orphan that outlives it logs
+`read_config: ... No such file or directory`, expires its lease and solicits a
+second one, which is how the machine ended with two addresses on one interface.
+
+**The shape worth keeping: identify a process by what it was started with, not
+by what it looks like now.** netcfgd already had this answer -- 0143 asks dhcpcd
+over its control socket which `-f` it recites, for exactly this reason -- and the
+switcher was using the process image because that is what worked for everything
+else.
+
+### Fixed: a preinst stopped the daemon and `--no-start` removed what restarted it
+
+Reproduced three times. `dpkg -i` of the netcfgd package with the daemon running
+leaves it `inactive`, and the network survives only because `KillMode=process`
+keeps the supplicant and the DHCP client alive.
+
+Isolated as far as it goes: it is **the unpack**, not the maintainer scripts.
+`dpkg --unpack` alone stops it and `dpkg --configure` does not bring it back.
+Running the shipped `prerm upgrade` and `postrm upgrade` by hand against a
+running daemon stops nothing. The package declares no triggers, and the
+`/etc/init.d/netcfgd` conffile generates no unit -- `FragmentPath` stays the
+native one. systemd records a stop *job* (`Result=success`, SIGTERM,
+`ExecMainCode=2`), so something asked it to stop rather than the daemon dying.
+
+**Found: `dh_installsystemd` generates a preinst that stops it.**
+
+    if [ -z "$DPKG_ROOT" ] && [ "$1" = upgrade ] && [ -d /run/systemd/system ]
+    then deb-systemd-invoke stop 'netcfgd.service'
+
+That is half of a stop-then-start pair, and `--no-start` suppresses the other
+half. So the stop shipped and the start did not, and the postinst's
+`try-restart` always ran against a unit that was already inactive -- correctly
+doing nothing, because `try-restart` acts on an *active* unit and that is
+exactly what the preinst had stopped it being. `--no-stop-on-upgrade` removes
+the stop; the daemon then runs through the unpack and the postinst restarts it,
+which is what that postinst already said it intended.
+
+**Why three reproductions missed it.** Hand-running the shipped `prerm upgrade`
+and `postrm upgrade` against a live daemon stopped nothing, which read as *"not
+the maintainer scripts"* -- and it was wrong in the most ordinary way: **preinst
+is the one dpkg runs on an upgrade that neither of those tests reaches.** The
+package declaring no triggers and `--no-triggers` changing nothing had ruled out
+everything except the scripts, and the scripts had been ruled out by testing two
+of the three.
+
+**What named it was systemd's own debug log.** At `log-level debug` it recorded
+`Accepting direct incoming connection from <pid> (systemctl)` immediately before
+enqueueing the stop -- over systemd's *private* socket, which is why
+`dbus-monitor --system` had shown no `StopUnit` call and made the stop look
+internal to systemd. **A bus monitor that sees no call is not evidence that no
+call was made**, only that none crossed the bus it was watching.
+
+**And it had only just started biting.** The `#DEBHELPER#` token was added to the
+maintainer scripts to stop debhelper generating snippets and dropping them --
+correct, and recorded in the prerm -- and that is what put this preinst on a
+machine for the first time. **The fix that makes a mechanism work is what
+exposes what the mechanism does**, so a change that is right in itself can be
+the proximate cause of a fault, and looking for the fault among recent *wrong*
+changes will not find it.
+
+## 10.73 Every write netcfgd makes, asked the same question at once
+
+> Have you checked all the write errors on all files netcfgd has to write?
+
+No. The ones that had failed had been checked -- a resolver file under an
+inert grant (10.66), a hook under a `noexec` mount (10.67) -- and nothing had
+asked the question of the rest. Asking it mechanically took an afternoon and
+is now a gate.
+
+**Ninety-one writes in the shipped crates, forty-four functions**, removals
+aside. Sixty-three propagate with `?`; twenty are handled where they stand;
+**four dropped the failure on the floor**, and all four are records netcfgd
+keeps of its own past: the supplicant's network fingerprint, the WireGuard key
+digest, the peers' preshared-key digests, and the hash of the `.ovpn` a tunnel
+was started from.
+
+**Every one of the four was a considered decision, and the decision was
+right.** A record that could not be kept must not fail an apply -- a device the
+kernel accepted is not made wrong by a digest that would not write, and 0079's
+restart counter would turn a full `/run` into a loop. One of them says so in
+its own doc comment.
+
+**What none of them did was say anything**, and that is the part worth
+keeping. The cost never lands at the time. It lands at some later reconcile as
+netcfgd having no opinion about a passphrase, a rotated key or an edited config
+-- which looks exactly like a machine that is fine. Three faults this week had
+that shape already, and in all three netcfgd reported success. So: report it,
+then carry on. One line each, no change to what an apply returns.
+
+### The gate, and why the list under it is empty
+
+`tool/write_gate.py` requires every write to propagate, to be handled where it
+stands, or to be named in `tool/write-best-effort.txt` with what its loss
+costs. The list is empty, which is the finding and not the default: nothing in
+the tree now drops a write's failure silently. It refuses in both directions --
+one reintroduced `let _ =` fails it, and so does an entry for a write that is
+no longer silent, so the allowance cannot rot into one nobody rechecks.
+Removals are exempt by rule, because `remove_file` is asked for a state and
+the usual error is that the state already held.
+
+### The test that passed for the wrong reason, caught by sabotaging it
+
+The refusals are made with **a file where a directory has to be**: no
+privilege, no mount, so these run wherever the suite runs -- which is the
+lesson of 10.71, where the tests that only assert as root or under `unshare -r`
+turned out to assert nothing for months. A mode would not do; root walks
+through one.
+
+The first version of the plain-record test passed with the write's error
+deliberately discarded. It was reading `create_dir_all`'s refusal every time
+and had never reached the write at all -- one call in the pair hiding the
+other. A *directory* where the file belongs is the refusal that gets past the
+first call, and both halves are now sabotaged separately.
+
+### The write that fails after the open, and what it caught on the way
+
+The gap above was real and is now closed: every unit test refuses at the
+`open`, and the half a real machine reaches is the other one. **Opening an
+existing file needs no space** -- truncating it hands some back -- so on a full
+filesystem the open succeeds, the mode is set, and the write stops part way
+with the operator's script half on disk.
+
+`tests/live/write_full.sh` fills a 256 KiB tmpfs with `dd` and drives the two
+writers a shell can reach without a radio, a modem or a VPN: an inline
+`pre_up` hook and the resolver. Twenty checks. netcfgd names the file, gives
+the kernel's words, says which action it stopped at and exits non-zero -- and
+the hook file is left *shorter than the body*, which is what tells a failed
+write from a failed open.
+
+**And it caught a promise nothing had checked.** `netcfgd-dns`'s `replace`
+declines to fall back to writing in place when staging fails for want of
+space, with a comment saying why: the fallback would truncate a working
+`resolv.conf` and then fail to refill it. Sabotaged by removing that guard,
+the run does not merely lose the resolver -- **it empties it and reports
+success.** That is 10.66 and 10.67's fault exactly, sitting behind a comment
+that was right all along and had never been asserted. Two checks now hold it:
+the old content survives, and no staging file is left beside it.
+
+Three ways of finding the same thing in one week: a grant that was inert, a
+hook that could not run, and a fallback that would have emptied a file. What
+made all three visible was **making the failure happen**, not reading the
+code that handles it.
+
+## 10.74 And every read, where the same question has a worse answer
+
+> now check the read errors too
+
+The write audit's twin, and the finding is not symmetrical. **A write that
+fails loses something netcfgd wanted to keep; a read that fails can produce a
+false statement about the machine** -- and netcfgd acts on statements.
+
+Ninety-seven reads: twelve propagate, thirty-two are handled where they stand,
+fifty-three drop the error, and **nearly all fifty-three are right**. Absence
+is usually the answer -- no pid file, nothing running; no record, nothing to
+compare against -- and the rule was already written down on
+`config_file_of`: *"None is not 'somebody else's', it is 'netcfgd could not
+tell'"*. The observation code follows it: four currency checks all leave
+`None` for a record they cannot read, each with a sentence saying why.
+
+The fault was in a population the search for `fs::` calls does not reach:
+**forty-seven `exists()`, `is_file()` and `is_dir()` calls, which swallow the
+error by construction.**
+
+### Measured: a config that could not be read deconfigured the machine
+
+`/etc/netcfgd/netcfgd.conf` made a symlink to itself:
+
+    $ ncfg apply
+    ok   addr.del read0  addressing: <absent> (was 10.11.0.1/24)
+    $ echo $?
+    0
+
+`if main.is_file()` answers `false` for a file it cannot examine, so an
+unreadable config became an **empty** one -- and an empty config is not
+nothing. It is the statement *nothing here is netcfgd's*, which netcfgd acted
+on: address off the interface, exit 0. Four ways in, none exotic: a symlink
+loop, a dangling symlink (a config on a disk that is not mounted, which is the
+likeliest), a directory in place of the file, `EIO`. The same gate guarded
+`conf.d`, so the wifi networks and the DNS policy could go the same way.
+
+`present()` now keeps three states apart where `is_file` has two: not there
+(skip -- an ordinary machine), there (read it), **cannot tell (refuse, naming
+the path and the kernel's words)**. It looks at the link before resolving it,
+because `metadata` follows one and would put the likeliest case back in "not
+there".
+
+### The same shape one crate over
+
+`netcfgd-secret` mapped every `metadata` failure to `NotFound`, whose message
+ends *"`ncfg secret set <name>` stores one"*. Right for a secret nobody
+stored; **wrong for one behind a permission error or a symlink loop, and
+destructive if the advice is taken**, because storing over it replaces a
+credential that was there.
+
+### What the control is for, and why it is not optional
+
+`tests/live/config_unreadable.sh` requires the address to survive all four
+unreadable shapes -- and then requires that an **absent** config still applies
+and still takes the address back. The fix could easily have been "refuse
+anything that is not a readable regular file", which would break every machine
+that has no netcfgd configuration at all. Sabotaged back to `is_file()`, eight
+checks go red including the interface losing its address.
+
+### The through-line of the week
+
+`ProtectSystem=full` made a grant inert; `/run` `noexec` made a hook
+unrunnable; a bounding set made a signal impossible; a full disk made a write
+half-happen; and an unreadable file made a configuration look empty. Five
+faults, one shape: **netcfgd could not do something, and what it reported was
+either success or a state it had guessed.** Every one of them was found by
+making the failure happen rather than by reading the code that handles it.
+
+## 10.75 And every exec, where the audit came back clean but for one sentence
+
+The third of the three. Sixteen places run a program, and **every one of them
+waits, reads the status, and reports a message naming what it ran.** Seven
+tell `NotFound` -- "not installed" -- from the rest, which is the distinction
+that matters, and the three-candidate DHCPv4 loop uses it to try the next
+client rather than to give up. The two sites that do not read a status are
+both right to: `dhcpcd -k`, where exit 1 is what a udhcpc machine always says
+(0070) and the outcome is confirmed on the control socket instead (0179), and
+the bounded `ETXTBSY` retry.
+
+Measured end to end, the four ways a client fails already gave four different
+messages. Two of them were the same sentence:
+
+    not executable         could not run dhcpcd: Permission denied (os error 13)
+    on a `noexec` mount    could not run dhcpcd: Permission denied (os error 13)
+
+**Two faults, different repairs.** A missing executable bit is a `chmod`; an
+executable file on a `noexec` mount is a mount option, and no `chmod` will
+ever touch it -- which is 10.67 one layer up, where the journal said
+`script_runreason: Permission denied` 1,350 times and it took a day to find
+with the answer sitting in `findmnt`. `exec_refusal` now resolves the program
+the way an exec would, reads the mode, and says which of the two it is. It
+stays quiet where it has nothing to add, so the caller's own "install one of
+these" survives.
+
+### What the three audits say together
+
+* **Writes** (10.73): four silent records -- the failure was heard by nobody.
+* **Reads** (10.74): `is_file()` answering false for a file it could not
+  examine -- the failure became a false statement, and netcfgd acted on it.
+* **Execs** (10.75): sound already, except one message covering two repairs.
+
+The risk changes direction with the operation, and so does the fix: **a write
+needs to be heard, a read needs to not be guessed, and an exec needs to be
+diagnosed.** All three were found the same way -- by making the failure happen
+rather than by reading the code that handles it.
+
+## 10.76 And the sockets, which fail in ways files do not
+
+The fourth audit. A socket adds failures a file has never had: a peer that
+connects and never speaks, a message that does not fit, an answer that arrives
+before the question. One of each, in three different places.
+
+### A connection that says nothing held a slot for ever
+
+The control socket caps concurrent connections at 64 and answers the 65th with
+a message rather than a dropped connection -- both deliberate, both right.
+Neither covers a connection that is not a client: `handle` blocked in
+`read_request` with no deadline. Measured against a real daemon, **64 silent
+connections and `ncfg reload` refused for as long as they were held** -- and
+where the policy opens `observe` to `any`, which is this machine's own, that
+is any local user with no credential and no request.
+
+A ten-second deadline on the *first* request, cleared once one arrives, so the
+tray that idles between clicks and the `monitor` stream that says nothing for
+hours are untouched. What it does not close is written down rather than
+implied: one valid request and then silence still holds a slot, and closing
+that would drop the very clients the exemption exists for.
+
+### The refusal reached the buffer and not the operator
+
+With the cap reached, `ncfg reload` said `cannot send: Broken pipe (os error
+32)`. The daemon answers on accept and closes, so the client's write lands on
+a closed socket **while the sentence explaining why is already in the client's
+own receive buffer**. A message composed carefully at one end, thrown away one
+function later at the other.
+
+Pinned on the function, not through a socket: through a socket it is a race,
+and the first version of that test passed for the wrong reason -- the write
+went into a buffer, the read found the refusal, and the path being fixed was
+never taken.
+
+### A netlink reply that did not fit was silently short
+
+`recv` without `MSG_TRUNC`. Netlink delivers a datagram whole or not at all,
+so a buffer too small takes what fits, the kernel drops the rest, and the
+return value is the buffer's length: **an incomplete dump that reports itself
+as complete**, and a wait to the socket timeout where the lost tail held the
+`NLMSG_DONE`.
+
+**Latent here, and measured rather than assumed**: the kernel caps a dump's
+datagrams just under the 32 KiB buffer -- 31,944 bytes for 800 interfaces,
+whatever the count. What reaches it is a single oversized message, and a
+WireGuard device with many peers is one message.
+
+`MSG_PEEK | MSG_TRUNC` asks the size without consuming; the buffer grows and
+takes the datagram whole, bounded at a megabyte.
+
+**The first fix was wrong and the test caught it.** Re-sending the request
+with a bigger buffer leaves the truncated reply's remaining datagrams queued,
+to be skipped against the new sequence number while the new reply waits behind
+them: it passed once and returned an empty dump on the next run. That is the
+second time this week a fix of mine passed its first run and failed its
+second, and both times what found it was running the test again rather than
+reading it.
+
+### What the four audits say together
+
+* **Writes** (10.73): the failure was heard by nobody.
+* **Reads** (10.74): the failure became a false statement, and netcfgd acted.
+* **Execs** (10.75): sound, but one message covered two repairs.
+* **Sockets** (10.76): a peer that says nothing, an answer nobody read, and a
+  reply that did not fit.
+
+Four passes, four different shapes, and one method: make the failure happen.
+None of these was found by reading the code that handles it -- including the
+two where the code that handles it was mine, written an hour earlier.
+
+## 10.82 The wifi fault the project was opened for: `ca_cert=""`
+
+> It was not able to switch...
+
+The laptop moved to the corporate network and netcfgd could not join it. The
+supplicant said why, forty-five times:
+
+    OpenSSL: tls_connection_ca_cert - Failed to load root certificates
+             error:80000002:system library::No such file or directory
+    TLS: Failed to set TLS connection parameters
+    EAP-PEAP: Failed to initialize SSL.
+    CTRL-EVENT-SSID-TEMP-DISABLED ssid="EMP-XYLEM" auth_failures=45
+
+netcfgd was stopped, NetworkManager started, and it joined the same network on
+the same laptop a minute later with `EAP-MSCHAPV2: Authentication succeeded`.
+
+**The line is `out.push(Setting::plain("ca_cert", "\"\""))`**, taken when a
+network pins no CA. Every value in that block is a *path* -- the code says so
+two lines above about the branch that does have a certificate -- so this asks
+wpa_supplicant to open a file whose name is the empty string. OpenSSL refuses,
+the TLS context is never built, and PEAP fails before proposing an inner
+method. **The network could never have authenticated.** NetworkManager writes
+no such line, which is the whole difference.
+
+The old comment's security argument was right and is untouched: a network with
+no pinned CA accepts any server that answers, and the compile stage warns
+about that by name on every apply. What it got wrong was making a security
+argument for emitting a *broken* setting. A feature that cannot connect does
+not teach an operator to pin a certificate; it teaches them to use something
+else.
+
+### It works, on the machine and the network it was reported from
+
+Installed and switched at the office, same access point, minutes later:
+`EAP-MSCHAPV2: Authentication succeeded`, `CTRL-EVENT-CONNECTED`, address
+`10.78.60.134/22`, resolver from the lease, `nothing to do`. First attempt,
+after forty-five failures that morning.
+
+**The default route came up on `metric 200`**, the metric the `EMP-XYLEM`
+block carries -- the first time 10.69's work has done anything on a real
+network.
+
+`phase2 = "auth=MSCHAPV2"` went in at the same time, so this cannot claim
+which change was load-bearing. What is known is that the failure was in TLS
+setup, before an inner method is proposed, so `phase2` was not what stopped
+it.
+
+### Why nothing caught it
+
+`enterprise.sh` and every EAP unit test supply a `ca_cert`, because a test
+that pins a certificate is what somebody writes when the feature is about
+certificates. **The default case -- the corporate network that pins nothing,
+which is most of them -- was the untested one.** The oldest lesson in this
+document, in a new place: the fixture modelled the careful configuration and
+the machine ran the ordinary one.
+
+### And the upgrade/downgrade audit it arrived during
+
+The finding is next door. `read_owned` treats an unreadable ownership record
+as empty -- right, since refusing to start over a disposable `/run` file would
+turn it into an outage -- and said nothing. That record is what tells netcfgd
+which addresses and routes are its own to remove, so forgetting it silently
+means an address netcfgd configured reads as somebody else's from then on. A
+downgrade is exactly how a machine gets one.
+
+Measured both ways: unknown fields from a future version parse and are
+ignored; a file that is not JSON at all is discarded, the daemon starts, the
+machine stays configured, and the next apply writes a good record.
+
+**That leniency belongs to the record and not to the document.** `owned.json`
+is netcfgd's own note about what it configured -- derived, disposable, rebuilt
+by the next apply -- so ignoring an unknown field costs nothing. A document is
+the opposite: its types carry `deny_unknown_fields`, because §2 says a
+consumer rejects a document containing a field it does not recognise. The two
+look like one question and are not. Now it says so as well.
+
+**Version skew is otherwise unguarded**, recorded rather than fixed: `Hello`
+carries a protocol and a schema version, both ends send them, nothing compares
+them. What saves it is that `ncfg` and `netcfgd` ship in one package.
+
+## 10.85 The supplicant was talking and nobody listened
+
+The roaming and reconnect audit, and it found the daemon attached to
+`wpa_supplicant`'s event socket -- correctly, since 0091, with `ATTACH` sent
+exactly once and roam.sh asserting it -- reading **one event out of the
+stream**. `connected_bssid()` answers `None` for anything that is not a
+connect, and `continue` was the whole handling of every event that says a link
+is failing rather than working.
+
+What that cost is on this machine's record. `EMP-XYLEM` with `ca_cert ""`
+(0189) failed PEAP inside OpenSSL before an inner method was proposed, and the
+supplicant said so forty-five times:
+
+    CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="EMP-XYLEM" auth_failures=45 duration=60 reason=CONN_FAILED
+
+Every one arrived on a socket netcfgd was holding open. netcfgd's log for that
+morning does not mention them; what it said was that the interface had no
+carrier -- true, and useless. **A day, for a fault the machine was announcing
+every ten seconds.**
+
+### Four events, at three levels, and the rest still dropped
+
+Temporary disable at warning, re-enable at note, an access point refusing the
+station at warning, a disconnect at note or verbose depending on **who ended
+it** -- forty-three in three days here and nearly all of them this machine
+leaving. Everything else still goes on the floor, DSCP policy included, which
+is most of the stream by volume. Being told everything is the same failure as
+being told nothing.
+
+Terse lines, because the count and the wait climb with each failure: these are
+forty-five *distinct* lines, and a paragraph explaining what a climbing count
+means would have been forty-five paragraphs.
+
+### And `LIST_NETWORKS` was ignored the same way
+
+`NetworkEntry` has parsed the flags since it was written and `is_current()` is
+the only thing that ever read them, so `[TEMP-DISABLED]` was parsed, carried
+and discarded. `STATUS` cannot close that gap -- it describes the one
+association an interface has, so an interface with none reads `SCANNING`
+whether it is scanning hopefully or has abandoned everything it was given.
+
+`ncfg wifi status` lists them now, flags passed through rather than translated,
+with the one sentence that belongs where it is read once: **a temporary disable
+is not a network out of range.** Out of range is absent from a scan, not
+disabled -- the difference between checking a passphrase and walking closer to
+the router.
+
+### The reader underneath
+
+`Event::field()` is not a `split_whitespace().find()`, because `ssid=` is
+quoted and `printf_encode` leaves a space alone. `ssid="Guest Wifi"
+auth_failures=3` splits into a network called `"Guest` with the count lost
+behind it -- both of the things the event is read for, destroyed by the reader.
+A two-word network name is what a router ships with.
+
+Fifteen checks in `tests/live/wifi_trouble.sh`, all green on the first run and
+therefore each made to fail: six on removing the reporting call, three on an
+empty `not_trying`, three on a whitespace-split field reader. Decision 0192.
+
+## 10.87 A scan is not a round trip
+
+    $ time ncfg wifi scan wlp0s20f3
+     -58 dBm   5500 MHz  enterprise  EMP-XYLEM  [EMP-XYLEM]
+
+    real	0m0.007s
+
+**Seven milliseconds**, for an operation in which the radio leaves its channel
+and visits every other one it is allowed to use. Three consecutive calls
+returned 15, then 20, then 20 access points: the first list was five networks
+out of date, and the scan it asked for is what made the second one right.
+
+`SCAN` queues a scan and returns at once; `SCAN_RESULTS` reads the cache the
+last completed scan filled. Sending one and immediately reading the other
+returns **the previous scan's results, always**. The comment in place said they
+were "about to be fresh either way" -- the fault stated as a reassurance, since
+about to be is not are and the client is gone before it becomes true.
+
+Worst in the case that matters most: a supplicant that has just started has an
+empty cache, so the first scan after netcfgd brings a radio up returns nothing.
+"I pressed scan and nothing appeared" is not a mystery.
+
+### Attach, scan, wait, read
+
+`ATTACH` before `SCAN`, because events reach only connections that asked and
+asking afterwards races the scan finishing. A `SCAN` answering `FAIL` is a scan
+already running and is not a reason to skip the wait -- its completion event is
+the one being waited for.
+
+Ten seconds of patience, and a `stale` reason on the report when they run out.
+Stale results beat no results, so they are still returned, labelled, with the
+driver's own `ret=` passed through: -16 is EBUSY, -100 ENETDOWN, both in this
+machine's journal.
+
+### The regression it would have been
+
+Requests are answered on the reconcile loop, so a scan that now takes seconds
+would hold that loop for seconds -- and **0111 is the record of that exact
+cost**, a wedged `PING` blocking the loop for 12.2 seconds where the fix was to
+stop waiting rather than wait better. So authorise on the loop and wait off it.
+The reply travels on a channel and does not care which thread sends it, and the
+server already runs a thread per connection.
+
+The unreachable `answer()` arm returns a message rather than calling
+`wifi::scan`: a scan routed back through it would *work*, and would quietly
+restore the stall. A message is a regression somebody sees.
+
+### And the event 0192 missed
+
+`CTRL-EVENT-SCAN-FAILED`, twenty-four of them in three days here. 0192 read the
+events that say an association is failing and not the one that says the radio
+could not look at all. It is also why the scan path does not log its own
+failure -- the same event reaches the journal through the watcher, and doing
+both put two near-identical lines there for one event.
+
+### The fixture had only half a supplicant
+
+`fake_supplicant.py` answered `SCAN` with OK and never sent an event, which a
+real one does. That had to be fixed before anything else could be checked,
+since a fake that never announces a result makes every scan wait out its
+patience. `FAIL_NEXT_SCAN` and `SILENT_NEXT_SCAN` are modes rather than events
+a test sends directly, because the scan connection attaches for its own scan
+and goes: an out-of-band event arrives at nobody and the test would pass on a
+fake talking to itself. Decision 0194.
+
+## 10.88 A switch that cannot fail is not a switch
+
+Reported as "switching is still completely broken", and reproduced twice on the
+machine. Both switches were announced as successful.
+
+**To netcfgd**: the success line at 20:33:08, the lease at 20:33:20. Twelve
+seconds during which the sentence was false.
+
+**To NetworkManager**: the success line at 20:38:07, and **no default route
+until 20:51:08 -- thirteen minutes**, ended not by NetworkManager recovering but
+by a person running `nmtui`:
+
+    20:50:57  agent-manager: agent[...,/nmtui/0]: agent registered
+    20:51:08  device (wlp0s20f3): Activation: successful, device activated.
+
+NM had tried once, at 20:38:10, and stopped: *"access point 'OpenPC.se' has
+security, but secrets are required"*, then *"no secrets: No agents were
+available for this request"*. The profile carries `psk-flags=1` -- the
+passphrase is agent-owned rather than stored -- so NM must ask a secret agent,
+and outside a desktop session there is none.
+
+**None of that is netcfgd's doing.** What is netcfgd's doing is that the program
+which had just rearranged this machine's networking said it had succeeded, exited
+0, and left nothing anywhere saying the machine was off the network.
+
+### Why nothing could report it
+
+`run()` is `"$@" >/dev/null 2>&1 || true` -- every systemctl's output discarded
+and failure ignored. Mostly right: masking a unit that does not exist and
+killing a pid that has gone are ordinary here. But it means no individual step
+can report anything, so **the outcome check is the only place truth can come
+from**, and there wasn't one.
+
+### A default route, and nothing else
+
+It is what was missing in both measurements and what every manager in `unit_of`
+exists to install. A global address is explicitly *not* the test: `docker0` has
+one, so "some interface has a global address" is true on a laptop with no
+network at all, and a check that passes while the machine is offline is worse
+than none.
+
+Bounded wait, default 30s, then the truth either way -- with the primary unit's
+state, a `journalctl` pointer, and exit 1. This does not contradict 0190's
+refusal to start `<manager>-wait-online.service`: that unit gates
+`network-online.target` for the next boot and has no deadline of its own.
+
+Six checks in `select.sh`, in a namespace that has no default route until one is
+added through `lo`. Both directions, because a confirmation that cannot pass is
+as useless as one that cannot fail. Decision 0195.
+
+## 10.90 Selecting a network is not joining one
+
+    match client.command(&format!("SELECT_NETWORK {id}")) {
+        Ok(()) => Response::Ok,
+
+`OK` to `SELECT_NETWORK` means the supplicant took the command. The
+authentication, the association, the four-way handshake and any TLS exchange
+all come after it, and every way they fail arrives as an event rather than a
+reply. netcfgd called the acknowledgement success, and `ncfg wifi connect`
+printed *"joining; `ncfg wifi status` says whether it worked"* -- the program
+admitting in its own success message that it did not know the answer to what it
+was just asked. On the network that started this work, that answer was
+forty-five consecutive authentication failures.
+
+### The same shape, three times
+
+Worth naming as a pattern rather than as three bugs:
+
+- **10.87 / 0194**: `SCAN` returns at once, `SCAN_RESULTS` reads a cache -- the
+  scan was always the previous one.
+- **10.88 / 0195**: `systemctl start` returns when the unit starts, not when
+  the machine is on a network -- success announced 13 minutes early.
+- **10.90 / 0197**: `SELECT_NETWORK` returns when the command is taken, not
+  when the radio has joined.
+
+Each reported an asynchronous operation's *acknowledgement* as its *outcome*.
+The fix is identical every time: attach first, do the thing, wait for the event
+that says what happened, say that instead.
+
+### What counts as the answer
+
+`CTRL-EVENT-CONNECTED` is success; `SSID-TEMP-DISABLED` carries the
+supplicant's own `reason` (`WRONG_KEY` and `CONN_FAILED` send a person to
+different places, so it is passed through); `AUTH-REJECT` is the access point
+refusing rather than a credential netcfgd got wrong.
+
+**`CTRL-EVENT-DISCONNECTED` is deliberately not a failure**: `SELECT_NETWORK`
+leaves whatever the radio was on, so a disconnect is the ordinary first step of
+a join, and treating it as the outcome would fail every successful switch
+between networks.
+
+Off the reconcile loop, like the scan, for 0111's reason -- an EAP handshake is
+not something to hold that loop for.
+
+Five checks, and the sabotage is instructive: removing the wait takes the three
+*failure* checks red and leaves the success check green, which is correct.
+Returning `Ok` unconditionally passes "it worked" every time; only the failure
+cases can tell the difference. `wifi_journey.sh` now asserts **joined** rather
+than **joining**, which is a stronger claim than it could make before.
+Decision 0197.
+
+## 10.93 Two settings that contradict each other, and a reference nothing read
+
+IPv6 privacy is applied properly and `mac_policy` reaches the supplicant
+correctly. What was wrong is what happens when both halves of the MAC story are
+set at once.
+
+`mac` on a device is planned as a `link.set_mac`; a randomising `mac_policy`
+goes to the supplicant, which applies its own address **when it associates**,
+over whatever the link is carrying. netcfgd does both and said nothing:
+
+    0  link.set_mac wlan0  mac: 02:00:00:00:00:01 (was 6a:d3:38:d3:a9:bb)
+
+netcfgd setting an address it is about to have overwritten. **What it costs is
+the reason somebody pins an address at all** -- `MacPolicy::Permanent`'s own
+documentation says "a network with MAC-based admission control is the usual
+reason", so an operator who set `mac` for admission and `mac_policy` for
+privacy gets neither the admission nor a diagnosis.
+
+Warned rather than resolved. Either could be what was meant, and picking for the
+operator would silently discard whichever was actually wanted.
+
+### The shipped reference was wrong
+
+`netcfgd.conf.example` said *"`scan_randomization` and `mac_policy = "random"`
+are the privacy pair"*. **`random` is not a MAC policy** -- confirmed against
+the compiler, which answers "one of permanent, per_network, per_connection".
+And the sentence presents the two as equals when `scan_randomization` is
+accepted and inert.
+
+That file calls itself "every feature, with the syntax to use it" and the
+postinst points an operator at it as the thing to read on a machine with no
+network. **Nothing checked a word of it** -- the Makefile installed it and
+removed it, which is also how it came to have no `probe` block at all (10.84).
+Two faults, one file, one session, both found only by reading.
+
+### `tool/example_gate.py`, and what it does not do
+
+Every commented top-level block, uncommented and compiled alone: 81 blocks, 79
+compile, and the two that cannot are named rather than skipped by pattern, so a
+third joining them is a failure.
+
+**It does not read prose**, and the gate's own header says so. The
+`mac_policy = "random"` was in a sentence, not a block, and this gate would have
+passed the file carrying it -- worth stating where somebody will read it,
+because a check trusted for more than it does is worse than none. It also
+refuses to pass on an empty block list, which is the trap every gate shares.
+Decision 0200.
+
+## 10.100 A preference that walks
+
+0154's idea holds and is unchanged: a metric counts up, lower winning, and
+every backend that orders networks for joining counts the other way, so one
+conversion lives in the model and both backends share it.
+
+**The function that exists to prevent a silent sign error had nothing checking
+its sign.** Not indirectly either -- the only `priority` in any test in this
+tree is a bridge priority and the `<3>` prefix on a control-socket event.
+Sharing one copy stops two backends disagreeing; it does nothing about the
+single copy being backwards, and its own comment says what that costs: "the
+machine simply prefers the wrong network". A defence against divergence, taken
+for a defence against error.
+
+### And the conversion that was not one
+
+`emit.rs` says: *"Two conversions that are not inverses would make a profile
+change its own ranking every time a desktop client read it back and wrote it
+out."* They were not inverses. Measured on the real functions:
+
+    metric 100 -> autoconnect-priority 974 -> metric 103
+
+and it did not settle. Repeated read-and-write -- what happens every time
+somebody opens a connection in a desktop client and saves it -- walked it:
+
+    100, 103, 107, 111, 115, 119, 124
+
+far enough to cross another network's metric, after which the machine prefers
+one the operator did not choose. The failure the comment describes, in the code
+it is attached to.
+
+**The cause is which end of the band the trip lands on.** 4096 metrics share
+1000 priorities, so coming back is a choice of which metric in the band to
+name, and truncating chose the edge -- the value that maps to the next priority
+*down* when sent again. Adding half a band picks the midpoint, which maps back
+to where it came from: 100, 101, 101, 101. Over every metric in range, none
+moves more than 8 and none moves twice.
+
+Asserted on the real functions and on the two properties that can hold --
+ordering survives, and the second trip is a fixed point -- rather than on
+equality, which cannot hold when 4096 values share 1000.
+
+### And a rank of zero is not a rank
+
+Sweeping every metric rather than sampling turned up the same loss at the other
+end. The write side scales rank 0..4096 into 0..999 by integer division, so a
+rank under 4096/999 scales to nothing -- and NM's priority 0 is not a low
+priority but *no* priority, which the read side correctly reads back as no
+metric. Metrics 4092 and above made the trip and came back unranked.
+
+The write side's comment opens by refusing exactly that: clamping "would throw
+the ordering away for exactly the networks an operator ranked". Its scale did
+the same to the five worst ranks, which are the ones somebody went furthest out
+of their way to set. A floor of 1 costs six metrics of precision there and
+keeps the ranking.
+
+**Found only because the sweep is exhaustive.** Every sampled value in the
+first draft sat comfortably inside the range and could not have reached it.
+
+### One definition, not two
+
+The round-trip test began by restating `settings.rs`'s arithmetic inside
+itself -- the trap the next section is about, committed again in the test
+written to catch it, and it would have gone on agreeing after the write side
+grew the floor. `autoconnect_priority` is one function now, called by the
+profile writer and by the test.
+
+### The existing test asserted the bug
+
+`per_connection_options_become_the_keys_that_carry_them` pinned `metric = 3924`
+for NM priority 42, above the comment *"Asserting the number rather than its
+presence is what makes the two directions provably inverse."* It proved the
+opposite: 3924 comes back as priority **41**. The assertion was specific,
+deliberate, agreed with the defect, and the sentence calling it a proof is what
+made it look settled.
+
+**An exact number in a test is only as good as the property it came from.**
+This one was read off the implementation it was meant to check, so it could
+only ever agree with it. Decision 0207.
+
+## 10.101 The APN register that answers with the question
+
+Two documents and a working tool for the same class of hardware, read against
+netcfgd's modem support: an i.MX91 flashing-and-testing runbook, and
+`cell-select`, which drives a two-SIM mux and has been run on the metal
+repeatedly.
+
+**Most of what they know, netcfgd already knew.** 0150 and 0152 got SIM
+selection right, the quirks table already carried the exact module, and "a link
+that pings is not a link that works" was already the first thing in
+`netcfgd-modem-at`'s header. That is the useful result of reading a second
+implementation: it says which of your own reasoning survived contact with
+somebody else's hardware.
+
+One thing was backwards.
+
+### The helper read the request and called it the outcome
+
+`netcfgd-modem-at` reported the APN in force with `AT+CGDCONT?`, under a comment
+saying *"The APN the context has, not the one we asked for"*.
+
+`AT+CGDCONT=` is what the helper writes the request with, two steps earlier.
+`AT+CGDCONT?` reads that same register back. So the value always equalled the
+request, and **the substitution warning beneath it could not fire on any modem
+on any network**. The failure the helper says it exists to catch was the one
+thing it could not see.
+
+The grant is in the dynamic parameters, `AT+CGCONTRDP`. Measured on one module,
+same SIM, two attaches four minutes apart: asked `im.cxn`, granted
+`internet.cxn`; then asked `internet.cxn`, granted `im.cxn`. The addresses came
+from different pools, which is independent of the string and so corroborates
+that the grant differed rather than the report being stale.
+
+### And the fake was built to match the helper
+
+`fake_at_modem.py` made `AT+CGDCONT=` store the *substituted* APN so that
+`AT+CGDCONT?` read it back changed. No module does that. The behaviour was
+invented to make the code under test look right, and the live test passed
+because of it -- under a header calling the substitution case "the case this
+file exists for". With the fake corrected, the old helper fails it.
+
+**This is 10.100's shape in another component, found the same week**: a check
+derived from the implementation it was meant to check. There it was an exact
+number read off the code; here it is a whole simulated device. The tell is the
+same -- written after the code, and from it, rather than from the thing being
+modelled.
+
+### Not known is not as-asked
+
+`+CGCONTRDP` is answerable only once a context is up, is missing from some
+firmware, and needs a port that a modem manager takes back on registration --
+which is exactly when there is finally something to read. The helper now says
+the grant is unknown rather than filling it in with the request, because
+filling it in puts the defect back in a quieter form.
+
+### The module's DHCP offers resolvers that do not answer
+
+`192.168.10.3` and `.4`, on the module's own pre-attach subnet; neither responds.
+The working pair is in the PDP context and changes with the APN.
+
+netcfgd needed nothing new to say this: an interface takes its lease's
+nameservers only where it carries a `dns { }` block, so **leaving that block off
+is what `UseDNS=no` says elsewhere**. Documented as the cellular default.
+
+The helper prints the granted resolvers and does not report them. A report
+merges with the lease's nameservers rather than replacing them, so reporting
+the live pair would leave the dead pair beside it -- ambiguous instead of
+wrong. Which source of nameservers wins on one interface is a real question and
+is left open rather than answered in passing.
+
+Decision 0208.
+
+## 10.102 A helper nobody was running
+
+Asked whether netcfgd could be put on a two-SIM LTE board, the honest answer
+was "most of it, and nothing starts the helper". Cellular support has been
+there since 0044 -- three helpers, a quirks table, an ordered SIM list,
+probe-driven fallback, `ncfg modem`. What was missing was everything between
+the binary and a running system.
+
+**Not closed by making netcfgd start it.** 0044 is explicit that netcfgd starts
+and supervises backends and does neither for a modem helper, and that is still
+right. Closed by making it possible to run, findable, and hard to run wrongly.
+
+### The port had no stable name
+
+`/dev/ttyUSB3` is where the port was the first time somebody looked. A module
+is reset as part of ordinary operation -- a SIM switch is a modem reset -- and
+the block of ports may land elsewhere. A udev rule matches the module and the
+USB interface number instead, and names the port `/dev/netcfgd-modem-at`.
+
+The same rule asks ModemManager to leave it alone, which matters because MM
+takes both AT ports once the modem registers -- exactly when the PDP context
+first has something worth reading.
+
+**The rule and the quirks table hold one fact between them**, so a gate fails
+when they disagree, including on the spelling that reads correctly and matches
+nothing: `at=3` in the table is `"03"` in udev. `udevadm verify` runs beside it,
+because a rules file that does not parse fails silently.
+
+### The selector's own gate found what was missed
+
+`select_gate.py` refused the new unit: a unit this project installs that no
+`unit_of` arm names cannot be stood down, so it survives every switch. It was
+right -- a modem helper still driving a module after a switch to NetworkManager
+is two masters on one device.
+
+Standing down a *template* needed a new case. A template never runs; its
+instances do, named for something the script cannot know. So instances are
+stopped by glob and the template is masked, which is what stops the next one
+starting.
+
+### The race ordering cannot fix
+
+netcfgd publishes the APN when it **reconciles**, not when it starts, so an
+init system starting both together loses however the units are ordered. With no
+APN the helper sets none, and on a module that dials itself that means
+attaching on the network's blank-request default -- which answers ICMP
+everywhere and routes almost nothing. Half a second of ordering, and the link
+is up and carries nothing.
+
+The helper waits for the file now, bounded, carrying on either way: the file's
+*existence* separates "netcfgd has not spoken" from "netcfgd has nothing to
+say". The test writes it a second into the wait, so what is checked is that the
+helper was waiting rather than lucky.
+
+### Still not possible
+
+Switching SIM needs a hook somebody writes -- netcfgd chooses the source and
+0150 keeps it out of driving the mux. And the ICCID, the only reliable
+discriminator of which card a module is reading, appears nowhere netcfgd
+reports: not `ncfg modem`, not `ModemStatus`, not the gui. That is the next
+piece.
+
+Decision 0209.
+
+## 10.103 The card is the only thing that says which SIM
+
+10.102 ended by naming what it had not done: the ICCID is the only reliable
+discriminator of which SIM source a module is reading, the AT helper could read
+it, and it appeared nowhere netcfgd reported.
+
+**A muxed board cannot be asked which SIM is selected.** The mux sits outside
+the module, so the module has no register that answers, and netcfgd knows only
+which source it *asked* for -- a different question, and exactly the one that
+goes wrong, because a request that did not take looks identical to one that
+did. The obvious alternative fails too: an ISD-R probe reports absent at both
+mux positions, including one demonstrably holding an eUICC.
+
+### The pairing belongs to the writer
+
+The helper reports `iccid=` and `sim=` together, and netcfgd must not make that
+pairing itself. It publishes a new source the instant it advances while the
+module is still reading the old card, so pairing its own current selection with
+whatever ICCID last arrived would file one card under the other's name at
+exactly the moment a source changed -- the only moment anybody looks.
+
+The helper is the only thing that saw both at one time. An `iccid` with no
+`sim` contributes nothing, which is what an older helper sends, and filling it
+in from the current selection is the same defect wearing a hat.
+
+The test drives that window: advance to `socket`, deliver a report still saying
+`esim`, check the card lands on `esim`. Paired from `chosen` instead, it lands
+on both.
+
+### No new channel was needed
+
+`interface-report.md` has always promised that unknown keys are ignored so a
+writer can run ahead of netcfgd. This is that promise being taken up rather
+than extended. It stays no addressing -- `takes_reports` is false for a
+`config = "dhcp"` interface, so nothing in the report can reach a plan, and the
+tests assert the absence of `address=`, `gateway=` and `dns=` rather than
+trusting the sentence.
+
+### What is shown is what has been seen
+
+`ncfg modem` lists the card for each source a helper has reported one for, in
+document order, marking the one in use. **Not one line per listed source**: a
+source netcfgd has never been on has no card, and the absence is honest rather
+than a gap. Nothing can show both at once; this shows both once both have been
+tried.
+
+The memory sits beside `chosen` and is disposable for the same reason -- a card
+can be swapped while the machine is off, and a remembered ICCID that outlived
+its card would be a confident wrong answer.
+
+### The C client had no modem test at all
+
+Adding a field meant adding to a function nothing tested; the witness exercised
+the parser by being parsed. A source and an ICCID mean nothing apart, so a
+transposing parser would look like a board reporting odd cards. There is a test
+now, and swapping the two `member_text` keys takes it red.
+
+Decision 0210.
+
+## 10.114 The address in a probe request
+
+`mac_policy` works. `scan_randomization` beside it was accepted and inert, and
+`ncfg plan` said so on every apply -- honestly, which is why this round is an
+implementation rather than a correction.
+
+**It is the more exposed half.** `mac_policy` governs the address used once a
+network is joined; this governs the address in *probe requests*, broadcast to
+everyone in range whether or not anything is ever joined. A laptop walking
+through a station announces the same address to every receiver it passes and
+associates with none of them.
+
+It is the supplicant's global `preassoc_mac_addr`, and asked directly on the
+`none` driver it answers `OK` where an unknown global answers `FAIL` -- the
+control that makes the rest mean something. Sent explicitly in both directions,
+for 0015's reason: an unset global inherits whatever this distribution's
+supplicant defaults to, and a privacy property resting on somebody else's
+default is not a property.
+
+### The digest gains a line only when it is on
+
+The same hazard the access point round met from the other side. The networks
+digest decides whether a running supplicant still matches, and a mismatch
+replaces its whole network set -- dropping the association. Encoding the off
+state as a line would change every existing machine's digest, so the first
+apply after an upgrade would disconnect all of them to record a setting none of
+them asked for.
+
+Absence means off, which is what the document means by absence too. Never used
+stays byte-identical; turning it on changes the digest once; turning it off
+changes it back.
+
+### Sound
+
+`use_tempaddr` is written as `2` and `0`, which is the pair that matters --
+`1` generates temporary addresses and then prefers the stable one, so a machine
+set that way would be configured for privacy and not have it. And
+`addr_gen_mode` is left alone deliberately: a stable SLAAC address derives from
+whatever address the interface currently has, so randomising the MAC randomises
+it too. Checked on this machine, where `fe80::2a5:54ff:fe22:3e90` is the EUI-64
+of `00:a5:54:22:3e:90`.
+
+`powersave` and a device `regdom` remain inert, and the plan still says so --
+with `scan_randomization` taken out of that sentence, because it is no longer
+true of it.
+
+Decision 0220.
+
+## 10.118 A pid is not a liveness test
+
+The control socket module is careful and most of the classic faults are already
+closed: 0112's reply-socket confusion, event interleaving in `request` (events
+skipped rather than returned as a command's answer), `Drop` sending `DETACH`
+rather than asking for it, a newline refused as a backstop. Two things were
+wrong, and the first had been sitting in `/run/wpa_supplicant` for three days.
+
+**`reap_reply_sockets` asked `/proc/<pid>` whether a socket's creator was
+alive.** A pid is a name that gets reused:
+
+```text
+srwxrwxr-x root root Sep 10 22:43 netcfgd-8-0
+srwxrwxr-x root root Sep 10 22:43 netcfgd-8-1
+$ ps -p 8 -o comm=
+kworker/R-netns
+```
+
+Seven days into a boot, three days old, no owner, skipped by every reap the
+daemon ran in between. The function's own doc had predicted this and filed it as
+acceptable -- "wrong in the direction that costs one stale entry". It is not one
+entry: **the pids most likely to be reused are the low ones, which belong to
+kernel threads that live as long as the boot**, and netcfgd's own live tests run
+it in a pid namespace where it gets exactly those numbers. Such a socket is not
+unlikely to be missed, it is guaranteed to be.
+
+Ask the kernel instead. Connecting to a unix datagram address answers three ways
+and they are all distinguishable:
+
+```text
+netcfgd-8-0          ECONNREFUSED   nobody has it bound     -> remove
+netcfgd-4026892-1    EPERM          bound, connected to a peer
+wlp0s20f3            connects       bound and unconnected
+```
+
+`EPERM` is the kernel refusing a second connect to an already-connected datagram
+socket, which every live reply socket is -- so the live case answers loudly
+rather than by absence of an error. The predicate is `nothing_is_listening`,
+which already existed in the file, already meant this, and was used by two other
+callers and not by the reaper. Decision 0224.
+
+**A datagram is truncated silently.** `recv` keeps what fits and drops the rest,
+with no error and no flag; `MSG_TRUNC` is the only way to learn the real length
+and std does not expose it without the `unsafe` this file promises not to use.
+So an oversized `SCAN_RESULTS` comes back short with its last row cut, and a
+network truncated off the end looks exactly like a network that is not there.
+Real replies measured at 1647 bytes and below against wpa_supplicant 2.10, so
+8192 is comfortable -- but whether the supplicant's own buffer caps first is a
+property of its build that netcfgd cannot know, which argues for detecting the
+case rather than picking a bigger number. A reply that exactly fills the buffer
+is now an error.
+
+**And a third fixture built from the code rather than the thing** (0222 had
+two). The reaper's test bound a socket and called it the dead one, because
+`/proc/0` never exists -- while a socket left by a dead process is a file with
+*nothing bound to it*, the opposite of what was built. It passed against the pid
+proxy and could not have tested the real question. Worth naming as a pattern:
+when a test constructs its subject by reading the implementation, it can only
+confirm the implementation.
+
+**And the gates were reaching into the running machine.** The stale sockets
+were meant to be left in place so the install would test the fix against
+evidence predating it. They were gone before the install. A witness socket --
+bound and closed under pid 1, so only the new reaper could take it -- run past
+each gate in turn found two that could:
+
+```text
+adapters  survived   conformance survived   client-test survived
+footprint survived   linkage     survived
+rss       REAPED IT  gui         REAPED IT
+```
+
+Both start a real `netcfgd` with `--config-dir` and `--run-dir` in a scratch
+directory, which reads as complete isolation and is not: **the wpa_supplicant
+control directory is a third path**, it defaults to the host's
+`/run/wpa_supplicant`, and `NCFG_WPA_CTRL_DIR` exists so a test does not share
+it -- `ctrl_dir`'s own doc says why. Neither gate set it, so both left reply
+sockets in the running machine's directory on every run (the `kill` is a
+SIGTERM and netcfgd installs no handler, so `Drop` never runs) and swept the
+host's entries on startup. The sweep was invisible while the reaper could not
+identify a stale socket; fixing the reaper is what made it visible.
+
+The idiom is written out by hand at each site and every site missed the same
+variable. **Partial isolation that looks total is worse than none, because
+nobody re-checks it.**
+
+Demonstrated on the machine at install:
+
+```text
+netcfgd: [supplicant] !: removed 5 reply socket(s) in /run/wpa_supplicant
+                          left by processes that are gone
+```
+
+Five, including the one planted under pid 1 -- alive, and so untouchable by the
+version this replaces.
+
+## 10.119 The log that only said things got worse
+
+The event vocabulary is read from `wpa_supplicant`'s own format strings rather
+than from documentation that does not give them; `field` runs a quoted value to
+its closing quote because `ssid="Guest Wifi"` is what a router ships with; the
+watcher recovers from a supplicant that goes away. Three things were wrong and
+all three were silences.
+
+**A log that could only report bad news.** Every arm of the event reporter was a
+failure -- a network not tried, a station refused, a scan that could not run, a
+station dropped -- except `CTRL-EVENT-SSID-REENABLED`, which was added with the
+reasoning *"without it the log only ever says things got worse, and a network
+that came back looks exactly like one that is still broken"*. That argument had
+never been applied to the event saying the radio is carrying traffic:
+`CTRL-EVENT-CONNECTED` fell through to `_ => {}` as "the connect the caller goes
+on to read" -- which is true, and the caller reads it to detect roaming, not to
+say anything. A roam fires a hook and logs nothing. So a machine that lost its
+association at three in the morning and got it back had the loss in the log and
+the recovery nowhere. Confirmed against this machine's journal, which carries
+the supplicant's failures and not one line about the association it has held for
+days. Decision 0225.
+
+**A radio nobody could watch, and nothing said so.** The comment beside the
+attach call already knew: *"Without ATTACH this connection gets replies and no
+events, and the loop below would be a silent no-op forever."* The consequence
+was written down and never reported -- `if client.attach().is_ok()` dropped the
+error, so a radio whose supplicant refused `ATTACH` lost roam detection and every
+diagnostic above it, all of which are read through that connection.
+
+**An unreadable event is not a supplicant that left.** `Err(_) => lost.push(..)`
+dropped the connection under a comment asserting the supplicant had gone. Both
+were true until 10.118's reply-too-large check made `InvalidData` reachable the
+day before: a datagram bigger than the buffer says something about the message
+and nothing about the sender. Dropping for it costs the re-attach *and the
+access point the interface last named*, after which the next `CONNECTED` reads
+as a first association and the roam across it goes unreported -- a defect
+introduced by the previous round and found by reading the consumer of what that
+round changed.
+
+**And the reporting could not be checked at all**, because every arm ended in a
+log macro that returns nothing. Split into `supplicant_event_line` (the severity
+and the sentence) and the part that says it; all seven arms are answerable now,
+including two that predate this audit.
+
+**The sabotage that was invisible.** A fourth revert -- never clear the
+complaint list -- passed. `first_complaint` took only the failure and the
+*caller* did the clearing, so the test drove the helper through its whole state
+machine using its own `retain`, and deleting the caller's line broke nothing.
+**A test that simulates the call site is not a test of the call site.**
+Restructured so success goes through the same function, one entry point and one
+state machine; the same sabotage now fails by name. Fourth instance of this
+pattern in four audits, and the first where the faulty test was written in the
+same session as the fix it was holding up -- 10.116 had two fixtures built from
+the code, 10.118 a third, and here the fixture was right and the *seam* was
+wrong.
+
+## 10.122 What a roam costs
+
+**Rekeying is not netcfgd's to set, and leaving it alone was right.** Nothing
+writes `wpa_group_rekey`, `wpa_ptk_rekey`, `wpa_gmk_rekey` or
+`disable_pmksa_caching`, and hostapd's own documentation on the reporting
+machine says why that is correct rather than an omission: the group key already
+rotates daily under CCMP, caching of keys made by EAP is already on, and
+upstream warns that "PTK rekeying is buggy with many drivers/devices". hostapd's
+`okc` is moot for the same kind of reason -- it shares a cache between BSSes in
+one hostapd process, and netcfgd runs one BSS per radio.
+
+**The station side is netcfgd's, and it was left expensive.** A `roam` block
+becomes a `bgscan`, so netcfgd decides how hard the radio looks for somewhere
+better. It turned roaming on and did not turn on what makes a roam cheap: on an
+enterprise network a move means a full EAP exchange with the authentication
+server unless the pairwise key can be carried across, and opportunistic key
+caching is what carries it. wpa_supplicant's own documentation: *"By default,
+OKC is disabled unless enabled with the global `okc=1` parameter or with the
+per-network `proactive_key_caching=1` parameter."* netcfgd set neither.
+Decision 0228.
+
+Measured on the `none` driver: `GET okc` is 0, `SET okc 1` is OK and reads back
+1, an unknown global FAILs. **A weaker control than `sae_pwe`'s**, and worth
+saying so: `SET okc 7` also answers OK, so this parser does not range-check the
+value -- the FAIL establishes that the key exists, not that the value was
+understood.
+
+Safe for everybody: where the access points do not share a key the station
+offers a `PMKID`, the access point does not recognise it, and a full
+authentication happens as before. It cannot leak the key, because a `PMKID` is
+derived from the key and both addresses -- an access point that does not already
+hold the key can neither produce nor use one.
+
+**Three settings now share one property, which is worth naming as a class.**
+`preassoc_mac_addr`, `sae_pwe` and now `okc` are netcfgd's own choices rather
+than anything the document asked for, so all three are globals sent at populate
+time and none is in the networks digest. That keeps an upgrade from repopulating
+every radio and dropping every association (10.114), and it costs the same
+thing each time: on a machine whose supplicant is already running, the setting
+lands at the next populate -- a configuration change, a supplicant restart or a
+reboot. Recorded here so it is not rediscovered a fourth time.
+
+## 10.124 The privacy option that named the vendor
+
+10.114 audited this area and implemented `scan_randomization`. What it did not
+do was check the numbers `mac_policy` turns into against the daemon that reads
+them, because a test already asserted them -- and that test was written from the
+mapping rather than from `wpa_supplicant.conf`. Its own doc comment names the
+risk: *"the numbers are not guessable from the names, and getting one wrong is a
+privacy setting that silently does something else."* It then asserted the wrong
+number.
+
+**Two is not "more random", it is "keeps the vendor".** The daemon documents the
+three values of `mac_addr`, per-network and global alike, as: 0 the permanent
+address, 1 a random one for each ESS connection, and **2 like 1 but maintaining
+the OUI** -- the first three octets, which say who made the radio. netcfgd's
+table called 2 "a random address per association" and mapped `per_connection` to
+it. So for the policy documented as the strongest, netcfgd sent the one value
+that identifies the hardware. Decision 0230.
+
+Checked against a real supplicant: `mac_addr` takes 0, 1 and 2 and refuses 3 and
+4, so there is no number that ever meant "per association". The distinction the
+model offers is not one that key makes.
+
+**What separates them is `rand_addr_lifetime`**, a global at 60 seconds by
+default: a random address is reused while it is still in date, so rejoining
+inside a minute comes back on the same one. That is exactly `per_network`'s
+documented meaning and zero is exactly `per_connection`'s. Both policies now
+send `mac_addr 1` and differ in the lifetime, sent in both directions for 0015's
+reason. A global costs nothing here, which usually it would: `mac_policy` is a
+property of the *device*, so there is one policy per radio and one supplicant
+per radio, and no second network to disagree.
+
+Nothing gets weaker for a machine already running: `per_connection` moves from 2
+to 1, which stops the address carrying the manufacturer prefix. The
+prefix-keeping value is now unreachable from the model -- admitting by vendor is
+a real thing to want, but it is a third policy rather than a stronger second
+one.
+
+**The fifth fixture written from the code, and the clearest.** A test that
+stated the hazard in prose, in the same paragraph as the assertion that embodied
+it. 10.116 had two, 10.118 a third, 10.119 a seam that simulated its own call
+site. What separates this one is that the correct source was a file on the same
+machine the whole time: `wpa_supplicant.conf` is installed under
+`/usr/share/doc/wpasupplicant/examples/`, it documents the key in two places,
+and both say the same thing. Nobody opened it.
+
+## 10.127 A signal that stopped the daemon
+
+Reported: a machine switched wifi networks, `/etc/resolv.conf` kept the previous
+network's settings, and the GUI kept showing the previous network.
+
+```text
+11:11:35  netcfgd: [netlink] Error: netlink watch failed:
+                   Interrupted system call (os error 4)
+11:11:37  wpa_supplicant: CTRL-EVENT-CONNECTED ... EMP-XYLEM
+```
+
+Two seconds before the new association a signal arrived while the netlink socket
+was blocked in `recv`. `EINTR` means "call it again"; the watcher treated it as
+fatal and returned. **Two things went, not one**: netcfgd stopped seeing kernel
+changes, and because that same thread produced `Command::Tick`, it stopped
+reconciling at all. Fifty-two minutes later the process was still `active`, had
+used no measurable CPU, and sat in `futex_wait`; `observed.json` was frozen at
+10:26 and `/run/netcfgd/dns/` still held values written on 10 September. A plan
+run by hand was not empty -- netcfgd knew what to do and had no way left to
+notice it should. Decision 0233.
+
+`ncfg wifi status` looked correct throughout, because it asks the supplicant
+over the control socket rather than reading the observation. The command that
+looked healthiest was the one that did not depend on the broken part.
+
+The signal itself is ordinary: netcfgd spawns `wpa_supplicant`, `dhcpcd` and
+hooks, and `SIGCHLD` can interrupt a blocking syscall in any thread whenever a
+child exits.
+
+**Two fixes, because there were two faults.** `EINTR` is classified where a
+timeout and `ENOBUFS` already were -- that function's own comment says a watcher
+treating `ENOBUFS` as failure "would stop watching precisely when the most was
+happening", and a signal belongs in the same company. And the loop takes its
+heartbeat from its own wait now: a backstop the thing it backs up can switch off
+is not a backstop. That also covers the case this fault never reached -- if the
+netlink socket cannot be opened at startup, the daemon would never have ticked
+at all.
+
+**What it says about eleven rounds of wifi audits.** The netlink watcher is not
+wifi. Every round took a subject and read the code implementing it; this is the
+loop those subjects are delivered *to*, and no list of wifi topics names it. The
+closest was 10.118, which found the same shape one layer over -- `Err(_)` read
+as "the supplicant went away" when it could also mean "this message was too
+big" -- and 10.119 split that for the supplicant's socket without asking the
+same of the kernel's. The question that would have found it is not about wifi:
+**which threads must stay alive for this daemon to keep working, and what
+happens to each if it returns?** That is a subject in its own right and has not
+been audited.
+
+## 10.128 A thread that never started
+
+10.127 ended by naming the audit that would have found it -- *which threads must
+stay alive for this daemon to keep working, and what happens to each if it
+returns?* This is that audit.
+
+```text
+thread    spawn result   ends on                          says what is lost
+control   checked (?)    nothing: incoming() is endless    n/a
+client    handled        the request finishing             n/a
+netlink   DISCARDED      a fatal error, or shutdown        yes
+config    DISCARDED      any watch error, or shutdown      no, only the error
+roam      DISCARDED      shutdown only                     n/a
+rfkill    DISCARDED      an absent device, a read error    yes
+confirm   DISCARDED      one-shot: sleep, send, end        n/a
+```
+
+**`serve` already does it correctly**, which is what makes the rest a defect
+rather than a gap: the control thread is `.spawn(...)?`, so a daemon that cannot
+accept connections fails to start instead of pretending, and a client thread
+that cannot spawn is handled deliberately. The idiom is in the file most likely
+to be read first, and five spawns in `lib.rs` do not use it. `let _ = spawn(..)`
+discards the handle, which is right -- none is joined -- and the `Result`, which
+is not: the process comes up, systemd calls it active, and whatever that thread
+was for never happens. Decision 0234.
+
+**The one that is a safety mechanism.** `spawn_expiry_timer` closes a
+commit-confirm window -- the mechanism that reverts a change the operator did
+not confirm, used when applying a configuration over the very link it might
+break. `resolve_expired_window` was called from exactly one place, guarded by a
+command that only that thread sends. A spawn that failed left the window open
+for ever: the change stayed applied, no revert happened, and nothing said the
+timer had not started. The safety mechanism failing silently through the
+mechanism meant to be the safety. The tick asks now as well; the timer stays,
+for the reason its own comment gives, and a missing timer costs seconds rather
+than the window. Free to ask on every pass because the resolver already asks
+whether the window *really* expired, and `expired_at` is tested against a window
+with time left, a slept-through machine, and a moved clock.
+
+**Threads are still not supervised**, and that is recorded rather than fixed.
+The two whose work has a deadline now have backstops that do not depend on them
+-- the loop's own tick (10.127) and the window's. `roam` and `rfkill` cost
+promptness rather than detection: the tick re-observes, so a flipped kill switch
+is noticed within five seconds instead of as it happens, and a roam is read from
+the associated address on the observation's own path -- what a dead `roam`
+thread loses is the hooks and 10.122's diagnostics. Restarting a dead watcher
+needs somewhere to decide when to give up, which is a design question rather
+than a patch.
+
+*(This paragraph said "`roam` and `rfkill` have none and would go quiet" when it
+was written, which is wrong in both halves. Corrected here and in 0234; 10.132
+has why it was wrong and what it says about writing these.)*
+
+**And the second sabotage passed on its first run**, against a fix written
+minutes earlier -- the seventh time in this campaign that a change went in with
+nothing holding it until the sabotage pass asked. That is the reason the pass
+exists.
+
+## 10.130 The setting that decided nothing
+
+The disconnect path is sound. `ncfg wifi disconnect` sends `DISCONNECT` rather
+than `REMOVE_NETWORK`, with the reason beside it -- the network stays configured
+and in the supplicant, so reconnecting resolves no credential again and the next
+reconcile does not see one missing and put it back. `ncfg wifi connect` uses
+`SELECT_NETWORK` rather than `ENABLE_NETWORK`, which disables the others: the
+difference between joining one network and adding one to the set. The
+per-network `autoconnect` is acted on, with a comment saying why.
+
+**The radio's `autoconnect` was read nowhere.** The model documents it as
+"whether to connect to known networks without being asked"; it is parsed, kept,
+rendered back by `ncfg profile save`, carried in the frozen schema, and read by
+nothing -- a radio told `autoconnect = false` joined networks anyway. The
+planner did not warn either: `warn_wifi_device_policy` lists `regdom` and
+`powersave` and not this, so nothing said the setting was inert. That is 0061's
+shape inside the function written to prevent it. Acted on now: a radio that does
+not join by itself is sent `DISABLE_NETWORK all` after its networks -- after,
+because `add_network` enables each one it adds. Asked of a real supplicant:
+`DISABLE_NETWORK all` is OK, `99` is FAIL, and `LIST_NETWORKS` then shows
+`[DISABLED]`. Decision 0236.
+
+**And neither flag reached the digest.** `autoconnect` drives `ENABLE_NETWORK`,
+which is not a `SET_NETWORK`, and the digest is built from rendered settings --
+so changing it left the digest identical, the planner saw no drift, the
+supplicant was never repopulated, and the edit did nothing. A network the
+operator had just marked automatic stayed disabled. Both are in the digest now,
+each adding a line **only when the answer is not the default**, so a machine
+where everything joins automatically is byte-identical to the previous build and
+an upgrade repopulates nothing -- 10.114's asymmetry, for its reason.
+
+**What is not covered, stated rather than claimed.** That the disable is *sent*
+when a radio says `autoconnect = false` has no end-to-end test: no existing live
+script writes that document, and reshaping `privacy.sh` (IPv6 temporary
+addresses) or `select.sh` (the manager switcher) to carry it would make either a
+test of two things. That half rests on a named predicate with its own test plus
+a one-line guard. The opposite half -- that an ordinary radio is *not* sent the
+command -- is covered live, because the half of a new behaviour most likely to
+be wrong is the one that fires when it should not.
+
+## 10.132 The switch that is watched and not touched
+
+A second pass over 0219's ground. Its three findings were re-checked rather than
+inherited -- the 64-byte buffer accepting any record at least `RECORD` long, the
+phy-name match that `continue`s past an unreadable entry, the warning whose
+remedy differs between a hard switch ("nothing in software can clear") and a
+soft one (`rfkill unblock wifi`). All three hold, and `/dev/rfkill` is still
+opened read-only so the write path cannot be reached at all.
+
+**The code is sound and what is said about it was not, in two places.**
+
+The README's feature table said "radio on/off" for the row covering `ncfg wifi
+activate` and `deactivate`. That is the one thing netcfgd deliberately does not
+do: 0062 decided a blocked radio is reported and never unblocked, and the
+read-only open is how that decision is enforced rather than merely stated. What
+`activate` decides is *which radio netcfgd manages*. Putting a kill switch and a
+selection in one cell invites the reader to conclude netcfgd can do the first
+because it can do the second.
+
+**The clients got this right and only the README did not**, which is the reverse
+of the usual direction. The GUI's button says "activate radio", the tray says
+"Disconnect wifi", and the table people read to decide whether netcfgd does what
+they need was the single place that overclaimed. Fixed.
+
+### The second one was mine, one round old
+
+10.128 above said `roam` and `rfkill` "have no backstop and would go quiet". The
+loop re-observes on a tick -- `kernel_changed || config_changed || probe_changed
+|| ticked` -- so a dead rfkill watcher costs promptness, not detection.
+`spawn_rfkill_watcher`'s own documentation says it: *an observation runs on a
+netlink event or on the loop's five-second backstop*. The watcher exists to make
+the report prompt, not possible.
+
+10.127 is the round that gave the loop that tick. 10.128 was written immediately
+after, by the same pass, and asserted two watchers had no backstop one round
+after the backstop was added -- from a doc comment three hundred lines above the
+line being edited.
+
+**That is three decision records in this campaign found to state something the
+code contradicts**: 0231's account of the NM binary, 0235's reason for threads
+instead of epoll, and now 0234. The shape is the same one the code keeps
+showing -- *a record of what was done used as a statement about what is* -- with
+the record being prose rather than a digest. The useful part is that all three
+were caught by reading the code while writing the *next* record, which is an
+argument for the campaign's own cycle and not for trusting any single pass.
+
+Decision 0238. Nothing to sabotage: both fixes are sentences, and the check is
+that the cited code says what they now say.
+
+## 10.133 A different address is not a roam
+
+0122 audited the roam *policy*. This is the other half: how netcfgd decides a
+move happened, and which configured network an association belongs to.
+
+**What netcfgd writes was re-measured rather than inherited**, because every one
+of these is a field it sends and never reads back. Against wpa_supplicant 2.10
+on the `none` driver, `SET_NETWORK n bgscan "simple:30:-70:300"` is OK and reads
+back verbatim; `bssid_accept` takes the masked form and reads back without the
+masks, which is the parser having understood them; a single `bssid` pin is taken
+unquoted and a malformed one FAILs. `bssid_accept` is the 2.10 spelling of what
+used to be `bssid_whitelist` -- both names are in this machine's binary, and
+netcfgd sends the new one.
+
+### The watcher answered a different question from the one it was asked
+
+`HookPhase::Roam` says "a station moved to a different access point **on the
+same network**". What the watcher did was `last != bssid`: a different address
+than the one it saw before. Those are not the same question, and the gap is
+ordinary rather than exotic -- **a machine leaving one network for another it
+also holds credentials for satisfies the address test and contradicts the
+sentence**. Switching from home wifi to the office ran the `roam` hooks, telling
+the script the station had moved to an access point on a network it had left.
+This machine switched networks three times during this campaign.
+
+The event already carries the answer. `CTRL-EVENT-CONNECTED` names the
+configured network's id beside the address, so the pair decides it: the same id
+with a different address is a roam and nothing else is. Decision 0239.
+
+That also makes the reconcile loop's comment true rather than lucky. It declines
+to re-plan on a roam because "a station moving within its own network changes no
+desired state" -- which a network change does not satisfy, since the network
+carries the metric, the addressing and the DNS scope. It was harmless only
+because the kernel announces the carrier change separately.
+
+### The fixture had written down the defect as a justification
+
+`fake_supplicant.py` hard-coded `id=0` in all three places it emits a
+`CONNECTED`, with a comment saying netcfgd could not tell a roam from a network
+change because "from netcfgd's side" the two "arrive identically". True of the
+fake; false of a supplicant. Eleven lines above, the same file says `ROAM` is
+"the *same* network under a different access point and is a different thing
+entirely". **A fixture built from the reader rather than from the thing
+modelled** -- the sixth in this campaign, and the first that argued for itself.
+
+### And the rule for "which network is this" had no test at all
+
+`network_for` is shared between the socket and the observation deliberately,
+and its documentation says a disagreement between copies "would show up as a
+route metric that does not match what the window says". Nothing called it from
+a test, and the single copy could produce that outcome alone: first match on
+*either* rule, in `id` order, so two blocks sharing an SSID and pinned to
+different access points both answered with whichever sorted earlier. Checked on
+this machine before the fix -- it compiles, and `ncfg plan` says `nothing to
+do`. The address is what separates such blocks, so it is asked first.
+
+### Three live scripts fail, and none of them because of this
+
+`wifi_journey.sh` ("and the machine then converges", 2 outstanding actions
+where it wants 0), `wifi.sh` (`HomeFiber` does not join within 20s on the fake
+radio) and `wifi_trouble.sh` ("and one from a living process is left where it
+is") were failing before this round. Confirmed rather than assumed: the six
+changed files were stashed, the tree rebuilt, and all three fail identically on
+`9dad858`. Recorded here because a round that touches the roam watcher and the
+supplicant fixture is exactly the one that would be blamed for them, and because
+nothing in this document had noticed them.
+
+`roam.sh`, `switch_network.sh` and `select.sh` pass. So does `association.sh`
+against this machine's own radio, which is the only check of the `network_for`
+change against real hardware: `wlp0s20f3` is still attributed to `EMP-XYLEM` by
+both the socket and the observation.
+
+### The sabotage that could not be written
+
+Six sabotages, five caught. The sixth was not of the code but of a sentence
+about it: a draft comment claimed `is_roam` guarded against `None == None`
+treating two unknown networks as one. No sabotage could prove it, because the
+watcher stores an `Option<(u32, String)>` and there is no room in it for an
+address without a network -- the representation forecloses the case, and the
+comment was taking credit for a check. Eighth first-run sabotage pass of this
+campaign, and the first whose answer was to fix the claim rather than add a
+test.
+
+## 10.134 Why it took twenty rounds, answered with the tools that were already here
+
+Asked directly: why did this take so long, and what changes so it does not
+happen again. The answer is uncomfortable and cheap to act on -- almost every
+question that cost a one-off experiment had a standing harness in this tree, and
+the rounds did not reach for it.
+
+**`backend/netcfgd-supplicant/tests/live.rs` drives a real `wpa_supplicant` and
+asserts read-back, and has since M6.** This campaign hand-rolled a throwaway
+`-Dnone` probe for `bgscan` and `bssid_accept` in 10.133, two settings that file
+already covers. Worse, of the four globals netcfgd sends -- `sae_pwe` (0226),
+`okc` (0228), `rand_addr_lifetime` (0230), `preassoc_mac_addr` -- **none was in
+it**. Each was measured by hand in the round that added it, written up as prose,
+and the script deleted, so the next round had no way to know and measured again.
+That is what the "time-consuming experiments" were.
+
+**`tests/live/hwsim.sh` produces real associations on simulated radios, and half
+of it had been dead since 0154.** That decision replaced `priority` with
+`metric`; the script still wrote `priority`, so every run got two compile
+diagnostics and `did not move to the preferred network (on: none)`. The only
+test in the tree that makes a radio associate, failing silently for months,
+because live scripts are not in `make check` and nobody read the output.
+
+### What that cost, measured by fixing it
+
+The script already loads three radios and stands up two access points. Pointing
+them at a roam -- one access point joining the network the station is on, the
+other taken away -- found **two defects in an afternoon**, neither of them
+0239's:
+
+- **A dead connection reads as a quiet one.** `next_event` only receives, and a
+  connected datagram socket whose peer has exited reports that by timing out,
+  which is what a quiet radio does. A restarted supplicant left the watcher
+  holding a dead entry, the rescan skipped the interface because it had one, and
+  the radio went deaf for the life of the process. `ncfg apply` restarts
+  supplicants.
+- **Falling behind is not merely late.** The watcher took one event per pass.
+  The 250ms is a timeout rather than a delay, so one busy radio drains fast --
+  but a *second, quiet* radio makes every pass wait it out, and then the busy one
+  yields about four events a second. Every modern driver provides that second
+  radio: `p2p-dev-wlan0`, silent, beside `wlan0`. A supplicant losing an access
+  point emits a burst, the queue fills, and `wpa_supplicant` drops a monitor it
+  cannot send to -- silently, from netcfgd's side.
+
+Both are decision 0240. Both are the campaign's own recurring shape: an
+available signal (an entry exists; a read timed out) standing in for the
+question (is this connection receiving?).
+
+### The ninth sabotage to pass, and the best one
+
+The drain went in with a burst test that reverting the drain **passed**. The
+test's premise was wrong in the same way the old code was accidentally right:
+with one radio, one-per-pass drains as fast as draining. The pacing needs the
+quiet second radio, which `roam.sh` now starts -- and the same sabotage then gets
+15 of 33 in three seconds.
+
+Eight previous first-run passes revealed a missing assertion. This one corrected
+what the test believed, which is a better argument for the pass than all eight.
+
+### The four changes
+
+- **`tool/supplicant_coverage_gate.py`**, in `make check`. Every setting netcfgd
+  hands a supplicant must have a real one behind it: 21 settings, all driven,
+  including an enterprise network whose seven EAP settings had never met the
+  real parser. A measurement cannot be thrown away again.
+- **`tool/cited_quote_gate.py`**, as `make claims`. A record may mark a
+  quotation with the file it came from; the gate checks the words are still
+  there. It catches quotations and not paraphrases, and says so -- what caught
+  0231, 0234 and 0235 was reading the code while writing the next record, which
+  is a practice and not a tool.
+- **`tool/prove-red.sh`.** Runs a new test against the parent commit in a
+  throwaway worktree, so the "sabotage" is what the code did before rather than a
+  mutation chosen by whoever wrote the bug. Nothing is stashed and nothing in the
+  working tree is touched, which matters in a tree several sessions share. It
+  separates an assertion-failure red from a compile-failure red and says the
+  second proves less; it cannot separate a test from its fix when they share a
+  file, and says that too.
+- **`make installed-diff`.** Twenty-one of this campaign's forty-five commits
+  touched only documents, and each still paid a full build, install and live
+  verification decided by unpacking the `.deb` by hand.
+
+### Audit by shape, not by subject
+
+Twenty rounds indexed by subject, and every subject had defects -- which means
+they were never subject-specific. Four shapes did the work: a record of what was
+done read as what is; a proxy for the real question; a true statement about one
+direction used to fix both; a fixture built from the reader rather than from the
+thing modelled.
+
+Swept three of them across the whole tree. One finding -- the handle held across
+time, which is the watcher above. The `/proc/<pid>` uses all read `cmdline` or
+`comm` rather than existence, which is 0143 already applied; the two
+absence-becomes-a-value sites that matter are deliberate and documented where
+they are. A useful result both ways: the shapes are worth sweeping, and this
+tree is not full of them.
+
+### What was irreducible, and what was not
+
+No second real radio, no enterprise authentication server, no real `resolvconf`
+here. Those are real. But `mac80211_hwsim` was installed, loaded by a script in
+a make target, and standing up two access points already -- so "a roam needs a
+radio" was true of the hardware and false of this machine, for the whole
+campaign.
+
+## 10.135 The lease that was taken and thrown away
+
+Reported: *"on wakeup we need to be faster in detecting that networks have
+changed, it took almost 30 seconds"*. Measured from the machine's own journal
+rather than reasoned about -- the resume at 11:03:49 on 2026-09-15, moving from
+`OpenPC.se` (`metric = 100`) to `EMP-XYLEM` (`metric = 200`):
+
+```text
++2.3s   associated; carrier acquired
++8.5s   dhcpcd leases, installs its route with metric 100
++8.5s   netcfgd stops that client and starts another
++14.7s  the replacement leases, having redone the solicit and the ARP probe
++18.7s  netcfgd logs the association the supplicant reported at +2.3s
+```
+
+**Nineteen milliseconds** between the client succeeding and netcfgd killing it.
+The rebind, the offer and the probe were done, discarded, and done again.
+
+### The trigger was the one thing that could not exist yet
+
+`restart_for_metric` is right about what it is for: the metric reaches a DHCP
+client once, as `-m`, so a radio moving to a network that asks for a different
+one keeps the old metric on its route and the client has to be replaced. What
+it compared was the **installed route** -- and its own comment explains that
+choice, reasonably, as avoiding "a record of what the client was started with
+[which] would be a second thing to keep true".
+
+The route cannot exist until the exchange that installs it has finished. So the
+only signal netcfgd watched was guaranteed to arrive after the expensive work
+was complete, and the cost is a whole DHCP exchange, doubled, every time a radio
+moves between networks with different metrics.
+
+**And the first way out was wrong, in this campaign's own shape.** The draft
+asked the client: `/proc/<pid>/cmdline` is where `pid_by_marker` finds a
+supplicant, so read `-m` back from there -- the process describing itself rather
+than netcfgd remembering, which looked like the right side of 10.131. **dhcpcd
+rewrites its command line** to `dhcpcd: <iface> [ip4]`, so nothing netcfgd
+passed survives; measured here, no dhcpcd carries `-m` at all. The change would
+have read `None` on every machine, fallen back to the route, and been inert
+while looking like a clean tree.
+
+It passed unit tests against a directory and `make check`, and was one command
+from being installed. What caught it was checking the live machine first,
+because the one thing that could disturb it was netcfgd deciding the running
+client had the wrong metric. **The repository already said so** --
+`backend_pid_file` calls the interface name "the weakest marker netcfgd uses"
+for exactly these two clients, "neither ... invoked with a path netcfgd chose
+that ends up in its command line" -- and the evidence went unread. A proxy for
+the real question, committed by the pass auditing for proxies.
+
+What it is instead is the record netcfgd already keeps for hostapd and radvd,
+with one difference: those read back a *rendered configuration*, which an apply
+may rewrite without restarting anything, so the record could drift into agreeing
+with a document the running client never saw. This one is written on the path
+that actually spawns a client and nowhere else, and one function builds the path
+for both sides rather than two a test proves agree -- a silent absence is this
+record's failure mode and it has already happened once. Decision 0241.
+
+### And eighteen of the seconds were 10.134's defect, in the wild
+
+`joined a0:a4:7f:23:6a:6f` reached the log 16.4 seconds after the supplicant
+emitted it. That is the one-event-per-pass watcher meeting a resume burst, with
+`p2p-dev-wlp0s20f3` sitting quiet in the control directory making every pass
+wait out its timeout -- four events a second through thirty. Found on simulated
+radios a day earlier; this is what it cost on the real one.
+
+### Nothing needed to detect the suspend, and that was the first idea
+
+netcfgd was awake and reconciling throughout: it acted nineteen milliseconds
+after the route appeared, which is not a daemon that had not noticed. Netlink
+delivers the carrier change at +2.3s and the loop's own tick is five seconds, so
+the observation was never further behind than that. A `PrepareForSleep`
+subscription or a `CLOCK_BOOTTIME` jump detector would have added a dependency
+and bought nothing. Written down because it was the obvious move and it was the
+wrong one.
+
+### The tenth sabotage to pass, and it corrected the code's shape again
+
+`restart_for_metric` had no test, in either direction, before this. Three cases
+now, and the third -- "netcfgd cannot read the metric" is not "the metric is
+wrong" -- passed its sabotage. The rule had been written as a `bool` and the
+caller reached back for the number with `unwrap_or(wanted)`, so the unreadable
+case was handled twice, once deliberately and once by accident, and breaking the
+deliberate half changed nothing. Rewritten to return the offending metric: one
+expression, no second way to spell "nothing to report", and all three sabotages
+then fail.
+
+Tenth first-run pass of the campaign, and the second in a row where the answer
+was to change the shape of the code rather than to add an assertion.
+
+### Two harnesses that could not have seen it, handled
+
+`started_backend` in the planner's fixtures builds the observed side from the
+document, which is 0222's trap; `started_metric` is `None` there -- "cannot
+tell", which plans nothing, and is what a converged machine looks like -- and the
+tests that care state a value. The schema witness does carry one, on the DHCP
+kind alone, because an `Option` left empty in every sample pins nothing and the
+field could be renamed without the schema moving. Additive: a minor bump.
+
+### The size ratchet fired, and it is the campaign's
+
+`make size` refused the build at 1,406 bytes over. The entry raising it is the
+first in `size-budget.txt` that is attributed to a campaign rather than to one
+change, and says so rather than inventing arithmetic nobody did: +86,024 bytes
+across twenty rounds of supplicant event handling, regulatory and channel
+checks, SAE and randomisation settings, and the sentences netcfgd prints about
+all of them.
+
+## 10.139 A link has a kind, and presence is three-valued
+
+The first GUI tab was named `devices` and showed `ncfg_client_links()`. It was
+the **link** list wearing the other noun, and there was no view of `device`
+blocks at all. The document has had the split since the beginning -- a `Device`
+is what must be true before a link can exist, an `Interface` is the networking
+-- so the two-list shape is the model's own and the GUI was what was out of
+step. Renamed to `links`.
+
+Collapsing the two was considered and is wrong on cardinality rather than taste:
+one device carries many links (a trunk with VLANs, a radio with networks) and
+one link spans devices (a bond).
+
+### A filter cannot be built from `kind`
+
+Measured here: `enp0s31f6`, `wlp0s20f3` and `lo` all report an empty `kind`. The
+kernel gives every real card one, so wired, wireless and loopback are a single
+value there; `wireless` separates the radio, the name separates the loopback,
+and **nothing on a link says modem** -- that lives in a `device` block, so the
+rule needs the document too.
+
+`netcfgd_model::link::category_of` is where it lives, carried on `ObservedLink`
+through the C client into the row type. **Not a consolidation, which makes it
+unusual here**: 0243 and `network_for` each pulled a rule back after several
+clients had written their own, and no client classifies links today. The same
+mistake declined in advance, against a failure that would have been quiet -- a
+link in no category is a row that does not appear. Decision 0245.
+
+### A configured wifi network is a link
+
+A `network` block already carries `addressing`, `routes`, `dns`, `metric`,
+`hooks`; an `Interface` carries `addressing`, `routes`, `dns`, `preference`,
+`hooks`. **A wifi network is already a link in all but name**, with `metric`
+against `preference` the same number under two spellings 0154 reconciled once.
+Unifying removes a duplicate rather than adding a concept, and it is what makes
+a linkset expressible at all.
+
+Identity is the block's label, which settles the case that was open: `network
+"office" { ssid = "@bssid"; bssid = [...] }` gives one name to a whole set of
+access points, and the ssid/bssid scheme only describes how a *default* label is
+chosen.
+
+### Presence is three-valued, and that is the sharpest point
+
+Calling the links view observation-driven was a statement about today's code,
+not about the design, and it read as an objection it was not. What survives is
+that the row set is a union of two sets that do not coincide -- configured and
+present, configured and not present, present and not configured -- so it can be
+neither observation-only nor document-only.
+
+**And presence is not a boolean.** A hidden network, or any network on a radio
+not allowed to probe actively, cannot be found by looking. netcfgd says so
+already, in `pick_ssid`: the access points are "in range and hidden, so a scan
+cannot say what the network is called". A hidden access point still beacons, so
+its *address* is observable and the name-to-address mapping is not; `scan_ssid`
+sends the directed probe that would resolve it, and on a `no IR` channel that
+probe is forbidden. The only evidence left is an attempt to associate.
+
+So: present, absent, unknown. The tree already states that convention twice --
+`ObservedLink::reachable` ("`None` is **not** the same as `Some(false)`") and
+`ObservedBackend::networks_match` -- with 10.135's `started_metric` a third.
+**Unknown must never be drawn as absent**: a hidden network shown as "not
+present" looks permanently gone, and trying it, which is the right response, is
+what that display argues against.
+
+Recorded for the linkset round rather than rediscovered there: a group picking
+one member cannot conclude "absent" from "I did not see it", so selection may
+have to *try* -- which makes a failover decision cost an association attempt
+rather than nothing.
+
+### Two sabotages
+
+Hiding an uncategorised row, and `all` ceasing to mean all. Both caught. The
+rule with the trap is the first: an empty category means a daemon older than the
+window, and such a row shows in **every** filter rather than none, because a row
+that vanishes when two programs disagree about its kind is how somebody
+concludes an interface has gone away.
+
+## 10.140 The link list is a union, and presence is its own column
+
+10.139 settled the shape and changed none of it. This is that, built.
+
+`netcfgd_model::link::inventory` joins the document and the observation into
+every link this machine has or has been told about, with all three provenances
+present: configured and present, configured and not present (a saved network out
+of range, an `interface` whose card is out), and present and not configured
+(`docker0`, `wg-test`). Dropping either half loses something real -- the first
+has no kernel link at all, and the second is demonstrably on the machine.
+
+**Beside `observed.links` rather than replacing it**, and that is not tidiness:
+the planner iterates `links` as "what the kernel has", so a synthetic row for
+something that does not exist would be read as one that does. Two lists, one a
+superset, is the smaller risk. Decision 0246.
+
+### The asymmetry is the rule
+
+**An interface is present or absent and never unknown.** The kernel's link table
+is complete, so an interface netcfgd cannot find is one that does not exist --
+there is no third answer because there was no question it could not ask.
+
+**A network can be unknown, and usually is.** Associated wins outright and
+outranks a stale scan; hidden is `Unknown` *even when a scan has been read and
+did not find it*; otherwise seen / not-seen / nobody-looked map onto present /
+absent / unknown. The hidden case is what the enum exists for: a hidden access
+point beacons with an empty name, so a scan sees its address and not its name --
+which is what `pick_ssid` refuses over -- and on a `no IR` channel the probe
+that would resolve it is forbidden.
+
+**An enum rather than `Option<bool>`, deliberately.** The tree states this
+convention twice already, on `ObservedLink::reachable` and
+`ObservedBackend::networks_match`, and both need a paragraph warning the reader
+not to conflate `None` with `Some(false)`. Here the type does that work, because
+the rendering rule -- unknown must never be drawn as absent -- is exactly the
+collapse a `None` invites at the point of display.
+
+A configured network nothing is associated with reads `Unknown` today, since the
+observation carries no scan. **Honest rather than unfinished**: narrowing it
+needs a scan, and for a hidden network no scan could settle it. The rule takes
+its evidence as arguments rather than reaching for it, so a caller holding scan
+results can ask directly.
+
+### Two rows that looked wrong and were not
+
+The machine's own inventory showed `EMP-XYLEM` as `unknown` and `OpenPC.se` as
+`present`, which contradicted what this session last knew. Checked rather than
+explained away: the radio had moved networks since, and `EMP-XYLEM` is unknown
+because nothing has scanned for it rather than because it is hidden. Both
+correct. It is recorded because the reflex to trust a remembered state over the
+machine is the one this campaign keeps punishing.
+
+### Five sabotages, all caught
+
+A hidden network treated as scannable; no scan read as absent; an interface's
+absence read as unknown; the union dropping unconfigured links; the union
+dropping absent interfaces.
+
+## 10.156 A test that disarms the process it shares
+
+Two symptoms in `netcfgd-sys`, neither mentioning its cause: **thirty seconds**
+on the clock of every run after the last assertion, and an intermittent
+`chmod: PermissionDenied` as root in a test about file modes. Decision 0262.
+
+### The cause said so itself
+
+`shed` takes a thread's capabilities and, where there is an id to become, its
+uid -- and POSIX makes credentials a property of the *process*, so glibc
+broadcasts the change to every thread. Rust runs the tests of one binary as
+threads in one process. The test's own comment: *"It is also why every test
+that runs after this one in a root run is running as 65534."* Written as an
+observation about the shed, read by nobody as a fact about the suite.
+
+A sibling still running then finds `chmod` returning `EPERM`, or `kill` of a
+root-owned child returning `EPERM` -- and the test that had just killed its
+child calls `wait`, which blocks until the `sleep 30` inside it ends on its
+own. The thirty seconds and the failing chmod are the same disarmament landing
+on whichever test the scheduler had in flight.
+
+An integration test is a binary of its own, so the shed moved to
+`crates/netcfgd-sys/tests/shed.rs` and now disarms only itself.
+
+### The accomplice, which the same file documents
+
+Four tests spawn `sh -c 'sleep 30'` and kill the child. `sh -c` forks the
+command and waits, so the sleep is a *grandchild*: killing the child kills the
+shell and leaves the sleep reparented to init, holding the test binary's
+stderr, which `cargo test` reads until every writer is gone.
+
+`process::terminate_group` exists for exactly this, twelve screens up the same
+file, and its documentation says the caller must use `Command::process_group(0)`
+-- recorded after two `sleep 300` processes outlived a run that believed it had
+killed them. **The production code learned it and the tests beside it did not.**
+
+Each half measured on its own, because two fixes at once prove neither: shed
+moved and groups unfixed, thirty seconds; groups fixed and shed left in, thirty
+seconds; both, **3.94 s** across ten runs with no failures, from 30.05 s.
+
+### A gate, and a sabotage against the gate
+
+One line removed brings back a thirty-second suite and an `EPERM` about file
+modes, which is a regression no failure describes. `tool/disarm_gate.py`
+refuses a `shed()` in a unit test and a spawned `sh` without a process group.
+It reads only spawned shells -- `.output()` and `.status()` wait, so nothing
+can be orphaned -- and narrowing it that way turned four false positives in
+other crates into none.
+
+**Its first version was wrong in the direction that passes.** The pattern
+forbade a `:` before the call, which excluded `super::shed()`, the one spelling
+it exists to catch; the gate reported a clean tree over a sabotaged one. Run
+the sabotage against the gate, not only against the code.
+
+## 10.157 Five red runs, and only the last was a defect in the program
+
+Five consecutive `make check` failures in one sitting, on a machine that had
+been away from this tree for a fortnight. **Three were guards asking the wrong
+question**, one is open and unattributed, and **the fifth was a real defect in
+shipped code whose own test had been passing for the wrong reason.** The order
+matters: each fix uncovered the next, so the last one had been unreachable
+behind four earlier failures all morning.
+
+The three share one mistake about three different things: a guard asked whether
+something was *there* where what it needed to know was whether it *worked*. A program was
+present and could not run the subcommand; a binary was present and was not this
+build; a filesystem was ordinary and the kernel had no instances left to give.
+
+**Each failure accused the thing it was protecting.** That is the cost and it is
+not the lost time -- a guard that reports its own unmet premise as a fault in
+the code sends the next person to read something correct, which is the most
+expensive kind of red there is.
+
+### The first: the program, not the subcommand
+
+`make check` was red on this machine and could not have been anything else:
+
+    udevadm: missing or unknown command
+    make: *** [Makefile:1171: packaging] Error 2
+
+`udevadm verify` arrived in systemd 254. The guard around it was `command -v
+udevadm`, which answers yes on the udevadm 251 this machine has -- so the one
+world that cannot run the check is the world that runs it, and the whole
+`packaging` target fails where it meant to skip. The comment above it had been
+written against two machines, absent and current: *"skipped loudly where
+udevadm is absent, which is every machine this project targets that does not
+run systemd"*. The machine in between has the program and not the subcommand.
+
+`udevadm verify --help` is the probe -- exit 0 where the subcommand exists, 2
+where it does not -- and it asks the binary the check will actually run rather
+than comparing a number out of `--version`.
+
+### The sweep that cleared this file could not have caught it
+
+The four-gates list above swept about fifty candidates in this tree for guards
+that report success having checked nothing, and dismissed the correct idiom by
+name: `if cond; then check; fi` rather than `A && B || C`. **This check uses
+that idiom and gets the predicate wrong**, which is a different fault in the
+same line -- the idiom decides whether a real failure survives the guard, the
+predicate decides whether the guard is asking about the thing. A sweep keyed on
+one cannot see the other, and the modem rules check was written after it
+anyway.
+
+### The two skips are different facts and now say so
+
+*Not installed* is a machine this project supports and does not ship systemd
+on. *udevadm 251 has no `verify`* is a machine that does, where the rules file
+is unverified for a reason somebody can act on and the check starts working
+after an upgrade. One message for both reads as the first on a machine that is
+the second.
+
+Proven in four worlds, with the recipe's own bytes extracted from the Makefile
+rather than retyped: this machine skips and names its version; a stub carrying
+`verify` runs the check; **the same stub refusing the rules file fails the
+target**, which is the arm that had to keep working and the only one that
+proves the gate is still a gate; and a PATH with no udevadm gives the
+not-installed line.
+
+### The second: the binary exists, but it is not this build
+
+The same run then went red in `test`, and the message pointed at the program:
+
+    ncfg --help panicked when its reader had gone:
+    thread 'main' panicked at library/std/src/io/stdio.rs:1123:9:
+    failed printing to stdout: Broken pipe (os error 32)
+
+which is precisely the defect 0261 had fixed a fortnight earlier. The binary
+under test was three weeks older than the fix. `cargo test --workspace` builds
+every test harness in the tree and **does not relink `target/debug/netcfgd`**,
+and `target/debug/ncfg` is a symlink `ncfg-link` makes rather than an artifact
+cargo has any opinion about -- so a test that runs the program runs whatever
+the last `make build` happened to leave there. `test` and `conformance` depend
+on `build` now.
+
+The test guards its own premise and the guard cannot see this: it asserts the
+binary **exists**, which catches the absent case loudly -- *"ncfg is not built,
+so nothing would be tested"* -- and says nothing about which source it was
+built from. Presence standing in for freshness, one line below presence
+standing in for capability.
+
+**What it cost is the diagnosis, not the run.** A missing binary accuses the
+build; a stale one accuses the code, in the voice of a test written to defend
+exactly that code. Twenty minutes went on reading a crate that was correct. The
+neighbouring lesson in 10.156 is the same sentence from the other end -- a
+broken test impersonating a plausible bug in the thing it was testing -- and
+`build-and-commit.md` states the rule outright: never conclude that a test
+passes or fails from a binary the build step did not rebuild. The Makefile
+dependency is now the only thing holding that, and it is worth knowing that is
+where it lives.
+
+### The third: the filesystem was ordinary and the budget was not
+
+With both of those fixed the run went red a third time, in `netcfgd-sys`:
+
+    assertion `left == right` failed: expected inotify on an ordinary
+    Linux filesystem
+      left: Polling
+     right: Inotify
+
+Measured rather than assumed: `inotify_init1` on this machine returns
+**`EMFILE`**, with 126 of the 128 `fs.inotify.max_user_instances` held -- by an
+ordinary TDE desktop and by **571 orphaned `dbus-daemon --session` processes**,
+whose origin is measured two paragraphs down. Three readings of the count
+agreed, and a fresh process asking for an instance was refused on its first
+attempt, which is the reading that decides: the count is a moment, the refusal
+is the condition.
+
+**`watch.rs`'s own first paragraph is about exactly this case** -- *"the
+fallback is not defensive programming for its own sake: `inotify_init1` fails
+with `EMFILE` when `fs.inotify.max_user_instances` is exhausted, which happens
+on real machines running enough watchers"*. So the module documents the
+condition, the fallback handles it correctly, and the test called it impossible
+and blamed the filesystem. The watcher did the right thing and was reported as
+broken for doing it.
+
+The test asks the kernel for an instance before deciding. One available and a
+watcher that polled anyway is a real defect and still fails; none available and
+the preference is unanswerable here, so it says so -- and `NCFG_LIVE` turns that
+skip into a failure, which is `wg.rs`'s bargain and the reason this is not a
+quiet green. Cargo captures a passing test's stdout, so a skip line is invisible
+in an ordinary run; `make live` is where a machine in this state gets told.
+
+**What is proven and what is not.** The skip passes here; `NCFG_LIVE=1` fails
+naming `EMFILE` and the sysctl; and sabotaging the mechanism assertion turns it
+red at the line, so it is not decoration. **The available-instance arm could not
+be reached on this machine at all** -- it is the old assertion unchanged, and
+nothing here demonstrates it, which is the half a reader should not take on
+trust.
+
+**The 571 were cleared on the holder's instruction, 2026-10-02**, after being
+reported rather than acted on -- 571 kills to green a gate is not a trade a
+session gets to make unasked. All of them went on `SIGTERM` alone, none needed
+`SIGKILL`, and none was skipped on an identity recheck. Instances held fell from
+126 to 15, five in a row could then be had, and this machine's process count
+went from 790 to 209.
+
+**The bus the instruction set aside turned out not to exist.** Every TDE process
+carries `DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Q5OOBARyPU`, and that
+socket is absent from the filesystem and has **zero** entries in
+`/proc/net/unix` -- so the desktop's own daemon had died at some earlier point
+and the whole session has been running on a stale address. Nothing needed
+excluding on that count, and the desktop was unchanged afterwards: `kdesktop`,
+`kicker`, `kded`, `konqueror`, `korgac` and `twin` all still up. **TDE uses DCOP
+rather than D-Bus**, which is why that can be true without anything appearing
+broken.
+
+**What was deliberately left alive**, because none of it is in that population:
+the system bus, at-spi's, and a `dbus-run-session` bus from hydra's tree with
+nine live clients. The one member of the 571 that did have a client was serving
+an equally orphaned `gnome-keyring-daemon` started in the same second from the
+same abandoned run, and that daemon exited when its bus went.
+
+**The method is `running-code.md`'s and the recheck earned its place.** The list
+is enumerated from `/proc` and written down rather than matched with
+`pgrep`/`pkill`, which would match the reaping script's own command line, and
+each pid's `comm` and argv are re-read immediately before it is signalled,
+because `kernel.pid_max` here is 32768 and 571 signals is long enough for a
+freed pid to be handed to something else.
+
+**And the skip was not hiding a defect**, which is the part only clearing it
+could establish: with the budget back, `NCFG_LIVE=1` runs the real assertion for
+the first time on this machine and inotify is preferred, as the module always
+claimed.
+
+Seven stale `/tmp/dbus-*` socket files were left bound by nobody, and **they
+were not this user's**: all seven owned by uid `claude`, dated 2026-09-18 and
+2026-09-28, with `/tmp` sticky, so neither `funk` nor a session running as it
+could unlink them. The holder removed them as root on 2026-10-02, and the end
+state is one `/tmp/dbus-*` socket left -- `funk`'s `dbus-run-session` bus from
+hydra's tree, still bound with its nine clients, which is the one that was meant
+to survive.
+
+**The owner check is the part worth keeping.** Asked to remove the seven, the
+sweep re-verified each at the moment of deletion -- a socket, owned by this
+user, still unbound -- and refused all seven on the second of those, printing
+the owner. That is the only reason the claim here that they were left over from
+the 571 unlinking their own was caught rather than published: the 571 were all
+`funk`'s, which is why every one of them died, while these belonged to an
+account with 42 live processes that leaks them by the same mechanism. **A
+cleanup keyed on a path cannot tell its own debris from another account's**, and
+on a machine with more than one agent uid that is not hypothetical.
+
+**netcfgd is cleared as the source, and the first version of this paragraph
+said so for a reason that was not the reason.** It read the population as *"the
+leak `running-code.md` records having cleaned once already"*, which that
+document associates with an fmake selftest -- an attribution nothing here
+established, made from a co-occurrence in somebody else's record. Asked by the
+holder whether netcfgd started them, the population was measured properly, and
+`/proc/<pid>/environ` answers it: a daemonised `dbus-daemon` chdirs to `/`, so
+`cwd` says nothing, while the environment it was launched in survives.
+
+    beerssh 161   respec 97   raidcfgd 82   hembygd 67
+    hydra 63      ossacli 59  fmake 31      claude-guidelines 11
+
+Eight trees, 571 total, **netcfgd zero** -- and fmake, the tree the first
+version blamed, is 31 of them. Every one was launched from a Claude Code session
+with **no `DBUS_SESSION_BUS_ADDRESS` set at all**, 571 of 571: something wanted
+a session bus, found none, `dbus-launch` started one, and nothing reaps it.
+
+**Two methods agree, which is what makes this a clearance rather than an
+absence.** No orphan's environment names this tree; and a `gui` test run with
+the variable deliberately unset adds none, because netcfgd's Qt front end talks
+to the daemon over its own unix socket and uses no D-Bus. The `-nm` shim does,
+and is Rust rather than Qt and a separate binary.
+
+The start times are also real rather than proxied: `/proc/<pid>` mtime agrees
+with field 22 of `/proc/<pid>/stat` to within a second or two, and the machine
+booted 2026-09-12, so the 458 from 2026-09-18 are not a boot artifact.
+
+**And the reading that said otherwise was an instrument error worth keeping.**
+A first pass had 571 and a second, minutes later, had 574, which read as a leak
+in progress -- so the thing was nearly reported as live. The first number came
+from matching `--syslog --fork --session` in argv and the second from
+`pgrep -c -x dbus-daemon`, which also counts the system bus, at-spi's, and a
+`--nofork --session` one: **two populations, three apart, quoted as one
+population growing by three.** A count inherits its detector, and the
+comparison was between detectors rather than between moments.
+
+### And a fourth, which is open: a probe test that failed once
+
+With the three closed, the next run failed in `netcfgd-daemon`:
+
+    the probe did not run with a lease present
+    probe::tests::an_interface_with_a_lease_runs_the_probe
+
+It has not reproduced since: **twelve runs of that crate's lib tests and four
+of the whole workspace, all green**, which is not evidence against it. An
+intermittent that does not reproduce is doing the only thing its name promises,
+and this one is recorded open rather than closed.
+
+**Four hypotheses, each killed by a measurement rather than by reasoning**, and
+they are listed because the next person should not pay for them twice:
+
+- *Two tests sharing a fixture.* Both lease tests call
+  `TestDir::new("probe-lease")` with the same tag, so one touching `ran` or
+  dropping the directory would explain it exactly. `TestDir` appends the pid
+  and an atomic serial: the paths cannot collide.
+- *The probe outran its timeout.* `run` polls `try_wait` to a deadline, and the
+  fixture allows `timeout = 5` for a `/bin/sh` that runs `touch`.
+- *The poll loop spins and starves the child.* It sleeps 50 ms per turn.
+- *`fork` failed for want of process slots.* `ulimit -u` is 773425 against 790
+  processes owned by this user.
+
+What is left is the shape the first three findings had: the test asserted on an
+outcome and said nothing about the cause, while the runner had recorded one.
+`detail_of` exists in that module and is documented as being *"for a failure
+message that explains itself"* -- and this was the one assertion in the module
+not using it. It does now, so a recurrence names whatever `spawn` or the exit
+status actually said. **That is not a fix and is not offered as one**; it is the
+instrument the next occurrence needs, put in place while the failure is known
+to be possible rather than after somebody has lost an afternoon to it.
+
+**Confirmed on 2026-10-03, by the message that assertion was given.** A second
+test in the same module failed in a `make check` run -- `require_lease_false_
+runs_the_probe_with_no_lease_at_all`, which already printed `detail_of` -- and
+it said:
+
+    the probe left no marker: verdict None, started-failures 1,
+    detail Some("cannot run /tmp/ncfg-probe-lease-6108-4/probe.sh:
+    Text file busy (os error 26)")
+
+`ETXTBSY`, which was this entry's untested suspicion: writing a script and
+exec'ing it from a process whose other threads fork is a race parallel tests run
+by construction, and the exec loses. Two tests, the same cause, and neither
+reproduces alone -- six and eight clean rounds respectively.
+
+**Fixed by not writing a program.** The four fixtures that wanted a marker
+touched now name `/bin/touch` with the marker as an argument, which
+`dhcp_document` passes through as `args`. The race is gone by construction
+rather than by retry: nothing writes the file that gets exec'd.
+
+`flapping` keeps a written script and says so in its own doc comment. It has to
+alternate its exit status across runs, which no installed binary does, so the
+script is the behaviour rather than a convenience -- and it remains narrowly
+exposed. It has not been observed failing; the shape that would fix it without
+a file is `/bin/sh` with the body as an argument.
+
+### And the fifth, which was real: a reopen that asked for the wrong socket
+
+    reconnect: and the connection reopens itself                   FAILED
+    reconnect: which leaves it open again                          FAILED
+    reconnect: and answering questions                             FAILED
+                 not connected
+
+Every run, not intermittently. `ncfg_connection::reopen_if_broken` ended:
+
+    QString ignored;
+    return open(path, &ignored);
+
+`open` calls `close()` first -- correctly, so the dead client goes with it --
+and `close()` does `path.clear()`. The argument is `const QString &`, bound to
+the member being cleared, so by the time `open` reads it the string is empty and
+`ncfg_client_open(nullptr)` falls through to `ncfg_client_default_socket()`.
+**A reopen asked for the default socket rather than the one the connection had
+been living on.**
+
+### Which is why it was green where it was written
+
+The consequence is not "reconnect fails". It is that **reconnect succeeds
+against the wrong daemon** wherever one is listening at the default path -- and
+that is every machine running netcfgd, including the one this landed from, which
+had just been switched to netcfgd (10.67, 10.82). Measured over all four cells,
+`NCFG_RUN_DIR` steering what the default resolves to:
+
+    nothing at the default path     broken: 3 FAILED      fixed: all pass
+    a daemon at the default path    broken: ALL PASS      fixed: all pass
+
+The bottom-left cell is the finding. The test is well made -- a real daemon,
+killed and restarted on the same socket -- and it cannot see this, because
+everything it asserts afterwards is true of a connection to *some* working
+daemon. **What made the test tell the truth was running it on a machine with no
+netcfgd**, which is a property of where the gate ran rather than of anything in
+the suite.
+
+A fallback is the shape that makes this happen: it converts "the caller named
+nothing" into a plausible success, so the error cannot reach the place that
+would show it. `ncfg_client_default_socket` is right to exist -- a CLI with no
+argument must go somewhere -- and the cost is that an *accidentally* empty path
+is indistinguishable from an omitted one.
+
+The fix is three words, `const QString where = path`, with the reason above it
+in the file. 0259's own work was not wrong: `is_open()` tests
+`ncfg_client_broken` as that decision says, and the pointer test it replaced is
+gone. The reopen beside it was passing a reference into a function that empties
+it, which no amount of reading `is_open` would reveal.
+
+## 10.159 A profile could not be saved by anyone who uses wifi
+
+    ncfg: this configuration cannot be written out yet, so it was not saved.
+    What is in the way:
+      device wlan0: a wifi policy
+
+`render_device` put a radio's policy on the unrenderable list, and the list
+refuses the **whole** save -- so `ncfg profile save` worked on a wired machine
+and on nothing else. That is not a narrow population: netcfgd writes
+`device <iface> { wifi { autoconnect = true } }` into the configuration of every
+radio `ncfg wifi activate` touches, so the block is in the file of anybody who
+has ever activated one. Profiles were unavailable to exactly the people the
+feature is for, and the renderer was being honest about it rather than dropping
+the setting, which is why nothing was wrong on any other axis.
+
+### Present and empty is not absent, which is where the care went
+
+`device.wifi` is an `Option` and its presence is what makes a radio netcfgd's to
+drive, so `Some(default)` and `None` are different documents. A renderer that
+writes only non-defaults -- which is this one's rule everywhere -- would write
+nothing at all for the policy netcfgd itself installs, turning every managed
+radio into one netcfgd has no policy for. The block is therefore emitted even
+when every key is at its default. **This is 10.21 exactly, one block over**: an
+empty `dns { }` was rendered as nothing for the same reason, and 0007's scopes
+are why both matter.
+
+### What made it checkable rather than plausible
+
+**Production already proves the round trip**, which is the part worth knowing
+before trusting any of this: after writing the snapshot the daemon reloads the
+layered configuration, recompiles it, and compares against the running document
+-- and on a mismatch it refuses and puts everything back, with a diff. So a key
+this renderer got wrong cannot be lost quietly; it refuses the save. What the
+fix changes is whether the save *succeeds*.
+
+Three round-trip cases, and each was reverted and watched: dropping one rendered
+key fails the all-keys case alone; skipping the block when every value is
+default fails only the case named for the block netcfgd writes itself; rendering
+it unconditionally fails the no-radio case **and nineteen others**, because
+handing a policy to every bridge and vlan breaks every device round-trip in the
+file. Restoring the original refusal fails the two wifi cases with
+`cannot render: device wlan0: a wifi policy`, which is what says they exercise
+this fix rather than something adjacent.
+
+`tests/live/profile.sh` carries a radio in its configuration now, which makes
+its existing assertions cover this path end to end rather than adding a subject
+-- the test is still about whether a save reproduces the machine. Its first run
+failed naming the old refusal, because `target/debug/netcfgd` was three commits
+stale: 10.157's second finding, met live within the hour by the person who had
+just fixed it, on the one path `make test` does not cover because a live script
+runs the binary directly.
+
+### The trap next door, checked rather than assumed
+
+`write_profile_snapshot` builds the `override` set from the base document, and
+its own comment records that when the renderer learned bluetooth this list had
+to learn it too -- *"the renderer's new capability defeated by a list that had
+not moved"*. It did not need moving here: a wifi policy is a sub-block of a
+`device`, and `device {name}` is already in that set. Recorded because the
+comment is aimed at precisely this kind of change and the next one may not be so
+lucky.
+
+**Still unrenderable, so a profile is still refused for these:** a `match`
+block, ethtool settings, qdisc and `ingress_redirect` on a device;
+`access_point` blocks; hooks; dns options, dnssec, transport, a server with a
+port or sni, and `mode = "exec"`; some interface kinds; an address with
+lifetimes or a peer; a route with a scope or a proto. The list is in `render.rs`
+and each entry is one of these waiting to be found by whoever it stops.
+**Routing rules came off that list in 10.168**, which is where the next one
+should be taken from rather than from this sentence -- it was a day old and
+already wrong once.
+
+## 10.163 An inode number is a name that gets reused, and 0240 rests on one
+
+10.160 left `roam.sh`'s last two checks open and said the next thing to look at
+was the fixed `sleep 3` after the event burst. It was not that. The cause is in
+the daemon and the test was right, which makes it the second of that list to end
+this way.
+
+**The watcher decides whether its connection is still good by comparing
+`(dev, ino)` of the control socket**, recorded at attach time against a `stat`
+each pass -- `socket_identity`, and `still_the_same_socket` whose own docstring
+says *"a different pair is one that went and returned, which is the case that
+used to be missed because the path looks identical either way"* (0240).
+
+**Measured on this machine: 200 bind/unlink cycles of one path produced one
+distinct inode, the same number 199 times in a row.** So the pair is not
+different, the premise is false, and the check reports "still the same
+supplicant" about a socket a different process now holds.
+
+### Why it passes alone and fails in the suite
+
+The check has one way to be right: `socket_identity` returns `None` while no
+file exists at the path, and `None` is not the recorded pair, so a pass landing
+in the gap between the old socket going and the new one arriving does drop the
+connection and re-attach. Run on its own, the watcher's quarter-second passes
+land in that gap. Inside `make live` the daemon is draining the event burst the
+previous check sends, no pass falls in the gap, and afterwards the inode matches
+for ever.
+
+So the green run was the accident and the red one is the behaviour. The daemon's
+own log says so by omission: in four reproductions it never once printed *"the
+control socket was replaced, so this radio's events were going nowhere"*.
+
+### What it means away from the test
+
+`systemctl restart wpa_supplicant` is this, and so is a supplicant that crashes
+and is restarted by anything. Where no watcher pass falls in the gap, **netcfgd
+keeps a connection to a socket nobody holds and hears nothing again** -- no
+roams, no `SSID-TEMP-DISABLED`, none of the authentication failures 10.85 exists
+to surface, and no message anywhere, because a dead connection reads exactly
+like a quiet radio. That is 10.85's subject reached by a different route and
+0240's fix defeated by the thing it was built on.
+
+**The same lesson is already in this tree, one function over.** 0224 took the
+reaper off `/proc/<pid>` for precisely this reason -- *"a pid is a name that
+gets reused"* -- and replaced it with a question to the kernel about the
+address. An inode number is the same kind of name, and the watcher is still
+asking one.
+
+### Fixed: ask the connection, which is what 0224 did one function over
+
+A connected unix datagram socket resolves to the socket at connect time, so once
+that peer is gone a send fails with `ECONNREFUSED` whatever now sits at the path
+-- the one observation that separates "replaced" from "unchanged" when the inode
+cannot. The watcher already holds a client and the supplicant answers `PING`, and
+`request` sends before it waits, so a dead peer costs no wait at all.
+
+Both costs were respected rather than discovered. The probe runs only on a pass
+that drained nothing, because 0240 cut this loop's chatter on purpose; and the
+watcher's client is already built with `IMPATIENT` for the reason 0111 records,
+so a supplicant that is bound and silent costs one second rather than ten.
+`connection_is_dead` is deliberately narrower than `supplicant_is_gone`: only
+`ECONNREFUSED` and `NotConnected` drop a connection here, because a reply that
+never arrives is 0141's wedged backend and re-attaching to it several times a
+second would be churn rather than recovery.
+
+**Proven, and the proof needed two instruments fixed first.**
+
+- Before: four full-suite runs, four failures, and no re-attach message in any
+  of them. After: the suite passes it.
+- **The first reading of that pass was worthless.** Grepping the suite log for
+  the re-attach messages returned zero, because the daemon writes to the test's
+  own `daemon.log` and the suite only sees it when the failure dump fires --
+  which a passing run does not. The artifact was never in the log being
+  searched.
+- **And one of the three paths said nothing at all.** The read-error branch
+  dropped the connection and logged nothing, so the recovery was working and
+  unattributable. It speaks now, which is how the mechanism became legible:
+  `roam.sh` prints which of the three fired, and it is
+  `note re-attached via: attached connection is dead` -- the probe, not the
+  inode check and not the gap.
+
+That last line is also what says the inode path is inert rather than merely
+unlucky: on the standalone run, which used to pass, the probe is what fires now
+too.
+
+**The existing unit test keeps its fixture and gains a caveat.**
+`a_replaced_control_socket_is_not_the_one_we_attached_to` asserts that `(66,
+9999)` is not `(66, 1234)`, which is true of the function and false of a real
+restart -- the fixture supplies a new inode where the filesystem supplies the
+old one. Kept, because a long enough gap can hand out a different number, and
+annotated, because a test whose fixture cannot occur is worth saying so in
+rather than deleting.
+
+## 10.164 A fake that answered half of `ADD_NETWORK`, and the 38 scripts behind it
+
+`wifi_journey.sh`'s convergence check: rotate a passphrase, apply, and the next
+plan should want nothing. It wanted `wifi.set_profiles` again, for ever.
+
+**The cause is the fake supplicant.** `ADD_NETWORK` returned an id and appended
+nothing, so `LIST_NETWORKS` reported zero networks however many had been handed
+over. netcfgd reads zero listed against a document that wants some as *this
+supplicant was emptied* -- `supplicant_was_emptied(listed, wanted)` is
+`listed == 0 && wanted > 0` -- and that **short-circuits the digest comparison
+entirely**, returning "does not match" without consulting the record. So the
+machine could not converge in this fixture whatever the daemon did.
+
+### Three prints that printed nothing, which is what found it
+
+The digest was the obvious suspect and the hypothesis was that the two sides
+disagreed. Printing the reader's digest beside the recorded one produced **no
+output at all**; so did printing the record path on the unreadable-record
+branch; so did printing the secrets directory above the `fingerprint` call. The
+function has no early return before any of them -- which left only that it is
+never called, and the call site is the `if` above with the emptied test in it.
+
+**An absence of output located this faster than any of the values would have**,
+and the three probes were each aimed at a mechanism that was not running.
+
+### The check above it was passing for the wrong reason
+
+*"a rotated passphrase is planned rather than ignored"* asserts that the plan
+contains `wifi.set_profiles` after a secret changes. With the fake always
+looking empty, the plan contained it whatever the secret said -- so the check
+could not have failed and proved nothing about rotation. It passes now with the
+digest actually being consulted, which is the first time it has meant what its
+name says.
+
+**And the count beside it is over lines rather than actions.** The plan prints
+the action and then a warning naming it, so `grep -c 'wifi.set_profiles'`
+answers 2 for one action. The failure was real either way, but the number was
+never the number of actions; the test prints the plan now when it is not zero.
+
+### What was behind it
+
+`make live` halts at its first failure, so one line in a shared fixture was
+hiding most of the suite. **Scripts passing went from 22 to 60**, and the halt
+moved to `sandbox_writes.sh`.
+
+Of the 19 scripts after that halt, **17 pass**; `tunnel.sh` (2 checks),
+`wifi.sh` and `acl.sh` remain. So the suite stands at 77 passing, three real
+failures, and one refusal that is not a defect.
+
+**`sandbox_writes.sh` cannot run on this machine and says so rather than
+skipping.** It drives the unit's real sandbox through `systemd-run`, and
+`ml350g6-01` has no systemd at all -- pid 1 is `init`, there is no `systemctl`.
+Under `NCFG_LIVE` it refuses to skip, which is that file's own bargain and the
+reason `make live` cannot be green here. Worth knowing beside 10.163's machine
+note: the two machines these trees are worked from differ in their init as well
+as their `/tmp`.
+
+## 10.168 A rule nobody could write, and rules no profile could hold
+
+Two things in one piece of work, found by taking the next item off 10.159's own
+list of what `ncfg profile save` still refuses.
+
+### `invert` was implemented everywhere except where it could be asked for
+
+`RoutingRule::invert` reaches the kernel as `FIB_RULE_INVERT` in
+`netcfgd-sys/src/rule.rs`, comes back through the observation, and `same_rule`
+compares it -- and **`lower.rs` had no arm for it**, so no document could set it.
+A complete implementation of a feature with the one layer missing that makes it
+reachable.
+
+**It is the mirror of 10.66's `autoconnect`**, which was parsed and read by
+nothing. This was read by everything and parsed by nothing, and the second is
+worse in one way: a rule somebody else had installed inverted compared against a
+desired `false` that was never a choice, so netcfgd would replace it on sight
+and call that convergence.
+
+**A gate refused the new key before any of this was committed**, which is 0127's
+working as designed: every key the compiler accepts has to be classified, so one
+added later cannot default to "a client may send this". `invert` is ordinary and
+is in `tool/privilege-ordinary.txt` with its eight sibling rule keys -- it
+configures routing policy and grants nothing beyond it -- and the gate now counts
+176 keys where it counted 175.
+
+The arm is six lines. The test asserts both directions, because a key that is
+**accepted and ignored** looks exactly like one that works when only the true
+case is tried -- and the sabotage is exactly that: `let _ = flag` in place of
+the assignment, which turns the test red on the first assertion. `invert` is in
+`doc/netcfgd.conf.example` now as well, with the carve-out case it exists for;
+that file claims to be every feature with the syntax to use it, and 10.84
+records what it costs when it is not.
+
+### And a single rule refused every profile
+
+`render_device` was not the only hole: one routing rule put
+`N routing rule(s)` on the unrenderable list, which refuses the **whole** save.
+So policy routing and profiles were mutually exclusive -- and policy routing is
+how a second uplink or a one-subnet VPN is written, which is to say by the
+machines most likely to want more than one profile.
+
+`render_rule` writes `priority` always, because the model requires it and an
+unnumbered rule lands wherever the kernel puts it, and everything else only
+where it differs from its default. Two round-trip cases: every key at a
+non-default, and a minimal rule asserting that a default family, a default
+action and an absent `invert` are **not** written -- the direction a
+non-defaults renderer is otherwise tested by nothing in.
+
+**The trap next door fired this time.** 10.159 recorded checking
+`write_profile_snapshot`'s `override` set and finding it needed no change,
+because a wifi policy is a sub-block of a `device` the set already carried. A
+rule is a block of its own, so the set did need to learn it -- the comment there
+says a renderer that gains a block and a list that does not is a save refused
+for restating what the base already said, and sabotaging the four new lines
+produces exactly that: `profile.sh` loses three checks to a refusal. The comment
+was right about a case it had not seen.
+
+`tests/live/profile.sh` carries a rule now, asserted as an `override` because
+the base defines it, which is the half a unit test cannot reach.
+
+**And the stale binary caught me a third time.** `cargo build -p` relinks no
+`target/debug/netcfgd`, so the first run refused with `1 routing rule(s)` from a
+daemon three edits old. 10.157's Makefile fix covers `make test` and cannot
+cover a live script run directly, which that entry says in as many words. Three
+occurrences now, each predicted by the record and each still paid for.
+
+## 10.170 Shaping the download direction could not be saved, and why that was invisible
+
+Three more off 10.159's list -- a device's `ethtool` block, its `qdisc`, and an
+address carrying a peer or a lifetime -- and then the one underneath them, which
+is the reason this entry is not just a list of keys.
+
+The three are ordinary. `ethtool` settings are a forced speed, a duplex, a
+wake-on-LAN flag and five offloads, which are properties of one socket on one
+switch and so exactly what differs between one site and the next. An address's
+`peer`, `preferred_lft` and `valid_lft` are trailing words inside the `config`
+string rather than keys of their own, netcfgd's addressing syntax having
+netifrc's shape, so the spellings the renderer writes are `address_entries`'
+`MODIFIERS` table's and not the model's field names. `preferred_lft 0` is the
+one worth naming: it keeps an address reachable while stopping it being chosen
+as a source.
+
+### Choosing what to work on by measuring reachability, not by reading the list
+
+The list was taken as a list of renderer gaps and it is not. Probing each entry
+with `ncfg show` against a one-block configuration -- which compiles and touches
+nothing, so it answers "can a document contain this" directly -- splits it in
+two:
+
+    reachable, so a renderer gap     ethtool, qdisc, address peer/lifetimes
+    not reachable from the language  match, ingress_redirect, dns mode exec,
+                                     dns options/dnssec/transport, port/sni,
+                                     a route with a scope or a proto
+
+The second column is not the renderer's problem at all. Those are the open
+question this file already carries near the top -- whether the parser gains the
+keys or the schema loses the fields -- and it is explicitly not a worker's to
+settle. **Which makes the probe worth more than the three fixes**: without it
+the honest-looking move is to work down the list in order, and most of the list
+is somebody else's decision wearing a renderer bug's clothes.
+
+### And one entry was in neither column, which is the finding
+
+`a_shaped_qdisc_round_trips` failed on `ingress_bandwidth` with **three**
+refusals at once: `device eth0: ingress_redirect`, `interface ifb-eth0: kind
+ifb`, and `device ifb-eth0: a qdisc metering arriving traffic`. All three are
+unreachable *by name* -- `ingress_redirect` is an unknown device key, `ifb` is
+not a kind the parser knows, and no key sets `ingress` -- and my own probe had
+measured exactly that, one entry at a time, and concluded they could not occur.
+
+They occur because `expand_ingress_shapers` sets all three. One
+`ingress_bandwidth` on a device's qdisc becomes the rate `take`n off that
+qdisc, an `ingress_redirect` on the device, and a synthesised `ifb-<name>`
+carrying the rate on a `cake` flagged `ingress`. So **every machine shaping its
+inbound line could save no profile**, which is most machines on a domestic
+connection, and the probe that should have found it answered about the key
+rather than about the field. *A field is reachable if anything sets it, and a
+key is only one of the things that can.*
+
+**It is also the only place the renderer reconstructs an input rather than
+describing the document.** Writing each device as it stands is wrong in both
+directions: the rate is no longer on the device the operator put it on, so one
+device loses it and another invents it -- and recompiling that profile would
+synthesise a *second* `ifb` for a document that already had one, which
+`expand_ingress_shapers` refuses outright, so the profile would not load at
+all. The derived device is skipped and its rate written back where it came
+from, and the round trip is the proof the inversion is exact: the second
+compile re-derives what the first one derived.
+
+The inversion is strict, because nothing in the type says a document came from
+the compiler. Every field the synthesis leaves at a default is required to
+still be at it, and the `ifb` must be named `ifb-<shaped>`; anything else keeps
+an honest refusal. **The name check is correctness and not paranoia** -- a
+redirect to a bare `ifb` called `shaper0` would render as a rate whose recompile
+derives `ifb-eth0`, a different document -- and the test for it exists only
+because deleting the check broke nothing. Fourteen sabotages, thirteen caught
+by the test written for each, and the fourteenth reported NOT COVERED; the
+fifteenth run, with the case added, fails exactly that case.
+
+**A message had also been wrong since 0155 pass 1b.** `render_kind`'s refusal
+says `interface {name}: kind ...` and its only caller is `render_device`, the
+pass having moved `kind` off the interface. It is `device {name}` now.
+
+`doc/netcfgd.conf.example` documented `qdisc { kind; bandwidth }` and not
+`ingress_bandwidth` -- the key behind all of the above, and the download half of
+the one problem that section exists to solve. It is in now, with the `ifb` and
+the name collision named, since discovering a refusal about a device you did not
+write is a bad way to learn that netcfgd makes one.
+
+### Somebody had already worked it out, and closed the question
+
+`render_interface` carried a comment, written 2026-09-01 in `1ace05a3`,
+describing the whole mechanism correctly: the compiler synthesises the redirect
+and the `ifb` from `ingress_bandwidth`, so rendering the redirect would make the
+next compile synthesise a second one on top. Every clause of that is right. It
+closed by saying the rate a snapshot would have to write back is one *"the
+document no longer holds by the time this sees it"* -- and that is the one step
+that is wrong. The document holds it. It holds it on the derived device, which
+is not reachable from inside `render_interface`, and the inversion recovers it
+from there.
+
+**So the claim was true of what one function could see and was written as a fact
+about the document**, which is `evidence.md`'s *sweep for claims of
+impossibility* earning its keep: an absence claim that has been closed wastes a
+reader's time, while an impossibility claim that was never true tells the next
+person not to write the thing that works. This one told four weeks of readers
+exactly that, in a comment that reads as settled analysis -- which it mostly
+was.
+
+It was also in the wrong place. 0155 pass 1a moved `ingress_redirect` to
+`device` and the sentence stayed in `render_interface`, describing an entry that
+list has not carried since. The comment is rewritten rather than appended to,
+per the rule about a reader who finds both believing whichever sounds more
+careful.
+
+### Three more fields nothing can ask for
+
+Found by the same probe, and reported rather than fixed, because they belong to
+the open question above and not to this pass: `DnsMode::Exec`, `Route::scope`
+and `Route::proto`. The method is one command each, `ncfg show` over a
+one-block configuration:
+
+    global { dns { mode = "exec" } }        unknown dns mode `exec`
+    routes = "default via X scope link"     unknown route keyword `scope`
+    routes = "10/8 via X proto static"      unknown route keyword `proto`
+
+**`DnsMode::Exec` is the `invert` shape exactly**: `netcfgd-dns` implements it
+end to end -- `DnsMode::Exec(command) => hand_to_script(scopes, command)` -- and
+no document can request it. A whole resolver mode, written and tested, with the
+one layer missing that makes it reachable.
+
+The other two differ, and the difference decides what to do with them. Nothing
+reads `Route::scope` or `Route::proto` anywhere outside the model and a frozen
+plan fixture, so unlike `invert` and `Exec` there is no working implementation
+waiting for a key -- they are schema with no behaviour on either side. **These
+are measurements, not recommendations**, and all three are the holder's call.
+
+## 10.171 The last two interface blocks, and three detectors that were each wrong
+
+`advertise` and `guard` were the last reachable entries on the renderer's
+refusal list for an interface, and both are small. A `guard` is the operator's
+own sentence about what depends on a link, which `ncfg` quotes back when
+something would take it down -- losing it in a profile turns a deliberate
+refusal into a link that goes down without comment. An `advertise` block is the
+router advertisement policy, and its one trap is that **`dns` defaults to
+on**: the omit-at-default rule therefore writes it only when it is off, and
+getting that backwards produces a profile whose router stops advertising a
+resolver, which looks like working DNS until the host has no other source.
+
+Two things inside it keep a refusal, because the language has no words for
+them: `RaBackend::Exec`, a fourth backend `netcfgd-ra` implements and
+`lower_advertise` will not accept, and `PrefixRef::index`, which selects
+between several delegations in one lease and is pinned to 0 by the parser.
+Both are reached in tests by putting the value in after compiling, since the
+parser will not.
+
+### Hooks are not a renderer gap and should stop being read as one
+
+The refusal stays, and the reason is now in the code rather than in whatever a
+reader assumes. A `HookRef` holds a **path and a sha256, not the shell**:
+`lower` hands the body to `hooks.record(...)`, which materialises it to a file
+and returns a reference, and the AST's `Hook.body` never reaches the document.
+There is also no path syntax -- a hook is only ever a brace body. So rendering
+one needs either a read of the materialised file, checked against the recorded
+hash, or new grammar. Both are decisions, and the hash exists for exactly the
+drift that read would have to tolerate.
+
+### Three detectors, each wrong in a different direction
+
+The count of model places no configuration can reach has been wrong three
+times in one session, so it got a sweep rather than a fourth increment. The
+sweep is the part worth keeping, because **every detector built for it was
+wrong, and each wrongness was visible only because some of the answers were
+already known.**
+
+- **Fields whose name never appears in `lower.rs`.** 204 desired-document
+  field names, 20 candidates. Sound in principle -- assigning a field requires
+  naming it -- and its positive control held: it found `dnssec`, `options`,
+  `transport`, `run_as` and `match`'s members, all already recorded. But it
+  **cannot tell two fields of the same name apart**, and `timeout` is both
+  `HookRef`'s and `ProbePolicy`'s. It reported `HookRef::timeout` reachable.
+  It is not; `lower_probe` is what mentions the word, and the record was right.
+- **Variants whose spelling never appears.** 43 candidates, and wrong in both
+  directions at once. It called every `BondMode` unreachable, because the
+  config spells them with hyphens and the guess used underscores -- and it
+  called `DnsMode::Exec` *reachable*, because `lower.rs` contains `"exec"`
+  belonging to the secret providers. The two cases already known to be
+  unreachable were the two it cleared.
+- **Variants whose constructor path never appears.** Exact where it applies, a
+  variant being constructible only by naming its path and `lower.rs` having no
+  glob imports -- and it reported `BondMode` 7/7 unconstructed, which is
+  false. `BondMode::parse` lives in the **model**, and `lower.rs` calls it. So
+  does `Principal::parse`. A path-only grep cannot follow the hop into a
+  helper, which is where this language keeps its string-to-variant mapping.
+
+**What that adds up to is not a better grep.** The question "can a
+configuration say this" is interprocedural, and the only exact instrument is
+the parser itself: a one-block configuration through `ncfg show`. That is what
+settled every entry in 10.170. It is also why **this entry publishes no
+total**: a cheap total here has been wrong four times, and a number with a
+method nobody can re-run is worth less than a list with one.
+
+### What is verified, and how
+
+Confirmed unreachable, by probe where a spelling was known and by reading
+where it was not:
+
+    the eight already recorded      DnsPolicy options/dnssec/transport,
+                                    DnsServer port/sni, Device match,
+                                    HookRef run_as/timeout
+    found by 10.170                 DnsMode::Exec, Route::scope, Route::proto
+    found by 10.171                 RaBackend::Exec, PrefixRef::index,
+                                    Dhcp4::hostname_mode, Dhcp4::client_id,
+                                    Dhcp4::request_options, Dhcp6::rapid_commit
+
+**The four DHCP fields are the inert shape rather than the `invert` shape**,
+and the distinction is the one that decides what to do with each. Their names
+appear nowhere in `lower.rs`; the model sets them only to their own defaults at
+`address.rs:108`-`111`; and nothing outside the model's own `frozen.rs` and
+`canonical.rs` reads them. A hostname to send, a client identifier, extra
+options to request and DHCPv6 rapid commit -- schema with no behaviour on
+either side.
+
+`DnsMode::Exec` and `RaBackend::Exec` are the other shape, and now there are
+three of them with `RoutingRule::invert`: each is a *"hand it to a script"*
+escape hatch, implemented end to end in a backend, with no way to ask for it.
+That is a pattern rather than three coincidences, and it is still the holder's
+call.
+
+## 10.172 The refusal list was never the measure, and nine things it could not see
+
+Four device kinds and two addressing sources were the last reachable entries on
+the renderer's refusal list: `WireGuard`, `OpenVPN`, `Tunnel`, `tun`/`tap`, a
+delegated prefix and a reported address. **`WireGuard` was the one that
+mattered** -- a VPN is the thing a profile is most likely to be about, the
+office tunnel being up at the office and not at home -- and the module's own
+`what_cannot_be_rendered_is_named` had been using `wireguard` as its example of
+the impossible, so it had to be repointed. It names a hook now, which is the
+only entry that is both reachable and refused on purpose.
+
+Two spellings in there are worth knowing rather than rediscovering. `tun` and
+`tap` are two **block heads** and not a `mode` key, so a renderer writing one
+head for both loses layer 2 in silence. And `@pd:` is an indirection for the
+same reason `@secret:` is: no config file can know what an ISP will delegate,
+so a profile has to write the reference back and not the address it resolved
+to -- resolving it would pin the profile to one lease.
+
+With every `AddressSource` variant handled the catch-all arm became dead, and
+it is gone: an eighth variant is now a compile error for whoever adds it rather
+than a refusal somebody meets at `profile save`. **The compiler is the witness
+that the match is exhaustive**, which no test could be.
+
+### Then the measure turned out to be wrong
+
+The refusal list had been driving three commits of this work, and it is **not a
+measure of what a profile can hold**. A refusal is what the renderer says when
+it knows it cannot write something. A field it simply never learned does not
+appear on it at all: `render` returns `Ok`, the document is wrong, and nothing
+anywhere says so. Only the daemon's round-trip proof stands between that and a
+bad profile -- and what the operator then sees is a save refused with a diff,
+rather than a sentence naming what is missing.
+
+So the list was finished and the question was not. What answers it is the round
+trip over a corpus somebody else curated: `doc/netcfgd.conf.example` claims to
+carry every feature with the syntax to use it, and `tests/example.rs` already
+compiles every snippet in it. Rendering each one and recompiling the result is
+three dozen lines on top of machinery that existed.
+
+**It found nine failures on its first run, in five causes, and none of the
+renderer's 88 unit tests had caught any of them** -- verified by sabotage, each
+cause re-broken one at a time with only the new gate going red:
+
+- **`global { hostname = "dhcp" }` rendered a profile that does not parse.**
+  It wrote `from_dhcp`, the variant's own name, and `lower_globals` reads
+  anything that is not `dhcp` as a literal hostname. So the failure was not a
+  lost setting but `` `from_dhcp` is not a hostname `` pointing at a line
+  netcfgd wrote itself.
+- **`domain_suffix_match` was the one field of nine `render_eap` did not
+  write**, and it is the field whose loss *weakens* a network rather than
+  changing it. Without it the supplicant checks the certificate chain and not
+  the name, so any certificate from any CA in the store is accepted -- which
+  is what a rogue RADIUS server needs. An enterprise profile came back weaker
+  than the configuration it was saved from, silently. Three of the example
+  file's own snippets set it.
+- **A probe's `require_lease` was written nowhere**, and its default is on, so
+  the key only ever appears to say "probe with no lease" -- which is what a
+  modem needs. A profile turned a working cellular probe into one waiting for
+  a lease it may never get.
+- **`dhcp6` wrote the bare word**, dropping `pd`, `pd_hint` and `pd_length`.
+  A saved profile stopped asking for a prefix delegation, which is what the
+  entire inside network is numbered from.
+- **`slaac` likewise**, dropping `privacy prefer_temporary`.
+
+The fix for the addressing three is not a longer list of fields. Each arm
+**compares against the default it would have written and refuses anything
+else**, so a field added to `Dhcp4` tomorrow is refused by name instead of
+being dropped by a renderer nobody remembered to update. That is the failure
+this list exists to prevent and the one it kept having.
+
+### The gate's own controls, and its limit
+
+The waiver is named rather than counted -- a snippet may be refused only if
+every reason mentions `hooks` -- so a new refusal fails with its own wording
+instead of being absorbed into a tolerance. The waiver is also asserted
+**non-empty**, because a permitted-failure list that has quietly stopped
+matching anything reports success whether or not the test still reaches it.
+And the rendered count has a floor, for the reason `every_example_compiles`
+already has one.
+
+**Its coverage is whatever the documentation happens to contain**, which is
+the limit to state rather than discover. So the five causes have unit tests of
+their own as well: an example deleted for being repetitive would otherwise take
+the only test of `pd_length` with it.
+
+### And clippy found the guard that could not fire
+
+The `Dhcp6` arm compares against the default it would have written, and the
+`slaac` arm was written the same way by copying it -- `Slaac { privacy, ..default }`
+and a `!=` against that. **`privacy` is Slaac's only field, so it compared the
+value with itself and could never fail.** A guard that cannot fire is the oldest
+entry in this tree's notes and it got written anyway, two screens below a
+comment saying so, inside the same change that was fixing five silent losses.
+
+`clippy::needless_update` caught it, which is worth noting for what it says
+about where the gate's value is: the lint is about a redundant struct update and
+has no idea what the comparison was for. **A style gate found a logic defect
+because the defect had a shape.**
+
+The fix is better than the guard was. `let Slaac { privacy } = slaac;`
+destructures, so a field added to `Slaac` does not slip through at
+`profile save` -- it fails to compile for whoever adds it. The same reasoning
+moved `render_kind`'s wildcard to `other @ InterfaceKind::Ifb`, and both are
+the lesson the addressing match had already taught twenty lines earlier.
+
+**And I read a narrower check's silence as a pass**, which is the other half.
+`cargo clippy -p netcfgd-compile --all-targets` printed nothing and I took the
+tree as clean; the Makefile runs `clippy --workspace --all-targets -- -D
+warnings`, and `too_many_lines` is a warning without that flag. `render_kind`
+was 147 lines over a limit of 100 the whole time. **The gate's own invocation is
+the only one that answers the gate's question**, and a hand-rolled narrower one
+answers a question nobody asked.
+
+Splitting it out gave `render_pppoe`, `render_openvpn`, `render_tunnel` and
+`render_tun` their own functions, so every kind with more than one line is one
+now.
+
+### And two more unreachable fields, by the blind spot 10.171 named
+
+`dhcp` takes no modifiers at all -- `address_source` runs it through
+`no_modifiers` -- so every field of `Dhcp4` is unreachable, including `metric`
+and `backend`. 10.171's field sweep missed both to exactly the collision it
+documented: a network has a `metric` and an advertise block a `backend`, so
+both words appear in `lower.rs` for other reasons. **The floor it published was
+a floor**, which is the one thing a count labelled that way gets to be right
+about.
+
+## 10.175 A key that was reachable and unusable, found by writing an example
+
+The render gate's corpus is `doc/netcfgd.conf.example`, so widening the corpus
+is extending a test rather than writing documentation -- which is the reason to
+do it, that file having yielded nine renderer defects from its existing
+contents. Asking which keys the parser accepts and no example assigns gives
+about thirty, once the privilege gate's extraction is filtered: it scans from a
+`match ....key.as_str()` to the `unknown ... key` arm and swallows nested
+*value* matches on the way, which its own documentation admits, so `wpa2`,
+`peap` and `off` arrive looking like keys.
+
+Examples went in for the bridge's `hello_time`, `ageing_time` and `priority`,
+WireGuard's `fwmark` and a peer's `preshared_key`, ethtool's `speed`, `duplex`
+and ring sizes, a PPPoE session's `service` and `ac`, the `qdisc = "fq_codel"`
+short form, and every selector a routing rule has. **Writing one of them found
+a defect in two directions.**
+
+### `l3mdev` was accepted by the compiler and usable in no valid document
+
+An `l3mdev` rule matches on whichever VRF a packet is in and looks up *that*
+VRF's table, so it carries no table of its own -- that is the whole reason to
+write one. `check_rule` refused a rule whose action is `lookup` with no table,
+with no exception for it. Asked of the kernel in a namespace on 6.12, which is
+how this project settles such questions:
+
+```text
+# ip rule add l3mdev pref 1500
+# ip rule show
+1500:	from all lookup [l3mdev-table]
+
+# ip rule add l3mdev table 100 pref 1501
+table can not be specified for l3mdev rules
+```
+
+So the two were mirror images, and both were wrong:
+
+    l3mdev alone        kernel accepts   netcfgd REFUSED
+    l3mdev + lookup     kernel refuses   netcfgd compiled
+
+The second is the worse one: netcfgd would plan a rule the kernel rejects, fail
+the apply, and plan it again on the next reconcile. The first means the only
+form that works could not be written at all.
+
+**Every layer below the compiler already had it.** `FRA_L3MDEV` is written in
+`netcfgd-sys/src/rule.rs`, read back in the same file, and compared by
+`same_rule`. That is `RoutingRule::invert`'s shape from 10.168 with one turn
+more -- not a field nothing could reach, but a field reachable *only* as
+something that cannot work, which no sweep for unreachable fields would have
+found because it is not unreachable.
+
+### Fixing the compiler made a latent renderer gap reachable, in the same run
+
+`render_rule` wrote thirteen of `RoutingRule`'s fourteen fields and dropped
+`l3mdev`. That gap had been **unreachable**: no document could carry such a
+rule, so nothing ever rendered one. The moment the compiler learned the
+exception, the example file carried one -- and the render gate failed on the
+same run, with the rule coming back as `rule "vrf-local" { priority = 1400 }`,
+which does not compile, because a rule with no lookup, no action and no
+`l3mdev` is exactly what the compiler refuses.
+
+**That is the better of the two failure modes and still a profile nobody can
+load**, and it is worth naming because a fix in one layer unsealing a defect in
+another is how this list keeps growing: 10.172's five silent losses were the
+same shape read from the other end.
+
+### Where it is pinned
+
+Three independent places, confirmed by removing the exception and watching all
+three go red: a unit test on the compiler, the example gate (the new example no
+longer compiles), and the renderer's round trip. `tests/live/rules.sh` carries
+the end-to-end case, which is the only one that can say the *kernel* agrees --
+netcfgd installs the rule, `ip rule show` reports
+`from all lookup [l3mdev-table]`, and a second plan has nothing to do, so the
+observation reads the flag back rather than re-planning for ever.
+
+**The sabotage sweep needed `--no-fail-fast` to tell the truth.** `cargo test`
+stops at the first failing binary, so the first run reported one test catching
+the change when three do -- a control intercepted by an earlier step, which is
+the same reading error as 10.172's and cost nothing here only because the
+number looked too small.
+
+## 10.183 The LSB init script works; the openrc one cannot be tested here
+
+netcfgd ships four init integrations and `sandbox_writes.sh` covers one.
+`packaging/sysvinit/netcfgd` -- 124 lines, which also serves OpenRC on Debian
+-- and `packaging/openrc/netcfgd` -- 28 lines of `openrc-run` -- **had never
+been executed anywhere**, and procd needs OpenWrt and stays out of reach.
+
+`tool/vm/payload/init.sh` and `make vm-init` run them in a Debian guest, which
+needs no new image and no host installs: the daemon is the ordinary glibc
+binary, copied in from the read-only mount rather than symlinked, because
+`start-stop-daemon --exec` resolves the path and compares it against
+`/proc/<pid>/exe`.
+
+**The LSB script passes seven checks, including the two its own comments
+promise:** that the runtime directory is made, and that stop *leaves* it --
+0135's choice, because the record of what netcfgd installed has nowhere else to
+live and a restart that threw it away could not put those things back.
+
+**And it proves less than it looks, which the run itself revealed.** The guest
+runs systemd, whose `systemd-sysv-generator` turns a script in `/etc/init.d`
+into a unit -- so `start` printed *Starting netcfgd (via systemctl)* and
+`status` answered `Loaded: loaded (/etc/init.d/netcfgd; generated)`. What that
+does prove is worth having: the generator parses the LSB header, which is the
+part most likely to be malformed, and the script's own `start`, `stop` and
+`status` shell ran. What it does not prove is the script under *sysvinit*,
+where nothing generates a unit and `start-stop-daemon --background` is
+unsupervised.
+
+**The openrc half was claimed before it was measured, and the claim was
+wrong.** This payload first said a Debian guest could run both, on the grounds
+that Debian packages `openrc`. It does -- 0.56-1 in trixie, candidate confirmed
+in the guest -- and it still cannot be installed:
+
+	systemd-sysv : Conflicts: insserv but 1.26.0-1 is to be installed
+	openrc:amd64 Depends insserv
+
+Installing openrc on a systemd Debian means removing systemd as init, which apt
+will not do on the way to a dependency. That is structural. Alpine is the tier's
+other OpenRC guest and is musl while the binary is glibc, and the musl target
+was retired deliberately rather than pollute the host to serve a guest. **A
+`sysvinit-core` guest would close both halves at once** -- openrc installs
+there, and the LSB script would run under the init it is written for -- and
+that is a second image, so it is named rather than assumed.
+
+The payload reports that limit and counts it **neither as a pass nor as a
+failure**: a target that always goes red is one people learn to ignore, and a
+green `vm-init` that silently covered one of two integrations is the vacuous
+pass this tree keeps finding. It also fires a note if `openrc-run` ever turns
+up, because at that point this measurement has gone stale and the section should
+become real checks again.
+
+**Two of my own mistakes are in the history rather than hidden.** The install
+loop printed `NOT AVAILABLE` for every failure with apt's output sent to
+`/dev/null`, so the first run said the one wrong thing about the one question
+asked and a whole guest run bought nothing; all three payloads keep apt's output
+now. And the rewrite of the openrc section used `str.index` on an anchor that
+occurred twice, cutting the file at the wrong one -- the uniqueness assertion
+this tree's own rule asks for, left off the one edit that needed it.
+
+## 10.189 A payload that is not strict, and a document that says it is
+
+`doc/socket-protocol.md` section 7 states the rule plainly: *"Unknown members
+are refused on a request, in the envelope as well as the payload."* The
+envelope half is true. The payload half has a hole, and the document does not
+mention it.
+
+`Request::Explain`'s `subject` is `Subject`, an **internally-tagged** enum, and
+serde refuses `deny_unknown_fields` on that representation -- the same
+limitation section 7 already records for the envelope, which is why
+`Request::members()` exists. Every other request payload in
+`crates/netcfgd-proto/src/lib.rs` carries the attribute; this one cannot.
+
+**Measured against the running daemon rather than read off the source**, which
+is what turned it from a code-reading claim into a fact:
+
+    {"request":"status","bogus":1}
+      -> {"response":"error","message":"unknown member `bogus` on this request"}
+
+    {"request":"explain","subject":{"subject":"interface","name":"wlp0s20f3",
+                                    "bogus":1}}
+      -> {"response":"explanation", ...}   accepted, and answered
+
+Found by the C port, which has no serde and therefore no such limitation: its
+member table refuses the unknown member inside `subject` as the document says
+it should, so the C is stricter than the Rust in exactly one place. That
+divergence is listed in 0263.
+
+Two ways to close it and they are not equivalent: give `Subject` a hand-written
+`Deserialize` that refuses what it does not know, which makes the document true
+again; or write the exception into section 7, which makes the document honest
+and leaves a client able to send a member the daemon ignores. The first is what
+the rule was for. Not decided here, and not on this branch -- it is `master`'s
+code and `master`'s document.
+
+## 10.190 What the port has found in the Rust so far
+
+Porting a module means reading every line of it with a reason to disagree,
+which is a review nobody has budget for on its own. Eleven findings so far,
+none of them from a reviewer and all of them from somebody trying to make the
+same thing work twice. Two already have sections of their own -- the attribute
+length that truncates (10.188) and the request payload that is not strict
+(10.189). The rest are here, with what was actually checked rather than
+reported.
+
+**Verified by reading the source, or by measurement:**
+
+* **The netlink receive documents `MSG_TRUNC` and passes `0`.** `socket.rs`'s
+  `receive` carries a SAFETY comment explaining that with `MSG_TRUNC` "the
+  *return value* may exceed that length", and the `libc::recv` two lines below
+  it passes flags `0`. `receive_whole` is saved by peeking first, so the
+  property is unreachable rather than wrong -- except in `send_batch`, which
+  reads into a fixed 32 KiB with no peek and no truncation signal, so an
+  nftables reply larger than that is silently short. That is the defect 0183
+  fixed on the other path.
+* **Nothing checks who sent a netlink message.** `recv`, not `recvfrom`, and no
+  test that `nl_pid` is 0. `/proc/net/netlink` is world-readable and shows this
+  daemon's port id -- measured on this machine -- and sequence numbers are
+  small predictable integers, so a local process can unicast a forged
+  `NLMSG_ERROR` or a forged link record into a dump in progress on a root
+  daemon. Narrow and real. The C port drops a datagram that did not come from
+  the kernel and counts it; dropping rather than failing is deliberate, since
+  failing would let the same process abort a dump instead.
+* **`ETH_P_ALL` is written as `0x0300`**, the byte-swapped constant, in
+  `qdisc.rs`. Correct on x86 and an ingress filter for no protocol at all
+  anywhere else.
+* **An interface index that does not fit is folded to zero**, four times in
+  `qdisc.rs` (`try_from(...).unwrap_or(0)`). A request about one interface
+  becomes a request about none -- and `RTM_GETTFILTER` answers index 0 with an
+  empty dump, which reads exactly like "no redirects installed".
+* **The nftables reader ignores the comparison operator.** `NFT_CMP_EQ` appears
+  once in `nft.rs`, in the writer; the reader takes `NFTA_CMP_DATA` without
+  looking at `NFTA_CMP_OP`. Since 0022's conflict check reads *other* people's
+  tables, a hand-written `oifname != "wan0" masquerade` there is read as
+  "wan0 is an uplink" -- not a near miss, the exact opposite.
+
+**Reported by the porting worker and not independently checked:**
+
+* Cake's options are read out of any scheduler's attribute 2, where the comment
+  says they are read only under `cake`; an 8-byte length check stands in for a
+  type check.
+* An nftables transaction with nothing in it is still emitted as begin+end,
+  which asks for no acknowledgement and receives no reply, so the reply loop
+  waits out its five-second timeout and reports a failure that did not happen.
+* `parse_mac` accepts one hex digit per octet and a leading `+`, because
+  `u8::from_str_radix` does; the configuration language's own reader requires
+  exactly two. So `+1:2:3:4:5:6` is a hardware address to one half of netcfgd
+  and not to the other.
+* `set_ipv6_token` takes an address of either family, and only one has a wire
+  form.
+* Five structs in `observed.rs` carry no `deny_unknown_fields` where every
+  other one does: `Entry`, `Connectivity`, `Primary`, `Standing`, `Chosen`.
+  That reads as an omission rather than a decision.
+* The netlink sequence counter can wrap to zero, after which every unsolicited
+  message matches the reply filter. Four billion requests away and one line to
+  make unreachable.
+
+**None of these is fixed on `master`**, and that is deliberate: the port is on
+its own branch, the fixes want tests written against the Rust, and two of them
+-- the sender check and the `Subject` payload -- are decisions rather than
+repairs. What this section is for is that they do not evaporate when the branch
+is merged or abandoned.
+
+## 10.193 A comment that forbids what the code does
+
+`with_metric` fills a route's absent metric from an interface's preference.
+Its own doc comment says why that must happen once:
+
+> It also has to happen in exactly one place, because the comparison that
+> decides "is this route already present" uses the metric and would loop
+> forever against a value computed differently on each side.
+
+There are two places. `plan_route` (lib.rs:4391) fills it from
+`self.effective_metric(interface, observed)`, which prefers the metric of the
+*wifi network the interface has joined*; `teardown_routes` (lib.rs:5645) fills
+it from `interface.preference`. So for an interface that states a `preference`
+and joins a network that states a different `metric`, the forward pass sees the
+installed route at the network's metric and adds nothing, while the teardown
+pass compares at the preference, matches nothing, and plans `route.del`. The
+next reconcile puts it back. **The loop the comment forbids, arriving by the
+route the comment describes**, and no fixture covers it.
+
+Not observed on this machine: its networks carry metrics and its radio states
+no `preference`, and the routes in question are the DHCP client's, which
+ownership keeps netcfgd's hands off anyway. What it wants is the shape from the
+example file -- a `preference` on the interface and a `metric` on the network --
+and a static route to hang it on.
+
+**And a vacuous fixture beside it.** A config address on an interface being
+disabled is withdrawn twice: `plan_disable` emits `addr.del`, and
+`teardown_addresses` independently decides the same address matches no static
+source and emits another. Both are idempotent, so the machine converges and one
+removal is merely described as two. The reason nobody has seen it is the
+fixture: `fixtures.rs:8618`'s
+`taking_an_interface_down_withdraws_its_addresses_first` sets `origin: None`,
+which is the single value that makes the teardown pass skip the address. The
+test that exists to cover the case is built out of the one input where the
+defect cannot appear.
+
+Both found by porting the planner, which is the third module in a row where
+the finding was in a comment the code had stopped obeying.
+
+## 10.196 A removal verified against a configuration the machine does not have
+
+Found while porting `config.rs`, and reproduced rather than read.
+
+`install_drop_in` carries a comment headed **"With the profile, not without
+it."** It is one of this document's own fixes: the function used to verify a
+write through `load_layered`, which does not read the selected profile's
+directory, so `ncfg profile set` wrote a selection, compiled a configuration
+that excluded the very profile it had just chosen, and reported success.
+
+`remove_drop_in` is 370 lines further down the same file and still calls
+`load_layered`. The fix was applied to the write path and not to the delete
+path beside it.
+
+What that costs, reproduced against a scratch tree with `NCFG_CONFIG_DIR`
+pointing nowhere near `/etc`: a base selecting the `office` profile, a drop-in
+defining `interface eth0`, and a profile carrying `override interface eth0`.
+Removing the drop-in is verified against base-plus-`conf.d` alone, where the
+`override` is not present to be orphaned, so it compiles and the removal is
+**accepted** -- and the machine's real configuration then does not:
+
+    remove_drop_in said: Ok(true) -- accepted
+    .../profile/office/20-eth.conf:1:10: `override interface eth0` has nothing
+    to override
+
+`ncfg config rm` reports success and the next reload is where the operator
+finds out. The refusal that should have fired is already written four lines
+below -- *"removing that would stop the configuration compiling, so it was put
+back"* -- with the restore that goes with it. The code is right; it is looking
+at the wrong document.
+
+**The general shape, and it is the one this document keeps arriving at.** A fix
+that lands on one of a pair leaves the pair disagreeing, and nothing here could
+see it: the two functions are checked by different tests, neither compares them,
+and the comment explaining the hazard sits in the function that no longer has
+it. The C port has both paths loading with the profile, and a case naming this.
+
+## 10.197 Two findings that were not, and why saying so is worth the lines
+
+Both were queued as defects from the port's notes. Neither survived being
+checked, and the checking is the point: a report that is not verified before it
+is written is how a document becomes a list of things somebody once suspected.
+
+**The eleventh `NoHooks` site is genuinely unreachable, and 0258 was right.**
+The port's notes had it that `config.rs::write_profile_snapshot` compiles its
+proof with `NoHooks` at line 2776, so `ncfg profile save` would fail on any
+machine with a hook, with a message blaming the snapshot. It does compile with
+`NoHooks`, and the conclusion is still wrong. Hooks exist on exactly two block
+types -- `interface.rs` and `wifi.rs` carry `hooks: Vec<HookRef>` and nothing
+else does -- and the renderer refuses both, pushing `"interface {name}: hooks"`
+and `"{whose}: hooks"` into `missing`. `render` runs 35 lines before the
+compile and returns through `?`. So reaching the `NoHooks` site requires a
+document with no hook, which is exactly the case where `NoHooks` behaves
+identically to `UnwrittenHooks`. The two conditions are mutually exclusive.
+[0258](doc/decision/0258-a-hook-is-shell-and-the-window-can-write-it.md) said
+"one in `profile save` that the renderer makes unreachable" and that is
+accurate.
+
+*One boundary, reasoned rather than reproduced, and marked as such because the
+distinction is the whole of §Judging evidence.* The proof compile reads the
+**disk** while the render reads `running`, the document the daemon has. Where
+disk carries a hook that `running` does not -- an edited drop-in not yet
+reloaded -- render succeeds and the compile fails, `after` is `None`, and the
+operator gets "that is a fault in the snapshot rather than in your
+configuration; please report it" with no difference appended, because
+`difference` is only called when `after` is `Some`. The save is refused either
+way and refusing is right in that window; what the sink costs there is the
+explanation, not the outcome.
+
+**`Peer::groups` is not lying about what empty means.** The note had its doc
+comment claiming to tell "could not read" from "in no group" when the type
+cannot. The comment reads: *"Empty means 'could not tell', not 'none' -- the
+caller must treat that as no group membership rather than as membership in
+nothing, which are the same thing here only because both deny."* The first
+clause is loose -- empty arrives from an unreadable `/proc`, from a uid
+mismatch against a recycled pid, and from a `Groups:` line that is genuinely
+empty -- but the sentence ends by saying the two are the same thing and that
+both deny, which is the behaviour and is correct. A comment that states its
+consequence accurately is not a defect, and filing it as one would have cost a
+reader the time to rediscover that it is fine.
+
+The C port's `daemon.h` keeps the two outcomes separate anyway, because there
+the group file is an argument and a test can produce each case on purpose --
+which the Rust cannot, since it reads `/etc/group` from a constant and its own
+tests say so twice.
+
+## 10.199 What porting the daemon's second half and the command line found
+
+Six workers, five modules, 12,420 lines of C and 867 checks. The suite is 56
+binaries and 3,842 checks, clean under ASan and UBSan with no findings. What
+follows is what the port found in the Rust while reading it. Five of the eight
+were reproduced rather than argued, and the reproductions are named.
+
+### A probe that talks too much takes the link away
+
+`netcfgd-daemon/src/probe.rs`, `run()`. Standard error is piped and read
+**only** inside the arm that runs after the child has exited. A child that
+writes past the 64 KiB pipe buffer blocks in `write(2)` and therefore cannot
+exit, so the loop runs to the deadline, kills it, and returns "no answer within
+Ns, so it was killed". The timeout branch never reads the pipe either, so the
+program's own words are discarded with it.
+
+Measured against a standalone transcription of `run()`, not argued from the
+source:
+
+| stderr written | result |
+|---|---|
+| 65,536 bytes | ok, 51 ms |
+| 70,400 bytes | **failed, 5.02 s, "no answer within 5s"** |
+
+**What it costs is the default route.** `probe_failing` is
+`reachable == Some(false)`; the planner then takes the early return at
+`plan_route` and warns *"{name}'s probe says it is not reaching anything, so
+its routes are not installed"*, and `advance_failed_sims` cycles a modem to its
+next SIM source on the same evidence. The verbosity that triggers it --
+`curl -v`, a script under `set -x`, `ping` on a link already dropping packets
+-- is precisely what somebody adds while debugging a link they suspect, so it
+arrives at the worst moment and `probe_detail` sends them to look at their own
+script. `DETAIL_MAX`'s comment anticipates that "a script can write without
+end", and then nothing reads it.
+
+### A confirm window that records a configuration nobody has run
+
+`confirm_window` writes `state.desired` as the new last-good. Twenty lines away
+in `state.rs`, `Armed::document` says in bold: **"Not `state.desired`, which
+moves under the window."** The loop reloads on any config change (`lib.rs`,
+unconditional) and defers only the *apply* (`defers_to_a_window`), so an edit
+made inside an open window becomes `desired` and is never applied. Confirm
+after such an edit and `/run/netcfgd-confirm/last-good.json` holds a
+configuration the machine has never been in -- the safety net for the next
+change, pointing somewhere nobody has run. `revert` was given the armed record
+for exactly this reason. `confirm` was not.
+
+### A typo that takes the machine off its profile
+
+Reproduced against `target/release/ncfg` in a scratch tree:
+
+    $ ncfg profile get                 -> office
+    $ ncfg config rm never-existed
+      the `office` profile was folded into your configuration and no profile
+      is chosen now; what is running has not changed
+      a drop-in called `never-existed` is not in .../etc          rc=0
+    $ ncfg profile get                 -> no profile chosen
+
+`with_profile_taken_off` folds the profile into `conf.d` before every settings
+write and undoes the fold only when the write returns `Err`. `remove_named`
+answers "absent is success", so a removal of nothing neither fails nor writes,
+and the fold stands. What is running does not move, which is what makes it
+quiet: what moves is the answer `profile get` gives, after a typo, at exit
+status 0.
+
+### A removal, and a control policy, each checked against the wrong document
+
+`remove_drop_in` is §10.196 and is reproduced there. Beside it,
+`ncfg control set` writes the machine's control policy **into the factory
+image**: `defines_global` searches the layered set factory-first and splices
+into the first file carrying a `global` block. Reproduced -- the block landed
+in the image's file and `/etc` stayed empty. On a read-only root, the case the
+factory layer exists for, that is a write error about a file the operator never
+named; on a writable one the policy lives in the image and leaves with the next
+package upgrade, while `ncfg control show` reports it correctly until then.
+
+And the scanner behind that splice is `str::find` with no notion of a string or
+a comment, so a `global` block containing a comment that mentions a block makes
+the span run to the end of `global`. The invariant puts the file back, so
+nothing is lost but the command -- with three diagnostics blaming the
+operator's file for keys `ncfg` itself wrote. It is the command `debian/postinst`
+prints and the only documented way out of the root-only default.
+
+### The diagnostic command is the least diagnostic one
+
+`why_no_supplicant` names the foreign supplicant holding a radio and names the
+units to stop. It is consulted by `scan` and by nothing else: `status`,
+`connect_to` and `disconnect` each fall back to the control socket's own
+sentence, which that function's doc comment says "cannot answer this and should
+not try". And `status` is the only wireless verb with no `check_backend`, so on
+an `iwd` device it opens a `wpa_supplicant` socket netcfgd deliberately never
+started. `wifi.rs` calls `status` "the command somebody runs when wifi is not
+working"; it is the one verb that withholds the diagnosis netcfgd has already
+computed. Both are pinned by name in `daemon_wifi_test.c`, so the checks go red
+the day somebody fixes them.
+
+### A method that reached the bus by accident
+
+`adapter/netcfgd-nm/src/settings.rs`: `writable()` sits inside the
+`#[zbus::interface]` block rather than the plain `impl` beside it, so zbus
+exports it. The bus policy opens that interface to `context="default"`, and it
+is the only method there that authorizes nobody -- `Update` and `Delete` both
+call `caller_uid` and `may_write`. Any local process can ask whether
+`/etc/netcfgd/conf.d/nm-<sanitised>.conf` exists, which enumerates the networks
+the shim has written. No traversal: `path_for` maps everything outside
+`[A-Za-z0-9._-]` to `_`. Real NetworkManager has no such method, so it is also
+a difference a client introspecting the shim can see.
+
+### Two smaller ones, and a help text that promises a verb
+
+The TUI's scroll offset is computed from the length of the content rather than
+the height of the window, so on any pane of 22 to 64 lines nothing scrolls,
+nothing past the last drawn row is highlighted, and `c` acts on the invisible
+selected line -- which `wifi_rows`' own comment calls "the worst kind of bug a
+list can have: it does something, confidently, to the wrong thing". `KEYS` is
+81 characters and is truncated to `... q qui` at 80 columns.
+
+And `ncfg --help` offers `ncfg secret rm`, which does not exist, while
+`SecretDelete` is in the protocol at the `admin` tier, served by the daemon,
+and **sent by the GUI** -- so the window can remove a credential and the
+command line cannot.
+
+### The gate that agreed with itself
+
+`tool/dbus_policy_gate.py` printed "18 interfaces, all granted" while knowing a
+different eighteen: it counted an interface the shim only *calls*, and it could
+not see `org.netcfgd.Compat` at all, which was consequently absent from the bus
+policy. Two errors cancelling in a total is what a count cannot show. Fixed to
+read the attribute that decides the matter; the corrected gate asked for the
+missing grant on its first run. This is §*Judging evidence* exactly: the count
+was never the thing that was wrong.
+
+### What the sabotage passes found that the code review did not
+
+Two breakages caught nothing alone -- the deadline's `TERM` at the process
+group and the `KILL` after it, which are redundant by design, so each survived
+while the other still killed the grandchild. Only breaking both together went
+red. Getting there found `end_it` returning early once the leader was reaped,
+skipping the group kill entirely; it now always sends it, and waits with
+`WNOWAIT` first so the leader stays a zombie and its pid -- which *is* the
+group id about to be signalled -- cannot be recycled onto somebody else's
+group.
+
+A TUI mutation escaped one of its two checks because `strstr` found the text
+under a different interface; the check now addresses the row by number. And one
+worker's own harness counted a check whose output went into a capture file, so
+a failure was invisible: results now go through a descriptor duplicated before
+any capture.
+
+### The tree, and what a shared one costs
+
+Twelve build objects under `c/src/backend/` were tracked in git, because
+`.gitignore` said `c/src/*/*.o` and the Makefile's `SRCS` is two levels deep.
+`make -C c clean` therefore deleted tracked files. Three of the six workers
+reported link failures from a half-sanitized archive, and two declined to run
+`clean` at all and built in private copies instead -- which is the right
+instinct and cost them a full rebuild each. Fixed, and the pattern now mirrors
+the Makefile's and says why.
+
+## 10.215 The store the daemon was pointed at, and the one it reads
+
+The two WireGuard observation passes are ported, which §10.213 judged a wave of
+their own because they need a generic netlink socket and, for the second of
+them, the secret store. The socket half stopped being a blocker when the
+offloads round opened one (§10.216); the store half is what this section is
+about, because reading it turned up the one defect in the Rust that this port
+does not inherit.
+
+### `--config-dir` does not reach the secret store
+
+`netcfgd --config-dir /srv/test` compiles `/srv/test/*.conf`, and then resolves
+every `@secret:NAME` in it under **`/etc/netcfgd/secrets`**.
+
+`crates/netcfgd-apply/src/kernel.rs:4176` is the whole of it:
+
+    pub fn secrets_dir() -> std::path::PathBuf {
+    	std::env::var_os("NCFG_CONFIG_DIR").map_or_else(
+    		|| std::path::PathBuf::from(netcfgd_secret::DEFAULT_SECRETS_DIR),
+    		|dir| std::path::PathBuf::from(dir).join("secrets"),
+    	)
+    }
+
+The environment variable, or the default, and nothing else. The flag is parsed
+(`netcfgd-daemon/src/lib.rs:171`) and resolved into the directory the
+configuration is read from (`:191`), and no path leads from there to this
+function. Four call sites take it: the executor's resolver
+(`kernel.rs:4202`, which is what loads a WireGuard private key and an 802.1X
+credential into the kernel and into a supplicant) and three passes in the
+observer -- `read_wireguard_currency` (`observe/host.rs:197`),
+`read_secret_currency` (`:483`) and `read_tunnel_currency` (`:676`).
+
+Read out of the source rather than run: starting a second netcfgd against this
+workstation's real `/etc/netcfgd/secrets` to watch it read the wrong directory
+is not a thing to do for a fact the two files settle between them.
+
+**What it costs has two shapes and the quiet one is worse.** On a machine with
+no `/etc/netcfgd/secrets`, every secret fails to resolve and the operator is
+told to run `ncfg secret set` -- which writes into a directory this daemon is
+not reading either, so the advice is wrong and following it does not help. On a
+machine that has both, netcfgd loads **the other tree's key** into the device
+the scratch tree's configuration describes, and `read_wireguard_currency` then
+reports that key as current, because both halves of its comparison came from
+the store the flag did not move. That is a tunnel coming up to the wrong peer,
+reported as correct.
+
+**The port does not inherit it**, and by two separate mechanisms rather than
+one. `c/src/main/daemon_main.c:330` builds the secrets directory as
+`where.config + "/secrets"` -- under the directory the daemon was *given* --
+with a comment that already says why. And the observer does not resolve the
+question at all: the store is a `ncfg_secret_resolver_t *` argument to
+`ncfg_observe_current_from`, stored on `ncfg_observe_source_t`, and NULL means
+the currency question goes unasked rather than the machine's own store being
+read. That is `observe.h`'s rule about every root being a parameter, pointed at
+the one directory where getting it wrong reads somebody's credentials.
+
+### What the observation is for, which is not the convergence NAT had
+
+§10.213 and §10.214 both end in the same sentence: a list nothing filled made
+the planner compare against an empty one, so a machine that was already right
+was planned the same op on every pass and never converged. **The WireGuard
+passes are the other failure.** `ncfg_plan_wireguard` returns without planning
+anything for a link whose `wireguard` observation is absent, and nothing filled
+one in -- so an edited listen port, an edited mark, a rotated private key and a
+**deleted peer** each planned nothing whatever, on a tunnel that looked
+configured. Decision 0054 is dated, its planner has been complete for waves,
+and none of it had ever run against a device.
+
+Both directions are now checked in `c/tests/observe_wireguard_test.c`: a device
+observed exactly as the document describes it plans nothing, an edited port
+plans one `wg.set_device`, and the same document against an observation with
+the device unobserved plans nothing at all -- which is what the last several
+waves would have printed.
+
+**And the absent seam is read differently here than in the two passes beside
+it, deliberately.** A netfilter socket that will not open is honestly "no NAT
+is installed"; an empty offload list is honestly "off or unsupported". A
+WireGuard device that could not be read is **not** a device with no peers, and
+reporting it as one hands the planner an empty peer list to correct with
+`WGDEVICE_F_REPLACE_PEERS`. So every way the read can fail leaves
+`link->wireguard` at NULL, which the model already distinguishes from an
+observed device with no key. 0263 carries it as a divergence because the
+neighbouring passes take the opposite direction and the difference is not
+visible from either.
+
+### One input of it is not written by this build
+
+The currency question compares a digest of what the store holds now against a
+digest of what netcfgd loaded when the kernel accepted it, and the second is a
+0600 record under `/run` that the executor writes. `apply/kernel_genl.c` does
+not write one, so `key_matches` and `preshared_matches` are absent on every
+real machine until it does. That is a question left unanswered rather than
+answered wrongly -- `plan/wireguard.c` reads `has` before `value` for exactly
+this reason, and an unanswered question rekeys nothing -- but it is the pass'
+remaining half and it is one function in the executor:
+`ncfg_observe_wg_key_record_path` and `ncfg_observe_wg_preset_record_path` are
+published so that whoever writes it names the file through them rather than
+spelling the path a second time.
+
+### A digest is not a way back to a key, and is still kept out of everything
+
+The technique is 0052's, which compares a digest for an access point's
+passphrase, and the argument for using it on a private key is that 32 octets of
+kernel randomness have no dictionary and no structure to attack -- which is
+also why it would be a poor answer for a passphrase. That makes the record safe
+to write; it does not make a digest safe to *print*, because it identifies the
+key it was taken of well enough for anyone reading a journal to tell which key
+a device is running. So neither the material nor a digest of it reaches an
+error buffer, a log line or the observation written to `/run`, and the test
+sweeps a canary through all three rather than asserting it.
+
+**The sweep was vacuous in half when it was first written**, which is worth
+recording because it is `evidence.md`'s shape and it was invisible: the
+canary's digest was a constant computed for an earlier spelling of the canary
+string, so the half of the sweep that looks for a digest could not have found
+one. It was caught by sabotage -- emitting the digest to a log deliberately and
+watching nothing go red -- and not by reading the test.
+
+## 10.218 What the port is waiting for, in one place
+
+Written because this document has had six sentences corrected this week for
+saying something nobody re-checked, and the list of what is left had become
+the same kind of claim: repeated from wave to wave, never re-derived. This is
+the derivation, as of 2026-09-18, and the next wave should re-derive it rather
+than quote it.
+
+### The one thing between this build and a machine
+
+**`ncfg_kernel_set_service` has no caller outside the tests.** Every op that
+goes through `ncfg_service_t` -- `dns.apply`, the four sysctls, the six wifi
+ops, and all three backend verbs -- is refused at run time for want of a
+context, and refused by a sentence that names the context rather than the op.
+So the supplicant launcher, the DHCP client, hostapd's start and the DNS
+delivery are all written, tested and unreachable, and none of the four
+refusals an operator would read says so.
+
+That is one wiring job in `src/main/`, and it is why `netcfgd` still will not
+start. Nothing else on this list blocks a machine.
+
+### What the planner still carries without acting
+
+Two, and both are the product's rather than this port's: **link-local
+addressing**, whose arm in the Rust is the same warning, and a **`network`
+block's** addressing, routes, `dns` and hooks, which §10.211 settled. The
+third, `metric`, is a real port gap and is deferred for a reason worth keeping
+-- `effective_metric`'s observation half reads a field nothing fills, so a
+producer written today would return `interface->preference` for every
+interface on every machine. It would look like the rule and be the bug.
+
+### What the observer does not do
+
+Seven of eleven passes. Six read `observed.backends`, which the record now
+carries but which nothing fills until `read_backend_liveness` lands -- and
+that one is held by `process.h` reaching `/proc` at a fixed path, which
+`observe.h`'s own rule forbids an observation pass. The seventh,
+`read_resolv_currency`, reads `observed.dns`, which is carried and not folded
+for the reason §10.214 gives.
+
+### What is written and cannot be reached
+
+`apply/kernel_genl.c` does not write the WireGuard key record, so
+`key_matches` is absent on every real machine -- unanswered rather than
+answered wrongly, which is the one shape the planner does nothing about.
+
+### What is deliberately not being done
+
+The NetworkManager adapter, which
+[0264](doc/decision/0264-the-library-the-bus-already-brought.md) settles and
+defers. `ncfg reset`'s partial-failure path, which cannot be driven as root.
+0079's third restart-count clear, which §10.214 shows is unsafe with the input
+available. And the `WANTED`/`ACTIVE` offload disagreement of §10.216, which
+needs a third state neither language's model has anywhere to put.
+
+### The residue nobody owns
+
+`request_parts` exists five times -- four under `src/observe/` and one in
+`src/apply/kernel_genl.c` -- each differing only in the noun in its refusal.
+`family_of` twice. None is wrong; all five are a chance to drift, and the
+shared pair belongs in `observe_internal.h`. A harmonizing pass over files
+that three waves were writing in at once is not a thing to do mid-wave, which
+is why it is here instead of done.
+
+## 10.224 The WireGuard record gets its writer, and a third base64 encoder
+
+`observe.h` declared `ncfg_observe_wg_key_record_path` and
+`ncfg_observe_wg_preset_record_path` "so that the writer, when it lands, names
+the file through them rather than spelling the path a second time". The writer
+has landed: `ncfg_kernel_wg_write_record`, called from the WireGuard arm after
+the kernel has accepted the request. Until now `key_matches` and
+`preshared_matches` came back absent on any real machine, which is a question
+left unanswered rather than answered wrongly -- the one shape the planner is
+built to do nothing about.
+
+**The digest is computed from what was sent, not from a second resolution, and
+that is a correctness property rather than a saving.** A caller that re-read the
+store would digest whatever it held a moment later, so a key rotated between the
+two reads would be recorded as the one in use while the kernel held the old one
+-- and the observer, comparing the store against the record, would answer
+`key_matches` **true** for ever and the planner would never send the new key.
+That is the convergence failure this port has already found twice, in the NAT
+pass and in WireGuard itself. So `ncfg_kernel_wg_build` fills the record from
+the octets it is about to send, before it wipes them.
+
+**And the digest rule is one function now.** `digest_of` was a static in the
+observer -- trim, parse as a key if possible, hash the octets rather than the
+text. A writer that hashed the base64 instead would produce a record that never
+matches, so `key_matches` would be false for ever and the planner would re-send
+a key the kernel already holds on every reconcile. It is
+`ncfg_observe_wg_digest`, and both halves call it.
+
+**A third base64 encoder was about to be written.** `ncfg_key_parse`'s own
+comment says two base64 *readers* of one format is how the halves of one program
+come to disagree about a key; there were already two *writers* --  `document.c`
+and `observed.c` each spelled the encoder out, identically -- and the record
+needed a third. `ncfg_key_render` is published beside `ncfg_key_parse` now and
+all three call it. It clears the low two bits of the last character, which the
+decoder ignores and `wg` emits set, so two spellings in give one spelling out.
+
+**The reader's fixtures were an independent witness, and now they are not.**
+`observe_wireguard_test.c` compares observations against literal digests that
+were computed once by hand and pasted in, so the whole file would pass over a
+rule that had drifted as long as the literals drifted with it -- `evidence.md`'s
+"two documents agreeing are one witness if the same hand wrote both". There is a
+case asserting each literal is what `ncfg_observe_wg_digest` answers, which ties
+them to the writer's output.
+
+**A sabotage that caught nothing, and what it found.** Writing the record even
+when the send failed turned nothing red: the ordering had no check, and neither
+did the file behaviour under it. `ncfg_kernel_wg_write_record` is published
+rather than static so three things can be checked without a WireGuard device and
+`CAP_NET_ADMIN`: a good record lands where the reader looks, an **empty** one
+removes a stale file rather than emptying it -- a device whose last preshared key
+was removed would otherwise go on being described by yesterday's digests -- and
+a buffer that ran out leaves the file alone rather than recording "no peer has a
+key" about one where several do. The `ok &&` before the call remains a one-line
+reading, which is what it should be.
+
+**And a leak I wrote, caught by the sanitiser and not by me.** The new
+"builds the same way with no record asked for" case `memset` a
+`ncfg_wg_messages_t` that the peers build had filled, stranding 320 bytes --
+bytes carrying a preshared key, which is the one kind this project scrubs on
+purpose. Freed before the handle is overwritten.
+
+6,304 checks across 95 binaries. Five sabotages caught: the digest hashing text
+instead of octets, the renderer keeping the low two bits, an empty record
+emptying the file rather than removing it, a failed buffer written anyway, and
+-- the one that caught nothing first time -- the record written for a request
+the kernel refused.
+
+## 10.226 Half a wifi metric, and the count that came out of `build.c`
+
+`address.c`'s `with_metric` filled a route's metric from
+`interface->preference` alone, and said so: *"This build has one answer,
+`interface->preference`, in both directions; see the port notes for where the
+Rust has two."* That was the gap. A radio associated to a network carrying
+`metric = N` installed its routes at the interface's preference instead, so an
+operator who ranked a network got the number they wrote on the interface and
+nothing said so.
+
+The rule is `ncfg_observed_effective_metric` now, beside
+`ncfg_observed_prefix_of` and for the same reason -- **three callers need one
+answer**. The planner fills a route's metric from it; the planner's *teardown*
+fills in the same value to decide whether a route it is looking at is one of
+these, and `with_metric`'s own comment says why that pair must agree, because a
+metric computed differently on each side makes the comparison never match and
+the plan loop for ever; and the daemon starts a DHCP client with `-m` from it.
+
+Proved shared rather than claimed: making the network's metric *replace* the
+preference instead of falling back to it turns the planner's case and the
+**daemon's** case red together, in two test binaries.
+
+**The fallback is the part that is easy to get wrong.** A network with no
+metric of its own leaves the preference exactly as it was; reading it as "the
+network's if there is a network" drops an operator's number because they also
+named an SSID. A route that states its own is overridden by neither. Both have
+checks.
+
+**And the gap warning is half a gap now, so it says which half.** What is left
+is a *re*start: a client already running keeps installing its lease's route at
+the old metric until something restarts it. The first draft of the new sentence
+was 649 characters at the widest network id, against a 511-character ceiling --
+so `ncfg_plan_warnf` truncated it and two existing checks went red, which is
+exactly the trap the comment above that warning records ("the operator got
+`still means t`"). Measured and trimmed to 461.
+
+**`build.c`'s own count is gone the same way `daemon_main.c`'s list went.** It
+said "the Rust planner is seven thousand lines and thirty passes; this is four
+of them", and it went on saying that while most of the rest landed. Counting
+the passes to correct it is what produced the stale number in the first place,
+and "pass" is not even a countable thing here -- 41 distinct `ncfg_plan_*`
+symbols are called from that file and some are helpers. So it names
+`warn_unported` and the per-pass warnings instead, which cannot rot because a
+pass landing takes its warning out in the same commit, and which `ncfg plan`
+prints off the operator's own machine.
+
+6,314 checks across 95 binaries. Three sabotages caught: the network's metric
+replacing rather than falling back, the planner going back to `preference`
+alone, and a route's own metric being overridden.
+
+## 10.227 The other half of the metric, and two sabotages that caught nothing
+
+`ncfg_plan_metric_restart` closes the second half of what a network's `metric`
+means. The first half -- a route the interface declares taking the effective
+metric -- landed in 10.226; this is the **lease's own route**, which netcfgd
+does not install and cannot edit, because the client installs it from what it
+was started with. The only way to move it is to start the client again.
+
+**It looks at two things and neither subsumes the other**, which is the Rust's
+arrangement and its reason. The client's own `argv`, recorded as
+`started_metric`, says what it was *told* and is there before any route exists
+-- a client that has not finished its first exchange has installed nothing. The
+installed default route carrying the kernel's DHCP protocol says what the
+client *did*, and catches one that ignored what it was told. `seen` is whichever
+noticed, and it is what the sentence reports, so an operator is told the number
+actually on their machine.
+
+**0079's cap matters more here than anywhere else it is applied.** Each round
+drops the lease for as long as the exchange takes, so a client that will not
+take the metric -- an operator's own `dhcpcd.conf` overriding it, say -- would
+otherwise take the machine's network away every reconcile, for ever. A machine
+whose network goes away every five seconds is worse than one whose route ranks
+wrongly.
+
+**And the warning is gone, which is `build.c`'s rule rather than a deletion.** A
+pass landing takes its warning out in the same commit; a warning that outlives
+the gap it describes tells an operator a number they wrote is inert when it is
+not. The test that asserted the warning now asserts its absence, and the two
+halves are checked for real instead.
+
+**Two sabotages caught nothing, and both were faults in my checks.**
+
+The start not waiting on the stop turned nothing red: the case asserted only
+that the stop came *first in the list*, which is the push order and stays the
+same without the edge. An executor that reads `depends_on` and parallelises
+would have started a second client beside the one being stopped, both retrying
+for ever. It asserts the edge now, and the list order beside it.
+
+Removing the "does this interface ask for a lease" guard turned nothing red
+either, because that case's fixture had **no dhcp4 backend running** -- so the
+*other* guard declined it and the check was passing for a reason it did not
+name. The fixture has a running client now, which is the ordinary shape of a
+machine whose document stopped asking for one. Fixing it exposed a third
+mistake of mine: the check counted `backend.stop`, and there legitimately is
+one -- the teardown stopping a client the document no longer asks for. It
+asserts on the restart's own half instead.
+
+6,321 checks across 95 binaries. Five sabotages caught: the restart cap
+ignored, the start not waiting on the stop, a converged client restarted
+anyway, the addressing guard removed, and the `argv` half dropped.
+
+## 10.258 `ncfg apply` arrives, and the seam that keeps it off this machine
+
+The verb that changes things is ported. It compiles, observes, plans, acts,
+records what it did and says so -- and in this build of the library it cannot
+reach a kernel at all, which is the arrangement rather than a stage of it.
+
+**The machine is a seam, and `ncfg_cli_main` installs none.** `cli.h` now
+carries `ncfg_cli_machine_t` -- an `executor_open` and an `executor_close`
+around a context -- and `ncfg_cli_main_on(argc, argv, machine)` is the entry
+point that takes one. `ncfg_cli_main` calls it with `NULL`, so every program
+that links `libncfg.a` and does not go out of its way can plan and explain and
+refuse and change nothing:
+
+    ncfg: this build of `ncfg` was started with no way to reach the machine,
+          so it will not apply.
+
+`src/main/cli_machine.c` is the one installer. It is where the machine's paths
+are spelled -- `/proc`, the supplicant control directory, `resolv.conf`,
+dnsmasq, unbound, the DHCP client -- and it hands `ncfg_main_world_open` the
+document and the observation the command already has. The library half names
+none of those files, which is 0263's rule about `src/main/` applied to the one
+verb where getting it wrong reconfigures a workstation.
+
+**That is also what makes `cli_apply_test.c` safe to run here.** Its recorder
+sits in the seam; the plan is real, the command is driven from `argv`, every
+action is carried out -- against a function that appends a name to an array. A
+case that forgot to install one would not apply *by default*: it would get the
+refusal above, which `cli_test.c` asserts as its own check. The two files are
+the two halves of the property, and neither is a promise about discipline.
+
+### The fixtures are written so the plan is not this machine's
+
+`ncfg apply` observes through netlink and there is no seam for that, so a
+fixture naming an interface would plan whatever this workstation happens to
+have. Both fixtures avoid it from opposite sides. The plan that is carried out
+is `dns.apply` and `hostname.set`: a hostname no machine is called, and a
+delivery whose record is read from `owned.json` under a run directory that is
+this test's own and empty. The plan that is empty configures `ncfgt0`, and is
+empty *because* no such device exists -- the planner declines an interface that
+is not there and says so, which is the case that proves an empty plan opens
+nothing.
+
+**An empty plan opening nothing is the check worth having.** A converged
+machine is the ordinary case, and taking the apply lock and three netlink
+sockets to discover there is no work is slower and a chance to fail where there
+was none. `--confirm-within` is the other side of the same question: a window
+is a timer that has to outlive the command, so that apply belongs to the
+daemon, and the test asserts the handover by asserting the seam is never
+opened.
+
+Seven cases, forty-seven checks: the empty plan, a plan carried out in order,
+the directories the seam is handed, the fold into `owned.json` and
+`plan.last.json`, a failing action stopping the rest while the seam is still
+given back, `--json` answering with the journal and neither line of prose, a
+seam that will not open, and the unwired program.
+
+Five sabotages, five caught: opening the machine for an empty plan, never
+closing the executor, handing the seam the run directory in place of the
+configuration directory, dropping the failure's exit status, and not writing
+`plan.last.json`.
+
+**One assertion had to be loosened and it is the interesting one.**
+`hostname.set` renders `(was <whatever this host is called>)`, so a whole-line
+match carries the hostname of the machine it was written on and fails
+everywhere else. The prefix is what the port decides; the tail is the
+observation's. `line_starting` is that distinction, not a weaker check.
+
+**The directory left in `/tmp` was mine, not the fixture's.** A run piped into
+`head -20` takes SIGPIPE mid-suite, so `testdir_remove` never runs -- the
+cleanup is correct and was proved correct on a failing run. Reading a test's
+output through `head` is how a clean fixture looks like a leaking one.
+
+`may_reconcile` is still 0: the daemon does not reconcile on its own, and its
+`apply`, `confirm` and `revert` arms are the next thing rather than a part of
+this.
+
+## 10.259 The daemon's three verbs that change the machine
+
+`apply`, `confirm` and `revert` are answered over the socket. Thirty of the
+thirty-two request kinds are answered now; the two that are not are `hello` and
+`monitor`, which the server takes before the seam is asked and which reach no
+arm at all.
+
+**They live beside the reconcile pass rather than in the dispatcher**, in
+`src/daemon/request.c`. Each opens an executor, each can leave the machine
+different from how it found it, and all three touch the four things a pass
+touches: the desired document, the ownership record, the confirm window and
+what that window covers. Writing them in `src/main/daemon_answer.c` -- which
+takes a request apart and hands the pieces on -- would have put a second copy
+of the arming rule there. What is left in the dispatcher is the decode: counted
+protocol fields into C strings, and a refusal into a sentence.
+
+The pass's own helpers became the daemon's: `ncfg_daemon_announce`,
+`ncfg_daemon_open_executor`, `ncfg_daemon_close_executor`,
+`ncfg_daemon_cycles_in` and `ncfg_daemon_arm_window`, declared in
+`daemon_internal.h`. The last of those is the half of `arm_window` that opens a
+window; what differs between a pass and a request is how the window is
+*decided*, and nothing about how it is opened.
+
+**`ncfg_main_desk_t` gains the loop**, and a desk without one refuses all three
+by name. That is the struct's own rule -- no member has a default -- and it
+matters more here than anywhere else in it: the loop is what carries the way to
+the machine, so a desk given none is a daemon nobody said may change anything.
+`answer_test.c` runs with exactly that desk, which is why its whole suite can
+drive the dispatcher on a workstation this daemon manages.
+
+### Two places this does not do what the Rust does
+
+**A revert with no window open is refused before an executor is opened.** The
+Rust opens one first, which takes the apply lock and a netlink socket to
+discover there is nothing to do -- against the same lock `ncfg apply` waits on.
+0184 made that argument about the contention check; it is the same argument.
+
+**Confirming does not record a configuration the machine has never been in.**
+The Rust writes `state.desired` as the new last-good, and a reload *inside* the
+window leaves `desired` holding an edit that was deferred and never applied --
+so the next window's revert would take the machine somewhere it has never been.
+The armed record carries the hash of what actually ran, so the two are
+compared, and a disagreement records nothing and says so. A daemon that
+restarted inside the window has no armed record, cannot tell, and falls back to
+`desired`, which is the Rust's behaviour and the older one.
+
+### What the planner does not read, said out loud
+
+`Request::Apply` carries `strand_credentials` and `restart_wedged`, and
+`ncfg_plan_options_t` has neither. Both halves of this port already dropped
+them: `plan_options_of` in the CLI sets `confirm_window` and
+`allow_disruption` and nothing else. So a client naming an interface in either
+list gets an apply that did not hear it -- a stranding still refused, a wedged
+backend still a loud failure.
+
+Refusing the whole request would be worse, since the rest of the apply is
+exactly what it would have been, and dropping them silently is worst: the
+client asked for consent and got nothing back. The arm logs one warning per
+list, naming how many interfaces were not consented to. The lists are carried
+in `ncfg_daemon_apply_ask_t` for the day the planner gains the options.
+
+### The journal response was the witness' spelling first time
+
+`doc/schema/socket.json` line 52 is a `journal` response, and
+`ncfg_daemon_journal_encode` produced it byte for byte on the first run --
+records flattened into the envelope rather than under a key, `error` absent
+rather than null on an action that stood. `ncfg_journal_write_members` is what
+the encoder and `plan.last.json` share, for the reason
+`ncfg_plan_write_members` exists: one writer, so a member added to the model
+cannot reach the file and miss the wire.
+
+**A journal carrying a failure is an answer rather than an error**, and that is
+the only interesting decision in the arm's return value. The client asked what
+happened; what happened is that the fourth action failed and the two behind it
+were not attempted. `0` with a sentence is for an apply that never *started* --
+a configuration that does not compile, a machine nobody has observed, a window
+somebody else holds, no way to reach the machine -- because there is then
+nothing that ran to report.
+
+The refusal for a configuration that does not compile is the compiler's own
+diagnostics, as far as an error buffer holds them. Three mistakes are three
+lines and longer than the buffer; the front is the half worth keeping, because
+the first line names the file, the line and the column.
+
+### The sentence that had stopped being true
+
+`will_not_reconcile` told an operator that "`ncfg apply` is refused for the
+same reason". It is not, since 10.258: somebody typed it, against the machine
+in front of them, having read what `ncfg plan` said. The daemon still refuses
+to start, and the reason is now stated as what it actually is -- a reconcile on
+a timer is an apply nobody typed, repeatedly, against a live network. Two
+sentences and a comment block rewritten; `may_reconcile` still answers 0.
+
+Six cases in `reconcile_test.c`, sharing its world double rather than a second
+copy of it: an apply that does the work and records it, a window armed and a
+second refused before anything is touched, `--confirm-within 0` declining the
+document's own window, a confirm that keeps the change, a revert that puts it
+back and refuses early, and the two refusals that leave the machine alone. Two
+more in `answer_test.c`: the witness spelling, and the three arms refusing a
+desk with no loop.
+
+Five sabotages, five caught. **A sixth caught nothing and was my fault rather
+than the check's**: setting `seconds` from `ask->confirm.value` without the
+`> 0` guard changes nothing when the value *is* zero, so it was not the
+defect 0094 describes. The defect is the document's window winning over an
+explicit zero, and written that way it goes red twice.
+
+## 10.260 The session nobody could hang up
+
+A PPPoE session is a `pppd`, and until this round the C port could neither
+start one nor stop one: `ncfg_apply_supported` refused `backend.start` on a
+pppoe interface with "which is not ported in this build", and that refusal was
+the last **port gap** in the executor. `src/backend/pppoe/` closes it.
+
+**What netcfgd owns is the options file, the two scripts, and the lifecycle.**
+The session is pppd's. The options file is the interesting half: it is what an
+operator reads when a line will not come up, and every line in it is a decision
+-- `nodefaultroute` and `noipdefault` because netcfgd owns routes and a route
+pppd installed is somebody configuring the network behind its back,
+`usepeerdns` because the ISP's resolvers are the one thing only pppd learns,
+`nic-<parent>` rather than a bare device argument because it cannot be mistaken
+for something else and needs no quoting, and `unit N` taken from the interface
+name so that `interface ppp0` is ppp0 rather than whichever unit was free. The
+test asserts the whole file rather than lines of it, for `cli_test.c`'s reason:
+the file is the product.
+
+**The password is in it, so the file is 0600 and the mode goes on the open.**
+`ncfg_backend_write_file` already settled that: `open` applies its mode only
+when it creates the file, so a rewrite keeps whatever mode was there, and a
+create-then-chmod leaves a window in which a local process opens a readable
+descriptor that the later chmod does not revoke. `/run/netcfgd` is traversable
+by anyone on the machine -- `RuntimeDirectoryMode=0755` -- so this is a DSL
+password, not a hypothetical.
+
+**Two scripts, not one told apart by its environment.** pppd hands `ip-up` and
+`ip-down` the same argv and does not unset `DNS1` or `DNS2` on the way down, so
+a single script testing its environment would report the same nameservers as
+the session went away -- netcfgd would then hold an ISP's resolvers for a line
+that is down. And each nameserver is its own `if` rather than
+`[ -n "$DNS1" ] && printf ...`: a failing test as the last command of a group
+makes the group's status 1, `|| exit 1` fires, and the report is written only
+when the peer offered *both*. The Rust measured that; a peer offering one
+nameserver is ordinary.
+
+### Stopping it is the half that was missing in the Rust too
+
+pppd has no control socket, which is what every other daemon here is stopped
+through (0014). It has a pid file it writes itself -- and a pid file outlives
+the process it names while pids are recycled, so the pid is checked against
+`/proc/<pid>/cmdline` with **the options file netcfgd generated** as the
+marker. An operator's own pppd cannot match a path netcfgd chose. Where pppd
+writes that file is not fixed, so the directories are a parameter carrying a
+list rather than one guess.
+
+The files go *after* the signal and never before, because the options file is
+what identifies the process: a stop that failed must leave the evidence for the
+next attempt. And a session that died on its own -- which is the branch that
+matters most -- still has its files taken back, since otherwise a DSL password
+stays readable under `/run` until the machine is rebooted.
+
+### What the port adds to the Rust's version
+
+pppd's own complaint is kept. The Rust runs it with inherited stdio and tells
+the operator "its log will say why", meaning syslog; here stderr goes to
+`<run>/ppp/<iface>.log` like every other backend's, so a dial that failed on
+`Cannot open /dev/ppp` says so in the refusal on a machine with no syslog at
+all.
+
+### Six sabotages, and the fixture that had to get sharper
+
+All six caught: the default route put back, the password written unquoted, the
+options file at 0644, the ip-down script reporting nameservers, the stop
+leaving the options file behind, and -- the one worth the paragraph -- the
+stop identifying a process by the interface name instead of by the options
+path.
+
+**That last one failed in only one direction at first.** The fixture for
+"netcfgd does not claim a pppd that is not its own" ran a process carrying some
+unrelated word, so a weakened marker did not match it either and the check
+passed while the rule was broken; only the *other* case, recognising netcfgd's
+own session, went red. The fixture now carries `ppp0` as an argument of its
+own, which is what an operator's own `pppd ... ppp0` looks like, and both
+directions go red.
+
+Two other things about that test were wrong before they were right, and both
+are the same shape -- a check that cannot fail:
+
+* **The stand-in ran `sh -c "sleep 30"`**, and dash execs the last command of a
+  `-c` script in place of itself, so the marker in its argv disappeared and
+  every question about its command line was asked of the wrong process.
+  `sleep 30; :` keeps the shell.
+* **The wait for the exec read `/proc/<pid>/cmdline` through `testdir_read`**,
+  which seeks to the end to size its buffer -- and a file under `/proc` reports
+  a length of zero. It reported "not yet" about a command line that was there.
+
+### What this leaves
+
+The list of what `ncfg_apply_supported` refuses now has no port gap in it:
+`link.create` for a physical device is a statement of fact, a plain
+`backend.start` for DHCPv6 is refused in both implementations for 0050's
+reason, and WireGuard and DNS have nothing to start in either. Two shared tests
+moved with it -- `service_test.c`'s carried list gains the session and its
+refused list drops to the two category errors, and `apply_test.c`'s
+"the refusal says what is missing" moved to the DHCPv6 start. That check's own
+comment had said, through four subjects, that when it had nowhere left to move
+the port would be finished; this is the first round where its subject is a
+refusal both implementations make.
+
+**The emitter is still missing, and that is the next round.** No pass in
+`src/plan/` emits `backend.start` for a pppoe or an openvpn interface --
+`link.c` says so in a warning, which is why this is a known gap rather than a
+discovery -- so what landed here is reachable through
+`ncfg_service_backend_start` and not yet through a plan. The same was already
+true of the openvpn backend.
+The planner's guard is where it has to change: `ncfg_plan_link_is_plannable`
+answers no for an interface whose link is absent because its daemon has not
+created it, which is right for addresses and routes and wrong for the one op
+that would bring the link into existence.
+
+## 10.264 The first run, and the eight seconds it took to hand back
+
+The tryout was run on the machine: `systemctl stop netcfgd`, the C daemon
+holding the radio for eighty-nine seconds, Ctrl-C, handed back. It reported
+that everything worked. **The journal says something the script did not.**
+
+### What the C daemon did, which was nothing
+
+From 17:52:51 to 17:54:20 there is not one network event in the journal. No
+disconnect, no carrier change, no route added or deleted, nothing from
+wpa_supplicant or dhcpcd. The C daemon's own log is three lines: the warning
+that the gate was overridden, and two saying it was watching `/etc/netcfgd`
+and listening on the socket.
+
+That is the first evidence that a netcfgd written in C can hold a machine --
+with `--no-apply-on-start`, so it observed and adopted and was asked for
+nothing. The supplicant that was running before is the supplicant that is
+running now, same pid, never restarted.
+
+### What the handback did, which was take the network away
+
+    17:54:20  Started netcfgd.service
+    17:54:20  adopted the Supplicant backend already running (pid 1256)
+    17:54:20  adopted the dhcp client already running
+    17:54:20  carrier lost / CTRL-EVENT-DISCONNECTED locally_generated=1
+    17:54:20  deleting default route via 10.78.63.254
+    17:54:23  CTRL-EVENT-CONNECTED
+    17:54:28  adding default route via 10.78.63.254
+
+**Eight seconds with no default route, and the Rust daemon caused them.** It
+adopts the supplicant it finds -- correctly, and says so -- and then re-hands
+it its networks, which makes wpa_supplicant disconnect and re-associate: a
+full PEAP handshake and a DHCP rebind. Recorded rather than fixed, which is
+this branch's rule for the Rust.
+
+It is worth knowing for its own sake: **every `systemctl restart netcfgd` on
+this machine costs about eight seconds of network**, and the fallback in the
+tryout is a restart. The safety net is not free, and its price is now measured
+rather than assumed.
+
+### And the check that said none of that happened
+
+The script printed *the network came back after 0s*. It asked once, straight
+after `systemctl start netcfgd` returned -- at 17:54:20, in the instant before
+the supplicant was told to disconnect. Everything it asserted was true of a
+state that was about to be replaced, and the eight seconds happened after it
+had said all was well and exited.
+
+**A check that passes on the state a restart is about to replace is not a
+check.** The wait now settles for three seconds and then wants three
+consecutive successes, so what it reports is a network that stays. The
+sabotage that puts the old single-shot answer back reproduces the live run's
+own wrong answer exactly: `0 s`.
+
+`c_daemon_watch.sh` gained the case for it -- a stub `systemctl start` that
+brings the network up, takes it away a second later and returns it four
+seconds after that, which is the machine's own shape in miniature. Nineteen
+checks now, and the new one reports 9 s where the broken version reports 0.
+
+### The log that was not evidence
+
+The real run's log came back with fifteen lines of `fake netcfgd:` above it.
+The tryout wrote `/tmp/netcfgd-c-tryout.log`, a fixed name, and
+`c_daemon_watch.sh` drives the tryout with a *fake* daemon -- so the stub's
+output and the machine's own evidence went to the same file, and the file was
+appended to for ever. One `mktemp` log per run now: a log somebody reads to
+find out what the C daemon did must not be a log anything else has written to.
+
+### What still has not been tested
+
+**The switch.** Nothing asked the C daemon to change anything: the hold was
+never released, no `ncfg apply`, no `ncfg wifi connect`. What is established
+is that it starts, adopts, watches and hands back without disturbing a live
+association -- which is the floor the switch has to be tried from, not the
+switch.
+
+## 10.271 The four backends that could not be taken back
+
+A sweep of what each implementation *says* -- every log line, by subsystem --
+found three the Rust has and this port has none of: `backend`, `wireguard` and
+`profile`. The first is the interesting one, and it is not a message that was
+missing but the thing the message reports.
+
+**Only the supplicant could be adopted.** Every backend module answers "is one
+of mine already running?" by reading the pid file netcfgd wrote, which is the
+right first question and is useless in the case that actually happens:
+`systemctl stop netcfgd` takes `/run/netcfgd` with it --
+`RuntimeDirectoryPreserve=restart` keeps it across a restart and not across a
+stop -- while `KillMode=process` leaves every daemon netcfgd started running.
+The pid file is gone and the process is not.
+
+The supplicant had a recovery for that (0140) and hostapd, radvd, openvpn and
+the PPPoE session did not, so a start in that state started a **second** one.
+Two on one radio, two on one line. The Rust generalised this for the same
+reason and its comment says what per-backend recovery cost: four kinds that
+could not be recovered at all, "which is what kept `KillMode=process`
+unshippable" (0142).
+
+`ncfg_service_backend_adopt` is one call, at the top of
+`ncfg_service_backend_start`, with the three answers:
+
+* **a pid file that still names a live process of ours** -- running, do not
+  start a second; this is what every converged pass takes;
+* **no usable pid file and the daemon answers** -- it is ours, by a marker it
+  carries in its own `argv`, so the record is written again and the caller
+  stops;
+* **no usable pid file and it does not answer** -- a corpse holding a radio.
+  It is stopped, and the caller starts fresh.
+
+**A weak marker gets no entry.** The marker has to be an absolute path netcfgd
+composed: a pid file it named, a generated configuration, a management socket,
+an options file. The two DHCP clients get the interface name instead, which
+`dhcp.h` calls the weakest marker netcfgd uses -- `eth0` is a short string an
+unrelated command line could contain -- so they keep the two specific
+recoveries they already have, and scanning `/proc` for them never happens.
+
+**Stopping here is not 0141's case.** That decision is about not killing a
+daemon that may only be busy, where a false positive kills somebody's healthy
+process, so a person decides. Here the marker is a path netcfgd chose and the
+process carries in its own argv, so *is this mine* is answered rather than
+guessed -- and a backend whose pid file still names a live process never
+reaches that branch, wedged or not.
+
+### What the test found
+
+Twelve checks against processes the test forks, carrying the mark in their own
+argv. The adopt branch **failed on the first run**, and not because of the
+fixture: `write_pid` did not make the directory. The case adoption exists for
+is `/run/netcfgd` being taken away -- and it takes `radvd/`, `openvpn/`,
+`supplicant/` and `ppp/` with it, so the daemon is running, its mark is in
+`/proc`, and the place its pid file goes does not exist. Every kind but one
+would have answered *could not be recorded* and then adopted again on the next
+pass, for ever.
+
+Three sabotages caught: the orphan stepped around rather than stopped, the
+marker scan removed so a lost pid file means a second daemon, and a weak
+marker given an entry so `/proc` is scanned for `eth0`.
+
+**`wireguard` and `profile` are still silent**, and both look like the same
+shape as this one rather than missing messages: the Rust warns there from code
+paths this port reaches differently. Not investigated yet, which is worth
+saying rather than leaving as an even sweep.
+
+## 10.273 The tunnel that was up, addressed and carrying nothing
+
+The last of 10.271's three silent subsystems, and it was not a missing message
+either. Pulling on it found four defects, one of them the worst this port has
+had.
+
+**A WireGuard device is not configured by the message that creates it.** The
+private key, the listen port, the firewall mark and the peers all go over
+generic netlink after the link exists; `RTM_NEWLINK` carries none of it. The
+Rust's create arm says so and calls `configure_wireguard` from inside itself.
+This port's stopped at the link.
+
+So `ncfg apply` printed three green actions, `ip link` showed `wg0` up with its
+address, and the device held no key, had no peers and could carry nothing. The
+planner emits no `wg.set_device` on a create -- by design, and identically in
+both implementations, because a create carries its whole configuration -- so
+the two WireGuard arms that do the work were simply never reached, and the key
+record the observer reads was never written.
+
+`ncfg_kernel_wg_configure_new` is the create arm's second half now: the device
+fields first, because they carry the key, then the peers unconditionally.
+
+### What only a namespace could say
+
+Everything after the netlink send needs `CAP_NET_ADMIN`, so no unit check
+reaches any of this -- and the plan is byte-identical either way, because the
+defect is entirely in what the executor does with one. `unshare -rn` is what
+makes the question askable, and `tests/live/c_wireguard.sh` asks it.
+
+Its independent reader is **the Rust `ncfg`**, observing the same kernel
+through its own generic netlink code and its own record reader, which is what
+section 9 asks for: netcfgd reading back its own work proves only that it
+agrees with itself. `wg` is not needed and the script runs without it.
+
+### The one that was silently wrong for a quarter of all keys
+
+Writing that script turned up a defect the port had been carrying, and it is
+the kind that never announces itself.
+
+`ncfg_observe_wg_digest` is the shared rule -- trim the material, and if it
+parses as a key, hash the thirty-two octets rather than the text. The trim is
+there because a key read out of a file has a newline on it. The executor
+called the same function with **the raw octets**, and the trim does not know
+the difference: it takes off any leading or trailing byte of `0x20` or less,
+and an octet is a number, not a character. A key whose first or last octet was
+low had thirty-one of them digested.
+
+That is 33 of 256 values at each end -- **about one WireGuard key in four**.
+Nothing failed. The tunnel worked. The record simply never matched what the
+observer computed from the store, so `key_matches` answered false for ever and
+the planner re-sent a key the kernel already held on every reconcile, for the
+life of the device. The preshared-key record had the identical call and the
+identical defect.
+
+`ncfg_observe_wg_digest_key` is the door for material that is already
+thirty-two octets. One rule still, and the text door's job is to find them.
+
+**The unit tests could have caught this and were built not to.** The file's
+own case is called *the literal digests are what the rule produces*, and its
+comment quotes `evidence.md`: two documents agreeing are one witness if the
+same hand wrote both. It then asked the rule through one door, twice. The
+writer's door was never in it. The new case drives both from the octets, with
+`0x00`, `0x09`, `0x0a`, `0x1f`, `0x20`, `0x21` and `0xc5` at each end.
+
+### Two smaller ones found on the way
+
+**`ncfg status` asked the secret store nothing when pointed by the
+environment.** `observe_now` built the secrets path from `--config-dir` alone,
+while `compile_config` four lines earlier resolved through
+`ncfg_config_resolve_dir`, which folds the flag, `$NCFG_CONFIG_DIR` and the
+machine's default into one answer. So an `ncfg` pointed by the environment --
+which is how a unit file and a container image point it -- compiled the
+document out of that tree and then declined to ask about its keys.
+`key_matches` came back unanswered and a rotated key could not be noticed by
+the program looking straight at it. Two rules for one directory, and the half
+that read credentials had the narrower one.
+
+**`ncfg plan` said `kind: wire_guard` where the Rust says `wireguard`** --
+in the human line and in the reason's `desired` field in the plan JSON, beside
+an observed side that already said `wireguard`, so one line carried both
+spellings of one kind. The document's spelling and the language's are both
+right and each belongs to one surface; `render_device.c` kept a private table
+of the language's for its refusal and its comment counted two previous times
+this pair had shipped the wrong way round. The table is the model's now,
+`ncfg_interface_kind_language_name`, with both callers on it and
+`document_test` walking the two lists for the exactly-two they may differ on.
+
+**The gate could not have caught it.** `agree_gate.py` compares `show --json`
+because it is the whole pure path; `plan` observes the machine, so it is out
+of reach until both programs can be handed an observation. Worth writing down
+as a boundary rather than leaving as a surprise.
+
+### The records go with the link
+
+Smaller, and the one this round set out to do. The two records under
+`<run>/wireguard/` were left behind when netcfgd deleted the device. Their
+**absence** is what tells the observer netcfgd did not configure a device, so a
+record that outlives its link makes the next `wg0` -- whoever created it --
+read as one netcfgd knows the key of. Both are named from the interface rather
+than swept out of a directory another device is writing into.
+
+### The sabotages
+
+The create arm back to stopping at the link: eight failures. The delete arm
+back to leaving the records: two, and the right two. The executor back through
+the text door: **two failures on one run in five**, because the script
+generated a random key and the defect is a quarter of them. That is the check
+being weaker than it reads, found by the sabotage it was written for. The
+script now forces both end octets low -- thirty octets of entropy is still a
+key, and the two ends are the question -- and it fails every run.
+
+## 10.275 Four sentences this port did not say
+
+The two rounds before this compared what the two programs *do* to a kernel.
+This compares what they *say* about a document, which is the other half of the
+same question -- and it found four warnings the Rust emits and this port does
+not.
+
+Every one is about a configuration that is legal, compiles, plans actions, and
+does something other than what it looks like. That is the only kind of mistake
+a warning can catch; everything else is a refusal.
+
+**A `device` block with no `interface` block plans nothing at all** (0186).
+netcfgd plans by interface, so a `device` block on its own is policy about
+hardware nobody asked it to configure -- read, kept, and acted on by nothing.
+The incident the Rust records is an operator with `wifi { autoconnect = true }`
+on a device, a `network` block with the passphrase, no `interface` block, and a
+plan that said `nothing to do`. The documented example was wrong and the
+product agreed with it in silence.
+
+**A fixed `mac` under a `mac_policy` that replaces it.** netcfgd writes the
+configured address to the link and the supplicant then writes a randomised one
+over it when it associates, so the fixed address holds until the radio joins a
+network and not after. An operator who set it for MAC-based admission is
+admitted exactly once and then stops being admitted, for a reason nothing
+reports.
+
+**EAP that believes whatever answers, in two degrees** (0206). With no
+`ca_cert`, the supplicant trusts any server that replies and the inner method
+hands it the credential. With a `ca_cert` and no `domain_suffix_match`, every
+certificate that issuer ever signed is accepted -- fine for an organisation's
+own CA, nearly worthless for a public one, and a commercial certificate on a
+RADIUS server is an ordinary arrangement. Two sentences rather than one with a
+clause, because the remedies differ.
+
+**A `phase2` that pins no inner method** (0189). wpa_supplicant reads `phase2`
+as whitespace-separated `key=value` tokens and discards anything else, so
+`phase2 = "mschapv2"` -- which reads like an instruction -- pins nothing: the
+server proposes the inner method and the supplicant accepts what it is
+offered, including one that sends the password in clear inside the tunnel.
+Warned and not refused, because the value is inert rather than invalid and
+refusing it would take the wifi off every machine carrying one to fix
+something that was already absent. **netcfgd's own example told people to
+write it.**
+
+`ncfg_phase2_pins_nothing` went into the model rather than the planner, which
+is where the Rust keeps it: the planner warns about it, the renderer writes it
+out, and three readings of one rule is how they come to disagree about a value
+whose effect nobody can see.
+
+Five sabotages, five caught: the inert-device pass removed (2), the permanent
+policy no longer excused (1), the two EAP degrees collapsed into one (1), the
+phase2 pass removed (3), and the model's rule loosened so `y=` reads as
+pinning something (4).
+
+### The sweep was wrong three times before it was right
+
+Worth writing down, because the method is the round.
+
+The first attempt compared the two implementations' *source text*: pull each
+Rust warning's message, grep the C for a distinctive phrase. It reported
+thirteen of fifteen missing, which was obviously wrong -- the C plainly has
+`warn_unmanaged` and `warn_regdom`. Three separate faults, each of which on
+its own produced a confident wrong answer:
+
+* **C string literals are split across lines**, so any probe spanning a split
+  found nothing. Fixed by joining adjacent literals first.
+* **The probe was not contiguous text.** It filtered non-alphabetic words out
+  of a phrase and then joined what was left, so `is false with clear netcfgd`
+  was searched for in a message that says "is `managed = false` with
+  `on_unmanage = \"clear\"`: netcfgd". Fixed by taking a run of five
+  *adjacent* plain words.
+* **The blob included comments**, so prose in a comment counted as a message.
+  `warn_inert_devices` came back "found" on the strength of two comments in
+  `plan/kind.c` and `plan/radio.c` -- while the port demonstrably did not emit
+  it. Fixed by extracting only string literals, with comments stripped first.
+
+The third fault is the instructive one: it is a **false pass**, and the other
+two were false failures. A false failure wastes an hour; a false pass closes
+the question. `evidence.md` says a passing check is not evidence until you
+know what it inspected, and a grep that cannot tell a message from a comment
+about a message does not know.
+
+**What settled it was running both programs.** One document, both `ncfg plan`
+invocations, the warnings sorted and diffed -- four lines present on one side
+and absent on the other, and afterwards the same diff empty. That comparison
+is now the fixture: the same four cases live in `plan_wifi_test.c` against the
+planner directly.
+
+### And a check that stopped discriminating
+
+`plan_radio_test` went red on the new pass, for a warning that belongs.
+
+Two of its cases assert that a particular radio arrangement is *not* warned
+about, and they said so by asking whether any warning contained the words "no
+`interface` block". That was precise while one sentence in the program used
+them. `warn_inert_devices` says "has a `device` block and no `interface`
+block" about every device without one -- correctly, and the Rust says it in
+exactly the shape the fixture builds, which is how the collision was settled
+rather than argued.
+
+So the check was the thing that was wrong, and it was wrong in the weaker
+direction: an assertion that nothing *matches* gets looser every time another
+sentence is added, and nothing tells you. Both now name this radio's own
+words, and taking the radio warning back out still fails them -- which is the
+half that had to be re-established after loosening the match.
+
+## 10.283 0644 stated, rather than a umask hoped for
+
+The last round's fix made the C's records match the Rust's. Sweeping *modes*
+across everything both write -- which the earlier run-directory comparison did
+not do, and is why the 0666 slipped through it -- showed what that match was
+worth.
+
+**Under a umask of zero, both implementations wrote `owned.json`,
+`desired.json` and `observed.json` world-writable.** 0666 with the umask left
+to decide is the right file on a machine with an ordinary umask and the wrong
+one on a machine without: a daemon started from a container entrypoint or an
+init script that cleared it gets no protection at all. The previous round
+closed the `fchmod` hole and left this one, because matching the Rust was
+taken as the goal.
+
+The C already wrote most of its files `0644` outright -- drop-ins, profiles,
+locks, logs -- so the tree had two families with the same reasoning and
+different answers. `NCFG_RUN_FILE_MODE` is one name for it now, `0644`, with
+the argument where the constant is: anyone may read a record, only netcfgd may
+write one, and that is a fact about the file rather than a hope about the
+environment. Two modes remain in this tree and both are stated: `0600` for a
+credential and this.
+
+Measured afterwards, under a umask of zero: the C writes 0644, the Rust writes
+0666. **Recorded as a Rust defect, not fixed.** Its directories are the same
+shape -- `create_dir_all` is 0777 and the umask, so a cleared umask gives 0777
+under `/run`, where the C states 0755.
+
+### Two sabotages that passed, and both were the test's fault
+
+Setting `NCFG_RUN_FILE_MODE` to `0666` passed. The check compared the file's
+mode **against the constant**, so the assertion moved with the thing it was
+asserting: the file became 0666 and so did what it was compared to. It asserts
+the number now.
+
+Changing the writer passed too, twice, and each time because the sabotage went
+somewhere else: the first replaced the mode at a different call site, and the
+second matched the string `observed.json` in a comment forty lines above the
+writer and edited the next call after *that*. A sabotage aimed by a text search
+lands where the text is, not where the meaning is.
+
+There was a third: the first attempt at the constant sabotage passed because
+`c/Makefile` has no header dependencies, so editing `state.h` rebuilt nothing
+and the old binary ran. That is a real gap in the build rather than in the
+test, and it is worth knowing when a header is what a sabotage changes: the
+round that found it worked around it with `make clean`, and this one did the
+same.
+
+## 10.288 Finishing the lens: every rule the model owns, asked of the whole tree
+
+10.286 and 10.287 each found one rule in the wrong layer by following the one
+before it. That is how a lens is derived and it is not how one is finished, so
+this wave asked the question mechanically instead, two ways.
+
+**From the Rust.** `netcfgd-model` has twenty-five free public functions across
+its twenty files. Each was looked up in this port and the module it landed in
+written down.
+
+**From this tree.** A sweep for string literals of twenty-four characters or
+more that appear in **more than one module**. A rule copied between modules
+takes its messages with it, and an error sentence is long, distinctive, and
+survives the copy unchanged -- so the literal is a better detector of a
+duplicated rule than the function name is, because the copy is usually
+renamed and the sentence never is.
+
+It found **39 literals in more than one module**. Three families were a rule
+copied; the other thirty-one are ordinary -- a client repeating what the daemon
+told it, two out-of-memory sentences, a refusal an option parser and a lowerer
+both have to be able to say.
+
+### The three, and one mechanism behind all of them
+
+**`usable_name`, six identical messages.** `netcfgd_model::interface::
+usable_name` is the kernel's own `dev_valid_name`. This port had it twice, in
+`src/compile/lower_value.c` and as a static in
+`src/backend/supplicant/client.c`, spelled identically down to the sentence
+explaining why `.` and `..` are named for directories. **It is a security
+check.** Each copy carries its own measurement of what its absence cost: the
+compiler's is `device "../../etc/evil" { kind = "dummy" }`, which compiled and
+planned `link.create ../../etc/evil`; the supplicant client's is 0160, where
+joining an unchecked name to a directory made the daemon an existence oracle
+over the whole filesystem answered as root -- `/etc/shadow` said "Permission
+denied" and `/etc/nonexistent` said "no control socket at ...".
+
+**`normalize_station`, and this pair had already drifted.** Same rule in
+`src/compile/lower_value.c` and `src/backend/hostapd/parse.c`; same verdicts,
+and **different text on the same input** -- the compiler printed the whole
+offending run, hostapd printed at most three characters of it. What the
+duplication threatens is not the message: `document.h` requires an access
+control list to be lowercase and colon-separated *so that comparing the
+document against what hostapd reports is string equality rather than a parse*,
+and the compiler writes that list while the backend reads the reply. Two
+normalisers is two answers to what `AA-BB-CC-DD-EE-FF` is, and an access point
+whose two lists never compare equal is one whose access control is rewritten on
+every pass.
+
+**The key codec, where the header had already named the hazard.**
+`ncfg_key_render`'s comment in `document.h` says two base64 *writers* of one
+format is how the halves of one program come to disagree about a key, records
+that there were already two, and says a third "was about to be written". There
+were three. `src/plan/model_json.c` carried `ncfg_plan_render_key` with its own
+alphabet and its own 45-byte constant, and three decoders stood beside them --
+`ncfg_key_parse`, `key_octets_read` in the same file as its own second copy,
+and `ncfg_public_key_parse` in the compiler. All six agreed; what makes it
+worth a section is that the argument against it was already written, in the
+tree, above one of the copies.
+
+**One mechanism produced all three.** `ncfg_usable_name` and
+`ncfg_normalize_station` were both declared in `src/compile/lower_internal.h`
+-- a header private to the compiler. A backend needing the rule cannot reach a
+private header, and reaching into another module's internals would be worse
+than a copy, so it wrote one. That is 10.286's finding stated generally: **a
+rule reachable by only one of its consumers grows a copy in the other**, and
+where the rule sits privately inside a module the copy is the only thing left
+to do.
+
+### Where they are now
+
+`c/src/model/document.c`, declared in `document.h` beside
+`ncfg_phase2_pins_nothing`, which is the Rust's `security::phase2_pins_nothing`
+and was already in the right place: `ncfg_usable_name`,
+`ncfg_station_address_normalize`, and with them `NCFG_INTERFACE_NAME_MAX` and
+`NCFG_STATION_ADDRESS_LEN`/`_SIZE` -- because the constant `15` was written out
+in both copies too, and a published rule with an unpublished bound is half a
+move.
+
+The compiler keeps `ncfg_normalize_station` as a wrapper rather than losing it:
+the rule is the model's, and what is the compiler's is the **arena** -- a
+lowered document owns its strings, so the answer is duplicated into the
+context rather than handed back on the stack. That is the shape to copy when a
+rule moves and a caller has a memory convention of its own.
+
+### One fix to the model that the move exposed
+
+The planner's renderer set `out[0]` to nothing on a buffer too small; the
+model's `ncfg_key_render` did not touch `out` at all. Its callers hold a buffer
+that cannot be too small and discard the status, so repointing them as they
+stood would have replaced an empty string with an uninitialised one. It empties
+`out` on a refusal now, which is `ncfg_key_parse`'s stated rule on its own
+refusal, and the header says so.
+
+**A move is not a repoint.** Two functions that answer the same question can
+still differ in what they leave behind when they refuse, and that difference
+does not show up in any test where the refusal cannot happen.
+
+### The proof, which is one edit
+
+Making the model's `ncfg_usable_name` stop refusing `/` reddens two checks in
+`lower_test` and one in `supplicant_client_test`. Both suites already tested
+the rule from their own side -- the compiler refusing `device "../../etc/evil"`
+and the client refusing `/etc/shadow` -- and before this wave the same edit
+would have reddened one of them. That the other goes red is the whole of what
+the move bought, and it is checkable in one command.
+
+### The sweep is a sweep, and does not become a gate
+
+Thirty-one of the thirty-nine are legitimate, so a standing gate would need a
+thirty-one entry waiver list, and a gate carrying a long ignore list has been
+switched off by instalments. This is the case for an investigative sweep read
+once by the person who ran it, where over-reporting costs reading time and buys
+the only errors that can be caught at all. The method is recorded so it can be
+re-run rather than rediscovered: literals of twenty-four characters or more,
+grouped by the module directory under `c/src/` that holds them, reported where
+a group spans more than one. It is thirty-one now, and a rule copied between
+modules will make it thirty-two.
+
+## 10.294 The Rust's live suite, run against the C, with the Rust as its control
+
+10.293 built the seam. This is the first run, and the first answer this tree
+has ever had to *does the C behave like the Rust* on anything that touches a
+kernel.
+
+Both builds, the same 75 scripts the `live` target names, the same harness:
+each script under `timeout --kill-after=10 120 unshare -rn`, `NCFG_LIVE=1` so
+a skip is loud, output per script.
+
+    22   both pass
+    33   the Rust passes and the C does not
+    11   both fail          -- no wireguard-tools, no openvpn, no pppd,
+                               mac80211_hwsim absent, /dev/vhci refused
+     8   both skip
+     1   one skips
+     0   the C passes and the Rust does not
+
+**The control is the whole of why the 33 is worth anything.** Eleven scripts
+fail for this machine rather than for either implementation, and without the
+Rust run they would have been reported as C defects; `evidence.md` says a
+failing check is not evidence until you know it could have succeeded, and here
+a fifth of the failures could not have.
+
+### The daemon's off-switch is what the first run actually measures
+
+Every daemon-driven script failed identically at first: *"this build of the C
+port does not start its reconcile loop by default"*. That is the deliberate
+latch, and the program's own message names the flag and even names the script
+written to supervise it.
+
+So the run was done through a two-file scratch directory -- `netcfgd` a shell
+script that execs `c/netcfgd --try-the-c-daemon "$@"`, `ncfg` a symlink beside
+it, since the program takes its identity from `basename(argv[0])` -- pointed at
+by `NCFG_LIVE_BUILD`. **Nothing in the tree was changed to do it**, which is
+the point: the latch stays on, and a suite that wants the loop passes the flag
+the way a person would.
+
+Measured after: **one** of the 33 still fails at daemon start. The other 32 got
+a running C daemon and disagreed with the Rust about what it did.
+
+### The sharpest one, which is a silent no-op on an edited configuration
+
+`links.sh`, 11 failures, and the first is the worst:
+
+    FAIL an edited vlan id plans a delete
+           expected to contain: link.delete work-net
+           actual:              nothing to do
+
+`links.sh` says why it matters where it asserts it: *"`ip link set work-net
+type vlan id 78` succeeds and changes nothing, so the only way to apply an
+edited id is to delete the interface and make it again -- with everything on
+it"* (0059). The Rust plans the delete and the create. **The C plans nothing
+and reports a converged machine.**
+
+The same shape three times over: an edited vlan id, a changed kind, a moved
+vlan parent. `grep` finds no remake path in `c/src/plan/link.c` at all, so it
+is one missing rule rather than three defects.
+
+That is a configuration an operator edits, applies, and is told is done. It is
+the defect class 0061 exists against, reached by the one instrument that could
+find it -- and neither the ledger, the agree gate, nor 90 C test binaries said
+a word about it, because every one of them asks whether an op is carried out
+rather than whether the right op was planned.
+
+### The rest, by size
+
+    roam 13   links 11   displace 9   exec_refused 9   write_full 8
+    openvpn 7   wedged 6   adopt 5   altname 5   ap 5
+    c_warnings 4   linkset 4   nat 4   resolv_owned 4 ...
+
+First lines rather than a diagnosis, because each wants reading: *netcfgd
+installs the address from config* (adopt), *netcfgd creates the bridge the
+config asks for* (altname), *the uplink is masqueraded* (nat), *netcfgd writes
+the file it was told to own* (resolv_owned), *netcfgd attaches to the
+supplicant's event socket, once* (roam), *and no staging file is left beside
+it* (write_full). Several are plainly the same daemon-side question asked from
+different angles; none has been chased yet.
+
+### A defect in the harness, and the proof that could not see it
+
+`sandbox_writes.sh` died with `build: parameter not set`. The substitution
+replaced a literal path with a shell variable, and three scripts use that path
+inside a **nested** shell -- `unshare -r sh -c '...'` -- where a plain variable
+does not exist. The literal always had.
+
+10.293's proof checked that the default expands to the string it replaced, in
+70 scripts, both ways. It was a true proof of the wrong property: textual
+expansion in the shell that declares it, where what mattered was scope. `export
+build` fixes all 70 at once.
+
+**The lesson is the shape rather than the fix.** A mechanical change's proof
+has to name the property that can actually break, and "the text expands to what
+it replaced" is not it when the replacement changes what kind of thing the text
+*is*. A literal is in scope everywhere; a variable is not.
+
+### What was not disturbed
+
+`/usr/sbin/netcfgd` -- this machine's own, running its network -- was never
+signalled, and no process from either build of this tree survived the run. Each
+script had a private network namespace and its own `mktemp -d`, with
+`NCFG_CONFIG_DIR` and `NCFG_RUN_DIR` pointed into it; the C honours both, which
+was checked before the first run rather than assumed. `/tmp` gained 13
+directories and 820 KB, on a 16 GB tmpfs at 10%.
+
+## 10.295 The link remake rule, which the live suite found by being run
+
+10.294's sharpest finding, fixed: an edited vlan id planned **nothing to do**
+where the Rust plans a delete and a create, and `links.sh` went from 11
+failures to none.
+
+### What was missing
+
+0059, entire. The port had no recreation pass at all -- `grep` found no remake
+path in `c/src/plan/link.c` -- so three shapes the kernel takes and ignores
+were silently unhandled:
+
+  * a VLAN whose **id** or tag protocol differs. `ip link set X type vlan id N`
+    succeeds and changes nothing, which is the worst of the kernel's four
+    answers: a planner that emits a set reports a change that never happened
+    and goes on reporting it;
+  * a VLAN's or a macvlan's **parent**, which is the outer `IFLA_LINK` and gets
+    the same answer (0060) -- while a VXLAN's and a tunnel's underlay lives in
+    its own nest, is moved by the kernel, and is corrected in place;
+  * a device that exists as an entirely **different kind**, which planned a
+    `link.up` and nothing else -- netcfgd bringing somebody else's device up
+    and calling the network configured.
+
+### The shape, which is the decision's rather than this port's
+
+`ncfg_plan_recreation` runs before the creation pass, stops what netcfgd runs
+on each doomed link, fires its `down` and `post_down` hooks around the delete,
+and hands back the names. `ncfg_plan_observed_without` then makes the
+observation every later pass reads, with those links -- and their addresses,
+routes, backends, the `master` of anything enslaved to them and any
+`ingress_redirect` onto them -- taken out.
+
+**That third step is the whole design.** Every pass below plans for a remade
+interface exactly as for one that never existed: the creation pass makes it,
+the addressing pass puts its addresses back, the backend pass restarts its
+client, and none of them knows. A flag threaded through eleven passes is the
+same information written eleven times.
+
+**The C's filtered observation is a shallow copy where the Rust's is a clone.**
+It borrows every string from the original, which the builder holds and which
+outlives the plan, so it is four `calloc`ed arrays and a `memcpy` of elements
+rather than a deep copy -- and it is freed by `ncfg_plan_observed_release`,
+never by `ncfg_observed_free`. The two places that differ from a plain filter
+are the reason a copy is needed at all: `master` and `ingress_redirect` are
+cleared *in the copy* on links that survive, which a filter-at-access could not
+do.
+
+The three `*_applied` lists are deliberately **not** filtered: they record that
+netcfgd once set a qdisc, a redirect or a sysctl, which is still true and is
+what makes deleting the setting from the document mean something. What the
+kernel held went away with the link.
+
+### Only a link netcfgd made
+
+This is the one place in the planner that throws an interface away, so the
+ownership rule that governs addresses and routes governs it: a link netcfgd has
+no record of creating gets a sentence naming what differs and what correcting
+it would cost, and is left alone. That leaves a real gap and it is the right
+one -- the alternative is a config file that deletes interfaces netcfgd never
+made.
+
+A guard (0010) or an unmanaged device refuses the delete, and the name then
+does **not** join the returned list, so nothing below plans as though it had
+happened.
+
+### One word published on the way
+
+`ncfg_vlan_protocol_name` -- `dot1q` or `dot1ad` -- existed as a private word
+set in `model/document.c` with no accessor, so the planner had no way to
+compare what a document asks for against the word an observation carries. A
+second copy of two words is how two spellings of one tag protocol arrive.
+
+### Proof
+
+Eight checks in `plan_kind_test.c`, driving all three remake shapes, the VXLAN
+that is **not** one, and the foreign link that is explained rather than
+deleted. Three sabotages:
+
+    the parent is no longer a remake          1 check red
+    a foreign link may be deleted             7 checks red
+    the observation is not filtered           1 check red
+
+The second is the interesting count: removing the ownership check reddens
+nearly everything, because a plan that deletes a link it does not own also
+deletes the one every other case is built on. The third is the one that matters
+most and is the quietest -- with the observation unfiltered the delete is still
+planned and the **create is not**, so the interface goes away and does not come
+back. One check, and it is the difference between a remake and a removal.
+
+### And the suite, re-run
+
+    both pass                   22 -> 23
+    rust passes, C does not     33 -> 32
+
+One script moved, which is the honest number: `links.sh` is the only one of the
+75 that exercises this. The other 32 are still there and are still the next
+thing.
+
+## 10.302 The seam the headers asked for and nobody supplied
+
+`orphan`, `revive` and `switch_network` failed with *no wpa_supplicant found
+for radio0*, in a namespace where the script had written a fake supplicant and
+named it.
+
+`ncfg_service_t` carries four program seams -- `hostapd_program`,
+`radvd_program`, `openvpn_program`, `supplicant_program` -- and
+`ncfg_main_world_where_t` carries the same four. `supplicant.h` and
+`openvpn.h` each explain at length why the program is a parameter rather than
+an environment read, with the measurement behind it: **20 of 45 checks in the
+Rust's live openvpn script were silently exercising the machine's own
+openvpn** before that project grew `NCFG_OPENVPN`. The C's headers are right
+and the seam was complete in every module.
+
+**Nothing filled it.** `daemon_main.c` memsets the struct and never assigns
+those four, and `cli_machine.c` does not either -- so every one was NULL, NULL
+means "find the conventional name", and the conventional search found nothing
+in a namespace with no `wpa_supplicant` installed. The header says *a test
+passes a program it wrote*, and no caller gave a test any way to pass one.
+
+`ncfg_main_world_where_from_environment` is the missing half, read in one
+place and by the two programs that build a world. **Two rather than four**:
+`NCFG_WPA_SUPPLICANT` and `NCFG_OPENVPN` are what the Rust has, and a seam
+this port carries that the thing it is compared against does not is a
+difference invented rather than ported. An empty value is no value, because
+`execv("")` would report the conventional search failing for a reason nobody
+could see.
+
+**A second seam in the same function was ignored outright.**
+`cli_machine.c` assigned `NCFG_SUPPLICANT_CTRL_DIR` as a literal where the
+daemon calls `ncfg_supplicant_ctrl_dir`, which reads `NCFG_WPA_CTRL_DIR` and
+falls back to that same constant. So `ncfg apply` looked for supplicant
+control sockets in `/run/wpa_supplicant` however it was told -- a default that
+is correct on the machine and wrong everywhere a test runs, which is the shape
+that makes a seam look present while doing nothing.
+
+Worth naming as a class, because this is the second instance this week: **a
+seam whose every layer exists except the one that supplies it**. The headers
+document it, the struct carries it, the callee honours it, and the one
+assignment that would make it live was never written. Nothing fails; the
+default is simply always taken. What found it was not reading the code -- it
+was a test that had set the variable and was refused anyway.
+
+## 10.303 The guard was on the wrong side of the harm, and the buffer was too small to say so
+
+`displace.sh` had one failure left: netcfgd was expected to say *NetworkManager
+is already managing `radio0`* and said nothing of the kind. It passes, and
+three things were wrong behind it.
+
+### Releasing a radio is not the same as declining one
+
+The C had the contention check, in the daemon's release pass: on a tick it
+asks which other managers claim an interface netcfgd runs a backend on, and
+stops its own. That is the right remedy for a manager which declares itself
+**after** netcfgd took the radio.
+
+It is not a guard. Where NetworkManager declared itself first -- which is
+`displace.sh`'s scenario and every boot on an ordinary Debian machine -- the
+sequence the C actually performed was: start a second supplicant on a radio NM
+holds, drop the association, notice on the next tick, and stop again, printing
+*two managers on one interface drop the association* about a thing it had just
+done. The log reads as a daemon behaving well.
+
+The Rust asks inside `start_supplicant`, before anything is spawned.
+`no_other_manager_holds` is the same question in the same place, and the two
+refusals now match word for word.
+
+Three states, and only the first refuses:
+
+    a contender claims this index    refuse, naming the manager and the cost
+    no contender                     start
+    the question cannot be asked     start
+
+**The third is deliberate and is the one that hid the next fault.** No sysfs
+root and no contention roots is what a caller says when it knows there is no
+other manager -- a fixture, a container -- and `ncfg_service_t`'s bargain is
+that an absent member refuses only the ops that cannot be done without it.
+This one can.
+
+### A 512-byte buffer for a function that demands 4096
+
+`ncfg_radio_class_net` refuses any buffer shorter than `NCFG_RADIO_ROOT_MAX`,
+which is 4096. The world's field and `ncfg_service_machine`'s static were both
+512, so **every call failed** -- and both callers passed `NULL, 0` for the
+error buffer, so the refusal went nowhere. `class_net` was empty, the guard
+took its third branch, and it asked nothing on every machine while appearing
+in the code, in the header and in the struct.
+
+It cost a full debugging round, and what found it was a probe printing what
+the guard saw rather than any amount of reading:
+
+    PROBE guard iface=radio0 class_net=(NULL) run_root=... proc_root=...
+    PROBE no index for radio0
+
+Both buffers are `NCFG_RADIO_ROOT_MAX` now, and a failure to resolve the root
+is logged -- because an empty answer switches the guard off and nothing
+downstream can tell that from a machine with no other manager on it. That is
+the same shape as 10.302's seam nobody supplied: **every layer present, and
+the one value that makes it live absent.** Third instance in two days.
+
+### The test's return value proves nothing; its sentences do
+
+Sabotaged by deleting the guard, `check(!ncfg_service_backend_start(...))`
+**stayed green** -- the fixture names no supplicant program, so the start
+fails either way. Only the two assertions on the message went red. A refusal
+is evidence of the *right* refusal only when it says which one it is, and the
+comment on that test says so, because the return-value check is the one a
+later reader would trust.
+
+The other direction is covered three ways, since a guard that refuses
+everything reads exactly like one aimed correctly: a NetworkManager that is
+not running (0145 -- the device file outlives the daemon), a claim on another
+interface's index, and a service told neither root.
+
+### And an edit that removed a passing test without saying so
+
+Inserting the new function searched backwards for the nearest `/*` and landed
+inside the previous one, cutting twelve lines out of the dhcp6 test -- the
+half that proves `-P` is absent when the document asks for no delegation. The
+compiler caught it, which is luck: a cut that had left valid C would have
+removed a check and left the suite green.
+
+The replacement tool inserts at a named line and asserts that the original
+text is a subsequence of the result, refusing to write otherwise. Second time
+this exact anchor-searching mistake has been made in this port; the first cut
+comments out of three observe sources.
+
+## 10.307 Sorted by the writer that could not sort, and a test that re-aimed itself
+
+`stations.sh` had one failure:
+
+    expected: 00:11:22:33:44:55 66:77:88:99:aa:bb aa:bb:cc:dd:ee:ff
+    actual:   00:11:22:33:44:55 aa:bb:cc:dd:ee:ff 66:77:88:99:aa:bb
+
+The Rust's `stations()` collects the walk into a `Vec` and sorts by address
+before returning; the script's comment says why -- *so the output does not
+reorder itself between runs*. hostapd's walk order is its own hash order, and
+`STA-FIRST`/`STA-NEXT` is the only listing it offers.
+
+**The C could not sort, structurally.** It wrote each station into the JSON
+document as the walk produced it, so by the time the second station was known
+the first was already bytes. That is a pleasant shape -- one pass, no
+allocation -- and it forecloses any answer that depends on the whole list.
+
+The walk collects into an `ncfg_buf_t` now and the document is written
+afterwards. **A buffer rather than an array of `STATION_WALK_MAX`**: that cap
+is 2007, hostapd's own `MAX_AID`, and a quarter of a megabyte of stack for a
+command that usually finds three. The buffer grows to what was found, its
+failure is sticky and read once, and `ncfg_buf_take` hands over memory from
+`malloc` -- aligned for any type, which is what makes the cast to
+`ncfg_hostapd_station_t *` defined rather than merely working.
+
+### The test moved with the data and said the same words
+
+Two checks in `daemon_wifi_test` went red, and reading why is the part worth
+keeping. They were written by index -- `stations[1]` had no statistics,
+`stations[2]` had not authenticated -- against the fake's deliberate walk
+order `00:11`, `aa:bb`, `66:77`. Sorted, position 1 and position 2 swap, so
+each assertion now described **the other station** while reading as exactly
+the same sentence about "the one with no statistics".
+
+They are keyed by address now, through a `station_at` that returns NULL for an
+address the report does not hold, because an assertion over a station that is
+not there would otherwise pass by finding nothing. And the ordering itself is
+asserted, which nothing did: the fake answers `00:11`, `aa:bb`, `66:77` in
+that order on purpose, so a report echoing the walk fails on the first check
+rather than on two unrelated-looking ones.
+
+### And the sabotage that did not reach the thing it was aimed at
+
+The first control removed the `qsort`, rebuilt **only the test binary**, and
+reported the unit check red and `stations.sh` green -- reading as a live
+script that could not see the defect. `make -C c tests/daemon_wifi_test`
+rebuilds one binary; `ncfg` and `netcfgd` were still the sorted build, so the
+live script exercised code with the sort in it.
+
+`build-and-commit.md` names this exactly: *never conclude that a test passes
+or fails from a binary the build step did not rebuild*. Re-run with a full
+`make`, both go red -- and the same stale-binary confusion had already cost a
+round a minute earlier, when a restored source with `make` reporting nothing
+to do left a test failing against an object nobody had relinked.
+
+## 10.308 Two rfkill scripts, two seams nobody supplied, and the daemon that published nothing
+
+`rfkill.sh` and `rfkill_stream.sh` both pass. Three separate gaps, and two of
+them are the same shape as 10.302's.
+
+### The plan said nothing about a radio that is switched off
+
+`status` named the block and `plan` did not, because the C's planner had no
+pass for it. The Rust's `warn_blocked_radios` exists for a reason worth
+keeping: **a blocked radio looks exactly like a network that will not
+associate.** The supplicant starts, the scan comes back empty, nothing fails,
+and on a laptop the switch is one keystroke away at all times. Nothing is
+refused and nothing is unblocked -- 0062 is why netcfgd will not undo
+somebody's deliberate act -- so the whole of the fix is a sentence.
+
+**It walks the document's interfaces rather than its devices**, which is the
+Rust's walk and the wider of the two: an interface asking for addressing on a
+blocked radio is exactly the arrangement that produces the silence, and a walk
+over devices misses one whose `device` block is absent.
+
+**The clause is spelled in the planner rather than taken from
+`ncfg_rfkill_remedy`**, which is a departure from that function's own rule
+that one wording serves every caller -- recorded because it is a departure.
+That helper writes a standalone sentence for `status` and `explain`; this one
+is a clause inside a longer sentence that names the interface first and says
+what netcfgd does next. The Rust keeps the same two wordings for the same two
+shapes. What must not drift is the *remedy*, and `rfkill.sh` greps both
+spellings for the same two phrases.
+
+### `NCFG_RFKILL_DEV` was read by nobody
+
+`daemon_main.c` assigned `watch.rfkill_device = NCFG_RFKILL_DEVICE`, a
+literal. `rfkill.h` says in as many words that the path is "a parameter
+everywhere below, so that a test can be handed something else" -- and the one
+caller that supplies the parameter handed it the constant. So a live script
+pointing netcfgd at a fifo was watched on `/dev/rfkill` instead, and its
+records went nowhere.
+
+**Third instance of the same shape in a week**: the supplicant program, the
+supplicant control directory, and now this. Every layer present -- the header
+arguing for the seam, the struct carrying it, the callee honouring it -- and
+the one assignment that makes it live absent. Nothing fails; the default is
+simply always taken, and the only way to see it is a test that set the
+variable and was ignored.
+
+**Why it matters beyond the test** is in the Rust's own comment: a network
+namespace is not a device namespace, so `unshare -rn` is no protection. A
+suite that could not move this path would be reading the switches on the
+machine it runs on -- and one that wrote would be flipping them.
+
+### The daemon observed constantly and published nothing
+
+`ncfg status` writes `observed.json` on its way past and says why: answering
+"why is it like this?" from a file is the product, and it should not require
+an apply first. The daemon observes far more often than anybody runs `ncfg`
+and was **the one observer that published nothing** -- `/run/netcfgd/` held
+`desired.json`, `owned.json` and `plan.last.json`, and no account at all of
+the machine those were decided against.
+
+`ncfg_daemon_state_reobserve` writes it now, best effort as the Rust has it: a
+`/run` that will not take the file is not a failure to observe, and refusing
+would disarm drift detection over a full disk.
+
+**What found it was an instrument, not a symptom.** `rfkill_stream.sh` uses
+the file's modification time as the answer to "did the event make it look
+again" -- a reasonable choice with nothing to read. The unit test asserts the
+*contents* rather than the file's presence, because a write that happened once
+on the first observation and never again would satisfy "the file is there",
+and what is being tested is that the record follows the observation.
+
+Sabotaged separately and with a full rebuild, each change takes both its unit
+checks and its live script red.
+
+## 10.313 A safety notice a log level could switch off, and the one check the flag cannot pass
+
+`log_shape.sh` has one failure and it is not fixable from here. What the
+investigation found instead is a defect in the thing the failure is about.
+
+### The notice claimed a property it did not have
+
+`daemon_main.c` says of the `--try-the-c-daemon` notice:
+
+> **Said every time, at the level nothing filters.** Somebody who typed the
+> flag knows what they did; the person who finds this in a log a week later,
+> or inherits a machine running it, does not.
+
+It went through `ncfg_log_emitf` at `NCFG_LOG_WARNING`. Measured:
+`NCFG_LOG=error` and `NCFG_LOG=critical` each printed **zero** lines about the
+flag. A machine could be running this port's reconcile loop with nothing
+anywhere saying so -- and the audience the comment names is exactly the one a
+log level would have hidden it from.
+
+**The pair was inconsistent as well as wrong.** `will_not_reconcile` writes
+its refusal with `fail`, straight to stderr, which nothing filters. Its
+counterpart -- *starting anyway* -- was the one that could vanish. It is said
+the same way now, and survives every level.
+
+### And the check, which was read as unpassable and was not
+
+    said=$(say warning)
+    check "a level below what is emitted silences it completely" \
+        "$(printf '%s' "$said" | grep -c .)" "0"
+
+The Rust's startup at `warning` emits nothing, because everything it says at
+startup is an info and a note. The C emits the notice above -- and emits it
+*because the live seam passes `--try-the-c-daemon`*, which this suite must
+pass for the daemon to start at all.
+
+**This entry used to say there were two ways out and that neither was mine to
+make**: weaken the notice so a level can filter it, which is the defect fixed
+above put back, or let the daemon bind and serve without reconciling, which on
+this workstation would take `/run/netcfgd/netcfgd.sock` from the Rust daemon
+running the network. Both readings stand. What was wrong was the word
+**two** -- and closing it is 10.292.
+
+The third way out is that the check counts the wrong thing. It is the only
+check in that file that counts raw LINES; the four around it identify a log
+line by its `[subsystem]` tag, which is what the logger puts there and what
+the notice deliberately has not got. Counting lines made the check a claim
+about one implementation's entire startup output rather than about the filter
+it names, so no build carrying an unfilterable notice could pass it however
+well its filter worked.
+
+**The general shape, and it is the third time this session:** a live check
+that encodes one implementation's output inventory instead of the behaviour
+under test. The other two counted a phrase and wanted exactly one. This one
+counted lines and wanted none. In all three the port said something correct
+and extra, and in all three the check's own name -- *says so*, *names the
+setting*, *silences it* -- described the behaviour rather than the tally.
+
+## 10.315 A refusal justified by a sentence that had stopped being true
+
+`enterprise.sh` failed at its first hard step: `ncfg wifi activate radio0`
+refused, on every build, with
+
+    `radio0` cannot be activated here: this caller was given no way to start
+    the radio's supplicant
+
+`answer_radio_set` passed NULL for the apply seam, and said why:
+
+> What an implementation needs here is a plan restricted to this interface and
+> to starting a supplicant, and `backend.start` is one of the thirty-five ops
+> this build's executor refuses -- so a seam here could only ever report that.
+
+`netcfgd --supported` answers `backend.start supplicant: true`, and has since
+the executor stopped refusing anything that is a port gap -- the same fact the
+daemon's own startup refusal was rewritten around. **The comment outlived its
+subject and took the verb with it.** Nothing failed and nothing was silent: a
+refusal that names a reason reads as a decision, and this one named a reason
+that had been true.
+
+`ncfg_daemon_start_supplicant_request` is the seam. It plans, keeps the
+`backend.start` actions for *this interface* whose kind is `supplicant`,
+applies them, records what ran, re-observes and publishes.
+
+**Restricted twice, and the second restriction is a failure paid for
+elsewhere.** It was the whole interface plan for a day in the Rust, and
+addressing is in that plan: activating a radio ran `dhcpcd`, which cannot get
+a lease on a link that has not associated with anything, so handing netcfgd a
+radio was refused because DHCP had not finished on it. Filtering on
+`backend.start` alone is not enough either -- it covers the DHCP client too.
+The rest is deferred rather than skipped; the loop applies it on the next
+pass, where a client that will not settle is a report rather than a refusal.
+
+**The dependencies are dropped rather than carried**, because an action lifted
+out of a larger plan names ids that are not in the smaller one, and an apply
+walking those would skip on an edge to nowhere.
+
+### The thirteen that remain are one divergence, and it is not a defect
+
+Every one of them reads `$work/daemon.log` for what netcfgd sent the
+supplicant -- `SET preassoc_mac_addr 0`, `SET_NETWORK 0 key_mgmt`, the path a
+materialised certificate was handed over at. The fake supplicant prints each
+command it receives, and where that lands is the whole question.
+
+**The Rust redirects hostapd's streams to a file and lets the supplicant's
+inherit.** The C redirects both, and its comment says where the second came
+from: *"which is `ncfg_hostapd_start`'s arrangement"*. So this is a
+port-introduced generalisation rather than an inherited decision, and it is
+not obviously wrong -- it is what lets a supplicant that will not start be
+quoted in its own words:
+
+    wpa_supplicant would not start on wlan0 (driver nl80211): <what it said>.
+    Its output is in <run>/supplicant/wlan0.log
+
+The Rust says `exited with {status}` and nothing more.
+
+For a **real** supplicant the two are nearly equivalent: `-B` forks after the
+control interface is up and closes its streams, so the file holds the pre-fork
+diagnostics and nothing else -- which is exactly what the quoting reads. For
+the **fake**, which stays in the foreground, the whole control-socket
+conversation goes wherever its stdout points. The fixture's expectation is a
+property of the fake.
+
+**So it is the holder's, with a real cost on each side.** Match the Rust --
+inherit the supplicant's streams -- and every diagnostic reaches the journal
+with netcfgd's own, at the price of the quoted refusal. Keep the file and the
+quoting stands, at the price of thirteen checks in the Rust's own suite, which
+0263 makes the bar for replacing a module.
+
+There is no arrangement that does both without teeing a pipe into the daemon's
+poll loop, which is machinery neither program has.
+
+## 10.325 The C is what ships, and the Rust stays as the instrument
+
+Instructed by the copyright holder; `doc/decision/0266` is the record. `make
+build` builds the C, `make install` installs it, and every package from this
+tree ships it. **The Rust is not deleted.**
+
+### The sizes, which is what was asked
+
+Both are multicall binaries -- `ncfg` is a symlink to `netcfgd` -- so this is
+one binary against one:
+
+    rust netcfgd   release, opt-level="z", lto, stripped   2,972,192   2.83 MiB
+    c netcfgd      -Os, stripped                           1,023,360   0.98 MiB
+    c netcfgd      -Os, as built                           1,145,336   1.09 MiB
+
+**2.9 times smaller, about 1.86 MiB off the installed daemon.** Source runs the
+other way, which is what C costs: 103,906 lines of Rust core against 140,355 of
+C plus 92,581 of C tests, or 65,123 against 145,809 counting only non-comment
+lines -- about 2.2 times either way, with roughly 42% of the C's non-test lines
+being comment.
+
+### Why the Rust stays, which was the decision worth asking about
+
+Because it is the instrument that proved the C correct, and the proof is a
+**comparison**. `agree_gate.py` is eleven configurations, twenty-seven
+read-only invocations and ten sequences of writing verbs, every one of them
+"do the two programs agree". `c_daemon_answers.sh` runs both daemons side by
+side. The 79-script parity result is a comparison. Delete the Rust and a future
+C regression has nothing to be measured against.
+
+So what is retired is the **shipped artifact**, not the source. That costs a
+tree that stays large and a `make check` that still wants a Rust toolchain, and
+it buys `make agree` still answering.
+
+### Two things relied on `build` producing the Rust, and both failed loudly
+
+Which is the good outcome, and both were found by running the gates rather than
+by reading.
+
+`agree` used to lean on `build` having made `target/debug/ncfg`. The gate fails
+rather than skips when a binary is missing -- `agree_gate.py` says so in as many
+words -- so a clean tree would have gone red for a reason that has nothing to do
+with the two programs agreeing. It builds the release binary and its symlink
+itself now, which is `linkage`'s "built here rather than trusted" applied one
+gate over. Verified by deleting both symlinks and watching it rebuild and pass.
+
+`make test` failed on `a_reader_that_goes_away_is_not_a_crash`, which refuses to
+run when `ncfg` is absent and says "run `make build`". `cargo test` builds
+binaries but cannot make a symlink, and the symlink came from `build`. Same fix,
+and verified the same way: delete the symlink, `make test`, rc=0.
+
+**Both are gates that would rather fail than test nothing, and that is why this
+change was cheap.** A suite that skipped quietly would have gone green over a
+Rust binary nobody had built, and the first symptom would have been a
+comparison that had silently stopped comparing.
+
+### What could not be retired
+
+**~~`adapter/netcfgd-nm` is Rust and stays Rust~~ ~~-- it is Rust *for now*~~
+-- it is C, and both earlier versions of this sentence are overtaken.** The
+first overstated 0264, which decided the answer is **link `libdbus-1`** and "not
+yet" rather than "stays", and was quoted back to the copyright holder on
+2026-10-02 as though they had instructed it (10.353). The second was accurate
+for nineteen days: 0276 retired the Rust shim on 2026-10-21, once the C one
+passed 0264's acceptance test. See 10.504.
+
+What is left of this entry's substance is the shape of the dependency, which
+survived the language change: the adapter is built by `make nm`, shipped as
+`netcfgd-nm.service`, and is the way NetworkManager's own clients reach netcfgd.
+`cargo` and `rustc` were Debian build dependencies for exactly as long as it was
+Rust and are gone with it; `libdbus-1-dev` took their place, and the comment in
+`debian/control` still says which line a tidying pass must not delete.
+
+The Qt client is C++ and was never in question.
+
+### What this leaves wrong, and is not fixed here
+
+**The three budget gates measure a binary nobody ships.** `size` checks
+`target/release/netcfgd` against `size-budget.txt`, `rss` measures the release
+Rust daemon's resident set, `footprint` reads what the debug Rust daemon left in
+`/run`. All three pass and all three are now about the wrong artifact.
+
+Deliberately not re-pointed. `size-budget.txt` is calibrated, and the C is a
+third the size -- so the gate would pass for a reason that has nothing to do
+with the budget holding. **Moving a budget in the same change that moves what it
+measures is how a ratchet stops ratcheting.** It wants a pass of its own, and
+the `footprint` half is the easy one: 10.318 measured the two programs writing
+byte-identical files under `/run`.
+
+**Closed.** All three were re-pointed at the C in the passes after this, each in
+its own change with its own re-measurement, and `size-budget.txt` carries the
+C's number with the method beside it. The ratchet was re-based on 2026-10-21
+with the base commit rebuilt as a control -- see 10.507, which also records that
+this paragraph was still being quoted as current three weeks later.
+
+`make live` and `make cross` still drive the Rust. Neither is a shipping
+question. And one stale sentence is left in Rust source -- the test above
+advises `make build`, which no longer builds it -- recorded rather than edited,
+because the standing rule here is that the Rust is recorded and not fixed.
+
+## 10.332 Four scripts were never unrunnable, and two were never tests
+
+Asked to make `dhcpcd`, `dhcpcd_orphan` and `slaac` run. They run. So does
+`c_dns_delivery`. **None of them was ever blocked by this machine** -- all four
+were blocked by the sweep harness, and the harness was mine.
+
+    dhcpcd           40 checks   pass both   was "makes its own namespace"
+    dhcpcd_orphan    13 checks   pass both   was "cannot make a namespace here"
+    slaac            14 checks   pass both   was "makes its own namespace"
+    c_dns_delivery   10 checks   pass both   was "cannot bind-mount /etc/resolv.conf"
+
+**77 checks that no sweep in this session had ever run**, and the messages were
+telling me why the whole time: "this script makes its own namespace and has been
+run inside one", and "run under unshare -m". I read them as properties of the
+machine because they arrived in the same column as "openvpn is not installed".
+
+The harness wrapped every script in `unshare -rn`. `make live` does not: it
+drives 45 that way, one with `-rmn`, and **29 with no namespace at all**,
+because a script that makes its own refuses a pre-made one. The Makefile knew
+per script and the sweep carried a uniform guess.
+
+### And the obvious fix was wrong, which is the more useful half
+
+Taking the Makefile's table wholesale broke `ap`, which went from pass to fail
+immediately. **`make live` runs as root**, so a script it drives with no
+namespace still has `CAP_NET_ADMIN`. A non-root sweep has none: `unshare -r`
+maps this uid to root inside the namespace, so there the namespace *is* the
+capability, and honouring `none` for all 29 took it away.
+
+So the rule is neither uniform nor the Makefile's: **`-rn` by default, because
+that is what supplies privilege here, and the Makefile's answer only for the
+four that refuse it.** Named rather than derived -- "has an internal `unshare`"
+looked like the principle and `ap` has one and still needs the wrapper, so the
+predicate would have been wrong in the same direction as the first guess.
+
+Caught by comparing against the previous run rather than by reading the new one:
+`ap new rc=1 old rc=0`, nine scripts in.
+
+### Two entries in the denominator were not tests
+
+`fake_mbimcli` is "an mbimcli with no modem behind it", invoked by `helper.sh`.
+`fake_umbim` is "a fake `umbim`, for tests/live/umbim.sh". **They are
+stand-ins**, and this sweep had been running them as though they were tests and
+counting "nothing asked for" as a failure. They are out of the list: 77 tests,
+not 79.
+
+So every figure this session reported over "79 scripts" had a denominator with
+two fakes in it, and "59/79 passing" counted two things that can never pass.
+
+### What the shape of this is
+
+The list of "cannot run here" was never a measurement -- it was **the set of
+things my instrument could not run**, and the two are not the same set. Six of
+the fourteen turned out to be the instrument: four wrappers and two fakes. The
+messages distinguishing them were in the output of every sweep.
+
+`evidence.md` has the general form under manufactured absence: a probe that
+cannot see somewhere reports absence rather than uncertainty. This is that,
+scaled to a whole suite, and it survived four full sweeps because the number it
+produced -- zero C-only failures -- was the number I wanted.
+
+## 10.334 The ordering moved, and the re-bless it was supposed to need was empty
+
+`ncfg_plan_wifi` runs between the device loop and the interface-contents loop
+now, rather than after `nat`. So the supplicant gets its networks before
+anything is addressed over them, which is what 10.333 measured the Rust doing.
+
+**The position is forced from both sides**, which is why there was only one
+place to put it. The op is gated through `ncfg_builder_gate`, and that collects
+the ids of ops already pushed for the interface -- so it has to run after link
+creation and `device_up`, or the profiles are handed over before the link is up.
+And it has to run before `ncfg_plan_interface_contents`, which is what plans
+addressing. Between the two loops satisfies both and nothing else does.
+
+### No witness needed re-blessing, and 10.333 said it would
+
+The prediction was that plan ordering is asserted by action id across the suite
+and the frozen witnesses, so moving a pass would renumber expectations and cost
+a re-bless. It cost neither.
+
+`doc/schema/plan.json` holds **48 actions and they are a catalogue**: every op
+kind with its inverse, `link.create` beside `link.delete`, `addr.add` beside
+`addr.del`, assembled to pin the JSON shape of each one. It is not a plan
+produced from a fixture, so it has no execution order to renumber. All three
+witness tests passed untouched.
+
+Checked rather than argued: **`make schema-bless` rewrites every witness and
+leaves no diff.** That is the cheap proof that nothing was stale, and it is
+worth preferring to reading the gate -- a blesser that changes nothing is a
+witness that was already right.
+
+**The general form, which this session has now paid for twice in a day:**
+guessing what a gate pins gives a change an imaginary price. The other instance
+was the opposite sign -- a budget gate assumed harmless turned out to be
+measuring a binary nobody shipped (10.326). Open the file.
+
+### What the change cost, measured
+
+    checks run                C 1400   Rust 1400
+    scripts passing           C 63/77  Rust 63/77
+    C-only failing checks     0
+    scripts that stopped passing              none
+
+`wifi_journey`'s "and the supplicant is given the networks again" passes three
+runs out of three, leaving only the convergence check the Rust fails too. So the
+suite has no check that fails for this build and passes for the Rust.
+
+One script moved from failing to passing between the two sweeps --
+`c_daemon_watch` -- and **the reorder is not credited with it.** That script
+drives the tryout harness against a fake daemon for two minutes and is the
+likeliest thing in the suite to be timing-dependent; nothing in it touches
+wifi profiles. An unexplained improvement is not evidence for the change that
+happened to be in flight, which is the same discipline that kept the earlier
+anomalous pass from being read as a regression.
+
+## 10.341 fuzznet is in the tree, linked by a program that admits what it is not
+
+0269 has the decision. What belongs here is the measuring.
+
+### The shape was decided in August and cost nothing to rediscover
+
+`doc/shared-protocol-brief.md` section 3 already fixed it: **the daemon never
+grows a network listener**, so whatever speaks UDP is a separate unprivileged
+process holding an ordinary local socket, exactly as the NetworkManager shim
+does for D-Bus. Reading that before designing anything saved inventing a shape
+and then finding the record that forbade it -- *working-practice.md*'s "check
+whether the project has already decided it somewhere else under a different
+name", paying out for once without anybody having to look hard.
+
+### A measurement that was stale within the hour
+
+The first pass measured fuzznet at `c535fae`, the HEAD of the checkout beside
+this tree: `make all` clean, 81 objects, a netcfgd-style probe linking and
+correctly refusing a zeroed frame at 674,600 bytes.
+
+`git submodule add` then pinned **`97719d9`**, because that sibling checkout is
+**145 commits behind its own remote**. Re-measured at the pin: 107 objects and
+969,272 bytes.
+
+Nothing was decided on the stale numbers, only because the pin was re-measured
+before anything was written down. **A sibling checkout is whatever its session
+last fetched**, which is exactly `harmonization.md`'s argument for vendoring --
+arriving here as a measurement rather than as advice, and arriving inside the
+one hour it took to act on it.
+
+### What is proven, and the half that is not
+
+    a zeroed 256-byte frame   fuzznet refused the frame (-2)   exit 1
+    empty stdin               nothing to read on stdin         exit 2
+
+`-2` is `FZN_SEAL_ERR_SHAPE`, the right answer for 256 zero bytes. So the seam
+is real: netcfgd's build links fuzznet's wire layer and gets a genuine answer
+out of it.
+
+**Every one of those is fuzznet saying no.** A program that can only refuse
+looks identical to one that refuses everything, and the positive control is
+what tells them apart. It is not written, and the reason is not effort.
+
+### The next decision, which the attempt to write that control uncovered
+
+**netcfgd has to choose a crypto backend and fuzznet deliberately will not
+choose for it.** Measured rather than read: `wire/seal.o` carries no undefined
+AEAD or `crypto_` symbol, and there is no Monocypher in the submodule. The
+crypto is a vtable the consumer fills. fuzznet's own golden-frame test is gated
+on Monocypher for the same reason, and its header says the vector's provenance
+is a consumer session's -- *"a frame this file recomputed from the code beside
+it would freeze whatever that code currently does, including whatever it does
+wrong"*, which is this tree's own independent-corroboration rule written in
+somebody else's words.
+
+So the first thing the next increment settles is what performs the AEAD and the
+hash. Until it does, a frame that verifies cannot be produced, and the bridge
+can be shown refusing and not accepting.
+
+### One number worth knowing before it surprises somebody
+
+`bridge/netcfgd-remote` is **969,512 bytes**, almost all of it fuzznet, because
+fuzznet builds objects and no archive so the linker has no member granularity
+to exploit. A tree that gates on size elsewhere should know this program is a
+megabyte before it has opened a socket. Whether that matters is a question for
+when it does something.
+
+## 10.344 netcfgd steers fuzznet, and steering has a shape already
+
+**Set by the copyright holder 2026-09-29.** netcfgd's job is to steer fuzznet
+into being three things:
+
+- a **remote command platform**;
+- a **shared database**;
+- a shared database with a **custom output module** -- netcfgd's netifrc-like
+  configuration files as the storage backend.
+
+**And the instruction that governs all three: these are not to be implemented
+haphazardly, but through generic primitives in fuzznet.**
+
+### What that means in practice, which raidcfgd has already demonstrated
+
+raidcfgd is not on this machine, so what follows is fuzznet's record of what
+they asked for rather than anything read in their tree. Four of fuzznet's
+headers carry it, and the pattern is identical each time: **a consumer met a
+limit, stopped, reported a measurement, and fuzznet answered with a primitive.**
+
+The sharpest is `node/remote.h`, on the reply-size cap:
+
+>  REPORTED BY raidcfgd 2026-09-22, measured in their tree: their smallest
+>  `status` reading is 3,230 bytes against a 512-byte cap, and their largest
+>  21,772. **They stopped rather than write a bridge that could not carry one,
+>  which is the right way round -- the cap was fuzznet's to answer for.**
+
+What fuzznet then built was not a bigger cap. It was multi-frame replies using
+the `index` and `chunks` fields `wire/frame.situ` had carried since it was
+written and nothing had used -- and with the kind *derived* rather than passed,
+so a caller cannot construct a CHUNK frame claiming to be the only piece.
+
+`node/local.h` is the same shape: raidcfgd wanted a gid-to-verb bound, the
+local access method had no seam to put a verb in -- its body carried a literal
+`(void)line;` -- so fuzznet grew `on_local` and `local/vocabulary.h`. Not a
+raidcfgd feature; the seam the remote method already had.
+
+**So steering is: meet the limit, measure it, stop, and report it as fuzznet's
+to answer.** It is `harmonization.md`'s rule about a dependency -- signalled,
+never edited from the consumer -- with the extra requirement that what gets
+signalled is framed as a *primitive fuzznet is missing* rather than as a
+netcfgd feature request.
+
+### The three, measured against what is already there
+
+**Remote command platform: the seam exists and netcfgd is on it.** `on_remote`
+is "where a consumer's handler (its vocabulary) acts", called only after the
+caller is authenticated and authorised -- a DROPPED frame never reaches a
+consumer. And the vocabulary has a sanctioned extension point rather than a
+list to be added to: `request->parsed` is `FZN_VERB_NONE` for a verb fuzznet
+does not offer, **"which is a consumer's own verb rather than an error"**.
+
+**Shared database: `record/` and `catalog/` exist** -- ledger, journal, store,
+sync, and a catalogue with shards, retention and sweep. Not yet measured
+against what netcfgd would ask of it, and that measurement is the next real
+piece of work rather than a design.
+
+**Custom output module: the seam is a vtable and it is already there.** Two of
+them:
+
+    fzn_persist_ops        load / save / list / remove, by slot and subject
+    fzn_record_store_ops   put / get, by issuer and stream
+
+netcfgd's configuration files as a storage backend is an implementation of one
+of those, in netcfgd's tree, filling ops fuzznet declares. **That is the whole
+answer to "not haphazardly": the custom output module is not a change to
+fuzznet at all**, and if it turns out it cannot be expressed through those
+ops, that is the measurement to report rather than the moment to add a hook.
+
+### What this changes about how the integration proceeds
+
+Three increments so far each began by my naming a decision that the tree had
+already made -- the process shape (0128 and the brief), the crypto backend
+(fuzznet vendors it), and the capability-to-tier mapping (0128 again, and it
+does not exist by design). The correction rate is the finding: **the default
+assumption should be that fuzznet or netcfgd's own records have already
+answered it**, and the first action is the grep rather than the design.
+
+## 10.345 The shared database measured, and the one thing it cannot be
+
+**Result: fuzznet's database needs nothing new for netcfgd, and the 512-byte
+record body is not the gap it looks like.**
+
+### What netcfgd would put in it, measured on this machine
+
+    /etc/netcfgd/conf.d, all of it    1,903 bytes   a laptop, two networks
+    desired.json                      2,358 bytes
+    observed.json                    15,398 bytes
+    FZN_RECORD_BODY_MAX                 512 bytes
+
+The first reading of that table is raidcfgd's reply-cap finding again. It is
+not: **a record is a signed statement, not a payload.** The bulk goes in
+`blob/` -- content-addressed, a Merkle tree over *sealed* leaves, with two
+verifiers so a relay that has never held the content key can still refuse a
+stranger's garbage -- and a record carries the 32-byte root. 512 is ample for
+a statement about a blob and would be the wrong number for the blob itself.
+
+So the composition is: `blob/` for the configuration bytes, `record/` for the
+signed statement naming which blob is current, `journal` for what was
+received against `ledger` for what a peer has acknowledged -- kept apart
+because *"every distributed configuration bug lives in the gap between
+them"* -- and `sync` for which ranges are missing and which way round.
+
+### netcfgd has already steered this layer without anybody noticing
+
+`record/`, `catalog/` and `persist/` cite netcfgd nowhere; that layer was built
+for fuzzypickles and raidcfgd. But **`blob/` carries netcfgd's constraint as
+the reason for its API shape**: the read-at-offset source and sink were refused
+partly because "netcfgd's constraint is that message boundaries are preserved
+END TO END", so those calls return leaf indices and never bytes. Fifteen of
+fuzznet's headers cite netcfgd, including "netcfgd reached that sentence first"
+about origin.
+
+The brief did that. It was written in August as requirements rather than
+design, and the requirements landed in somebody else's primitives.
+
+### The one thing the config files cannot be
+
+**Both storage seams round-trip opaque bytes keyed by a 32-byte public key.**
+
+    fzn_persist_ops        load/save/list/remove   (slot, subject pubkey) -> bytes
+    fzn_record_store_ops   put/get                 (issuer pubkey, stream) -> bytes
+
+A netifrc-like configuration file cannot round-trip an arbitrary signed record,
+and should not try: the file is the operator's, human-edited and
+human-readable, and constraint 1 makes it the source of truth locally. Storing
+somebody else's opaque signed bytes in it would make it neither.
+
+**What netcfgd already has instead is the renderer.** `c/src/compile/render.c`
+and its two siblings turn a document back into configuration text, in the
+language's spellings rather than the document's. A shared database whose
+content is netcfgd *documents*, rendered out through that, is a thing this tree
+can already do half of.
+
+So "the netifrc-like config files as storage backend" has two readings that
+lead to different work, and this entry deliberately does not pick one --
+`working-practice.md` on holding a discrepancy open rather than spending it.
+The question is recorded for the holder, with the measurement above as its
+basis.
+
+### Corrected within the hour: this measured the wrong model
+
+**The holder's clarification, 2026-09-29: the shared database holds data like
+Ubiquiti's UniFi -- a network one can reason about and deploy, not a collection
+of hosts.** Everything above measured whether fuzznet could replicate
+*netcfgd's per-machine document*, answered yes, and answered a question nobody
+had asked.
+
+A UniFi-shaped model is **site-scoped**: networks, VLANs, WLANs and their
+security, devices with roles, port profiles -- from which each device's own
+configuration is *derived*. Replicating finished per-host documents is the
+thing that model exists to stop doing.
+
+**fuzznet's primitive for it is `state/`, not `record/` alone, and it fits
+exactly:**
+
+>  A permission, a rule and a configuration setting are the same object at
+>  this layer: a value some issuer set, for some subject, of some kind, and
+>  the current one is whichever that issuer set most recently.
+
+>  The value of a cell is a function of the SET of records applied to it,
+>  never of the order they arrived in. Two hosts that have admitted the same
+>  records answer the same question the same way, whatever order the network
+>  handed them over in.
+
+A record's `subject` is **not** its `issuer`, so one signer makes statements
+about many things -- a site's networks, its WLANs, its devices. And the layer
+"resolves records into current values and interprets none of them", because
+the shape is configuration rather than design. **So the site schema is
+netcfgd's to define and fuzznet is already the right shape to carry it.**
+
+### Which relocates the gap entirely
+
+It is not in fuzznet. **netcfgd has no model above one machine** -- `site`
+appears zero times in `document.h`, and the document is "this machine"
+throughout, by constraint rather than by omission. A site model, and the
+derivation of a host's document from it, is new modelling work in netcfgd and
+is the largest thing this integration has turned up.
+
+It also reopens the storage question above rather than settling it: if the
+shared content is site-level cells rather than host documents, then "the
+netifrc-like config files" are plainly the *rendered output* of a derivation,
+which is the reading netcfgd already has a renderer for.
+
+**The lesson is the one this integration keeps paying for, arriving from the
+other side.** Three times the answer was already in the tree and I designed
+instead of looking. Here I looked, measured carefully, and measured the wrong
+thing -- because the requirement had not been stated yet and I supplied one
+from what netcfgd happens to hold today. **A careful measurement of an assumed
+requirement is not cheaper than a guess, it is a guess with numbers on it.**
+
+## 10.347 Trying the site model for fit, and the one place it does not
+
+**The holder's experiment, 2026-09-29**: blend the network-wide machinery into
+the local without many special cases. Add site configuration -- not hidden,
+just not in the same tab. Allow configuring hosts other than the local one,
+made obvious in the GUI by a side tree whose **root is the local host**. Scope
+the data the same way: site-wide config always in the database, and
+host-specific replicated config deleted on every other host when that host is
+deleted.
+
+Tried against what exists rather than reasoned about. Three of the four fit
+without new primitives; the fourth does not fit at all and is the finding.
+
+### The tab is a seventeenth view
+
+`main_window.cpp` is a `QTabWidget` and there are sixteen `*_view.cpp` beside
+each other. A site view is the seventeenth and needs no new shape. The picker
+is a tree in the same window, left of the tabs, choosing whose configuration
+the tabs are showing.
+
+**The root being the local host is a presentation choice that contradicts the
+data, deliberately.** In the database the site is above the host; in the tree
+the local machine is the root and everything else hangs off it. That is right
+for the reason constraint 2 exists -- a person who opens the GUI on their
+laptop sees their laptop -- and it is worth writing down so nobody later
+"fixes" the tree to match the model and quietly makes the single-machine case
+feel like an afterthought.
+
+### The scoping is fuzznet's cell, unchanged
+
+`state/` is already `(issuer, subject, kind) -> value`, so site-wide is a cell
+whose subject is the site and host-specific is a cell whose subject is the
+host. No second mechanism, no special case: the same apply, the same conflict
+report, the same ordering.
+
+### The cascade delete works, and the primitive was paid for
+
+Deleting a host is clearing every cell whose subject is that host; the clears
+replicate and every host converges on absence. It holds because **a clear is a
+tombstone rather than an erasure**, keeping the writer and the sequence, and
+fuzznet measured what the other design cost:
+
+>  Measured, when `fzn_state_clear` wiped the entry: a record fifty sequences
+>  BELOW the clear was accepted afterwards and set the value again, because
+>  with the sequence gone there was nothing left to call it stale. **A
+>  revocation that any replay undoes is not a revocation.**
+
+Capacity fails in the right direction too: tombstones are forgotten first and
+a **live** setting is refused rather than evicted, because evicting one
+"silently reverts it to whatever a consumer's default is, which is the kind of
+change nobody can trace back".
+
+### Where it does not fit: every host holding every host
+
+The instruction says host-specific replicated config is deleted on all other
+hosts -- which means every host holds every other host's configuration. That is
+what makes the delete rule necessary, and it is the part that does not scale.
+
+`fzn_state_init(state, entries, capacity)` takes storage from its caller, so
+netcfgd sizes it. A site of a thousand nodes at even a few dozen cells each is
+tens of thousands of entries **on every node**, and constraint 7 says
+`ncfg plan` survives to the smallest build -- netcfgd is meant to run on
+routers, which `node/node.h` also records. A node that cannot hold the site is
+not a node with a smaller view; it is a node returning `FZN_STATE_ERR_FULL` and
+refusing live settings.
+
+**So the missing decision is who replicates what**, and the shape the rest of
+the design already suggests is UniFi's own: a controller-capable host holds the
+whole site, and a leaf node holds the site-wide cells plus the cells whose
+subject is itself. That keeps a router small, keeps the tree view honest for
+whoever is running the controller, and leaves the delete rule meaningful --
+but it means "deleted on all other hosts" is really "deleted wherever it was
+held", which is a weaker and more implementable sentence.
+
+**Not decided here.** It is a capacity question with a constraint behind it,
+and the alternative -- everyone holds everything, sized for the largest site
+netcfgd intends to support -- is a legitimate answer that simply costs
+memory on the smallest device. Which of the two is a question for the holder,
+and the numbers above are what it should be decided on.
+
+## 10.367 A hard-coded metric that went stale, and the decision it was about
+
+`nm.sh` asserted `metric = 3924` from `autoconnect-priority 42` and had been
+failing since decision 0207. **The test was wrong and the code was right.**
+
+    priority 42, ceiling 4096
+      (42 * 4096) / 999              = 172  ->  metric 3924   what nm.sh said
+      (42 * 4096 + 4096/2) / 999     = 174  ->  metric 3922   what 0207 does
+
+0207 added half a band to the inverse so that a profile a desktop client reads
+and writes back is a fixed point rather than walking upward every trip -- 100,
+103, 107, 111, far enough to cross another network's metric and prefer one the
+operator did not choose. The arithmetic moved by two and the number in the test
+did not.
+
+**It is the same defect 0207 itself is about, from the other side.**
+`settings.rs` says why that function is not restated: *"a round trip checked
+against a restatement of this arithmetic checks nothing -- 0207 is about an
+assertion that agreed with the defect because it was read off the code it was
+meant to test."* That assertion agreed because it was read off the code. This
+one disagreed because it never was again. **A magic number in a test fails both
+ways**, and which way is luck.
+
+### What replaced it, which cannot go stale
+
+Two checks, and the second is the property:
+
+    a metric is written at all        `^\s*metric = [0-9]+$`
+    the priority read back is 42      through nmcli, both directions
+
+Neither names a metric, so a future change to the scaling is free to move it.
+Sabotaged by removing the midpoint correction: **only the round trip goes red**,
+which is the discrimination wanted -- the first check catches the key being
+dropped, the second catches the arithmetic drifting. The old check caught the
+drift too, by going red and staying red, which is worse than catching it.
+
+**And the sabotage had to be rebuilt to land.** The first attempt edited
+`emit.rs` and ran `nm.sh`, which takes `adapter/netcfgd-nm/target/debug/` as it
+finds it and skips when it is absent -- so a stale binary answered, nothing
+failed, and the run printed no summary at all. `build-and-commit.md` names that
+one: never conclude a test passes or fails from a binary the build step did not
+rebuild.
+
+## 10.371 Six dhcpcd processes that are one, and the verdict that said otherwise
+
+**There is no leak.** Reading the journal after an install, a session flagged
+six dhcpcd processes in netcfgd's control group as accumulation across
+restarts and put it to the holder that way. The process table answers it:
+
+    1146693  dhcpcd: wlp0s20f3 [ip4]                        parent 1
+    1146694    [privileged proxy] wlp0s20f3 [ip4]            parent 1146693
+    1146695    [control proxy] wlp0s20f3 [ip4]               parent 1146693
+    1988730      [BPF ARP] wlp0s20f3 10.0.125.56             parent 1146694
+    1988758      [BOOTP proxy] 10.0.125.56                   parent 1146694
+
+One client in dhcpcd's privilege-separated model: a client, a privileged
+proxy, a control proxy, and two per-address helpers. The two young pids are
+those helpers being recreated, which is why they appeared to churn across
+restarts while the trio stayed.
+
+### What misled the reader, which is the part worth fixing
+
+`ncfg_leftovers_classify` runs two passes, and the second visited only
+`UNACCOUNTED` processes. Three of those five carry `wlp0s20f3` in their own
+argv, so they matched the record's claim on that interface, were CLAIMED in
+pass one, and never reached the pass that would have called them helpers. The
+log then said, three times, *"a backend the record claims on an interface it
+names, with no pid written down."*
+
+**Nothing was hidden** -- CLAIMED and HELPER are both accounted-for verdicts and
+the sweep refuses neither. What the wording cost was a reader, and the reader
+it cost was the session that wrote this file's own comment about dhcpcd. That
+comment said the `[privileged proxy]` title *"does not always carry the
+interface"*, which is true; the case that matters is when it does.
+
+### The fix is two halves and needs both
+
+- **Pass two reconsiders CLAIMED**, so a claimed process whose parent is also
+  accounted for becomes a helper of it. RECORDED is left alone: a process
+  netcfgd wrote a pid down for is a backend in its own right whatever its
+  parentage.
+- **The anchor walk still runs past a HELPER**, which was tried the other way
+  and reverted. Accepting a helper as an anchor made a grandchild report the
+  proxy between them, losing the recorded case's property that *a helper names
+  the recorded process it hangs off, not its parent*. Two checks said so.
+
+Together: one claimed client, four helpers, every one of them naming the
+client.
+
+Sabotaged both halves separately -- the reconsideration removed, and the anchor
+widened to accept a helper -- and each fails two checks, a different two.
+
+**Two previously-pinned checks changed, which is the part to be suspicious
+of.** They asserted the old answer and the entry beside them called it *"the
+honest answer rather than a near miss"*. It was honest and it was the thing
+that read as several backends, so they are re-pinned with the misreading
+recorded beside them rather than quietly edited to fit.
+
+### Confirmed on the machine, both halves at once
+
+Installed 2026-10-01 12:41. The adopt lines now read:
+
+    dhcpcd 2067374, a backend the record claims on an interface it names,
+                    with no pid written down
+    dhcpcd 2067375, a helper of pid 2067374
+    dhcpcd 2067376, a helper of pid 2067374
+    dhcpcd 2067462, a helper of pid 2067374
+    dhcpcd 2067503, a helper of pid 2067374
+
+One client and four helpers where there were five backends. **And the last two
+are grandchildren** -- the BPF and BOOTP helpers hang off the privileged proxy,
+not off the client -- so their naming the client is the second half
+demonstrated: the walk ran past a helper to the thing netcfgd could account
+for. The widening that broke that is the one two checks refused.
+
+### And `make -C c` does not build the tests, for the third time today
+
+The first run of `leftovers_test` after the change reported 23 of 23 passing.
+It was the previous binary: `make -C c` builds the library and the program, and
+`make tests/leftovers_test` builds the test. Rebuilt, it failed two checks
+immediately -- the two pinning the behaviour being changed, which is exactly
+what should have happened.
+
+`build-and-commit.md` names this and today has supplied three instances: a
+Rust adapter answered from `target/debug` while `nm.sh` tested a stale one
+(10.367), and this twice. The rule is not subtle and the trap is not either;
+what makes it recur is that the stale run usually looks like the answer you
+expected.
+
+## 10.376 The control exchange was on no log at all
+
+The holder's question, 2026-10-01: can netcfgd log everything, including a
+subtool's output when configured to, rather than needing a logging script
+started by hand. Measured rather than answered from memory, and the answer was
+no in one specific place -- the place that cost this document its hardest
+investigations.
+
+**Where subtool output goes today, measured on `debian-nabbe`:**
+
+    dhcpcd           the journal (netcfgd's cgroup) and /run/netcfgd/dhcp/*.log
+    wpa_supplicant   syslog only, under its OWN tag, at default verbosity
+    netcfgd itself   stderr -> the journal, 7 levels, subsystem filter
+
+So two journal queries and two vocabularies. But the gap that mattered is
+narrower and worse: **`backend/supplicant/client.c` held no logging
+whatsoever** -- zero `ncfg_log` calls in the module that owns every control
+exchange. netcfgd sends `SELECT_NETWORK`, which disables every other network
+on the radio, and nothing anywhere recorded that it had been sent. That is
+the whole of why 10.368 needed `tool/capture-supplicant.sh`: the request that
+caused the fault was the one thing not written down.
+
+**The facility was already there and already cites the symptom.**
+`ncfg_log_aboutf` exists to put a link's supplicant, its DHCP client and the
+daemon's passes on one timeline, and its own comment names 10.338 as the
+afternoon that wanted one. Twelve subsystems use it. The wire was the one
+thing not on it.
+
+**The request is logged by its label, which makes redaction a property rather
+than a rule.** `ncfg_supplicant_request_labelled` already took a `label`
+distinct from the `command` for exactly the commands that carry a credential,
+`session.c` passing the form `ncfg_supplicant_setting_redacted` builds. That
+parameter existed for error messages; logging it is safe by the same
+construction. Proven by sabotage: logging `command` instead puts the canary
+secret on stderr and `supplicant_client_test`'s sweep goes red.
+
+A reply body is logged at `DEBUG`, and that is safe for a reason belonging to
+this tree rather than to the protocol: a reply can carry a credential only in
+answer to `GET_NETWORK`, and netcfgd issues none -- checked across `c/src`.
+Written beside the logging, because a call site that adds one makes that line
+a leak.
+
+**And the subtool's verbosity now follows netcfgd's own, on one knob.**
+`NCFG_LOG=debug` raised netcfgd's half of the conversation and left
+wpa_supplicant at its default, so a trace showed what netcfgd asked and not
+what the radio did about it. The launch pushes `-d` at `DEBUG`. Deliberately
+not `-dd`: that logs every frame, and a level nobody can leave on is a level
+nobody has when the fault happens, which is the complaint.
+
+**`-s` is kept and the named log file is still not used, which is the right
+way round.** The journal is the one timeline; a file in `/run` is one more
+place to look.
+
+**But the dead path is a real finding and is not fixed here.**
+`launch.c` computes a log path into `log` at line 255 and passes **`NULL`**
+to `ncfg_backend_run`. Every other backend -- openvpn, dhcp, pppoe, hostapd,
+ra -- passes its `log`; the supplicant alone does not, and three cases in
+`supplicant_launch_test.c` assert that `ncfg_supplicant_log_path` works. A
+correct function, tested, with no consumer: `evidence.md`'s own shape, and
+`-Wunused` cannot see it because the buffer is written to. Whether the
+supplicant should write a file at all is a design question about where subtool
+output belongs, and it is the holder's; the measurement is here so it can be
+answered once.
+
+## 10.378 The daemon was the quietest thing in its own log
+
+The holder, 2026-10-01: the logging is the blocking feature, and it is poorly
+designed -- or incomplete. Measured, it is incomplete, and the earlier half of
+that diagnosis in 10.376 was wrong in a way worth keeping.
+
+**`journalctl -u netcfgd` already carries everything.** 10.376's table said
+wpa_supplicant was on a separate timeline under its own tag; it is under its
+own tag and under the unit, because it runs in netcfgd's control group. One
+query gets the lot. There is no fragmentation to fix and the claim should not
+have been made from the tag alone.
+
+**What there is, counted over six hours on `debian-nabbe`:**
+
+    wpa_supplicant   68 lines
+    dhcpcd           49
+    systemd          24
+    netcfgd          14
+
+And the fourteen are startup, four roams and one warning said twice. **Not one
+of them says what the daemon changed** -- while in that window it configured an
+interface, started dhcpcd and wrote resolv.conf.
+
+**The structural version of the same fact:**
+
+    plan/      0 log calls across 29 files
+    apply/    17 across 19
+    daemon/   73 across 19
+
+The two layers that decide and act carry 17 calls across 48 files; the loop
+around them carries 73. A declarative reconciler whose reconcile leaves no
+record is one that can only be diagnosed by watching the things it drives,
+which is what every investigation in this document has had to do.
+
+**So every applied action is logged, in `ncfg_apply`, inside the loop.** One
+site covers all six callers and any added later. Inside the loop rather than
+after it because the ordering is the value: the line lands between the
+supplicant's and dhcpcd's own, on the timeline that already exists, instead of
+in a block to be matched up by timestamp afterwards. `INFO` for a change and
+`ERROR` for a failure, so an operator filtering for trouble gets the failure
+without the commentary -- and a converged pass builds no actions and so says
+nothing at all.
+
+**The renderer was a `static` in `cli/plan.c` and is now
+`ncfg_action_describe`.** A second copy would have been two renderings of one
+fact, drifting in the direction nobody notices: `ncfg apply` and the journal
+telling an operator the same action in two wordings, neither wrong. The
+interface is blanked for the log line alone, because `ncfg_log_aboutf` puts it
+in the subsystem path -- which is what makes `NCFG_LOG_SUBSYSTEM=apply/wlan0`
+select one link -- and saying it twice is what the first version did.
+
+**And the client now reads `NCFG_LOG`, which it never had.** Only the daemon
+called `accept_from_env`, so `NCFG_LOG=debug ncfg status` turned nothing up --
+the first thing anybody would try. The floor is `WARNING` rather than the
+`INFO` default, because a command's report is its stdout: with actions logging
+at `INFO`, `ncfg apply` would have printed each one twice. Warnings still
+reach the operator; what goes is commentary duplicating the thing being
+printed.
+
+Proven by sabotage at both levels: removing the change line fails three checks
+and the failure line two, each its own and nothing else. The suite is held at
+`WARNING` with the two cases that are about the log turning it up deliberately
+-- sixty applied actions between the check lines is noise, and a case that
+forgot to raise the level would be reading an empty file.
+
+**Two things seen and not fixed, both visible in those fourteen lines.** A roam
+between APs on one ESS is logged at warning severity, four times -- ordinary
+operation flagged as a problem. And the resolv.conf warning repeats identically
+with no new information. Both are severity and de-duplication decisions rather
+than missing records, which is a different piece of work from this one.
+
+## 10.379 Three reported faults, none of which was one
+
+Asked to fix the roam severity and the duplicated warning reported at the end
+of 10.347. Measured, **all three things named there are correct code**, and
+the report was wrong in three different ways. The findings are kept because
+each one is a way of misreading a log, and the log is what this work is about.
+
+**The roam is not at warning.** `!` is the label for `NCFG_LOG_NOTE`, not for
+`WARNING`, which renders as `Warning:`. So `!: wlp0s20f3: joined ...` is a
+note, and `daemon_wake.c` says why in as many words: "an association is rare on
+a desk and one per move on a laptop, which is the rate somebody reading a day's
+log wants". Four in six hours, on a laptop that moved between sites, is exactly
+the predicted rate.
+
+**The label is deliberately flog's and is not netcfgd's to change.**
+`process_test.c` asserts the whole table against flog's -- "the labels are
+flog's, including the ones it does not print" -- and names itself "the one
+place that could drift from it". So the `!` that reads as an alarm is a
+cross-project vocabulary, and changing it here would be local drift away from a
+sibling rather than a fix.
+
+**The repeated warning is two episodes, not one message twice.**
+`ncfg_reconcile_sweeps` zeroes the counter when it fires, so each line is a
+fresh run of `NCFG_RESOLV_PATIENCE` take-backs. De-duplicating it would have
+suppressed the second occurrence of a real fault -- the exact inversion of the
+complaint, since what the operator needs to know is that it happened again.
+
+**What was actually wrong is that the two cannot be told apart**, and that is
+worth one line: both printed an identical sentence, so a reader sees a log that
+repeated rather than a fault that recurred. Two readers made that mistake,
+including the one sent to remove the duplicate. The line now carries which
+episode it is, and the sentence moved from `ncfg_resolv_sweep` to
+`guard_resolv` -- the caller's own stated rule, "whoever sweeps says what they
+are sweeping", and the sweep is a library call with no memory between runs.
+
+**Not covered by a test, and said rather than left quiet.** Driving two
+episodes needs a reclaim the reconcile harness cannot force, and `guard_resolv`
+is static. The ordinal rendering was checked directly; the two-lines-differ
+property is not asserted anywhere.
+
+**Why this entry exists at all.** Every one of the three was reported by a
+worker who had read the log for an afternoon and the code for an hour. A log
+whose severity label is more alarming than its severity, and whose recurrences
+are indistinguishable from repeats, produces exactly this: confident reports of
+faults that are not there, costing the time of whoever checks them.
+
+## 10.382 The modem proposal landed as code and never as a document
+
+Asked whether everything from `netcfgd-modem-at-proposal` had been folded in.
+It had not, and the split is clean: **the code and the measurements are here,
+the document never caught up, and one decision number was spent on something
+else.**
+
+**In, and in one case further along than proposed:**
+
+    helpers/netcfgd-modem-at      helper/netcfgd-modem-at, 11 KB -> 25 KB
+    tests/live/helper-at.sh       tests/live/modem_at.sh, plus a
+                                  fake_at_modem.py the proposal did not have
+    patches/Makefile.diff         the `live:` target runs it
+    the usbnet finding            project.md, as prose
+    the three quirks              helper/modem-quirks
+    the bootstrap-profile finding helper/modem-quirks
+
+**Not in: decision 0123 was never created, and the number is spent** --
+`0123-a-hook-that-never-exits-is-killed.md` holds it. The proposal's own
+document patch cited `[0123]` four times for the modem finding, so had it been
+applied as written those references would dangle. The finding is therefore
+prose that nothing can cite by number, which is the one thing
+`doc/decision/` exists to provide.
+
+**And five claims in this document were false**, each falsified by work sitting
+in the tree, now rewritten rather than appended to:
+
+    Next item 1        "no real modem"
+    the usbnet finding "what it needs IS a second helper"
+    the contention par 0043's quirk table "designed, unbuilt"
+    the Cellular part  "Nothing here has met hardware", naming one helper
+    honest limits      "written entirely against a fake"
+
+The wording taken is the proposal's own, because it is more careful than
+anything written here would have been: **some of it has met hardware and the
+connected path has not.** The AT helper's exchanges and parsing were read off a
+real Quectel EG916Q-GL; no bearer has carried traffic, because that module's
+eUICC holds a bootstrap profile with no data entitlement.
+
+**This is the sentence class `evidence.md` warns is hardest to catch** -- a
+claim whose falsifier is a commit nobody connects to it. Nothing in the
+ordinary course of work brings "nothing has met hardware" together with the
+helper that met it, and the helper landed in September while the sentence
+stayed until October.
+
+**The tree does do this correctly elsewhere, which is the useful part.** The
+same section records `helper/netcfgd-modem-umbim` arriving -- "exists now, and
+0045 had been waiting for it since it was written". So the habit is there and
+the AT helper simply never got it. What distinguished the two is that umbim
+closed a gap this document had named in the same paragraph, while the AT
+helper arrived from outside the tree with its own README.
+
+**Two things left, and both are the holder's.** Whether to cut a record for the
+finding under a new number, since records are not edited once accepted and 0123
+is gone; and whether "met hardware" is the right phrase at all for a helper
+that has exchanged AT commands with a real modem and never carried a packet.
+
+## 10.383 Extracting `netcfgd-modem-at-proposal` so it can be deleted
+
+The proposal tree is **not a git repository** -- no `.git`, not a submodule,
+referenced from nothing -- so deleting it is unrecoverable and the bar for this
+pass was that nothing of value outlive it unrecorded.
+
+**Asked whether every surface had been checked, which it had not.** 819 lines
+across six files; 371 had been read in full and two files only through a
+`grep` of their comments. Reading the remaining 425 found one more fact worth
+keeping and settled two others as already covered -- the helper's `monitor`
+tail states the contract's empty-versus-missing rule, which
+`doc/interface-report.md:192` already says better, and its `still_connected`
+checks `+CGATT` and `+CGACT` together, which the shipped helper also does.
+
+**Taken from the test's second case, into the 27.007 note in the helper:** a
+cellular bearer is **usually a `/30`**, and `255.255.255.240` is an ordinary
+answer. So a parser that rounds to a byte boundary, or assumes the `/24` every
+worked example shows, is wrong on the common case rather than on an edge one.
+That proposal spent three of its fourteen cases on masks for exactly that, and
+the fact makes the trap concrete where the encoding alone left it abstract.
+
+**Taken on this pass, both into `helper/modem-quirks`:**
+
+- **`ESM cause 29` and `33` mean different things and now say so.** The table
+  had 29 as a measurement datum only. 29 is the request refused -- wrong APN
+  name, or credentials the network did not accept -- and 33 is the request
+  understood and not permitted. Reading one as the other has somebody phoning
+  the operator about an entitlement when the APN is misspelled, or sweeping
+  APNs that were all fine.
+- **Why `at=` is usually not the first port that answers.** A module presents
+  several AT-capable ttys and ModemManager holds the PRIMARY one where it is
+  running, so the index worth recording is a secondary; aiming a helper at the
+  primary gets a timeout that looks like a module fault and is contention. The
+  field definition said "that a modem manager does not hold" without saying
+  why.
+
+**Found while extracting, and not fixed here.** The table records `at=3` for
+the only module anybody has measured, and `helper/netcfgd-modem-at`'s own usage
+examples show `-p /dev/ttyUSB2`. The note added above says an example is
+illustrative rather than a default, which is the honest reading, but the two
+numbers sitting in one tree invite the wrong one to be copied.
+
+**Deliberately not taken, listed so nobody re-derives the question:**
+
+    mask_bits and its three mask test cases   the helper reports no addressing
+                                              by design; the 27.007 encoding it
+                                              guarded is recorded as the trap
+    the IPv6 pass-through reasoning           moot for the same reason
+    the file-based fake modem                 superseded by a pty fake with real
+                                              termios; 0208 paid for the better
+                                              one
+    `config = "reported"`                     the shipped design takes a lease
+    connect/disconnect/stop, `-d`             deliberately diverged, 10.382
+
+**What dies with it.** The decision record's 149 lines of text. Its substance
+is distributed now -- the `usbnet` finding and the no-retry argument in this
+document, the three quirks and the two causes in the table, the 27.007
+encoding in the helper -- so nothing is lost that anybody needs. But if a
+record is ever cut for this, that file was the draft, and after the deletion
+there is no copy of it anywhere.
+
+**Four passes, four findings, and the reason is worth more than any of them.**
+Asked the same question four times, each pass examined a surface the last had
+not: the file list, then the README, then the decision record, then the two
+source files compared by behaviour rather than by size. Every pass found
+something real -- the stale claims, the no-retry argument, the 27.007
+encoding, the diverged command surface. **A "yes" given after the first pass
+would have been wrong four times over, and it would have been given
+confidently**, because each pass had genuinely audited everything it had
+looked at.
+
+## 10.387 The adapter's client was already written, and the manager is on the bus
+
+The second slice of 0264's port. **`client.rs` has no counterpart to write**:
+`client/libncfg_client.a` and `client/ncfg_client.h` are the daemon's own
+local-hop library in C already, so `state.c` links what `ncfg` links and the
+371 lines of Rust become fifty of handle management. That is the one place
+this port starts ahead of the daemon's, which had to write its model first.
+
+**`org.freedesktop.NetworkManager` now answers at the manager path, with all
+twenty-four properties declared.** Declared even where the answer is an empty
+list, and that is the point rather than a shortcut: libnm reads the
+introspection document at startup to decide what to ask, so a property
+answering "nothing" is a shim being honest while one absent from the document
+is a shim libnm treats as not being NetworkManager.
+
+The answers are three kinds, and naming them is what keeps the next one
+honest. A **constant**, where NM's value and the shim's are the same --
+`Capabilities` is empty for a thing with no NM plugins. A **deliberate lie**,
+which is `Version`, because clients gate on it; design section 9.3 says so and
+`org.netcfgd.Compat` is where the truth is told. And **netcfgd's own answer**,
+through the client.
+
+**A property of the third kind whose daemon is absent answers NM's `UNKNOWN`,
+not a D-Bus error.** An error would put a dialog on a desktop for a daemon
+that is restarting. The client is dropped and reopened on the way in rather
+than at the call that broke it, so a restart costs one failed property instead
+of a shim that never reconnects.
+
+### Proven against the running daemon, by construction rather than by eye
+
+On a private bus in the scratchpad, `State` answered **70**,
+`CONNECTED_GLOBAL`. That is the positive control: a client that could not
+reach netcfgd makes this property answer `0`, so 70 is the socket round trip
+having happened. `Connectivity` answered `0` beside it, which is also right --
+the machine is *routed* and not *online*, no probe being configured, and
+`FULL` is reserved for a rung a probe confirmed.
+
+`busctl` renders the whole surface with correct signatures, which is the
+foreign witness 0264 wants.
+
+### What the test asserts, and what it refuses to sample
+
+Twenty checks. The property count is **asserted at twenty-four** rather than
+four names being spot-checked: a property that fell out of the table is
+invisible to a sample, and the properties are the whole of what a client reads
+here. Every one is then walked for a name, a getter, and a signature
+`dbus_signature_validate_single` accepts -- which catches `a{sv}` written as
+two types, the error a hand-kept table makes.
+
+### What this slice deliberately does not do
+
+**Every getter asks netcfgd; there is no cache.** A `GetAll` on the manager is
+therefore one socket round trip per property that needs one, which is wrong
+for a tray polling it and right for being correct first. The cache belongs
+with the signal emission it exists to drive -- `emit.rs`'s 1,177 lines -- and
+inventing one now would be a cache nothing invalidates.
+
+Devices, active connections and the primary connection answer empty. They need
+the object tree, which is `device.rs` and `active.rs`, and an empty list is
+what "none" looks like to libnm rather than a refusal.
+
+## 10.392 The write authorization, and the deputy it refuses to be
+
+The seventh slice of 0264's port, and the one the previous slice held writes
+back for. **The gate is live, tested and already deciding, with nothing behind
+it** -- which is the order that matters.
+
+### The confused deputy, which is why this cannot be delegated
+
+**netcfgd authorizes its socket peer.** The adapter is that peer, so asking
+netcfgd "may this be done" answers for the ADAPTER and not for the client on
+the bus -- and the adapter is the more privileged of the two. A write forwarded
+on that answer gives every local process the adapter's rights.
+
+`ncfg_client_tiers` is the obvious wrong turn and is worth naming as one: it
+exists, it answers in a single call, and what it answers is what *this
+connection* may do. The question is what the *caller* may do, and only the bus
+can say who the caller is. So that function must not be used here, and the
+header says so where somebody would reach for it.
+
+### The uid comes from the bus, never from the message
+
+A sender name is whatever the client wrote in the header.
+`GetConnectionUnixUser` is the bus reporting the credentials of the connection
+it accepted, which the client cannot choose. `settings.rs` says that
+distinction is the whole security of this, and it is the one line of this slice
+that cannot be got wrong quietly.
+
+**No sender is a refusal, not a bypass.** A message with none means a
+peer-to-peer connection with no bus to ask -- an arrangement nobody designed
+for this shim, and not an invitation to skip the check.
+
+### Every arm, and the two that must fail closed
+
+The policy mirrors the Rust's, read from the document per call rather than
+cached: `control` is ordinary configuration a person edits, and a policy cached
+at startup goes on granting after it was narrowed. A round trip per write
+attempt is the cheaper mistake.
+
+    uid 0            allowed, whatever the document says -- root can edit the
+                     file this would write, so refusing would be theatre
+    any              allowed
+    user:NAME        allowed where the uid matches, refused naming the user
+    root             refused, saying where to change it
+    group:NAME       refused, and this is the interesting one
+    anything else    refused
+
+**The group arm is a refusal about the transport and not about the caller.** A
+message bus reports a connection's user and not its groups, so whether this
+caller is in the group cannot be known here -- and is not guessed. Reading
+`/etc/group` would miss supplementary groups from every other source, and
+`getgrouplist` answers for a NAME rather than for the process actually calling.
+`ncfg` sees the real credentials over a unix socket and can do this; a bus
+cannot. The refusal says so and names what can.
+
+**An unreadable principal refuses rather than widening.** A typo in `control`,
+or a daemon that could not be asked, leaves the principal `UNKNOWN` -- and a
+parser falling back to `any` would turn a misspelling in netcfgd.conf into an
+open door. Both are asserted.
+
+### Proven on the real policy, which reached exactly one arm
+
+This machine's `admin` tier is `group:netcfgd` and the caller was uid 1000, so
+the live shim answered the group refusal -- the uid from the bus, the policy
+from the running daemon, and the arm chosen by both. **A live bus can reach
+only that one**, which is why all six are driven directly: the other five would
+need a different document or a different uid, and they are the arms where being
+wrong is expensive.
+
+### Why the writes still refuse, in the right order
+
+An unauthorized caller is told so, which is the answer that will still be right
+once writing works. An authorized one is told the operation does not exist yet.
+Doing it the other way round would mean the authorization arrived untested on
+the day the write did -- **which is exactly how 0264's unauthorized method came
+to exist.** `AccessDenied` in spirit for the first and `Failed` for the second,
+because a client retrying as root should succeed in one case and never in the
+other.
+
+### One model change it needed
+
+`nmc_method_t.call` now takes the connection, because **a method that cannot
+reach the bus cannot ask who is calling.** Three existing handlers gained an
+unused parameter, which is the cheapest possible price for making the question
+askable at all.
+
+## 10.399 The oracle pointed at the port, and what it found in one run
+
+0264 names `tests/live/nm.sh` as the acceptance test for the C shim, and it was
+still starting the Rust binary. **An oracle aimed at the implementation being
+replaced says nothing about the replacement**, and the cost of that was not a
+missing check or two: the first run against the C shim did not reach its second
+check. `NCFG_NM_SHIM` points it back, which is what makes a failure here
+readable -- the same 36 checks against the other binary separate "the port is
+wrong" from "the check was always wrong", and both were passing when it was
+switched.
+
+Where it stands: **28 of 36, from 1.** The eight that remain are two coherent
+pieces of work, named at the end.
+
+**It claimed NM's name with no netcfgd behind it.** The first check tests exactly
+that and the shim ran for its ten seconds. `main.rs` refuses before claiming,
+because a shim owning `org.freedesktop.NetworkManager` while unable to answer is
+worse than one not running -- a client finds a daemon, gets errors, and stops
+looking for an alternative. `nmc_store_refresh` is the probe, not
+`nmc_state_client`: opening a client is not asking it anything. The refusal says
+"refusing to claim", which `nm.sh` greps for, so the wording is a contract
+between the two implementations rather than decoration.
+
+**libnm learns what exists from `GetManagedObjects` at `/org/freedesktop`, and
+`bus.h` said NetworkManager serves no object manager.** That claim came from
+0264's design document where it was an open question; `main.rs` had already
+answered it against a running NetworkManager 1.52 and serves one. Without it
+`nmcli general status` says "NetworkManager is not running" against a shim
+answering every property correctly -- which is what the oracle's readiness wait
+was reporting, and what no amount of reading properties by hand would have
+shown. It is built by walking the same tables the dispatcher routes with and the
+same `enumerate` callback `Introspect` uses, so there is no second list of what
+exists. Registered as an object and not a fallback, which is the opposite of
+what the depth suggests: a fallback there would answer `GetManagedObjects` for
+`/org/freedesktop/NetworkManager/Bogus`.
+
+**`GetDeviceByIpIface` was missing and fourteen checks were failing on an empty
+path.** Every device the oracle reads properties off is resolved by name through
+it first, so bridges, vlans and tunnels were all reporting nothing about
+themselves while the fault was one method up. `state`, the lowercase method, is
+there too: NM serves both it and the property, and older clients call the method.
+
+**The device state asked the document and NM's `State` is about the machine.** It
+answered `configured` -- netcfgd's word for "the document describes this device"
+-- so a down link with no carrier read as DISCONNECTED and an `interface` block
+with no `config` read as ACTIVATED. It is `up`, then `carrier`, then whether
+there is a routable address, which is `device.rs`'s mapping; `StateReason` now
+carries the two of NM's forty that are answerable, since a link nobody brought up
+and a cable that is not in are different sentences to a client.
+
+**Link-local does not count as having an address, and that is a function of its
+own.** Every link with IPv6 gets an `fe80::` the moment it comes up, so "has an
+address" reported every addressless interface as ACTIVATED. `169.254.` is the
+same thing for IPv4 and means the opposite of connected.
+
+**A radio is either the kernel's answer or the document's, and the radios list is
+the wrong source -- which was tried first.** netcfgd builds that list from
+`ncfg_link_t.wireless` deliberately, so somebody can take on a radio nobody has
+configured; a managed device with a `wifi` block over a dummy is therefore never
+in it, and that is `nm.sh`'s whole wireless fixture. `ncfg_device_t.policy`
+is the answer, already decided by the daemon and carried for exactly this reason
+-- its header says the rule belongs in one place rather than in each front end.
+The access point store had the same fault from the same source and is fixed the
+same way, which is why the scan went from four access points to none.
+
+**`Strength` was the linear formula everybody writes, and the unit test agreed
+with it.** NM's is `nm_wifi_utils_level_to_quality`: perfect at -40 dBm,
+hopeless at -100, interpolated across the sixty between. The test asserted
+`2 * (dBm + 100)` because it was written beside the code -- one witness twice --
+and what disagreed was a figure a real NetworkManager produced: 79 for -53 dBm,
+where the old formula gives 94. Every applet's signal-bars widget is calibrated
+against NM's numbers.
+
+**Three of the access point security constants were wrong, and one collided.**
+`GROUP_CCMP` was 0x100, which is `KEY_MGMT_PSK` -- so every cipher claim also
+claimed a pre-shared key, and a network the document pins to WPA3 rendered as
+"WPA2 WPA3". `PAIR_CCMP` was `GROUP_WEP40`'s bit and `OWE` was OWE-in-transition's.
+**A collision cannot be seen by reading one constant and survives a test written
+per flag**, so the whole ladder is written out and the mapping is a function
+`bus_test` checks by its SUM: 1416 for a WPA2/WPA3 network, which is a real
+transition access point's reported `RsnFlags` and pins four constants at once.
+
+**And the security a configured network reports now comes from the document.** A
+scan reports three collapsed facts; the document says `psk` with which
+generation, `eap`, or `owe`. The network an applet is about to be asked to join
+is almost always one the document describes, so this is the commonest case
+rather than an edge.
+
+Open, and the eight failures are exactly these two:
+
+- **The subtype properties are still stubs.** A bridge's `Slaves`, a vlan's
+  `Parent` and `VlanId`, a wireguard device's `PublicKey`, `ListenPort` and
+  `FwMark` answer placeholders. netcfgd observes all six.
+- **`InterfacesRemoved` is not emitted**, so a device that goes stays in a
+  libnm client's cache: 10.398 emits `DeviceRemoved`, which libnm reads as a
+  hint about an object it expects to know already. The membership diff that
+  drives it is in place and the signals are declared.
+
+**`make live` is red where it was green, and that is the honest state.** Leaving
+the oracle pointed at the Rust shim would have kept a passing run that tested
+nothing about the port.
+
+## 10.406 The fake answered before it wrote down what it had been asked
+
+`daemon_wifi_test` lost two checks and the output was `FAILED` and nothing else.
+It has ten assertions of the form
+
+	check(heard && strstr(heard, "ADD_NETWORK") != NULL &&
+	    strstr(heard, "SELECT_NETWORK 0") != NULL, "...");
+
+and **not one of them printed `heard`** -- so there was no way to tell a missing
+command from a command with different arguments, or which of a pair of `strstr`
+calls had come back empty. An afternoon went on reasoning about a log sitting in
+a variable, and this file already had a `detail()` helper every other diagnostic
+in it uses. `check_heard` prints it now, and the cause fell out of the first run:
+
+	the fake heard: PING / LIST_NETWORKS / ADD_NETWORK
+	  SET_NETWORK 0 ssid 486f6d654669626572 ... ENABLE_NETWORK 0 / ATTACH
+
+**Both failing traces ended exactly at `ATTACH`, and `SELECT_NETWORK` is what
+`ncfg_wifi_connect` sends immediately after it.**
+
+### The cause, and it is the fake's
+
+`fake_supplicant.py`'s `SELECT_NETWORK` branch answered first and logged last:
+
+	reply(server, sender, b"OK\n")
+	for listener in attached: server.sendto(event, listener)
+	print(command, flush=True)
+
+So netcfgd got `OK`, `ncfg_wifi_connect` returned, the test called
+`log_since(mark)` and read the file -- while the fake was still sending the
+connected event to every attached listener and had not reached its `print`.
+`ncfg_wifi_connect` attaches *before* selecting, deliberately and for a good
+reason (0194), so there is always a listener to widen that gap.
+
+**Only the last command of a window can be lost this way**, which is why this
+was invisible for so long: every earlier command's log line gets flushed during
+the next command's round trip. The last one has nothing behind it.
+
+Proven, not inferred. Moving that one `print` above its `reply` made all checks
+pass three times; putting the old file back failed twice; restoring it passed
+again. **Logging on receipt is also the more accurate record** -- it says "I was
+asked this", which is what the assertions are about, where logging after the
+reply says "I finished handling this" and is the fact that races.
+
+Twelve branches shared the pattern and all twelve now log first. The move is a
+pure reordering: every one printed `command`, a constant, or an f-string over
+`command`, so nothing printed depends on state changed in between -- and the
+converter asserted the multiset of `print` lines was identical before and after
+rather than trusting that.
+
+### Why it passed in the morning and not the afternoon
+
+Load. These checks passed at 14:24, 14:28, 14:33 and 14:41 and failed every run
+from 15:05 -- 8 for 8 -- with no C source change in between, which is what sent
+the first investigation looking for one. **It is not the renderer commit**: the C
+was reverted to the parent in place, rebuilt, and failed identically three times.
+What changed is that another session began a container build on this machine,
+and the window between a reply and a `print` is exactly the kind of thing that
+loses under load. A race that always wins looks like working code.
+
+**Two smaller things found on the way.** The conversion matched one `check()`
+whose message reads "a generation nobody has heard of" -- the word in prose, not
+the variable -- and the compiler caught it; a pattern over a call's whole text is
+not a pattern over its identifiers. And `c-test` leaks two `/tmp` directories per
+run, one `ncfg-apply-hook-*` and one `ncfg-apply-kernel-*`, one pair at each of
+14:24, 14:27, 14:33, 14:38, 14:41 and 15:04.
+
+## 10.408 `hostname = "dhcp"` rendered as a word the language refuses
+
+`render_globals` wrote `hostname = "from_dhcp"`. `lower_global` compares against
+`"dhcp"` and nothing else; everything else falls through to the hostname check,
+where `from_dhcp` is refused outright because an underscore is not legal in a
+hostname. **So the renderer produced a document that does not compile, and
+`ncfg profile save` refused on any machine with `global { hostname = "dhcp" }`
+in it** -- which is an ordinary thing to have.
+
+The same defect was found in the Rust renderer earlier the same day. Two
+renderers written from one understanding inherit the same mistakes, which is now
+three for three: the `@bssid` marker, the bare block label, and this.
+
+### A third corpus, and the method that keeps paying
+
+Found by round-tripping the **78** documents `lower_test.c` already compiles --
+a corpus written to exercise lowering, with no reason to ask about rendering --
+and the renderer's own suite had no case for this policy at all. The experiment
+was a temporary instrumentation of one helper, `compiles()`, which 79 call sites
+go through. Measured:
+
+	53 OK   23 MISSING   1 NOCOMPILE   1 DIFFERENT
+
+**The 23 refusals are honest and were read rather than counted**: routing rules,
+access points, qdiscs, hooks, a wifi policy, delegated addressing, advertise and
+guard -- the C renderer's known gaps, each reported by `ncfg_render_refuse`
+rather than written wrongly. A sweep that treated them as failures would have
+buried the two that matter in twenty-three that do not.
+
+### The one left open, with the evidence it now has
+
+The `DIFFERENT` is `device eth0 { ethtool { } }`. An empty `ethtool` block
+contributes nothing, so the device compiles to an entry with no settings, and
+`render_device` skips a device whose body comes out empty -- taking the device
+itself with it. Its comment says that skip "is right".
+
+**It is not mine to overrule, and it is no longer only a matter of taste.** The
+same skip was removed on `master` for the same reason 10.21 gives, and here is a
+document in this branch's own corpus that it loses: the round trip fails, so
+`profile save` refuses on a machine configured that way. What the comment and the
+corpus now say are different things, and `working-practice.md` asks that this be
+flagged rather than resolved in either direction. It also blocks making the
+round-trip check permanent over this corpus, which is the obvious next step once
+it is settled.
+
+## 10.410 Routing rules render, and two things had to be found first
+
+`render.c` refused `%zu routing rule(s)` wholesale, so **a machine with any
+policy routing could not save a profile** -- and a rule is not written by
+accident, so the refusal fell on exactly the configurations somebody had thought
+hardest about. Fifteen fields, with the spellings coming from
+`ncfg_rule_action_name` and `ncfg_rule_family_name`, which the lowerer's own
+`..._from_name` pair invert. **No table here to put in the wrong order**, which
+is the mistake the wifi backend made an hour earlier.
+
+`lookup` is written as `lookup` rather than `table`: the compiler reads both, the
+model calls it `table`, and a profile is read by people, so it gets the spelling
+the manual teaches.
+
+### `l3mdev` was a key no document could carry
+
+The C accepted `l3mdev` as a key and then refused every rule that used it. The
+completeness check asked "action is lookup and no table" and said so -- and an
+`l3mdev` rule has no table **by construction**, the VRF the interface is
+enslaved to supplying one. So a VRF rule could not be written at all, and the
+renderer's `l3mdev` line was unreachable.
+
+Both halves are here now, as they are in the Rust: the "no table" rule exempts
+`l3mdev`, and a rule naming **both** is refused, because that is asking for two
+different tables and picking one would be inventing an answer.
+
+Proven by sabotage in the direction that matters: dropping `l3mdev` from the
+renderer makes a valid VRF rule render to text the compiler refuses -- *rule
+`vrf-local` looks up no table and names no action* -- which is exactly what the
+Rust renderer did until a round trip caught it.
+
+### `invert` was applied, observed, serialised, and unwritable
+
+The sharper find, and the fixture is what turned it up: `every field of a routing
+rule` would not compile, on **`unknown rule key \`invert\``**.
+
+`ncfg_routing_rule_t` carries `invert`, and the C uses it at every end but one.
+`ops_route.c` sets `FIB_RULE_INVERT` from it, so the executor can apply an
+inverted rule; `sys/rule.c` reads it back off a netlink dump, so the observer can
+see one; `plan/model_json.c` writes it out, so a plan carries it. **Only the
+configuration language could not say it.** A rule the kernel can hold and
+netcfgd can report was one no operator could ask for.
+
+That is `evidence.md`'s *an interface is only as wired as its least-used method*
+with the unwired end being the one a person types. It survived because every
+instrument that would notice looks at the other four ends, and because the
+renderer could not write rules at all -- so nothing ever tried to round-trip one.
+
+**The fixture found it by naming a non-default value for every field**, which is
+the same property that caught the wifi backend table. A case that sampled two
+fields would have passed.
+
+### And two existing tests were pinning the refusals
+
+`render_test.c` asserted `1 routing rule(s)` in its refusal list and, in another
+function, that a rule is *refused and counted*. Both are gone: the first removed
+from the expected array, the second replaced by a note saying where the case
+moved. A refusal assertion for something that renders would send the next reader
+looking for a gap that is closed -- and the neighbouring check that the list has
+lost no entry went on passing, which is what makes removing one safe to do
+deliberately.
+
+## 10.412 `ethtool` and `qdisc` render, and one sabotage round-trips
+
+Both were refused wholesale, so **a machine with any link setting or any shaped
+queue could not save a profile** -- and these are settings somebody chose against
+a specific NIC or a specific uplink, which makes them the least guessable things
+in a document.
+
+**A toggle has three values and `off` is not the absence of one.** `unmanaged` is
+the default and means netcfgd leaves the driver's own answer alone, so it is
+omitted; `on` and `off` are both written. A renderer treating `off` as nothing
+turns *switch this offload off* into *do not touch it*, which is the opposite
+instruction -- sabotaged, and it fails two checks.
+
+### The sabotage that round-trips, which is why the text is asserted too
+
+The qdisc has two forms: `qdisc = "fq_codel"` for a kind carrying no rate, and a
+block for one that does. Making the renderer **always** write the block form
+changes nothing about the document -- it compiles to the same policy, so the
+round trip passes -- and it is still wrong, because a profile is read by people
+and that is not what a person writes.
+
+It fails three checks only because the case asserts the *text* beside the round
+trip. `render_test.c`'s own header says to do that where a spelling has more
+than one accepted form, and this is the first time in today's work that the
+round trip alone would have been silent. Worth keeping as the example: a
+symmetric check cannot see a difference that both sides agree about.
+
+### One table fewer rather than one more
+
+`qdisc_name` and `ncfg_qdisc_kind`'s parser each carried their own copy of the
+closed set, and the renderer would have been a third. The array is at file scope
+now with both functions using it, and `ncfg_qdisc_kind_name` is exposed through
+`lower_internal.h` -- so the spelling has one home. **A kind rendered under the
+wrong name is a document that compiles and describes a different scheduler**,
+which is the shape the wifi backend table paid for earlier today, so the fix was
+to remove the opportunity rather than to be careful.
+
+### Two self-inflicted faults, both caught in the first run
+
+An `offsetof` table walking the six toggles by offset was written and then
+replaced by six named calls: the pointer arithmetic is the kind of thing that
+goes wrong silently in a renderer, and six lines are cheaper than being clever.
+In making that swap the `ethtool {` opening line went with the text being
+replaced, so the block rendered as bare assignments and *did not parse* -- which
+the round trip said immediately.
+
+**The ingress half stays refused**, as it is in the Rust: a policy metering
+arriving traffic is served by building an `ifb` and redirecting to it, the `ifb`
+is derived rather than written, and rendering it back would mean recovering an
+`ingress_bandwidth` the document no longer holds. That is the same reason
+`ingress_redirect` is refused, and the C has no inversion machinery for it.
+Four device refusals remain, each deliberate: a kind, a match block, that
+metering case, and the redirect.
+
+### The `agree` gate needed a third kind of recorded divergence
+
+`tests/determinism/netcfgd.conf` shapes eth0 with cake at 100mbit, so this made
+the two programs disagree on `profile save` for the first time: the Rust names
+`device eth0: qdisc` and writes nothing, the C writes the profile. That is 0266's
+expected direction -- the C is what `make` installs -- and it is not something to
+let the gate absorb, because **a record saying "these differ" would also cover
+the C rendering the qdisc wrongly**, which is the only failure here worth
+catching.
+
+So `SAVE_AHEAD` pins four things separately, the way `reset`'s three divergences
+are pinned: the Rust's refusal wording, what the C said instead, the files the C
+leaves behind and the Rust does not, and **what the C's written-back snapshot has
+to contain, read off the fixture rather than off the renderer.** The last is the
+one that makes it a second witness rather than the renderer agreeing with itself.
+When the Rust goes, every part of the entry stops holding and the gate goes red
+naming it.
+
+Its summary line was over-claiming and now does not: it counted all four
+compiled corpora as "written back as the same profile" when one of them was not,
+and the heading above the recorded divergences said `TWO CASES` when there were
+four. The count is gone rather than corrected -- a count in a docstring is a
+claim about the file that nothing recounts.
+
+### A sabotage the check under test never saw
+
+Deleting the `bandwidth` line from the renderer turned the gate red through the
+wrong check: it reported the C no longer saying `wrote ...`. The C's own
+`profile save` verifies its round trip before keeping anything, so it refused the
+save itself -- the program defended the gate's fixture, and the content check
+never ran. **A control has to be reached, not only able to fire.**
+
+What only the content check can answer is a rendering that still round-trips, so
+the second attempt collapsed `render_rate`'s three suffixes to `kbit` alone:
+`100000kbit` is the same rate, compiles identically, and is not what the fixture
+says. That fired through its own route and named the fragment. The other two
+pieces were sabotaged in the record -- a refusal wording the Rust does not use,
+and a file the C does not write -- and each named itself.
+
+## 10.413 An address's peer and lifetimes render, and a survey that was wrong twice
+
+`render_link.c` refused `an address with lifetimes or a peer`, so **a
+point-to-point link could not save a profile.** All three modifiers -- `peer`,
+`preferred_lft`, `valid_lft` -- are in the language, and the code's own comment
+said closing it was separate work with its own round trip. This is that work.
+
+`ncfg_static_t` holds four fields and all four are written now, which is what
+makes it complete rather than a sample: the compiler *refuses* every modifier it
+cannot keep rather than dropping it -- `netmask` folds into the prefix, and
+`scope`, `label`, `nodad`, `brd` and the rest are named as unsupported -- so a
+compiled static address can carry an address, a peer and two lifetimes and
+nothing else. That refusal upstream is what bounds this.
+
+**`forever` is the absence of a lifetime**, not a value: `set_lifetime` stores it
+as unset, so writing nothing where `has` is clear is the same statement in fewer
+words. Sabotaged by saying it out loud -- `valid_lft forever` on every address --
+and that **round-trips**, because it compiles back to the same unset field. Only
+the text assertions caught it, three of them. The second case in two days where
+the round trip alone would have been silent, so it is no longer a curiosity: a
+renderer needs its text asserted wherever the language has two ways to say one
+thing.
+
+`peer` and `pointopoint` are two spellings of one field, so a document using the
+second comes back using the first. That is the round trip working -- what has to
+survive is the document, and the document has one field -- and it is asserted
+rather than assumed.
+
+### The survey that found this was wrong twice, in the reassuring direction
+
+The question was which renderer refusals are worth closing, and the answer turns
+on whether the *language* can express the thing at all: a refusal for something
+no config file can write is unreachable and costs nothing, and the code says so
+at four of them.
+
+**First instrument: grep the parser for each key.** It reported `match` and
+`client_id` as absent from the language and `hooks` as absent too. All three are
+in it -- `match` and `dhcp` are blocks the grep did not look for, and `hooks` is
+there under a syntax the probe got wrong. A name-keyed grep answers about the
+spelling it was given, which is the lens that already failed once on the
+`Observed` field sweep.
+
+**Second instrument: compile a probe for each and look for a complaint.** The
+detector was `grep 'unknown|expected|unexpected'`, and it reported nine
+constructs "accepted" that the compiler had rejected -- because it rejects a
+block it does not have with ``is not valid inside `interface` ``, which contains
+none of those three words. **A probe that can only see one vocabulary of refusal
+reports every other kind as a pass.** Both errors inflated the work: nine gaps
+that were not there.
+
+What answered it was reading the compiler's actual first line for each probe.
+The reachable refusals are three, not fourteen: this one, `interface: advertise`,
+and `hooks` on an interface and a network. Everything else -- the five `dns`
+facts, seven `dhcp` lease fields, `match`, `ingress_redirect`, route `scope` and
+`proto` -- names something the language has no syntax for, which is why each one
+carries a comment saying it cannot fire from a compiled document.
+
+## 10.415 `guard` renders, hooks cannot, and the survey was wrong a third time
+
+**`guard` was the most expensive refusal in the renderer and the cheapest to
+close** -- one field, three lines. A guard says why an interface must not be
+disrupted, and the reason string is the whole value: "eth0: nfs root" tells a
+reader what to go and stop. An interface saved without it comes back as one
+netcfgd may take down, and the thing it was guarding goes with it. Until now
+every machine with a guard could not save a profile at all.
+
+Written through `ncfg_render_quote` rather than a format string, because nothing
+validates a reason -- sabotaged by writing it unescaped, and **only** the case
+whose reason carries a quote catches that. One check, which is the argument for
+writing it.
+
+### Hooks cannot be rendered, and that is not a gap
+
+The language takes a phase block of **inline shell**; `ncfg_lower_hook` hands it
+to a sink that materialises it into a file, and the document carries a path, a
+hash, a user and a timeout -- and no shell, deliberately, because a document that
+could carry shell would be remote code execution with extra steps. So there is
+nothing in the document to write the block back from.
+
+Recovering it would mean reading the file off disk, which would make a saved
+profile depend on something outside the config files and break 0009's purity
+property. **So the refusal is permanent rather than pending**, and the comment at
+the site now says so: whether that trade is worth revisiting is a design question
+and not the renderer's to settle. Both programs refuse it, so nothing diverges.
+
+### The third wrong instrument, and why the third one is the interesting one
+
+10.413 recorded two: a name-keyed grep, and a probe whose detector could only see
+one vocabulary of refusal. The conclusion drawn from fixing them -- that the
+reachable refusals were advertise and hooks alone -- **was itself wrong, because
+`guard` is a key and the probe wrote it as a block.** The error was in the probe
+again, one layer along.
+
+The first two were instrument errors. The third was a *frame* error: having just
+been burned twice on probe syntax, the survey still accepted a syntax error as
+evidence of absence, because by then the answer felt settled. `evidence.md` names
+this -- a frame that has just been right is the hardest one to drop -- and the
+tell was there, since ``guard is not valid inside `interface` `` is a complaint
+about *where*, which a key-versus-block confusion produces and a missing feature
+does not.
+
+**What actually settles reachability is reading the lowering, not probing it.**
+`lower_interface.c` is a chain of `strcmp(key, ...)` for keys and a separate arm
+for blocks; which arm a thing is in is the answer, and it cannot be mistyped. The
+refusal sites bear this out: eleven of twenty-five carry a comment saying they
+cannot fire, and the other fourteen say nothing either way -- so the comments are
+not a census either.
+
+## 10.416 Every address source renders now
+
+`@pd:` and `reported` were the last two the model has, both refused through the
+same `%s addressing` line, and closing them leaves the switch in
+`render_addressing` covering all seven kinds -- the `default:` arm is now
+defensive rather than load-bearing.
+
+`@pd:` is the other half of 10.383. `advertise` tells the hosts behind a machine
+what their prefix is; a delegated address is how the machine gives *itself* an
+address out of the same delegation. **A router has both**, so either one refused
+was enough to stop it saving a profile, and they were refused separately in two
+different functions.
+
+The spelling is `@pd:<interface>[/<subnet>][=<suffix>]` and the suffix defaults
+to `::1/64`, so the form that states the default and the form that omits it are
+one document. Only the shorter is written -- and **sabotaging that is the third
+round-trip-blind case in two days**: always writing the suffix compiles to the
+same document, so the round trip passes and one text assertion is the whole
+defence. The other two were the qdisc block form in 10.412 and `valid_lft
+forever` in 10.382.
+
+That is now a pattern rather than three incidents, and it has a shape: **the
+round trip cannot see a choice between two spellings of one fact.** It sees
+anything that changes the document, which is most defects; it is blind to exactly
+the class where the language is redundant. So the rule for this renderer is
+narrow and mechanical -- where the language accepts more than one way to say a
+thing, the test asserts the text as well, and where it does not, the round trip
+is enough.
+
+`reported` takes no modifiers, so the bare word is the whole source. Rendering it
+as anything else would turn an observation into an instruction: it says netcfgd
+must not manage this interface's addresses and must report what it finds.
+
+## 10.417 Every device kind renders but the one netcfgd makes itself
+
+`wireguard`, `openvpn`, `tunnel` and `tun`/`tap` were the four the switch in
+`render_kind` refused, and closing them leaves **`ifb` alone** -- refused because
+netcfgd synthesises one per interface asking for `ingress_bandwidth`, so
+rendering it would put a derived device into a profile as though somebody had
+asked for it. That is a property of the thing, like hooks in 10.415, rather than
+work left undone.
+
+A WireGuard machine could not save a profile at all, which is the largest of
+these: the keys stay references -- `ncfg_secret_ref_t` is incapable of carrying
+material -- so saving a profile copies no key anywhere, and a peer's public key
+goes out through `ncfg_key_render` rather than any spelling of this file's own.
+Base64 has more than one spelling of one 32-octet key, the final character
+carrying four significant bits, and the model keeps octets precisely so two
+spellings compare equal; rendering them by hand would reintroduce the second
+spelling at the one place the whole arrangement exists to prevent it.
+
+**The mode of a tun device is the block's name, not a key in it.** `lower_tun` is
+reached from `tun { }` and from `tap { }` and takes the mode from which head it
+saw, so `tun { mode = "tap" }` is an unknown key rather than a tap device. One
+model type, two spellings, and the spelling is the whole difference -- sabotaged
+by inverting them, and it fails four checks.
+
+### The redundancy rule from 10.416 paid for itself the same day
+
+10.416 ended with a rule: where the language accepts more than one way to say a
+thing, assert the text as well, because the round trip is blind to a choice
+between two spellings of one fact. These four kinds have five such pairs --
+`config`/`file`, `username`/`user`, `mode`/`kind`, `parent`/`dev`, `key`/`vni` --
+and the first draft of the test asserted only `mode`.
+
+Adding the other four was mechanical, not inspired, and then **writing `user`
+where `openvpn` should write `username` failed exactly one check: the assertion
+added for that reason.** The round trip passed, because the parser takes both.
+Without the rule the test would have been written, the sabotage would have come
+back green, and nothing would have said why.
+
+So the rule is not a heuristic any more. It has a procedure: read the lowering
+for `||` chains on key names, and assert the canonical spelling of each pair it
+finds.
+
+### What the refusal list is now, and a helper whose death is the finding
+
+Twenty-odd refusals remain and **hooks is the only one a config file can
+reach**. Every other names something the language has no words for -- the five
+`dns` facts, the seven `dhcp` lease fields, `match`, `ingress_redirect`, a
+route's `scope` and `proto` -- or something netcfgd synthesises, or a shape the
+lowering already rejects before the renderer sees it.
+
+The evidence is a compiler warning rather than a survey: `refusals_of_config` in
+`render_test.c`, which compiled a config file and collected its refusals, has no
+callers left. It had them while `wireguard` and `openvpn` were refused. Its
+absence is noted in the file rather than quietly tidied, because anything new
+that is both refused and reachable wants it back -- and because an unused test
+helper is the cheapest census of reachability this tree is going to get.
+
+## 10.419 Nothing is unported, and the list still said five things were
+
+Asked what remains to port. **Three independent instruments agree that nothing
+of substance does**, and they are independent in the way `evidence.md` asks --
+different artifacts, not one query asked three ways:
+
+- **`netcfgd --supported`**: 115 rows, 100 supported, 15 refused. Every refusal
+  carries its own sentence and every sentence says the thing cannot exist rather
+  than that it is missing -- a physical device netcfgd configures and cannot
+  make, a pppoe interface its helper creates as it dials, a reload for a client
+  whose reload is its own business. The ledger is derived from
+  `ncfg_apply_supported` per op and per kind, so it cannot drift from the code.
+- **`ncfg --help`** is byte-identical between the two programs, which
+  `tool/agree_gate.py` compares as a read case.
+- **`warn_unported`** holds one entry, `link_local`, and its own comment cites
+  the Rust arm that carries the same warning. Checked by phrase rather than by
+  the line number it gives: `crates/netcfgd-plan/src/lib.rs` has
+  `AddressSource::LinkLocal` warning "accepted but not yet applied by this
+  build". So it is a feature neither language implements, not a port gap -- and
+  the C deliberately dropped the "not yet", which was a promise nobody made.
+
+### What the list actually still contained: five false claims
+
+Every one says a capability is missing that this build has. Each was checked by
+reading the function it describes.
+
+| site | said | is |
+|---|---|---|
+| `apply/apply.c` | `wg.set_device`/`wg.set_peers`, "neither of which this build executes" | `ncfg_kernel_wg_op` opens a genl socket and sends them |
+| `plan/link.c` | the executor "builds no nest" for bond, macvlan, tunnel, vlan | all four have nests; the probe is a backstop with nothing left to fire on |
+| `plan/build.c` | the same, with `k-bond` as the witness | a bond is creatable, so that document no longer reproduces it |
+| `apply/backend_ops.c` | "five of the nine backend kinds have a module", pppoe "not ported" | eight kinds, six start, seven modules, and `backend.start pppoe` is supported |
+| `cli/run.c` | an arm can be "a verb whose module is not ported" | no arm is, and `--help` matches the Rust byte for byte |
+
+**The WireGuard one nearly cost a day.** It was the most plausible next task on
+the list -- a kernel device created but not configured, which the comment itself
+says looks like a working interface -- and the work was already done. That is the
+cost `evidence.md` names for this class: a gap claim that outlives its gap sends
+the next reader at work already done, and its falsifier is a commit nobody
+connects to it.
+
+**The tests were right the whole time.** `plan_kind_test.c` says in as many
+words that the bond and the macvlan "have left this list" and that "with them
+went the last kind a *document* could express that `ncfg_apply_supported`
+refuses". `apply_kernel_test.c`'s `check_supported_matches_the_builders` asserts
+the agreement for all fifteen kinds through their real entry points, so the
+behaviour could not rot. Only the prose beside the code did -- which is why four
+of the five are in `src/` and none in `c/tests/`.
+
+### The remedy for a count is to stop quoting it
+
+`backend_ops.c`'s was the instructive one: "five of the nine" is a
+present-tense countable claim about the tree's own shape, which is the form
+`evidence.md` says rots, and it was wrong in both figures. It now names no
+number and points at `netcfgd --supported`, which recounts itself on every run.
+That is *move the count out of judgement and into the tool* where the tool
+already existed.
+
+### And the correction added a sixth, caught before it landed
+
+The replacement sentence in `build.c` said `declined` is filled by "a veth whose
+peer name is taken and a physical device that is not there". The second half was
+inferred, not read. `grep` for `&builder->declined` finds exactly two sites --
+the veth clash and the executor probe -- and absent hardware is held back by
+`link_is_plannable`, a different mechanism. **The first grep missed the probe
+site because the pattern spanned a line break**, which is the loose-pattern
+failure of *Four ways to manufacture an absence* met while fixing its sibling.
+Fixed before the commit; recorded because writing a correction is exactly when
+the next wrong claim gets written.
+
+## 10.420 The rebase onto master, and the three defects it surfaced
+
+295 commits replayed onto master, which had moved 58 commits since this branch
+left it on 2026-09-18. Eight conflicts. The measurement that chose the method is
+in the commit for the renumbering; what belongs here is what the rebase *found*,
+because that is the argument for doing it rather than merging.
+
+### Both branches had fixed the same three defects, and each had half
+
+- **`nm.sh`'s metric.** master pinned the literal `metric = 3922`; this branch
+  asserts that *a* metric is written and that the priority round trips. The
+  second is the better test and its own comment names the trap the first fell
+  into -- a hard-coded result goes stale in silence, which is the defect 0207
+  is about. Took this branch's.
+- **The GUI socket aliasing.** Each branch fixed **half**: master copied the
+  path before `close()` could clear it but discarded the error into a local;
+  this branch passed the error to the caller and did not copy. Neither alone
+  was the fix.
+- **The `udevadm` guard**, three-state on both sides. Here the tail below the
+  conflict marker belonged to this branch's `if/elif/else`, so taking master's
+  opening would have produced a construct that did not parse -- the one case
+  where reading only the hunk would have misled.
+
+### master carried the empty-`device` regression, which 10.418 predicted
+
+Three agree-gate cases failed with ``override device eth0`` *has nothing to
+override*. That is 10.418's reproduction, in the Rust, on master's code, which
+10.418 could not reach from this branch. The skip is restored and `round_trip`
+pins what that leaves open.
+
+**The gate could only see it after the rebase**, because this branch's Rust was
+three weeks stale: it still refused the renderer features master had closed, so
+the comparison was between a current C and an old oracle. That is what made
+`SAVE_AHEAD` necessary, and it is why the entry emptied itself.
+
+### `SAVE_AHEAD` went red and asked for its own deletion
+
+It recorded that the C rendered a qdisc the Rust refused. master's Rust renders
+it, so the pinned `rust` fragment stopped appearing and the gate failed naming
+the entry rather than passing over a closed divergence. That is the four-part
+pinning working: a record saying only "these differ" would have gone on passing.
+
+One divergence was left after it went: both programs render the qdisc and put
+`mtu` on opposite sides of it. Neither was a porting error -- the feature was
+implemented twice, independently -- and the gate compares bytes, so one had to
+move. The Rust's did, because a plain key before a nested block is the order the
+configuration itself is written in and under 0266 the C is what ships.
+
+The gate now reports **4 configurations written back as the same profile and 0
+divergences**, against 3 and 1 before.
+
+### And a reading error of mine, which is this file's own rule
+
+`make check` was reported as passing when it had exited 2. The harness's
+completion notice carries the **shell's** exit code, and the command ended with
+an `echo`, so it was always 0; make's status went to the output file that echo
+wrote, which went unread. *Ask the object you mean* -- the status of the thing,
+not of whatever followed it -- met in the one place the instrument is the
+harness rather than a pipe. The gate's own output is what caught it, because it
+was read whole.
+
+## 10.422 The ingress shaper is undone, and the refusal's reason was wrong
+
+**Three refusals for one setting, so no machine shaping arriving traffic could
+save a profile.** `qdisc { ingress_bandwidth = "50mbit" }` on a device compiles
+to two things -- an `ingress_redirect` naming `ifb-<device>`, and a synthesised
+`ifb` whose own cake qdisc carries the rate and meters arriving traffic -- and
+the C refused all three parts:
+
+    device eth0: ingress_redirect
+    device ifb-eth0: kind ifb
+    device ifb-eth0: a qdisc metering arriving traffic
+
+**The refusal said the information was gone, and it is not.** Its comment read
+that what a snapshot would have to write back "is the `ingress_bandwidth` it
+came from, which the document no longer holds by the time this sees it. A
+derived field is not a missing feature, and treating it as one would be the
+bug." The first half of that is false: the rate is on the `ifb`. The second half
+is still right, which is why what goes out is the *setting* and never the
+redirect -- writing the redirect would make the next compile synthesise a second
+`ifb` beside the first.
+
+### Found by re-measuring after the rebase, not by the gate
+
+The renderer was complete when 10.419 measured it. The rebase then brought
+master's Rust forward, and master's `fc191b8c` had taught it to undo the shaper
+-- so the C was behind by one refusal and the earlier measurement had outlived
+its subject.
+
+**The agree gate could not see it**, and that is the finding about the gate: no
+configuration in its corpus shapes arriving traffic, so both programs were
+compared on inputs where the difference does not arise. What found it was
+diffing the two renderers' refusal lists, which is a different instrument from
+running them on a corpus.
+
+### Computed from the document, not collected into a side table
+
+The Rust builds an `IngressShaping` map up front. This asks the document on
+demand instead: there are a handful of devices, the walk is cheap, and a
+parallel structure is a second thing to keep in step -- which is the fault this
+file has already paid for twice in word tables. It also removed the allocation,
+the ownership and the free.
+
+Two halves, and the second is what makes it safe:
+
+- a device whose redirect names the `ifb` this build would have made, where that
+  `ifb` is bare, gets `ingress_bandwidth` written back and the `ifb` is written
+  nowhere;
+- anything else is **refused by name**: a redirect onto a device that is not
+  there, onto an `ifb` this build would not have called that, or onto one
+  carrying a field of the operator's. Undoing past their field would discard it
+  in silence, which is what the unrenderable list exists to prevent.
+
+`bare_ifb` enumerates `ncfg_device_t`'s fields, which is the part that rots: a
+field added later is one it silently stops checking, and the symptom would be a
+profile that quietly dropped it. **The rot is made loud** with a
+`_Static_assert` on the struct's measured size -- 584 bytes, x86-64 -- which
+sends whoever grows it to this function. Shown firing by changing the constant
+to 592.
+
+### A sabotage that did not land, and read as a dead check
+
+Four sabotages, and the first reported **zero** failures: the bareness check
+looked incapable of failing. It was not -- the edit had replaced only the
+`managed`/`on_unmanage` clause and left the `mtu.has` test that the case
+actually trips. Removing the whole block fails exactly the case written for it.
+
+*Confirm the sabotage landed* is already the rule, and this is the shape it
+takes when a check is a single long condition: a textual edit applies cleanly,
+disables a third of what it names, and the green run reads as "this check is
+dead" rather than "that edit missed".
+
+### And `refusals_of_document` is a function nobody has
+
+The comment above the helper named it that; it is `refusals_of_json`. Written
+while the two cases below were being added, which is how it was noticed -- the
+compiler refused the name. Fixed, and worth one line because 10.419 swept this
+class in `src/` and a test file's comments were not in that sweep.
+
+## 10.423 The renderer had no corpus guard, and adding one found two faults
+
+Asked to keep porting renderer gaps with the refusal lists agreeing, so the
+question became what instrument had not been used. **No C test round-tripped a
+corpus at all.** `lower_test.c` compiled 78 documents and never asked whether
+they rendered back; `render_test.c` had only the cases somebody thought to
+write. The Rust guards three corpora, and its own comment says why: five
+planner fixtures caught a renderer defect none of the compiler's ninety
+documents could see.
+
+`ncfg_config_round_trips` is that guard, and `lower_test.c`'s `compiles()` now
+asks it of every document it builds. Two faults, both real.
+
+### Where it lives, because the layer was the first thing I got wrong
+
+It was written in `compile/` beside the renderer, which is where the Rust keeps
+it. That cannot work here: the third step is a document comparison, and
+`host/document_compare.c` is where that lives -- including the one member it has
+to leave out. So it is in `host/round_trip.c`, and `profile_save.c` already
+performs the same sequence against the machine's observed state.
+
+### And the corpus, which I got wrong more expensively
+
+The guard went into `c/tests/planfix.h` first, where 140 plan fixtures would
+have been free. It reported **70 faults**. Sixty-two were not faults:
+`planfix.h` builds documents from JSON, and **the lowering synthesises a device
+per interface**, so a document that never went through the lowering gains
+devices on recompile and can never round trip. Measured directly --
+`before devices: []`, `after devices: ['eth0']` -- rather than argued.
+
+The Rust's equivalent guard works because `netcfgd-plan/tests/fixtures.rs`
+compiles fixture *text*. The property belongs to compiled documents, and
+`lower_test.c` is where the C has those.
+
+**A first diagnosis was wrong too, and plausibly.** The only difference in my
+reduced fixture was `generated_by`, which `document.h` excludes from equality
+and the canonical writer emits -- so a string comparison of canonical JSON
+reports it. That was a real fault in the instrument and fixing it changed
+nothing: the count stayed at 70, because the reduced fixture had no interfaces
+and so could not show the synthesis. **A reduction that fires reliably tells you
+where to look and nothing about why**, which is already in `evidence.md`; this
+is it costing a diagnosis.
+
+### What the valid corpus found
+
+Three faults of 79, and one of the three was worth the whole exercise.
+
+**Hooks: two, and skipped structurally rather than tolerated.** A hook is a
+phase block of inline shell the compiler materialises into a file; the document
+carries a path and a hash, so there is nothing to write the block back from. A
+document carrying one has no round trip to assert, which is a different
+statement from one that fails. Asked of the document rather than matched on a
+message.
+
+**The empty-device hole, reached from `device eth0 { ethtool { } }`.** 10.418
+recorded that hole as needing "an access point beside it to observe". It needs
+nothing of the sort: a declared device the operator left at every default is
+written nowhere, and the simplest possible config reaches it. **Pinned rather
+than skipped** -- `compiles_but_cannot_round_trip` asserts the failure *and its
+reason*, so closing the hole fails there and sends the next reader to 10.418
+instead of leaving a silent exception behind.
+
+### The one real renderer defect: a tunnel of the wrong address family
+
+Found in the planfix run before that corpus was ruled out, which is worth
+saying: **a wrong instrument still produced one true finding.** The renderer
+wrote `tunnel { mode = "geneve"; remote = "2001:db8::9" }` and the compiler
+answered *a `geneve` tunnel carries an IPv4 outer header, and `remote` is
+IPv6*. So the renderer produced a profile that does not compile, and
+`profile save` would have refused it with "would not reproduce what this machine
+is running" -- which says nothing about the tunnel.
+
+Refused by name now, **asking `ncfg_tunnel_is_v6` rather than restating the
+rule**, so the renderer and the lowering cannot drift. Unreachable from a config
+file, like the `dns` and `dhcp` refusals, and kept for the same reason.
+
+### And a duplicate word table of my own
+
+`lower_kind.c` has had `tunnel_name` all along; 10.417 added
+`tunnel_mode_words` to `render_device.c` -- a second copy of the same seven
+words, committed by the hand that recorded in 10.381 that "a kind rendered under
+the wrong name is a document that compiles and describes a different
+scheduler". Both are `ncfg_tunnel_mode_name` now. The rule is easy to state and
+easy to break while writing something else.
+
+### Three invocation errors, one class
+
+`client_test`, `render_test` and `lower_test` each resolve a fixture relative to
+their own directory, and each was run from the repository root and read as a
+failure -- a missing witness, a missing schema, a missing example file. Three
+times in one session. The suites are right to use relative paths; what was wrong
+is running them from anywhere else, and `make c-test` does not.
+
+## 10.425 A probe's `require_lease` was dropped, found by asking the example file
+
+10.423 added the round-trip guard to `lower_test.c`'s own documents. The example
+file was still unasked, and it is the corpus a reader meets first and the one
+`ncfg profile save` is most likely to be pointed at. `example_cases()` already
+compiles all 101 blocks; asking each whether it renders back is three lines and
+found a real defect in one.
+
+**`render_probe` wrote nothing for `require_lease`, one field of nine.** The
+example's `wwan0` probe sets `require_lease = false` and the file's own prose
+says why: a cellular link gets no DHCP lease, so requiring one *"would hold a
+working link down for ever"*. A profile saved from such a machine came back
+requiring a lease -- the probe's precondition inverted, with nothing downstream
+to report it.
+
+**Why that field and not another is the transferable part.** Every other probe
+key is written when it differs from a fallback of zero or a number.
+`require_lease` is the only one whose default is `true`, so it needed the
+opposite test -- `if (!probe->require_lease)` -- and a renderer written by
+sweeping the struct with one shape of comparison skips exactly the field whose
+polarity differs. The same shape caught the ethtool toggles in 10.381, where
+`off` is not the absence of a value; this is it again with a boolean.
+
+It is written only when off, which is 0191's reasoning: `require_lease = false`
+reads as a decision where `skip_lease_check = true` would read as a workaround.
+
+### Two corpora, and each catches it alone
+
+Pinned in `render_test.c` as well as found in the example, so the fix does not
+depend on that file keeping the `wwan0` block. Sabotaged by dropping the write
+again: `render_test` fails two checks and `lower_test` reports one example
+block. Either alone would have caught it, which is the argument for having both
+rather than a reason to drop one.
+
+### The instrument's third corpus, and the pattern in what each found
+
+Three corpora now ask the renderer whether it can write a document back, and
+each has found something the others could not:
+
+    render_test.c's own cases     the hand-written ones, 188 checks
+    lower_test.c's compiles()     a geneve tunnel of the wrong address family
+    doc/netcfgd.conf.example      a probe's require_lease
+
+None of the three found the other two's defect. That is the non-overlap argument
+stated as a measurement rather than a principle, and it is why the next corpus
+is worth asking rather than the next feature: **the renderer's remaining gaps
+are not in what it refuses -- both implementations agree there -- but in fields
+it writes nothing for and nobody has asked about.**
+
+## 10.430 Four writes no corpus reached, found by asking what ran
+
+10.427 to 10.429 asked "is every key handled" four ways -- the gate, the alias
+spellings, the corpus count, the denominator's own spelling -- and all four
+agreed. **The frame was keys, and a frame that has just been right four times
+is the one that supplies no friction.** `evidence.md` names the remedy: ask
+what observation the frame cannot represent.
+
+It cannot represent a **write**. Every one of those instruments reads source
+text; none asks what executed. So: build with `--coverage` from
+`git archive HEAD` and run every test binary that touches the renderer.
+
+    render.c  93.61%   render_device.c  98.28%   render_link.c  94.78%
+    95.66% of 1130 lines, and the 49 that never ran:
+      ~22  allocation-failure arms, unreachable without fault injection
+      ~23  refusals the lowering makes unreachable from a config file
+        4  conditional writes nothing exercises
+
+**The denominator was checked before the finding was believed.** Five test
+binaries reference the renderer, not the two first measured -- `render_test`,
+`lower_test`, `config_test`, `proto_test`, `cli_control_test` -- and the figure
+is *identical* for two and for five, so the other three cover no renderer line
+the first two do not. Had it differed, the four would have been a claim about a
+subset.
+
+### The four
+
+    render.c:596          `ignore = []`, a connectivity policy ignoring nothing
+    render_device.c:616   `"%lldbit"`, a rate no suffix divides evenly
+    render_link.c:834     an access point's `ssid`, when it is not the label
+    render_link.c:890     `autoconnect = false` on a wifi network
+
+**Two are the `require_lease` shape, a fourth and fifth time.**
+`network.autoconnect` is set to 1 in `lower_network` and written only when
+false; the access point's ssid is written only when it differs from the label.
+A corpus assembled from ordinary configurations contains neither, which is what
+that shape means rather than an accident of these corpora.
+
+**`ignore = []` is an instruction, not an absence.** `lower_global` records
+that writing `ignore` *replaces* the default list, so the empty list says
+"consult every interface" where omitting the key says "use the defaults". A
+renderer that dropped it would turn one into the other silently.
+
+**The bare `bit` is the two tables disagreeing in a way that happens to be
+right.** The renderer's units run gbit, mbit, kbit and stop, falling through to
+a bare suffix; the parser's run gbit, mbit, kbit, **bit**. So the fallback is
+accepted -- checked, not assumed, because had it not been the write would have
+produced a profile that does not compile.
+
+### The access point's ssid is the one worth the most
+
+`render_link` carries that comparison **twice** -- line 757 for a network, 834
+for an access point -- and only the network copy had a test. The network copy
+exists because dropping it was a real shipped defect: `ssid = "@bssid"`
+vanished, the document came back as a network named after its label, and
+`profile save` refused on any machine with a network pinned by access point.
+
+**So the untested one was the second copy of a construct that had already
+bitten.** `evidence.md` has this as a naming rule -- a deliberate parallel copy
+needs a distinct name -- and here the cost was not a link collision but a test
+that looked like it covered both and covered one.
+
+### Proved by re-measuring, not by assertion
+
+The four cases are in `the_writes_no_corpus_reached`. Coverage was re-run after
+adding them, and the four lines report an execution count of 2 where they
+reported `#####` before -- which is the claim itself rather than the 96.19%
+the percentage moved to.
+
+**And the fixtures were wrong twice before they were right**, both times
+because I wrote what an ssid looked like instead of reading it. An access
+point's `ssid` is **hex** -- `ncfg_ssid_from_hex`, which is why the renderer
+has a `quote_ssid` at all, the bytes not needing to be text -- and an access
+point with no `wifi` block is refused because it would be open. The compiler
+said both in one diagnostic. A test's own configuration is as much a claim
+about the language as the check underneath it.
+
+### The method, and what it would cost to keep
+
+Reproducing it is four steps and no installed tooling beyond `gcov`:
+
+    git archive HEAD | tar -x -C <scratch>
+    append `CFLAGS += --coverage` and `LDFLAGS += --coverage` in c/Makefile
+    make the five test binaries, run each from c/
+    gcov -o src/compile src/compile/render*.c, then read for `#####`
+
+**A standing target is the holder's call, not mine.** The cost: the renderer's
+objects are built in place rather than under `BUILD_DIR`, so a coverage build
+cannot share the tree with a normal one -- it needs the scratch copy, which is
+about two minutes and a temporary directory per run. The benefit is that this
+class has now produced six findings (`require_lease`, a vlan's `protocol`, and
+these four) and a method written in prose does not get re-run.
+
+**It would be a reporting target and not a gate.** The 45 remaining uncovered
+lines are legitimately uncovered, so a gate would need a waiver list longer
+than its findings -- which is the reason the phrase-keyword sweep in 10.427 was
+recorded rather than gated.
+
+## 10.433 A line that ran 40,210 times and was never tested
+
+`render_connectivity` is the third member of 10.432's omit-at-default family,
+and it carried three unexercised arms. Two are the family's shape again and are
+closed the same way. **The third is invisible to both coverage instruments and
+is the one worth the entry.**
+
+    ignore_differs = count != default_count;
+    for (i = 0; !ignore_differs && i < count; i++)
+            ignore_differs = strcmp(ignore[i], default_ignore[i]) != 0;
+
+**Delete the loop entirely and both suites pass.** That was measured before
+anything was written, as in 10.432.
+
+### The first explanation was wrong, and gcov said so on the line itself
+
+The obvious reading is that the loop never runs: every `ignore` list in the
+tree has nought or one member, the default has five, so the count differs and
+the loop is skipped. That is what this was first written up as.
+
+    40210: 578:  ignore_differs = strcmp(policy->ignore[i] ? ...
+    24133: 577:  for (i = 0; !ignore_differs && i < policy->ignore_count; i++)
+                 branch 0 taken 100%  branch 1 taken 1%
+                 branch 2 taken  83%  branch 3 taken 17%
+
+**It runs forty thousand times and every branch on it is taken.** The lowering
+gives every document without an explicit `ignore` the default five-member list,
+so the loop compares all five on almost every render -- each member against
+itself.
+
+### So the gap is not coverage, and no coverage tool could have found it
+
+Equal lists and different-length lists give the **same answer** with the loop
+and without it. The only input that separates a real comparison from a
+count-only one is **a list of the same length that is not equal**, and nothing
+in the tree had one.
+
+That makes it the sharpest instance here of a rule the suite has met before
+from other directions: **a high execution count is not evidence of being
+tested.** Line coverage says the line runs. Branch coverage says every branch
+on it is taken. Both are true, and the comparison had never been asked a
+question it could answer wrongly.
+
+**It was found by reading the condition and asking which input would make it
+decide something** -- which is the question neither instrument asks, and the
+reason the two of them were worth running first rather than instead.
+
+### What it would have cost
+
+A five-member custom ignore list read as the default and replaced by it: an
+operator's `docker*, br-*, veth*, virbr*, tap*` coming back as the shipped
+`...vnet*`, so `wait-online` and the tray would consult an interface the
+operator had excluded and ignore one they had not. The fixture differs from the
+default only in its last member, so the loop must reach its final index and the
+comparison must be the thing that decides.
+
+Removing the loop fails exactly two checks, the round trip and the content
+assertion, and nothing else -- so the corpus case is what closes it, and it
+closes it for the round trip as well, which could always have seen this and had
+never been given the document.
+
+## 10.436 Output wrong, meaning right: the third instance makes it a class
+
+The escaping surface. The lexer takes four escapes in a string -- `\"`, `\\`,
+`\n` and `\t` -- and `ncfg_render_quote` writes back only two, escaping a
+backslash and a quote and passing a newline or a tab through **raw**.
+`a_name_needing_escapes_round_trips` covered the quote; nothing covered the
+other two.
+
+**What the new case uniquely holds was measured rather than argued, and it is
+not what the first draft of its comment claimed.** Two sabotages:
+
+    renderer escapes the newline   only the text assertion fails; lower_test
+                                   and config_test pass
+    lexer refuses a raw newline    the round trip fails -- and so do two
+                                   checks in lower_test
+
+So the lexer half was already guarded, and by something better than this: **a
+string carrying newlines is a documented LIST form in this language**, which is
+what `lower_test`'s "spaces and newlines both separate entries" compiles. The
+first draft of the comment said tightening the lexer would let `profile save`
+write unreadable profiles -- true, and `lower_test` would go red first and
+louder.
+
+**What nothing else watches is the renderer's choice.** An escaped `\n`
+re-lexes to the same value, so every round trip in the tree passes either way
+and only the output's bytes say which was written.
+
+### The class
+
+That is the third instance of one shape, and three is what turns a coincidence
+into something to look for:
+
+    10.428   a renderer preserving `dev` where it should write `parent`
+    10.432   a redundant `control { }` block at every default
+    10.436   a newline escaped instead of written raw
+
+**Output wrong, meaning right, round trip blind.** In each the renderer emits
+something a reader would not have written, the compiler reads it back to the
+identical document, and a test comparing documents cannot be made sensitive to
+it **by adding documents** -- which is the move every corpus lens makes. Only
+an assertion on the text can see any of them.
+
+So the useful generalisation for the next renderer change: **ask whether the
+property is about what the document MEANS or about what the file SAYS.** The
+first is the round trip's and four corpora already cover it. The second has no
+instrument but a text assertion, and this tree has now paid for that three
+times.
+
+### The class, swept
+
+Naming a class is worth little until it has been enumerated, so: every choice
+the renderer makes between two forms that compile to the same document.
+
+    alias vs canonical spelling        closed 10.428, nine cases
+    omit vs write a block at default   closed 10.432, four members
+    raw vs escaped newline             closed here
+    bare vs quoted label               already sound
+    bare vs bracketed list             already sound
+    rate units                         already sound
+    short vs block `qdisc` form        already sound
+
+**Three were gaps and four were already pinned, which is the useful ratio** --
+this is not a tree that had ignored the question, it is one that had answered
+it four times without naming it, so the three that were missed look like
+oversights rather than a missing practice.
+
+The four that hold are worth reading for how. `ncfg_render_label` is the best
+of them: a population of three names that must be quoted -- `.th0`, `2eth`,
+`4g0`, every one a name the kernel makes happily -- against three that must
+stay bare, `eth0`, `eth0.42`, `br-lan`. Both directions, in the text, with the
+hard case (`eth0.42`, a dot being legal inside an identifier and not at its
+start) chosen deliberately as the control. And `servers = ["10.4.0.53"]` is
+asserted with a **single** entry, which is the whole of what `always_bracket`
+buys: drop the flag and one server renders bare, splits on whitespace back into
+one server, and the document is identical.
+
+So the sweep is finished rather than open. A new choice of this kind arrives
+with a new renderer form, and the question to ask it is the one above: does
+this change what the document MEANS or what the file SAYS.
+
+## 10.438 `declared` goes into the wire form, and equality has to leave it out
+
+10.437 kept the field out of the serialisation and 10.437's own last section
+found the route that choice could not cover: a save taken after a
+commit-confirm revert reads its document off disk and sees nothing declared.
+**Instructed to serialise it.** What that cost, and the one thing it broke.
+
+### No version bump, and the witness is what makes it visible
+
+0038 holds the schema version until the first release -- *"there is no consumer
+anywhere that was built against 1.1 and could be handed a 1.2 document"* -- so
+no bump is taken, which is the statement 0020 asks every schema commit to make.
+What makes the change visible is the witness moving under a deliberate
+`make schema-bless`, which is 0038's own answer to the same question.
+
+**The bless carries a proof rather than a diff to read.** 46 lines added, 23
+removed in `doc/schema/document.json`, and the new witness with `declared`
+stripped from every device **equals the previous one exactly** -- the other 23
+added lines are the former last member gaining a comma. All 23 devices carry
+`declared: true`, so the field is populated rather than merely present.
+`socket.json` did not move, which confirms what `scope.c` says: nothing in a
+device travels on the wire.
+
+### It obliged the implementation being retired
+
+`make schema-bless` is driven by the Rust (`cargo test -p netcfgd-model --test
+frozen` under `NCFG_BLESS=1`), and the witness is read back with
+`deny_unknown_fields`. So a member the C writes has to exist on both sides or
+neither, and the field went into `netcfgd-model`'s `Device` as well -- with a
+doc comment saying this port does not act on it, 0266 having the C as what ships.
+
+The compiler found the sites rather than a sweep: 4 in `netcfgd-compile`'s
+lowering, which is where it matters and where the three invented-device cases
+and the one written one mirror the C exactly, and 7 in tests and `sim.rs` where
+the value is immaterial. That is 0020 working as designed -- *"writing it out is
+what forces somebody adding a field to look at every other field."*
+
+### The thing it broke, which is the entry's point
+
+Serialising a field puts it into **equality**, and `declared` cannot be
+round-trip stable. A synthesised member device carries a `master`, so the
+renderer writes it -- it must -- and the recompile reads a block somebody
+wrote. The fact is about the *text*, and rendering is what produces the text;
+there is no syntax for "this block was invented" to preserve it with.
+
+Two round trips went red immediately **in the C, and two more in the Rust** --
+and the Rust's were the harder half, because its equality is `#[derive(PartialEq)]`
+and a derive has no way to exclude a field. Worse, that equality is what
+`profile save` verifies with (`crates/netcfgd-host/src/config.rs`, one `!=` on
+whole documents), so the field would have refused every save of a bridge or
+bond config there.
+
+**The fix is a type whose values all compare equal**, which is better than
+normalising at each comparison site:
+
+    #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+    #[serde(transparent)]
+    pub struct Declared(pub bool);
+    impl PartialEq for Declared { fn eq(&self, _: &Self) -> bool { true } }
+
+`#[serde(transparent)]` keeps the wire form a bare bool, so **the witness did
+not move again**. The exclusion then holds at every comparison in that
+implementation including ones nobody has written yet, and the Rust's own
+round-trip helper needed no edit at all -- which three hand-normalised call
+sites would not have given. `field.h` is why that mattered: a hand-written
+equality there missed `bluetooth` for as long as the field existed, and a type
+cannot drift the way a maintained list does.
+
+**And the check caught my own verification being too narrow**, which is worth
+more than the bug. Clippy refused an unused import of `Declared` in
+`netcfgd-daemon`: the usage is inside `#[cfg(test)] mod tests`, the import had
+gone to the module level, and a non-test build therefore sees it unused. What
+let it through was that I had checked for unused imports with
+`cargo test -p netcfgd-model`, one crate, and read the zero as a fact about the
+workspace -- `evidence.md`'s rule that a search's scope is chosen before you
+know who owns the answer, met in a verification rather than in a sweep. `make
+clippy` is the gate and it is workspace-wide for exactly this reason.
+
+In the C the same exclusion is one `continue` in `document_compare.c`, which is
+the treatment `generated_by` already has: **in the canonical form, out of
+equality.** Those two are deliberately different places, which this made
+explicit --
+
+    canonical form      the document's IDENTITY, everything the writer writes;
+                        shared with the Rust for the confirm window's hash
+    equality            what "the same machine" means, provenance excluded
+
+### And the test had its own notion of equality, which only showed now
+
+`render_test`'s `round_trips` compared the two **canonical** forms with
+`strcmp` -- identity, not equality. That was adequate for as long as no
+provenance field ever differed, and `generated_by` never did in these fixtures.
+`declared` does, so the verdict now goes through `ncfg_config_round_trips`,
+which asks the host's own comparison. A case cannot disagree with the operation
+it stands for.
+
+The canonical pair is still computed, for the failure printout: identity is the
+right thing to *show* a reader even where it is the wrong thing to judge on.
+
+**Two notions of equality in one tree is the finding**, not the inconvenience.
+It cost nothing while they agreed, and the moment they did not it cost two red
+round trips whose message said "the document changed" about two documents that
+describe the same machine.
+
+## 10.439 The Rust renderer had the same hole, and a waiver with nothing left to waive
+
+Taking "port the renderer" literally for once: compare the two renderers
+function by function rather than hunt for gaps. 50 functions in `render.rs`, 12
+with no same-named counterpart in the C -- and eleven of those are the C's word
+tables (`drift_name`, `toggle_name`, `proto_name` and the rest), `render_rate`
+under another name, or `ncfg_render_list_emit`'s bracket flag.
+
+**The twelfth was `silent_devices_aside`**, the Rust's waiver for the
+empty-device hole, with `speaking` as its helper. Its doc comment cited 10.418's
+two candidate fixes and said *"neither is this function's to make"* -- and
+10.438 made one. **A waiver whose stated blocker has been removed is a waiver
+nobody will revisit**, because nothing in the ordinary course of work brings the
+sentence together with the decision that retired it.
+
+### Closing it is one line on each side, mirroring the C
+
+    render.rs:1359    `if body.is_empty() && !device.declared.0`
+    config.rs:2672    the override list filtered to `device.declared.0`
+
+Both are the C's changes transliterated, and with them the waiver and its helper
+are gone rather than left standing. **The Rust's own pin fired on the first
+build** -- `an_empty_device_block_is_not_written_and_that_is_pinned`, whose
+comment ends *"if this test starts failing, one of them has landed and this case
+should become the assertion it used to make."* It is that assertion now, and
+renamed to say so.
+
+So the hole is closed in both implementations rather than in the one that ships,
+which is what keeps the agree gate meaningful: 10.437 recorded that the gate's
+zero did not cover this behaviour because the C was ahead with no configuration
+to show it. The C is not ahead any more.
+
+### Four failed edits before one landed, all the same mistake
+
+The pin took four attempts, and every failure was an anchor I had written from
+memory of the file rather than read out of it: two tabs where the body has
+three, and a doc comment whose lines are tab-indented because the test lives
+inside `mod tests`. Each time the `assert` on the match count refused and wrote
+nothing, which is the guard working -- `evidence.md`'s rule that an anchor
+retyped rather than read matches nothing, and that the same count assertion
+catches it.
+
+What fixed it was giving up on text anchors and editing **by line number**,
+located by a substring search rather than by a remembered shape. The lesson is
+narrow and worth keeping: in a file this module's size, the cheap anchor is a
+line found by searching, not a literal reproduced by hand.
+
+## 10.440 The C renders a connectivity policy and the Rust refuses the save
+
+The other direction of 10.439's comparison, which that entry ran one way only.
+69 functions in the C renderer, 27 with no name in `render.rs` -- and almost all
+are plumbing the Rust gets from `Vec`, `String` and `HashSet`, or the C's
+decomposition of `IngressShaping::of` into `bare_ifb`, `derived_ifb`,
+`our_ifb_name` and `shaper_rate`.
+
+**Three were rendering functions rather than plumbing**, and one of them is a
+real divergence: `connectivity` appears **zero times** in `render.rs`.
+
+### Measured with both programs, not inferred from the grep
+
+    base            interface eth0 { config = "dhcp" }
+    profile `net`   global { connectivity { requires = "probe"
+                                            ignore = ["docker0"] } }
+    then            profile set net; profile save kept2
+
+    ./c/ncfg              wrote the profile
+    ./target/debug/ncfg   ncfg: saving `kept2` would not reproduce what this
+                          machine is running, so nothing was kept
+
+The C's profile carries the block, `ignore` unwrapped to a bare value because
+one entry is not a list:
+
+    global {
+        connectivity {
+            requires = "probe"
+            ignore = "docker0"
+        }
+    }
+
+**The first attempt measured nothing**, and for the reason that caught the
+`collect_overrides` test too: the connectivity was put in the *base*, so both
+programs correctly trimmed it from the profile and both succeeded. A profile is
+a diff against the base, so a thing has to be in the running state and NOT in
+the base for the renderer to be asked about it -- which the fold being taken
+out when a snapshot is saved is what arranges.
+
+### The Rust fails safe, and that is why nobody had met it
+
+It refuses rather than writing a lossy profile, because its own verification
+finds the profile does not reproduce the machine. But **the drop is caught by a
+later check rather than named by the renderer** -- `connectivity` is in neither
+its rendering nor its refusal list -- so the message blames the snapshot in
+general where it could have named the block. That is precisely the distinction
+this project calls *a refusal is not a drop*, and the Rust has the drop.
+
+### Not acted on, and why
+
+`SAVE_AHEAD` is the mechanism for "the C renders something the Rust refuses",
+and the holder's decision on the last gate-coverage gap of this shape (10.437's
+empty device) was to record rather than pin, because 0266 retires the Rust and a
+pin waiting for the divergence to close would never fire. The same reasoning
+applies, so the same answer is taken.
+
+What is *not* the same is that this one is a functional divergence rather than
+only a coverage gap: a machine with a connectivity policy cannot save a profile
+under the Rust. Porting the block to `render.rs` would close it, and that is
+work in the implementation being retired. **Whose decision: the copyright
+holder's.** The reproduction above is four commands and re-runs.
+
+## 10.444 `ncfg_render_device_writes_nothing` removed
+
+Added in 10.426 so the mutation sweep could ask the renderer whether a device
+would be written rather than recompute "at every default" and keep that
+enumeration current. 10.437 closed the skip it reported on, 10.439 removed the
+last caller, and it has been exported with none since. Removed on the holder's
+instruction.
+
+    render_device.c   29 lines, the definition and its comment
+    render.h          13 lines, the declaration and its comment
+
+**Checked across the whole tree first, not just `c/`.** The earlier survey had
+looked at `c/` alone and would have missed a caller in the client, the gui or a
+tool; there was none, and the only other mentions were the two records in this
+file, both now corrected rather than left standing.
+
+Both gates that could have had an opinion pass unchanged -- 52 headers each
+reached by a test, 52 public headers each in one file -- which says the gates
+count headers rather than exported functions, so nothing was holding this in
+place but the API question the holder has now answered.
+
+**The reason it was written is not retired with it.** Asking the renderer
+instead of reproducing its rule is why `bare_ifb` carries a size assertion and
+why the ingress-shaper undo is read off `render_device` rather than recomputed.
+What went away is one instance, because the thing it was asked about stopped
+existing.
+
+## 10.446 The renderer's gaps asked from the document's side, and `schema_version`
+
+Every instrument pointed at the renderer so far has asked the question from the
+*language's* side: `key_coverage_gate.py` takes the keys the lowering's `strcmp`
+arms accept and requires the renderer to write each one, and it is satisfied --
+141 accepted, 132 written, 9 waived aliases. That instrument is structurally
+unable to see the class that has twice cost a `profile save`, because both
+instances were **fields no key can express**: `declared` (10.437) and the
+ingress shaper before it. A key-side gate cannot ask about a field the language
+has no word for.
+
+So ask the other side. The model's reflection tables in `document.c` are the
+document's own field list -- 52 tables, 260 entries, each carrying
+`.offset = offsetof(type, member)` -- and the renderer either reads a member or
+cannot possibly write or refuse it.
+
+**Thirteen fields the renderer's code never touched, and four were the probe
+being wrong.** Three `hook_fields` members plus `interface.hooks` and
+`network.hooks` looked unread because the refusal is keyed on the list's
+companion count -- `render_link.c:651` and `:939` refuse on
+`interface->hook_count`, which is enough. Accepting `count_offset` as a read
+dropped the count to nine, and two more candidates disappeared with it:
+`dhcp4.request_options` and `dns_policy.options` are read and refused by name.
+
+The nine that remain are all accounted for, in three groups:
+
+    version.major, version.minor, document.schema_version   the format
+    document.generated_by                                   provenance
+    hook.phase, hook.sha256, hook.run_as                    inside `hooks`
+    device_match.driver, device_match.name_glob             inside `match`
+
+The last two groups are inner fields of a block refused whole -- `a match
+block`, `hooks` -- so not reading them is correct. Which leaves the format.
+
+### `schema_version` was counted by an equality the renderer cannot satisfy
+
+`render.c` says at the walk that `schema_version` and `generated_by` are
+deliberately not written, the language having no key for either.
+`document_compare.c` leaves out `generated_by` and did **not** leave out
+`schema_version`. So a document recompiled from a rendering carries whatever
+this build stamps, and any document that said something else fails the
+comparison on the one member the renderer was never able to carry.
+
+**That is reachable, and not by a hypothetical.** `canonical.c:588` refuses a
+document whose *major* this build does not speak and accepts any *minor* --
+which is what a minor version is for. This build is 1.1, so a 1.0 document is
+readable by design. Reproduced by taking a document through the writer,
+changing the minor to 0 in the JSON, reading it back and asking for the round
+trip:
+
+    and a 1.0 document is readable by this build                  ok
+    with the older minor kept rather than restamped               ok
+    what it wrote compiles to a DIFFERENT document
+
+`ncfg profile save` would refuse to save a machine whose desired state came
+from a profile an older build wrote. Excluding the member symmetrically, which
+is `generated_by`'s argument and not a second one, closes it: the schema
+version is a property of the document's format rather than of the machine, and
+a minor is by definition one this build reads.
+
+**It has never been able to fire, and that is not the comparison being right.**
+`NCFG_SCHEMA_MINOR` has never moved off its first value -- 0038 keeps it there
+until a release -- so one minor exists and no document can disagree with it.
+The check passed on a property of the version counter, and the counter is going
+to move.
+
+**Both implementations have it and only the C is fixed.** The Rust's
+hand-written `PartialEq` in `netcfgd-model/src/lib.rs` destructures `Document`
+exactly so that a new field cannot be forgotten, excludes `generated_by` in as
+many words, and compares `schema_version`. So this is not a port gap -- the C
+inherited the defect faithfully -- and under 0263/0266 the Rust is a comparison
+oracle rather than something to fix. Recorded, not edited. The agree gate cannot
+see the difference either way: its eleven configurations are all freshly
+compiled, so both programs stamp the current version and no document in it
+disagrees.
+
+### The test was wrong twice before it was right, both times silently
+
+Worth keeping because both failures *passed*.
+
+**A bare early return made the case vacuous.** The fixture
+`interface eth0 { address = 192.0.2.5/24 }` does not compile -- numbers in this
+language are integers, so the address wants quoting -- and the case began
+`if (!document) { return; }`. The suite printed the parse diagnostic and
+reported every check passed, because the case asserted nothing at all. The
+guard is a `check` now, so a fixture that stops compiling fails rather than
+disappears.
+
+**Then the mutation did not happen and the round trip passed on an unmodified
+document.** The search string was `"minor": ` taken from
+`doc/schema/document.json`, which is the *pretty-printed* witness;
+`ncfg_document_write` is the compact writer and emits no space. `strstr` found
+nothing, the minor stayed 1, and the final assertion passed -- a green line
+asserting the round trip survives a change that was never made. It steps over
+the separator rather than spelling it now, and the assertion that the reread
+document holds minor 0 is what makes a failed mutation impossible to miss.
+
+Both are the same shape as the earlier `\t`-fused-with-names fault in
+`key_coverage_gate.py`: a probe whose failure to look reads as a clean result.
+
+### What the field-side instrument is and is not evidence of
+
+Its **alarm** is sound: a member the renderer's code never mentions cannot be
+written or refused by it. Its **clear** is weak, and saying so matters -- 251
+fields passed by being read somewhere, and reading a member is not writing it.
+What covers those is the round trip over 5000 mutations and the key gate, which
+is why this is a third instrument rather than a replacement.
+
+### The probe is a gate, and its hole is measured rather than described
+
+`tool/field_coverage_gate.py`, with `tool/renderer-unread-fields.txt` holding
+the nine in both directions the way the key gate's waiver list is held, wired
+into `make packaging` beside it: 260 fields the document holds, 251 the
+renderer reads, 9 waived. The waiver file names the two kinds that may be
+waived -- the document's own format and provenance, and a member inside a block
+refused whole -- and says that a field waived on the first ground must also be
+left out of `document_compare.c`, since that is exactly what `schema_version`
+was not.
+
+**Four controls, each seen to fail with the right sentence.** The one that
+matters is the first, because it is the failure the gate exists for rather than
+a failure of its bookkeeping: every read of `mtu` blanked in
+`render_device.c` -- in a `git archive HEAD` copy, not the working tree -- and
+the gate names `ncfg_device_t.mtu`. Then a dropped waiver, a waiver for a
+member nothing has, and a waiver for a field the renderer does read; the last
+two are what stop the list becoming one nobody has looked at since.
+
+**The hole is in the clear, it is large, and it is stated rather than closed.**
+The read is matched by member NAME, because `x->mode` does not say what `x` is
+and nothing short of a C parser can. So two types sharing a member name mask
+each other, and that is not a corner: 39 of the 197 distinct names are used by
+more than one type, which puts **102 of the 260 entries' clears** within reach
+of a sibling. `mode` and `id` are six types each.
+
+For the job the gate is actually for -- a field added to the model and never
+wired into the renderer -- the consequence is that a new field hides if its
+name collides with one of those 39 and is caught otherwise. That is worth
+having, and worth not overstating: the gate's docstring carries these numbers
+so the next reader does not have to take the word *weak* on trust.
+
+## 10.448 The renderer's word tables: nothing wrong, two things unguarded
+
+The lens this time was the renderer's own duplication. `render.c`'s header says
+the eleven word tables deliberately copy sets the model already has, because
+the two sides spell values differently -- `wire_guard` against `wireguard`,
+`wpa2_wpa3` against `wpa2+wpa3` -- and reaching for the model's name function
+instead "is a defect this project has shipped twice". A deliberate copy is a
+thing to hold to what it copies.
+
+**Nothing is wrong today, and that is the finding.** Measured rather than
+assumed:
+
+  * all eleven tables hold exactly one word per value of the enum they index,
+    `bond_mode_words` included at seven;
+  * of the nine model name functions the renderer calls, two
+    (`ncfg_tunnel_mode_name`, `ncfg_qdisc_kind_name`) live in `compile/` and
+    are therefore the language's own words, four more are symmetric -- the
+    lowering parses with the `*_from_name` beside them, one table in both
+    directions, so no divergence is possible -- and `interface_kind` already
+    goes through `ncfg_interface_kind_language_name`, the variant the
+    three-times-wrong history produced;
+  * `ncfg_rule_family_name`'s words ARE written into output, and
+    `lower_rule.c` accepts both of them (`inet`, `inet6`) with `ipv4` and
+    `ipv6` as aliases, so the written word reads back;
+  * `ncfg_address_source_kind_name` appears only in a refusal, and in one whose
+    `default:` arm cannot be reached -- the switch above it handles all seven
+    kinds -- so the document's spelling in it cannot be observed.
+
+### What a short table would do, measured
+
+Set a value outside a table's range and the renderer writes `powersave = "?"`
+and **returns success with no refusals**, which is the one thing its contract
+forbids: a refusal is not a drop, and this is neither.
+
+Traced to the end rather than left as an alarm. `profile_save` renders, writes
+the file, selects the profile, and only then proves by recompiling -- and `?`
+is not a word the language reads, so the proof fails, and the outer
+`ncfg_profile_save` unlinks the snapshot, removes the directory, restores the
+selection as a file or an absence, and restores the folded configuration. So
+"nothing was kept" in its message is true, and the operator gets an honest
+refusal saying it is a fault in the snapshot worth reporting.
+
+**Which settles what the gap is worth.** Converting the twenty-one
+`_or_gap` sites to refuse means threading a refusal buffer through functions
+that take none -- `render_eap`, `render_toggle` -- to improve a message on a
+path only a library consumer hand-building a document can reach, since the
+reader checks every closed set. Not done, deliberately.
+
+What IS reachable from an ordinary change is the other half: a value added to
+one of those enums without its word. **No round trip can cover that**, because
+a round trip only exercises values some document sets and the value just added
+is the one no corpus sets yet. So `tool/word_table_gate.py`, with
+`tool/renderer-word-tables.txt` naming what each table indexes, held in both
+directions so a new table cannot arrive without saying.
+
+**It found a table the survey missed on its first run.** `prefixes` in
+`ncfg_render_quote_secret` is enum-indexed by `ncfg_secret_provider_t` and is
+not called `*_words`, so the `*_words` grep that produced the list above never
+saw it -- a name-keyed filter under-counting, which is `running-code.md`'s
+lesson about process tables arriving in a source tree. The gate's scope is
+defined by USE now, tables handed to `ncfg_render_word`, which also excludes
+the two function-local `keys[]` lists that are parallel to a values array
+rather than indexed by anything -- and those two share a name, so a name-keyed
+table could not have spoken about either.
+
+Three controls in a `git archive HEAD` copy: an enum gaining a value, a table
+losing a word, and a mapping entry for a table that is gone. The fourth fired
+in the wild, on the first run, as the two tables above.
+
+### The better find was beside it: six hand-sized parallel arrays
+
+Those `keys[]` lists are the visible half of a pattern the renderer uses six
+times -- a loop bounded by `NCFG_COUNT_OF(one)` indexing a sibling whose length
+is a literal:
+
+    render.c         control's keys / tiers[3], and remote's keys / tiers[3]
+    render_link.c    eap's keys / sources[3], probe's numbers / values[5]
+    render_device.c  bridge's keys / values[4], vxlan's keys / values[3]
+
+Add a key without its value and the loop dereferences past the end, in a
+library whose own header says it is not allowed to crash. Six
+`_Static_assert`s now, the device `render_device.c` already uses for
+`sizeof(ncfg_device_t)`.
+
+**And the rationale had to be corrected, because gcc is not silent.** The
+prediction written into the first draft of the comment was that the toolchain
+says nothing. It says `iteration 4 invokes undefined behavior` -- measured on
+the break itself, a fifth bridge key with no fifth value:
+
+    -Os  warns      -O2  warns      -Og  warns      -O0  SILENT
+
+That is `-Waggressive-loop-optimizations`, a diagnostic from the loop
+optimiser, which is `evidence.md`'s rule about a verdict being a property of
+the toolchain rather than of the source, met in the place it is easiest to miss
+-- the protection that already existed was a property of the optimisation
+level. There is no `-Werror` here either, so where gcc does speak it is a line
+a build scrolls past. The assertions are a hard error at every level including
+the one where the compiler is quiet, which is why they stay, and the comment
+carries the table so nobody removes them as redundant.
+
+## 10.450 A vlan id is twelve bits, and neither number on offer was right
+
+Settled by the copyright holder 2026-10-09, on 10.449's open question: **the
+spec decides this, not the Rust the C is replacing.** The two candidates were
+4095 (the diagnostic's number) and 65535 (the code's). The spec's answer is
+**4094**, and the reason is worth keeping because it is why asking beat
+picking.
+
+802.1Q gives the VID twelve bits. 4095 is **reserved for implementation use**,
+and Linux spells that `VLAN_VID_MASK` and refuses anything not below it. So a
+vlan device takes 0 through 4094: the diagnostic was wrong at the top as well
+as disagreeing with the code, and nobody looking only at those two numbers
+would have found the third.
+
+`working-practice.md` says a discrepancy held open produces answers neither
+branch contains. This is a small instance of exactly that, and it is the second
+in this tree -- the terminal's selection rule was the first.
+
+**The old 65535 was never a bound.** It was the width of a C short, inherited
+from `u16::try_from`, and a faithful port of a number that is not a fact about
+VLANs. Ids from 4095 up compiled and were handed to a kernel that refuses them
+with an errno rather than a name.
+
+### The tree already had the spec right twice, which is where the shape came from
+
+The sweep that found this checked every numeric bound in `lower_kind.c` and
+`lower_device.c`. Bridge `priority`, vxlan `port`, wireguard `listen_port` and
+`keepalive` are genuinely sixteen bits and tunnel `ttl` is eight, so those
+65535s and that 255 are bounds. Two neighbours are spec-correct and say so:
+
+  * the **VXLAN VNI** rejects 1 << 24 and up with "a VNI is 24 bits, so at most
+    16777215", and its comment names the harm -- the kernel truncates silently,
+    so two tunnels that look distinct in the config become one;
+  * the **per-port bridge VLAN** rejects 0 and anything over 4094 with "not a
+    VLAN id: between 1 and 4094", and its comment says 0 is not a VLAN and 4095
+    is reserved and the kernel refuses both with an errno.
+
+So the vlan device id was the lone outlier among six, which is what made it
+worth doubting rather than a lone oddity worth explaining away.
+
+**The bridge-port bound stays stricter, and the difference is recorded where it
+will be met.** 1 to 4094 there, because 0 is not a VLAN to put on a port; 0 to
+4094 for a vlan device, because the kernel accepts one. A later reader
+harmonising the two would be wrong, so `NCFG_VLAN_ID_MAX`'s comment says which
+is which and why.
+
+### One bound, two users, because that is the fault this session kept finding
+
+`NCFG_VLAN_ID_MAX` is in `document.h` beside `ncfg_vlan_config_t` rather than
+written into either file that needs it. The lowering needs it to refuse a
+configuration; the renderer needs the same number to know what it cannot write
+back -- and two copies of a bound is precisely how this one came to disagree
+with itself.
+
+**Narrowing the language creates a renderer gap, so both halves land
+together.** The document's range for the id is `R_U16`, so a document read from
+JSON still holds ids up to 65535 that the language will no longer take. Left
+alone, the renderer would write `id = 5000` and the recompile would refuse --
+10.449's class, created by 10.449's fix. `render_kind` names it instead:
+
+    device v: a vlan id of 4096, which is not one (0 to 4094)
+
+Refusing rather than narrowing `R_U16` to match, for the reason 10.449 gives:
+the reader's range is what documents this build accepts, and narrowing it makes
+a document other things still read unreadable here.
+
+### The C is stricter than the Rust now, deliberately, and no gate can see it
+
+This is the first place the port has gone **past** the thing it ports rather
+than matching it, and that is the instruction: 0266 makes the Rust a comparison
+oracle, and the holder's words were that the spec decides. So the Rust still
+accepts ids to 65535 and the C stops at 4094, on purpose.
+
+**The agree gate stays green and is not evidence of anything here.** Its eleven
+configurations hold no vlan id above 4094, so the two programs cannot disagree
+about one -- a passing gate over an input set that cannot produce the
+difference, which is `evidence.md`'s vacuous pass wearing the oracle's clothes.
+Written down because a later session finding the divergence has a green gate, a
+sibling implementation and no note, and "the two should agree" is the
+comfortable reading.
+
+### Asserted at both edges, because a bound checked on one side is half a bound
+
+`lower_test.c` takes 4094 through `compiles`, which proves the round trip too,
+so the renderer's new bound is asserted against the top of the range by the
+same line; then 4095 and 65535 are refused by name. `render_test.c` renders
+4094 as its control and refuses `NCFG_VLAN_ID_MAX + 1`, written as that rather
+than as a literal so the test cannot drift from the bound it is testing.
+
+## 10.451 A channel outside its band, and the sweep that should have been finished first
+
+10.450's lens -- **a number inherited from the Rust that is a type width rather
+than a fact about the domain** -- was applied to two of the eight lowering
+files. Finishing it found one more site and then something better behind it.
+
+`lower_network.c` narrows an access point's `channel` to 65535. A WiFi channel
+is a small number, so that is a type width by the same reasoning that condemned
+the vlan id's.
+
+**It is harmless, and the reason is worth more than the site.** There is a
+second gate: `check_channel_in_band`, added by 0222 after `band = "2.4"` with
+`channel = 36` compiled, planned and failed at `ncfg apply` with the interface
+already up. With no `band` the band is inferred -- 14 and below is 2.4 GHz,
+above it is 5 -- and then membership is required, 1 to 14 or 36 to 177. So
+channel 65535 infers 5 GHz and is refused for not being in it. The loose narrow
+never decides anything.
+
+So the remaining five numeric bounds in those files are all genuine: bridge
+`priority`, vxlan `port`, wireguard `listen_port` and `keepalive` really are
+sixteen bits, and a tunnel `ttl` is eight. **The lens is spent**, with one true
+positive out of seven candidates.
+
+### What the finishing found instead
+
+The compiler bounds a channel by its band. The **configuration renderer did
+not**, and could not: `ncfg_render_access_point` took no
+`ncfg_unrenderable_t` at all, so it had no way to refuse anything. It wrote
+`channel`, `band` and `regdom` as it found them.
+
+The document's range for a channel is `R_U16`, so a document read from JSON
+holds channels the language will not take back. Measured, four of them, with
+`band` dropped so the number chooses the band:
+
+    channel 0      refused on recompile: not in the 2.4 GHz band
+    channel 20     not in the 5 GHz band
+    channel 300    not in the 5 GHz band
+    channel 65535  not in the 5 GHz band
+
+and a fifth with `band = "2.4"` kept and channel 300. Each rendered cleanly and
+failed its own round trip in the compiler's words -- so `ncfg profile save` on
+such a machine wrote the profile, failed its proof, rolled it back and reported
+a fault in the snapshot. The fourth instance of 10.449's class, after the
+shaped rate, the probe counts and the vlan id.
+
+`ncfg_render_access_point` takes the refusal buffer now and uses **the model's
+own** `ncfg_access_point_effective_band` and `ncfg_channel_in_band` rather than
+a copy -- which is the rule `check_channel_in_band` states in a comment, after
+the compiler grew its own pair of statics and became "exactly the second
+implementation `hostapd.h` had a paragraph warning against".
+
+    access_point guests: channel 300, which is not in the 2.4 GHz band
+
+### A comment I suspected and was wrong about
+
+`ncfg_access_point_effective_band` returns NULL for band `6` and says the
+compiler accepts it "on purpose so that the renderer can refuse it in its own
+words". The configuration renderer cannot refuse anything, and band `6` round
+trips through it untouched -- which read like a stale claim of the kind this
+file has been collecting.
+
+It is not. **"The renderer" there is the hostapd one**, and it refuses band 6
+by name: "the 6 GHz band needs an operating class and HE parameters, which the
+document has no fields for and which this build has never run against a radio".
+That renderer also applies `ncfg_channel_in_band` itself, so the apply path was
+guarded all along and only the profile-writing path was not.
+
+Which is why the new guard writes the channel unchanged when the effective band
+is NULL, mirroring `check_channel_in_band`'s own arm for it: the configuration
+language reads `band = "6"` back perfectly well, so refusing it in the
+configuration renderer would stop a profile saving over something that file can
+in fact write. **Two renderers, two different questions, and the band belongs to
+the other one.**
+
+## 10.452 Six of the eight, enumerated from the language's side
+
+Four instances of "a document holds what the language refuses" had been fixed
+one at a time. The fifth was not going to arrive by luck, so this closes the
+enumeration -- and the first attempt at closing it was the wrong one, which is
+the more useful half.
+
+### The sweep that was abandoned, and why
+
+The obvious instrument is document-side: walk every numeric field, set it to
+each end of its range, and require **refused by name, or round trips** --
+never *renders and then fails to recompile*. It is the document-side analogue
+of the mutation sweep `lower_test.c` already has, and that sweep structurally
+cannot find this class: it mutates CONFIG TEXT, so every document it produces
+came from compiling, and a document that came from compiling cannot hold a
+value the compiler refuses.
+
+There are 53 such fields -- 34 `R_U32`, 11 `R_U16`, 5 `R_U8`, 2 `R_U64`, 1
+`R_I32`. Two things stopped it:
+
+  * **The field tables are `static` in `document.c`**, so a reflection-driven
+    walk needs them exported. Exporting the model's internals for a test is a
+    change to the thing under test.
+  * **The witness is not a usable base.** `doc/schema/document.json` is the one
+    document with every field set, and it is deliberately unrenderable -- a
+    `kind ifb`, a match block, a qdisc metering arriving traffic, dns options.
+    `render_test` asserts exactly that. So every mutant reports `refused` for a
+    reason that was already there, the round trip never runs, and the
+    instrument answers a question nobody asked.
+
+Carving a renderable base out of the witness by hand is available and was
+declined: a hand-carved fixture is what produced 10.449's false defect, where a
+document missing the device an `interface` implies looked like a renderer fault.
+
+### The enumeration that worked, from the other side
+
+Ask the LANGUAGE what it refuses, not the document what it can hold. The
+lowering's semantic rejections -- the checks beyond a type -- are seven
+messages across all eight `lower_*.c` files, and that set is both smaller than
+53 and exactly the set that matters. Five were already accounted for:
+
+    a shaped rate of zero would pass nothing          10.449
+    `interval` has to be at least 1 second            10.449
+    `up_after` and `down_after` have to be at least 1 10.449
+    vlan id must be between 0 and 4095                10.450
+    channel %lld is not in the %s GHz band            10.451
+    `%s` is too large a rate                          harmless: INT64_MAX round trips
+    a credential must be a secret reference           a string, not a range
+
+Two had never been followed up, and both were instances.
+
+**A vxlan whose ends disagree.** `local` and `remote` are strings with no
+family in the field table, so a document can hold one of each; the kernel will
+not build such a tunnel and the compiler refuses it. The renderer wrote both
+and the recompile said so. **This is a PAIR, not a bound** -- neither end is
+wrong alone -- which is the sub-shape a per-field range check cannot reach, and
+the channel-in-band case was the same sub-shape wearing a number.
+
+**A port VLAN outside 1 to 4094.** The member's range is `R_U16` while
+`ncfg_lower_bridge_vlans` takes 1 to 4094, 0 not being a VLAN to put on a port
+and 4095 being reserved. Measured: 0, 4095 and 5000 each rendered and failed
+the round trip in the compiler's words.
+
+Both named now, both with a control that still round trips:
+
+    device vx0: a vxlan whose `local` and `remote` are different address families
+    device eth0: a port vlan of 4095, which is not one (1 to 4094)
+
+### Each fix put the shared rule in one place, because that is this week's fault
+
+The family test was `(strchr(local, ':') == NULL) != (strchr(remote, ':') ==
+NULL)`, inline in the lowering. Copying it into the renderer would have been a
+second implementation of one rule -- which is what `ncfg_channel_in_band` was
+moved into the model to stop. It is `ncfg_addresses_same_family` there now,
+used by both. One colon decides it, which is why it looked too small to share,
+and sharing it is not about the size of the expression.
+
+`NCFG_BRIDGE_VLAN_ID_MIN` sits beside `NCFG_VLAN_ID_MAX` with a comment saying
+why a port's minimum is 1 and a vlan device's is 0, so the next reader
+harmonising them has the reason in front of them. `lower_device.c` builds its
+diagnostic from both constants now, so the message cannot drift from the bound
+the way the vlan device's did.
+
+**The class was declared closed on this axis here, and it was not.** The claim
+was that every semantic rejection the lowering has is either mirrored in the
+renderer or measured unreachable. It rested on a grep over the lowering's
+diagnostics, and a grep sees only the wordings it was given: `roam`'s two
+checks say "is not a signal strength" and "cannot be longer than", neither of
+which matches `at least`, `must be`, `too large` or any of the other words that
+pattern carried. Two constraints were open while the enumeration called itself
+complete -- **a count inheriting its detector**, in a sentence written three
+entries after quoting that rule at something else.
+
+10.453 has them, and has the sweep that found them: the document-side
+instrument described above as blocked turned out to be buildable by a third
+route that neither obstacle touches.
+
+## 10.453 The sweep got built after all, and found what reading had missed
+
+10.452 said the document-side sweep was blocked on two things: the field tables
+are `static`, and the witness is deliberately unrenderable so it cannot be the
+base. Both are true and **neither matters**, because there is a third route:
+
+  * **the base** is each example block compiled on its own -- renderable by
+    construction, since it compiled -- rather than the witness;
+  * **the enumeration** is the numeric leaves of that document's canonical
+    JSON, found by scanning the text for `": "` and a digit. No reflection, so
+    nothing needs exporting.
+
+Prototyped in the scratchpad as a Python driver over two small C harnesses, and
+it found four faults on its first run. The durable form is a C helper beside the
+mutation sweep that was already there, in process, because `example_cases`
+already reads the example file and splits its blocks -- the part that had
+looked expensive was already written.
+
+### What it found, and why reading had not
+
+    "signal" = 0            renders and will not recompile
+    "signal" = 99999        renders and will not recompile
+    "interval" = 99999      renders and will not recompile
+    "slow_interval" = 0     renders and will not recompile
+
+Two constraints on a `roam` policy. `signal` is dBm so negative, between -100
+and -1, while the member's range is `R_I32`. And `interval` is how often to
+look while the signal is weak, so it may not exceed `slow_interval` -- an
+ORDER between two `R_U32` members, which no range can express and which reads
+as a plausible pair of numbers, as its own comment says.
+
+**They were missed because the enumeration was a grep.** 10.452 listed the
+lowering's semantic checks by searching its diagnostics for `at least`,
+`must be`, `too large`, `of zero` and the rest. These two say "is not a signal
+strength" and "cannot be longer than". The set was declared complete on the
+strength of a pattern that could not see them -- a count inheriting its
+detector, which that same entry had quoted at something else.
+
+So the lesson is not "grep harder". It is that **an enumeration of a behaviour
+should come from exercising it, not from reading what it says about itself.**
+The sweep asks the program; the grep asked the program's error messages.
+
+### Why the text-side sweep could never have found them
+
+`mutate_block` has been mutating the example blocks for a long time, 120 per
+block, and the property it asserts is the right one. It mutates CONFIGURATION
+TEXT, so every document it builds came from compiling -- and a document that
+came from compiling cannot hold a value the compiler refuses. The documents
+`profile save` renders did not all come from compiling: a profile or a state
+file arrives through `ncfg_document_read`, whose ranges are the field tables'.
+
+The two sweeps are therefore not redundant and the new one is not a better
+version of the old. One reaches field combinations nobody wrote; the other
+reaches values the language cannot say.
+
+### Its floors are its control
+
+A scan that found no numeric leaf, or a reader that refused every variant,
+would report no faults exactly as loudly as a clean run. So the counts are
+asserted: 118 variants the reader accepts, of which 17 the renderer refuses by
+name, with floors at 60 and 8. Both guards and both predicates are the model's
+-- `ncfg_roam_signal_in_range` and `ncfg_roam_intervals_ordered`, used by the
+compiler for its two sentences and by the renderer for its two refusals, with
+`NCFG_ROAM_SIGNAL_MIN` and `NCFG_ROAM_SIGNAL_MAX` building the compiler's
+message so it cannot drift from the bound.
+
+Verified against the tree without the guards: the sweep names all four and the
+check fails.
+
+## 10.455 Three pins cleared, and the pin list catching its own staleness
+
+10.454 left fifteen pinned string constraints, each a named piece of work.
+Three are closed, and what is worth recording is that **the both-directions
+check found them before I did**: the guards went in, the sweep stopped
+faulting, and two pins failed as stale with the sentence they were given --
+"`a `network` block needs a name` no longer faults ... so drop the pin". A pin
+list that only grows is the list nobody has looked at since; this one reports
+its own obsolescence.
+
+The three:
+
+  * **a probe's `command`** must be absolute, because a probe runs as root and
+    where it comes from is not a thing to leave to a search path. One pin
+    covered a hook path as well, and that half never fired -- hooks are skipped
+    by the sweep for the reason `compiles` gives -- so the pin went when the
+    command was guarded.
+  * **an openvpn tunnel's `config`**, the same requirement for the same reason.
+  * **a network's label**, which renders as `network "" {` when empty and which
+    the lowering refuses because the label IS the SSID, so an empty one leaves
+    nothing to call the network by.
+
+### What the twelve remaining ones need, which is why they are still pinned
+
+Not one of them is a one-line guard, and saying so is the point of leaving them
+pinned rather than half-done:
+
+  * **secret reference names** (19 fault lines, the largest) are written at
+    seven sites, four of which take no refusal buffer -- `render_pppoe`,
+    `quote_cert_source`, `render_eap`, `render_security`. Threading it through
+    all of them is the shape 10.449 declined for `_or_gap`; the consistent
+    answer is the pre-walk pass that `refuse_unusable_names` already is, which
+    means enumerating every secret a document can carry. One place, one list,
+    and its own piece of work.
+  * **a route's `destination`** needs `ncfg_network_of`, which is pure apart
+    from allocating through the lowering's context. Its test is `default`, or a
+    prefix with its host bits clear -- and the host-bits half is the part a
+    renderer must not reimplement, since a destination with host bits set
+    "abandons every later action in the plan". Sharing it is a refactor of that
+    function, not a call.
+  * **a network name** was filed here as needing `ncfg_ssid_from_bytes`
+    extracted, and that was wrong: the whole of that function is a comparison
+    against `NCFG_SSID_MAX_LEN`, which is public in `document.h` already. It
+    was a one-line guard misfiled as a refactor -- see 10.457, which also has
+    the part I did get wrong about it.
+  * the rest -- regdom, Bluetooth address, IPv6 literal, `http://` URL,
+    hostname, duplex, band, addressing entry, `group:` principal, APN -- are
+    each a validator the lowering holds privately. Each is small; there are
+    nine of them, and nine rushed extractions in one pass is how a layer
+    boundary gets blurred.
+
+**The baseline is twelve now and cannot grow**, which is what the pinning buys:
+a sixteenth constraint arriving unpinned fails the sweep, and a pin outliving
+its fix fails it too.
+
+## 10.457 Two more pins, one of which I had sized wrongly
+
+Nine left, from fifteen. Two went this pass and they are worth separating,
+because one was the refactor I said it was and the other was not.
+
+### The route destination, which was a real extraction
+
+`ncfg_network_of` was pure apart from allocating its result through the
+lowering's context, so the masking moved to the model as
+`ncfg_address_network_of(text, out, out_size)` -- 1 where the text already was
+a network, 0 where it had host bits set, -1 where it is not a prefix -- and the
+lowering keeps a six-line wrapper that allocates. The reason the function
+exists moved with it, since both callers need it: the kernel refuses
+`ip route add 10.1.2.3/8` outright, and execution stops at the first failed
+action, so **one destination with host bits abandons every later action in the
+plan, on every apply, for ever.**
+
+The renderer now takes `default`, or a network by that function, and refuses
+anything else. Four cases measured: host bits set, not an address at all, no
+prefix, and empty.
+
+### The network name, which was a one-liner I filed as a refactor
+
+10.455 said this one "needs `ncfg_ssid_from_bytes`, which is in the compile
+layer rather than the model, so the same extraction question". **That was
+wrong, and wrong in the direction that matters** -- it made a one-line guard
+look like a layer problem and parked it for a later pass. The whole of that
+function is
+
+    if (length > NCFG_SSID_MAX_LEN) { *why = "an ssid is at most 32 octets"; }
+
+and `NCFG_SSID_MAX_LEN` is public in `document.h` already. Nothing needed
+extracting; the renderer needed a `strlen`.
+
+I had filed it from the function's NAME and its header, not from its body. The
+same reading error as 10.453's grep, one layer up: a claim about what a thing
+would cost, made without opening it.
+
+**And guarding the network's label alone left the pin firing**, which is how I
+found the second half: `cannot be a network name` is raised at two sites, a
+network's label and an access point's, and both are the SSID. The pin not
+clearing is what said so -- had the sweep only reported faults rather than
+asserting its pins still fire, a half-done guard would have read as a whole
+one.
+
+### What that leaves
+
+Ten pinned -- I said nine in the report and miscounted -- all of them a
+validator the lowering holds privately: regdom,
+Bluetooth address, IPv6 literal, `http://` URL, hostname, duplex, band, an
+addressing entry this guard does not reach, a `group:` principal, and an empty
+APN. None needs a layer moved, on the evidence of this pass -- which is exactly
+what I claimed about the last one before reading it, so each will be opened
+before it is sized.
+
+## 10.458 The baseline reaches zero, and the pinning comes out
+
+The last ten pins are guarded and the pinned list is gone: a fault in the
+string sweep is a fault again, and nothing is waived. Fifteen constraints in
+all, cleared over four passes.
+
+**It cost far less than the first estimate**, and the reason is the thing to
+keep. 10.455 said nine of them each "hold a small validator privately" and
+filed them as extraction work. Then `render_link.c` turned out to already
+include `lower_internal.h`: **the renderer and the lowering are siblings in
+`compile/`**, so a pure predicate the lowering already declares is simply
+callable. `ncfg_is_hostname` was one of those -- no extraction, a direct call.
+Of the ten, two used functions already public in `value.h`
+(`ncfg_hardware_address_strict`, `ncfg_address_parse`), one was reachable in
+the module header, three needed a one-line predicate promoted out of an `if`,
+and four were a comparison written out.
+
+So the sizing error of 10.457 was not a one-off. **Both times the cost was
+estimated from where a thing lived rather than from what it was**, and both
+times it was an overestimate that parked real work. The first was a function's
+name; the second was a layer boundary that is not one.
+
+### What each of the ten turned out to be
+
+    hostname            ncfg_is_hostname, already declared for this module
+    bluetooth address   ncfg_hardware_address_strict, already public
+    ipv6_token          ncfg_address_parse with the lowering's three conditions
+    regdom              two alphabetic characters, promoted to a predicate
+    duplex              full or half, promoted
+    band                2.4, 5 or 6, promoted
+    portal_check        starts with `http://`
+    apn                 not empty
+    group: principal    a `user:` or `group:` with a name after it
+    addressing entry    no space in a delegation's source or suffix
+
+**Three of them are closed sets the document stores as free strings** --
+`regdom`, `duplex`, `band` -- which is why the hole existed at all. Were they
+enums, the reader would refuse nonsense and the renderer would have nothing to
+check. Making them enums changes the wire form and so the frozen witness, which
+is 0020's territory and a decision rather than a guard; recorded here because it
+is the shape behind three of the fifteen.
+
+### The last one was not the constraint it looked like
+
+`is not an address or keyword` read as another validator to apply. It is not:
+an addressing entry is **word-split** by `ncfg_as_words`, so `@pd:a b` is two
+entries by the time the lowering sees it, and the second is not an address.
+Quoting cannot help -- the entry is already a quoted string and the split is in
+the entry's own grammar rather than the lexer's.
+
+So the guard is "no space in a delegation's source or suffix", which is a
+different kind of rule from the other fourteen: not *is this a valid X* but
+*can this text survive the syntax it is written into*. It also sidesteps the
+open question about whether a source must be an interface name, since it holds
+either way and a name could not contain a space.
+
+### What the pinning bought, written down because it is gone
+
+Four of the fifteen were reported fixed by the list itself, before I looked.
+One of those reports caught a HALF-done guard: `cannot be a network name` is
+raised at two sites, and guarding the network's label alone left the pin
+firing. A sweep that only reported faults would have read that as complete.
+
+The shape to bring back, if a batch ever needs landing again: pin on the
+compiler's REASON rather than the JSON key -- a key is shared, and a pin on
+`name` would have masked the device-name guard -- and assert that every pin
+still fires.
+
+## 10.459 Delimiters inside composite values, and the half a sweep cannot find
+
+10.458's last guard was not "is this a valid X" but "can this text survive the
+syntax it is written into" -- an addressing entry is word-split, so a space in
+one part makes two. That is a different kind of rule from the fourteen before
+it, and following it gave the next lens: **the renderer writes composite
+strings, and a value carrying their separator comes back meaning something
+else.**
+
+Three such forms:
+
+    @secret:<provider>:<name>
+    @pd:<source>/<subnet>=<suffix>
+    <destination> via <address> src <address> metric <n> ...
+
+And three faults, every one of them **"compiles to a DIFFERENT document"**
+rather than a refusal:
+
+  * a FILE secret named `keyring:wifi` renders to exactly what a KEYRING secret
+    named `wifi` renders to. **The rendering stops being injective** -- two
+    distinct documents produce identical text, so a profile can no longer tell
+    them apart, and the one that is read back is whichever the parse prefers.
+  * a delegation source of `wan0/9` comes back as source `wan0` with subnet 9,
+    and `wan0=x` as source `wan0` with suffix `x`.
+  * a route `via` of `192.0.2.1 metric 9` comes back as a route **carrying a
+    metric nobody wrote**. Every word parses, so nothing complains.
+
+All three refuse by name now. `ncfg_is_bare_address` does the route's two
+modifiers -- the lowering's own test, reachable because the renderer is this
+module's own, which is 10.458's lesson being used rather than relearned.
+
+### The sweep found the loud half and could not find the quiet half
+
+The sweep's string mutations were whitespace, empty and over-long, and they
+missed all three. Adding delimiter-bearing mutations -- `a:b` and `a/b=c` --
+found **twenty faults, and every one a refusal**: `a` is not a provider,
+`b` is not a subnet number. The three silent cases above stayed invisible.
+
+**The reason is worth more than the twenty.** A mutation finds a delimiter
+fault loudly when the injected value is INVALID under the other parse, and
+silently only when it is VALID under it: `keyring:wifi` names a real provider,
+`wan0/9` a real subnet, `metric 9` a real modifier. Producing a value that is
+valid under a reading the mutator does not know about is domain knowledge, not
+mutation -- so the quiet half of this class is not reachable by generic
+fuzzing at all, and the three cases are written out as their own test with that
+said in its comment.
+
+This is the first limit of the instrument that is structural rather than a gap
+in its inputs. 10.453 said an enumeration should come from exercising rather
+than reading; this is the exception that sharpens it -- **exercising finds what
+breaks, and only reading finds what quietly means something else.**
+
+### One defect of my own, in the refusal
+
+The first version of the secret refusal carried a literal `\n` in its format
+string -- I split the C literal with `\n"` instead of `"` -- so the sentence
+arrived across two lines in the middle of a refusal list. Caught by reading the
+probe's output rather than by any check: a refusal's text is the one thing here
+that nothing asserts on, since the tests match substrings.
+
+## 10.462 Where the suite is weakest, measured, and one rule that has drifted
+
+The renderer is closed by every instrument built for it -- line and branch
+coverage both down to defensive arms, three gates on keys, fields and words,
+the numeric and string axes swept, over-refusal shown across 6656 compiling
+mutations. Hunting further in it would be inventing work, so the same
+instrument was pointed at the whole tree to say where the next work is.
+
+`gcov` over all 204 C sources, the whole suite:
+
+    79.46% of 47,127 lines
+
+and the renderer's 95 to 99 per cent is far above that. Ranked by UNCOVERED
+lines rather than by percentage, which is what says where the mass is:
+
+    379  48.71%  src/cli/run.c
+    327   0.00%  src/cli/tui_term.c
+    266  17.90%  src/apply/kernel.c
+    247  47.89%  src/backend/dns/deliver.c
+    240  41.79%  src/main/daemon_main.c
+    191  66.19%  src/daemon/reconcile_pass.c
+
+**Most of that is the shape of the thing rather than a gap.** `apply/kernel.c`
+talks netlink, `daemon_main.c` is an entry point, `tui_term.c` owns a terminal
+-- and this project has a VM tier for exactly the paths a namespace cannot
+reach. A low number there is a statement about where the code runs, not about
+what nobody checked.
+
+### The 0.00 per cent file is the design working
+
+`tui_term.c` is 327 lines and no test executes one of them, which looks like
+the worst entry in the table and is the best. Its header says why: it is "the
+only part of `ncfg tui` that owns a terminal" -- descriptors, termios, signals
+and `poll` -- and explicitly **no rendering**, because "the frame is composed by
+`tui.c` into a buffer and this writes it, so that everything a test would want
+to assert is reachable without a terminal".
+
+So the untestable code was deliberately gathered into one file, and the file
+being at zero is that decision having worked. **Measured against its own rule:
+zero references to `ncfg_document_t` or any document type**, so no row of
+machine state is composed in there.
+
+### And the rule has drifted, in the way its own comment predicted
+
+The header names the risk in so many words: "one `snprintf` of a row in here
+would be a row no test can see." There were seven `snprintf`s of user-visible
+text in there, all in `static` functions of a file whose entry point needs a
+terminal, so no test could call them.
+
+**I reported that as eight and it was three.** Seven `snprintf`s, of which four
+are bare `"%s"` copies of a string composed elsewhere -- the daemon's own
+refusal, or a `done` literal a caller passed in -- and one more was an
+`fprintf` to stderr on the fatal path, which is not a message at all. The
+compositions were three: `"no wireless device on this machine"`,
+`"%s is netcfgd's now; scanning"` and `"joining %s"`. A count wrong twice in
+one sentence, in the entry that reports a measurement.
+
+They are not rows of document state, which is why the stricter reading of the
+rule still holds -- zero document types in the file. They are sentences an
+operator reads, and 10.463 moves them.
+
+## 10.463 The sentences move to tui.c, on the holder's instruction
+
+Settled 2026-10-10: move them. The three sentences `tui_term.c` composed are
+`tui.c`'s now, and `tui_test.c` asserts all three.
+
+**It needed no boundary redrawn, which is the part I had wrong.** 10.462 said
+obeying the rule meant moving the event handling too, or passing more structure
+across the module line. It did not: the sentence is a function of the choice
+already in hand, so
+
+    void ncfg_tui_use_says(const ncfg_tui_use_t *chosen, char *out, size_t out_size);
+    const char *ncfg_tui_no_radio(void);
+
+take the composing half and leave the event handling exactly where it was.
+`tui_term.c` calls them and copies the result, which it was already doing for
+the daemon's own refusals. The second follows `ncfg_tui_help` precisely -- a
+const sentence, which `tui_test` already asserted against `tui.message` -- so
+the pattern was in the tree and I had not looked for it before estimating.
+
+That is twice in three entries that I have sized a piece of work from where it
+sat rather than from what it was. 10.457 called a `strlen` a refactor; this
+called two function signatures a redrawn boundary.
+
+**What is left in `tui_term.c` is five `snprintf`s and every one is `"%s"`** --
+the daemon's refusal, a caller's `done` literal. No sentence is composed there,
+so the rule its header states is true again rather than aspirational.
+
+### What the tests pin, and why one of them is worth more than the others
+
+`ncfg_tui_no_radio` carries a decision rather than a wording: **the machine
+rather than the configuration.** This wave has no loader, a radio comes from
+the kernel's own link table, and sending somebody to edit a file about a fact
+that came from elsewhere is the wrong instruction -- the Rust says "in the
+configuration" and 0263 records the divergence.
+
+So the test asserts the distinguishing word and not the sentence: `machine`
+present, `configuration` absent. Rewording it does not fail the test; reversing
+the decision does. Verified by reversing it in a `git archive` copy -- the check
+fails and names itself.
+
+The other two pin an argument each: a radio's sentence names the interface, a
+network's names the network and not the radio, which is the transposition a
+copy-paste of either would make. And a `NOTHING` choice writes an empty string,
+because the buffer is the caller's and is reused between the two arms.
+
+## 10.464 `loop_test` fails when the machine runs out of inotify, and 79 per cent was one suite of several
+
+Two findings from going back for the ranked list in 10.462, and the first is
+the one to read before debugging anything here.
+
+### The suite fails on a machine condition, not on the code
+
+`loop_test` reports two failures -- "an inotify watch has one" and "the
+supplicant's control directory is watched" -- in a `git archive` build that had
+passed three times the same day. It reproduces, so it is not a flake.
+
+    /proc/sys/fs/inotify/max_user_instances   128
+    instances held by this account            126
+    of those, `dbus-daemon --session`         100
+    orphaned session buses (parent is init)   102
+
+**The bus leak has stopped being clutter and started failing tests.** Two
+instances were left, and `inotify_init` fails rather than returns a descriptor,
+so the watch the loop needs cannot be created. Any test in any tree that wants
+an inotify instance fails the same way, for reasons nothing in its own output
+points at.
+
+The diagnosis, which is the artefact worth keeping:
+
+    cat /proc/sys/fs/inotify/max_user_instances
+    for d in /proc/[0-9]*; do
+        n=$(find "$d/fd" -lname 'anon_inode:inotify' 2>/dev/null | wc -l)
+        [ "$n" -gt 0 ] && printf '%4d %s\n' "$n" "$(tr -d '\0' < $d/cmdline)"
+    done | sort -rn
+
+Not reaped from here. A hundred of them belong to other sessions, and
+`running-code.md` records a sweep that `SIGKILL`ed a live selftest worker
+through PID reuse while clearing exactly this leak. The remedy is the holder's
+and is partly applied already -- `~/.screenrc` sets a bus address now, which
+covers screens started after it and not the ones already running.
+
+### And 79.46 per cent was one suite of several
+
+10.462 ranked the tree by uncovered lines and called `cli/run.c` the largest at
+48.71 per cent of 739. Its 379 uncovered lines are in **180 blocks**, averaging
+two lines each, the largest eleven. That is not an untested algorithm; it is
+forty-odd verb arms, each of which builds a request, asks a socket and prints.
+
+None of them runs without a daemon -- and **the measurement could not see the
+tier that runs them.** `gcov` over `make -C c test` excludes the agree gate,
+which drives 27 read-only invocations, 10 sequences of writing verbs and 5 of
+the daemon's own against the real binaries, and excludes the VM tier entirely.
+
+So the tree-wide figure is coverage from the C unit suite alone, and it
+understates most where the other tiers do their work: a CLI dispatch, a netlink
+path, an entry point. The renderer's 95 to 99 per cent is not flattered the
+same way, being a pure function the unit suite can reach in full -- which is
+why that number was worth acting on and this one is not a ranking of where work
+is owed.
+
+**The honest version of 10.462's question**: there is no single number for this
+tree, because the suites are tiered on purpose and only one of them is
+instrumented.
+
+## 10.465 The test measures the machine now, and the fall-back got the test it never had
+
+10.464 left `loop_test` failing on a machine at its inotify instance cap and
+said the remedy was the holder's. The leak is, and that has not changed. **But
+the failure was the test's.**
+
+`daemon_watchers.c` watches the configuration directory "by inotify where the
+kernel allows it and by mtime otherwise", and `watch.h` says the fall-back is
+not defensive programming: `inotify_init1` fails with `EMFILE` on a busy
+machine and some container runtimes refuse it outright. So **a machine with no
+inotify instance is a supported environment**, and the daemon degrades into it
+by design -- `ncfg_inotify_open` even names the cap in its own message, "cannot
+watch for configuration changes: Too many open files;
+fs.inotify.max_user_instances is exhausted".
+
+The test asserted the undegraded path unconditionally. With the cap reached it
+reported "an inotify watch has one  FAILED", which reads as a defect in the
+watch and was a defect in nothing.
+
+### What changed
+
+`inotify_obtainable()` asks the machine -- opens an instance, closes it, says
+what `errno` was if it could not -- and the two assertions branch on the
+answer:
+
+    inotify available      a watch has a descriptor; the radio directory is a source
+    none to be had         it polls instead; there is no radio-directory source
+
+**Asserted either way rather than skipped.** A gate that skips when the thing
+it checks for is absent is weakest exactly where it matters, so the degraded
+arm carries the same strictness as the other two -- and the absence has to be
+the one the environment forces rather than one a regression introduced.
+
+**The fall-back gained a test it had never had.** On a machine where inotify
+works, nothing exercised the mtime path through `watchers_open`; the test had
+one forced-polling run, which sets `poll_config` rather than finding the
+resource gone. The arm that a busy machine actually takes was unasserted until
+the busy machine arrived.
+
+### The control, because the easy mistake here is a test that cannot fail
+
+Forcing `inotify_obtainable()` to return 1 in a `git archive` copy -- claiming
+the machine can when it cannot -- fails both strict assertions. So the branch is
+a branch and not a way of passing regardless.
+
+### And what it says about every earlier green run
+
+The result depended on a machine-wide resource, so it was passing when two
+instances happened to be free and failing when they were not. `make -C c test`
+passed in this tree and the same build failed in a scratch tree minutes apart,
+which is the whole of the evidence that nothing about the code had changed.
+A suite whose verdict races a global limit is a suite whose green is worth less
+than it looks, and that is fixed here rather than explained.
+
+## 10.468 One duplicate line, three failing checks, and a conditional that preserved the bug
+
+Settled 2026-10-10: fix the three. All three were **one line said twice**.
+
+`ncfg apply` printed, before its own report:
+
+    netcfgd: [apply/ap0] Error: backend.start failed: hostapd would not start
+    on ap0: nl80211: ... -- the rest of this plan is skipped
+    ok   link.create ap0  kind: dummy (was <absent>)
+    ok   link.up ap0  enabled: true (was false)
+    FAIL backend.start ap0  access_point: access_point (was <absent>)
+         hostapd would not start on ap0: nl80211: ...
+
+The Rust prints that without the first line. So `ncfg_apply` logs every action
+-- `INFO` on success, `ERROR` on failure with the executor's own words -- which
+is right in the daemon, where that log IS how an operator sees what happened.
+In the CLI it is a second rendering of what the journal report already says,
+and `main.c` accepts `WARNING`, which drops the `INFO` lines and keeps the
+`ERROR` one. So exactly the failing action was doubled, which is why all three
+checks were `expected: 1, actual: 2`:
+
+    ap.sh    `grep -c hostapd`                              1 -> 2
+    ap.sh    `grep -c 'nl80211\|Could not read interface'`   1 -> 2
+    acl.sh   `grep -c 'did not answer its control socket'`   1 -> 2
+
+The CLI brackets its own `ncfg_apply` with `ncfg_log_accept(NCFG_LOG_CRITICAL)`
+now, restoring the level afterwards. The daemon's callers are untouched.
+
+### The first fix was conditional and that was wrong
+
+I quietened only while the accepted level was below `INFO`, reasoning that an
+operator who asked for the engine's chatter with `NCFG_LOG` had asked for this
+line too. **Then I ran the oracle at that level.** `ap.sh` passes against the
+Rust at `NCFG_LOG=info` as well, so the Rust logs no per-action line in this
+path at ANY level, and the conditional preserved the divergence it was written
+to remove.
+
+Nothing but running the Rust at that level would have said so -- the
+conditional was defensible from the C alone, and wrong. It is unconditional
+now, and all four cells agree:
+
+                   default   NCFG_LOG=info
+    the C          passes    passes
+    the Rust       passes    passes
+
+Nothing is lost by it: `CRITICAL` still passes, and the journal report names
+every action, its outcome and its error -- strictly more than the log line did.
+
+### And a stray brace that compiled
+
+The edit that made it unconditional left an extra `}`, which closed
+`ncfg_cli_apply` early. **It compiled** -- the remainder of the function parsed
+at file scope -- and the only signs were three "unused variable" warnings for
+locals used fifty lines further down and one "data definition has no type or
+storage class". The binary built, ran, and reported the old behaviour, which is
+how a fix verified against a stale-looking result nearly got believed.
+
+Second time today that computing an edit's end by index rather than by an exact
+string cut the wrong amount. The anchored replacements in the same session have
+all held; the two that bit were both `src.index(...)` arithmetic.
+
+## 10.469 The whole acceptance suite against the C: four port gaps
+
+All 78 scripts the Makefile names, against the C build, each in its own
+throwaway namespace with `NCFG_LIVE=1` so that a script which cannot run says
+so loudly instead of passing quietly. This is the first time the suite 0263
+names as the port's acceptance criterion has been run end to end against the C.
+
+    63  pass
+     4  fail where the Rust passes        port gaps
+     2  fail against both builds          not the port's
+     8  cannot run here                   environment or an unbuilt prerequisite
+     1  hangs
+
+**The four, each confirmed by running the same script against the Rust** --
+same namespace, same `NCFG_LIVE=1`, differing only in `NCFG_LIVE_BUILD`:
+
+    exec_refused.sh    10 checks   "it says the hook is why dhcpcd was not used"
+    hooks.sh           aborts      "a tampered down hook is refused by hash"
+    profile.sh         aborts      "saving asks the daemon rather than writing
+                                    the file itself"
+    dhcpcd_orphan.sh    1 check
+
+`hooks.sh` and `profile.sh` abort part-way under `set -e` rather than reporting
+a count, so the check named is the first to fail and there may be more behind
+it -- and for both of them there was.
+
+**All four are closed; 10.470 has what each turned out to be.** Not one was the
+thing its failing check appeared to name, and two were caused by this port's own
+earlier work. The two that fail against both builds, and the eight that cannot
+run here, are unchanged and are below.
+
+### The two that fail against both are not the port's
+
+`control_exposure.sh` fails one check on each build -- "and the socket belongs
+to the group named" -- and `confirm.sh` aborts on each without printing a
+summary. A failure that both implementations share is not a port gap, which is
+the one thing this comparison is for and the reason it is worth the second run
+every time.
+
+**Both of those readings are now superseded, and one of them was this sweep's
+own fault.** `confirm.sh`'s failures were a wait shorter than the loop tick and
+are fixed (10.470, 10.472). `control_exposure.sh` was never failing: this sweep
+wrapped it in `unshare -rn`, where the only secondary group is an unmapped
+`nogroup`, and `make live` runs it bare on the host where the chgrp works. It is
+the invocation error the section below this one is about, made again by the same
+runner on twenty more scripts -- see 10.470.
+
+### What cannot run, and the three that were my own fault
+
+`bluetooth.sh` needs `/dev/vhci`, `hwsim.sh` cannot `modprobe mac80211_hwsim`
+("Operation not permitted"), `sandbox_writes.sh` wants a real systemd,
+`dhcpcd.sh` has no dhcpcd to start, `nm.sh` no `nmcli`, `delegation.sh` no
+`odhcp6c`, and `association.sh` and `c_nm_signals.sh` each need an artefact
+built first -- a cargo example and the NM shim.
+
+**Two of those are wrong and the reason is the sweep's PATH, which is the
+third invocation error of the same family.** `make live` opens with `live:
+export PATH := $(PATH):/sbin:/usr/sbin` and my runner did not, so every tool
+that lives in `sbin` read as absent. Measured 2026-10-12:
+
+    dhcpcd      /sbin/dhcpcd        installed -- `dhcpcd.sh` passes under
+                                    `make live`, it does not skip
+    pppd        /sbin/pppd          installed; `pppoe-session.sh` skips for
+                                    real root on /dev/ppp, not for pppd
+    dnsmasq     /sbin/dnsmasq       installed
+    hostapd     /sbin/hostapd       installed
+    wpa_suppl.  /sbin/wpa_supplicant installed
+    odhcp6c, nmcli, radvd           genuinely absent
+
+So of the eight, `dhcpcd.sh` and `c_nm_signals.sh` now pass -- the first
+because it always could and the sweep could not see its client, the second
+because `make live` builds the shim (10.473). `delegation.sh`,
+`pppoe-session.sh`, `bluetooth.sh` and `hwsim.sh` all skip for **real root**
+rather than for a missing program, which is a different and less fixable
+thing. `nm.sh` and `association.sh` are the two genuine missing-artefact
+cases.
+
+**Running one of these scripts by hand needs that PATH**, which is the
+transferable part: `PATH=$PATH:/sbin:/usr/sbin` before any of them, or the
+measurement is about a machine with fewer tools than this one has.
+
+Three more had reported "cannot run" and were **my invocation**:
+
+  * `slaac.sh` and `dhcpcd.sh` and `dhcpcd_orphan.sh` make their own
+    namespaces, and the Makefile runs them bare for that reason; I had wrapped
+    them in `unshare -rn`, which forbids the nested `setgroups` they need. Run
+    bare: `slaac.sh` passes, `dhcpcd.sh` meets the missing client, and
+    `dhcpcd_orphan.sh` is the fourth port gap.
+  * `c_dns_delivery.sh` is the one script the Makefile runs with `unshare
+    -rmn`, needing a mount namespace to bind over `/etc/resolv.conf`. With
+    `-rmn` it passes.
+
+So of my first sweep's apparent problems, four were the sweep. **The invocation
+is part of the measurement**, and a runner that is nearly right produces a
+failure list that is mostly artefact -- which is why each of the four gaps was
+re-run under the project's own invocation and then against the Rust before
+being written down.
+
+### And one script hangs rather than saying it cannot run
+
+`gui_wifi.sh` runs until the 180-second timeout, twice, on two different
+sweeps. With `NCFG_LIVE=1` set a script that cannot run is supposed to say so
+and exit, which seven others do; this one waits. Not diagnosed further here --
+it is the one entry in the table that is neither a pass, a failure, nor a
+statement about the machine.
+
+## 10.471 222 directories the suite left in /tmp, and nothing failed
+
+Found while sweeping up after the probes 10.470's hooks defect needed, which is
+the sweep `running-code.md` asks for after running anything -- and the thing it
+turned up was not mine.
+
+    111  /tmp/ncfg-apply-hook-*      each holding one `bssid`
+    111  /tmp/ncfg-apply-kernel-*    each holding an empty `run/wireguard`
+
+888 KiB, oldest 2026-10-08, accumulated over two days of ordinary `make test`
+runs while every one of them printed that every check passed.
+
+**`tempdir.h` already stated the rule and no caller could be checked against
+it.** Its header says "a test that makes a directory removes what it made, by
+name, at the end", and every caller ended `(void)rmdir(dir)`. `rmdir` refuses a
+directory with anything in it, so each of these two fixtures named some of what
+it wrote, left one thing out, and discarded the refusal:
+
+  * `apply_test`'s hook checks share a directory and remove `hook.sh`; the
+    `NCFG_BSSID` check writes a `bssid` marker that nothing named.
+  * `apply_kernel_test`'s secrets fixture removes `wg0`, `psk` and `broken`;
+    the record half makes `<dir>/run` and `ncfg_kernel_wg_write_record` makes
+    `run/wireguard` under it, and neither was removed.
+
+**The fix is not a better `rmdir`.** `tempdir_gone` returns whether the
+directory went, and the three callers assert on it -- so `rmdir`'s refusal is
+now the failure of the test that caused it, and the assertion states the
+property the header claims rather than that somebody called the function.
+
+Proved by reverting it, which is the evidence that entry asks for and the only
+kind worth having here:
+
+    fix in        make test exits 0,  leaves 0 directories
+    fix reverted  make test exits 2,  leaves 1, and the check says FAILED
+
+**Why it went unseen for two days is the part worth keeping.** None of the
+obvious instruments looks at it: the suite is green, the directories are in
+`/tmp` rather than in the tree, and `df -h .` in a source tree answers for
+`/home` while the scratch is on `/` here (`findmnt /tmp` returns nothing on
+this machine -- no separate mount, which is itself worth knowing because this
+workspace's notes describe a machine where `/tmp` is a 16 GiB tmpfs and a leak
+there is charged to memory).
+
+**And `lsof +L1` earned its place in the same sweep, on my own process.** The
+`strace -f` that diagnosed 10.470's hooks defect was still running 27 minutes
+later, its output file inside a probe directory I had already removed -- so the
+file belonged to no directory, `du` could not see it, and deleting the directory
+freed nothing. `lsof +L1` named it; killing the tracer and the daemon it had
+stopped took `/` from 72 per cent to 69, about 3 GiB. Two details from
+`running-code.md` were both load-bearing: a traced process ignores `SIGTERM`, so
+the `kill` I sent first reported success and cleaned up nothing, and the tracer
+has to go first or the kernel keeps the traced one around for it.
+
+**And two of my own counts were wrong by their own detectors, in one
+afternoon.** The live sweep's tally counted lines whose first field was `FAIL`
+and so read two failing scripts as five, because the script writes the failing
+check names underneath each verdict. Then `grep -icE warning` over the suite
+log returned 24, which were check descriptions containing the word rather than
+compiler warnings. Both were mine, in throwaway code, and both would have been
+quoted as measurements if I had not looked at what the detector matched.
+
+## 10.473 `make live` runs the whole suite, and stops on its last line
+
+Three runs today, same machine, same build, and the only thing that changed
+between them is in this repository:
+
+    run 1   stopped at the 10th script       confirm.sh, 2 failed
+    run 2   69 scripts, 0 failed             c_nm_signals.sh, shim not built
+    run 3   73 scripts, 0 failed             sandbox_writes.sh, no systemd
+
+Run 1 is 10.470's measurement, run 2 followed 10.472's waits, and run 3
+followed building the shim. **Zero failing checks in the last two runs**, and
+the only stops are a missing artefact and a missing init system.
+
+### The shim was the one artefact the target did not build
+
+`c_nm_signals.sh` runs under `NCFG_LIVE=1` on purpose -- the target's own
+comment says a quiet bus is what a converged machine and a broken emitter both
+look like, so a skip there must be loud -- and it skips when
+`adapter/netcfgd-nm/c/netcfgd-nm` is absent. Nothing built it. So the one
+script whose skip is a failure by design was the one thing the suite could not
+get past, and the fix is the shape this target already uses for the Qt live
+projects before `gui_wifi.sh`: build the thing, then run the script. Built, it
+passes its 10 checks. Guarded on `pkg-config --exists dbus-1`, because without
+libdbus neither the shim nor the script can run and the script's own sentence
+reads better than a compile error.
+
+### What remains cannot be built, and is the suite's policy
+
+`sandbox_writes.sh` is the target's last recipe line, is also run under
+`NCFG_LIVE=1`, and exits 1 here with *"no systemd here, so the unit's real
+sandbox is unchecked"*. Under `NCFG_LIVE` this suite treats "cannot check" as a
+failure, deliberately; systemd is not something a recipe can supply. So on this
+machine `make live` reaches its final script and no further, and that is a
+statement about the machine rather than a defect. Left alone: changing it is a
+decision about what the acceptance suite asserts.
+
+The five quiet skips are all scripts the target runs bare, without `NCFG_LIVE`,
+which is how it says "not every machine has this": no nmcli, no real root for
+`/dev/vhci` or for module loading, no cargo example built, no odhcp6c.
+
+### And `make`'s own line number sent me to the wrong script
+
+The failure printed as `make: *** [Makefile:2434: live] Error 1`, and line 2434
+is `@sh tests/live/association.sh` -- which skipped cleanly and exits 0.
+`sandbox_writes.sh` is line 2458.
+
+Established rather than assumed, because the first reading was "association.sh
+failed": all four scripts at and after 2434 reported in that run, including
+`delegation.sh` at 2443, so execution continued 24 lines past the line make
+blamed. The direct measurement agrees -- `NCFG_LIVE=1 sh
+tests/live/sandbox_writes.sh` exits 1 on its own.
+
+**The cause is established, and it is arithmetic rather than a bug.** GNU Make
+reports
+
+    <the line of the rule>  +  <the index of the failing LOGICAL recipe line>
+
+and not the physical line of the command that failed. Where a recipe is a
+plain list of one-line commands the two coincide, which is why nobody meets
+this; where it is not, the report drifts by however much the recipe's physical
+and logical line counts differ.
+
+Reproduced in four six-line makefiles, which is what turns this from a theory
+into a fact, and which also says exactly which line kinds create the gap:
+
+    recipe line kind              counted?
+    a tab-indented command        yes
+    `@#`, a tab-indented comment  yes -- it IS a recipe line
+    a backslash continuation      once, however many physical lines it spans
+    a blank line inside a recipe  no
+    `#` at column 0 inside one    no
+
+Then confirmed on the real case twice, against the Makefile each run actually
+read rather than the one in the tree now -- which is where the first attempt
+went wrong, having compared a blamed line against a file that had since gained
+lines:
+
+    run 2   rule at 2063 + index 308 = 2371   make blamed 2371   c_nm_signals
+    run 4   rule at 2089 + index 371 = 2460   make blamed 2460   sandbox_writes
+    run 5   rule at 2108 + index 371 = 2479   make blamed 2479   sandbox_writes
+
+So in this target the gap is 24, which is exactly the extra physical lines its
+backslash continuations consume. **The habit is unchanged and now has a
+reason**: read the script's own last words, because the number make prints is
+an index into the recipe wearing a file position's clothes.
+
+## 10.474 What the port still owes, measured: two features and no gaps
+
+**Both are answered now and the register is empty, so this entry is history
+rather than a list of work.** Link-local landed (10.480); bluetooth was settled
+as observed and not driven by decision 0272, from the costing in 10.484. The
+heading is kept because the measurement it records was right and the method is
+the point -- read the register rather than invent work -- but nothing below is
+outstanding.
+
+Asked what to do next with the acceptance suite green, and the honest answer is
+read the register rather than invent work. `warn_unported` in
+`c/src/plan/build.c` is that register -- 0263 requires an arm to come out of it
+in the same commit as the pass that lands -- and every arm in it now says "this
+is read elsewhere" except two calls to `ncfg_plan_warn_unbuilt`:
+
+  * **link-local addressing.** `config = "link-local"` compiles and no pass
+    claims an RFC 3927 `169.254.0.0/16` address.
+  * **bluetooth.** Nothing pairs a device, connects it, or brings a `pan` link
+    up.
+
+**Neither is something the C owes the Rust.** Re-measured rather than taken
+from the arm's own comment: `AddressSource::LinkLocal` has readers in the
+model, the compiler, the renderer and the planner's warning in **both** trees
+and nowhere else. So these are scope rather than porting, and
+`doc/decision/` is where that gets settled.
+
+### Whose decision, and what it costs
+
+**The option**: implement link-local, which is the smaller of the two and the
+one a configuration can already ask for and silently not get.
+
+**The cost**: IPv4LL is not in the kernel, so it is a protocol somebody has to
+speak -- probe the candidate with ARP, defend it, and re-pick on conflict.
+This tree's settled answer for anything needing a protocol daemon is to
+delegate and supervise: dhcpcd/udhcpc/busybox for DHCP, pppd, wpa_supplicant,
+mbimcli/umbim. The machinery a delegated client needs already exists -- a
+machine struct of named programs with environment overrides,
+`ncfg_backend_find_program`, `ncfg_process_exec_refusal`, the run-directory
+marks and the adopt-or-refuse path. Writing the protocol into netcfgd instead
+would be the first time this tree did that.
+
+### And then the question turned out to be decided already, twice over
+
+**This entry deferred a design question that the tree had answered**, which is
+the error `working-practice.md` says is caught by nothing: a wrongly-deferred
+question sits in the document looking exactly like diligence. Measured within
+the hour, after it was written:
+
+  * **`dhcpcd` already speaks IPv4LL** -- it probes for a valid IPv4LL address
+    and `-L, --noipv4ll` turns that off -- so the obvious cheap answer is to
+    reuse the client netcfgd already delegates to. **It is excluded, by this
+    project's own stated intent rather than by taste.** dhcpcd reaches IPv4LL
+    only as a fallback from the discover phase (`-y, --reboot seconds`, "IPv4LL
+    is started when the first reboot timeout is reached"), and there is no
+    IPv4LL-only switch -- so an explicit `link-local` request would broadcast
+    DHCPDISCOVER first and take a lease if one answered.
+  * **`document.h` has already decided that is wrong.** Beside
+    `NCFG_ADDRESS_SOURCE_LINK_LOCAL`: *"IPv4 link-local coexists with routable
+    addresses rather than being a fallback, because a timeout-triggered
+    fallback would be state hidden in the reconciler that no config explains."*
+    That is the semantics settled, in the model header rather than in a
+    decision record, and it rejects dhcpcd's mechanism by name.
+
+So the option space is one program: a purpose-built IPv4LL-only client, which
+on Debian is `avahi-autoipd` (packaged, `0.8-16devuan1`, not installed here).
+And it forces no packaging decision, because a backend program in this tree is
+optional by construction -- NULL means "find the conventional name", an absent
+one is a refusal that names what to install, and that is the sentence
+`exec_refused.sh` holds netcfgd to.
+
+A record is not the vehicle here either -- of 255 records in `doc/decision/`,
+253 are `accepted` and two `superseded`, so a record in this project states a
+decision that has been made rather than proposing one.
+
+### So the implementation was attempted, and one gate stops it by design
+
+Mapped before editing, which is the half worth writing down, because four of
+the five things I expected to be in the way are not:
+
+  * **No new op.** `backend.start` and `backend.stop` are generic and carry a
+    `ncfg_backend_kind_t`, so `op_gate` needs nothing: this is a new *kind*,
+    not a new verb.
+  * **No packaging decision.** A backend program here is optional by
+    construction, so an absent client is the refusal `exec_refused.sh` already
+    holds netcfgd to.
+  * **`agree` is not affected.** It compares `ncfg show --json`, which is the
+    document, and the document already carries `link_local` in both trees --
+    the compiler accepts it and the renderer writes it. The observation is a
+    different surface.
+  * **`word_table_gate` is not affected either.** It reads enums out of
+    `document.h`; `ncfg_backend_kind_t` lives in `observed.h`.
+
+**~~What does stop it is `doc/schema/observed.json`.~~ Nothing stops it, and
+both blockers I wrote here were asserted without being checked.** Corrected
+2026-10-13, after they had been used twice to decline the work:
+
+  * **The module numbering does not apply.** `module_order_gate` carries
+    0263's `ORDER` as `base, json, model, compile, sys` and says in as many
+    words that "anything not named here is in its sixth group, which that
+    decision leaves unordered". A new backend module falls in that sixth
+    group, so it needs no decision record and no renumbering.
+  * **The frozen schema is the Rust's, and a C-only addition does not touch
+    it.** `doc/schema/observed.json` enumerates nine backend kinds because it
+    is generated from `crates/netcfgd-model`'s `BackendKind`; the C's
+    `ncfg_backend_kind_t` is a separate enum that no gate compares to the
+    witness. `ledger_gate` reads the kinds *out of* the witness and requires
+    the C build to answer for each -- witness to C, not C to witness -- and
+    its only reverse check is for ops.
+
+So a tenth kind can be added to the C, and the Rust, the witness and
+`schema-bless` are untouched. What remains true is the earlier half: the
+*semantics* were settled in `document.h` and the client choice follows from
+them. The divergence that does appear is `ncfg status` reporting a backend kind
+the Rust has no word for -- visible only on a machine that has configured
+link-local, which is 0266's situation and not a gate.
+
+**The lesson is the one this file keeps relearning in the other direction.** A
+claim about an instrument is a measurement, and I wrote three of them from
+reading rather than running: that the module gate would reject a new module,
+that the schema witness bound the C, and that the oracle would have to gain
+arms. Each sounded like diligence and each was a guess with a gate's name
+attached.
+
+### Three lenses on the way, all clean, and that is the finding
+
+Derived from the last defects rather than chosen in advance. The `rmdir` whose
+status was discarded cost 222 directories (10.471), so the shape swept for was
+**a call whose failure means the thing did not happen, with the status thrown
+away**:
+
+  * **A written stream closed without checking.** One `(void)fclose` on a
+    `"wb"` stream in all of `c/src`, and it is on the error path after
+    `fprintf` had already failed; the success path checks `fclose(file) != 0`
+    and reports. 0180's rule is being kept.
+  * **Process control before an exec.** All fourteen `setpgid`/`dup2` sites
+    discard, and correctly: the child calls `setpgid(0, 0)` and the parent
+    `setpgid(child, child)`, which is the race-free idiom in which **both**
+    failures are expected -- whichever loses the race, or arrives after the
+    exec, gets `EACCES`.
+  * **An origin nothing produces.** Of `ncfg_origin_t`'s six values, only
+    `NCFG_ORIGIN_STATIC` has a producer; the other five appear solely in the
+    enum and in `explain.c`'s renderer. That looked like 0006 rule 7 collapsing
+    -- the rule that stops the planner re-adding a vanished DHCP address
+    instead of restarting the backend. It is not: origin comes from netcfgd's
+    own route-protocol tag, and the planner uses it as a **positive** gate,
+    removing only what it tagged. Everything untagged is skipped, which is the
+    conservative direction. And the C is at parity: both trees read the
+    recorded prior state first and fall back to the tag, and in both the tag
+    can only yield `Static`, so `explain`'s four other arms are unreachable in
+    production and the Rust's tests are what keep them alive.
+
+**The third one is the useful half, because it prices the decision above.** A
+link-local address netcfgd caused ought to be recorded as `link_local` rather
+than inheriting the static tag -- which is what that value is for, and why the
+C's fallback carries a comment about a `dhcp4` record no producer writes yet.
+Whoever implements either feature writes the first producer of a non-static
+origin, and `explain` starts being able to say what it already knows how to
+print.
+
+**And three clean lenses is a reason to stop rather than to run a fourth.**
+The payout pattern in 10.460's sweep was lenses derived from defects that had
+already happened *in the code being read*; these were derived from defects in
+the test harness and the build, which is a different population. Worth knowing
+before the next sweep picks its lenses.
+
+## 10.481 The cast is the protection, and three switches never had it
+
+10.480's defects were four shapes, and `working-practice.md` says the shape of
+the last bug is the best guess at where the next one is. Three of the four were
+derived from something that had just gone wrong here rather than chosen in
+advance, so they were worth finishing as a set.
+
+### A loop bounded by a named enumerator: two more, both in tests
+
+Swept the C for a loop whose bound is a named enum member rather than a count.
+Thirteen candidates, eleven of them genuine tunables --
+`NCFG_TUI_EVENT_HISTORY`, `NCFG_MAIN_EVENT_BURST`, `NCFG_RESOLV_PATIENCE` and
+the like, where the constant is the bound and nothing else. Two were the shape:
+
+- `apply_test.c` walked `kind <= NCFG_OP_COMMIT_REVERT` to assert that every
+  op is either carried out or refused with its own name in the sentence.
+- `document_test.c` walked `tag <= NCFG_KIND_IFB` to assert that the document's
+  word table and the language's are paired index for index.
+
+Both were correct, because both named the real last enumerator. Both were
+coverage loops, which is the worse half: a value appended to either enum would
+not have failed anything, it would have been **walked past**. The
+`document_test` one was the sharper case -- the loop breaks with `paired = 0`
+on a missing word, so the sixteenth kind with a word in one table and not the
+other was a kind the walk stopped before reaching, and its comment says in as
+many words that a second copy of the table is what the check is there to stop
+having while the bound was a third copy of its length.
+
+Both walk their tables now, with the named enumerator kept below as the count
+to check against -- and re-running the sweep returns the eleven tunables and
+nothing else, which is the fix's own proof and is how the count above was
+recovered. Reading it back the first time gave thirteen against a `grep -c` of
+eleven, because the two that had been fixed no longer match the pattern that
+found them; a count that cannot be reconciled with its own listing is not one
+to write down. That is the asymmetry 10.480 arrived at, applied in the other
+direction: the same constant is a hazard as a bound and a witness as an
+expectation, and which one it is depends only on whether it can grow with the
+thing it is watching. Both controls fail on an off-by-one and pass restored.
+
+### A two-valued mapping over a multi-valued enum: nothing
+
+Eleven ternaries map to a pair of enum values, and every one of them maps a
+genuine **boolean** -- `recorded ?`, `tap ?`, `failed ?`, `seen ?`. A two-branch
+expression over a two-valued input is exact, so none of them is the defect.
+
+Three were worth a second look because they choose a **union member** by an
+equality test on one op kind, where a wrong branch is type confusion rather
+than a wrong string: the two WireGuard arms in `kernel_genl.c` and the qdisc
+one in `kernel_tc.c`. Each is reached from a switch arm naming exactly the two
+kinds it discriminates, immediately above in the dispatch, so each is exact
+today. Recorded rather than changed: the guard is visible at the call site and
+there is no defect to fix.
+
+A lens that finds nothing is still a finished lens. This one cost twenty
+minutes and removes a branch.
+
+### A permissive `default` over a taxonomy -- and my first fix was wrong
+
+`plan/address.c` decides whether an addressing source produces any action at
+all, and its switch named six of the seven sources with `default: return;`
+absorbing `NCFG_ADDRESS_SOURCE_SLAAC`. Planning nothing for SLAAC is right --
+the kernel builds the address and the two sysctls that decide whether it
+listens are `sysctl.c`'s -- but a `default` over a taxonomy is what turns the
+compiler's exhaustiveness check off, so I named SLAAC, removed the `default`,
+and wrote a comment saying the file was now covered.
+
+**The control said otherwise.** With the arms removed and no `default`, gcc
+said nothing. The reason is not the `default` at all:
+`ncfg_address_source_t.kind` is declared `int kind; /* ncfg_address_source_kind_t */`,
+and `-Wswitch` fires only for a controlling expression of enumerated type. So
+`switch (source->kind)` was unchecked whatever its arms were. What makes the
+five switches that *did* name the missing arm work is the cast --
+`switch ((ncfg_backend_kind_t)kind)` in `backend_ops.c` is the idiom, and it
+is easy to read as decoration. With the cast added, gcc names the missing
+value; both files have it now and both controls fail with an arm removed.
+
+The measured scope, since the two forms are indistinguishable at a glance:
+**39 taxonomies in this tree are stored as an `int` with the enum named only
+in a trailing comment**, and of the switches over a `kind` field, 27 cast and
+48 do not.
+
+**That pair of numbers was offered as a candidate count needing a tree-wide
+pass, and the pass does not exist. Re-derived rather than left standing:**
+
+    114   bare switches in `c/src` with no enum cast
+    107   of them carry a `default`
+      7   do not -- and all seven switch on an expression already declared
+          with its enum type, so `-Wswitch` is live on every one of them
+
+Controlled rather than inferred: removing an arm from `watch.c`'s bare
+`switch (mechanism)` produces `enumeration value 'NCFG_WATCH_POLLING' not
+handled in switch`, with no cast anywhere. **A cast is needed only where the
+declared type is `int`**, and outside the two sites already fixed there is no
+such switch left unprotected. So there is nothing mechanical left to sweep,
+and the earlier figure measured the wrong property -- it counted a spelling
+rather than the combination that costs anything.
+
+**What the re-derivation exposed is better than the number it replaced.**
+`plan/address.c` and `plan/build.c` both *had* a `default`, so by this
+discriminator neither was at risk -- and address.c was the real defect of this
+pass. A `default` buys defined behaviour and says nothing about correct
+behaviour: for a taxonomy where every value needs a decision, the `default`
+IS the hazard, because it answers for values nobody has thought about yet.
+That is not sweepable. It is a judgement per switch about whether the
+default's answer is right for a value that does not exist, and the 107 are
+where it lives. `backend_wanted` is the known instance, it keeps its
+permissive arm deliberately, and what guards it is the whole-taxonomy test
+above rather than anything the compiler can see.
+
+### One switch the compiler can never protect, so it got a test
+
+`backend_wanted` is the worst case and cannot be fixed by a cast: a `default`
+suppresses `-Wswitch` even where the controlling expression is cast, and its
+permissive arm is deliberate -- a kind no pass starts must not be stopped. So
+the permissive default and the diagnostic cannot both exist, and when
+`link_local` arrived gcc pointed at five switches over this taxonomy and could
+not see this one. The arm was found by reading.
+
+What it has now is the question asked of the build rather than of a list:
+every backend kind `ncfg_apply_supported` says this build can **start** must
+plan a `backend.stop` when the document asks for nothing. A kind that falls to
+the default plans none, so the walk names it. The control removes the
+`router_advert` arm -- a kind with no individual case anywhere -- and the walk
+reports `a running router_advert the document asks nothing of plans no stop`.
+It is checked for vacuity in both directions, since a walk that found no kinds
+and one where nothing was startable would both otherwise pass.
+
+### An expectation copied from the generator: three, all of them 10.480's
+
+The fourth lens is the one 10.480's ledger defect actually belonged to, and it
+is about independence rather than about a bound. Nine places in the C tests
+write an expectation as an enum member plus one. Three were the shape and are
+10.480's own, now paired with table-bounded loops; three are the witnesses this
+pass added; two are a qdisc filter handle and one is a loop over
+`NCFG_MAIN_SOURCE_PATIENCE`, neither of which is an enum end.
+
+The gates were worth checking for the same reason and come out clean, because
+nearly every one of them compares two independently written sides --
+`key_coverage_gate.py` the lowering against the renderer, `word_table_gate.py`
+a table's length against the enum indexing it, `agree_gate.py` the two
+programs against each other. The frozen witnesses under `doc/schema/` *are*
+compared to the generator that wrote them, which is what a frozen witness is
+for: `make schema-bless` rewrites them from the Rust and the unblessed run
+asks whether the Rust still agrees with itself, which is regression detection
+and correct. What makes them independent evidence about the **C** is that the
+Rust is a separate implementation, and that holds in the one direction
+`ledger_gate.py` uses them.
+
+`walk_test.c`'s emitter-against-parser check is the model for the shape done
+right, and it was already there: it guards its own vacuity with
+`check(emitted > 0, ...)`, it compares across a seam rather than a function
+with itself, it names which half is the weaker one, and it compares the
+spelling rather than whether the result parses -- because a slice that lost a
+character parses as a shorter value nobody would see was short.
+
+### `fail to compile` is not what happens, measured
+
+Several comments in this tree say a kind added to a taxonomy will "fail to
+compile" if a switch has no arm for it. There is no `-Werror` in `c/Makefile`'s
+`WARNINGS`. Measured by removing an arm from `backend_ops.c`: gcc prints
+`warning: enumeration value ... not handled in switch [-Wswitch]`, make exits
+0, and the binary is produced and installed over the previous one. The
+protection is real and it is a warning, in a build whose `ar` line alone is
+longer than a terminal.
+
+This is the document-and-code contradiction `working-practice.md` says to flag
+rather than resolve in either direction, and the two obvious answers are both
+somebody else's: softening the comments makes the tree honest and weaker, and
+`-Werror=switch` makes the claim true and is a build-policy change that a
+future compiler cannot break the way blanket `-Werror` can. Whose decision it
+is matters more than which is better, so it is written here and raised rather
+than taken.
+
+**What it would cost is measured, because the fear is the expensive half of
+that decision and the measurement is one loop.** Compiling every translation
+unit with the tree's own warning set plus `-Werror=switch`, output to
+`/dev/null` so nothing in the tree moves: **205 source files and 97 test
+files, and none of them fails.** So the flag would break nothing today and can
+only ever fire on an omission somebody is about to make, which is what the
+comments already promise it does. That does not decide it -- promoting a
+warning to an error is a policy choice and `-Werror=switch` is narrower than
+blanket `-Werror` by design rather than by luck -- but it removes the one
+objection nobody had checked.
+
+## 10.482 A directory the sweep found, an explanation it refused, and four bad counts
+
+The sweep `running-code.md` asks for after a run found `/tmp/ncfg-watch.H0ilKH`
+left behind by a `make live` in which every check passed -- 80K, four
+`netcfgd-c-tryout.*.log` files in it, from `c_daemon_watch.sh`. The same shape
+10.471 and 10.476 were found by, and the sweep earning its place a third time.
+
+### What was fixed, and it is not what the first diagnosis said
+
+`c_daemon_watch.sh` matched its stub by name. `pkill -f fake-netcfgd` reaches
+**any** run's stub, because the stub has that name in every `$work` while the
+path is this run's alone -- so a bare name in the cleanup signals a concurrent
+run's process, and a bare name in the check asserting nothing of the C daemon
+is left running reports somebody else's stub as this script's failure to stop
+its own. Both are `$work/bin/fake-netcfgd` now.
+
+Proved rather than argued, with a stand-in from another run alive: the bare
+name matched three processes, two of them that other run's and one the shell
+doing the counting; a work-path pattern matched none. This is the rule in
+`CLAUDE.md` about deleting by name rather than by prefix, met from the signal
+side, and it is the half of the change that stands on its own.
+
+### The race was the comfortable explanation and it is refuted
+
+The first version of this said a single `rm -rf` had raced a daemon still
+writing, which is 10.476's finding in nineteen sibling scripts, and that this
+one missed the fix by joining `make live` after that pass. The sequencing is
+true and makes a tidy story. The story is wrong, or at least unproven, and
+`running-code.md` asks for the experiment that would confirm it rather than the
+sentence:
+
+  * A probe in the cleanup reported **no stub alive** and 84K in the work
+    directory. Nothing was writing when the removal ran.
+  * Stopping the script mid-run leaves no directory: the trap runs.
+  * Stopping the suite's own `timeout ... unshare -rn sh -c` invocation of it
+    leaves no directory either, so a kill that skips the trap through the
+    layers is refuted as well.
+
+Three branches removed and no explanation left. The retry loop stays, because
+it costs five seconds in the worst case and says so when it gives up, and
+because nineteen siblings carry it -- but it is hygiene here rather than a fix,
+and the script says so.
+
+**And the evidence was destroyed before the question was asked.** The
+directory's mtime was the one thing that could have attributed it to a run --
+the completed suite, or the earlier one stopped part-way -- and it was removed
+to get a clean baseline for the re-run. A clean baseline was worth less than
+the timestamp.
+
+### Four counts in one session that counted the thing doing the counting
+
+Every one of these was a `grep -c` or `pgrep -c` whose pattern appeared in the
+argv of the shell running it, so the measurement included itself:
+
+    qemu alive: 1          after a VM run that had cleaned up; 0 were alive
+    force-bind: 3          after the link-local script; 0 were alive
+    fake-netcfgd: 1        looking for a leftover stub; 0 were alive
+    bare vs path: 3 vs 2   where the path pattern could only be 0
+
+A fifth was a different fault with the same result, and it reached a commit:
+`grep -c 'dbus-daemon --session'` counted none where six were running, because
+the flag comes last in the command line those processes actually carry. 10.477
+has it. Both faults produce a plausible number that nothing downstream can
+question, and in that case the number was read as evidence a leak had stopped.
+
+`running-code.md` records this for a `pgrep` watcher that never exits and
+notes in passing that counting them with `grep` returns one too many. The
+general form is worse than the watcher case, because it is silent: every one of
+those numbers was plausible, and the first three were read as evidence that
+something had leaked when nothing had.
+
+**`pgrep` excluding its own pid does not help**, which is what makes this easy
+to walk into -- the match is the *parent shell*, whose command line is the whole
+eval. Two remedies, and the first is enough: **list, do not count**, because a
+listing shows the shell and a number hides it. Where a count is wanted, capture
+`ps` to a file in one command and grep that file in another, so the grep's own
+argv was never in the data.
+
+**The cross-project half is signalled rather than fixed here**, because what
+produced four of the five is a command `running-code.md` prescribes: its
+*After it runs, look* section instructs
+`ps ... --ppid 1 | grep -i <name>`, which self-matches, while the arithmetic
+is stated ninety lines earlier in a section about watchers. Which form a
+shared document should prescribe is not netcfgd's to decide. Signalled as
+`claude-guidelines` commit `4443253`, *"`running-code.md` prescribes the
+self-matching sweep command, and 'one too many' is a false positive when the
+truth is zero"* -- named rather than asserted, since a sentence claiming to
+have signalled something leaves no artifact and two of three such claims
+measured elsewhere in this workspace were false.
+
+## 10.485 `bluetooth.sh`'s skip needed no fixing, and `make vm-skipped` is red
+
+Raised as a gap after a `make live` in which `bluetooth.sh` skipped quietly --
+`needs real root (/dev/vhci is root-only)` -- which looked wrong now that 0272
+makes adapter observation the whole of netcfgd's Bluetooth scope. It was not a
+gap, and the tree had the answer in two deliberate halves:
+
+  * **On the host it skips by decision**, and the `live` target says why: the
+    adapter belongs to the machine, `/dev/vhci` is root-only, the module
+    autoloads on the open, and a machine that cannot make one gets a skip
+    rather than a failure. No namespace makes that work, which is why it is
+    also not under `unshare`.
+  * **In the guest it cannot skip.** `tool/vm/payload/skipped.sh` runs
+    `NCFG_LIVE=1 sh tests/live/bluetooth.sh`, and a skip under `NCFG_LIVE`
+    exits 1. So the loud failure that was supposedly missing is exactly what
+    the tier that can answer already produces.
+
+Demonstrated rather than inferred, because this session had been wrong about
+"already covered" in both directions: `make vm-skipped` reports
+`bluetooth.sh: all checks passed` in a Debian guest. The kernel line beside it
+-- `Bluetooth: hci0: Opcode 0x0c03 failed: -110` -- is a virtual controller
+declining a command and not a failed check.
+
+**This was the fourth question in one session handed over or raised that the
+tree had already decided**, after `sandbox_writes.sh`, the cast sweep and the
+polling seam. The common thread is worth more than any of them: in all four the
+answer sat in a comment at the place doing the work, or in a sibling target,
+and never in a document. `working-practice.md` says a working sibling
+explaining itself is a cheaper source of a project's decisions than the
+document is, and four misses in a day is what ignoring that costs.
+
+### And the tier itself is failing, which is the finding worth keeping
+
+`make vm-skipped` exits non-zero: **5 passed, 4 failed** of the nine scripts it
+carries. None of it relates to the work of this session, checked rather than
+assumed, and two of the four are missing prerequisites rather than defects:
+
+    bluetooth hwsim ppp killmode select     passed
+    association.sh    the probe is not built -- `cargo build -p
+                      netcfgd-host --example live_association`
+    delegation.sh     needs `odhcp6c` from source, which `vm-delegation`
+                      exists to pay for separately
+    pppoe-session.sh  1 check
+    nm.sh             51 checks
+
+The last two are real and are somebody's to read. **The first two were two
+different problems wearing one label, and only one was the payload's to
+solve.** Re-run after fixing it: 5 passed, 3 failed of eight.
+
+**`delegation.sh` left the list rather than being fixed.** It wants odhcp6c,
+which Debian does not package, so no change to this payload could ever clear
+it -- and `make vm-delegation` already exists to build that from source,
+because charging it to the other scripts is "how a suite stops being run". A
+verdict that cannot change is the kind of red that teaches a reader to skip the
+colour, so the permanent failure is gone and the script is reached by the
+target that can pay for it.
+
+**`association.sh` needed a build nobody ran, and the three wrong turns on the
+way to that are the instructive part.** The probe is
+`c/examples/live_association`; the script resolves it off `$build` and resolves
+it *correctly*. First guess: the payload should build it in the guest -- wrong,
+the guest reads host-built binaries off the read-only share. Second: the script
+looks in the C tree for a Rust example, a path bug from the day the suite's
+default flipped -- wrong, and `target/debug/examples/live_association` sitting
+there built is exactly the decoy that makes it plausible. Third and right:
+`c/examples/live_association.c` exists, `c/Makefile` has an `examples` target
+for it, and that target is not part of `all` for the same reason tests are not
+-- so nobody had ever built it, in a tier whose purpose is to run that script.
+`vm-skipped` builds it now.
+
+**The daemon is started now too, and the gate moved twice more.** The payload
+starts `c/netcfgd` for that one script and stops it before the loop moves on,
+because several of these scripts run daemons of their own in namespaces they
+make and a system daemon left bound would be in the next one's way. It waits
+for the socket, bounded, and reports rather than hanging. Measured: the socket
+binds.
+
+The verdict went from "the probe is not built" to "no netcfgd is running" to
+**"ncfg wifi status did not answer"** -- and that message was wrong, which took
+a measurement to establish and is the part worth keeping. Suspicion fell on
+the obvious thing first: the payload starts the **C** daemon and the script
+reads with the **Rust** `ncfg`, so the port's interop premise was the candidate
+explanation. It holds. Both clients against one C daemon answer byte for byte:
+
+    ncfg: no wireless device in the configuration. Name the interface, or
+    add a `device` block with a `wifi` section.
+
+Both exit 1. So the daemon answered, clearly and usefully, and the script
+called that "did not answer" -- which is `evidence.md`'s *a failing check is
+not evidence either* in one sentence of prose. The gate distinguishes the two
+causes now, and does it by asking again on failure rather than reading
+`2>&1` into `$status`, which would have been shorter and a regression: the
+parse below takes the interface from `NR == 1`, so a log line on stderr would
+become an interface name.
+
+**And then the rig turned out not to be the answer either.** Asked for next,
+and `association.sh`'s own header refuses it: "Nothing, and nothing. It
+reads", and it is "meant to be runnable on the machine somebody is using, over
+the very wifi it is asking about". It is a reader for a live machine with a
+real association, so rigging it contradicts what it is, and no prerequisite
+this payload installs can give a guest a real radio. It has left the list for
+`delegation.sh`'s reason -- a verdict that cannot change -- and the daemon
+start added for it one step earlier went with it, having been a fix to the
+wrong layer.
+
+**The rig already existed and the missing half was smaller than the question.**
+`hwsim.sh` loads `mac80211_hwsim`, moves both radios into a private namespace,
+stands an access point at `ssid="netcfgd-test"`, associates netcfgd from the
+other, and already read the socket side -- `ncfg wifi status` reaching
+`COMPLETED` and naming the block. What it never read was the observation path.
+So the comparison `association.sh` exists for is there now, against the
+simulated association: the probe's row for the station must name the same
+block the daemon does. Both paths share only `network_for`, which is why
+agreement is evidence rather than coincidence, and 0153 rests on it.
+
+### The probe read the wrong run directory, and four theories died before it said so
+
+The check failed first, and what it reported was an empty reading. The cause is
+one line of the probe's own stderr:
+
+    live_association: cannot read /run/netcfgd/desired.json
+
+`run_dir` is `argv[1]`, defaulting to `NCFG_RUN_DIR_DEFAULT`, and it does not
+read `NCFG_RUN_DIR` -- so invoked bare inside a rig whose everything is under
+`$work/run` it looked at the machine's real run directory. `association.sh`
+runs it bare and is right to; on a live machine the default is the answer.
+
+**That line was discarded by the first draft of the check**, which wrote
+`2>/dev/null`, and four theories were spent in its absence: the supplicant
+control directory (`innc` already exports `NCFG_WPA_CTRL_DIR`), the probe not
+being built (it was), C-and-Rust interop (disproved separately -- both clients
+answer one C daemon byte for byte), and the daemon not persisting
+`desired.json` (it does). `evidence.md` says read the input before theorising
+about the mechanism; the input was being thrown away.
+
+**The worse half is the check that passed beside the failure.** "Only the radio
+has a network" compares an empty list against empty, so with no rows at all it
+printed `ok` directly under the `FAIL` -- making a total absence of
+observation look like one narrow field being wrong. A vacuity guard now proves
+there is a reading before anything interprets its contents, and reports the
+probe's own words when there is not. The guard is worth more than the check it
+protects, and the wired assertion is labelled for what it establishes: that
+nothing else claimed a network, which in a rig with no wired row is true
+without asking anything.
+
+The tier stands at 5 passed and 2 failed of seven -- `pppoe-session.sh` at one
+check and `nm.sh` at fifty-one, both real and neither this session's.
+
+So the tier's remaining failures are `pppoe-session.sh` at one check, `nm.sh`
+at fifty-one, and one unmet capability -- against four, two of which said
+nothing about the software.
+
+## 10.487 ActivateConnection is understood, written, and deliberately not landed
+
+Asked to port it. It is worked out end to end, it was written, it built, and it
+is reverted -- because what I had forwarded a write to netcfgd with no
+authorization at all, and the tree refused it before I noticed.
+
+### What stopped it, and the tree says it twice
+
+`bus_test.c` asserts the manager declares four methods, with the reason beside
+the number: **"The activation pair is a write and waits for the authorization
+gate."** A fifth failed that check, which is the suite working against me.
+
+`settings.c` then gives the order, and it is the whole argument: **every write
+authorizes first and is refused for not being built second.** An unauthorized
+caller gets the answer that will still be right once writing works; an
+authorized one is told the operation does not exist yet. The other way round
+"would mean the authorization arrived untested on the day the write did, which
+is exactly how 0264's unauthorized method came to exist".
+
+So the gate is live, tested and already deciding, with nothing behind it. The
+first real write behind it is a milestone, and this tree has paid once for
+getting that order wrong.
+
+### What the port needs, so it is not re-derived
+
+  * **`admin_principal` wants promoting.** It is `static` in `settings.c` and
+    called three times there; `manager.c` needs the same answer and a copy
+    would be two definitions of who may write. It belongs beside
+    `nmc_may_write`.
+  * **`nmc_device_up_of`**, mirroring `nmc_device_carrier_of`, because the
+    `up` flag lives in `device.c`'s private `facts_for` and an `interface`
+    profile already up is the state being asked for while one that is down
+    gets the reason. Drafted.
+  * **The handler**, with `refuse_add` as the exact template: `nmc_caller_uid`,
+    the admin principal, `nmc_may_write`, then act. For a `network` the act is
+    `ncfg_client_wifi_connect(client, interface, id)` -- netcfgd's own verb,
+    which keeps 0013's boundary in one place and is what `nm.sh` checks by
+    watching for `ADD_NETWORK` beside `SELECT_NETWORK`. `specific_object` is
+    accepted and ignored, as in `manager.rs`.
+  * **The answer** is `/org/freedesktop/NetworkManager/ActiveConnection/` plus
+    the device's number, which is what `device.c` answers and the manager
+    lists.
+  * **Then the bookkeeping**: `bus_test`'s count and its comment, `activation`
+    back in `SUPPORTED[]`, and `nm.sh`'s pin turned round -- which is what that
+    pin was written to be turned by.
+  * **Not ported, and it changes behaviour:** the secret-agent question
+    `manager.rs` asks first. Without it a network whose passphrase names a file
+    that is not there fails in netcfgd rather than being asked about.
+
+The draft is in this session's scratch and not in the tree, because a
+half-authorized write is not a thing to leave in a source file.
+
+### Three things the attempt turned up
+
+**The shim still advertises more than it serves.** `profile_writes` and
+`profile_writes_wifi_only` sit in `SUPPORTED[]` while every write refuses --
+the same fault as `activation`, which came out on instruction while these
+stayed.
+
+**Two decision records are numbered 0264**, dated 2026-09-18 and 2026-10-03,
+in a scheme whose whole value is one stable anchor per decision and which is
+cited by number from source hundreds of times.
+
+**And `settings.c`'s citation of "0264's unauthorized method" is correct, which
+this entry twice said it was not.** 0264 records exactly that: `Writable` was
+reachable on the Settings.Connection interface and authorized nobody --
+"`Update` and `Delete` both call `caller_uid` and `may_write` and this does
+neither, because it was never meant to be reachable". The claim that it matched
+neither record came from `grep -rln 'unauthoriz'`, and the record says **"no
+authorization at all"**. A pattern that cannot match its subject again, which
+is 10.482's second kind of counting fault and the eighth instance of the class
+in one session -- this one published in an entry and two commit messages before
+being checked.
+
+So there was nothing wrong with the comment, and the collision was the whole of
+the defect: the number was ambiguous and is not any more, which leaves that
+citation resolving to the record it always meant.
+
+**And the claim that the gate was wired into nothing was mine and false.** It
+came from a grep piped through `head -8`, where matches in `authorize.c` and
+`bus_test.c` filled the eight lines and `settings.c` fell off the end. The
+sixth time in this session that reducing output before reading it produced a
+confident wrong answer, and the one that would have justified shipping an
+unauthorized write.
+
+## 10.490 ActivateConnection is ported, authorized first, and acts
+
+10.487 worked it out and declined to land it. Asked again, so it is in, and
+the thing that made it worth declining the first time is the thing it is built
+around: this is **the first write this shim carries out**, behind a gate that
+was written, tested and deciding with nothing behind it.
+
+### Authorized before anything is resolved
+
+`nmc_caller_uid` asks the BUS who called -- never the message, since a sender
+name is whatever the client put in the header -- then `nmc_admin_principal`,
+then `nmc_may_write`. netcfgd authorizes its socket PEER, which is this
+adapter and the more privileged of the two, so asking netcfgd would answer the
+wrong question; that is the confused deputy `authorize.h` exists for and 0264
+is this tree's record of having got it wrong once.
+
+The gate runs **before** the paths are resolved, so an unauthorized caller
+learns nothing about which objects exist.
+
+`admin_principal` moved rather than being copied: it was `static` in
+`settings.c` and used three times there, `manager.c` needed the same answer,
+and two definitions of who may write is the duplication `authorize.h` exists
+to prevent. It is `nmc_admin_principal` in `authorize.c` now.
+
+**A cast was nearly shipped over a type that does not exist.** The first
+version forward-declared `struct nmc_state` so the header would not need
+`state.h` -- and `nmc_state_t` is an anonymous struct typedef, so that
+declared a different, unrelated incomplete type and the casts bridged the two.
+It compiled and worked, pointers being pointers, which in the authorization
+path is exactly the kind of working not to accept. It takes the real type now.
+
+### What it does, and what it proves
+
+Measured in the guest: `activating a profile reaches the supplicant` and
+**`and it went through netcfgd's join`** both pass. The second is the one that
+matters -- `ADD_NETWORK` beside `SELECT_NETWORK` in the supplicant's log is
+what shows the activation went through netcfgd's own verb rather than a path
+of the shim's own, which is 0013's boundary kept in one place. A method that
+merely returned would pass neither.
+
+`nm.sh` moves from 66 ok and 51 failing to **70 and 48**.
+
+An `interface` profile is not activated: netcfgd brings interfaces up because
+the configuration says to, so one already up answers success and one that is
+down gets the reason. `nmc_device_up_of` is new for that, mirroring
+`nmc_device_carrier_of`, because the flag lives in `device.c`'s private
+`facts_for`.
+
+`specific_object` is accepted and ignored, as in `manager.rs`: netcfgd's
+socket has no argument for preferring an access point, and pinning one is a
+`bssid` in the configuration.
+
+### The bookkeeping worked in the right order, which was the point of it
+
+`bus_test`'s method count refused the fifth method until both the number and
+the comment saying the activation pair "waits for the authorization gate" were
+updated. And `nm.sh`'s pin -- written to hold the `activation` tier OUT while
+the method was absent -- was turned by precisely the event it was written for.
+Neither depended on anybody remembering.
+
+### DeactivateConnection is ported too, and is unreachable from nmcli
+
+Ported the same way and in the same order: a write, so the bus is asked who
+called before any path is resolved. A network activation goes down through
+netcfgd's own `wifi_disconnect`; an `interface` one is refused, and the
+refusal is the useful part -- netcfgd brings an interface up because the
+configuration says it should, so a request to take it down is one the next
+reconcile would undo, and the message names the edit that would really do it.
+
+`nmc_active_profile_of` is promoted out of `active.c` rather than copied, for
+`nmc_admin_principal`'s reason: the nuance that an `interface` block counts
+only where it is actually served as a profile is what a second copy loses.
+
+**It changed nothing, and the reason is the fixture.** `nm.sh` stays at 70 and
+48, and nmcli says why:
+
+    Error: 'HomeFiber' is not an active connection.
+
+So nmcli never calls the method. `nmc_active_exists` requires a routable
+address as well as a profile -- which `active.c` states deliberately,
+"Activated means it holds an address... a link that is up with no address is
+`DEACTIVATED`", because that is NM's own state machine -- and the fixture's
+radio is `interface radio0 { }` with no `config` at all. No address, so no
+`ActiveConnection` object, so the manager lists none, so a client has nothing
+to take down and the device-state checks assert a `Connection` column the
+document cannot produce.
+
+**So a large part of that band asserts state its own fixture makes
+impossible**, and the methods are not what is failing. Worth knowing before
+anybody reads 48 failures as 48 defects: the `vm-skipped` target says this tier
+runs "scripts that never ran anywhere", so these assertions may never have
+passed rather than having regressed.
+
+### radio0 has an address now, which buys one check of three
+
+Settled by the copyright holder: give it one. `interface radio0` carries
+`10.7.8.1/24` and an IPv6, on a different `/24` from `probe0`, and `nm.sh`
+moves to 71 and 47. What flipped is `a radio with an activation is connected,
+not disconnected`, which is the one that only wanted the address.
+
+**It costs the fixture a causal claim, and the config says so.** On a real
+radio the address arrives from the lease the joined network hands out, so that
+check would be evidence the activation did something. The supplicant here is a
+stand-in and no lease exists, so the address is the document's and the check
+evidences the shim's state MAPPING rather than the activation's EFFECT -- it
+would read `connected` whether or not the activation happened. There is no way
+to make it causal in this fixture, so the weaker claim is written down beside
+it rather than left for a reader to over-read.
+
+**The other two need the observation to name the network.** `deactivating
+reaches it too` and `the device names what is active on it` want `HomeFiber`,
+which is `nmc_active_profile_of` answering NETWORK -- and that depends on
+netcfgd reporting the radio as associated with that block. The activation
+demonstrably reached the supplicant, and the stand-in does not report back an
+association netcfgd reads as completed, so the active connection is the
+interface profile rather than the network. That is the same wall `hwsim.sh`
+gets past with real simulated radios, and it is a fixture capability rather
+than a shim defect.
+
+**And the IP-config failures were never about radio0 at all**, which is the
+correction this instruction turned up: `details()` queries `probe0`, which the
+document already addresses, so `10.7.7.1/24` and `10.7.7.254` are its. The
+address check passes and always did; the GATEWAY is what does not arrive. A
+diagnostic was first attached to the address check and never fired, because a
+diagnostic on a passing check is worth nothing -- it is on the gateway now,
+printing the kernel's default route beside nmcli's answer, which separates
+netcfgd never installing the route from the shim not projecting it.
+
+The secret-agent question `manager.rs` asks before connecting is not ported,
+so a network whose passphrase names a missing file fails in netcfgd rather
+than being asked about first -- a worse message and not a worse outcome.
+
+And **this handler's refusal arm is not covered by a test.** The gate's own
+logic is unit-tested and `refuse_add` exercises the same calls, but `nm.sh`
+runs as root in the guest, so every activation there is authorized and the
+`AccessDenied` path is reasoned rather than observed. That is the half of a
+security change a green suite says least about.
+
+## 10.492 AddConnection is 1,500 lines of Rust and writes credentials
+
+Asked for it after the `ipv4` group landed, since `a client can write a static
+profile at all` is the band's last failure outside the activation pair. Scoped
+rather than started, and the measurement is the argument.
+
+### What it is
+
+`refuse_add` authorizes the caller, checks the type is `802-11-wireless`, and
+then says this build cannot write a network over the bus -- which is the order
+`settings.c` argues for and which 10.490 put the first real write behind. The
+write itself does not exist in C at all:
+
+    adapter/netcfgd-nm/src/emit.rs    1177   NM dictionary -> netcfgd config
+    adapter/netcfgd-nm/src/store.rs    285   the write, via config_put/secret_put
+
+`adapter/netcfgd-nm/c/src/emit.c` is 523 lines of D-Bus SIGNAL emission --
+the same word for a different job, which is worth saying because its presence
+reads like the renderer already being there.
+
+So this is the largest single item this session has met, and unlike the two
+activation methods it is not a handler plus a client call: it is a renderer.
+
+### Why it is not a smaller slice than it looks
+
+The test's own case is the easy instance -- an open network with static IPv4 --
+and a renderer covering only that would still have to **refuse what it cannot
+carry rather than drop it**, which is 0034's rule and already how the Rust
+behaves: the M7 record notes an MTU "named in the file as unexpressible rather
+than dropped". nmcli sends more than the test reads. It defaults
+`ipv6.method` to `auto`, and the test asserts `"slaac"` reaches the file --
+so a partial renderer that ignored what it did not recognise would write a
+profile quietly missing a client's settings, which is the wrong-family fault
+of 10.491 in another costume: a file that looks complete and is not.
+
+### And it writes secrets, which is the part to be slow about
+
+`store.rs` calls `secret_put` as well as `config_put`, and 0030 and 0031 set
+how: the passphrase goes to the secret provider and a `@secret:` reference
+into the block, inbound only, with `GetSecrets` still refusing. 0042 calls a
+credential the one thing on a machine nobody can get back.
+
+The test's network is open, so the minimal path touches none of that -- which
+is exactly the trap. A method that wrote the open case and silently dropped a
+psk would hand a client a secured network with no credential and no error.
+So the smallest honest slice is **write what can be written and refuse when a
+security group carries a secret, naming `ncfg wifi add`** -- the shape
+`refuse_add` already has, one step less refused.
+
+### Where this leaves the band
+
+`nm.sh` is 76 and 42. Of what remains, this is the one with a clear
+specification and a known cost; the rest of the band needs the fixture to
+report an association, which is `hwsim.sh`'s territory rather than the shim's.
+The subset defined above was then built, in 10.493, and the half this entry
+was most careful about -- a method that writes the open case and drops a
+credential -- was refused there by name rather than implemented. 10.494 then
+wrote it: the value to netcfgd's secret provider, the reference in the block,
+and nothing of the renderer left unported.
+
+## 10.494 The credential half: the value to the provider, the reference to the file
+
+10.493 wrote every network a client could ask for except a secured one, and
+refused that by name. This is the other half, and the shape is the one 0030
+and 0031 set: the passphrase goes to netcfgd's secret provider, the block gets
+`psk = "@secret:<id>"`, and nothing reads one back out.
+
+`security_of` now takes the profile's id and the block it is filling, so a
+`wpa-psk` or `sae` group leaves the value in `block.secret` and the reference
+in `text`. `settings.c` writes the credential first and the file second, and
+forgets the block whichever way the write went.
+
+### Neither write replaces, and that is what makes the rollback safe
+
+`store.rs` passes `replace: true` and is right to: its one write serves
+`AddConnection` and an agent answering a request for a credential, and 0031's
+bridge needs the second to be able to say "no, this one". Here `AddConnection`
+is on its own, so both writes refuse what is already there -- which is the
+line `ncfg_client_wifi_add` draws for the same reason, refusing outright if
+either the network file or the secret exists.
+
+That is not only caution. **It settles ownership**: a secret this call stored
+is one that was not there a moment before, so removing it again when the file
+is refused cannot remove anybody else's. Without the refusal there would be no
+way to tell a credential we had just written from an operator's, and 0042
+calls a credential the one thing nobody can get back.
+
+Measured: a second `AddConnection` of the same name is refused at the
+credential step, in netcfgd's own words, with `Nothing has been written`
+appended and the first value untouched on disk.
+
+### The rollback is measured rather than reasoned about
+
+The branch that matters is the credential stored and then the file refused,
+which leaves a secret no block refers to -- inert, but enough to refuse the
+client's next attempt at the same network, because the store does not replace.
+
+Provoked rather than waited for: `AddConnection` with the id of a network the
+document already defines. The secret stores, the drop-in is written, netcfgd's
+compile-back refuses it for a duplicate label, the file is put back, and the
+rollback removes the credential. The secrets directory is the same list before
+and after and no file is left.
+
+**What proves the secret step ran is the error, not the absence.** An empty
+secrets directory on its own is equally consistent with the credential having
+been refused in the first place; the sentence that came back is `config_put`'s,
+and that is only reachable once the store has succeeded.
+
+### The passphrase is checked here, and twice rather than once
+
+`check_passphrase` in `c/src/cli/wifi_write.c` is the rule: 8 to 63 octets
+(0229), and no control characters. Both are enforced before anything is
+stored, where the Rust renderer checks only the length. Its comment is the
+argument for doing it at all -- at association time the failure is a bare
+`FAIL`, half an hour after the file was written -- and the control-character
+half is what makes the difference here: such a passphrase cannot be sent to
+the supplicant at all, so storing it buys a credential certain not to work.
+
+A fourth copy of the range, named as one: the model's `PASSPHRASE_OCTETS`, the
+CLI's check, the supplicant's own, and this. The shim links `client/` and
+nothing else, and the client library does not publish the constant.
+
+**The length is reported and the value never is.** A refusal from here crosses
+the bus and lands in a client's log, so the one asserted check in the pair is
+that the passphrase does not appear in the message.
+
+### Forgetting it is a function rather than a discipline
+
+Five paths leave the write: netcfgd away, the credential refused, the file
+refused, a network netcfgd then does not report, and success. `nmc_block_forget`
+is called once after one call that covers all five, which is why the write is
+its own function -- a wipe at each `return` is the error path somebody forgets.
+
+`explicit_bzero` and not `memset`, because memory about to go out of scope is
+exactly what a compiler is entitled to skip clearing, and the local copy in
+`security_of` goes the same way whether the passphrase was used or refused.
+
+### `refuse_write` had gone stale and nothing would have caught it
+
+Its sentence was `writing connections over the bus is not implemented`, true
+until 10.493 and false after it: a settings panel would have sent somebody
+looking for a feature that is there. The three calls it answers --
+`LoadConnections`, `ReloadConnections`, `SaveHostname` -- are not refused for
+being unbuilt but because netcfgd re-reads its own files and keeps a hostname
+policy rather than a hostname, so the message says that now.
+
+**And the comment above those refusals claimed `nm.sh` greps each of them.**
+Measured across every script in `tests/live/` on 2026-10-19: `read-only here`
+is grepped three times and the other two wordings are asserted nowhere. So one
+of the three is a contract and two are not -- which is worth knowing in both
+directions, because the reason the stale sentence sat there is that nothing
+was ever going to fail over it.
+
+### Three checks were passing on an absence, and writing the file revealed it
+
+`nm.sh` goes from 87 and 30 to **93 and 24**: the whole `Roaming` band passes,
+including the credential's own file and its mode, and the note naming what
+could not be translated.
+
+**Nine checks started passing and three stopped**, and the three are the
+finding. They are the delete band -- `deleting takes the file with it`, `and
+the credential too, rather than leaving it for nothing`, `and netcfgd no
+longer has the network` -- and each asks whether something is *gone*. Nothing
+was ever created, so each was comparing an absence with an absence and
+reporting success; `Delete` has refused throughout and still does. They are
+not regressions in the shim. They are `evidence.md`'s first rule arriving from
+the far side: a check over nothing passes exactly as loudly as a real one, and
+the way this one came to light was not review but **making the thing it
+asserts about exist.**
+
+Worth keeping because the usual advice does not cover it. A vacuous pass is
+normally found by asking what a check inspected; these were in a band whose
+other checks were failing honestly, so the suite looked like a feature that
+was half built rather than one with three assertions that could not fail.
+**The population of such checks is "every assertion about the removal of
+something this build cannot create"**, which is a lens rather than a list, and
+`Delete` is where it points next -- ported in 10.495, which is what turned
+these three back and is measured against them.
+
+The count was predicted before the run as 24 from this reasoning, and the run
+reported 24 -- which is the only part of the band's arithmetic that was worth
+asserting in advance, because getting it wrong would have meant the model of
+what these checks assert was wrong.
+
+### What remains
+
+Of the 24: six are the secret agent and the activation that needs one, four
+are `IP4Config` reporting what was applied, seven are `GetSettings` not
+reporting the connection options this now writes -- so each of those is a pair
+with its write half passing and its read half not, which is where 0207's fixed
+point lives -- three are the delete band above, one is `Update`, two are the
+device-to-activation join, and one is `RequestScan`.
+
+## 10.495 Delete, and the three checks that were passing on nothing
+
+10.494 closed the create path and turned three checks from passing to failing
+-- the delete band, which asks whether a profile and its credential are gone
+and had never had anything to assert about. This is `Delete`, and those three
+are what it is measured against.
+
+### Whose file it is, asked of netcfgd
+
+A hand-written block is read-only through the bus (design section 9.4) and a
+drop-in under this shim's own naming is its to remove. The Rust decides by
+stat: `is_machine_generated` tests `<config_dir>/conf.d/nm-<id>.conf`, which
+means the shim keeping a copy of where netcfgd puts its configuration.
+
+**This asks for the drop-in list instead** -- `ncfg_client_configs`, which
+answers with each file's stem, its path relative to the configuration
+directory, and its text. 0127 makes the daemon the only writer of that
+directory, and the same argument makes it the only authority on what is in it.
+`say_filename` is the counter-example in the same file: it builds
+`/etc/netcfgd/conf.d/nm-<id>.conf` from a hardcoded prefix and is wrong in
+every test rig, which 10.493 recorded and this does not repeat.
+
+**"I cannot tell" is a third answer, not a no.** A failed fetch would
+otherwise be served as "somebody wrote this by hand", which is a sentence
+about section 9.4 and the wrong thing to show an operator whose own profile is
+briefly unreachable.
+
+### Only the credential the block referred to
+
+The Rust removes the secret named after the profile unconditionally. That is
+safe for a profile it wrote and not for a name it was handed: a secret under
+that name may be an operator's, and 0042 calls a credential the one thing
+nobody can get back.
+
+So the drop-in's text is read for the reference -- the whole thing, quotes
+included, because `@secret:Home` is a prefix of `@secret:HomeFiber` and a
+profile is not entitled to another's credential for starting with its name.
+One fetch answers both questions, so the two cannot come to disagree, and an
+id too long to build the reference from is reported as referring to nothing:
+that leaves a credential behind rather than taking the wrong one.
+
+Measured on the bus: `Road` and `Roadside`, both with passphrases, and
+removing `Road` leaves `Roadside`'s value intact.
+
+### The order is the create's, backwards
+
+The file goes first and the credential second. A block naming a credential
+that is gone is a network this machine will try to join and cannot; a
+credential nothing refers to is inert. The create writes the value then the
+reference for the same reason, read the other way round.
+
+**A credential left behind does not fail the deletion.** The network is gone
+once the file is, and reporting failure for something that happened would have
+a client show an error about a profile it is also about to see removed. It goes
+to stderr instead, which is the position netcfgd itself takes for
+`wifi forget`: what shows a leftover credential is the secrets list, where it
+is already named as the fault it is.
+
+### The window is reopened the other way round, too
+
+10.494 reopens the dispatch's fact window after a write so the new network can
+be found. This reopens it so the removed one cannot: the store is refreshed
+before the announcement, so the path has stopped resolving by the time a client
+is told the object has gone. Same rule -- a dispatch that writes is one whose
+cached facts describe the world as it was -- pointed in the other direction.
+
+### The ledger that said more than it checked
+
+`bus_test` asserted "every method but GetSettings shares the refusing
+handler", and compared each handler against `methods[0]`, which IS
+`GetSettings`. So it would have caught a write wired to the getter and nothing
+else: a write wired to anything that works passed. **`Delete` landing did not
+make it fail**, which is the detector missing the first case it existed for.
+
+It compares against `Update`'s handler now and carries a ledger of the methods
+that legitimately do not share it, each with its reason. Writing that found a
+third case nobody had noticed: **`GetSecrets` does not share the read-only
+refusal and must not** -- its sentence is a security property rather than a
+gap, and it is deliberately not authorized first. The weaker check could not
+have told that apart from a write that had quietly started working.
+
+Two failures, then, from one correction -- the exemption that was missing and
+the one that was wrong -- which is `evidence.md`'s *suspect the check before
+the code*, arriving as the check itself being the thing under test.
+
+### The band, and what is left of the write path
+
+`nm.sh` goes from 93 and 24 to **96 and 21**, which is the three checks of
+10.494's finding and nothing else -- predicted as 21 before the run, and the
+prediction is the point: the band was understood rather than improved by
+trial. `deleting one is refused` still passes, which is the hand-written half
+of the same method.
+
+The 21 that remain are three groups and one straggler. **Six are the secret
+agent** and the activation that needs one -- netcfgd asking a NM agent for a
+credential, which is `agent.c`'s path rather than this one's. **Eleven are the
+read direction**: `GetSettings` does not report the connection options this
+now writes, and the `IP4Config` pair does not report what was applied, so each
+is a pair with its write half passing. `Update` is the last write still
+refused, and `RequestScan` is the straggler 10.486 recorded.
+
+**Of what is left, nothing is a profile this shim wrote and cannot manage.**
+Create, create-with-credential and delete are all served; what a client cannot
+do is edit one in place, and that is one method with a known shape -- the
+credential it must leave alone is the case `emit.rs` keeps
+`network_block_keeping_secret` for. Ported in 10.496, where that flag turned
+out to be the smaller half of the problem.
+
+## 10.499 autoconnect belongs inside `wifi`, and the compiler was right
+
+10.498 recorded `autoconnect` as a gap in the daemon's compiler: the model
+declares it in `network_fields` and `lower_network.c` has no network-level arm,
+so a block carrying it would not compile and `AddConnection` failed whole for
+any client asking for a network it should not join by itself.
+
+**That diagnosis was wrong, and asking the daemon is what showed it.** Four
+blocks, written by hand into a work directory and put to `ncfg plan`:
+
+    plain                 accepted
+    at network level      unknown network key `autoconnect`
+    inside wifi           accepted
+    wifi, with the rest   accepted
+
+So the key is a `wifi` key, the lowering has had an arm for it all along -- in
+`ncfg_lower_wifi_key`, beside the diagnostic for the `priority` 0154 retired --
+and `hidden`, `metered` and `metric` are network-level in the same test. The
+compiler was right and **the renderer was writing the key in the wrong place.**
+
+### The model's field list is no evidence about the language
+
+What made the wrong diagnosis plausible is that `network_fields[]` does list
+`autoconnect` at network level. It is the JSON surface and not the DSL's, and
+the two differ on purpose: `psk` is inside `wifi` in the language and inside
+`security` in the JSON. A field's presence in the one says nothing about where
+the other takes it.
+
+**So 10.498's "two lists that have to agree" was the wrong shape as well.**
+They are two surfaces of one model and they are not required to agree; what
+has to agree is the renderer with the language, and the only authority on the
+language is the parser. Reading a table is not asking.
+
+### Both shims have it wrong, which is why nothing caught it
+
+`emit.rs` writes `autoconnect = false` at network level too, so the Rust
+produces the same uncompilable block. `nm.sh` never set the option -- the
+per-connection band sets `metered` and `autoconnect-priority` and stops -- so
+neither implementation was ever asked.
+
+It has a profile of its own now rather than another option on `Opts`, because
+the check above that one asserts its `wifi` block carries **only** the
+security, which is 0154's defect; widening it to admit a second key would
+retire the thing it catches. The new one asserts the add happened at all, that
+the key is inside the block, and that netcfgd accepts the file.
+
+**The Rust is fixed too, and that is the half worth measuring.** `emit.rs`
+writes the key inside the block now, with a test of its own that was proved
+able to fail by putting the old placement back. Then both shims were driven
+against the same daemon through the same client, and they produce the same
+block -- `wifi { open = true; autoconnect = false }` -- and the same read-back.
+An oracle and a port agreeing is worth more than either passing alone: the
+port was written FROM the oracle, so a fault they share is invisible to every
+comparison between them, and this one was. What found it was neither of them
+but the daemon, asked directly.
+
+### What the fix is worth beyond the key
+
+`nm.sh` goes from 108 and 13 to **111 and 13** -- three checks added, none
+moved, which is what a fix to something nothing was asking for looks like in a
+suite. The three are the add happening at all, the key's placement, and
+netcfgd accepting the file.
+
+The renderer and the reader now agree about this option in both directions: a
+client asking for a network that joins only when asked gets a block that
+compiles, `GetSettings` reports `autoconnect` false, and a read-modify-write
+leaves it false. Measured through a real client rather than inferred -- the
+same loop that 10.497 and 10.498 closed for the IP groups and the options
+beside them.
+
+## 10.500 The agent band: the shim asks, for the first time
+
+Design section 9.3's other half. `agent.c` has held the registry since it was
+written -- `Register` and `Unregister` keyed on the sender's bus name, and an
+agent dropped when its connection goes away -- and the shim had never asked
+anybody for anything. It has only ever answered calls.
+
+### What it does when a credential is missing
+
+`ActivateConnection`, for a network whose credential netcfgd does not hold:
+ask each registered agent in turn for `GetSecrets` on
+`802-11-wireless-security` with the flags that say a person is waiting, take
+the `psk` out of the reply, and store it through `secret_put`. Then the join
+proceeds, and netcfgd finds the credential where it looks for it. 0031's
+bridge, inbound only, with `GetSecrets` on a profile still refusing.
+
+### Three pieces that were already there
+
+**`GetSettings`' dictionary is `GetSecrets`' first argument.** An agent is
+handed the profile it is being asked about, and `get_settings` already appends
+into a message rather than answering one -- so `nmc_settings_append` is six
+lines and the agent sees exactly what a client sees. A second renderer for it
+would have been a second answer to one question, and the one an agent saw
+would be the one nothing checks. That argument was also incomplete until this
+week: before 10.497 it carried no IP groups and before 10.496 no security
+group.
+
+**`block.c` already reads a settings dictionary**, so the passphrase comes out
+of the agent's reply with the readers that parse what a client sends. The same
+shape read for the opposite purpose, and one set of rules about which types
+count.
+
+**The credential's name comes from netcfgd**, not from a stat:
+`ncfg_client_secrets` answers with the union of what the store holds and what
+the configuration refers to, and `stored` is the half that says which. A
+referenced name with no file is exactly the case an agent exists for -- and it
+is already named as a fault in the daemon's own listing.
+
+### The caller is never asked, and that is not an optimisation
+
+0107's finding, ported with the code: a secret is asked for from inside
+`ActivateConnection`, before it returns, so a client that registered an agent
+and then activated a profile is blocked on the very reply it would have to
+answer. `nmcli` does exactly that -- it registers an agent for
+`connection up` -- and asking it is a circular wait that unwinds at whichever
+side times out first.
+
+The live script records the Rust's version of it as intermittent, about one run
+in five, with the agent's log stopping at `registered`. The C skips the caller
+by bus name, which is why that stall should not be reachable here; the timeout
+is 90 seconds rather than libdbus's 25 so that the *agent* is the side that
+gives up, since two parties timing out at the same number is how the race got
+its coin-flip in the first place.
+
+**And the shim answers nothing while the call is outstanding**, which is the
+cost of a blocking call in a single-threaded loop. For the fake agent that is
+microseconds; for a desktop dialog it is as long as somebody takes to type. The
+honest fix is an asynchronous activation, which 0107 already anticipates --
+"until the shim's activation is asynchronous too" -- and this does not do it.
+
+### Measured on the host before the guest, all three outcomes
+
+A real `dbus-python` agent against the real daemon, through the bus:
+
+- **nobody registered**: netcfgd's own `secret `Prompted` was not found ...
+  `ncfg secret set Prompted` stores one`. A machine with no desktop gets the
+  message that names the command, not one about agents.
+- **an agent that refuses**: `the secret agent `:1.8` did not supply a
+  passphrase: the user cancelled`, and **no credential written** -- a
+  half-written one for a network nobody joined is worse than none.
+- **an agent that answers**: asked with
+  `setting=802-11-wireless-security flags=5`, the value stored at 0600, the
+  activation returning a path, and the supplicant told.
+
+**One of those nearly became a false regression.** The no-agent case printed
+nothing at all through `busctl` and exit 1, which read as the shim answering
+with an empty error -- and the same call through `gdbus` printed netcfgd's
+sentence in full. The instrument was the thing that was quiet, not the shim.
+`evidence.md`'s *never reduce a check's output before you know it passed*,
+arrived at from the reader's side: two clients disagreed about whether there
+was anything to read.
+
+### And the band still failed, for a reason the host rig cannot see
+
+All three outcomes worked on the host and the guest tier did not move: the same
+six checks, with the agent's log stopping at `registered` -- the shim was never
+asked to do anything. The diagnostic:
+
+    Error: device 'radio0' not compatible with connection 'Prompted':
+    The device is lacking WPA capabilities required by the connection.
+
+**libnm refused locally and never called the shim.** `WirelessCapabilities`
+answered zero, so a connection that needs WPA is one no device can carry; the
+Rust shim reports the real set and its comment names this exact sentence as
+what `nmcli connection up` said until it was written. The C never ported that
+half.
+
+**It was answering zero harmlessly until 10.496.** Before `GetSettings`
+reported the security group, libnm had no requirement to check the device
+against -- so the property was wrong for as long as nothing could notice, and
+the change that made it matter was two commits earlier and in another file.
+Traced through this session's runs rather than guessed: the cancel check's
+diagnostic was netcfgd's own `secret not found` in the first runs, the empty
+gateway in the run after the IP groups, and this from the run after the
+security group onward.
+
+**And the host rig is structurally blind to it.** `gdbus` and `dbus-python`
+call `ActivateConnection` directly; `nmcli` goes through libnm, which validates
+the connection and the device first. So a raw bus client tests what the shim
+SAYS and only libnm tests whether a client can USE it -- which is why both of
+this week's local refusals, the empty gateway and this one, were invisible to a
+rig that passes every outcome. The guest tier is the only place with libnm in
+it, and that is what it is for rather than merely where root is.
+
+### The band, and the seven that are left
+
+`nm.sh` goes from 111 and 13 to **117 and 7**: all six agent checks, and
+nothing else moved. A cancelled prompt is reported as such, the agent is asked
+for the right setting and told a person is waiting, the passphrase reaches
+netcfgd's provider at 0600, and the activation then reaches the supplicant.
+
+**Seven left, and none of them is a wifi profile.** Four are the `IP4Config`
+pair reporting what was APPLIED rather than what was asked for, which is 0032's
+other half and reads the observation; two are the device-to-activation join --
+`deactivating reaches it too` and `the device names what is active on it`; one
+is `RequestScan`.
+
+## 10.507 The budget gates were already fixed, and the ratchet had gone slack
+
+"now fix the size, rss and footprint gates too", the copyright holder,
+2026-10-21, after `linkage`. **Two of the three words in that instruction were
+already done and the interesting part was somewhere else.**
+
+Measured rather than assumed, which is the whole lesson of this entry:
+
+    size        reads `c/netcfgd`, and says "the C, because the C is what
+                `make install` installs (0266)" in its first comment
+    rss         runs `./c/netcfgd` with the footprint fixture, and the band
+                carries the C's three-run measurement beside the Rust's
+    footprint   runs `./c/ncfg plan`, "for 0266's reason and the size gate's"
+
+Each was re-pointed in a pass of its own after 0266, exactly as that record
+asked. What nobody had done was the half a re-point does not cover.
+
+### The ratchet had gone slack by 22,224 bytes
+
+`size-budget.txt` said 1,154,776 and the binary was 1,177,000 -- 1.9 per cent
+into the 3 per cent tolerance, so the gate printed
+`installed 1177000 of 1154776` and exited 0. **A passing gate reporting a
+number larger than its limit** is the exact output this file's own history says
+costs a reader a detour through the recipe, and the entry above the new one says
+"recorded rather than left to ride the tolerance" about seventy-two bytes.
+
+So it is recorded, with the method rather than an argument. Sixty-five commits
+of `c/` had landed since the figure was set; two midpoints were built from
+`git archive` into a scratch directory and measured:
+
+    8dbe980c  1,154,776   the commit that set the old figure
+    3e436604  1,159,216   +4,440 over the first 22 commits
+    542c15bf  1,167,976   +8,760 over the next 22
+    HEAD      1,177,000   +9,024 over the last 21
+
+About 340 bytes a commit and no single cause: 24 fixes, 19 test commits, 12
+comment passes, and three features. **The features are where a reader would
+look and are not where most of it is** -- a fix that adds a refusal with a
+sentence in it costs a few hundred bytes too, and there were twenty-four of
+those.
+
+**The base rebuild is the control and it came out byte-for-byte**: 1,154,776,
+the recorded figure, from the same toolchain running today. Without it the entry
+would be a guess about whether 22 KB was code or a compiler that had moved under
+the number.
+
+### What each gate's failure arm does, since a budget nobody has seen fail is a number
+
+    size        limit dropped in a scratch copy: "over its 1030000 ceiling by
+                137976", naming ceiling, limit and overage
+    rss         `make rss RSS_LIMIT_KB=100`: "over limit"
+    rss         a daemon replaced by `exit 0`: "could not measure", refused
+                rather than passed
+    footprint   one line cut from `expected-run.txt`: "/run does not match",
+                with the diff
+
+`footprint`'s other arm -- `./c/ncfg` missing -- could not be reached, and that
+is correct rather than a gap: the gate builds before it checks, and the build
+makes the symlink. It is a backstop for a tree where the build did not run,
+which is the state that produced it.
+
+### The shim is not in the total, and the file now says so
+
+`make install` installs the daemon; `make install-nm` installs the shim into
+its own package. The flash this gate is about is the flash a router spends and a
+router installs the daemon alone -- but the shim is C and in this tree's own
+build since 0276, so a reader could reasonably have assumed the quarter megabyte
+was counted. Adding it would change what the number means, which makes it a
+decision rather than a line to add; `make linkage` is what holds the shim to
+anything until somebody takes it.
+
+### And the stale claim was mine, from an hour earlier
+
+10.506 ended with "`size`, `rss` and `footprint` are still pointed at the Rust.
+They are 0266's open item, not this one." That came from 0266's *What this
+leaves wrong* section, quoted rather than re-derived -- **in an entry whose
+subject is a gate that rotted because its comment was believed over its
+recipe.** The same failure, in the same hour, in the paragraph diagnosing it.
+
+Which says something the four rules in `evidence.md` say more briefly: the
+document that tells you what is broken is the one most likely to be describing a
+tree that has moved. 0266's list was true the day it was written. Three weeks
+later two thirds of it was wrong, nothing announced that, and a record cannot be
+edited -- so the correction has to live where the next reader will be, which is
+why 10.506 now carries a strike-through and that entry carries a *Closed*
+paragraph pointing here.
+
+## 10.513 The GUI's readers are the library's, except one
+
+"now fuzz the GUI's readers too", the copyright holder, 2026-10-21. The
+answer is one target and a measurement, and the measurement is most of it.
+
+### What the window actually reads
+
+Everything it knows about the machine comes through `libncfg_client.a`, whose
+twenty-one one-request readers 10.511 covered. **The one reader it uses that
+`replies` never touches is the event stream.** `monitor` turns a connection
+into a stream and it never goes back, so `ncfg_monitor_next` is called again
+and again on one connection, keeping a partial line between calls -- and
+`gui/src/monitor_stream.cpp` is exactly that loop with a `QSocketNotifier`
+where the target's `for` is. None of that code ran in the other target.
+
+909,161 executions, 2,977 new coverage units, clean, with the corpus clean
+under the sanitizers too.
+
+### What the GUI parses itself: nothing a target can point at
+
+Measured rather than assumed, because "fuzz the GUI" sounds like it should
+mean more than one target. Its views split strings this library already
+parsed -- `settings.members.split(' ')`, `peer.allowed_ips.split(' ')`,
+`file.text.split('\n')` -- and every one of those lives in a widget class
+that needs a `QApplication`. There is no parser there to drive, and nothing a
+fuzzer could hand those splits that the library would not have passed through
+first. Three conversions of user typing exist in 65 source files; the rest is
+Qt rendering values that arrived typed.
+
+So the honest answer is that the window has two readers and both are now
+fuzzed, rather than a sweep of the GUI finding ten.
+
+### The bound, and the control for it
+
+A reader with three answers -- 1 for an event, 0 for "nothing complete yet",
+-1 for a stream that is gone -- and a buffer it keeps between calls can fail
+to make progress without failing. That is `kernel_bytes`'s hazard in a
+different costume, so the loop is counted and running out aborts.
+
+Proved: with the `memmove` that consumes a line removed in a scratch copy,
+the reader returns the same event for ever and the target aborts in under a
+second. The real reader exits 0 on the same seed. **A zero is not treated as
+a reason to stop**, because the GUI does not stop on one -- the notifier fires
+again -- so the loop goes on until the stream says it is gone.
+
+### ~~The seed came from the schema, and there is only one event in it~~
+
+~~`doc/schema/socket.json` carries exactly one `{"response":"event"}` line...
+**One event kind is thin** and the schema is where to fix it rather than the
+corpus.~~ **Wrong, and the schema was never the problem.** It carries all five
+event kinds -- as bare `{"event": ...}` lines, which is the shape a monitor
+stream delivers -- plus one wrapped `{"response":"event", ...}`. What carried
+one kind was my seed filter, which looked for the wrapped form only. 10.514
+has the correction, the gate that now enforces the claim, and what the error
+cost.
+
+## 10.515 The event docs, and a table a gate holds to the code
+
+"add a line per event kind to the schema's event docs", the copyright holder,
+2026-10-21, after 10.514 established that the witness already had them all.
+The docs did not: `doc/socket-protocol.md` said an event payload "appears both
+on its own and wrapped" and never said what an event IS. Five kinds, named
+nowhere a client's author would look.
+
+Section 6.1 is a row per kind now -- what it means, when the daemon sends it,
+and which of the seven members are filled, since the members are per kind
+rather than shared and a client reads the tag first. The facts came out of the
+code rather than from the witness lines: `ncfg_proto_event_t`'s comments say
+which member belongs to which arm, `reconcile_pass.c` and `confirm.c` are
+where each is emitted, and `daemon.h` is where `drift`'s `action` is
+documented as "`reconciling`, `reported only`, or what to do about a refusal".
+
+Three got prose as well as a row, on the usual test of whether a reader would
+do something differently for knowing:
+
+* **`observed` carries a sentence, not the observation** -- a client that
+  wants state asks for it, and putting the observation in the event would send
+  the machine's whole state to a tray deciding whether to change an icon;
+* **`drift`'s `action` is the one thing an operator must be told** without
+  having written a `drift` hook first: whether netcfgd is going to put this
+  back;
+* **`confirm_resolved` says whether the configuration was kept and not who
+  kept it**, which is in the journal.
+
+### The claim in it is a gate, because this week has been about exactly that
+
+The section says every kind has a witness line and a row, and **it says so
+because `tool/ledger_gate.py` now checks both** against `event_names[]` -- the
+table `word_table_gate.py` already holds to one word per enum value. One
+authority, two consumers: the bytes in `doc/schema/socket.json` and the
+meaning in section 6.1.
+
+Writing the sentence first and then making it true was deliberate. The
+alternative was a document claiming a gate exists, which is the shape 10.506
+found in a Makefile comment and 10.513 produced on its own: **prose asserting
+a property nothing enforces is how a tree comes to believe things about
+itself.**
+
+Six arms now, each seen to fail:
+
+    witness, kind missing        "socket.json has no line for the `drift`
+                                 event, which this build emits"
+    witness, kind invented       "carries an `invented` event and this build
+                                 cannot emit one"
+    witness, table renamed       "has no event_names table, so this would
+                                 check the witness against nothing"
+    document, row missing        "section 6.1 has no row for the `drift`
+                                 event, which this build emits"
+    document, row invented       "describes an `invented` event and this
+                                 build cannot emit one"
+    document, section renamed    "has no `### 6.1 The events` section, so
+                                 this would check the table against nothing"
+
+The two "would check nothing" arms are the ones worth the trouble. A gate that
+goes quiet when its input moves is the vacuous pass this tree keeps finding,
+and both of these inputs are things a tidying pass renames.
+
+## 10.519 The last two vocabularies, and a witness that cannot carry one
+
+"now add the same gate for link and backend kinds", the copyright holder,
+2026-10-22. Fifteen interface kinds and ten backends, in section 6.4 with a
+row each, held to `netcfgd --supported` in both directions. And the
+measurement that had to come first found something the other four tags did
+not.
+
+### `observed.json` names nine backends and the build has ten
+
+`ncfg_backend_kind_name` answers for ten. `doc/schema/observed.json` carries
+nine. The tenth is `link_local`, an IPv4LL client for
+`config = "link-local"`, and **the witness structurally cannot carry it**:
+`make schema-bless` regenerates these four files by running the RUST's tests,
+the Rust has no word for an IPv4LL backend, and
+`c/include/ncfg/observed.h` says so where the value is appended -- "the tenth
+is the C's own: the Rust has no word for it, which `ncfg status` shows on a
+machine that configures one and nowhere else."
+
+So this is not drift and blessing would not fix it. It is 0266's shape in the
+last place nobody had looked: **the frozen witnesses are produced by the
+implementation that was retired.** The gates that read them have been
+re-pointed one at a time this week -- `dbus_policy_gate`, `linkage`,
+`tier_table_gate` -- and the witnesses themselves are the remaining instance.
+Moving their generation to the C is a cross-cutting change to four files and
+`make schema-bless`, so it is reported rather than done.
+
+**The exception is named and self-checking**, which is the part worth copying.
+`WITNESSLESS_BACKEND = "link_local"` excuses exactly one kind, and two
+assertions keep it honest: if the witness ever carries that kind the gate
+fails, because the generator has moved and the entry is stale; and if the
+build loses the kind it fails too, because then the exception is about
+nothing. A second kind going missing is an ordinary failure. That is
+`dbus_policy_gate.py`'s `CALLED_OUT` pattern -- an excuse that expires.
+
+### What the two tables say that a list of names would not
+
+Same test as 6.3 and the same answer: the names are self-describing, so the
+columns are what the program decides.
+
+**Interface kinds carry whether `link.create` can make one, and the refusal
+where it cannot.** Three of fifteen cannot: `physical` is what netcfgd
+configures and cannot manufacture, and a `pppoe` or an `open_vpn` interface is
+made by the helper that connects it -- so `backend.start` brings one up and a
+netlink message never would. A client showing a plan can print all fifteen;
+only twelve can appear as a `link.create`.
+
+**Backends carry which of start, stop and reload each supports.** One reload
+in ten: only a router advertisement daemon re-reads its configuration, an
+access point's reload would be a restart, and a DHCP client's is the client's
+own business. `dns` and `wire_guard` are started by nothing -- the first is a
+file netcfgd writes, the second is netlink rather than a daemon -- and both
+are in the vocabulary because an observation can report either.
+
+### Six arms, and the one that matters is new
+
+    an interface kind with no row        "6.4 has no row for the `macvlan`
+                                        interface kind, which this build knows"
+    a row for an unknown kind           the mirror of it
+    a backend with no row               the same for the second table
+    a backend missing from the witness  "observed.json names no `dhcp6`
+                                        backend, which this build reports"
+    the exception gone stale            "observed.json now carries the
+                                        `link_local` backend, so the exception
+                                        for it is stale -- the witness
+                                        generator has moved"
+    a table renamed                     "section 6.4 ... has no `#### backends`
+                                        table"
+
+The fifth is the new shape. Every gate in this sequence has had a "this would
+check nothing" arm; this is the first with a "this check is no longer needed"
+arm, and an exception without one is how a workaround becomes permanent.
+
+### The five lists, and what this sequence came to
+
+    section 4    requests           ledger_gate, tier_table_gate
+    section 6.1  events             ledger_gate
+    section 6.2  responses          ledger_gate
+    section 6.3  actions            ledger_gate, three columns
+    section 6.4  kinds              ledger_gate, two tables, one exception
+
+Every wire vocabulary netcfgd has is now listed in one document and held to
+the program's own answers. Nothing in that sentence was true a week ago, and
+the thing that made it possible was not the gates: it was `--supported`
+existing at all, which is a program that prints what it decides rather than a
+document asserting it.
+
+## 10.522 The socket witness is generated, and the wifi lines say what the fakes answer
+
+"now build socket.json from the C too", then "re-author the six lines to what
+the fakes answer", the copyright holder, 2026-10-22. 0280 is the builder's
+record and 0281 the re-authoring's. `make schema-bless` writes all four
+witnesses now, and `make check` holds every one of socket.json's 67 lines byte
+for byte.
+
+### What the file is, which decided what the work could be
+
+The other three witnesses are one value each, read and written back. This one
+is 67 sample messages whose values somebody chose -- an ICCID, a BSSID, a
+signal in dBm -- and no program derives those. So the builder owns the bytes
+and the test owns the values, which is the half that goes stale when an encoder
+changes and the half a hand-edited file cannot check. The 41 request lines are
+decoded from the file and re-encoded, which is the path `proto_test` already
+proves; constructing them again here would be a second copy of the samples with
+nothing holding the two in step.
+
+### The asymmetry the witness had been hiding
+
+**Five of the file's lines were a shape this build could read and never
+write.** The witness carries every event twice -- wrapped as a monitor stream
+delivers it, and as the payload on its own -- and `ncfg_main_event_encode`
+wrote `"response":"event"` unconditionally. The decoder accepts both, which is
+exactly what made it invisible: nothing in the program or the tests asks
+whether a shape it accepts is one it can produce.
+
+It is `ncfg_proto_event_encode(event, wrapped, ...)` in `src/proto/response.c`
+now, below the reader, and 87 lines left `src/main/`. The wrapped bytes are
+unchanged, which `world_test` and `proto_test` both assert.
+
+**The general shape is worth more than the fix**: a reader that is lenient
+about a shape nobody writes hides whether anybody can write it, and a round
+trip through the reader cannot see it. Asking the other direction -- what can
+this program EMIT -- is what the builder does that `proto_test` never did.
+
+### A builder that matched the file could never have written it
+
+The first version claimed each produced line against whatever line of the file
+was still unclaimed. That reads as a comparison and cannot be a generator: the
+only file it could write is the one it just read, so a line whose bytes had
+changed was refused rather than replaced -- `evidence.md`'s gate that compares
+an artifact to itself, with a bless arm that was never going to fire. **The
+order is the builder's now**, written as a sequence of producers, and the
+requests are emitted by position with an assertion that no request line sits
+below the first 41.
+
+### The six wifi lines, and what re-authoring them moved
+
+They are written as a live supplicant is read -- members emitted while control
+socket replies are parsed -- so there is no encoder to call with a value, and
+the fakes answered `HomeFiber` at -53 dBm where the file said `home` at -40.
+The holder's instruction was to re-author the lines.
+
+Three shapes left the file when it was re-authored. One stays gone and is a correction rather than a
+cost: an empty `access_points` beside `stale`, which **the daemon never
+writes** -- a failed scan answers with what it last saw -- so that line
+described behaviour no code here produces, and `json_write_test` pins the
+spelling where the values are a test's own. A `SCANNING` status with no
+association went too; the new line carries `blocked` beside a full status,
+which is the harder case because the member that matters sits next to
+everything that might hide it.
+
+**The other two came back the same day** (0282). Told what the re-authoring
+had cost, the holder's answer was to add the OWE and hidden-name networks to
+the fake, so the witness carries `"owe":true` and `"ssid":"","name":""` again
+-- produced this time rather than written by hand, which is the first time
+either shape has been driven by a supplicant at all: `scan_row` has a comment
+about the empty name and no fake had ever sent one. `mobility_domain` is the
+one that stays with `supplicant_test` and the renderer fixtures, the flags
+having no way to spell it.
+
+Three shapes arrived with the re-author: access points sorted strongest first
+with `configured` on the one a `network` block names, a station hostapd reports
+no statistics for beside two it does, and `not_trying` with both flags named.
+
+### What it cost outside the witness, which is the half to expect
+
+**Every test that had copied a fixture's contents into an assertion failed,
+and each is a better test for the fix.** That is the whole bill, and it is one
+shape repeated: `cli_test` found two lines by a prefix that two lines now
+share, and takes a mark as well as a head so each pair is told apart by the
+member that differs -- at the end of the line, where a prefix cannot reach.
+`tui_test` asserted the literals `home` and `-40`, and asks the decoded scan
+for the strongest access point's name and signal. `daemon_wifi_test` asserted
+the scan by position -- four rows, four named signals, `access_points[1]` for
+HomeFiber -- and six of its checks failed when the fake gained two networks,
+over positions rather than over anything netcfgd does; it asks by address
+through a `scan_at` helper now, and checks sortedness rather than a copy of
+the fake's table.
+
+**And one of the rewritten checks was wrong in the instructive direction.**
+The hidden row's first version asserted the name was *absent* where the daemon
+writes it *empty*, which is the distinction `ncfg_proto_str_t` exists to carry:
+a client reading a missing `ssid` as absent could not tell a hidden network
+from a row of a kind it does not know. A fixture that moves is how a test that
+asserts the wrong thing gets read again.
+
+`tests/live/nm.sh` held the last two literals, four access points and the
+sorted name list. This machine has no `nmcli`, so when they were written their
+new values were derived from the shim's own code rather than observed:
+`accesspoint.c` keys a slot by bssid and skips only a row whose bssid is empty,
+so a nameless access point is listed with an empty name. Both checks ask about
+named rows only, which keeps what the shim does with a nameless one out of an
+assertion.
+
+**They are observed now**, in a container with NetworkManager installed:
+10.523 has the run, what it took to make it possible, and the two reasons that
+file had never run in a container before.
+
+The rig is `c/tests/fakewifi.h`, extracted from `daemon_wifi_test.c` rather
+than copied -- a forked `timeout 60 python3`, a socket waited for rather than
+slept on, and a kill that reaches the process group. The second copy is where
+the kill gets forgotten.
+
+### What was seen to fail
+
+The five changed lines before the bless, each reported with both spellings.
+The fakes absent: exit 1, nothing written, the witness's hash unchanged -- a
+builder that carried on would have written six lines of `[]` over six real
+answers and reported success. One producer removed: `66 produced, 67 in the
+file`. And a second bless giving the same five-line diff rather than a growing
+one.
+
+## 10.524 hull is where the emulator, container and VM testing is heading
+
+"once hull becomes useful maybe you should start using it for the
+emu/container/vm testing", the copyright holder, 2026-10-22, said while asking
+for nm.sh to be run in a container.
+
+Not an instruction to adopt it and not a date. It is the direction, and it is
+written here because this tree has grown three separate ways to start a guest
+and a fourth is always the easy thing to add: the `vm-*` targets (0265),
+`make live-container`'s own `docker run`, and whatever one-off a session writes
+when it needs a package the host does not have -- 10.523 is one of those, and
+it existed for an hour.
+
+**So the rule to apply is about adding, not about replacing.** A session about
+to write a fourth should read hull first and raise the question rather than
+build another one; what exists keeps working until there is a reason to move
+it. `hull` is a private project in its own tree and its readiness is its own
+to report.
+
+**The trial is deferred, by the holder, on 2026-10-22: hull is reaching full
+usability rapidly and this tree is to carry on with other work until it is
+done.** So nothing here has been tried against it, and the paragraph below is
+hull's account rather than a measurement of this tree's.
+
+**What hull reports, asked the two questions this suite would decide on**
+(their words, their measurement, 2026-10-22): a package set like
+`network-manager` and `bc` arrives through a hull build step rather than a
+machine spec, and groups and `/etc/subuid` are the image's -- on a vm the
+guest's own in full, because its root is the real root of its kernel. The 81
+live scripts' `unshare -rn` works inside a vm guest and is refused inside a
+chroot one, so the vm engine is the one that would apply here. They echo the
+mtime finding in 10.523 unprompted: a tree shared into a machine keeps the
+host's mtimes, so a build inside has to clean first.
+
+**And the line that would make it materially better rather than tidier**: they
+say a vm guest loaded `mac80211_hwsim` and got `phy0` and `phy1`. That is the
+one thing `make live-container` structurally cannot do -- its own comment says
+so, because a container shares the host's kernel and this host has no such
+module -- and `hwsim.sh` is a script this workspace has never been able to
+run. Several machines on one wire, which `delegation.sh` would want, waited on
+their segments work, and **no longer does** -- see 10.570.
+
+## 10.526 An unused build dependency, and the three findings under it
+
+"remove libncurses-dev then", the copyright holder, 2026-10-22, after 10.525
+left it as the next small item.
+
+**It is out of `debian/control` and proved out.** The package builds in a
+`debian:trixie-slim` container that has never had the library: `dpkg-l` counts
+zero ncurses dev packages, `dpkg-checkbuilddeps` passes, all five `.deb`s are
+produced, the build log mentions curses zero times, and the daemon's only
+`NEEDED` entry is `libc.so.6`. A local `make deb` would have proved none of
+that, this host having the library installed -- which is the whole reason the
+line survived 0276, where cargo and rustc came off the same list.
+
+It was there for the Rust `ncfg tui`, which binds ncurses as a default-on cargo
+feature. The C writes its own escape sequences and `c/src/cli/tui_term.c` says
+why, so nothing the package builds has linked it since 0266. The README keeps
+it, correctly: the Rust is still in the tree as a test instrument and still
+needs it.
+
+### Alpine had the same stale line, and three further things under it
+
+`packaging/alpine/APKBUILD.in` declared `depends="ncurses-libs"` and
+`makedepends="make ncurses-dev"` for the same retired reason. Both are gone --
+`depends` is empty now, since apk derives runtime dependencies from what a
+binary links.
+
+**And `make apk-container` has not worked since the C port.** Running it is
+what found the rest:
+
+- **`linux-headers` was never declared.** Alpine does not ship kernel headers
+  with its libc, where glibc distributions carry `linux/if_addr.h` and friends
+  in `libc6-dev`, so the build failed at the first such include. Added, and the
+  control run proves it was not the ncurses entry doing that job: with
+  `ncurses-dev` restored the build fails identically.
+- **A packaging environment could drop the language standard.** Every one of
+  these Makefiles wrote `CFLAGS ?= -std=c11 -Os`, and `?=` is skipped when
+  `CFLAGS` arrives from the environment -- abuild exports its own hardening set
+  -- so Alpine compiled this with gcc's `gnu17` and the standard the code is
+  written to was gone with the default. The optimisation level is a packager's
+  to choose and the language is not, so `-Os` stays a default and `-std=c11`
+  moved to the appended half, in `c/`, `client/` and the shim.
+- **Two files did not compile there, and it was not musl.** `src/sys/dump.c`
+  and `src/sys/ops.c`, three errors, one cause: `linux/if_tunnel.h` needs
+  `IFNAMSIZ` and a complete `struct iphdr` for the `struct ip_tunnel_parm` it
+  declares, and it included `linux/if.h` and `linux/ip.h` for itself until the
+  uapi headers were cleaned up -- Debian's 6.12 set includes both and Alpine's
+  7.0.0 includes neither. **A kernel-headers version difference wearing a libc
+  difference's clothes**, and the first reading of it here said "the
+  kernel-and-libc header minefield", which was wrong and was written before
+  anybody read either header.
+
+  Both files ask for what they need now, out of alphabetical order with the
+  reason at the include block, and they ask the kernel's `linux/if.h` rather
+  than libc's `net/if.h` for the reason `ops.c` already gives: the two redefine
+  each other's structures, so a .c file may include the first and a public
+  header may not. On Alpine from clean: 206 objects, no errors, the daemon
+  linking at 1,213,824 bytes, where it was 204 objects and three errors.
+
+  **So `make apk-container` works, for the first time since the C port**:
+  `dist/netcfgd-0.1_git1404-r0.apk`, 514,567 bytes, built by abuild in Alpine
+  with `depends=""` and `makedepends="make linux-headers"`.
+
+  What found it was reading the two headers rather than theorising about libcs
+  -- `grep '#include' /usr/include/linux/if_tunnel.h` on each side, which is
+  the whole diagnosis and took one command. `evidence.md`'s read the input
+  before theorising about the mechanism, met in a packaging target.
+
+### And the measurement that was wrong first, which is the part to keep
+
+The first reading of the musl question was "the C builds cleanly on musl, 401
+objects, zero errors". **It compiled nothing.** The probe copied the tree with
+`tar`, which preserves mtimes, so make found the host's objects current -- the
+same trap that made this tree's own container build a step that looked like one
+and was not, found and recorded in 10.523 **the same afternoon**, by the same
+session, and then walked into from the other side.
+
+What makes it embarrassing rather than unlucky is that the probe reported a
+number -- 401 objects -- that was evidence of the trap rather than of a build:
+the glibc tree has 401 because its tests are built, and a default build makes
+204. A count that agrees with the wrong thing reads exactly like a count that
+agrees. So the clean version deletes every `.o` and `.d` first and says how
+many it made, which is the form any later probe here should take.
+
+## 10.528 What this session left open, 2026-10-22
+
+A fold rather than a finding: the entries above hold the reasoning and this
+holds what is unfinished, so that the next session reads one list instead of
+nine. Each item names where it is argued.
+
+**Decisions waiting on the copyright holder**
+
+- ~~**Ten `_name` functions take their enum and sixteen take an `int`.**~~
+  **Settled 2026-10-23: they take `int`** (10.525), the holder deciding it
+  against the count this entry argued from -- which had measured warnings under
+  a half-done conversion rather than casts after a whole one. Fourteen public
+  functions converted, not ten: that figure was wrong here too, and the
+  re-measurement is in 10.525. The tree lost 33 casts and 10 shim functions and
+  gained 16 casts; clang still reports 0.
+- ~~**Whether a clang gate should hold the zero.**~~ **Added 2026-10-23 on the
+  holder's instruction** (10.529): `make clang` is in `PORTABLE_GATES` and
+  found a real uninitialised use in `scope_test.c` on its first look. It read
+  224 sources and counted 40 findings over the test sources it would not
+  gate; **those are fixed and it gates them now, 324 sources** (10.536).
+
+**Measured and unexplained**
+
+- ~~**`link_local.sh` failed four checks in one container run and nothing
+  explains it**~~ (10.523). **A mechanism was found and fixed 2026-10-23**
+  (10.533): the start confirmed a detached client with a single look at
+  `/proc`, which reports a failed start for a client that is running and
+  leaves nothing able to stop it. It now waits, the case is deterministic in
+  the unit suite, and four environmental explanations are disproved -- the
+  `--group-add users` flag, host load, container load and a `noexec` `/tmp`.
+  What is still not known is what that particular run did, since its
+  `apply.txt` is gone.
+
+**Work with a clear next step**
+
+- ~~**`make live-container` reaches 75 of 81 invocations**~~ **It reaches 80
+  of 81** (10.535), 76 passing and 4 skipping for reasons a container cannot
+  change, and stops at the 81st -- `sandbox_writes.sh`, which needs systemd as
+  PID 1 (10.523). A container cannot be talked out of that, and that one is
+  covered: `make hull-sandbox` runs it at 31 of 31 (10.530). So this item is
+  as closed as it can be from the container side.
+- ~~**The hull rig has no Makefile target**~~ (10.527). **Added 2026-10-23**
+  on the holder's instruction (10.532): `make hull` runs all three rigs, 71
+  checks, with `hull-hwsim`, `hull-sandbox`, `hull-openrc`, `hull-image` and
+  `hull-clean` beside it. The reason for waiting had already gone -- the guest
+  builds netcfgd itself since hull `7b47668` gave the workload a PATH, so the
+  rig no longer borrows the host's binaries. What is still true is the image.
+  It is baked by docker. ~~because hull cannot
+  install a package set yet~~ -- **hull can, since `a2448d1`**, and one reason
+  is left rather than three (10.534): a `hull pull` still drops a layer's
+  owners, so a store cannot hold these images yet, and hull's spec may change
+  before 1.0.
+
+  **And the baked image is not faithful**: `docker export` through `tar` as a
+  user drops all eight setuid bits that `hull materialize` keeps, so a payload
+  calling `sudo`, or `mount` as a user, must not use it. `hwsim.sh` does not,
+  which is the only reason the rig stands on it.
+- ~~**netcfgd's systemd and OpenRC payloads cannot move to hull yet.**~~
+  **Both run, and both pass.** The systemd one was 30 of 31 (10.530) and is
+  31 of 31 since hull `828f72d` mounted a guest's `/run` as an initramfs
+  leaves it; before that the 31st was a control needing `noexec`, which the
+  native tier has and a hull guest did not. The OpenRC payload runs in
+  `tests/hull/openrc/` under `openrc-init`, 13 checks (10.531), which is the
+  first execution of `packaging/openrc/netcfgd` anywhere. hull `bfeb65f` and
+  `0681fb3` had already fixed the setuid bug and given a machine the image's
+  own init.
+
+  The image is baked by docker with its setuid and setgid bits **put back from
+  the image's own listing**, which the hwsim rig does not bother with and this
+  one must: systemd wants them, and hull since `bfeb65f` shows a guest the
+  user's files as root's, so a restored bit is a real setuid-root program.
+- ~~**Alpine: the C and the apk build, and nothing runs the live scripts
+  there**~~ (10.526). **`make live-alpine` runs them, 2026-10-23**: 64 passed,
+  10 skipped, 6 failed of 80 on its first run and **68, 9 and 3 after the
+  fixes** (10.538), the shim builds on musl too, and six scripts guarding a
+  comparison binary on `[ -x ]` rather than on whether it runs are fixed
+  (10.537). What is left is three scripts failing one check each
+  intermittently, measured in 10.538. `make apk-container` is still in no gate, which is how it
+  came to be broken for as long as the C port has existed.
+- ~~**netcfgd tells an operator to install what they have.**~~ **Fixed the
+  same day.** Found in the hull guest: with no `/usr/sbin` on `PATH`,
+  `backend.start` said "dhcpcd, udhcpc and busybox are not installed" about a
+  machine where `/usr/sbin/dhcpcd` is. The `PATH`-only search is deliberate
+  (`dhcp.c`: an operator's own client in front of the packaged one is a choice
+  netcfgd honours), so the behaviour was right and the sentence was wrong --
+  0182's fourth fault, where it had three.
+
+  A candidate that `PATH` does not have is now asked of the sbins-first search
+  every daemon here uses, and where that answers, the message says so and
+  names the file: "dhcpcd is installed at /usr/sbin/dhcpcd and is not on PATH
+  ... a netcfgd whose PATH carries the sbins, as an init gives it, would use
+  this one". The install line is suppressed, because the action is not an
+  installation. Nothing about which client is chosen changes.
+
+  **And `exec_refused.sh` was pinning the defect.** Its first check asserted
+  the install line with `PATH` pointed at an empty directory -- on this
+  desktop, which has `/sbin/dhcpcd` and `/usr/bin/busybox` -- so it passed
+  because the message was wrong in the same direction as the assertion. It
+  branches on what the machine has now, read from the sbins rather than from
+  `$PATH`, which is the thing under test. A second check pinned `udhcpc and
+  busybox are not installed` for the same reason and asserts what it meant
+  instead: that every candidate is accounted for, whichever fault each one
+  has. 19 checks pass.
+
+**Not this tree's, and tracked elsewhere**
+
+Of the five hull findings, **two are fixed and verified here**: hull `7b47668`
+exports the conventional root PATH where a spec and image name none, which was
+finding 5 and also the cause of finding 2, gcc losing `cc1` -- a machine of
+mine printing `/usr/local/sbin:...:/bin` and finding `/usr/sbin/dhcpcd`
+confirms it rather than taking the report. The rig's own `export PATH` stays
+until nothing here runs an older hull, and its comment says so.
+
+Three remain theirs: the silent truncation of an apt install in an overlay vm,
+which they test when the host is quiet; `(mutable direct)` writing through 9p
+as the host user, which is inherent and being recorded rather than changed;
+and the one-uid limit a maintainer script meets in a build step -- decided
+since, their holder choosing many uids with owners kept, after the init
+hand-over. A fourth finding was mine and is withdrawn (10.527).
+
+## 10.529 The clang gate, and two vacuous passes on the way to it
+
+"add the clang gate", the copyright holder, 2026-10-23, settling 10.528's
+second open decision. `make clang` is in `PORTABLE_GATES`, so it is in `check`
+and `check-ci` by construction, and it reads 224 sources: 206 of `c/`, 2 of
+`client/` and 16 of the shim, with no finding.
+
+### What it is, and what it refuses to be
+
+Each component gained a `syntax` target -- its own `$(CFLAGS)`, plus
+`-Werror -fsyntax-only`, over its own sources -- and the gate is
+`make syntax CC=clang` in each. Three properties were worth the care:
+
+- **It compiles nothing.** A clang `.o` in gcc's path is the mixing that
+  `.build-flags` exists to prevent; `-fsyntax-only` writes no file at all.
+  `-MMD -MP` are filtered out, since they write a `.d` even then, and a
+  dependency file for an object nobody built is a list of prerequisites for a
+  thing that does not exist.
+- **Its flags are not a second copy.** A warning added to `WARNINGS` reaches
+  clang without anybody remembering, which is the whole value of a second
+  compiler and the first thing a hand-written gate loses.
+- **It skips loudly where clang is absent**, which is `clippy`'s bargain here,
+  and names what to install.
+
+### Both vacuous passes, because they are the lesson
+
+**The gate passed with the warnings it exists to catch printed above it.** The
+first version had `-fsyntax-only` and nothing else, and **clang exits 0 having
+printed every finding**. All four controls failed to fail, which is the only
+reason anybody looked. `-Werror` is what makes a warning a failure, and a gate
+whose tool reports by printing rather than by exiting is the shape to suspect:
+the check and the diagnosis are not the same channel.
+
+**And one of the controls was itself vacuous.** The client arm's control
+patched an anchor that did not exist in the file, the edit silently did
+nothing, and the gate's pass was reported as evidence that the arm was blind.
+A control is a check and is untested until it has been seen to fail: the
+anchor assertion now aborts rather than skipping, and with a real edit that arm
+fails as it must. Three arms needed separate controls anyway, the gate's `&&`
+chain meaning a failure in `c/` would never reach the other two.
+
+### What it found on its first look
+
+`c/tests/` is not in the gate and its gap is a number: 40 findings, 36
+signedness conversions and 4 string concatenations, counted by
+`make -C c syntax-tests CC=clang` so that nobody has to take 40 on trust.
+
+It was 41. The one that went was not stylistic: `scope_test.c` declared two
+`ncfg_block_t` and set them in one `check(a && b)`, where `_from_name` leaves
+`*out` untouched on refusal -- so a first lookup that failed would leave the
+second variable holding whatever was on the stack, and three checks after it
+would read that. gcc reports nothing there. One real defect in the first look
+at a corner nothing was watching is the argument for the gate, made by the
+gate.
+
+## 10.532 The hull rigs got targets, and `clean` would have eaten the images
+
+"add the hull targets then", the copyright holder, 2026-10-23, closing the item
+10.528 called the smallest useful thing left. Three rigs under `tests/hull/`
+were run by hand, so nothing could notice them rotting -- and each is the only
+place one of netcfgd's payloads runs at all.
+
+    make hull           every rig, which is 71 checks
+    make hull-hwsim     27, mac80211_hwsim radios a namespace cannot load
+    make hull-sandbox   31, the systemd unit's sandbox under systemd as pid 1
+    make hull-openrc    13, both init scripts, one under the init it is for
+    make hull-image     bakes all three guests, the only part needing docker
+    make hull-clean     removes them, which `clean` deliberately does not
+
+Measured through the targets on the day they were written: `rc=0`, 71 `ok`
+lines, no image re-baked, and each run opening with
+`hull: hull 0.1 (6c685a4), image dist/hull/<name>-rootfs`.
+
+### `make clean` would have printed 14,975 lines and deleted 696M
+
+The first thing the work found was a defect put there the same morning. The
+baked images went to `dist/hull-<name>-rootfs`, and `clean` ends with
+
+    find "$(DIST)" -type f -print | sed 's/^/clean: removing /'
+    rm -rf "$(DIST)"
+
+Three rootfs trees are 14,975 files and 696M, so `make clean` -- the one thing
+everybody runs without reading -- would have listed every file in them and
+then removed guest images that cost docker, a network and minutes each to
+rebuild. Everything else under `$(DIST)` costs a recompile. **The images are
+not build output**, which is why this tree's other guests live outside the tree
+at `~/vm` (0265).
+
+Fixed by giving them one directory, `$(HULL_IMAGE_DIR)`, defaulting to
+`$(DIST)/hull`, so a single pruned path answers both halves: `clean` lists what
+it removes without descending into an image, removes the rest of `$(DIST)` by
+depth rather than wholesale, and prints one line saying what it kept and which
+target removes it. The existing guards on `$(DIST)` -- non-empty, relative, no
+`..` -- are untouched and still fire; an absolute `DIST` refused the fixture
+this was tested against, which is the guard working.
+
+**Tested in both arms before it went near the real `dist/`**, on fixtures: with
+images present it lists three files and keeps `dist/hull`; with none it removes
+everything and `rmdir`s `dist` exactly as before. Then re-tested by executing
+`make -n clean`'s own expansion against a relative fixture, because a fragment
+that works in a shell is not evidence about what make expands. `hull-clean` was
+proved the same way, on a fixture rather than on 696M.
+
+### Two things that were assumptions and are now measured
+
+**hull resolves a spec's relative paths against the spec's own directory**, so
+the recipes run `hull run -f tests/hull/<name>/hull.conf` from the tree root
+with no `cd`. The rigs' headers had claimed it; the targets depend on it, so it
+was run.
+
+**An existing image does not re-bake and a missing one does.** The image is a
+pattern rule over the directory, which is the rigs' own "once, and after a
+package change" written as a dependency. Controlled both ways: `make -n
+hull-sandbox` names no bake, and asking for an image that does not exist prints
+`sh tests/hull/probe/bake-rootfs.sh dist/hull/probe-rootfs`.
+
+### Why `timeout` is the right bound here and would not be for a container
+
+`running-code.md` measures the trap: an outer `timeout` around a container
+runner kills the supervisor and leaves the container compiling, because the
+container belongs to the daemon rather than to the shell. A `(backend vm)`
+machine is qemu, a child of this shell, so the signal reaches it -- and all
+three specs say `(backend vm)`. A spec that changes that needs its own bound,
+which the comment at the targets says.
+
+### The sibling, named rather than assumed
+
+`HULL` is a variable defaulting to `$(HOME)/src/hull/build/hull`, and nothing
+hard-codes a path. hull is a live sibling checkout rather than vendored, which
+`harmonization.md` names as a real cost -- what these targets run is whatever
+that session left there -- so every run prints the version and the commit it
+rested on instead of leaving a report to claim one. It earned that immediately:
+the commit read `6c685a4` where the sandbox run two hours earlier rested on
+`828f72d`.
+
+**And the commit comes from `hull --version` since hull `f48d7c2` put it on a
+line of its own**, rather than from `git rev-parse` in the directory the binary
+sits in, which is what this did first and what netcfgd told hull was a guess
+worth removing. The difference is not theoretical: measured the same day, the
+binary answered `f48d7c28516b-dirty` while that checkout's HEAD was `48139be`,
+because a binary is as old as its last build and a tree is as new as its last
+pull -- so the derivation named a commit whose code was not running. The git
+lookup stays only as the fall-back for a hull too old to say, and labels itself
+`derived from its checkout` so a reader is not told the binary claimed it.
+Three arms, all exercised: the binary's own answer, the derived one against a
+stub that prints no commit line, and `commit unknown` for a stub outside any
+checkout.
+
+`.PHONY` gained `vm-delegation` and `vm-init`, which the vm tier's own line had
+never listed.
+
+## 10.533 The link-local failure had a mechanism, and the start now waits
+
+"fix the link_local failure then", the copyright holder, 2026-10-23, on the one
+item 10.528 listed as measured and unexplained: `link_local.sh` failed four
+checks about the pid of the client netcfgd started, in one container run, and
+two explanations had already been disproved.
+
+### Three more disproofs before the code
+
+**`noexec` is out.** The stand-in client is written into `$work` under `/tmp`
+and executed, so a container that mounts `/tmp` `noexec` would produce exactly
+this signature. Measured in the live image: `/tmp` is the overlay root,
+`findmnt` reports no `noexec`, and a script there runs both plainly and inside
+`unshare -rn`.
+
+**The reduced container is out.** The script itself, run in that image against
+this tree, passes all 18 checks.
+
+**Load inside the container is out too**, which is the second time load has
+been tested and the first inside a container: `--cpuset-cpus 0` with four
+spinners, three runs, all checks passed.
+
+**And one of those runs was my own instrument failing.** To keep `$work` the
+probe disabled the script's `trap cleanup EXIT`, and then every run failed one
+check -- the previous run's stand-in outliving the run it belonged to, because
+cleanup is what stops it. The unmodified script under the same load passes. A
+probe that reports a failure of its own making is worse than no probe, and the
+tell was that the failure count was stable at one where the thing being hunted
+was four.
+
+### The mechanism, which is in the code rather than the environment
+
+`ncfg_autoip_start` confirms a start by searching `/proc` for a process
+carrying netcfgd's two markers, **once, at the instant the client has
+detached**:
+
+    pid = ncfg_process_pid_by_markers(marker, 2u);
+    if (pid <= 0) { ... "no client of netcfgd's is running there" ... }
+
+That refusal says neither "error" nor "failed" -- which is what 10.523
+predicted `apply.txt` would say, from reading the script rather than the
+source. So the signature is accounted for: `backend.start` is reported, the
+check for failure text passes, and four checks about the pid fail.
+
+**The question is asked at the one moment it can be answered wrongly.** This
+client writes no pid file and `-D` means the process netcfgd waited for is not
+the one still running, so the answer depends on a second process being in place
+at that instant. With `-w` a real `avahi-autoipd` holds its detach until an
+address has been acquired, so its child is long since there; nothing requires
+that of a client, and a `cmdline` is briefly empty while a child is in `execve`
+regardless.
+
+**The consequence is the worst answer available here**, which is why this is
+worth fixing whatever caused that run: the client is running, netcfgd reports
+the start as failed, and with no pid recorded nothing will ever stop it --
+`--force-bind` means it keeps its 169.254 address alongside whatever replaced
+it. The error message says as much in its own last clause.
+
+So the start waits: `wait_for_client`, 1000 ms of patience in 25 ms steps, both
+named constants with the argument written at them. The shape is `dhcp.c`'s
+`confirm_stopped` -- look, sleep a named step, give up at a named patience --
+kept rather than re-decided. The common case returns on the first look and pays
+nothing; the case the wait cannot help, a client that really started nothing,
+still fails and now says how long it waited.
+
+### The control, and the suite's own missing half
+
+The new case is a stand-in that detaches at once and whose marker-carrying
+process arrives about 400 ms later. **The markers sit inside a `-c` string
+until the `exec`, and a `-c` string is one argument**, so
+`cmdline_has_argument` cannot match it -- which is what makes the window real
+rather than described: for those 400 ms no process on the machine carries both
+markers as whole arguments.
+
+Against the single look, restored deliberately, it fails:
+
+    a client that appears after its starter has exited is a successful start FAILED
+      said: `avahi-autoipd` reported success on lan1 and no client of
+            netcfgd's was running there, so netcfgd has nothing it could
+            stop later
+      and the start waited for it rather than finding it at once         FAILED
+      waited: 81 ms
+      and the pid recorded is the process that arrived late              FAILED
+
+So the failure is reproducible on demand in the unit suite, which is what the
+container run could not give. The elapsed time is asserted as well as the
+verdict, because a success that arrived instantly would mean the stand-in had
+not reproduced the case.
+
+**And the suite had been testing the easy half of its own claim.**
+`a_recorded_client_is_recognised_and_stopped` has its stand-in `sleep 0.3`
+before exiting, which quietly closed the window the module's own documentation
+describes. The fixture had absorbed the defect.
+
+### A third finding, from the control's own leftovers
+
+With the sabotage reverted, the next run failed one check -- the elapsed-time
+one -- because the sabotaged run had left its late client alive for twenty
+seconds and the new run found it instantly. The marker search reads the whole
+machine's `/proc`, so a fixed interface name makes a test depend on every
+other run of itself. `link_local.sh` already solved this by putting the run's
+pid in the interface name, and both unit cases do now. Proved by running two
+copies of the test at once: both pass, where fixed names could not.
+
+### What is established and what is not
+
+**Established:** the code can produce exactly the observed signature, it does
+so on demand, and that path is closed. **Not established:** that this is what
+happened in that container run. The original `apply.txt` is gone, and
+non-reproduction was never evidence either way -- so this closes the item by
+removing a defect that fits the evidence, not by explaining a run nobody can
+re-examine.
+
+Verified: 19 checks on the host, five runs of five in the container under load
+on one CPU, `make check` green, and clang clean over 224 sources.
+
+**The lens, pointed at the other backends.** autoip is the only one that
+confirms a start by searching for a process; radvd, hostapd, openvpn, pppoe and
+dhcp read a pid file their program writes, and none of them reads it inside the
+start -- radvd's start returns on the exit status alone. So the class has one
+member and it is fixed.
+
+**Seen again, in a different shape, 2026-11-03 -- open.** One full `make test`
+at a load average near 40 failed the late-client case the other way round:
+the start *succeeded* after 16 ms (the check asks for at least 300), and then
+`ncfg_autoip_running_pid` found no client. So something carrying both markers
+was found at once and was gone moments later. Not reproduced since: 5 runs
+alone and 12 under eight CPU spinners, all clean. A leftover client of an
+earlier run on the same interface name -- the shape the control's leftovers
+had above -- fits all three symptoms, but needs this run's pid reused within
+that client's five seconds, and pids here advance about 240 in five seconds
+against a `pid_max` of 32768. That is a candidate, not a finding. The cost if
+it is real is the one this section names: a start reported good with
+nothing recorded to stop. Next time it shows, read `/proc` for
+`--force-bind ll<pid>` at the moment of the start.
+
+## 10.534 hull answered the bake's two conditions, and one of them was unaskable
+
+Reported by hull's session, 2026-10-23, after this tree said what would move
+the rigs off their docker bake (10.532). Their facts, in their voice:
+
+  * **`hull build` keeps file owners** as of `a2448d1`, so a step can install
+    a package set: `dnsmasq-base` installs with exit 0, the stored manifest
+    keeps `run/dnsmasq` as 999 and apt's partial directory as 42, and a later
+    step on that image sees those owners again. No file of another owner
+    touches the disk -- the step's tree leaves the namespace as a tar and is
+    committed from it.
+  * **`hull push` keeps owners** as of `d93fc08`, with a pushed tree of 101's
+    and 102's read back apart from hull.
+  * **`hull pull` keeping a layer's tar owners is next**, and until then a
+    pulled base starts with none.
+  * **`hull commit --tar FILE REF`** takes a docker export and keeps its
+    owners and setuid bits.
+
+### The condition this tree set that cannot be met
+
+netcfgd's reply named two things that would move the switch up, and one of
+them was not a thing hull could choose: that a package-installing step work
+without host subid configuration. **A user namespace with more than one id
+mapped needs the subuid and subgid ranges plus `newuidmap`'s setuid bit, which
+is the kernel's rule rather than hull's** -- their correction, and the useful
+half of this exchange, because a condition nobody can satisfy reads like a
+reasonable ask and quietly blocks a decision for ever.
+
+Measured here rather than taken, since it decides whether the question even
+arises on this machine:
+
+    /etc/subuid:funk:100000:65536
+    /etc/subgid:funk:100000:65536
+    -rwsr-xr-x root root /usr/bin/newuidmap
+    -rwsr-xr-x root root /usr/bin/newgidmap
+    unshare -rn sh -c 'cat /proc/self/uid_map'   ->   0  1000  1
+
+The last line is the control for the claim: without the helpers a namespace
+maps exactly one id, which is the condition that stopped `dnsmasq-base`. The
+ranges and both setuid helpers are present, so **the precondition is already
+satisfied on this machine** and a build step would work here today.
+
+### So the bake stays, for one reason rather than three
+
+What remains is `hull pull`: a store that drops owners on the way out cannot
+hold these images, and netcfgd's rigs would be one `pull` away from a guest
+with no setuid bits -- which is the bug hull `bfeb65f` fixed on the other side
+and which two of the three bakes still work around by restoring the bits from
+the image's own listing. When pull keeps them, `hull commit --tar` is the small
+change rather than the new mechanism: every bake already pipes a `docker
+export` through `tar`, so the tar is in hand and the setuid-restoring step goes
+away with it.
+
+Nothing is asked of hull for that, and nothing here changes today.
+
+**And an image will be able to say which hull made it**, which netcfgd asked
+for and hull added in `48139be`: every manifest records
+`(provenance (builder "hull 0.1 (<commit>)"))`, with `-dirty` where the tree
+had changes and `unknown` from a build that does not write a commit. In their
+words, the cost is that one tree committed by two hulls gives two manifest ids
+differing in provenance alone, and build cache keys exclude provenance so
+caching is unaffected. It matters here for the reason the question was asked:
+a store image outlives the session that baked it, and `hull manifest show` is
+then the only thing that can say what baked it.
+
+## 10.537 The live scripts on musl, and `-x` is not "can this machine run it"
+
+"do the alpine live scripts then", the copyright holder, 2026-10-23, on the
+item 10.526 left open: the C and the apk build on Alpine and no live script had
+ever run there. `make live-alpine` runs them now.
+
+**It runs the scripts rather than `make live`**, because that target begins
+`$(CARGO) build --workspace` and Alpine has no cargo: what was asked for is the
+suite against musl and busybox, not the Rust core.
+
+### What a second libc found, which is one sentence
+
+**`[ -x binary ]` answers "is there an executable file", not "can this machine
+run it".** Six scripts guard on a comparison binary -- five on the Rust `ncfg`
+or daemon, one on `bridge/netcfgd-remote` -- and the container copies the tree
+in, glibc binaries included. On Alpine each is `-x` and each gets `not found`
+from the shell when it runs, because the ELF interpreter it names,
+`/lib64/ld-linux-x86-64.so.2`, is absent. So the skip never fired and the
+shell's message arrived as a test's *actual value* several checks later:
+
+    FAIL a local connection gets the local policy
+           expected: observe 1  wifi 1  admin 1
+           actual:   tests/live/remote_tiers.sh: line 127:
+                     /work/bridge/netcfgd-remote: not found
+
+All six ask the binary now -- `--version`, or `--help` for the bridge -- and
+skip saying "not built here, or will not run (a glibc build on musl)". The
+control is on this machine, where those binaries do run: `c_warnings`,
+`c_link_settings`, `c_wireguard`, `c_daemon_answers` and `remote_tiers` all
+still pass here, and `c_dns_delivery` still skips for its own unrelated reason.
+
+**`file` is how the diagnosis was settled** rather than by reading the scripts:
+the binary is `ELF 64-bit LSB pie executable ... interpreter
+/lib64/ld-linux-x86`, which does not exist on Alpine. A missing interpreter and
+a missing file are the same errno, and the shell prints the same word for both.
+
+### Alpine ships no kernel headers with its libc, and this tree knew
+
+The first run never reached a script: `linux/ethtool.h: No such file or
+directory`. `packaging/alpine/APKBUILD.in` has said why since the apk existed
+-- `makedepends="make linux-headers"`, with a comment that Alpine does not ship
+them with its libc -- and the probe image was built from the Debian package
+list instead of from this tree's own Alpine recipe. A run spent rediscovering a
+fact the tree had written down.
+
+### Three quarters of the first survey's failures were the instrument
+
+17 failures became 6 without a single fix to a live script, because the survey
+was wrong in four ways and each is worth naming:
+
+  * **It looped over `tests/live/*.sh`**, which holds helpers other scripts
+    drive -- `fake_umbim.sh`, `fake_mbimcli.sh`, and `c_daemon_tryout.sh`,
+    which `die`s without systemd by design because `c_daemon_watch.sh` drives
+    it. Three failures, none of them a test.
+  * **It built only the C**, so `c_nm_signals.sh` reported the shim missing.
+    The target builds `c`, the shim, `bridge` and the examples -- and that is
+    how the shim was first shown to build on musl at all, 237824 bytes beside
+    netcfgd's 1213448.
+  * **It wrapped every script in `unshare -rn`**, including
+    `control_exposure.sh`, which `live` deliberately runs bare: inside that
+    namespace gid 65534 is unmapped, so the chown it checks cannot take and
+    the socket's group stays `root`.
+  * **Its bound was 90 seconds**, which `confirm.sh` exceeds on Alpine without
+    hanging; at `LIVE_TIMEOUT` it passes.
+
+So the target derives both the list and each script's wrapper from `live`'s own
+recipe, read out of the Makefile at run time. A copied list is a list that
+drifts, and three of those four mistakes were a copy of something the Makefile
+already said.
+
+### 64 of 80, and why the tier does not set NCFG_LIVE
+
+**64 passed, 10 skipped, 6 failed of 80** on the first real run and **64, 9
+and 7** on the second, and the target fails on a real failure while listing the
+skips with their reasons. **NCFG_LIVE is deliberately unset**: many skips here
+are honest -- no `mac80211_hwsim`, no `qmake6`, no systemd, no `odhcp6c` -- and
+`make live` turns a skip into a failure, which would make this tier
+permanently red and therefore unread, the thing this Makefile says about
+`vm-skipped`.
+
+**Two packages, and finding the first turned a skip into a failure**, which is
+the tier working. `nm.sh` skipped for `nmcli`, which Alpine keeps in
+`networkmanager-cli` rather than in `networkmanager`; with that installed it
+ran and failed two checks, both on `fake_agent.py` importing
+`gi.repository`, which is `py3-gobject3` there. With both in the list the
+script passes on Alpine: **85 checks, 0 failures**, measured on its own rather
+than as part of a sweep. So the tally is 65, 9 and 6 by arithmetic and 64, 9
+and 7 by measurement; the next full run is what makes the first of those a
+fact.
+
+One warning in that output is this session's and not the tier's: nmcli 1.52.2
+against NetworkManager 1.44.0, because the probe image installed the daemon
+and the client against two different index snapshots. The target installs them
+in one `apk add`.
+
+### The six that remained, three of which are now fixed (10.538)
+
+  * **`c_daemon_watch.sh`**, 9 of 26 checks. Its first symptom was its own work
+    directory vanishing mid-run -- `can't create /tmp/ncfg-watch.XXXX/active:
+    nonexistent directory` -- which is a busybox or musl difference in
+    something the script does to its own scratch, not a netcfgd fault that has
+    been shown.
+  * **`resolv_defended.sh`**, failing at `dns.apply`.
+  * **`select.sh`**, 3 checks.
+  * **`nm.sh`** is no longer among them -- see above -- so the six are the
+    five below plus `c_daemon_watch.sh`.
+  * **`revive.sh`** 2, **`displace.sh`** 1 and **`link_local.sh`** 1 -- and
+    these three **pass when run one at a time** with a longer bound, in the
+    same image. So they are order- or load-sensitive under the suite rather
+    than broken on musl, which is a statement about the suite and not an
+    explanation. Recorded as such: "it passed when I ran it alone" explains
+    nothing.
+
+**Three were fixed the same day and one of them was netcfgd's own**: the
+shipped `netcfgd_select.sh` swept nothing on any busybox machine, because
+`pgrep -x` is procps'. `select.sh`, `resolv_defended.sh` and
+`c_daemon_watch.sh` pass on both libcs now, and `make live-alpine` reads 68, 9
+and 3. The three that remain are intermittent rather than order-dependent --
+15 isolated runs under load passed, and so did a whole-suite run taken
+straight after. 10.538 has the measurements and the next experiment.
+
+## 10.542 The network is the same loop, and all the config is meant to live in fuzznet
+
+The copyright holder, 2026-10-23, describing the distributed half:
+
+> We have our netcfgd fuzznet layer with config that is attempted to be kept
+> atomic across the whole network via fuzznet, and occasionally fixed when
+> changes need to occur (can be driven from kernel updates). From that data then
+> we have the process of planning and provisioning it out to the nodes and
+> monitoring for changes and possibly repairing.
+
+and, when this record cited the protocol brief as though the dependency were
+finished:
+
+> fuzznet is not complete yet, but we really want to use its distributed model
+> to store all of our config.
+
+`0285` is both. **The network loop is netcfgd's own loop with a node where an
+interface stands** -- observe, plan, apply, confirm, repair -- so design
+section 4's taxonomy, the drift reporting and the word "repair" keep their
+meanings at the larger scale and a reader who knows one knows the other.
+
+### Three scales, one mechanism, which is the week's accident worth keeping
+
+| scale | handle | question |
+|---|---|---|
+| ruleset | the kernel's nftables generation | did this ruleset move while I read it |
+| host | observed against desired | is this machine what the document asks |
+| network | the version a node holds | is this node on the truth everyone else is on |
+
+The generation check written this week for one ruleset (10.541) is the same
+device the network layer needs for a config version. That symmetry was not
+designed -- it fell out of two unrelated requests on the same day -- and it is
+written down so the network layer does not invent a fourth vocabulary for
+"what you are looking at has moved".
+
+### Atomic is the intention and visibility is the obligation
+
+The holder's word is "attempted", which is exact. Versioned, signed, ordered
+distribution is achievable; atomic *application* across nodes is not -- nodes
+apply at different instants, some are asleep, a partition splits a rollout.
+**So the obligation is that the window where nodes differ is visible rather
+than absent**: which node holds which version, and for how long, is state the
+loop reports, exactly as a host reports an interface whose observed state does
+not match its document.
+
+### What I got wrong, and it is this file's own standing hazard
+
+The first draft of 0285 said fuzznet "already carries what that needs", citing
+the brief's section 2. That section does say everything is built -- **as a
+reading taken 2026-08-19 of a tree that is not this one**, which `evidence.md`
+calls a measurement nobody here took. The holder corrected it the same hour.
+Both documents now carry the date and the correction, and the brief's sentence
+is in the past tense where a reader meets it rather than qualified 180 lines
+later -- which is the exact failure that section already records having
+committed once, against this same dependency.
+
+### All the config, which is larger than the firewall question that started it
+
+"all of our config" moves the desired state itself: a host's document becomes a
+projection of a distributed store rather than the original. Two consequences,
+and the second is a requirement rather than a preference.
+
+The store becomes the subject of the reconcile loop at both scales, which is
+why this stays one design instead of two.
+
+**And a host still has to come up alone.** A node boots before the network
+exists, a read-only root cannot write a cache, and a machine whose uplink is
+the thing being configured cannot fetch its configuration over that uplink --
+`doc/first-run.md` and `doc/read-only-root.md` are this tree's existing
+statements of it. So a local document stays authoritative for a node in
+isolation and the store is what a node converges *to*. A design where a node
+cannot configure its own link without the network cannot bring up the network.
+
+### Open, and one of them is sequencing
+
+Who holds the authoritative config; how a version is agreed when two writers
+amend at once; what a node does when it cannot comply; how a partition is
+reported and what heals when it closes; how a local document and the store are
+reconciled when both have moved. Plus: the dependency is unfinished, so netcfgd
+either waits or designs against the model and implements behind a seam it can
+test without a network -- which is what `ncfg_observe_kernel_t` already is for
+every kernel-facing thing here. Which, and how much is built before fuzznet can
+carry it, is the holder's.
+
+0284's requirement still governs all of it: a node keeps enforcing when the
+controller is unreachable, and must not fail open.
+
+## 10.544 Two apply modes, and a cross-host value is a report with a wider scope
+
+The copyright holder, 2026-10-23, asking the three questions that follow from
+0285: both best-effort and atomic apply; whether the mode is chosen at the
+apply button; ad-hoc against collate-then-run; and "What about rules that
+depend on a value from another host?" `0286` answers them, and the third
+constrains the other two.
+
+### The modes, and who picks
+
+**Best-effort** is each node applying as it receives, doing what it can and
+reporting the rest -- which the host loop did only in part until 10.796, its executor
+stopping at the first failure. **Atomic** is
+nothing applied until every node holds a resolved plan, then all at the named
+instant with each node's own revert timer armed.
+
+**The mode is a property of the change, not of the operator's mood**, and
+0285's two classes are derivable from the plan -- so the planner classifies,
+proposes, and says what the other mode would cost. At the bottom of that
+button the useful sentence is not "atomic or best-effort?" but "this renumbers
+four nodes; applied best-effort they cannot reach each other until the last one
+lands". A bare question pushes a correctness decision onto a dropdown, and the
+operator answering usually knows less than the planner that drew it. The
+override stays, because a maintenance window and a lab are things netcfgd
+cannot see.
+
+### One detail decides collate against ad-hoc
+
+Atomic requires collate, and **what is distributed is the resolved plan rather
+than the config template**. A template still carrying "the address node B got"
+resolves differently on each node, or not at all on one that has not heard from
+B -- so distributing the template and applying simultaneously applies
+*different things* at the same instant, which is worse than applying the same
+thing at different instants.
+
+### The third question had an answer already in the tree
+
+Some values are authored and some discovered -- a lease, a generated key, a
+delegated prefix. A rule naming a discovered value cannot resolve until the
+node that discovers it publishes.
+
+**netcfgd already does exactly this at host scale and the contract is
+written**: `reported.c` and `doc/interface-report.md`, where a bearer or tunnel
+daemon knows what it negotiated, netcfgd does not, the value arrives through
+`/run/netcfgd/reported/` and netcfgd installs it tagged as its own. A
+cross-host dependency is that with the node as reporter and the store as the
+file.
+
+**And the pass's gate is the part worth copying.** `ncfg_plan_takes_reports` is
+deliberately not "there is a file": a report for an interface the document says
+nothing about is an observation with no instruction behind it. One level up
+that is what stops a published value from being an instruction -- a node
+publishing what nobody referenced changes nothing, which is the property that
+keeps a confused or compromised node from configuring its neighbours.
+
+What each mode does with an unresolved dependency: best-effort leaves the rule
+**pending and reported**, naming the value and the node it waits on, because a
+rule that vanishes for want of a dependency is read as a successful apply;
+atomic treats it as a precondition and does not start, because a timed commit
+over a plan with a hole in it is a timed partition.
+
+### Two things that fall out
+
+**A resolved plan is a snapshot**, so dependencies carry versions: B's lease
+changes, the rule naming it is stale, and a dependency version is what
+re-triggers resolution so repair carries the new value out. That is the
+generation idea at a fourth scale -- a ruleset's, a host's, a node's, and now a
+dependency's. Four places, one question: has what I acted on moved.
+
+**Cycles must be refused at resolution time, and the common case that looks
+like one is not.** Two nodes peering with each other's public keys resolve
+fine, because discovery does not depend on the rule: both discover
+independently, both publish, both resolve. A true cycle is A's address computed
+from B's and B's from A's, which has no fixed point -- refuse it naming both
+ends, since a planner that iterates for ever is worse than one that says
+"circular".
+
+## 10.545 A rule's standing, and the red row is the capability report
+
+The copyright holder, 2026-10-23: a concept of "this rule was not applied
+fully", with a settled status for when enough nodes know about a value -- so a
+long list of netfilter rules can show one row red because that machine has no
+kernel support for it and it was never applied. `0287` records it.
+
+**Status is per rule and it is standing state rather than a log line**, and the
+distinction is the whole design: a list of two hundred rules with one red row
+answers "what is true now", where `/run/netcfgd/plan.last.json` answers "what
+did the last run do". Both are wanted and they are not the same artifact.
+
+### The precedent was already in the tree, and it is the same argument
+
+`ncfg_outcome_t` gives every action `DONE`, `FAILED`, `SKIPPED` or `REVERTED`
+with its reason. **`REVERTED` exists because the Rust recorded a revert as log
+lines and an operator reading the journal after a window closed unconfirmed
+could not tell which listed actions were still in effect** -- "the one question
+that file exists to answer, and the one moment it is read". A rule list without
+standing has that defect at a larger scale: it reports what was attempted and
+leaves the operator to derive what holds.
+
+So the journal stays what it is, and a rule gains a standing computed from the
+last run's outcome, the observation and the acknowledgements -- computed rather
+than stored, so it cannot drift from reality the way a cached field would.
+
+### Seven standings, each distinguished by what an operator would do
+
+`live`, `pending`, `unsupported`, `refused`, `stale`, `drifted`, `unsettled`.
+The test for whether a vocabulary has the right number of words is whether two
+of them would lead to the same action; these do not.
+
+**Green is the only one that needs no sentence.** The holder's example is the
+argument: a row saying `failed` sends somebody to a log, and a row saying
+"nftables rejected `flowtable`; this kernel is 5.4 and it arrived in 5.13" ends
+the question. **That text does not exist yet** -- netcfgd hands over the
+kernel's errno, and translating `EOPNOTSUPP` from a construct into a named
+capability is exactly the half 0283 recorded as missing. So **the red row is
+the capability report**, and the two are one piece of work rather than two.
+
+### Settled, defined narrowly enough to compute
+
+A rule is settled when every node whose rules reference the value holds the
+version carrying it, acknowledged, within a freshness bound. Three decisions
+sit in that sentence: **the consumers rather than every node**, since a quorum
+over the whole network makes an unrelated node's absence into this rule's
+problem; **acknowledged rather than sent**, which is 0285's argument that
+distribution is not application; and **within a bound**, because a node that
+confirmed ten minutes ago and is now unreachable is not settled now -- calling
+it settled is the stale-measurement fault this tree keeps finding.
+
+**Unsettled is a transient, not an error**, and the reason it must be visible
+is that for the first seconds it looks identical to a node that will never
+settle.
+
+### The rollup must not turn one red into green
+
+A rule can be `live` on nine nodes and `unsupported` on the tenth, and that is
+one rule in one list -- so the rollup is **the worst standing among the nodes,
+with the count beside it**: `unsupported on 1 of 10`, the node named on the
+row. A list that showed green because most nodes applied it is the vacuous pass
+this tree keeps meeting in other clothes.
+
+### What it asks of the model
+
+A rule needs an identity that survives re-planning or a list cannot show the
+same row twice -- which netcfgd has met before, in 0137, where tc filters took
+handles because a planner that cannot name what it installed cannot read it
+back. An authored rule gets a stable id in the config and the kernel object's
+handle is recorded beside it.
+
+Open: the wire form of an acknowledgement, the freshness bound's value, whether
+`pending` distinguishes waiting-for-a-value from waiting-for-an-instant in the
+row or only in its detail, and whether an operator can pin a rule as
+expected-unsupported on a node so its red stops being news -- which is the
+difference between a list that is read and a list that is dismissed.
+
+## 10.555 What a guest sees of ownership, and a claim here that was wrong
+
+hull reported on 2026-10-25 (its `f82403d`) that a **stored** tree now gets
+its non-root owners back inside a vm as well as on its chroot engine: the qemu
+engine maps a subuid range and chowns the manifest's owners in the host-side
+overlay before boot, where a vm's 9p share used to flatten them. Their note
+says no change is needed here, and that is right for a reason worth writing
+down rather than assuming.
+
+**netcfgd's four rigs are `dir:` sources, not stored trees.** Each
+`hull.conf` names `dir:../../../dist/hull/<rig>-rootfs`, baked by `docker
+export`; there is no manifest, so there are no owners to give back and the fix
+does not reach them. Told to hull, since their note assumed otherwise.
+
+### The measurement, because a claim in this tree was stale
+
+`tests/hull/hwsim/bake-rootfs.sh` said 9p shows a guest every file as the host
+user's, so a setuid-root program becomes setuid-1000 and root running it is
+refused. Measured in a `dir:`-sourced vm on hull `a5c1f58-dirty`:
+
+    0 65534 0644 /etc/passwd      0 65534 4755 /usr/bin/su
+    0 65534 0640 /etc/shadow      0 65534 2755 /var/lib/apt
+    eight setuid files, one non-root path: hull's module share, owned by nobody
+
+So the **owner maps to root, not to 1000**, and every mode bit the bake
+restored is intact in the guest -- that hazard does not arise in this form.
+
+**The group is the half that does not map, and the rule is which gid rather
+than which name.** hull's own account, 2026-10-25: a machine maps the user's
+uid and primary gid, and for a stored tree the subuid and subgid ranges
+besides. Measured here: `funk`'s primary group is `funk`, gid 1000, while
+`docker export` through `tar -x` leaves every file `funk:users`, gid **100** --
+a supplementary group, outside the map, so it arrives as the overflow gid.
+Nothing about the name; a file group-owned by gid 1000 would come through. The
+header carries the correction and the date; the narrower reason it exists is
+unchanged, that a `docker export` plus `chmod` carries modes and not ownership,
+so a payload needing a file's owner or group to be anything in particular
+wants `hull materialize` instead.
+
+**Which is still blocked on the package install and not on ownership** -- the
+bakes' standing recommendation.
+
+**And the ownership objection is not removed yet either, which this entry had
+wrong for an hour.** It said hull's change removes one objection to that road.
+hull reported next (2026-10-25, prompted by bbq-predictor) that `hull run` of
+a stored image **does not yet emit the owners list at all**, so the engine half
+they had just built has nothing to act on and a manifest-bearing image is still
+flattened; the store side is being fixed. So the road is blocked on two things
+rather than one, and the ownership half is in flight rather than done. Their
+`f82403d` is necessary and not sufficient, which is exactly the shape a
+forward-looking claim about somebody else's tree takes when it is written from
+one commit message.
+
+### The instrument check that made this worth doing at all
+
+The hull binary this workspace runs reports `commit a5c1f58ef2e8-dirty`, which
+is the commit *before* the two in their message -- so nothing measured here
+can confirm their fix, only describe what netcfgd's own guests see today. Said
+to them as well, since a consumer running their build directory does not have
+`f82403d`. It is also why the figures above name the hull commit: every rig
+run prints it (`hull_says` in the Makefile) precisely because a result from a
+machine runtime is a result about a version of it.
+
+## 10.572 What identifies an installed rule: asked, costed, not decided
+
+10.564 left the firewall's next slice as *"the planner, the transaction and the
+observer"*. Starting it found that the three are not three independent pieces:
+**the planner cannot be written at all until the observer's identity question
+is answered**, and 0294 did not answer it. Recorded as 0295, status `proposed`
+rather than `accepted`, which is the first such record in this tree.
+
+### Why it blocks rather than merely precedes
+
+A planner with no observation emits its op every pass, so the machine never
+converges: `ncfg plan` would say "replace the firewall" for ever and each apply
+would replace an identical ruleset. The plan is what an operator reads before
+consenting, so that is not an inefficiency, it is the plan lying about there
+being work to do.
+
+`nat.c` already carries the proof at one-boolean scale. Its comment says an
+unsorted observation would differ from a machine that is already right and
+replace the table on every pass -- so this property was paid for once at the
+smallest possible size, and the firewall needs it over a much larger object.
+
+### The two answers, and the trap in the cheap-looking third
+
+**A, decode the rules back into the model**: the renderer written backwards.
+The shape exists at one-rule scale in `ncfg_nft_rule_uplink`, which walks
+nested attribute areas accumulating what it recognises and refusing the rest.
+Generalising it means every expression layer one emits -- `meta` and `cmp`,
+`payload` and `cmp`, `ct`, `immediate` -- and every refusal the lowerer can
+name gains a counterpart. It is the whole renderer again, and its benefit is
+that the observation **is** the model, so `ncfg status` could show the
+installed ruleset.
+
+**B, identity in `NFTA_RULE_USERDATA`**: each rule carries its name and a
+digest of what netcfgd rendered, and the comparison is the ordered list of
+`(name, digest)`. Small, and it hands 0294's per-rule naming to the refusal
+path for free. Its honest limit is that netcfgd learns a rule *is not what it
+wrote* rather than what it now is, so a hand-edited rule is replaced -- the
+right action -- under a worse sentence than A could write. Bounded by
+`NFT_USERDATA_MAXLEN`, which is 256 bytes.
+
+**The third answer looks cheapest and cannot work.** Comparing the rule payload
+the kernel returns byte-for-byte against what was sent fails because the kernel
+normalises: the bytes that come back are not the bytes that went in, and the
+difference is a property of the kernel version rather than of the
+configuration. That is a false difference, which is a table replaced on every
+pass -- the exact failure the observer exists to prevent, arriving through the
+mechanism meant to prevent it. **A digest over netcfgd's own rendered form has
+no such exposure**, which is the argument for B rather than its convenience.
+
+### The fact this machine cannot establish, and the experiment for it
+
+**~~Unverified here~~ -- measured the same day, and the experiment this entry
+named is the one that ran.** Neither libnftnl's headers nor an `nft` binary was
+installed on this machine, so the `netcfgd/natcap` image gained the `nftables`
+tool and the probe ran in that guest. The result is in the section below and in
+0295: the encoding is nft's own TLV, netcfgd will write that rather than a
+private one, and the cap is 128 characters rather than the 256 the record
+assumed.
+
+### Measured since: the TLV, and a limit of 128 rather than 256
+
+The `netcfgd/natcap` image gained the `nftables` tool and the experiment ran:
+`nft --debug=netlink` prints `userdata = { \x00\x0bname=block\x00 }`, so the
+encoding is `u8 type`, `u8 length`, NUL-terminated value with the NUL counted,
+and type 0 is the comment. A rule written that way lists back as
+`accept comment "name=ssh"`.
+
+**So netcfgd writes nft's own TLV and the tolerance question disappears** --
+there is no foreign encoding for nft to tolerate, and an operator running
+`nft list ruleset` reads the rule's name as its comment.
+
+**And 0295 had a limit wrong: nft refuses a comment over 128 characters**,
+where the record said `NFT_USERDATA_MAXLEN`'s 256 left room to spare. Half the
+budget, measured by asking for 300 and reading the refusal. Only the product
+question is left open now.
+
+### What is the holder's, and why the record stops there
+
+**Whether `ncfg status` must show the installed firewall as rules.** If it
+must, A is not optional and wants doing *with* B rather than after it, because
+a decoder written later has to be reconciled with a digest scheme already in
+the field. If names and standing are enough, B alone carries the whole of layer
+one.
+
+That is a product question about what an operator sees, which is not a thing to
+settle while implementing a planner -- the reason 0294 gives for its own
+existence. So the slice stops at the record, and nothing of A or B is built.
+
+## 10.575 This tree already knew how to count processes, and a session rediscovered it the expensive way
+
+Three process sweeps were run badly in one afternoon, each reported, each
+corrected. **All three failures were already documented in this repository**,
+in files this session did not read before reaching for the command.
+
+### What was already here
+
+`tool/vm/run.sh`, in its own termination notes:
+
+> Verified afterwards with `ps -C qemu-system-x86_64`: `pgrep -f qemu-system`
+> matches its own command line, and `pgrep -x` cannot match a name longer than
+> fifteen characters and says so.
+
+`packaging/netcfgd_select.sh`, which paid more for its version:
+
+> **`pgrep -x` is procps', and busybox's `-x` is a different thing.** Measured
+> on Alpine 2026-10-23 with busybox 1.37 ... `pgrep -x wpa_supplicant` matches
+> nothing while bare `pgrep wpa_supplicant` matches it -- so every sweep below
+> found nothing on a musl machine and this script reported having looked.
+
+So the tree held the self-match, the fifteen-character ceiling **and** a third
+fact nobody had asked for: that the same flag means different things on the
+machines netcfgd exists to serve.
+
+### What was run instead, and what each cost
+
+- `ps ... | grep -c qemu` returned **3**, all three the grep's own command
+  line. Reported as three orphans before being re-read.
+- `pgrep -x qemu-system-x86_64` returned **0** -- not because nothing was
+  running but because the pattern is 21 characters, which pgrep refuses with a
+  warning that was not read. Two "no strays" reports rest on it, and both were
+  vacuous passes.
+- `pgrep -f 'qemu-system'` returned **2** against one real process, the second
+  being the invoking `bash -c` whose argv held the pattern. This was the form
+  recommended to another project as the safe one.
+
+**What found all three was three instruments disagreeing** -- 2, 1 and 0 for
+the same question. No single count would have been questioned; the
+disagreement is what forced the look, which is `evidence.md`'s rule about a
+model that disagrees being the witness working.
+
+### The distinction worth keeping, which came from hull
+
+The exposure is not a property of the tool. **It is whether the pattern is
+literal in the invoking process's argv.** hull's committed sweep passes its
+regex in a shell variable, so the script's own argv never contains it and no
+caller-shell can self-match; the same is true of every sweep in this tree --
+`pkill -f "$work/bin/fake-netcfgd"`, `pkill -f "$work/run/ppp"` and the rest
+hold their patterns in variables. Checked rather than assumed, across every
+`pgrep`, `pkill` and `ps | grep` site in netcfgd's scripts and Makefiles.
+
+**So the committed code was never exposed, and the ad-hoc commands were.** A
+rule that lives only in a comment protects the file it is written in.
+
+### The instruments, measured here rather than inherited
+
+| asked | answer |
+|---|---|
+| `pgrep -x <name longer than 15>` | refuses, matches nothing, warns |
+| `ps -C <full name>` | matches |
+| `ps -eo comm= \| grep '^<first 15>'` | matches |
+| `ps -eo ... \| awk '$2==1 && $3=="user"'` | no name filter, so nothing to self-match |
+
+`ps -C` is what `tool/vm/run.sh` already named, and it is the answer for "is
+this binary running". For "is anything of mine orphaned", the intersecting
+`awk` with no pattern at all remains the only form that cannot lie about
+itself.
+
+### Why it is worth an entry rather than a shrug
+
+This is the **third** time today that the knowledge was in the file and the
+conclusion was not drawn: openvpn's management path unlinked a socket one line
+below a comment saying the daemon removes that socket itself; `pppoe`'s stop
+carried the lesson its four siblings needed; and now three process-counting
+traps sat in two files while being met again from scratch.
+
+The pattern is not forgetfulness, it is **reach**: a comment protects the code
+beside it and nothing else. `running-code.md` has the self-match rule, which is
+why these commands are written down there -- and this session read that file at
+the start of the day and still typed `ps | grep` from habit. Whatever fixes
+this is not another comment, so none is added here; what is recorded is the
+count, three in one day, as evidence for whoever decides what would.
+
+## 10.579 A message change broke a rig for a day, and `make check` cannot see the rigs
+
+0295's unverified fact is measured: the `netcfgd/natcap` image gained the
+`nftables` tool, and `nft --debug=netlink` prints
+`userdata = { \x00\x0bname=block\x00 }` -- `u8 type`, `u8 length`,
+NUL-terminated value with the NUL counted, type 0 being the comment. **netcfgd
+will write nft's own TLV**, so the tolerance question disappears and an
+operator reading `nft list ruleset` sees a rule's name as its comment. The cap
+is **128 characters, not `NFT_USERDATA_MAXLEN`'s 256**: nft refuses longer, and
+0295 had that wrong. Only its product half is open now.
+
+### What running the rig turned up, which is the larger finding
+
+The rig failed, and not because of the image. `ca517c6b` rewrote the
+`LINK_CREATE` capability sentence yesterday, replacing a list of kinds with the
+general `CONFIG_<KIND>` rule -- better, and it dropped the one kind an operator
+never asked for. **An `ifb` is netcfgd's own device, synthesised for ingress
+shaping**, so "this kernel does not know `ifb`" is about something absent from
+the document, and without the clause a reader cannot connect it to the shaping
+they did write. `tests/hull/natcap/` asserts that clause and had been red since.
+
+The clause is back, as a clause rather than a revert: the general rule stays
+and the `ifb` connection is named. 40 checks pass again.
+
+**The gap is reach, not care.** `make check` runs 97 suites and cannot run the
+hull rigs -- they need `/dev/kvm` and minutes each -- so a contract between a C
+string and a rig's `grep` is checked only when somebody runs the rig by hand. A
+unit test does assert `CONFIG_<KIND>` is present, which is why the rewrite
+looked safe; nothing asserted what the rewrite removed. **A test that checks
+what a sentence says cannot catch what it stopped saying**, and that is the
+fifth instance in two days of a rule or a fact being present in one place and
+unreached from another.
+
+## 10.582 Delegation under loss, and the control that stopped it being a vacuous pass
+
+`make hull-delegation-lossy`: the delegation rig with hull's impairment on the
+segment, three frames in ten dropped each way. The prefix still arrives and
+netcfgd still derives from it, which is the test 10.570 named and netcfgd has
+never been able to write.
+
+**Two independent draws, not thirty per cent end to end.** hull applies `out`
+where a frame enters the switch from its machine and `in` where it leaves
+towards one, so a solicit crosses the CPE's out and the ISP's in.
+
+**The relational assertion earned its design here.** Under loss kea delegated
+`2001:db8:1234:100::/56` rather than the clean run's `2001:db8:1234::/56` --
+a different /56 from the same pool, its lease database being fresh. A check
+written against the address the first run happened to produce would have failed
+for a reason that has nothing to do with loss.
+
+### The control, because a pass under loss proves nothing by itself
+
+hull prints no notice that an impairment was applied and the timings were
+indistinguishable, so "passed under loss" and "the impairment was silently
+ignored" looked the same from outside. Raising it to `(loss 1.0)` makes the
+prefix never arrive and the rig fail, which is what shows the knob reaches the
+wire at all. Restored to 0.3 afterwards.
+
+**hull says it now, since 9745108 (2026-10-27):** `hull run` prints, on stderr,
+one line per link a spec impairs. stdout is unchanged, so the collector here,
+which reads verdict files, is unaffected; the `(loss 1.0)` control stays,
+because a notice says the impairment was configured and only the failure says
+it reached the wire.
+
+**And the failure message no longer quotes a figure.** It said *"did not pass
+under 30% loss"*, which is a number in a Makefile describing a spec it does not
+read -- stale the moment the spec changes, which is the fault this tree has
+spent two days finding. It names the spec and prints what the spec says
+instead.
+
+## 10.589 `ncfg wifi connect` lasted one pass, and an apply's consents were dropped
+
+**Found by `make hull-hwsim`, which had failed one check -- "did not move to
+the preferred network" -- with and without the mesh work.** Two defects, the
+second hidden behind the first.
+
+**The consents.** `apply_through_daemon` sent `--allow-disruption` and sent
+`--strand-credentials` and `--restart-wedged` as nothing. A corner while only
+`--confirm-within` took that path; 7e13290e made every plain apply the
+daemon's, so on any machine with a daemon both were dropped: the daemon
+refused the restart the operator named and answered an empty journal with exit
+status 0. Fixed in 26312582, whose `Fixes:` trailer names `7e13290e6ef8`; the
+commit is `7e13290e2bdb`.
+
+**The reconcile for a disabled network repopulated, and that disconnects.**
+e242b319 meant to "re-enable what `autoconnect` names, and leave the current
+association alone" (10.368's answer). It reached that through
+`wifi.set_profiles`, which clears every network and adds them back -- and
+removing the network a station is on disconnects it, after which the
+supplicant joins whichever it ranks first. Measured in the vm: `ncfg wifi
+connect netcfgd-test` joined it, the next pass ran `wifi.set_profiles`, and the
+station was back on `netcfgd-better` within the second, the DHCP client
+restarted each way. **It was invisible while the daemon stayed held**: the live
+script's applies ran in-process, so the daemon started `--no-apply-on-start`
+was never released and never reconciled; 7e13290e released it. Now the
+executor re-enables without repopulating where the record says the supplicant
+holds the document's set and the list has that many networks --
+`ENABLE_NETWORK` does not deselect, so the station stays where it was put --
+and repopulates in full otherwise, as before.
+
+Checked: `hull-hwsim` passes all 27 checks again, including the two that
+first failure had masked (the station moves on `ncfg wifi connect`, and that
+is not a roam). `service_test` holds a disabled network to `ENABLE_NETWORK`
+with nothing removed, with the no-record control still repopulating;
+switching the new path off fails it. `cli_test` checks every consent travels.
+
+## 10.630 The global tab pins the country
+
+0296's machine-wide `global { regdom }` was neither shown nor settable in the
+window: the global tab predates it, and the client's globals reader never
+read the key. It now shows `country` -- pinned, or "follows the machine" --
+and sets it, written to its own drop-in, `50-regdom`, because `global` takes
+contributions from several files (0147) and unpinning should be removing a
+file rather than writing a value somebody has to know means "follow". A blank
+removes only the tab's own file: a country pinned elsewhere can be overridden
+here, a later file winning a scalar, but not unpinned from here.
+`gui/tests/global_load.cpp` pins, refuses one character, and unpins through a
+real daemon; with the tab unable to see its own pin, the unpin checks fail.
+
+## 10.637 A static prefix is advertised as itself
+
+Decision 0304, amending 0009: `advertise { prefixes = ["fd00:7::/64"] }` takes
+a prefix the configuration knows beside `@pd:` references, kept in the document
+as `static_prefixes` so the delegated references stay typed exactly as 0009
+has them. A /64 written as the network, not link-local or multicast, on an
+interface holding a static address in it -- refused otherwise, since radvd
+would hand hosts a prefix with no route back. It needs no lease: the planner
+counts it resolvable, lists it after the delegated ones in the order
+`daemon_service.c` hands radvd them, and starts radvd at once.
+
+**Measured end to end in `make hull-dhcp-server`**, which needed radvd: the
+hwsim image now installs it (its spec says why), rebuilt from the spec. lan0
+holds `fd00:7::1/64`, advertises the prefix with `managed = true` and serves
+`range6`; an ordinary dhcpcd that waits for the advertisement as a host does
+took `fd00:7::94f8:82ff:fe13:172f/64` by SLAAC and `fd00:7::12f/128` from the
+server -- which is the whole DHCPv6 path, the managed flag included. The
+interface dialog carries the prefixes in its one field, held by the coverage
+gate (`ra_fields.static_prefixes`) and by `interface_load`, which a reader that
+skipped them fails. +4,120 bytes.
+
+## 10.642 DNS sent anywhere is answered by the router
+
+0305's second way round the router: `dhcp_server { dns_intercept = true }`
+answers DNS the network sends to any server, for the TV or streaming stick
+with a server built in that ignores the one offered, so the block lists reach
+it too. It is **two port forwards to the router itself** -- UDP and TCP 53
+arriving on the interface, translated to its own static IPv4 address, where
+the forwarder listens -- so the kernel writing, reading back and comparing
+them is 0298's unchanged, and `wanted_forwards` gains them beside the
+document's. Named `dns+udp` and `dns+tcp`: a `port_forward` label cannot hold
+a `+`, so neither can meet one. No reflection and no return path, since the
+host it sends to is this one; refused without `dns_forward`, as a block list
+is. IPv4 only, as a port forward is -- a device with an IPv6 server built in
+still asks past the router, which is said in the example.
+
+**Measured in `make hull-dhcp-server`**: the client's resolver set to
+192.0.2.53, where nothing listens, through the router's default route --
+`www.example.test` resolved to nothing before, to the upstream's 10.9.9.9
+after the apply, and a blocked name stayed unresolved; the plan after it was
+empty, which is the `+` name surviving the kernel's read-back.
+
+## 10.644 Rigs start in order, where hull can order them
+
+The holder asked for hull's start order (hull 1330cae, its §4.8) in place of
+the sleeps the multi-machine rigs used to wait on each other. `(after NAME)`
+starts a machine once its sibling is up, and `(ready (command ...))` on the
+sibling says when that is: its command, run in it, exiting 0.
+
+- **The six regdom pairs** (`wire*.conf`): each station `(after <ap>)`, each
+  access point ready at the `UP` line its payload writes, bounded as the
+  stations' loops were (2m, 5m at 5 and 6 GHz). The six polling loops are
+  gone. The access points' own wait at the end, for the station's verdict,
+  stays: start order says when to start, not when to stop.
+- **Delegation** (`hull.conf`): the CPE `(after isp)`, the ISP ready at its
+  `VERDICT ok`. The ISP's fixed `sleep 90`, there only to outlive the CPE,
+  became a wait for the CPE's verdict, bounded at 300 s -- a fixed lifetime
+  would now be counting the CPE's boot too. Measured 15 s rather than 90.
+- **`hull/wire`** has no cross-machine wait, so nothing changed.
+
+**Measured**: `make hull-delegation` passes, the CPE saying the ISP was up
+before it started; the six regdom pairs pass, each access point's `UP`
+written before any line of its station's. **Their measurement ran from a copy
+in scratch, not from `make hull-regdom`**, which cannot run from this account
+at all: `tests/hull/regdom/verdict` belongs to the other account, and a vm's
+shared folder writes as this account without its supplementary groups, so
+every access point failed at its first line -- `cannot create /verdict/ap:
+Permission denied` -- before start order was reached. The directory is group
+writable; the share does not honour that. 10.645 makes the targets replace
+such a directory.
+
+**`lossy.conf` keeps the simultaneous start, measured rather than assumed.**
+With `after` and `ready` it failed 3 of 3 -- kea logging every SOLICIT and an
+ADVERTISE for each, no REQUEST arriving -- and that was signalled to hull as a
+late-joining port losing everything. **It was not, and the retraction is the
+finding.** hull's loss is seeded, so a run reruns its pattern, and its two
+experiments settled it: `hull segment pd` mid-run showed the CPE's in way
+losing 3 of 9, 3 of 8 and 2 of 7 frames, the 30% asked; and with start order,
+`(seed N)` on that way passed for 2, 3 and 5 and failed for 1 and 4. The
+default seed's pattern under that start defeats the exchange; a seed that
+passes would be a result chosen, so the file keeps both starting together and
+`cpe.sh` its wait.
+
+**And `hull-delegation-lossy` is flaky on its own, which 10.582 did not
+say.** On the files as they were it passed 4 of 5. The arithmetic fits: a
+delegation is four messages, at 30% each way about 0.7^4 of attempts get all
+four through, and odhcp6c retries about six times inside the CPE's 60 s wait,
+which is roughly 80%.
+
+**The wait is 300 s now, and it rescues some runs and not others.** Five
+runs after widening, 4 passed again, and the two that matter read opposite
+ways. One delegated after about 100 s and five REQUEST/REPLY rounds, so the
+old 60 s would have failed it. The failure had six solicits reach kea and
+none of the six ADVERTISEs reach the CPE in 300 s -- about 2% at 0.49 a
+frame. odhcp6c's solicit interval doubles (kea saw gaps of 1, 2, 13, 19 and
+36 s), so the extra four minutes bought about two tries, which is why the
+width helps less than its size suggests. The ISP's own bound went from 300 s
+to 600 s with it, or it would stand down under a CPE still waiting.
+
+Across the five runs the ISP-to-CPE direction delivered about 8 of 23 frames
+that can be traced, 35% against the 49% two 30% draws give. That is not
+significant at n=23, and 10.644 above has already retracted one loss fault
+sent to hull on thinner evidence, so it is recorded and not signalled. A red
+run of this rig is still a reading to repeat before it is a regression.
+
+## 10.653 A hidden network, added from the GUI at the `wifi` tier
+
+**Found walking the same aim as 10.652.** A network that does not broadcast its
+name never appears in a scan by name, and the add dialog opened only from a
+scan row. The one other way in, the wifi tab's `add by hand`, writes a whole
+block through `config_put`, which is `admin` -- so a laptop's owner holding
+`wifi` could not add their own hidden network from the GUI at all, though
+`wifi_add` has carried `hidden` all along.
+
+**`hidden network...`** on the wifi tab and `Hidden network...` in the tray's
+`Connect to` ask for the two things no scan can say -- the name, and whether
+it wants a passphrase, an 802.1X login or nothing -- then open the ordinary add
+dialog with its "does not broadcast" box ticked and locked. From the tray, the
+network is joined once loaded, by 10.652's path.
+
+- **The SSID is the typed name's UTF-8 as lowercase hex** (`ncfg_ssid_hex_for`),
+  and the 32-octet limit is checked in octets before the dialog goes on: a
+  name in another script reaches it well before 32 characters. This is the
+  only place a typed name becomes an SSID; every other add takes the octets a
+  radio heard.
+- **The box is locked** because a block for a hidden network without
+  `hidden` is one the supplicant never probes for, which joins nothing and
+  looks configured.
+
+Checked: `gui/tests/add_network_hidden` holds the conversion, each security
+choice, the length refusal and the locked box; sabotaged to Latin-1 and to an
+unlocked box it fails three checks.
+
+## 10.654 The tray says when the network comes and goes
+
+The tray's only sign of a dropped network was its icon changing -- 22 pixels
+in a corner -- so the first a laptop's owner knew of it was a page that would
+not load. It now says so in a notice, on a change only and never for the
+first answer after it starts or after the daemon comes back (that is where
+things stand, not news):
+
+- `Connected to <network>.` on reaching a default route, and on moving to
+  another network while routed -- a join that worked, or a roam onto
+  something else.
+- `<network> has no default route: ...` on losing the route but keeping the
+  network, the state that looks fine from every angle but one.
+- `Disconnected from <network>.` on losing it.
+
+**Not the climb through `local`**: a join passes through it for the second a
+lease takes, and a notice there would come with every good join. **Nor
+`routed` against `online`**: the icon draws them as one picture, because
+the difference is only whether a probe has looked. The rule is
+`ncfg_tray::notice_for`, held by `gui/tests/tray_choices` to each case;
+without the roam clause it fails "moving to another network is said". The
+notice itself still wants a notification host (10.590).
+
+## 10.656 The Qt tray starts at login
+
+The TDE tray has had an autostart entry since it was packaged; the Qt one had
+none, so on every other desktop a laptop's owner started the tray by hand each
+session or did without. And `--tray` is the wrong thing for a session to run:
+with no daemon it opens a modal Retry box, and with no notification area it
+opens the whole window -- each right for somebody at a prompt and wrong at
+login, where a box at every login on a machine not running netcfgd teaches
+people to remove the package.
+
+**`netcfgd-gui --login`** waits, bounded -- thirty looks two seconds apart --
+for netcfgd and for a notification area, since the panel and the daemon can
+each come up after the session starts its autostart entries; then starts in
+the tray only. If either never appears it says which on stderr and exits 0,
+with no window and no dialog. **`/etc/xdg/autostart/netcfgd-gui-tray.desktop`**
+runs it, `NotShowIn=TDE`, which has its own tray and autostart. Installing a
+thing that starts at login narrows "installing starts nothing", and the
+narrowing is the TDE package's own, for the same reason: a tray holds no
+authority and changes nothing about the network. `debian/control` says so
+for `netcfgd-gui` as it does for the TDE tray.
+
+Measured, offscreen (which has no notification area): `--login` with no
+daemon leaves after 60 s naming the socket, against a control `--tray` still
+sitting on its dialog when `timeout 5` killed it; and `--login` against a
+scratch daemon in `unshare -rn` leaves after 60 s saying the desktop has no
+notification area. The tray branch itself still wants a notification host
+(10.590). `desktop-file-validate` passes the entry.
+
+## 10.658 A radio switched off says so, in the window and both trays
+
+The daemon's `wifi_status` has carried `blocked` since 0062 -- the sentence
+naming where rfkill has the radio off and what clears it, "asked here because
+this is the command somebody runs when wifi is not working". `ncfg wifi
+status` prints it. **The C client never read it**, so the wifi tab, the Qt tray
+and the TDE tray all drew a radio switched off by the laptop's own key as one
+in range of nothing: offline, and no reason.
+
+`ncfg_wifi_status_t.blocked` ("" when on), the Qt row's `blocked`, and each of
+the three lines that say what a radio is doing appends it. **Not added to the
+conformance dump**, which the Rust CLI's must match line for line;
+`client_test` reads it from a staged answer of its own, both ways, and
+`tray_choices` holds the wifi tab's line to it.
+
+## 10.659 A network the supplicant gave up on is named, and the lens that found it
+
+The same shape as 10.658, found by looking for it: **a member the daemon
+sends and the C client drops.** `wifi_status`'s `not_trying` is 0192's answer
+to what `SCANNING` cannot say -- the networks the supplicant has stopped
+trying -- and `ncfg wifi status` prints it with the sentence that matters:
+`[TEMP-DISABLED]` is the supplicant giving up after repeated failures, which
+is credentials or settings and never distance. The window and both trays
+showed a radio that had given up on its only network as one still looking.
+
+`ncfg_wifi_status_t.not_trying`, read in full; the Qt row's `given_up`, the
+`[TEMP-DISABLED]` ones by name; and the three radio lines append "gave up on
+<network> after repeated failures, usually a wrong passphrase". A network
+merely `[DISABLED]` is left out of that line: it was turned off on purpose.
+`client_test` reads the witness's own pair from a staged answer, and passes
+under ASan and UBSan; `tray_choices` holds the wifi tab's line.
+
+**The lens, run over the whole witness**: every member of every response in
+`doc/schema/socket.json`, against the strings `client/ncfg_client.c` reads.
+Besides these two, what the client does not read is `hello`'s and
+`document`'s version numbers and eleven of `status`'s per-link diagnostics -- `accept_ra_applied`,
+`address_proto_supported`, `backend_restarts`, `delegations`,
+`forwarding_applied`, `hook_state`, `ingress_applied`, `nat_conflicts`,
+`privacy_applied`, `qdisc_applied`, `reports`. Those are a router's
+diagnostics rather than anything a laptop's owner looks for, which is why
+this pass stopped at the radio; `nat_conflicts` is the one a router's window
+would most want, if one is ever asked for.
+
+## 10.662 fuzznet built three things this tree asked for, and the seam they meet
+
+Five inbox messages, 2026-11-02 and 03, recorded here before they are
+deleted. Three are fuzznet's answers to netcfgd's asks; two are fmake's.
+
+**fuzznet, at `2a13964` and after (its sections 811, 814-816, 820):**
+
+- **Records, the half 10.591 waited on.** A record is a setting a host signs
+  about itself -- KEY what it observed (`seen/wlan0/aa-bb-cc-dd-ee-ff`, the
+  setting-key grammar), VALUE up to 256 printable bytes, its time in ms --
+  every one kept, a month a bucket per observing host, carried to every
+  estate member each round. On fuzznetd's local socket, its own user only:
+  `add record KEY VALUE`, `list record [HOST] [FROM]` (paged, `ok FROM SHOWN
+  MORE HOST,KEY,AT,VALUE ...`), and `get record KEY [HOST]` for the newest of
+  a key. Retention is fuzznet's rule engine with a `records` word: `prune|keep
+  records [source=HOST] [text=SUBSTRING] age|count N` and `policy records
+  keep|drop`, where `text=seen/wlan0/` selects an interface and a MAC prefix a
+  station. Not built yet: a keep rule that reads a list's members.
+- **`list setting-holders KEY [FROM]`** (its 811, answering 724): for an
+  estate setting, the version in force and, per other device of the user, the
+  version it holds and when it was last heard -- the "has it reached them"
+  half 10.567 found netcfgd was the second to ask for. Paged; positions are
+  in memory, so every device reads 0 after a restart until the first round.
+- **`fzn_responsible_order` and `list responsible KEY`** (its 820, answering
+  the 2026-09-29 report and the holder's active/active answer): rendezvous
+  order over the estate's hosts, the first responsible and the next its
+  successor, a joining member moving only the keys it now ranks first. What
+  counts as the first having failed stays the caller's.
+
+**Since answered: 10.664 and 10.666 -- the daemon writes the records itself.**
+What follows is the question as it stood. **None of it is wired here yet, and
+the reason is a seam rather than effort.**
+fuzznetd answers its own user only, on `$XDG_RUNTIME_DIR/fuzznet/fuzznetd.sock`;
+netcfgd's daemon runs as root and, by 0269 and the shared-protocol brief,
+never links fuzznet -- only `bridge/` does. So "which process writes a
+station it saw as a record, to which fuzznetd, and how the resolver that
+expands an allow-list prefix in the daemon reads records back" is a
+deployment question no tree has answered: a root fuzznetd on a router, the
+bridge as a recorder under fuzznet's user feeding the daemon, or the daemon
+speaking fuzznetd's line protocol without linking fuzznet. It is the same seam
+10.567 left with the holder for the scope enum. Raised with the holder rather
+than chosen here.
+
+**fmake (`c0d0746`, `c5c1801`, its sections 559-560)**: the README's `fmake`
+line had stopped building anything -- kernel-doc in the hwsim rootfs this tree
+stages under `dist/` tripped a directive, and a Debian rootfs's `lib ->
+usr/lib` made `git check-ignore` fail for the whole batch, so every ignored
+file was read, `c/libncfg.a` and `client/libncfg_client.a` among them. Both
+fixed in fmake; nothing here changes. `fmake -C . -n` writes nothing.
+
+## 10.673 The global tab turns UPnP on, after saying what it costs
+
+10.671 built UPnP for the document and `ncfg`, and a GUI user -- the person
+this project's near-term bar names, who should never meet the language --
+could neither turn it on nor see that it was on. The global tab now shows a
+row for it and carries the uplink, the LAN interfaces and a button, written
+to its own `50-upnp` drop-in, as the country is to `50-regdom` (10.630), so
+off is removing the file. Turning it on asks first, in the words of the
+holder's condition (10.664 item 5): any device on those networks may then
+open a port on this router without asking. Off is not asked; a client asks
+again for what it still wants.
+
+The tab restates none of 0310's refusals. A write is validated by the
+daemon, so an uplink without NAT comes back as the compiler's sentence and
+nothing is written. `global_load` drives it through a real daemon: refused
+without NAT, on with it, shown, and off again by removing the drop-in. With
+the client's reading of `upnp` taken out, four of its checks fail.
+
+## 10.697 The remote safety path, live: a window armed, confirmed, and left to revert
+
+0312 refuses an operator's apply without a confirm window, because across
+the estate a change that cuts the operator off has no other way back. That
+rule had been checked at the gate (`ask_test`) but never through the whole
+path. `node_fleet.sh` now does it in its third start of A, with A's remote
+`admin` tier open. Through B:
+
+- `apply --at A --confirm-within 60` arms a window on A (`commit.arm`);
+- `confirm --at A` confirms it;
+- a second `confirm` is A's own `no confirm window is open`;
+- `apply --at A --confirm-within 3`, left alone, is reverted by A
+  (`revert: undid 1 of 1 applied`), and then has nothing to confirm.
+
+The last waits on A's log, up to 30 seconds, rather than sleeping. A's loop
+closes the window, and how soon depends on A's tick, which a fixed sleep
+would only be guessing. An earlier draft slept 6 seconds and passed because
+the tick happened to fall inside it. A's configuration manages nothing (`lo`,
+unmanaged), so the applies need no privilege, and the property under test is
+the window, not any change it covers.
+
+## 10.707 fuzznet built the coordination netcfgd left to it: staged commit, propagation, sealed values
+
+fuzznet's message `20261104T0010Z`: on the holder's word it built the pieces
+10.567 left to it. The pin moves to fuzznet `e6c72acf`. `node_serve.sh` and
+`node_fleet.sh` pass on it, and the program is 2,381,336 bytes, inside the
+budget. `fzn_node_settings_here` now returns -1 for a value sealed to a key
+this host lacks, and netcfgd does not call it.
+
+- **A staged commit** (its `5ac9528`, sec 873): `set staged SECONDS SCOPE KEY
+  VALUE` answers a token, and `add confirm TOKEN` keeps the value. The revert
+  is signed at staging and held by every host, so a change that cuts the
+  operator off is undone by the hosts it changed. **netcfgd's use: none yet,
+  and that is deliberate.** Its configuration is files that a node's daemon
+  applies, and each node already has its own commit-confirm window (M2,
+  0312), which propagation (next) arms on many nodes at once. A staged
+  *setting* would matter for configuration held in fuzznet's settings,
+  which netcfgd does not hold.
+- **Command propagation** (its `e904cf9`, sec 872): `call NAME at estate` and
+  `at group=NAME` run a procedure on every reachable named host, and answer
+  per host with ok, unknown, denied, failed or silent. netcfgd's `ask`
+  (0312) is a procedure, so this is `ncfg --at estate` for the verbs that
+  change something (go item 3).
+- **Sealed group values** (its secs 874 and 875): `set sealed group=NAME KEY
+  VALUE`, up to 76 bytes, sealed to each member's prekey, and resealed to a
+  member that joins later. This is the secrets path 10.567 waited on for a
+  zone's mesh password or roaming key (go item 2).
+
+**What netcfgd builds on each, and the finding that shapes the first**
+(2026-11-04, designed and not yet built):
+
+- **Propagation needs a procedure of its own, not `ask`.** fuzznet's answer
+  to `call NAME at estate` is `ok TOTAL ANSWERED KEY16:STATUS ...`, where a
+  host's `ok` means only that the procedure returned bytes, and each host's
+  answer itself is not carried. `ask` answers a refusal as a page, the
+  socket's error document, which is right for one host and its pages. So
+  `ask` propagated would show `ok` for a node that refused, which is the one
+  result an operator must never misread. The design is a second procedure,
+  `do REQUEST` (or `@DIGEST`, staged with `askpart` at the same target),
+  behind the same gate. It answers `ok` only where the daemon carried the
+  request out, and nothing where it refused or failed, so fuzznet reports
+  the host as `failed`. `ncfg` then prints the per-host table, and the
+  reason for a failed host is one `--at HOST` away. Only commands that
+  change something are propagated, since their answers would be discarded:
+  reload, `apply --confirm-within`, confirm, revert, config, secret and
+  profile. **The calling host is among them**: fuzznet runs the call
+  on itself first, where it is named, and lists it. An operator's own
+  plain fuzznetd serves no `do` and is listed `unknown`, so `ncfg` counts
+  such hosts apart, as serving no netcfgd, rather than as failures (10.708).
+- **Sealed values as secrets are built: 10.709.** They waited on a getter
+  that works inside a procedure, since `fzn_daemon_local` is refused there.
+  fuzznet's `fzn_daemon_setting_here` is that getter.
+
+## 10.739 A caller with no stream and no socket is read to
+
+`any` has no read to grant, so under `observe = "any"` only the control socket gave an
+ordinary user a stream, which held 0309's last step back. `eventlog` is a call, and
+`any=x` reaches a call. `ncfg_fuzznet_events_tick` hands such a caller a socket on which
+a small child writes `event net-tick -` every two seconds, and the reader takes that
+line as it takes a held one and reads `eventlog`. So `ncfg monitor`, the TUI and the
+GUI's stream need no second path. It comes after the control socket, not before, as a
+held stream's word is immediate and this is up to two seconds late. It ends when the
+reader goes, by the write failing, or when the daemon does, by the look failing.
+`node_second_user.sh` hears a reload this way as a real second uid.
+
+**Left alone: the live scripts' wait on `netcfgd.sock`,** which 10.732 lists. Moving 42
+scripts buys a user nothing until the holder says what a daemon with no node does.
+
+## 10.758 `make vm-skipped` is green: seven of seven, the shim being the C
+
+At 5960709e, in a Debian guest: `bluetooth.sh`, `hwsim.sh`, `ppp.sh`, `pppoe-session.sh`,
+`killmode.sh`, `select.sh` and `nm.sh` all pass, 214 checks, exit 0. 10.485's *5 passed, 4
+failed* was the last result recorded and is superseded; nine became seven as `association.sh`
+and `delegation.sh` left the payload for the reasons `skipped.sh` gives. `nm.sh` drives
+`adapter/netcfgd-nm/c/netcfgd-nm`, so the NetworkManager shim that passes is the C one;
+`nmcli` exists only in the guest, which is why `make live` here skips it.
+
+## 10.763 What the Rust's `live.rs` asked, asked of the C
+
+`backend/netcfgd-supplicant/tests/live.rs` sent the Rust's supplicant settings to a real
+`wpa_supplicant` -- every security mode, every key management, every MAC policy, enterprise --
+and was the one test whose subject went with the Rust and was never asked of the C: the C's
+`supplicant_test.c` renders the commands and compares them with what they should say, which
+cannot know what a parser accepts. `SET okc 7` answers OK and `ieee80211w required` does not.
+
+`c/examples/live_supplicant` compiles a configuration directory the way the daemon does and,
+for every network under each of the three MAC policies, sends the globals `wifi_ops.c` sets
+and then `ADD_NETWORK` and every `SET_NETWORK` from `ncfg_supplicant_settings`, printing each
+refusal with its line redacted. `tests/live/c_supplicant_settings.sh` gives it thirteen
+networks -- open, WPA2, WPA3, the transition, OWE, hidden, a pinned BSSID, one held from
+autoconnect, a quoted name, and EAP by PEAP, TTLS, TLS and PWD with stored certificates --
+and `wpa_supplicant -Dwired` on loopback, as `live.rs` used. 39 of 39 accepted. With WPA3's
+`ieee80211w 2` changed to `required` the three WPA3 sends are refused and the script fails;
+restored, it passes. In `make live` after `c_wireguard.sh`.
+
+Acceptance only, as `live.rs` was: a wired supplicant on loopback joins nothing.
+
+## 10.765 `make hull-mips` on 0a64eb68, and what the mips payload still copied
+
+VERDICT ok, exit 0: the MIPS build runs, 8789 ok lines, the six sections excused for
+qemu-user's netlink as designed, and the fleet 39 of 39 on one byte order and on two. The run
+also showed the payload's first `tar` naming `crates`, which 0317 deleted -- not fatal, since
+tar copies the rest and only then exits non-zero, and so not caught by the verdict. Dropped,
+and the module load now tries the guest's own `binfmt_misc` before the host's copy: hull's
+089facf boots its own kernel for a vm that names none, and a module built for the host's will
+not load into it. Two reruns on the change: VERDICT ok, 8792 ok lines (10.764's three checks),
+no `Cannot stat`.
+
+## 10.795 Nothing on qtty's side stands between `ncfg tui` and the GUI's screens
+
+**qtty measured `ncfg tui` against its own goal (its note 20261111T0100Z, recorded here and
+deleted).** qtty means to put the existing terminal implementations behind one backend, and
+read `c/src/cli/tui.c` and `tui_term.c` -- raw termios, poll and hand-written ANSI -- for what
+they do that qtty cannot: nothing. Terminal open and restore, SIGWINCH, key decoding and
+SIGTSTP/SIGCONT are all qtty's already, and the one thing untested, an application's own
+socket notifier still firing once qtty owns the event loop, is tested now (qtty d5aca3e). So
+moving `ncfg tui` onto the GUI's screens through qtty has no blocker on qtty's side; whether
+and when is netcfgd's, and qtty is not asking.
+
+## 10.799 The apply dialog said "Applied" for an apply that did not stand
+
+**Found reading how the GUI meets 10.796.** The daemon answers an apply that stopped -- or,
+since 10.796, never started for a credential nobody stored -- with a journal, not an error;
+the error path is for an apply it could not attempt. The dialog read success off the call
+alone and said "Applied. No confirm window was armed, so this stands." over a journal whose
+only action was `failed`. The CLI never had this: it counts the journal, `unmet` included (`c/src/cli/run.c`).
+
+`ncfg_apply_dialog::trouble` reads the journal: nothing done is "Nothing was applied", some
+done is "Applied in part: N of M actions ran", each naming the first action that did not
+stand and the daemon's sentence for it; with a window armed it adds that Revert undoes what
+did run. `unmet` (0293) now gets a failure's ink in the table, where it had none.
+`gui/tests/apply_actionable.cpp` states the three cases; emptying `trouble` fails two.
+
+## 10.804 The GUI quotes a name with quotes, not backticks
+
+**Half of 10.778's last finding: backticks reach a person's eye.** Thirty-nine sentences in
+`gui/src` -- every delete and forget question, the profile switch, the notes under a field
+-- wrapped the name they were about in backticks, markdown's mark for code, which a Qt
+dialog draws as two stray accents: "Delete the DNS record `nas.home.lan`?". A name is now
+in plain double quotes. What stays in backticks is what genuinely is syntax or a command a
+person would type -- `@secret:wg0`, `ncfg secret set wg0`, a `device` block -- and the
+other half of the finding, commands and op names in help lines meant for somebody who will
+never open a terminal, is still open: it is wording to rewrite one sentence at a time, not a
+substitution.
