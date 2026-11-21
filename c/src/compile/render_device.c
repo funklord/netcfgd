@@ -426,6 +426,15 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 		ncfg_buf_add_text(body, "\tkind = \"dummy\"\n");
 		break;
 	case NCFG_KIND_BRIDGE:
+		/* The JSON range is `R_U32` and the language takes 6 to 40, the
+		 * kernel's (10.889): one outside is named, as the vlan id below. */
+		if (kind->bridge.max_age.has &&
+		    (kind->bridge.max_age.value < 6 || kind->bridge.max_age.value > 40)) {
+			ncfg_render_refuse(missing, "device", name,
+			    "a bridge's `max_age` of %lld is outside the 6 to 40 seconds the "
+			    "language takes", (long long)kind->bridge.max_age.value);
+			break;
+		}
 		render_bridge(&kind->bridge, body);
 		break;
 	case NCFG_KIND_BOND:
