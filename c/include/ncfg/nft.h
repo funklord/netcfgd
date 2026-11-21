@@ -469,6 +469,8 @@ typedef struct {
 	int      protocol; /* ncfg_firewall_protocol_t */
 	int      has_port;
 	uint16_t port;
+	/* A destination port range, "LOW-HIGH", or empty (0331). */
+	char     port_range[16];
 	char     from[64]; /* "" where the rule matches no source address */
 	char     to[64];
 	char     interface[NCFG_NFT_IFNAME_MAX];

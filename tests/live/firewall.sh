@@ -133,8 +133,10 @@ nft add rule inet netcfgd input limit rate 10/second accept comment '"name=sneak
 "$probe" --read > "$work/read" 2>&1 || true
 check "a hand-added rule with no identity is refused, naming why" \
 	"$(grep -c '^refused .*no .name=... sha256=.... comment' "$work/read" || true)" "1"
+# A `limit` is one netcfgd writes since 0330 -- ten a minute, ahead of a log --
+# so this one is refused for its rate rather than for being a limit at all.
 check "and one wearing an identity with an expression netcfgd never writes" \
-	"$(grep -c '^refused rule .sneaky. has a .limit. expression' "$work/read" || true)" "1"
+	"$(grep -c '^refused rule .sneaky. has a .limit. netcfgd does not write' "$work/read" || true)" "1"
 
 # A replacement: the table is there, and a smaller ruleset takes its place.
 cat > "$work/netcfgd.conf" <<'CONF'
@@ -341,6 +343,28 @@ check "and the next plan has nothing to do" "$(cat "$work/plan")" "nothing to do
 check "ncfg status shows the log's row before the drop's" \
 	"$(grep -E '^    (log|drop) telnet' "$work/status" | tr '\n' ' ')" \
 	"    log telnet protocol tcp port 23     drop telnet protocol tcp port 23 "
+
+# A port range (0331): the kernel takes `th dport LOW-HIGH` and the reader
+# reads it back, so the next plan converges.
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		accept "games" { protocol = "udp"; port = [27015, "6000-6010"] }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a rule with a port range is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the range is one kernel match" 'udp dport 6000-6010 accept comment "name=games'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status shows the range" \
+	"$(grep -c '^    accept games protocol udp port 6000-6010' "$work/status" || true)" "1"
 
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"

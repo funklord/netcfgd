@@ -52,6 +52,7 @@ static void rule_free(ncfg_firewall_rule_t *rule)
 {
 	free(rule->name);
 	free(rule->ports);
+	ncfg_strings_free(rule->port_ranges, rule->port_range_count);
 	ncfg_strings_free(rule->from, rule->from_count);
 	ncfg_strings_free(rule->to, rule->to_count);
 	free(rule->interface);
@@ -155,11 +156,14 @@ static void rule_protocol(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *as
 }
 
 /*
- * One port, or a list of them.
+ * One port, or a list of them, each a number or a range written as a string,
+ * `"1000-2000"` (0331).
  *
  * A single number is accepted as well as a list, for the reason `addressing`
  * accepts a string or a list: a rule for one port is the common case and
- * `port = 22` is what somebody writes.
+ * `port = 22` is what somebody writes. A range is a string because the
+ * language has no range literal, and `"60000-61000"` is what nft and iptables
+ * both print.
  */
 static void rule_ports(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
     ncfg_firewall_rule_t *rule)
@@ -183,6 +187,9 @@ static void rule_ports(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assig
 	free(rule->ports);
 	rule->ports = NULL;
 	rule->port_count = 0;
+	ncfg_strings_free(rule->port_ranges, rule->port_range_count);
+	rule->port_ranges = NULL;
+	rule->port_range_count = 0;
 	if (count == 0) {
 		return;
 	}
@@ -194,9 +201,34 @@ static void rule_ports(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assig
 	for (i = 0; i < count; i++) {
 		int64_t port = 0;
 
+		if (entries[i]->kind == NCFG_AST_STRING) {
+			unsigned long low = 0, high = 0;
+			char          tail = 0;
+			char          normal[16];
+			char         *text = ncfg_as_string(ctx, entries[i]);
+
+			if (!text) {
+				continue;
+			}
+			if (sscanf(text, "%lu-%lu%c", &low, &high, &tail) != 2 || low < 1 ||
+			    high > 65535 || low >= high) {
+				ncfg_diag(ctx, entries[i]->span,
+				    "`%s` is not a port range: two ports from 1 to 65535 with a dash, "
+				    "the lower first, as \"1000-2000\"", text);
+				free(text);
+				continue;
+			}
+			free(text);
+			/* Written back without leading zeros or spaces, so the digest
+			 * and the reader agree on one spelling. */
+			(void)snprintf(normal, sizeof(normal), "%lu-%lu", low, high);
+			(void)ncfg_push_string(ctx, &rule->port_ranges, &rule->port_range_count, normal);
+			continue;
+		}
 		if (entries[i]->kind != NCFG_AST_NUMBER) {
 			ncfg_diag(ctx, entries[i]->span,
-			    "a port is a number, found %s", ncfg_ast_value_describe(entries[i]));
+			    "a port is a number or a range as \"1000-2000\", found %s",
+			    ncfg_ast_value_describe(entries[i]));
 			continue;
 		}
 		if (!ncfg_as_i64(ctx, entries[i], &port)) {
@@ -557,7 +589,8 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 	 * for refusing here. `any` is included: a port means tcp or udp, and a
 	 * rule that does not say which is a rule whose author has not decided.
 	 */
-	if (rule.port_count > 0 && rule.protocol != NCFG_FIREWALL_PROTO_TCP &&
+	if ((rule.port_count > 0 || rule.port_range_count > 0) &&
+	    rule.protocol != NCFG_FIREWALL_PROTO_TCP &&
 	    rule.protocol != NCFG_FIREWALL_PROTO_UDP) {
 		ncfg_diag(ctx, block->span,
 		    "rule `%s` matches ports with no protocol that has them: add "

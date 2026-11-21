@@ -59,10 +59,14 @@ void write_rule(QStringList &body, const ncfg_firewall_rule_row &rule)
 	if (!rule.protocol.isEmpty() && rule.protocol != QLatin1String("any")) {
 		body << QStringLiteral("\t\t\tprotocol = %1").arg(quoted(rule.protocol));
 	}
-	if (!rule.ports.isEmpty()) {
+	if (!rule.ports.isEmpty() || !rule.port_ranges.isEmpty()) {
 		QStringList numbers;
 		for (int port : rule.ports) {
 			numbers << QString::number(port);
+		}
+		/* A range is a string in the language (0331). */
+		for (const QString &range : rule.port_ranges) {
+			numbers << quoted(range);
 		}
 		body << QStringLiteral("\t\t\tport = [%1]").arg(numbers.join(QStringLiteral(", ")));
 	}
@@ -192,7 +196,7 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 
 	ports = new QLineEdit(this);
 	ports->setObjectName(QStringLiteral("firewall_ports"));
-	ports->setPlaceholderText(QStringLiteral("22, 80 -- blank for every port"));
+	ports->setPlaceholderText(QStringLiteral("22, 80, 6000-6010 -- blank for every port"));
 	form->addRow(QStringLiteral("destination ports"), ports);
 
 	from = new QLineEdit(this);
@@ -319,6 +323,7 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 		for (int port : rule.ports) {
 			numbers << QString::number(port);
 		}
+		numbers << rule.port_ranges;
 		name->setText(rule.name);
 		action->setCurrentIndex(action->findData(rule.action));
 		protocol->setCurrentIndex(protocol->findData(rule.protocol));
@@ -380,13 +385,26 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 	for (const QString &text : split_list(ports->text())) {
 		bool      number = false;
 		const int port = text.toInt(&number);
+		/* A range, "1000-2000" (0331): checked here as the compiler would,
+		 * so the sentence names the field rather than a line of a file. */
+		if (!number && text.count(QLatin1Char('-')) == 1) {
+			bool      low_ok = false;
+			bool      high_ok = false;
+			const int low = text.section(QLatin1Char('-'), 0, 0).trimmed().toInt(&low_ok);
+			const int high = text.section(QLatin1Char('-'), 1, 1).trimmed().toInt(&high_ok);
+			if (low_ok && high_ok && low >= 1 && high <= 65535 && low < high) {
+				rule->port_ranges << QStringLiteral("%1-%2").arg(low).arg(high);
+				continue;
+			}
+		}
 		if (!number || port < 1 || port > 65535) {
-			note->setText(QStringLiteral("\"%1\" is not a port: 1 to 65535").arg(text));
+			note->setText(QStringLiteral("\"%1\" is not a port or a range: 1 to 65535, or "
+			              "the lower and the higher with a dash, as 1000-2000").arg(text));
 			return false;
 		}
 		rule->ports << port;
 	}
-	if (!rule->ports.isEmpty() && rule->protocol != QLatin1String("tcp") &&
+	if ((!rule->ports.isEmpty() || !rule->port_ranges.isEmpty()) && rule->protocol != QLatin1String("tcp") &&
 	    rule->protocol != QLatin1String("udp")) {
 		note->setText(QStringLiteral("only tcp and udp have ports: choose one, or clear the "
 		              "ports"));

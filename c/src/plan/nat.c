@@ -279,6 +279,10 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 				rule->ports[rule->port_count++] = one->port.value;
 			}
 		}
+		if (!add_text(&rule->port_ranges, &rule->port_range_count, one->port_range)) {
+			ncfg_firewall_free(firewall);
+			return NULL;
+		}
 		/* A schedule's UTC pieces, kept as the kernel holds them: the local
 		 * schedule cannot be recovered from them, and the builder takes them
 		 * as they are, so the restored rules digest as these do (10.663). */

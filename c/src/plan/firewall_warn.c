@@ -23,6 +23,7 @@
  */
 #include "plan_internal.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static int names_state(const ncfg_firewall_rule_t *rule, const char *state)
@@ -77,7 +78,8 @@ int ncfg_plan_input_accepts(const ncfg_document_t *desired, const char *iface, i
 	chain = &desired->firewall->input;
 	for (r = 0; r < chain->rule_count; r++) {
 		const ncfg_firewall_rule_t *rule = &chain->rules[r];
-		int                         named = rule->port_count == 0u;
+		int                         named = rule->port_count == 0u &&
+		    rule->port_range_count == 0u;
 
 		if (rule->action != NCFG_FIREWALL_ACCEPT ||
 		    (rule->protocol != NCFG_FIREWALL_PROTO_ANY && rule->protocol != protocol) ||
@@ -87,6 +89,15 @@ int ncfg_plan_input_accepts(const ncfg_document_t *desired, const char *iface, i
 		}
 		for (p = 0; port >= 0 && p < rule->port_count; p++) {
 			named = named || rule->ports[p] == port;
+		}
+		/* And a range holding it (0331). */
+		for (p = 0; port >= 0 && p < rule->port_range_count; p++) {
+			unsigned long low = 0, high = 0;
+
+			if (sscanf(rule->port_ranges[p], "%lu-%lu", &low, &high) == 2 &&
+			    (unsigned long)port >= low && (unsigned long)port <= high) {
+				named = 1;
+			}
 		}
 		if (named) {
 			return 1;

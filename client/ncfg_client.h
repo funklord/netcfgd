@@ -1289,6 +1289,8 @@ typedef struct {
 	 * as `mon` to `sun` joined, both empty where the rule has none. */
 	char *hours;
 	char *days;
+	/* `ports` above holds ranges too, "1000-2000", after the single ports
+	 * (0331). */
 	/* `translated = true` (10.670): the rule matches a connection whose
 	 * destination NAT rewrote. Read so a Save keeps it. */
 	int   translated;

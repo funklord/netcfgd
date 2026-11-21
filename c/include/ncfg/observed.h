@@ -1590,6 +1590,8 @@ typedef struct {
 	char         *action;
 	char         *protocol;
 	ncfg_optint_t port;
+	/* A destination port range, "LOW-HIGH", NULL where none (0331). */
+	char         *port_range;
 	char         *from;
 	char         *to;
 	char         *interface;

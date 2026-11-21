@@ -1572,7 +1572,11 @@ static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t 
 		rule.action = from_c(entry.action);
 		rule.protocol = from_c(entry.protocol);
 		for (const QString &port : firewall_list(entry.ports)) {
-			rule.ports << port.toInt();
+			if (port.contains(QLatin1Char('-'))) {
+				rule.port_ranges << port;
+			} else {
+				rule.ports << port.toInt();
+			}
 		}
 		rule.from = firewall_list(entry.from);
 		rule.to = firewall_list(entry.to);

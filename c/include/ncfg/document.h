@@ -2668,6 +2668,11 @@ typedef struct {
 	 * be rendered is worse than one that is refused. */
 	int64_t *ports;
 	size_t   port_count;
+	/* Ranges of ports, "LOW-HIGH" with LOW below HIGH, written beside the
+	 * single ones in `port` as `"1000-2000"` (0331). Omitted when empty, so
+	 * every ruleset before it is the document it was. */
+	char   **port_ranges;
+	size_t   port_range_count;
 	/* Addresses or CIDRs as the document spells them, either family. Held as
 	 * written rather than parsed, for the reason `addressing` is: the renderer
 	 * has to put back what the operator wrote. */

@@ -3256,6 +3256,25 @@ static int read_firewall_chain(const ncfg_json_doc_t *doc, uint32_t object,
 		rule->action = member_text(doc, entry, "action");
 		rule->protocol = member_text(doc, entry, "protocol");
 		rule->ports = firewall_ports(doc, ncfg_json_member(doc, entry, "ports"));
+		/* The ranges after the single ports, "LOW-HIGH" each, in the same
+		 * space-joined text (0331): a Save that read only the numbers would
+		 * delete every range. */
+		{
+			uint32_t ranges = ncfg_json_member(doc, entry, "port_ranges");
+
+			for (uint32_t r = 0; rule->ports && r < ncfg_json_count(doc, ranges); r++) {
+				size_t      length = 0;
+				const char *range = ncfg_json_string(doc, ncfg_json_at(doc, ranges, r),
+				    &length);
+				char        one[24];
+
+				(void)snprintf(one, sizeof(one), "%.*s", (int)length, range ? range : "");
+				if (!join_one(&rule->ports, one)) {
+					free(rule->ports);
+					rule->ports = NULL;
+				}
+			}
+		}
 		rule->from = join_strings(doc, ncfg_json_member(doc, entry, "from"));
 		rule->to = join_strings(doc, ncfg_json_member(doc, entry, "to"));
 		rule->interface = member_text(doc, entry, "interface");

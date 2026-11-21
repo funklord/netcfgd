@@ -4184,6 +4184,38 @@ static void firewall_log_cases(void)
 	    "cannot do yet", "a rule that logs and counts `over` is refused, saying why");
 }
 
+/* Port ranges beside single ports (0331), and what is not a range. */
+static void firewall_port_range_cases(void)
+{
+	ncfg_document_t *document;
+
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"games\" {\n\t\t\tprotocol = \"udp\"\n"
+	    "\t\t\tport = [27015, \"6000-6010\", \" 7000-7001\"]\n\t\t}\n\t}\n}\n",
+	    "a rule with single ports and ranges compiles, and renders back");
+	check(document && document->firewall && document->firewall->input.rule_count == 1,
+	    "  as one rule");
+	if (document && document->firewall && document->firewall->input.rule_count == 1) {
+		const ncfg_firewall_rule_t *rule = &document->firewall->input.rules[0];
+
+		check(rule->port_count == 1 && rule->ports[0] == 27015 &&
+		        rule->port_range_count == 2 &&
+		        strcmp(rule->port_ranges[0], "6000-6010") == 0 &&
+		        strcmp(rule->port_ranges[1], "7000-7001") == 0,
+		    "  the single port, and each range in one spelling");
+	}
+	ncfg_document_free(document);
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"tcp\"; port = \"2000-1000\" }\n\t}\n}\n",
+	    "is not a port range", "a range written high to low is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"tcp\"; port = \"0-10\" }\n\t}\n}\n",
+	    "is not a port range", "a range from port 0 is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { port = \"1000-2000\" }\n\t}\n}\n",
+	    "no protocol that has them", "a range with no protocol is refused, as a port is");
+}
+
 static void switch_cases(void)
 {
 	ncfg_document_t        *document;
@@ -4229,6 +4261,7 @@ int main(void)
 	precedence_cases();
 	global_cases();
 	switch_cases();
+	firewall_port_range_cases();
 	firewall_log_cases();
 	dns_cases();
 	network_cases();

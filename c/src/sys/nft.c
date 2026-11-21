@@ -1148,6 +1148,10 @@ int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *r
 	for (at = 0; at < rule->port_count; at++) {
 		ncfg_buf_addf(out, "port %lld\n", (long long)rule->ports[at]);
 	}
+	/* Only where set, so no digest written before 0331 changes. */
+	for (at = 0; at < rule->port_range_count; at++) {
+		ncfg_buf_addf(out, "port_range %s\n", rule->port_ranges[at]);
+	}
 	/* Addresses as the decoder prints them -- network masked, prefix shown
 	 * only where it is short -- so that what is read back digests the same
 	 * as what was written. */
@@ -1466,6 +1470,25 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 
 		put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 2u, 2u);
 		put_cmp(&expressions, NFT_CMP_EQ, &port, sizeof(port));
+	} else if (rule->port_range_count) {
+		/* `th dport LOW-HIGH`, as nft 1.1.3 writes it: one `range`
+		 * expression over the loaded port, network order both ends (0331). */
+		unsigned long low = 0, high = 0;
+		uint16_t      from_port;
+		uint16_t      to_port;
+		ncfg_buf_t    range;
+
+		(void)sscanf(rule->port_ranges[0], "%lu-%lu", &low, &high);
+		from_port = htons((uint16_t)low);
+		to_port = htons((uint16_t)high);
+		put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 2u, 2u);
+		ncfg_buf_init(&range, 0);
+		put_be32(&range, NFTA_RANGE_SREG, NFT_REG_1);
+		put_be32(&range, NFTA_RANGE_OP, NFT_RANGE_EQ);
+		put_data(&range, NFTA_RANGE_FROM_DATA, &from_port, sizeof(from_port));
+		put_data(&range, NFTA_RANGE_TO_DATA, &to_port, sizeof(to_port));
+		put_expression(&expressions, "range", &range);
+		ncfg_buf_free(&range);
 	}
 	if (rule->from_count) {
 		put_address_match(&expressions, &from, 1);
@@ -1619,7 +1642,8 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
     const char *chain, const ncfg_firewall_rule_t *rule, char *err, size_t err_size)
 {
-	const size_t ports = rule->port_count ? rule->port_count : 1u;
+	const size_t ports = rule->port_count + rule->port_range_count
+	    ? rule->port_count + rule->port_range_count : 1u;
 	const size_t froms = rule->from_count ? rule->from_count : 1u;
 	const size_t tos = rule->to_count ? rule->to_count : 1u;
 	const size_t macs = rule->mac_count ? rule->mac_count : 1u;
@@ -1701,8 +1725,14 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 						ncfg_buf_t           attrs;
 						int                  ok;
 
-						one.port_count = rule->port_count ? 1u : 0u;
-						one.ports = rule->port_count ? &rule->ports[p] : NULL;
+						/* The singles first, then the ranges (0331): one of
+						 * either per kernel rule. */
+						one.port_count = p < rule->port_count ? 1u : 0u;
+						one.ports = p < rule->port_count ? &rule->ports[p] : NULL;
+						one.port_range_count =
+						    rule->port_range_count && p >= rule->port_count ? 1u : 0u;
+						one.port_ranges = one.port_range_count
+						    ? &rule->port_ranges[p - rule->port_count] : NULL;
 						one.from_count = rule->from_count ? 1u : 0u;
 						one.from = rule->from_count ? &rule->from[f] : NULL;
 						one.to_count = rule->to_count ? 1u : 0u;
@@ -3191,6 +3221,41 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 				return 0;
 			}
 			reading.swapped = 1;
+		} else if (strcmp(name, "range") == 0 && reading.what == LOADED_PAYLOAD) {
+			/* A destination port range, as the builder writes it (0331):
+			 * over the loaded port, network order, the lower end below the
+			 * upper. */
+			const uint8_t *from = NULL;
+			const uint8_t *to = NULL;
+			size_t         from_length = 0;
+			size_t         to_length = 0;
+			uint32_t       op = 0;
+			uint16_t       low;
+			uint16_t       high;
+
+			if (reading.base != NFT_PAYLOAD_TRANSPORT_HEADER || reading.offset != 2u ||
+			    reading.length != 2u || reading.mask_length != 0u || out->has_port ||
+			    out->port_range[0] || !be32_member(&data, NFTA_RANGE_OP, &op) ||
+			    op != NFT_RANGE_EQ ||
+			    !data_value(&data, NFTA_RANGE_FROM_DATA, &from, &from_length) ||
+			    !data_value(&data, NFTA_RANGE_TO_DATA, &to, &to_length) ||
+			    from_length != 2u || to_length != 2u) {
+				ncfg_error_set(err, err_size, "rule `%s` has a range netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			memcpy(&low, from, sizeof(low));
+			memcpy(&high, to, sizeof(high));
+			low = ntohs(low);
+			high = ntohs(high);
+			if (low < 1u || low >= high) {
+				ncfg_error_set(err, err_size, "rule `%s` has a port range netcfgd does not "
+				    "write", out->name);
+				return 0;
+			}
+			(void)snprintf(out->port_range, sizeof(out->port_range), "%u-%u", (unsigned)low,
+			    (unsigned)high);
+			reading.what = LOADED_NONE;
 		} else if (strcmp(name, "range") == 0) {
 			const uint8_t *from = NULL;
 			const uint8_t *to = NULL;
@@ -3778,7 +3843,8 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->out_interface, observed->out_interface) ||
 	    !same_text(expected->mac, observed->mac) ||
 	    (expected->translated != 0) != (observed->translated != 0) ||
-	    !same_text(expected->over, observed->over)) {
+	    !same_text(expected->over, observed->over) ||
+	    !same_text(expected->port_range, observed->port_range)) {
 		return 0;
 	}
 	{

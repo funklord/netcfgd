@@ -232,6 +232,9 @@ static void print_firewall(const ncfg_observed_t *observed)
 			if (rule->port.has) {
 				ncfg_out_writef(" port %lld", (long long)rule->port.value);
 			}
+			if (rule->port_range) {
+				ncfg_out_writef(" port %s", rule->port_range);
+			}
 			if (rule->from) {
 				ncfg_out_writef(" from %s", rule->from);
 			}

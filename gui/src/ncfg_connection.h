@@ -323,6 +323,8 @@ struct ncfg_firewall_rule_row {
 	QString     action;
 	QString     protocol;
 	QList<int>  ports;
+	/* "LOW-HIGH" each (0331), written after the single ports. */
+	QStringList port_ranges;
 	QStringList from;
 	QStringList to;
 	QString     interface;

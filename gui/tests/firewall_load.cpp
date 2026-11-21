@@ -121,6 +121,7 @@ static QString dump(const ncfg_firewall_settings &settings)
 			for (int port : rule.ports) {
 				ports << QString::number(port);
 			}
+			ports << rule.port_ranges;
 			lines << QStringList { rule.name, rule.action, rule.protocol,
 				ports.join(QLatin1Char(',')), rule.from.join(QLatin1Char(',')),
 				rule.to.join(QLatin1Char(',')), rule.interface, rule.out_interface,
@@ -152,7 +153,8 @@ static const char every_key[] =
     "\t\tpolicy = \"drop\"\n"
     "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\"; "
     "hours = \"22:00-07:00\"; days = [\"mon\", \"tue\"]; translated = true }\n"
-    "\t\taccept \"out\" { out_interface = \"wan0\"; to = [\"192.0.2.0/24\"] }\n"
+    "\t\taccept \"out\" { out_interface = \"wan0\"; to = [\"192.0.2.0/24\"]; "
+    "protocol = \"tcp\"; port = \"8000-8010\" }\n"
     "\t}\n"
     "\toutput { policy = \"accept\" }\n"
     "}\n";
@@ -224,6 +226,9 @@ int main(int argc, char **argv)
 		 * not read it would have dropped the guard and kept the drop. */
 		check(loaded.input.rules.size() > 3 ? loaded.input.rules.at(3).over : QString(),
 		    QStringLiteral("8/900s"), "  and a guard's per-source rate");
+		/* 0331: a range, which a Save that read only numbers would delete. */
+		check(loaded.forward.rules.at(1).port_ranges.join(QLatin1Char(',')),
+		    QStringLiteral("8000-8010"), "  and a port range");
 		/* 0330: a Save that did not read it would stop the rule logging. */
 		check(loaded.input.rules.size() > 2 && loaded.input.rules.at(2).log
 		          ? QStringLiteral("yes") : QStringLiteral("no"),

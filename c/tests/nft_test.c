@@ -626,6 +626,71 @@ static void a_logged_rule_is_a_log_then_its_verdict(void)
 	ncfg_buf_free(&text);
 }
 
+/*
+ * A port range (0331): one kernel rule per single port and per range, the
+ * range as one `range` expression, each read back as what was written.
+ */
+static void a_port_range_is_one_kernel_rule(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_buf_t           text;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	int64_t              port = 27015;
+	char                *ranges[1] = { (char *)"6000-6010" };
+	char                 err[NCFG_ERROR_MAX];
+	char                 seen[64] = "";
+	int                  rules = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"games";
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	rule.protocol = NCFG_FIREWALL_PROTO_UDP;
+	rule.ports = &port;
+	rule.port_count = 1u;
+	rule.port_ranges = ranges;
+	rule.port_range_count = 1u;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.policy = NCFG_FIREWALL_POLICY_ACCEPT;
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a rule with a port and a range is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		rules++;
+		if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			char piece[24];
+
+			(void)snprintf(piece, sizeof(piece), "%s%s", seen[0] ? " " : "",
+			    one.port_range[0] ? one.port_range : one.has_port ? "port" : "none");
+			if (strlen(seen) + strlen(piece) < sizeof(seen)) {
+				strcat(seen, piece);
+			}
+		}
+	}
+	check(rules == 2 && strcmp(seen, "port 6000-6010") == 0,
+	    "  as two kernel rules, the range read back as written");
+	ncfg_buf_free(&out);
+
+	ncfg_buf_init(&text, 0);
+	(void)ncfg_nft_firewall_rule_text("input", &rule, &text);
+	check(strstr(text.data ? text.data : "", "port_range 6000-6010\n") != NULL,
+	    "  and the range is part of what the digest is taken over");
+	ncfg_buf_free(&text);
+}
+
 /* The comment's digest of a one-rule input chain, at the fixed offset. */
 static void digest_of(ncfg_firewall_rule_t *rule, char *out, size_t out_size)
 {
@@ -1885,6 +1950,7 @@ int main(void)
 	a_translated_rule_is_written_read_and_digested();
 	an_over_rule_is_a_meter_per_family();
 	a_logged_rule_is_a_log_then_its_verdict();
+	a_port_range_is_one_kernel_rule();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

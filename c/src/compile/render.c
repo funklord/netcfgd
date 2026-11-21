@@ -1340,14 +1340,21 @@ static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *b
 	if (rule->protocol != NCFG_FIREWALL_PROTO_ANY) {
 		ncfg_buf_addf(body, "\t\t\tprotocol = \"%s\"\n", protocol);
 	}
-	if (rule->port_count == 1u) {
+	if (rule->port_count == 1u && rule->port_range_count == 0u) {
 		/* One port as a number rather than a list of one, because that is
 		 * what somebody writes and the lowerer takes either. */
 		ncfg_buf_addf(body, "\t\t\tport     = %lld\n", (long long)rule->ports[0]);
-	} else if (rule->port_count > 1u) {
+	} else if (rule->port_count + rule->port_range_count > 0u) {
+		size_t written = 0;
+
+		/* The single ports, then the ranges as strings (0331): the document
+		 * keeps the two apart, so their order between is not recorded. */
 		ncfg_buf_add_text(body, "\t\t\tport     = [");
 		for (at = 0; at < rule->port_count; at++) {
-			ncfg_buf_addf(body, "%s%lld", at ? ", " : "", (long long)rule->ports[at]);
+			ncfg_buf_addf(body, "%s%lld", written++ ? ", " : "", (long long)rule->ports[at]);
+		}
+		for (at = 0; at < rule->port_range_count; at++) {
+			ncfg_buf_addf(body, "%s\"%s\"", written++ ? ", " : "", rule->port_ranges[at]);
 		}
 		ncfg_buf_add_text(body, "]\n");
 	}
