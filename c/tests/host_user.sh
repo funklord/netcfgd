@@ -182,8 +182,14 @@ check $? "and with no client left it stops, nothing of this user's left running"
 # (fuzznet's sec 910), and a client that meets the stop waits for the lock.
 bad=0
 n=0
+# A miss keeps what the ask said (project.md 10.896): one in a loaded run, with
+# nothing kept to say why.
 while [ $n -lt 40 ]; do
-	timeout 8 "$C" status --at "$key" --json > /dev/null 2>&1 || bad=$((bad + 1))
+	if ! timeout 8 "$C" status --at "$key" --json > /dev/null 2> "$R/ask"; then
+		bad=$((bad + 1))
+		printf '  ask %d, %d.%d%d s after the last, said: %s\n' "$n" 0 \
+		    "$((n * 7 % 10))" "$((n % 10))" "$(head -c 400 "$R/ask")"
+	fi
 	sleep "0.$((n * 7 % 10))$((n % 10))"
 	n=$((n + 1))
 done

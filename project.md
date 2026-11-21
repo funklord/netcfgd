@@ -6997,6 +6997,19 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.896 A stopping user host missed one ask in a loaded run -- OPEN
+
+`c/tests/host_user.sh`'s last check asks `status --at` forty times while the
+user host stops and starts under it. On 2026-11-21 one run of `make -C c test`
+failed it, *1 of 40 were not answered*, while GUI test builds were loading the
+machine; three reruns alone answered 120 of 120. Nothing the run was testing
+(`secret_get`, 3e209e76) touches the host or fuzznet. **Not explained**: the
+window the check exists for -- a client meeting the stop and waiting for the
+lock, or a host begun again that the far side takes for nobody's copy
+(fuzznet's sec 910) -- is the candidate, and a candidate is not a cause. The
+script threw the failing ask's error away; it now prints it, so the next miss
+says which.
+
 ## 10.894 A pin move left fuzznet's old objects in the link
 
 `make bridge-test` failed on 2026-11-21 with `multiple definition of
