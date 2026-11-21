@@ -1784,8 +1784,31 @@ int ncfg_reconcile_pass(ncfg_reconcile_t *loop, const ncfg_reconcile_wake_t *wak
  * exactly "start the supplicant now", and a supplicant start's prerequisites
  * are the link's, which the loop reconciles.
  */
-int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *interface,
-    char *err, size_t err_size)
+/* Which of a full plan's actions on the interface one of the two requests
+ * below keeps. */
+typedef int (*keep_fn)(const ncfg_action_t *action);
+
+static int keep_supplicant_start(const ncfg_action_t *action)
+{
+	return action->op.kind == NCFG_OP_BACKEND_START &&
+	    action->op.u.backend.kind == NCFG_BACKEND_SUPPLICANT;
+}
+
+static int keep_everything(const ncfg_action_t *action)
+{
+	(void)action;
+	return 1;
+}
+
+/*
+ * The part of the plan on one interface that `keep` keeps, applied now: the
+ * shared core of the two requests, each of which says above why it keeps
+ * what it does. `what` begins every sentence ("the radio was taken on, and the
+ * supplicant was not started"), and `journal_as` is what the record of it says
+ * ran.
+ */
+static int apply_on_interface(ncfg_reconcile_t *loop, const char *interface, keep_fn keep,
+    const char *what, const char *journal_as, char *err, size_t err_size)
 {
 	ncfg_plan_t   *full;
 	ncfg_plan_t   *wanted;
@@ -1797,13 +1820,11 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 	int            code = 1;
 
 	if (!loop || !loop->state || !interface) {
-		ncfg_error_set(err, err_size, "there is no loop to start a supplicant from");
+		ncfg_error_set(err, err_size, "%s: there is no loop to apply from", what);
 		return 0;
 	}
 	if (!loop->state->desired || !loop->state->observed) {
-		ncfg_error_set(err, err_size,
-		    "the radio was taken on, and the supplicant was not started: this daemon "
-		    "has no %s to plan from yet",
+		ncfg_error_set(err, err_size, "%s: this daemon has no %s to plan from yet", what,
 		    loop->state->desired ? "observation of the machine" : "compiled "
 		    "configuration");
 		return 0;
@@ -1812,8 +1833,7 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 	full = ncfg_plan_build(loop->state->desired, loop->state->observed, NULL, message,
 	    sizeof(message));
 	if (!full) {
-		ncfg_error_set(err, err_size,
-		    "the radio was taken on, and the supplicant was not started: %s", message);
+		ncfg_error_set(err, err_size, "%s: %s", what, message);
 		return 0;
 	}
 	wanted = ncfg_plan_new(err, err_size);
@@ -1825,11 +1845,7 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 		const ncfg_action_t *action = &full->actions[at];
 		const char          *on = ncfg_op_interface(&action->op);
 
-		if (action->op.kind != NCFG_OP_BACKEND_START ||
-		    action->op.u.backend.kind != NCFG_BACKEND_SUPPLICANT) {
-			continue;
-		}
-		if (!on || strcmp(on, interface) != 0) {
+		if (!keep(action) || !on || strcmp(on, interface) != 0) {
 			continue;
 		}
 		(void)ncfg_plan_add(wanted, &action->op, &action->reason, NULL, 0u,
@@ -1837,16 +1853,14 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 	}
 	ncfg_plan_free(full);
 	if (wanted->action_count == 0u) {
-		/* **Nothing to do is success**: the radio may already be up from a
-		 * previous activation, and reporting that as a failure would make a
-		 * switch complain about being already on. */
+		/* **Nothing to do is success**: the state asked for may already
+		 * hold, and a switch must not complain about being already on. */
 		ncfg_plan_free(wanted);
 		return 1;
 	}
 	message[0] = '\0';
 	if (!ncfg_daemon_open_executor(&loop->world, &executor, message, sizeof(message))) {
-		ncfg_error_set(err, err_size,
-		    "the radio was taken on, and the supplicant was not started: %s", message);
+		ncfg_error_set(err, err_size, "%s: %s", what, message);
 		ncfg_plan_free(wanted);
 		return 0;
 	}
@@ -1854,7 +1868,7 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 	message[0] = '\0';
 	(void)ncfg_apply_as(wanted, &executor, NCFG_APPLY_BEST_EFFORT, 1, &journal, message,
 	    sizeof(message));
-	ncfg_daemon_record_what_ran(loop->state, "activate", wanted, &journal);
+	ncfg_daemon_record_what_ran(loop->state, journal_as, wanted, &journal);
 	ncfg_daemon_close_executor(&loop->world, &executor);
 	(void)ncfg_daemon_state_reobserve(loop->state, &moved, message, sizeof(message));
 	ncfg_daemon_state_publish(loop->state);
@@ -1863,14 +1877,40 @@ int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *int
 		const ncfg_record_t *failure = ncfg_journal_failure(&journal);
 
 		/* The executor's own sentence, because it names the action and the
-		 * reason -- including the one an operator most needs here, which is
-		 * that another manager is still holding the radio. */
-		ncfg_error_set(err, err_size,
-		    "the radio was taken on, and the supplicant was not started: %s: %s",
-		    failure->op, failure->error ? failure->error : "no reason was recorded");
+		 * reason -- including the one an operator most needs for a radio,
+		 * which is that another manager is still holding it. */
+		ncfg_error_set(err, err_size, "%s: %s: %s", what, failure->op,
+		    failure->error ? failure->error : "no reason was recorded");
 		code = 0;
 	}
 	ncfg_journal_free(&journal);
 	ncfg_plan_free(wanted);
 	return code;
+}
+
+int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *interface,
+    char *err, size_t err_size)
+{
+	return apply_on_interface(loop, interface, keep_supplicant_start,
+	    "the radio was taken on, and the supplicant was not started", "activate", err,
+	    err_size);
+}
+
+/*
+ * A tunnel's whole interface, now, after a `switch` moved it (0329).
+ *
+ * **The whole of it, where a radio gets only its supplicant**, and the
+ * difference is what the interface holds. A radio's plan has a DHCP client in
+ * it that cannot lease before association, which is the failure that narrowed
+ * the request above. A tunnel's has its link, its addresses, the routes over
+ * it and, for OpenVPN, the daemon -- and a switch that applied less would
+ * report a VPN off while it carried traffic, or on while nothing was routed
+ * over it. The dependencies are dropped as they are above, for the same
+ * reason; the plan's own order is kept.
+ */
+int ncfg_daemon_apply_interface_request(ncfg_reconcile_t *loop, const char *interface,
+    char *err, size_t err_size)
+{
+	return apply_on_interface(loop, interface, keep_everything,
+	    "the switch was written, and applying it failed", "switch", err, err_size);
 }

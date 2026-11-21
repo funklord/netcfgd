@@ -642,8 +642,19 @@ int main(void)
 		check(refused_saying("interface eth0 {\n\ton {\n}\n}\n",
 		    "expected an event name after `on`"),
 		    "and `on` with no event is named");
-		check(refused_saying("post_up = 1\n", "expected `{` after `post_up`"),
-		    "a phase used as a key is named too");
+		/* **A phase's name followed by `=` is a key** (0329): `switch wg0 {
+		 * up = false }`. It was refused here as a hook missing its brace,
+		 * and it is the token after the word that decides, as for every
+		 * other statement. A phase and something that is neither is still
+		 * named. */
+		file = accepted("post_up = 1\n");
+		item = file ? item_at(&file->items, 0u) : NULL;
+		check(item && item->kind == NCFG_AST_ITEM_ASSIGNMENT &&
+		        strcmp(item->as.assignment.key, "post_up") == 0,
+		    "a phase followed by `=` is read as a key");
+		ncfg_ast_file_free(file);
+		check(refused_saying("post_up 1\n", "expected `{` after `post_up`"),
+		    "and a phase followed by anything else is named as a hook missing its brace");
 	}
 
 	/* UNCLOSED THINGS, which must be named rather than producing a

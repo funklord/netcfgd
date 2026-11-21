@@ -229,7 +229,7 @@ took=$(within 'ncfg status')
 said=$(ncfg tunnel up ipsec0 2>&1)
 say "     ncfg said: $(echo "$said" | head -2 | tr '\n' ' ')"
 check "ncfg tunnel up is answered" \
-	"$(echo "$said" | grep -o 'asked strongSwan to bring ipsec0 up')" "asked strongSwan to bring ipsec0 up"
+	"$(echo "$said" | grep -o 'asked for ipsec0 up')" "asked for ipsec0 up"
 took=$(within 'ip addr show dev ipsec0 | grep -q "inet 10.98.0.1/32"')
 say "     the report: $(grep -v '^#' /run/netcfgd/reported.d/ipsec0/net 2>/dev/null | tr '\n' ' ')"
 if [ "$took" = never ]; then
@@ -253,7 +253,7 @@ check "  and it left by ipsec0" "$(( ${after:-0} - ${before:-0} ))" 2
 said=$(ncfg tunnel down ipsec0 2>&1)
 say "     ncfg said: $(echo "$said" | head -2 | tr '\n' ' ')"
 check "ncfg tunnel down is answered" \
-	"$(echo "$said" | grep -o 'asked strongSwan to bring ipsec0 down')" "asked strongSwan to bring ipsec0 down"
+	"$(echo "$said" | grep -o 'asked for ipsec0 down')" "asked for ipsec0 down"
 took=$(within '! ip addr show dev ipsec0 | grep -q "inet 10.98.0.1/"')
 check "  and the virtual IP goes with the tunnel" \
 	"$([ "$took" != never ] && echo gone || echo kept)" gone

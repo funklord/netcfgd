@@ -1617,6 +1617,16 @@
 #	config = "10.9.0.2/24"
 #}
 
+# A SWITCH holds an interface up or down apart from its block (0329). It is
+# what `ncfg tunnel down wg0` writes, in a drop-in of its own,
+# conf.d/tunnel-wg0.conf, so a person may turn their VPN off without editing
+# the operator's block -- and removing the file gives the operator's word
+# back. It sets the interface's `enabled`, and for an OpenVPN or PPPoE device
+# off also stops the daemon, which would otherwise hold its session behind a
+# down link.
+
+#switch wg0 { up = false }
+
 # A PERSISTENT TUN OR TAP DEVICE, for something else to attach to: a VPN
 # daemon, a hypervisor, a test rig. `tun` carries IP packets and `tap` carries
 # ethernet frames, and the block's name is which one you get.

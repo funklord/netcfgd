@@ -404,9 +404,13 @@ static int wireless_interface(const ncfg_cli_options_t *options, const char *giv
 }
 
 /*
- * `ncfg tunnel up|down IFACE`: an IPsec tunnel, by its XFRM interface
- * (10.864). The daemon asks strongSwan; what it brings arrives as the
- * tunnel's report, so this says it asked rather than that the tunnel is up.
+ * `ncfg tunnel up|down IFACE`: a tunnel on or off, at the `laptop` tier.
+ *
+ * Two shapes behind one verb, and the daemon chooses by the device's kind.
+ * An IPsec tunnel's XFRM interface (10.864): the daemon asks strongSwan, and
+ * what it brings arrives as the tunnel's report. A WireGuard or OpenVPN one
+ * (0329): the daemon holds its interface with a `switch` and applies it
+ * before answering. So this says it asked, and `ncfg status` says what is.
  */
 static int command_tunnel(const ncfg_cli_options_t *options, const char **positional,
     size_t count)
@@ -417,8 +421,8 @@ static int command_tunnel(const ncfg_cli_options_t *options, const char **positi
 
 	if (count != 2u || (strcmp(positional[0], "up") != 0 &&
 	    strcmp(positional[0], "down") != 0)) {
-		return fail("usage: ncfg tunnel up|down IFACE, where IFACE is an IPsec tunnel's "
-		    "`xfrm` device");
+		return fail("usage: ncfg tunnel up|down IFACE, where IFACE is a `wireguard`, "
+		    "`openvpn` or `xfrm` device");
 	}
 	up = strcmp(positional[0], "up") == 0;
 	memset(&request, 0, sizeof(request));
@@ -432,8 +436,8 @@ static int command_tunnel(const ncfg_cli_options_t *options, const char **positi
 	if (options->json) {
 		return say_json_ok();
 	}
-	ncfg_out_writef("asked strongSwan to bring %s %s; `ncfg status` shows its addressing "
-	    "when the tunnel reports it\n", positional[1], up ? "up" : "down");
+	ncfg_out_writef("asked for %s %s; `ncfg status` shows whether it is, and an IPsec "
+	    "tunnel's addressing once strongSwan reports it\n", positional[1], up ? "up" : "down");
 	return NCFG_CLI_EXIT_OK;
 }
 

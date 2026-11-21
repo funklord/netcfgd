@@ -7980,36 +7980,20 @@ requests carry the same two members. What the window says is what it asked,
 not that the tunnel is up; the tunnel's addresses in `links` say that.
 The TUI has them too, being these widgets (gui/project.md section 7a).
 
-**The same for OpenVPN and WireGuard: the tier is decided by 0327; the mechanism is the holder's.** `tunnel_set`
-answers only an `xfrm` device. netcfgd runs those two tunnels itself, so
-"take it down" from the `wifi` tier would be that tier writing the
-interface's `enabled`, as `radio_set` writes a `device` block -- precedent
-for yes. It widens what the `wifi` tier may write, which sat inside the
-deferred permission overhaul, so it was asked rather than built. **0327
-answers it**: the `laptop` tier is defined as what a person at their own
-machine needs, the VPN on and off among it. Until answered, neither has an
-on/off control in `ncfg` or the window short of editing the file.
-
-**Why it is not built, measured 2026-11-21.** Two things stand between the
-tier and the switch, and the first is a language decision. *A drop-in cannot
-change one key of an interface*: a second `interface wg0` block must say
-`override`, and `override` replaces the block wholesale (merge.c, section 3)
--- so the radio's shape, a drop-in of its own written whole and removed
-whole, has no `interface` to write without restating the operator's. The
-options, each a change to the configuration language: (a) a block of its own
-per interface, `switch wg0 { up = false }`, which a drop-in `tunnel-wg0`
-holds as `radio-wlan0` holds a `device` block; (b) an explicit key-level
-form, `amend interface wg0 { enabled = false }`, which section 3's rule
-against *silent* last-wins does not forbid but which no block has had; (c) a
-`global` list such as `held_down = ["wg0"]`, in one netcfgd-owned file
-rewritten whole as `ncfg control set` writes `00-control`. (a) is the
-recommendation: it is the radio's pattern, needs no read-modify-write, and
-removing the file restores the operator's word. *And `enabled = false` only
-takes the link down* (`plan_disable` in plan/link.c): a WireGuard link down
-carries nothing, which is off; an `openvpn` daemon keeps running and keeps
-its session behind a down `tun`, so "off" for OpenVPN also has to stop the
-backend. Until the language question is answered, neither has an on/off
-control short of editing the file.
+**The same for OpenVPN and WireGuard: built, by
+[0329](doc/decision/0329-a-vpn-is-switched-by-a-block-of-its-own.md)** (the
+holder chose option (a), 2026-11-21). The tier was 0327's: `laptop`. The
+mechanism needed a language construct, because a drop-in cannot change one key
+of an `interface` (a second block must say `override`, which replaces it
+wholesale). So `switch NAME { up = BOOL }` is a top-level block that sets the
+interface's `enabled`, and `ncfg tunnel down wg0` on a `wireguard` or `openvpn`
+device writes it into `conf.d/tunnel-wg0.conf` and applies the interface before
+answering; `up` removes the file, or writes `up = true` where the operator's own
+block disables the tunnel. An interface held down now stops its OpenVPN or PPPoE
+daemon too, which `enabled = false` alone did not. Rejected: (b) an `amend
+interface` key-level form, (c) a `global { held_down }` list. The devices tab's
+two buttons answer all three kinds; `tests/live/vpn_switch.sh` drives a real
+WireGuard link and the fake openvpn through the daemon.
 
 On the devices tab rather than a tab of its own: the row is the tunnel's,
 and a VPN tab with one kind in it would be the first of several kinds nobody

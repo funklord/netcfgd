@@ -4149,12 +4149,57 @@ static void vlan_id_cases(void)
 	    "between 0 and 4094", "and so is the old bound's own upper limit");
 }
 
+/*
+ * `switch NAME { up = BOOL }` (0329): an interface held down apart from its
+ * block, in a file of its own. It sets the interface's `enabled` whichever
+ * file is read first, a phase word followed by `=` is a key and not a hook,
+ * and a switch naming no interface is refused rather than doing nothing.
+ */
+static void switch_cases(void)
+{
+	ncfg_document_t        *document;
+	const ncfg_interface_t *interface;
+
+	document = compiles("switch wg0 { up = false }\n"
+	    "interface wg0 {\n\tconfig = \"10.9.0.2/24\"\n}\n",
+	    "a switch before the interface it names compiles");
+	if (document) {
+		interface = interface_named(document, "wg0");
+		check(interface && !interface->enabled, "  and holds the interface down");
+		ncfg_document_free(document);
+	}
+	document = compiles("interface wg0 {\n\tconfig = \"10.9.0.2/24\"\n\tenabled = false\n}\n"
+	    "switch wg0 { up = true }\n",
+	    "a switch can hold up an interface its block disables");
+	if (document) {
+		interface = interface_named(document, "wg0");
+		check(interface && interface->enabled, "  and the switch is what holds");
+		ncfg_document_free(document);
+	}
+	document = compiles("interface eth0 {\n\tconfig = \"dhcp\"\n\tup {\necho up\n\t}\n}\n",
+	    "`up {` is still a hook");
+	if (document) {
+		interface = interface_named(document, "eth0");
+		check(interface && interface->hook_count == 1u, "  with its one body");
+		ncfg_document_free(document);
+	}
+	refuses("switch wg1 { up = false }\ninterface wg0 {\n\tconfig = \"dhcp\"\n}\n",
+	    "names no interface", "a switch naming no interface is refused");
+	refuses("switch wg0 { }\ninterface wg0 {\n\tconfig = \"dhcp\"\n}\n", "says nothing",
+	    "a switch that says nothing is refused");
+	refuses("switch wg0 { up = false; down = true }\ninterface wg0 {\n\tconfig = \"dhcp\"\n}\n",
+	    "unknown switch key", "a switch key other than `up` is refused");
+	refuses("switch wg0 { up = \"no\" }\ninterface wg0 {\n\tconfig = \"dhcp\"\n}\n", "",
+	    "a switch that is not a boolean is refused");
+}
+
 int main(void)
 {
 	addressing_cases();
 	route_cases();
 	precedence_cases();
 	global_cases();
+	switch_cases();
 	dns_cases();
 	network_cases();
 	access_point_cases();

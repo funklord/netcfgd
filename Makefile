@@ -3595,6 +3595,9 @@ live:
 	@# An OpenVPN tunnel, against a fake daemon that speaks the real
 	@# management protocol. Under NCFG_LIVE: it needs no openvpn package.
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/openvpn.sh"
+	@# A WireGuard and an OpenVPN tunnel turned off and on by `ncfg tunnel`
+	@# (0329). Under NCFG_LIVE: the kernel's WireGuard and the fake openvpn.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/vpn_switch.sh"
 	@# The same tunnel against a *real* openvpn, which is the only thing that
 	@# can say what it puts in a --route-up script's environment. Deliberately
 	@# not under NCFG_LIVE, for the reason ap.sh is not: openvpn is a package a

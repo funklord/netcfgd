@@ -3305,6 +3305,13 @@ int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_as
  */
 int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *interface,
     char *err, size_t err_size);
+/*
+ * Apply what the plan has for one interface now: a tunnel a `switch` just
+ * moved (0329). The whole interface, where the request above keeps only the
+ * supplicant -- see the definition. Nothing to do is success.
+ */
+int ncfg_daemon_apply_interface_request(ncfg_reconcile_t *loop, const char *interface,
+    char *err, size_t err_size);
 
 int ncfg_daemon_confirm_request(ncfg_reconcile_t *loop, char *err, size_t err_size);
 

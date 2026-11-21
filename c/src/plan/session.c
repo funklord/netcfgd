@@ -42,6 +42,23 @@
 
 #include <string.h>
 
+/*
+ * Whether the device's interface block holds it down: `enabled = false`, or
+ * a `switch` (0329). **A tunnel need not have an interface block**, and one
+ * without is not held down by anything.
+ *
+ * Taking the link down is not enough for these two, which is why this is
+ * asked here rather than left to the interface walk: `pppd` and `openvpn`
+ * keep their session behind a link that is down, and the link is theirs to
+ * raise again. A VPN switched off has to have its daemon stopped.
+ */
+static int held_down(const ncfg_document_t *desired, const char *name)
+{
+	const ncfg_interface_t *interface = ncfg_plan_interface(desired, name);
+
+	return interface && !interface->enabled;
+}
+
 /* Which backend a device's kind asks for, or 0 where it asks for none. */
 static int session_kind_of(const ncfg_device_t *device, const char **field)
 {
@@ -66,7 +83,7 @@ void ncfg_plan_session(ncfg_builder_t *builder, const ncfg_device_t *device)
 	const char     *field = NULL;
 	int             kind = session_kind_of(device, &field);
 
-	if (kind == 0) {
+	if (kind == 0 || held_down(builder->desired, device->name)) {
 		return;
 	}
 	/* The same gate every other pass takes, so a guard on this interface stops
@@ -108,5 +125,5 @@ int ncfg_plan_session_wanted(const ncfg_document_t *desired, const char *name, i
 	 * removing a `pppoe` device left `pppd` holding the line with `persist`
 	 * and `maxfail 0` in the options netcfgd had written it: for ever.
 	 */
-	return session_kind_of(device, &field) == kind;
+	return session_kind_of(device, &field) == kind && !held_down(desired, name);
 }

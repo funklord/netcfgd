@@ -209,6 +209,41 @@ static void a_session_the_document_dropped_is_hung_up(void)
 }
 
 /*
+ * **A tunnel switched off has its daemon stopped, not only its link** (0329).
+ *
+ * `enabled = false` -- which a `switch` sets -- takes a link down. That is off
+ * for a WireGuard link and not for these two: `openvpn` keeps its session
+ * behind a down `tun0` and raises it again, so the switch would have read off
+ * in the window and carried traffic. Turned back on, it is started again.
+ */
+static void a_tunnel_switched_off_is_stopped_and_not_started(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(TUNNEL, "{\"name\":\"tun0\",\"enabled\":false}",
+	    "", "", RUNNING("open_vpn", "tun0"), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(plan && planfix_count(plan, "backend.stop") == 1u,
+	    "a running tunnel whose interface is held down is stopped");
+	check(stop && stop->op.u.backend.kind == (int)NCFG_BACKEND_OPENVPN,
+	    "  and it is the tunnel's own daemon that is stopped");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(TUNNEL, "{\"name\":\"tun0\",\"enabled\":false}", "", "",
+	    "\"links\":[]", &document, &observed);
+	check(plan && planfix_count(plan, "backend.start") == 0u,
+	    "and one that is not running is not started");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(TUNNEL, "{\"name\":\"tun0\",\"enabled\":true}", "", "",
+	    "\"links\":[]", &document, &observed);
+	check(plan && planfix_count(plan, "backend.start") == 1u,
+	    "and switched back on, it is started");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * A device the operator took out of netcfgd's hands is not dialled.
  *
  * `managed = false` is 0035's choke point, and it is `ncfg_builder_push` that
@@ -236,6 +271,7 @@ int main(void)
 	a_running_session_is_left_alone();
 	a_session_whose_daemon_died_is_dialled_again();
 	a_session_the_document_dropped_is_hung_up();
+	a_tunnel_switched_off_is_stopped_and_not_started();
 	an_unmanaged_session_is_not_dialled();
 
 	printf("plan_session_test: %d checks, %d failed\n", checks, failures);

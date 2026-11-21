@@ -68,7 +68,9 @@ void ncfg_devices_view::selection_changed()
 	configure_button->setEnabled(table->selected_row() >= 0);
 	/* By the document's kind, which is what the daemon judges too: a tunnel
 	 * the document does not describe has no connection to ask for. */
-	const bool tunnel = table->selected_cell(1) == QStringLiteral("xfrm");
+	const QString kind = table->selected_cell(1);
+	const bool tunnel = kind == QStringLiteral("xfrm") || kind == QStringLiteral("wireguard") ||
+	                    kind == QStringLiteral("openvpn");
 	tunnel_up_button->setEnabled(tunnel);
 	tunnel_down_button->setEnabled(tunnel);
 }
@@ -95,11 +97,17 @@ void ncfg_devices_view::set_tunnel(bool activate)
 		emit reported(error);
 		return;
 	}
-	/* Asked, not done: strongSwan brings it up, and the tunnel's addresses
-	 * in `links` are what say it is. */
-	emit reported(activate
-	        ? QStringLiteral("asked strongSwan to bring %1 up").arg(name)
-	        : QStringLiteral("asked strongSwan to take %1 down").arg(name));
+	/* An IPsec tunnel is asked of strongSwan, and its addresses in `links`
+	 * say when it is up. A WireGuard or OpenVPN one netcfgd holds with a
+	 * `switch` and has applied before answering (0329). */
+	if (table->selected_cell(1) == QStringLiteral("xfrm")) {
+		emit reported(activate
+		        ? QStringLiteral("asked strongSwan to bring %1 up").arg(name)
+		        : QStringLiteral("asked strongSwan to take %1 down").arg(name));
+		return;
+	}
+	emit reported(activate ? QStringLiteral("turned %1 on").arg(name)
+	                       : QStringLiteral("turned %1 off").arg(name));
 }
 
 void ncfg_devices_view::refresh()

@@ -101,6 +101,9 @@ typedef enum {
 	/* The names the router's forwarders refuse (0305). Last, for the reason
 	 * above. */
 	NCFG_BLOCK_BLOCK_LIST,
+	/* An interface held up or down apart from its block (0329). Last, for
+	 * the reason above. */
+	NCFG_BLOCK_SWITCH,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

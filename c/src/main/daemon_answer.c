@@ -800,6 +800,103 @@ static int start_detached(const char *program, char *const argv[])
 	return 1;
 }
 
+/* The interface block a tunnel is held up or down by, or NULL. */
+static const ncfg_interface_t *interface_named(const ncfg_document_t *document,
+    const char *name)
+{
+	size_t at;
+
+	for (at = 0; document && at < document->interface_count; at++) {
+		if (strcmp(document->interfaces[at].name, name) == 0) {
+			return &document->interfaces[at];
+		}
+	}
+	return NULL;
+}
+
+/* Write the `switch` drop-in, `up` as given, replacing one already there. */
+static int hold_switch(ncfg_main_desk_t *desk, const char *drop_in, const char *interface,
+    int up, char *err, size_t err_size)
+{
+	char text[NAME_MAX_BYTES + 64];
+
+	(void)snprintf(text, sizeof(text), "switch %s { up = %s }\n", interface,
+	    up ? "true" : "false");
+	return ncfg_config_install_drop_in(desk->state->paths.config, desk->state->paths.factory,
+	    drop_in, text, 1, NULL, NULL, err, err_size);
+}
+
+/*
+ * A WireGuard or OpenVPN tunnel on or off, at the `laptop` tier (0327, 0329).
+ *
+ * netcfgd runs these two itself, so "off" is configuration rather than a
+ * command to another daemon, as it is for strongSwan above. **A drop-in of its
+ * own, `tunnel-NAME`, holding a `switch` block**: a drop-in cannot change one
+ * key of the operator's `interface` block without restating it, and a `switch`
+ * is a block nobody else writes. The radio's pattern (`radio-NAME`), with one
+ * difference: removing the file gives the operator's word back, and if that
+ * word is `enabled = false`, "on" writes `up = true` rather than leaving the
+ * tunnel off having said it was turned on.
+ *
+ * **Applied before answering**, the whole interface (see
+ * `ncfg_daemon_apply_interface_request`): `on_drift` defaults to `report`, so
+ * a written switch that nothing ran would leave a VPN the window says is off
+ * carrying traffic. A caller with no loop to apply through is refused before
+ * anything is written, for the radio's reason.
+ */
+static int switch_tunnel(ncfg_main_desk_t *desk, const char *interface, int up,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	char drop_in[NAME_MAX_BYTES + 16];
+	char why[NCFG_ERROR_MAX];
+	int  written;
+
+	if (!interface_named(desk->state->desired, interface)) {
+		ncfg_error_set(err, err_size,
+		    "%s has no `interface` block, and a tunnel is turned %s by holding its "
+		    "interface block %s: add `interface %s { }` with its addressing",
+		    interface, up ? "on" : "off", up ? "up" : "down", interface);
+		return 0;
+	}
+	if (!desk->loop) {
+		ncfg_error_set(err, err_size,
+		    "%s cannot be turned %s here: this caller was given no way to apply it, and "
+		    "a switch written and not run is a tunnel that says one thing and does "
+		    "another", interface, up ? "on" : "off");
+		return 0;
+	}
+	written = snprintf(drop_in, sizeof(drop_in), "tunnel-%s", interface);
+	if (written < 0 || (size_t)written >= sizeof(drop_in)) {
+		ncfg_error_set(err, err_size, "`%s` is too long a name for a drop-in", interface);
+		return 0;
+	}
+	if (!up) {
+		if (!hold_switch(desk, drop_in, interface, 0, err, err_size)) {
+			return 0;
+		}
+	} else {
+		const ncfg_interface_t *now;
+
+		if (!ncfg_config_remove_drop_in(desk->state->paths.config,
+		        desk->state->paths.factory, drop_in, NULL, NULL, err, err_size)) {
+			return 0;
+		}
+		(void)ncfg_daemon_state_reload(desk->state, why, sizeof(why));
+		now = interface_named(desk->state->desired, interface);
+		if (now && !now->enabled &&
+		    !hold_switch(desk, drop_in, interface, 1, err, err_size)) {
+			return 0;
+		}
+	}
+	/* The install proved the whole configuration compiles, so a failure here
+	 * is a race with another writer, and the daemon keeps what it had. */
+	(void)ncfg_daemon_state_reload(desk->state, why, sizeof(why));
+	if (!ncfg_daemon_apply_interface_request(desk->loop, interface, err, err_size)) {
+		return 0;
+	}
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
 static int answer_tunnel_set(ncfg_main_desk_t *desk, const ncfg_proto_tunnel_set_t *set,
     ncfg_buf_t *out, char *err, size_t err_size)
 {
@@ -814,10 +911,14 @@ static int answer_tunnel_set(ncfg_main_desk_t *desk, const ncfg_proto_tunnel_set
 	}
 	device = desk->state && desk->state->desired ?
 	    ncfg_document_device(desk->state->desired, interface) : NULL;
+	if (device && (device->kind.kind == (int)NCFG_KIND_WIREGUARD ||
+	                  device->kind.kind == (int)NCFG_KIND_OPENVPN)) {
+		return switch_tunnel(desk, interface, set->activate ? 1 : 0, out, err, err_size);
+	}
 	if (!device || device->kind.kind != (int)NCFG_KIND_XFRM) {
 		ncfg_error_set(err, err_size,
-		    "%s is not an IPsec tunnel this configuration describes: a tunnel is an "
-		    "`xfrm` device, and its block names the connection to drive", interface);
+		    "%s is not a tunnel this configuration describes: a tunnel is a "
+		    "`wireguard`, `openvpn` or `xfrm` device", interface);
 		return 0;
 	}
 	connection = device->kind.xfrm.connection;

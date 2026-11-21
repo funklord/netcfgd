@@ -109,7 +109,8 @@ int main(int argc, char **argv)
 	        QStringLiteral("global { control { laptop = \"any\" } }\n"
 	                       "device ipsec0 {\n\txfrm { if_id = 7; connection = \"home\"; "
 	                       "child = \"all\" }\n}\n"
-	                       "device dum0 { kind = \"dummy\" }\n")) ||
+	                       "device dum0 { kind = \"dummy\" }\n"
+	                       "device wg9 {\n\twireguard { private_key = \"@secret:wg9\" }\n}\n")) ||
 	    !write_file(swanctl, QStringLiteral("#!/bin/sh\necho \"$*\" >> '%1'\n").arg(log)) ||
 	    !QFile::setPermissions(swanctl, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
 	                                        QFileDevice::ExeOwner)) {
@@ -171,6 +172,13 @@ int main(int argc, char **argv)
 	    QStringLiteral("selected"), "a device that is not a tunnel is listed");
 	check(QString::fromLatin1(up->isEnabled() || down->isEnabled() ? "enabled" : "disabled"),
 	    QStringLiteral("disabled"), "  and offers neither button");
+
+	/* A WireGuard tunnel is switched rather than asked of strongSwan (0329),
+	 * and offers the same two buttons. */
+	check(QString::fromLatin1(select(table, QStringLiteral("wg9")) ? "selected" : "absent"),
+	    QStringLiteral("selected"), "a WireGuard tunnel is listed");
+	check(QString::fromLatin1(up->isEnabled() && down->isEnabled() ? "enabled" : "disabled"),
+	    QStringLiteral("enabled"), "  and offers both");
 
 	check(QString::fromLatin1(select(table, QStringLiteral("ipsec0")) ? "selected" : "absent"),
 	    QStringLiteral("selected"), "the tunnel is listed");

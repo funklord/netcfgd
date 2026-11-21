@@ -16,7 +16,7 @@
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
 	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh",
-	"host_list", "dns_record", "block_list" };
+	"host_list", "dns_record", "block_list", "switch" };
 
 const char *ncfg_block_name(int block)
 {
@@ -98,7 +98,10 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	[NCFG_BLOCK_DNS_RECORD] = NCFG_SCOPE_GROUP,
 	/* What a site's LANs refuse to resolve, a site's as its names are
 	 * (0305). */
-	[NCFG_BLOCK_BLOCK_LIST] = NCFG_SCOPE_GROUP
+	[NCFG_BLOCK_BLOCK_LIST] = NCFG_SCOPE_GROUP,
+	/* Whether this machine's tunnel is up is this machine's, and the person
+	 * at it is who flips it (0329). */
+	[NCFG_BLOCK_SWITCH] = NCFG_SCOPE_HOST_PRIVATE
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)

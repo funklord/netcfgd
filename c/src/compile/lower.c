@@ -831,6 +831,102 @@ static int remember(ncfg_lower_ctx_t *ctx, deferred_t **list, size_t *count, con
 	return 1;
 }
 
+/*
+ * `switch NAME { up = BOOL }`: an interface held up or down apart from its
+ * block (0329).
+ *
+ * **Why a block of its own rather than a key.** `enabled` already says it, and
+ * a drop-in cannot change one key of an `interface`: a second block must say
+ * `override` and replaces the first wholesale (merge.c, section 3). A person
+ * turning a VPN off from the window would have to restate the operator's whole
+ * block to do it. A `switch` is a block nobody else writes, so `ncfg tunnel
+ * down` holds it in a drop-in of its own -- as `ncfg wifi activate` holds a
+ * `device` block -- and removing the file gives the operator's word back.
+ *
+ * It takes one key, `up`, and lowers to nothing of its own: the interface's
+ * `enabled` is what it sets, so the planner, the document and every client
+ * read one field as before.
+ */
+static int lower_switch(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, int *up)
+{
+	const ncfg_ast_block_t *block = merged->block;
+	int                     said = 0;
+	size_t                  i;
+	char                   *name;
+
+	*up = 1;
+	/* Checked as a link's name, since it names one, and not kept: the label
+	 * itself is what `remember` copies. */
+	name = ncfg_require_interface_label(ctx, block);
+	if (!name) {
+		return 0;
+	}
+	free(name);
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t *item = merged->items[i].item;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `switch`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		if (strcmp(item->as.assignment.key, "up") != 0) {
+			ncfg_diag(ctx, item->as.assignment.span,
+			    "unknown switch key `%s`: a switch holds `up`, true or false",
+			    item->as.assignment.key);
+			continue;
+		}
+		if (ncfg_as_bool(ctx, item->as.assignment.value, up)) {
+			said = 1;
+		}
+	}
+	if (!said) {
+		ncfg_diag(ctx, block->span,
+		    "switch `%s` says nothing: it needs `up = true` or `up = false`",
+		    block->label ? block->label : "");
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * Each switch onto the interface it names, once every interface is read --
+ * so a drop-in read before the file holding the interface still finds it.
+ * Naming no interface is refused: a switch that quietly did nothing is the
+ * VPN somebody believes is off.
+ */
+static void apply_switches(ncfg_lower_ctx_t *ctx, const deferred_t *switches, size_t count)
+{
+	size_t at;
+	size_t i;
+
+	for (at = 0; at < count; at++) {
+		ncfg_interface_t *found = NULL;
+
+		for (i = 0; i < ctx->document->interface_count; i++) {
+			if (strcmp(ctx->document->interfaces[i].name, switches[at].name) == 0) {
+				found = &ctx->document->interfaces[i];
+				break;
+			}
+		}
+		ctx->source = switches[at].source;
+		if (!found) {
+			ncfg_diag(ctx, switches[at].span,
+			    "switch `%s` names no interface: a switch holds an `interface` block up "
+			    "or down, and there is no `interface %s`",
+			    switches[at].name, switches[at].name);
+			continue;
+		}
+		found->enabled = strcmp(switches[at].other, "up") == 0;
+		ncfg_record(ctx, switches[at].source, switches[at].span, "interface.%s.enabled",
+		    switches[at].name);
+	}
+}
+
 ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t *hooks,
     ncfg_lower_diags_t *diags, char *err, size_t err_size)
 {
@@ -912,6 +1008,9 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	deferred_t      *blockers = NULL;
 	size_t           blocker_count = 0;
 	size_t           forwarder_count = 0;
+	/* Each `switch`, applied once every interface has been read (0329). */
+	deferred_t      *switches = NULL;
+	size_t           switch_count = 0;
 	/* Where the firewall block was, for a host list one of its rules names
 	 * and nothing declares. */
 	ncfg_span_t      firewall_span;
@@ -1214,11 +1313,18 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 					free(set.name);
 				}
 			}
+		} else if (strcmp(head, "switch") == 0) {
+			int up;
+
+			if (lower_switch(&ctx, block, &up)) {
+				(void)remember(&ctx, &switches, &switch_count, block->block->label,
+				    up ? "up" : "down", block->block->span, block->source);
+			}
 		} else {
 			ncfg_diag(&ctx, block->block->span,
 			    "unknown top-level block `%s`: the top-level blocks are interface, network, "
 			    "device, rule, linkset, access_point, mesh, host_list, dns_record, "
-			    "block_list, firewall and global",
+			    "block_list, firewall, switch and global",
 			    head);
 		}
 	}
@@ -1230,6 +1336,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
 	resolve_forward_hosts(&ctx, forwarders, forwarder_count);
 	resolve_block_lists(&ctx, blockers, blocker_count);
+	apply_switches(&ctx, switches, switch_count);
 	check_upnp(&ctx);
 	check_shared_radio(&ctx, mesh_spans, mesh_span_count);
 
@@ -1240,6 +1347,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	deferred_free(referrers, referrer_count);
 	deferred_free(forwarders, forwarder_count);
 	deferred_free(blockers, blocker_count);
+	deferred_free(switches, switch_count);
 
 	/*
 	 * A table for a document nobody gets is a table of paths into nothing, so

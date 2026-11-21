@@ -188,14 +188,14 @@ asked() {
 	grep -c -- "$1" "$work/swanctl.log" 2>/dev/null || echo 0
 }
 said=$(NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel up ipsec0 2>&1)
-contains "ncfg tunnel up is answered" "$said" "asked strongSwan to bring ipsec0 up"
+contains "ncfg tunnel up is answered" "$said" "asked for ipsec0 up"
 contains "and strongSwan is asked for the child of the connection" \
 	"$(asked '--initiate --child all --ike home')" "1"
 NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel down ipsec0 > /dev/null 2>&1
 contains "ncfg tunnel down takes the connection down" \
 	"$(asked '--terminate --ike home')" "1"
 contains "a device that is not a tunnel is refused by name" \
-	"$(NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel up up0 2>&1)" "up0 is not an IPsec tunnel"
+	"$(NCFG_RUN_DIR="$work/run" "$build/ncfg" tunnel up up0 2>&1)" "up0 is not a tunnel this configuration describes"
 kill "$daemon" 2>/dev/null
 wait "$daemon" 2>/dev/null || true
 

@@ -580,6 +580,34 @@ static ncfg_ast_item_t *parse_hook(parser_t *parser)
 		note_oom(parser);
 		return NULL;
 	}
+	/*
+	 * **A phase's name followed by `=` is a key, not a hook** (0329):
+	 * `switch wg0 { up = false }`. A hook is a phase and then `{`, so the
+	 * token after the word decides, as it does for every other statement,
+	 * and nothing a hook could be is taken away -- `up = ...` was a parse
+	 * error until now.
+	 */
+	if (strcmp(phase, "on") != 0 && peek(parser)->kind == NCFG_TOKEN_EQUALS) {
+		ncfg_ast_value_t *value;
+
+		drop(parser);
+		value = parse_value(parser);
+		if (!value) {
+			free(phase);
+			return NULL;
+		}
+		expect_terminator(parser);
+		item = new_item(parser, NCFG_AST_ITEM_ASSIGNMENT);
+		if (!item) {
+			ncfg_ast_value_free(value);
+			free(phase);
+			return NULL;
+		}
+		item->as.assignment.span = span;
+		item->as.assignment.key = phase;
+		item->as.assignment.value = value;
+		return item;
+	}
 
 	if (strcmp(phase, "on") == 0) {
 		ncfg_token_t event;
