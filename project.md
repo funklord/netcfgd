@@ -12763,8 +12763,11 @@ default, Devuan's `mountnfs.sh` only waits for NFS under /usr and /var; the
 mounting is `/etc/network/if-up.d/mountnfs`, which ifupdown runs as each
 interface comes up, once the last `auto` one is up. netcfgd runs no
 if-up.d hook. So a box switched from ifupdown would boot with every NFS
-and `_netdev` line in its fstab unmounted -- ml350, a client of the NAS,
-the first.
+and `_netdev` line in its fstab unmounted. ml350's one such line today (-03's
+home) is `noauto`, mounted on demand and untouched by this; any line without
+it -- the NAS mount made automatic -- is what it would have hit. ml350's
+other if-up.d hooks (resolvconf, ethtool, openvpn, bridge, wpasupplicant)
+act on `interfaces` stanzas, which the translated documents carry instead.
 
 Two ways to fill the facility were measured and refused. `$network` is
 `+networking +ifupdown` in /etc/insserv.conf, and a second definition in
