@@ -1697,6 +1697,11 @@ typedef struct ncfg_interface {
 	 * without NAT sends private addresses at the internet, NAT without
 	 * forwarding translates packets the kernel already dropped. */
 	ncfg_optbool_t         nat;
+	/* `clamp_mss = true` (0334): a forwarded TCP connection's SYN, either way
+	 * across this interface, has its MSS lowered to what the route's MTU
+	 * carries -- what keeps a site whose path drops ICMP from hanging behind
+	 * a PPPoE uplink. Set on the uplink. */
+	int                    clamp_mss;
 	ncfg_guard_t          *guard;
 	/* `ip token set ::5 dev eth0`: the prefix still comes from the router, the
 	 * host part is chosen. The reason to want it is a server that must be

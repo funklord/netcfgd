@@ -1714,6 +1714,8 @@ typedef struct {
 	int   enabled;
 	int   forwarding;
 	int   nat;
+	/* `clamp_mss = true` (0334). */
+	int   clamp_mss;
 	char *probe_command;
 	char *probe_args;
 	/* Every probe value is -1 where the document states none, which is "follow

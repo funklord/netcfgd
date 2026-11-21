@@ -92,6 +92,9 @@
  * document asks. The same word for both, as nft's own `@offload` reads. */
 #define NCFG_NFT_CHAIN_OFFLOAD "offload"
 #define NCFG_NFT_FLOWTABLE     "offload"
+/* MSS clamping (0334): a `filter` chain at the forward hook, priority mangle,
+ * holding two rules per interface that clamps. */
+#define NCFG_NFT_CHAIN_MSS     "mss"
 
 /*
  * The table miniupnpd adds UPnP and NAT-PMP mappings to (0310): netcfgd's by
@@ -379,10 +382,22 @@ typedef struct {
 	size_t             device_count;
 } ncfg_nft_offload_t;
 
+/* `clamp` names the interfaces whose forwarded TCP connections have their
+ * MSS clamped to the route's (0334), sorted; NULL and 0 for none. */
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
     const ncfg_forward_rule_t *forwards, size_t forward_count,
-    const ncfg_nft_offload_t *offload, ncfg_nft_batch_t *batch, char *err, size_t err_size);
+    const ncfg_nft_offload_t *offload, const char *const *clamp, size_t clamp_count,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size);
+
+/*
+ * Whether a rule reply is one of 0334's, in netcfgd's table, in its `mss`
+ * chain, exactly as `ncfg_nft_build_replace_all` writes one: the interface
+ * into `interface` and which way it matches into `*leaving` (1 for
+ * `oifname`, 0 for `iifname`). 0 for anything else.
+ */
+int ncfg_nft_rule_mss(const void *payload, size_t length, char *interface,
+    size_t interface_size, int *leaving);
 
 /* The text a forward's digest is taken over, as `ncfg_nft_firewall_rule_text`
  * is for a firewall rule: every field, one fixed order. */

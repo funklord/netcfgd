@@ -123,6 +123,7 @@ private:
 	QCheckBox   *enabled;
 	QCheckBox   *forwarding;
 	QCheckBox   *nat;
+	QCheckBox   *clamp_mss;
 	/* A DHCP server for the hosts behind it (10.608): on, the range, the
 	 * lease and the DNS servers offered. Reservations have no field. */
 	QCheckBox   *dhcp_server;

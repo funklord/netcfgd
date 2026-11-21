@@ -412,6 +412,18 @@
 #	nat    = true
 #}
 
+# MSS CLAMPING, on an uplink whose MTU is smaller than the LAN's -- PPPoE's
+# 1492, a tunnel's less. A forwarded TCP connection's SYN, either way across the
+# interface, is told the largest segment the route carries (0334). Without it,
+# a site whose path drops ICMP hangs part-way through loading, because the
+# packets that would have said "too big" never arrive. Same table, own chain.
+
+#interface ppp0 {
+#	config    = "reported"
+#	nat       = true
+#	clamp_mss = true
+#}
+
 # UPNP AND NAT-PMP, so a game console or a phone on the LAN can open the port
 # it needs on this router by asking, rather than somebody writing a port
 # forward for it (decision 0310). Two keys: the interfaces clients ask on, and

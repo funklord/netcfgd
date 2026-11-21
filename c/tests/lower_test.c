@@ -4270,6 +4270,19 @@ static void firewall_icmp_type_cases(void)
 	    "0 to 255", "a type past 255 is refused");
 }
 
+/* `clamp_mss = true` on an interface (0334). */
+static void clamp_mss_cases(void)
+{
+	ncfg_document_t        *document;
+	const ncfg_interface_t *interface;
+
+	document = compiles("interface ppp0 {\n\tconfig = \"reported\"\n\tclamp_mss = true\n}\n",
+	    "an interface clamping the MSS compiles, and renders back");
+	interface = document ? interface_named(document, "ppp0") : NULL;
+	check(interface && interface->clamp_mss, "  and clamps");
+	ncfg_document_free(document);
+}
+
 static void switch_cases(void)
 {
 	ncfg_document_t        *document;
@@ -4315,6 +4328,7 @@ int main(void)
 	precedence_cases();
 	global_cases();
 	switch_cases();
+	clamp_mss_cases();
 	firewall_port_range_cases();
 	firewall_reset_cases();
 	firewall_icmp_type_cases();

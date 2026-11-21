@@ -1200,6 +1200,12 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 		}
 		return;
 	}
+	if (strcmp(key, "clamp_mss") == 0) {
+		if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+			interface->clamp_mss = flag;
+		}
+		return;
+	}
 	if (strcmp(key, "on_drift") == 0) {
 		int policy;
 

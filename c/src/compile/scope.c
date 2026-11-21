@@ -244,6 +244,8 @@ static const struct {
 	 */
 	{ NCFG_BLOCK_INTERFACE, "vlans", NCFG_SCOPE_GROUP },
 	{ NCFG_BLOCK_INTERFACE, "nat", NCFG_SCOPE_GROUP },
+	/* The clamp goes with the NAT it usually sits beside (0334). */
+	{ NCFG_BLOCK_INTERFACE, "clamp_mss", NCFG_SCOPE_GROUP },
 	{ NCFG_BLOCK_INTERFACE, "advertise.prefix", NCFG_SCOPE_GROUP },
 	{ NCFG_BLOCK_INTERFACE, "advertise.prefixes", NCFG_SCOPE_GROUP },
 	{ NCFG_BLOCK_INTERFACE, "advertise.lifetime", NCFG_SCOPE_GROUP },
@@ -367,6 +369,7 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "port_forward.to", 0x0002002au },
 	{ NCFG_BLOCK_INTERFACE, "port_forward.to_port", 0x0002002bu },
 	{ NCFG_BLOCK_INTERFACE, "port_forward.hairpin", 0x0002002cu },
+	{ NCFG_BLOCK_INTERFACE, "clamp_mss", 0x0002002du },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the

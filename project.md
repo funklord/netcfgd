@@ -7097,17 +7097,24 @@ each server as a string, and the document holds `{"addr": ...}`. A global block
 holding what the tab cannot write back -- a server's port or SNI, `domains` --
 is refused rather than saved without it.
 
-**MSS clamping, measured and not built.** nft 1.1.3 writes `oifname "ppp0" tcp
-flags & (syn | rst) == syn tcp option maxseg size set rt mtu`, in a chain at the
-forward hook, priority mangle, as: `meta load oifname`, `cmp`; `meta load
-l4proto`, `cmp 6`; `payload load 1b @ transport + 13`, `bitwise & 0x06`, `cmp
-0x02`; `rt load tcpmss`; `byteorder hton 2`; `exthdr write tcpopt reg => 2b @ 2
-+ 2`. It would be a fourth part of the one transaction that replaces
-netcfgd's table, so it touches the `nftables` op (which the confirm window
-persists), `ncfg_nft_build_replace_all`, the write-audit's chain list, the
-observer, the planner's comparison and the undo copy -- the shape flow offload
-took (0319). Left for when a PPPoE uplink is in front of somebody: nothing the
-holder runs today has one. `reject` answers tcp with a reset
+**MSS clamping is built**:
+[0334](doc/decision/0334-an-uplink-may-clamp-the-tcp-mss.md), `clamp_mss = true` on
+an interface, a chain of its own in netcfgd's table, measured against what nft
+1.1.3 writes. It was first parked here as large and unused; the router aim
+(M4, M5, the OpenWrt routers next) is reason enough, which is what the run's
+goal-gap walk said.
+
+**Open, and the holder's: may netcfgd reserve one packet-mark bit?** Logging
+beside `over` (0330 refuses the pair) needs the log's rule to evaluate the
+meter once and tell the verdict's rule the answer, and a mark is how one rule
+tells the next: `meta mark set mark | BIT` in the log's rule, `mark & BIT` in
+the verdict's, the bit cleared first so a packet arriving with it set matches
+nothing. The cost is that bit in every packet the guard drops, where policy
+routing (`rule { fwmark }`, a WireGuard `fwmark`) also reads marks -- harmless
+for a packet that is dropped next, but a bit an operator's own scheme might
+already use. Best guess: reserve the top bit, `0x80000000`, refuse a `fwmark`
+or `fwmask` that touches it, and say so in the plan. Unblocks: `log` on an
+`over` rule, which is the SSH guard's own case. `reject` answers tcp with a reset
 where asked: [0332](doc/decision/0332-a-reject-may-answer-tcp-with-a-reset.md).
 
 ## 10.894 A pin move left fuzznet's old objects in the link

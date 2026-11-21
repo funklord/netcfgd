@@ -216,6 +216,15 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_
 		    ncfg_nft_rule_is_offload(reply_of->items[at].bytes, reply_of->items[at].length)) {
 			continue;
 		}
+		/* MSS clamping's (0334), read by `read_clamp`. */
+		{
+			int leaving;
+
+			if (ncfg_nft_rule_mss(reply_of->items[at].bytes, reply_of->items[at].length, name,
+			        sizeof(name), &leaving)) {
+				continue;
+			}
+		}
 		if (!ncfg_nft_rule_uplink(reply_of->items[at].bytes, reply_of->items[at].length, name,
 		    sizeof(name), why, sizeof(why))) {
 			/*
@@ -600,6 +609,45 @@ static int read_offload(const ncfg_netlink_reply_t *flowtables, const ncfg_netli
 	return 1;
 }
 
+/*
+ * The interfaces the `mss` chain clamps (0334): every one a clamp rule names,
+ * and how many such rules there are. A chain as written holds two per
+ * interface, so a rule left on its own is a count the planner sees differ.
+ */
+static int read_clamp(const ncfg_netlink_reply_t *rules, ncfg_observed_t *observed, char *err,
+    size_t err_size)
+{
+	size_t at;
+	size_t seen;
+
+	observe_names_free(observed->clamp, observed->clamp_count);
+	observed->clamp = NULL;
+	observed->clamp_count = 0;
+	observed->clamp_rules = 0;
+	for (at = 0; at < rules->count; at++) {
+		char name[NCFG_NFT_IFNAME_MAX];
+		int  leaving;
+		int  known = 0;
+
+		if (!ncfg_nft_rule_mss(rules->items[at].bytes, rules->items[at].length, name,
+		        sizeof(name), &leaving)) {
+			continue;
+		}
+		observed->clamp_rules++;
+		for (seen = 0; seen < observed->clamp_count; seen++) {
+			known = known || strcmp(observed->clamp[seen], name) == 0;
+		}
+		if (!known && !observe_list_add(&observed->clamp, &observed->clamp_count, name)) {
+			ncfg_error_set(err, err_size, "out of memory recording the MSS clamp");
+			return 0;
+		}
+	}
+	if (observed->clamp_count > 1u) {
+		qsort(observed->clamp, observed->clamp_count, sizeof(*observed->clamp), by_name);
+	}
+	return 1;
+}
+
 /* Forget the forwards an observation holds, for a pass that has none. */
 static void clear_forwards(ncfg_observed_t *observed)
 {
@@ -704,6 +752,10 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 		observed->firewall = NULL;
 		ncfg_observed_offload_free(observed->offload);
 		observed->offload = NULL;
+		observe_names_free(observed->clamp, observed->clamp_count);
+		observed->clamp = NULL;
+		observed->clamp_count = 0;
+		observed->clamp_rules = 0;
 		clear_forwards(observed);
 		return 1;
 	}
@@ -775,7 +827,8 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 				    read_conflicts(kernel, &chains, observed, err, err_size) &&
 				    read_firewall(kernel, &rules, &chains, observed, err, err_size) &&
 				    read_forwards(kernel, &rules, observed, err, err_size) &&
-				    read_offload(&flowtables, &rules, observed, err, err_size);
+				    read_offload(&flowtables, &rules, observed, err, err_size) &&
+				    read_clamp(&rules, observed, err, err_size);
 				ncfg_netlink_reply_free(&rules);
 				ncfg_netlink_reply_free(&chains);
 				ncfg_netlink_reply_free(&flowtables);

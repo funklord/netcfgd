@@ -210,7 +210,7 @@ static int name_must_be(const ncfg_wire_attrs_t *area, uint16_t kind, const char
  * chains of 0294. A fifth name in a message is refused by the audit. */
 static const char *const OUR_CHAINS[] = { NCFG_NFT_CHAIN, NCFG_NFT_CHAIN_INPUT,
 	NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT, NCFG_NFT_CHAIN_PREROUTING,
-	NCFG_NFT_CHAIN_OFFLOAD };
+	NCFG_NFT_CHAIN_OFFLOAD, NCFG_NFT_CHAIN_MSS };
 
 static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char *err,
     size_t err_size)
@@ -229,8 +229,8 @@ static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char
 	}
 	ncfg_error_set(err, err_size,
 	    "a message would write to chain `%s`; netcfgd's table holds `postrouting`, "
-	    "`prerouting`, `input`, `forward`, `output` and `offload` and nothing else (0022, "
-	    "0294, 0298, 0319)", name);
+	    "`prerouting`, `input`, `forward`, `output`, `offload` and `mss` and nothing else "
+	    "(0022, 0294, 0298, 0319, 0334)", name);
 	return 0;
 }
 
@@ -2207,6 +2207,106 @@ int ncfg_nft_put_offload(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_
 	return ok;
 }
 
+/*
+ * MSS clamping (0334)
+ *
+ * `oifname "X" tcp flags & (syn | rst) == syn tcp option maxseg size set rt
+ * mtu`, and the same with `iifname`, as nft 1.1.3 encodes them (measured,
+ * project.md 10.895): a forwarded connection's SYN, either way across the
+ * interface, has its MSS lowered to what the route's MTU carries. That is
+ * what keeps a site whose path drops ICMP from hanging behind a PPPoE
+ * uplink's 1492 bytes.
+ */
+static void mss_rule(ncfg_buf_t *rule, const char *interface, int leaving)
+{
+	ncfg_buf_t     expressions;
+	ncfg_buf_t     data;
+	const uint8_t  tcp = IPPROTO_TCP;
+	const uint8_t  flags = 0x06; /* syn | rst */
+	const uint8_t  syn = 0x02;
+
+	ncfg_buf_init(&expressions, 0);
+	put_meta(&expressions, leaving ? NFT_META_OIFNAME : NFT_META_IIFNAME);
+	put_cmp(&expressions, NFT_CMP_EQ, interface, strlen(interface) + 1u);
+	put_meta(&expressions, NFT_META_L4PROTO);
+	put_cmp(&expressions, NFT_CMP_EQ, &tcp, 1u);
+	put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 13u, 1u);
+	put_mask(&expressions, &flags, 1u);
+	put_cmp(&expressions, NFT_CMP_EQ, &syn, 1u);
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_RT_KEY, NFT_RT_TCPMSS);
+	put_be32(&data, NFTA_RT_DREG, NFT_REG_1);
+	put_expression(&expressions, "rt", &data);
+	ncfg_buf_free(&data);
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_BYTEORDER_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_BYTEORDER_DREG, NFT_REG_1);
+	put_be32(&data, NFTA_BYTEORDER_OP, NFT_BYTEORDER_HTON);
+	put_be32(&data, NFTA_BYTEORDER_LEN, 2u);
+	put_be32(&data, NFTA_BYTEORDER_SIZE, 2u);
+	put_expression(&expressions, "byteorder", &data);
+	ncfg_buf_free(&data);
+	ncfg_buf_init(&data, 0);
+	{
+		const uint8_t maxseg = 2u; /* TCPOPT_MAXSEG */
+
+		ncfg_wire_attr_put(&data, NFTA_EXTHDR_TYPE, &maxseg, 1u);
+	}
+	put_be32(&data, NFTA_EXTHDR_OFFSET, 2u);
+	put_be32(&data, NFTA_EXTHDR_LEN, 2u);
+	put_be32(&data, NFTA_EXTHDR_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_EXTHDR_OP, NFT_EXTHDR_OP_TCPOPT);
+	put_expression(&expressions, "exthdr", &data);
+	ncfg_buf_free(&data);
+	ncfg_wire_attr_put_str(rule, NFTA_RULE_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(rule, NFTA_RULE_CHAIN, NCFG_NFT_CHAIN_MSS);
+	ncfg_wire_attr_put_nested(rule, NFTA_RULE_EXPRESSIONS, &expressions);
+	ncfg_buf_free(&expressions);
+}
+
+static int put_mss(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    const char *const *clamp, size_t clamp_count, char *err, size_t err_size)
+{
+	ncfg_buf_t attrs;
+	ncfg_buf_t hook;
+	size_t     at;
+	int        ok;
+
+	for (at = 0; at < clamp_count; at++) {
+		if (!clamp[at] || !clamp[at][0] || strlen(clamp[at]) >= NCFG_NFT_IFNAME_MAX) {
+			ncfg_error_set(err, err_size, "`%s` cannot be an interface to clamp the MSS on",
+			    clamp[at] ? clamp[at] : "");
+			return 0;
+		}
+	}
+	/* Priority mangle, so the clamp is written before a filter at the same
+	 * hook sees the packet; policy accept, since it decides nothing. */
+	ncfg_buf_init(&hook, 0);
+	put_be32(&hook, NFTA_HOOK_HOOKNUM, NF_INET_FORWARD);
+	put_be32(&hook, NFTA_HOOK_PRIORITY, (uint32_t)NF_IP_PRI_MANGLE);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, NCFG_NFT_CHAIN_MSS);
+	ncfg_wire_attr_put_nested(&attrs, NFTA_CHAIN_HOOK, &hook);
+	ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TYPE, "filter");
+	put_be32(&attrs, NFTA_CHAIN_POLICY, (uint32_t)NF_ACCEPT);
+	*last_acked = *seq;
+	ok = build(transaction, NFT_MSG_NEWCHAIN, (uint16_t)(NLM_F_ACK | NLM_F_CREATE), (*seq)++,
+	    NFPROTO_INET, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&hook);
+	for (at = 0; ok && at < clamp_count * 2u; at++) {
+		ncfg_buf_init(&attrs, 0);
+		mss_rule(&attrs, clamp[at / 2u], at % 2u == 0u);
+		*last_acked = *seq;
+		ok = build(transaction, NFT_MSG_NEWRULE,
+		    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), (*seq)++, NFPROTO_INET, &attrs,
+		    err, err_size);
+		ncfg_buf_free(&attrs);
+	}
+	return ok;
+}
+
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size)
@@ -2220,13 +2320,14 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
     ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	return ncfg_nft_build_replace_all(out, first_seq, table_exists, uplinks, uplink_count,
-	    firewall, NULL, 0, NULL, batch, err, err_size);
+	    firewall, NULL, 0, NULL, NULL, 0, batch, err, err_size);
 }
 
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
     const ncfg_forward_rule_t *forwards, size_t forward_count,
-    const ncfg_nft_offload_t *offload, ncfg_nft_batch_t *batch, char *err, size_t err_size)
+    const ncfg_nft_offload_t *offload, const char *const *clamp, size_t clamp_count,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	ncfg_buf_t transaction;
 	ncfg_buf_t attrs;
@@ -2276,7 +2377,8 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 			translations++;
 		}
 	}
-	if (!table_exists && uplink_count == 0 && !firewall && forward_count == 0 && !offload) {
+	if (!table_exists && uplink_count == 0 && !firewall && forward_count == 0 && !offload &&
+	    clamp_count == 0) {
 		/* Nothing to remove and nothing to create. See `empty` in nft.h:
 		 * the begin-and-end transaction this would otherwise produce asks
 		 * for no acknowledgement and receives no reply, so a caller that
@@ -2304,7 +2406,7 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 		ncfg_buf_free(&attrs);
 	}
 
-	if (ok && (uplink_count > 0 || firewall || forward_count > 0 || offload)) {
+	if (ok && (uplink_count > 0 || firewall || forward_count > 0 || offload || clamp_count > 0)) {
 		ncfg_buf_init(&attrs, 0);
 		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_TABLE);
 		last_acked = seq;
@@ -2384,6 +2486,10 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 		if (ok && offload) {
 			ok = ncfg_nft_put_offload(&transaction, &seq, &last_acked, offload->hardware,
 			    offload->devices, offload->device_count, err, err_size);
+		}
+		/* MSS clamping (0334), at the forward hook before the filter. */
+		if (ok && clamp_count > 0) {
+			ok = put_mss(&transaction, &seq, &last_acked, clamp, clamp_count, err, err_size);
 		}
 	}
 
@@ -3151,6 +3257,138 @@ static int read_comment(const ncfg_wire_attrs_t *area, ncfg_nft_kernel_rule_t *o
 		left -= 2u + (size_t)length;
 	}
 	return 0;
+}
+
+/*
+ * One of 0334's rules, read back exactly as `mss_rule` writes it: eight
+ * expressions in one order, every value the one written. Anything else in
+ * the `mss` chain is not netcfgd's clamp, and is answered 0.
+ */
+int ncfg_nft_rule_mss(const void *payload, size_t length, char *interface,
+    size_t interface_size, int *leaving)
+{
+	static const char *const order[] = { "meta", "cmp", "meta", "cmp", "payload", "bitwise",
+		"cmp", "rt", "byteorder", "exthdr" };
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t list;
+	ncfg_wire_attr_t  attr;
+	char              name[NCFG_NFT_NAME_MAX];
+	size_t            at = 0;
+	int               way = -1;
+
+	if (!interface || !interface_size || !leaving ||
+	    !payload_attrs(payload, length, &area, NULL, 0) ||
+	    ((const uint8_t *)payload)[0] != NFPROTO_INET ||
+	    !read_name(&area, NFTA_RULE_TABLE, name, sizeof(name), NULL, 0) ||
+	    strcmp(name, NCFG_NFT_TABLE) != 0 ||
+	    !read_name(&area, NFTA_RULE_CHAIN, name, sizeof(name), NULL, 0) ||
+	    strcmp(name, NCFG_NFT_CHAIN_MSS) != 0 ||
+	    ncfg_wire_attrs_find(&area, NFTA_RULE_EXPRESSIONS, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	interface[0] = '\0';
+	ncfg_wire_attrs_start(&list, attr.value, attr.length);
+	while (ncfg_wire_attrs_next(&list, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t expression;
+		ncfg_wire_attrs_t data;
+		ncfg_wire_attr_t  data_attr;
+		const uint8_t    *bytes = NULL;
+		size_t            count = 0;
+		uint32_t          value = 0;
+		uint32_t          other = 0;
+
+		if (attr.kind != NFTA_LIST_ELEM) {
+			continue;
+		}
+		ncfg_wire_attrs_start(&expression, attr.value, attr.length);
+		if (at >= sizeof(order) / sizeof(order[0]) ||
+		    !read_name(&expression, NFTA_EXPR_NAME, name, sizeof(name), NULL, 0) ||
+		    strcmp(name, order[at]) != 0 ||
+		    ncfg_wire_attrs_find(&expression, NFTA_EXPR_DATA, &data_attr, NULL, 0) !=
+		        NCFG_WIRE_OK) {
+			return 0;
+		}
+		ncfg_wire_attrs_start(&data, data_attr.value, data_attr.length);
+		switch (at) {
+		case 0: /* meta oifname or iifname */
+			if (!be32_member(&data, NFTA_META_KEY, &value) ||
+			    (value != NFT_META_OIFNAME && value != NFT_META_IIFNAME)) {
+				return 0;
+			}
+			way = value == NFT_META_OIFNAME;
+			break;
+		case 1: /* the interface's name */
+			if (!data_value(&data, NFTA_CMP_DATA, &bytes, &count) || count == 0u ||
+			    count > interface_size || count > NCFG_NFT_IFNAME_MAX ||
+			    memchr(bytes, '\0', count) == NULL) {
+				return 0;
+			}
+			memcpy(interface, bytes, count);
+			interface[interface_size - 1u] = '\0';
+			break;
+		case 2: /* meta l4proto */
+			if (!be32_member(&data, NFTA_META_KEY, &value) || value != NFT_META_L4PROTO) {
+				return 0;
+			}
+			break;
+		case 3: /* tcp */
+			if (!data_value(&data, NFTA_CMP_DATA, &bytes, &count) || count != 1u ||
+			    bytes[0] != IPPROTO_TCP) {
+				return 0;
+			}
+			break;
+		case 4: /* the flags byte */
+			if (!be32_member(&data, NFTA_PAYLOAD_BASE, &value) ||
+			    value != NFT_PAYLOAD_TRANSPORT_HEADER ||
+			    !be32_member(&data, NFTA_PAYLOAD_OFFSET, &value) || value != 13u ||
+			    !be32_member(&data, NFTA_PAYLOAD_LEN, &value) || value != 1u) {
+				return 0;
+			}
+			break;
+		case 5: /* & (syn | rst) */
+			if (!data_value(&data, NFTA_BITWISE_MASK, &bytes, &count) || count != 1u ||
+			    bytes[0] != 0x06u) {
+				return 0;
+			}
+			break;
+		case 6: /* == syn */
+			if (!data_value(&data, NFTA_CMP_DATA, &bytes, &count) || count != 1u ||
+			    bytes[0] != 0x02u) {
+				return 0;
+			}
+			break;
+		case 7: /* rt tcpmss */
+			if (!be32_member(&data, NFTA_RT_KEY, &value) || value != NFT_RT_TCPMSS) {
+				return 0;
+			}
+			break;
+		case 8: /* hton, 2 of 2 */
+			if (!be32_member(&data, NFTA_BYTEORDER_OP, &value) || value != NFT_BYTEORDER_HTON ||
+			    !be32_member(&data, NFTA_BYTEORDER_LEN, &value) || value != 2u ||
+			    !be32_member(&data, NFTA_BYTEORDER_SIZE, &other) || other != 2u) {
+				return 0;
+			}
+			break;
+		default: { /* write the maxseg option's size; the type is a bare u8 */
+			ncfg_wire_attr_t type;
+
+			if (ncfg_wire_attrs_find(&data, NFTA_EXTHDR_TYPE, &type, NULL, 0) != NCFG_WIRE_OK ||
+			    type.length < 1u || ((const uint8_t *)type.value)[0] != 2u ||
+			    !be32_member(&data, NFTA_EXTHDR_OP, &value) || value != NFT_EXTHDR_OP_TCPOPT ||
+			    !be32_member(&data, NFTA_EXTHDR_OFFSET, &value) || value != 2u ||
+			    !be32_member(&data, NFTA_EXTHDR_LEN, &other) || other != 2u) {
+				return 0;
+			}
+		}
+			break;
+		}
+		at++;
+	}
+	if (at != sizeof(order) / sizeof(order[0]) || way < 0 || !interface[0]) {
+		return 0;
+	}
+	*leaving = way;
+	return 1;
 }
 
 int ncfg_nft_firewall_rule_read(const void *payload, size_t length,

@@ -188,6 +188,8 @@ int main(int argc, char **argv)
 		                   "\tpreference = 50\n"
 		                   "\tforwarding = true\n"
 		                   "\tnat = true\n"
+		                   /* 0334, which a Save that did not read it would drop. */
+		                   "\tclamp_mss = true\n"
 		                   "\tdhcp_server { range = \"192.0.2.50-192.0.2.60\"; lease = 3600; "
 		                   "dns = [\"192.0.2.53\"]; dns_forward = true; dns_intercept = true; "
 		                   /* 0305: the lists it applies, two so the order

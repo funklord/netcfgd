@@ -419,6 +419,34 @@ nft replace rule inet netcfgd input handle "$handle" tcp dport 113 reject commen
 check "a reset swapped for ICMP under the same identity is planned back" \
 	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
 
+# MSS clamping (0334): a chain of its own at the forward hook, priority
+# mangle, two rules for the interface, read back so the plan converges.
+write_etc <<'CONF'
+device wan9 { kind = "dummy" }
+interface wan9 {
+	config = "192.0.2.9/24"
+	clamp_mss = true
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "an interface clamping the MSS is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the chain sits at the forward hook before the filter" \
+	'type filter hook forward priority mangle; policy accept;'
+has "and clamps what leaves by the interface" \
+	'oifname "wan9" tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu'
+has "and what arrives by it" \
+	'iifname "wan9" tcp flags & (syn | rst) == syn tcp option maxseg size set rt mtu'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
+# One direction deleted by hand is a difference, and is written again.
+handle=$(nft -a list chain inet netcfgd mss | sed -n 's/.*iifname "wan9".*# handle \([0-9]*\).*/\1/p')
+nft delete rule inet netcfgd mss handle "$handle"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a clamp missing one direction is planned back" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+ip link del wan9 2>/dev/null || true
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true

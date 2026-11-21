@@ -366,6 +366,11 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 			member_strings(writer, "offload_devices", op->u.nftables.offload_devices,
 			    op->u.nftables.offload_device_count);
 		}
+		/* Written only where some interface clamps (0334). */
+		if (op->u.nftables.clamp_count) {
+			member_strings(writer, "clamp_mss", op->u.nftables.clamp,
+			    op->u.nftables.clamp_count);
+		}
 		/* The forwards whole -- they are short -- with the digest their
 		 * comment will carry, which is what `ncfg status` shows (0298). */
 		if (op->u.nftables.forward_count) {

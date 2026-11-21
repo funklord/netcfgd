@@ -2142,6 +2142,9 @@ static const ncfg_field_t interface_fields[] = {
 	{ .name = "forwarding", .kind = NCFG_F_OPT_BOOL,
 	    .offset = offsetof(ncfg_interface_t, forwarding) },
 	{ .name = "nat", .kind = NCFG_F_OPT_BOOL, .offset = offsetof(ncfg_interface_t, nat) },
+	/* Absent when false (0334). */
+	{ .name = "clamp_mss", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_interface_t, clamp_mss) },
 	{ .name = "guard", .kind = NCFG_F_OPT_STRUCT, .type = &guard_type,
 	    .element_size = sizeof(ncfg_guard_t), .offset = offsetof(ncfg_interface_t, guard) },
 	{ .name = "ipv6_token", .kind = NCFG_F_STR,

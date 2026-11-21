@@ -350,6 +350,15 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	nat = new QCheckBox(QStringLiteral("NAT -- share this uplink with other interfaces"), this);
 	nat->setObjectName(QStringLiteral("iface_nat"));
 	form->addRow(QString(), nat);
+	/* 0334: what a PPPoE uplink needs so sites whose path drops ICMP load. */
+	clamp_mss = new QCheckBox(QStringLiteral("clamp TCP MSS to the route -- for a PPPoE or "
+	                                         "tunnel uplink"), this);
+	clamp_mss->setObjectName(QStringLiteral("iface_clamp_mss"));
+	clamp_mss->setToolTip(QStringLiteral(
+	    "Forwarded TCP connections across this interface are told to send segments no "
+	    "larger than its path carries. Without it, some sites hang behind an uplink with "
+	    "a smaller MTU, such as PPPoE's 1492."));
+	form->addRow(QString(), clamp_mss);
 
 	/* **The router's other half, beside forwarding and NAT** (0297). It serves
 	 * the network of this interface's static IPv4 address, so it needs one,
@@ -679,6 +688,7 @@ void ncfg_interface_dialog::load_existing()
 	enabled->setChecked(existing.enabled);
 	forwarding->setChecked(existing.forwarding);
 	nat->setChecked(existing.nat);
+	clamp_mss->setChecked(existing.clamp_mss);
 	dhcp_server->setChecked(existing.dhcp_server);
 	dhcp_range->setText(existing.dhcp_range);
 	dhcp_lease->setValue(existing.dhcp_lease > 0 ? existing.dhcp_lease : 0);
@@ -999,6 +1009,9 @@ QString ncfg_interface_dialog::block_text() const
 	}
 	if (nat->isChecked()) {
 		body << QStringLiteral("\tnat = true");
+	}
+	if (clamp_mss->isChecked()) {
+		body << QStringLiteral("\tclamp_mss = true");
 	}
 	if (dhcp_server->isChecked()) {
 		QStringList served;

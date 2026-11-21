@@ -352,6 +352,10 @@ typedef struct {
 			ncfg_optint_t              offload;
 			const char *const         *offload_devices;
 			size_t                     offload_device_count;
+			/* MSS clamping (0334): the interfaces whose forwarded TCP
+			 * has its MSS clamped, sorted and interned. */
+			const char *const         *clamp;
+			size_t                     clamp_count;
 		} nftables;
 		struct {
 			const char *iface;

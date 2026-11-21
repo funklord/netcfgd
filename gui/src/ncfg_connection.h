@@ -539,6 +539,8 @@ struct ncfg_interface_config {
 	bool    enabled = true;
 	bool    forwarding = false;
 	bool    nat = false;
+	/* `clamp_mss = true` (0334). */
+	bool    clamp_mss = false;
 	QString probe_command;
 	QString probe_args;
 	/* -1 where the document states none, which is "follow the default"

@@ -1493,6 +1493,13 @@ typedef struct {
 	 * treats them the same because "no NAT is installed" is true in both. */
 	char **nat;
 	size_t nat_count;
+	/* The interfaces netcfgd's `mss` chain has a clamp rule for (0334),
+	 * sorted, and how many such rules there are: two per interface where
+	 * the chain is as written, so one left on its own is still a difference
+	 * the planner sees. */
+	char   **clamp;
+	size_t   clamp_count;
+	int64_t  clamp_rules;
 	/* Tables other than netcfgd's that translate source addresses. Decision
 	 * 0022 refuses to delete these and reports them instead: a second
 	 * source-NAT chain on the same hook translates the same packets twice, and

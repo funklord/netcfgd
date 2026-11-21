@@ -691,6 +691,42 @@ static void a_port_range_is_one_kernel_rule(void)
 	ncfg_buf_free(&text);
 }
 
+/* MSS clamping (0334): its own chain, two rules an interface, each read back
+ * as the interface and the way it matches; the audit takes the chain. */
+static void an_mss_clamp_is_two_rules_an_interface(void)
+{
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	const char *const    clamp[1] = { "ppp0" };
+	char                 err[NCFG_ERROR_MAX];
+	int                  chains = 0, leaving = 0, arriving = 0;
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, NULL, 0, NULL, clamp, 1u,
+	          &batch, err, sizeof(err)),
+	    "a table that only clamps the MSS is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and its `mss` chain passes the audit");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		char name[NCFG_NFT_IFNAME_MAX];
+		int  way = -1;
+
+		chains += (message.header.kind & 0xffu) == NFT_MSG_NEWCHAIN;
+		if ((message.header.kind & 0xffu) == NFT_MSG_NEWRULE &&
+		    ncfg_nft_rule_mss(message.payload, message.payload_length, name, sizeof(name),
+		        &way) && strcmp(name, "ppp0") == 0) {
+			leaving += way == 1;
+			arriving += way == 0;
+		}
+	}
+	check(chains == 1 && leaving == 1 && arriving == 1,
+	    "  as one chain and two rules, one each way, read back");
+	ncfg_buf_free(&out);
+}
+
 /* ICMP types (0333): one kernel rule each, each read back as its type. */
 static void icmp_types_are_one_kernel_rule_each(void)
 {
@@ -1007,7 +1043,7 @@ static void forwards_are_written_and_read_back(void)
 	int                       others_pass = 1;
 
 	ncfg_buf_init(&out, 0);
-	check(ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, forwards, 2u, NULL, &batch, err,
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, forwards, 2u, NULL, NULL, 0, &batch, err,
 	          sizeof(err)) && !batch.empty,
 	    "a table with an uplink and two port forwards builds");
 	check(message_count(&out) == 8u,
@@ -1053,7 +1089,7 @@ static void forwards_are_written_and_read_back(void)
 	ncfg_buf_free(&out);
 
 	ncfg_buf_init(&out, 0);
-	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, forwards, 1u, NULL, &batch, err,
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, forwards, 1u, NULL, NULL, 0, &batch, err,
 	          sizeof(err)) && message_count(&out) == 5u,
 	    "a forward alone is a table, its chain and its rule, with no masquerade chain");
 	ncfg_buf_free(&out);
@@ -1066,7 +1102,7 @@ static void forwards_are_written_and_read_back(void)
 		int                       found = 0;
 
 		ncfg_buf_init(&out, 0);
-		check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &six, 1u, NULL, &batch, err,
+		check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &six, 1u, NULL, NULL, 0, &batch, err,
 		          sizeof(err)),
 		    "a forward to an IPv6 address builds");
 		ncfg_wire_messages_start(&walk, out.data, out.length);
@@ -1090,14 +1126,14 @@ static void forwards_are_written_and_read_back(void)
 	bad.address = "203.0.113.1";
 	bad.to = "2001:db8::10";
 	ncfg_buf_init(&out, 0);
-	check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, NULL, &batch, err,
+	check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, NULL, NULL, 0, &batch, err,
 	          sizeof(err)) && out.length == 0u && strstr(err, "not an IPv4 address") != NULL,
 	    "a reflection to an IPv6 address is refused, and nothing built");
 	ncfg_buf_free(&out);
 	bad = forwards[0];
 	bad.interface = "a-name-far-too-long";
 	ncfg_buf_init(&out, 0);
-	check(!ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &bad, 1u, NULL, &batch, err,
+	check(!ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, &bad, 1u, NULL, NULL, 0, &batch, err,
 	          sizeof(err)) && out.length == 0u,
 	    "  and one on an interface name no register holds");
 }
@@ -1127,7 +1163,7 @@ static void reflections_and_return_paths_are_read_back(void)
 	int                  chains = 0;
 
 	ncfg_buf_init(&out, 0);
-	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, rules, 3u, NULL, &batch, err,
+	check(ncfg_nft_build_replace_all(&out, 1u, 0, NULL, 0, NULL, rules, 3u, NULL, NULL, 0, &batch, err,
 	          sizeof(err)),
 	    "a forward with its reflection and return path builds");
 	ncfg_wire_messages_start(&walk, out.data, out.length);
@@ -2037,6 +2073,7 @@ int main(void)
 	a_port_range_is_one_kernel_rule();
 	a_reset_reads_back_as_a_reset();
 	icmp_types_are_one_kernel_rule_each();
+	an_mss_clamp_is_two_rules_an_interface();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

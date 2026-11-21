@@ -820,6 +820,9 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	size_t                 forward_count = 0;
 	const char           **offloaded = NULL;
 	size_t                 offloaded_count = 0;
+	const char           **clamped = NULL;
+	size_t                 clamped_count = 0;
+	int                    clamp_same;
 	int                    offload_wanted = 0;
 	int                    offload_same;
 	int                    failed = 0;
@@ -931,6 +934,31 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		        same_uplinks((const char *const *)offloaded, offloaded_count,
 		            (const char *const *)seen->devices, seen->device_count);
 	}
+	/* MSS clamping (0334): every interface the document clamps on, whether
+	 * or not its link is there yet -- a PPPoE uplink appears when it dials,
+	 * and the rule matches it by name when it does. */
+	if (desired->interface_count != 0u) {
+		clamped = calloc(desired->interface_count, sizeof(*clamped));
+		if (!clamped) {
+			builder->plan->failed = 1;
+			free(offloaded);
+			free(forwards_was);
+			free(forwards);
+			free(wanted);
+			return;
+		}
+		for (i = 0; i < desired->interface_count; i++) {
+			if (desired->interfaces[i].clamp_mss) {
+				clamped[clamped_count++] = desired->interfaces[i].name;
+			}
+		}
+		if (clamped_count > 1u) {
+			qsort(clamped, clamped_count, sizeof(*clamped), by_name);
+		}
+	}
+	clamp_same = same_uplinks((const char *const *)clamped, clamped_count,
+	    (const char *const *)builder->observed->clamp, builder->observed->clamp_count) &&
+	    builder->observed->clamp_rules == (int64_t)(2u * clamped_count);
 	uplinks_same = same_uplinks((const char *const *)wanted, count,
 	    (const char *const *)builder->observed->nat, builder->observed->nat_count);
 	firewall_same = ncfg_nft_firewall_matches(desired->firewall, builder->observed->firewall,
@@ -958,7 +986,8 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		    "one. netcfgd does not touch them", ncfg_buf_text(&buf));
 		ncfg_buf_free(&buf);
 	}
-	if (uplinks_same && firewall_same && forwards_same && offload_same) {
+	if (uplinks_same && firewall_same && forwards_same && offload_same && clamp_same) {
+		free(clamped);
 		free(offloaded);
 		free(forwards_was);
 		free(forwards);
@@ -993,8 +1022,13 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		op.u.nftables.offload_devices = (const char *const *)offloaded;
 		op.u.nftables.offload_device_count = offloaded_count;
 	}
+	op.u.nftables.clamp = (const char *const *)clamped;
+	op.u.nftables.clamp_count = clamped_count;
 	memset(&inverse, 0, sizeof(inverse));
 	inverse.kind = NCFG_OP_NFTABLES_REPLACE;
+	/* The clamp as it stands, put back by a revert. */
+	inverse.u.nftables.clamp = (const char *const *)builder->observed->clamp;
+	inverse.u.nftables.clamp_count = builder->observed->clamp_count;
 	/* The table as it stands, which is a real revert rather than a guess: an
 	 * empty list and no firewall removes the table, and that is what a
 	 * machine with no table had. The firewall is the installed one put back
@@ -1021,6 +1055,7 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	if (failed) {
 		builder->plan->failed = 1;
 		ncfg_firewall_free(was);
+		free(clamped);
 		free(offloaded);
 		free(forwards_was);
 		free(forwards);
@@ -1062,6 +1097,7 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 	 * are the caller's to give back -- the same bargain every string an op
 	 * names is under. */
 	ncfg_firewall_free(was);
+	free(clamped);
 	free(offloaded);
 	free(forwards_was);
 	free(forwards);

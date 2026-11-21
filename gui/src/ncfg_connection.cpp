@@ -1399,6 +1399,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->enabled = found.enabled != 0;
 	out->forwarding = found.forwarding != 0;
 	out->nat = found.nat != 0;
+	out->clamp_mss = found.clamp_mss != 0;
 	out->probe_command = from_c(found.probe_command);
 	out->probe_args = from_c(found.probe_args);
 	out->probe_interval = found.probe_interval;

@@ -605,6 +605,9 @@ static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t 
 		ncfg_render_quote(body, interface->ipv6_token);
 		ncfg_buf_add_char(body, '\n');
 	}
+	if (interface->clamp_mss) {
+		ncfg_buf_add_text(body, "\tclamp_mss = true\n");
+	}
 	if (interface->nat.has) {
 		ncfg_buf_addf(body, "\tnat = %s\n", interface->nat.value ? "true" : "false");
 	}

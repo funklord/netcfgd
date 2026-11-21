@@ -5206,6 +5206,7 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	out->enabled = ncfg_json_bool(doc, ncfg_json_member(doc, found, "enabled"), 1);
 	out->forwarding = ncfg_json_bool(doc, ncfg_json_member(doc, found, "forwarding"), 0);
 	out->nat = ncfg_json_bool(doc, ncfg_json_member(doc, found, "nat"), 0);
+	out->clamp_mss = ncfg_json_bool(doc, ncfg_json_member(doc, found, "clamp_mss"), 0);
 	uint32_t preference = ncfg_json_member(doc, found, "preference");
 	if (preference != NCFG_JSON_NONE) {
 		out->preference = (int)ncfg_json_int(doc, preference, -1);

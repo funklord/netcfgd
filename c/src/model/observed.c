@@ -1590,6 +1590,12 @@ static const ncfg_field_t observed_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_t, forwarding_applied_count) },
 	{ .name = "nat", .kind = NCFG_F_STR_LIST, .offset = offsetof(ncfg_observed_t, nat),
 	    .count_offset = offsetof(ncfg_observed_t, nat_count) },
+	/* Absent when empty (0334). */
+	{ .name = "clamp_mss", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_t, clamp),
+	    .count_offset = offsetof(ncfg_observed_t, clamp_count) },
+	{ .name = "clamp_mss_rules", .kind = NCFG_F_INT, .flags = NCFG_FF_OMIT_ZERO,
+	    .offset = offsetof(ncfg_observed_t, clamp_rules) },
 	{ .name = "nat_conflicts", .kind = NCFG_F_STR_LIST,
 	    .offset = offsetof(ncfg_observed_t, nat_conflicts),
 	    .count_offset = offsetof(ncfg_observed_t, nat_conflict_count) },

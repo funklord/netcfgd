@@ -107,11 +107,13 @@ int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
 		offload.device_count = op->u.nftables.offload_device_count;
 		return ncfg_nft_build_replace_all(out, first_seq, table_exists, op->u.nftables.uplinks,
 		    op->u.nftables.uplink_count, op->u.nftables.firewall, op->u.nftables.forwards,
-		    op->u.nftables.forward_count, &offload, batch, err, err_size);
+		    op->u.nftables.forward_count, &offload, op->u.nftables.clamp,
+		    op->u.nftables.clamp_count, batch, err, err_size);
 	}
 	return ncfg_nft_build_replace_all(out, first_seq, table_exists, op->u.nftables.uplinks,
 	    op->u.nftables.uplink_count, op->u.nftables.firewall, op->u.nftables.forwards,
-	    op->u.nftables.forward_count, NULL, batch, err, err_size);
+	    op->u.nftables.forward_count, NULL, op->u.nftables.clamp, op->u.nftables.clamp_count,
+	    batch, err, err_size);
 }
 
 /*
