@@ -212,6 +212,25 @@ ncfg_optbool_t ncfg_observe_forwarding(const char *proc_root, const char *name)
 	return some_bool(four && six);
 }
 
+/* br_netfilter's switch (10.891). Absent where the module is not loaded,
+ * which is unknown here and off in effect. */
+ncfg_optbool_t ncfg_observe_bridge_nf(const char *proc_root, const char *leaf)
+{
+	char path[HOST_PATH_MAX];
+	char value[HOST_VALUE_MAX];
+	int  written;
+
+	if (!proc_root || !leaf) {
+		return no_bool();
+	}
+	written = snprintf(path, sizeof(path), "%s/sys/net/bridge/%s", proc_root, leaf);
+	if (written < 0 || (size_t)written >= sizeof(path) ||
+	    !read_value(path, value, sizeof(value))) {
+		return no_bool();
+	}
+	return some_bool(strcmp(value, "0") != 0);
+}
+
 ncfg_optbool_t ncfg_observe_privacy(const char *proc_root, const char *name)
 {
 	char value[HOST_VALUE_MAX];
@@ -572,6 +591,10 @@ int ncfg_observe_augment_host(ncfg_observed_t *observed, const ncfg_observe_root
 	}
 	free(observed->hostname);
 	observed->hostname = ncfg_observe_hostname(roots->proc);
+	observed->bridge_nf_call_iptables =
+	    ncfg_observe_bridge_nf(roots->proc, "bridge-nf-call-iptables");
+	observed->bridge_nf_call_ip6tables =
+	    ncfg_observe_bridge_nf(roots->proc, "bridge-nf-call-ip6tables");
 	for (at = 0; at < observed->link_count; at++) {
 		ncfg_observed_link_t *link = &observed->links[at];
 

@@ -184,11 +184,70 @@ static void warn_forward_replies(ncfg_builder_t *builder)
 	}
 }
 
+/*
+ * A bridge whose forwarded frames a forward chain drops (10.891). With
+ * br_netfilter loaded and `bridge-nf-call-iptables` on -- Docker does both --
+ * a frame crossing a bridge from one port to another passes every table's
+ * IP forward chain, and Docker leaves `ip filter/FORWARD` dropping by policy.
+ * Traffic between two other machines through this one is then dropped, and
+ * in a ring the box that forwards is the one carrying the failover, so it
+ * works until the day a cable is cut. Said, not fought: the table is not
+ * netcfgd's, and turning br_netfilter's switch off is Docker's business too.
+ */
+static void warn_bridged_filtered(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	const ncfg_observed_t *observed = builder->observed;
+	int                    four, six;
+	ncfg_buf_t             named;
+	size_t                 at, d;
+
+	if (!desired || !observed) {
+		return;
+	}
+	four = observed->bridge_nf_call_iptables.has && observed->bridge_nf_call_iptables.value;
+	six = observed->bridge_nf_call_ip6tables.has && observed->bridge_nf_call_ip6tables.value;
+	if (!four && !six) {
+		return;
+	}
+	ncfg_buf_init(&named, 0);
+	for (at = 0; at < observed->forward_dropper_count; at++) {
+		const char *one = observed->forward_droppers[at];
+
+		if ((four && strncmp(one, "ip ", 3u) == 0) || (six && strncmp(one, "ip6 ", 4u) == 0) ||
+		    strncmp(one, "inet ", 5u) == 0) {
+			ncfg_buf_addf(&named, "%s`%s`", ncfg_buf_text(&named)[0] ? ", " : "", one);
+		}
+	}
+	if (desired->firewall && desired->firewall->forward.policy == NCFG_FIREWALL_POLICY_DROP) {
+		ncfg_buf_addf(&named, "%s%s", ncfg_buf_text(&named)[0] ? ", and " : "",
+		    "this firewall's own `forward`");
+	}
+	for (d = 0; ncfg_buf_text(&named)[0] && d < desired->device_count; d++) {
+		const ncfg_device_t *device = &desired->devices[d];
+
+		if (device->kind.kind != NCFG_KIND_BRIDGE || device->kind.bridge.member_count < 2u) {
+			continue;
+		}
+		ncfg_plan_warnf(builder->plan, device->name,
+		    "%s forwards between its ports, and with bridge-nf-call-%s on (br_netfilter, "
+		    "which Docker loads) those frames pass %s, which drops by default: traffic "
+		    "between two other machines through this bridge is dropped -- in a ring, the "
+		    "failover path. Accept it there (Docker's is `iptables -I DOCKER-USER -i %s "
+		    "-o %s -j ACCEPT`), or set net.bridge.bridge-nf-call-iptables to 0; netcfgd "
+		    "does not touch other tables",
+		    device->name, four ? "iptables" : "ip6tables", ncfg_buf_text(&named),
+		    device->name, device->name);
+	}
+	ncfg_buf_free(&named);
+}
+
 void ncfg_plan_input_warnings(ncfg_builder_t *builder)
 {
 	const ncfg_document_t *desired = builder->desired;
 	size_t                 at;
 
+	warn_bridged_filtered(builder);
 	warn_forward_replies(builder);
 	if (!ncfg_plan_input_drops(desired)) {
 		return;

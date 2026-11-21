@@ -397,6 +397,9 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 	observe_names_free(observed->filter_neighbours, observed->filter_neighbour_count);
 	observed->filter_neighbours = NULL;
 	observed->filter_neighbour_count = 0;
+	observe_names_free(observed->forward_droppers, observed->forward_dropper_count);
+	observed->forward_droppers = NULL;
+	observed->forward_dropper_count = 0;
 	for (at = 0; at < reply->count; at++) {
 		ncfg_nft_chain_t chain;
 		char           **slot = NULL;
@@ -439,6 +442,19 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 				    chain.name, hook);
 				if (!observe_list_add(&observed->filter_neighbours,
 				        &observed->filter_neighbour_count, named)) {
+					ncfg_observed_firewall_free(found);
+					ncfg_error_set(err, err_size, "out of memory recording the firewall");
+					return 0;
+				}
+			}
+			/* Docker's `ip filter/FORWARD` is one: a bridge's own ports
+			 * pass it once br_netfilter is on (10.891). */
+			if (chain.hook == NF_INET_FORWARD && chain.has_policy &&
+			    chain.policy == NF_DROP && family[0]) {
+				(void)snprintf(named, sizeof(named), "%s%s/%s", family, chain.table,
+				    chain.name);
+				if (!observe_list_add(&observed->forward_droppers,
+				        &observed->forward_dropper_count, named)) {
 					ncfg_observed_firewall_free(found);
 					ncfg_error_set(err, err_size, "out of memory recording the firewall");
 					return 0;

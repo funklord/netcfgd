@@ -12747,6 +12747,46 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.891 Docker on a ring box drops the failover; the plan says so
+
+ml350 runs Docker (read on the box: `dockerd` up, `br_netfilter` loaded,
+`/proc/sys/net/bridge/bridge-nf-call-iptables` 1). With that switch on, a
+frame crossing a bridge from one port to another passes every table's IP
+forward chain, and Docker leaves `ip filter/FORWARD` dropping by policy.
+With -01 as the ring's root (10.889), ml350 is the box the path between
+-01 and -03 goes through once their cable is cut, so the failover would be
+dropped there -- on the one day it is needed, and silently.
+
+Measured in `make hull-storage-ring`, with ml350 given br_netfilter, the
+switch and a dropping `ip filter/FORWARD` (the hwsim image gains
+`nftables` for it): before the cut every box reached the others; after it,
+-01 and -03 did not reach each other or ml350 for the 281-291 s the rig
+waited. Nothing of netcfgd's can fix that from its own table -- the
+strictest verdict across tables wins (0294) -- and the per-bridge
+`nf_call_iptables` only adds to the global switch, it cannot exempt one
+bridge from it.
+
+So the plan says it. The observation keeps, beside the neighbouring filter
+chains, the forward chains whose policy drops (`forward_droppers`, as
+`family table/chain`) and br_netfilter's two switches (absent where the
+module is not loaded); and every bridge with two ports or more, when a
+dropping chain of a family whose switch is on exists -- or the document's
+own `forward` drops -- gets a warning naming the chain and the remedy:
+`iptables -I DOCKER-USER -i BRIDGE -o BRIDGE -j ACCEPT`, or the switch set
+to 0. The rig now checks ml350's plan says it, inserts that remedy in
+nft's words, and the ring heals in 13-14 s as before. `plan_input_test`
+holds the four cases (warned; not with the switch off; not for the other
+family's chain; not with nothing dropping).
+
+For the holder's boxes: ml350 needs that DOCKER-USER rule (or the switch
+off) before the ring is relied on, and any other box that comes to run
+Docker the same. Whether Docker's own containers need the switch on is
+Docker's question; the rule is the narrower change.
+
+Once, in the run without the remedy, ml350's first jumbo ping to -01 was
+lost before any cut -- not forwarded traffic -- and reached after it; it
+did not recur with the remedy. Unexplained, seen once.
+
 ## 10.890 Taken over from ifupdown, a Devuan box mounted no network filesystem at boot
 
 The takeover rigs (10.884, 10.886) switch within one boot and never boot

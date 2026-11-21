@@ -1534,6 +1534,11 @@
 # LINK TYPES
 #
 # A BRIDGE. Members take no address of their own; the bridge does.
+#
+# Where br_netfilter is loaded with bridge-nf-call-iptables on -- Docker does
+# both -- frames crossing the bridge between two of its ports pass every
+# table's IP forward chain, Docker's dropping one among them; `ncfg plan`
+# names the chain and the rule that lets them through.
 
 #device br0 {
 #	bridge {

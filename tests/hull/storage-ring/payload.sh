@@ -53,6 +53,22 @@ CONF
 if [ "$name" = dl180g6-01 ]; then
 	sed -i 's/^\t\tstp           = true$/&\n\t\tpriority      = 4096/' "$work/etc/netcfgd.conf"
 fi
+# ml350 runs Docker, which loads br_netfilter, turns bridge-nf-call-iptables
+# on and leaves `ip filter/FORWARD` dropping by policy (10.891). Here it is
+# the box a cut -01 -- -03 cable makes the ring's path through.
+if [ "$name" = ml350 ]; then
+	modprobe br_netfilter 2>/dev/null
+	echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables
+	nft add table ip filter
+	nft add chain ip filter FORWARD '{ type filter hook forward priority 0; policy drop; }'
+	timeout 60 "$ncfg" plan > "$work/plan-docker.log" 2>&1
+	check "the plan says Docker's forward chain drops what br-storage forwards" \
+		"$(grep -c 'br-storage forwards between its ports.*ip filter/FORWARD' "$work/plan-docker.log")" "1"
+	if [ "$(cat /payload/remedy 2>/dev/null || echo yes)" = yes ]; then
+		# The remedy the warning names, in nft's words for this table.
+		nft insert rule ip filter FORWARD iifname br-storage oifname br-storage accept
+	fi
+fi
 timeout 60 "$ncfg" apply > "$work/apply.log" 2>&1
 say "     apply exited $?"
 grep -v '^netcfgd: \[observe\]' "$work/apply.log" | sed 's/^/     apply: /' >> "$out"

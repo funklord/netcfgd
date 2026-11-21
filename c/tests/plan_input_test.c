@@ -164,8 +164,56 @@ static void a_masquerade_whose_replies_are_dropped_is_said(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * A bridge's forwarded frames, through a forward chain that drops (10.891):
+ * Docker's `ip filter/FORWARD` once br_netfilter's switch is on. Said per
+ * bridge with two ports, and only where both halves are true.
+ */
+#define RING_BRIDGE \
+	"{\"name\":\"br-storage\",\"kind\":{\"kind\":\"bridge\"," \
+	"\"members\":[\"eth2\",\"eth3\"],\"stp\":true,\"vlan_filtering\":false}}"
+#define DOCKER_FORWARD "\"forward_droppers\":[\"ip filter/FORWARD\"]"
+
+static void a_bridge_another_table_drops_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+	plan = planfix_plan(RING_BRIDGE, "", "", "",
+	    "\"links\":[]," DOCKER_FORWARD ",\"bridge_nf_call_iptables\":true", &document,
+	    &observed);
+	check(plan && planfix_warned(plan, "br-storage forwards between its ports") &&
+	        planfix_warned(plan, "`ip filter/FORWARD`") &&
+	        planfix_warned(plan, "-i br-storage -o br-storage -j ACCEPT"),
+	    "a bridge whose frames Docker's forward chain drops is said, with the remedy");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RING_BRIDGE, "", "", "",
+	    "\"links\":[]," DOCKER_FORWARD ",\"bridge_nf_call_iptables\":false", &document,
+	    &observed);
+	check(plan && !planfix_warned(plan, "forwards between its ports"),
+	    "  and not with br_netfilter's switch off");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RING_BRIDGE, "", "", "",
+	    "\"links\":[],\"forward_droppers\":[\"ip6 filter/FORWARD\"],"
+	    "\"bridge_nf_call_iptables\":true,\"bridge_nf_call_ip6tables\":false", &document,
+	    &observed);
+	check(plan && !planfix_warned(plan, "forwards between its ports"),
+	    "  nor where only the other family's chain drops");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RING_BRIDGE, "", "", "",
+	    "\"links\":[],\"bridge_nf_call_iptables\":true", &document, &observed);
+	check(plan && !planfix_warned(plan, "forwards between its ports"),
+	    "  nor where no forward chain drops");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
+	a_bridge_another_table_drops_is_said();
 	a_masquerade_whose_replies_are_dropped_is_said();
 	no_replies_is_said_once();
 	a_dhcpv6_client_and_ipv6_are_said();

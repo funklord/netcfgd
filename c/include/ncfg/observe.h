@@ -715,6 +715,7 @@ ncfg_optbool_t ncfg_observe_forwarding(const char *proc_root, const char *name);
  * can request and netcfgd therefore does not claim as its own. Absent where
  * the file is not there at all.
  */
+ncfg_optbool_t ncfg_observe_bridge_nf(const char *proc_root, const char *leaf);
 ncfg_optbool_t ncfg_observe_privacy(const char *proc_root, const char *name);
 
 /*

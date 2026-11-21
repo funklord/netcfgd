@@ -1526,6 +1526,16 @@ typedef struct {
 	 * 0294 says to report before an apply, not to fight. Omitted when empty. */
 	char  **filter_neighbours;
 	size_t  filter_neighbour_count;
+	/* Of those, the forward chains whose policy drops, as `family
+	 * table/chain` (10.891): what a bridge's forwarded frames meet once
+	 * br_netfilter sends them through the IP hooks. Omitted when empty. */
+	char  **forward_droppers;
+	size_t  forward_dropper_count;
+	/* `/proc/sys/net/bridge/bridge-nf-call-iptables` and `-ip6tables`: on,
+	 * a bridge's forwarded IPv4 or IPv6 frames pass every table's forward
+	 * chain. Unknown where br_netfilter is not loaded, which is off. */
+	ncfg_optbool_t bridge_nf_call_iptables;
+	ncfg_optbool_t bridge_nf_call_ip6tables;
 	/* The port forwards netcfgd's table holds (0298), read back out of its
 	 * `prerouting` chain in the kernel's order; and why each rule there the
 	 * decoder could not read was refused -- a hand edit, replaced on the next
