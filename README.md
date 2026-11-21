@@ -436,9 +436,13 @@ Anything can be a client: the control socket's contract is written down in
 
 ## Permissions and secrets
 
-Three tiers on the control socket — **observe**, **wifi** and **admin** —
-grantable to a user, a group, anyone or root, and set separately for the local
-socket and for remote connections.
+Three tiers on the control socket, each including the one before it —
+**view** to read, **laptop** for what a person at their own machine does
+(join, add and forget networks, the radio and the VPN on and off), and
+**root** for everything else, named for what it is: whoever may choose a
+machine's routes and resolvers chooses where its traffic goes. Each is
+grantable to a user, a group, anyone or root, and set separately for the
+local socket and for remote connections.
 
 **Secrets never enter the desired-state document.** It holds only a reference,
 resolved from a file, the kernel keyring, `pass`, a program you name or a value
