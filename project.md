@@ -7010,6 +7010,62 @@ lock, or a host begun again that the far side takes for nobody's copy
 script threw the failing ask's error away; it now prints it, so the next miss
 says which.
 
+## 10.895 What the firewall language and the window cannot say, inventoried
+
+Asked by the holder on 2026-11-21: the SSH guard had no translation until
+`over` (10.885), so how far is the firewall from what operators write in
+iptables and nftables, and what does the window not expose? Read from
+`lower_firewall.c`, `nft.c` and the dialogs, with two claims spot-checked
+(`invert` is lowered and no dialog writes it; port ranges are refused). The
+rule keys are `protocol port from to interface out_interface state translated
+mac hours days over`, on `accept`, `drop` and `reject`, in `input`, `forward`
+and `output` -- the vocabulary [0294](doc/decision/0294-layer-one-is-named-rules-in-netcfgds-own-table.md)
+called whole for a first version, which left out rate limits, marks, logging,
+sets and raw text on purpose. `over` has since taken the first.
+
+**Present:** conntrack state (no `untracked`), time of day, MAC and OUI with
+`host_list:`, a per-source packet rate on `drop`/`reject` (`over`), port
+forwarding with hairpin (IPv4), masquerade by `nat = true`, both families in
+one `inet` table.
+
+**Partial:**
+- interfaces match by exact name: no `eth*`, no negation, no groups;
+- `from`/`to` are lists expanded into one kernel rule per pair (256 at most),
+  not a set; no named address sets and nothing feeding one from a file or URL;
+- ports are single numbers and destination only: **no ranges, no source port**;
+- protocols are `tcp udp icmp icmpv6` and `any`: no `gre`, `esp`, `sctp`;
+- `reject` is always icmpx port-unreachable: no `tcp reset`, no type;
+- `port_forward` is one port, tcp or udp, with no external source match;
+- SNAT is masquerade only, never to a fixed address;
+- chains are the three filter hooks: no prerouting/postrouting, no user chains,
+  no `jump`; forwarding between zones is `interface` plus `out_interface`, and
+  zones (0284's layer three) do not exist yet.
+
+**Absent:** ICMP type and code, TCP flags, a global `limit`, connection counts
+(`ct count`), **logging** (no `log` at all, so a drop leaves no trace),
+counters, a general `redirect`, setting or matching a packet or conntrack mark
+(policy routing can match one nothing in the firewall sets), **MSS clamping**
+(the PPPoE uplink's usual need), raw/notrack, owner match, negation of any
+match.
+
+**The window**, against the language: the firewall tab covers every rule key
+and the chain policies; the interface, network, access point, mesh, dns
+record, block list and host list dialogs found nothing missing. What has no
+structured control:
+- device kinds `xfrm`, `radio` and `mesh_point`, and a bridge's
+  `forward_delay`, `hello_time`, `max_age`, `ageing_time`, `priority`;
+- a routing rule's `invert`;
+- `global`: `locked`, `flow_offload` and `connectivity` not shown at all;
+  `hostname`, `on_drift`, `confirm` and `remote` shown read-only; the global
+  dns `servers`, `search` and `domains`.
+The files tab edits any of it as text.
+
+**What follows, in order of what a router needs first:** logging and
+counters (a firewall that drops in silence cannot be debugged), port ranges
+and ICMP types, MSS clamping, `reject with tcp reset`, then the window's
+missing keys. Each firewall item is a key on 0294's vocabulary rather than a
+new layer, the way `over` was.
+
 ## 10.894 A pin move left fuzznet's old objects in the link
 
 `make bridge-test` failed on 2026-11-21 with `multiple definition of
