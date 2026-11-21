@@ -732,33 +732,46 @@ static void a_name_that_is_not_utf8_fails_the_rendering_and_not_the_write(void)
 }
 
 /*
- * There is no `ncfg secret get`, and that is the point.
+ * `ncfg secret get` asks the daemon, and never reads the file itself.
  *
- * The whole of a secret reference is that the value travels to the backend that
- * needs it and nowhere else (0075).
+ * 0328 shows a credential to the `root` tier, and the tier is judged by the
+ * daemon: a `get` that read the store when no daemon answered would show a
+ * value to whoever could read the file, whatever the policy said. So with no
+ * daemon here, it fails, and the value stored is not printed.
  */
-static void there_is_no_way_to_read_one_back(void)
+static void get_asks_the_daemon_and_never_the_file(void)
 {
-	static const char *const asked[] = { "get", "show", "print" };
-	const char              *positional[2];
-	char                     err[NCFG_ERROR_MAX];
-	size_t                   which;
+	const char *positional[2];
+	const char *printed;
+	char        path[512];
+	char        err[NCFG_ERROR_MAX];
 
 	fixture(base_config);
-	for (which = 0; which < sizeof(asked) / sizeof(asked[0]); which++) {
-		positional[0] = asked[which];
-		err[0] = '\0';
-		check(!ncfg_cli_secret(&options, positional, 1u, err, sizeof(err)),
-		    "`ncfg secret get` is refused rather than absent");
-		check(strstr(err, "that is the point") != NULL,
-		    "and says why, rather than reading as an unimplemented command");
-	}
+	(void)snprintf(path, sizeof(path), "%s/secrets", config_dir);
+	(void)mkdir(path, 0700);
+	(void)snprintf(path, sizeof(path), "%s/secrets/vpn", config_dir);
+	(void)testdir_write(path, sentinel, strlen(sentinel));
+	positional[0] = "get";
+	positional[1] = "vpn";
+	err[0] = '\0';
+	capture_begin();
+	check(!ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "`ncfg secret get` with no daemon to ask fails");
+	printed = capture_end();
+	check(strstr(printed, sentinel) == NULL && strstr(err, sentinel) == NULL,
+	    "  and does not read the stored value itself");
+	(void)unlink(path);
+
+	positional[0] = "get";
+	err[0] = '\0';
+	check(!ncfg_cli_secret(&options, positional, 1u, err, sizeof(err)),
+	    "and `get` with no name is refused");
 
 	positional[0] = "rm";
 	err[0] = '\0';
 	check(!ncfg_cli_secret(&options, positional, 1u, err, sizeof(err)),
 	    "and a subcommand this port does not have is named");
-	check(strstr(err, "there are two: set, seal") != NULL, "saying what there is");
+	check(strstr(err, "there are three: set, seal, get") != NULL, "saying what there is");
 	detail("said", err);
 
 	err[0] = '\0';
@@ -789,7 +802,7 @@ int main(void)
 	a_config_that_does_not_compile_still_stores_the_secret();
 	json_says_what_was_stored_and_never_the_value();
 	a_name_that_is_not_utf8_fails_the_rendering_and_not_the_write();
-	there_is_no_way_to_read_one_back();
+	get_asks_the_daemon_and_never_the_file();
 
 	{
 		char path[512];

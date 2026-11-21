@@ -16,6 +16,7 @@
 {"request":"secret_put","name":"cafe","value":"NOT-A-REAL-SECRET"}
 {"request":"config_delete","name":"nm-cafe"}
 {"request":"secret_delete","name":"cafe"}
+{"request":"secret_get","name":"cafe"}
 {"request":"profile_delete","name":"weekend"}
 {"request":"hello"}
 {"request":"status"}
@@ -55,6 +56,7 @@
 {"response":"event","event":"confirm_armed","seconds":90}
 {"response":"ap_stations","interface":"wlan0","access_point":"guest","access_control":"deny","stations":[{"address":"00:11:22:33:44:55","hostname":"laptop","ipv4":"192.168.4.120","authorized":true,"listed":true,"signal":-52,"connected_seconds":3600,"inactive_msec":40,"rx_bytes":100000,"tx_bytes":200000},{"address":"66:77:88:99:aa:bb","ipv4":"192.168.4.121","authorized":false,"listed":false,"signal":-70,"connected_seconds":10800,"inactive_msec":40,"rx_bytes":300000,"tx_bytes":600000},{"address":"aa:bb:cc:dd:ee:ff","authorized":true,"listed":false}]}
 {"response":"ok"}
+{"response":"secret","name":"cafe","value":"NOT-A-REAL-SECRET"}
 {"response":"error","message":"not permitted"}
 {"response":"secrets","secrets":[{"name":"cafe","stored":true,"used_by":["network Cafe"]},{"name":"campus","stored":false,"used_by":["network Campus"]},{"name":"old-vpn","stored":true}]}
 {"response":"modems","modems":[{"device":"wwan0","sim":["esim","socket"],"selected":"socket","apn":"im.cxn","cycle_pending":true,"cards":[{"source":"socket","iccid":"8946080023614318322"}]},{"device":"wwan1","sim":["socket"],"selected":"socket"}]}

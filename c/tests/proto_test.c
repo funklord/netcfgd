@@ -300,6 +300,7 @@ static int fully_populated(ncfg_proto_request_kind_t kind, ncfg_proto_request_t 
 	case NCFG_PROTO_REQ_CONFIG_DELETE:
 	case NCFG_PROTO_REQ_SECRET_DELETE:
 	case NCFG_PROTO_REQ_PROFILE_DELETE:
+	case NCFG_PROTO_REQ_SECRET_GET:
 		out->u.name = ncfg_proto_str("office");
 		return 1;
 	case NCFG_PROTO_REQ_PROFILE_SAVE:

@@ -72,8 +72,26 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 	}
 	table->add_control(store_button);
 
+	/* **Shown to `root`, on this machine, and to nobody else** (0328). Off
+	 * with a reason everywhere else rather than offered and refused: the
+	 * daemon would refuse a remote node whatever its `remote` block opens. */
+	show_button = new QPushButton(QStringLiteral("show..."), this);
+	show_button->setObjectName(QStringLiteral("show_secret"));
+	show_button->setEnabled(false);
+	if (connection->tiers().root == 0) {
+		show_button->setToolTip(
+		    QStringLiteral("showing a credential needs the root tier, which this "
+		               "connection does not have"));
+	} else if (!connection->node().isEmpty()) {
+		show_button->setToolTip(
+		    QStringLiteral("a credential is shown only on the machine that holds it, "
+		               "never to another node of the estate"));
+	}
+	table->add_control(show_button);
+
 	connect(forget_button, &QPushButton::clicked, this, &ncfg_secrets_view::forget_selected);
 	connect(store_button, &QPushButton::clicked, this, &ncfg_secrets_view::store_selected);
+	connect(show_button, &QPushButton::clicked, this, &ncfg_secrets_view::show_selected);
 	connect(table, &ncfg_table_view::selection_changed, this, [this, connection]() {
 		const int row = table->selected_row();
 		/* **Only a stored one, and only with the tier.** A row that is
@@ -88,6 +106,8 @@ ncfg_secrets_view::ncfg_secrets_view(ncfg_connection *connection, QWidget *paren
 		 * is never overwritten by a click (0042). */
 		store_button->setEnabled(row >= 0 && row < shown.size() && !stored &&
 		                         connection->tiers().root != 0);
+		show_button->setEnabled(stored && connection->tiers().root != 0 &&
+		                        connection->node().isEmpty());
 	});
 
 	auto *layout = new QVBoxLayout(this);
@@ -171,6 +191,35 @@ void ncfg_secrets_view::store_selected()
 	emit reported(QStringLiteral("stored the credential \"%1\"").arg(secret.name));
 }
 
+void ncfg_secrets_view::show_selected()
+{
+	const int row = table->selected_row();
+	if (row < 0 || row >= shown.size()) {
+		return;
+	}
+	const ncfg_secret_row secret = shown.at(row);
+	QString value;
+	QString error;
+
+	if (!connection->secret_get(secret.name, &value, &error)) {
+		emit reported(error);
+		QMessageBox::warning(this, QStringLiteral("Credential"), error);
+		return;
+	}
+	/* Rich text said outright, with both strings escaped: a passphrase may
+	 * hold `<`, and a box left to guess the format would drop it. */
+	QMessageBox box(QMessageBox::Information, QStringLiteral("Credential"), QString(),
+	                QMessageBox::Close, this);
+	box.setObjectName(QStringLiteral("secret_value"));
+	box.setTextFormat(Qt::RichText);
+	box.setText(QStringLiteral("The value stored as \"%1\":<br><br><tt>%2</tt>")
+	                .arg(secret.name.toHtmlEscaped(), value.toHtmlEscaped()));
+	box.setTextInteractionFlags(Qt::TextSelectableByMouse);
+	value.fill(QChar(0));
+	emit reported(QStringLiteral("showed the credential \"%1\"").arg(secret.name));
+	box.exec();
+}
+
 void ncfg_secrets_view::refresh()
 {
 	QList<ncfg_secret_row> found;
@@ -213,10 +262,10 @@ void ncfg_secrets_view::refresh()
 	                  "%1 referred to by the configuration and not stored. A network whose "
 	                  "passphrase is missing never joins, and it fails with an error about "
 	                  "the radio rather than about the credential -- choose it and press "
-	                  "store. Values are never shown here, and only sent to be stored.")
+	                  "store. A stored value is shown only to root on this machine, by show.")
 	                  .arg(missing)
 	            : QStringLiteral(
-	                  "Values are never shown here or sent over the socket -- only names. "
+	                  "Values are not in this table; root on this machine may show one. "
 	                  "`stored, unused` is a credential left behind after whatever referred "
 	                  "to it was deleted; choose it and press forget."));
 	emit reported(missing ? QStringLiteral("%1, %2 missing").arg(ncfg_counted(rows.size(), "secret", "secrets")).arg(missing)

@@ -3363,6 +3363,47 @@ static void an_unreachable_daemon_says_what_to_do(void)
  * built this with `snprintf("%s")` would send a broken line for a name with a
  * quote in it.
  */
+/*
+ * Reading a credential back hands the caller the value and a refusal the
+ * daemon's sentence (0328). The daemon decides who may; this pins that the
+ * client asks by name alone, copies the value whole, and does not mistake a
+ * refusal or another kind of answer for an empty password.
+ */
+static void a_secret_is_read_back_whole_or_not_at_all(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	static char sent[65536];
+	char *value = NULL;
+
+	if (!staged_open(&staged, "a secret can be read back",
+	         "{\"response\":\"secret\",\"name\":\"guest\",\"value\":\"hunter2 \\\"x\\\"\"}\n"
+	         "{\"response\":\"error\",\"message\":\"not permitted: secret_get needs the `root` tier\"}\n"
+	         "{\"response\":\"ok\"}\n")) {
+		return;
+	}
+
+	if (ncfg_client_secret_get(staged.client, "guest", &value, err, sizeof(err))) {
+		equals("reading a credential carries its name and nothing else",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"secret_get\",\"name\":\"guest\"}\n");
+		equals("and the value comes back whole, escapes undone", value, "hunter2 \"x\"");
+	} else {
+		ok("reading a credential carries its name and nothing else", 0, err);
+	}
+	ncfg_client_secret_value_free(value);
+
+	ok("a refusal is a failure, not an empty value",
+	   !ncfg_client_secret_get(staged.client, "guest", &value, err, sizeof(err)) && !value &&
+	       strstr(err, "root") != NULL,
+	   err);
+	ok("and so is an answer that carries no credential",
+	   !ncfg_client_secret_get(staged.client, "guest", &value, err, sizeof(err)) && !value,
+	   err);
+
+	staged_close(&staged);
+}
+
 static void removing_a_secret_names_it_and_nothing_else(void)
 {
 	struct staged staged;
@@ -3457,6 +3498,7 @@ int main(int argc, char **argv)
 	freeing_what_was_never_filled_in_is_nothing();
 	a_kind_the_kernel_gave_wins_over_the_name();
 	removing_a_secret_names_it_and_nothing_else();
+	a_secret_is_read_back_whole_or_not_at_all();
 	an_unreachable_daemon_says_what_to_do();
 
 	printf("\n");

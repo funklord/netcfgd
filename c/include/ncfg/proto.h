@@ -335,6 +335,10 @@ typedef enum {
 	 * daemon runs strongSwan's `swanctl` for the connection the device's
 	 * block names. `u.tunnel_set`. */
 	NCFG_PROTO_REQ_TUNNEL_SET,
+	/* One stored credential's value, by `name` in `u.name` (0327). The
+	 * `root` tier, where showing a credential stops being a question, and
+	 * never from off the machine: a credential does not travel (0029). */
+	NCFG_PROTO_REQ_SECRET_GET,
 	/* Not a request. The bound every exhaustive walk in this module uses in
 	 * place of the `match` the Rust gets checked for it. */
 	NCFG_PROTO_REQ_COUNT
@@ -534,6 +538,8 @@ typedef enum {
 	NCFG_PROTO_RESP_AP_STATIONS,
 	NCFG_PROTO_RESP_OK,
 	NCFG_PROTO_RESP_ERROR,
+	/* `secret_get`'s answer: the name asked for and its value. */
+	NCFG_PROTO_RESP_SECRET,
 	NCFG_PROTO_RESP_COUNT
 } ncfg_proto_response_kind_t;
 
@@ -795,6 +801,12 @@ typedef struct {
 		struct {
 			ncfg_proto_str_t message;
 		} error;
+		/* A credential, which the caller holds only as long as it shows it:
+		 * nothing in this library keeps or logs one. */
+		struct {
+			ncfg_proto_str_t name;
+			ncfg_proto_str_t value;
+		} secret;
 	} u;
 } ncfg_proto_response_t;
 

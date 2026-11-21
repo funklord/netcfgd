@@ -264,6 +264,8 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_PROBE_LIST:
 	case NCFG_PROTO_REQ_MODEM_LIST:
 	case NCFG_PROTO_REQ_PROBE_PUT:
+	/* A stored credential's value, the store's own reader behind it (0327). */
+	case NCFG_PROTO_REQ_SECRET_GET:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -587,6 +589,56 @@ static int answer_secret_delete(ncfg_main_desk_t *desk, ncfg_proto_str_t which, 
 		return 0;
 	}
 	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+/*
+ * One stored credential's value (0327).
+ *
+ * **The `root` tier, where showing a credential stops being a question**: a
+ * caller who may choose the machine's resolvers and repoint an SSID at their
+ * own access point gains nothing from being shown a passphrase, and somebody
+ * at their own laptop who wants to give a guest the wifi password should not
+ * have to go and find a file. `ncfg_authz_check` has already refused it from
+ * off the machine, because a credential does not travel (0029).
+ *
+ * Read through the resolver, as a backend reads one, so the name means here
+ * exactly what `@secret:NAME` means in the configuration. The value is copied
+ * into the answer and the resolver's buffer is wiped on release; the answer
+ * itself is the server's to send and free.
+ */
+static int answer_secret_get(ncfg_main_desk_t *desk, ncfg_proto_str_t which, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	char                   name[NAME_MAX_BYTES];
+	char                   dir[4096];
+	ncfg_secret_resolver_t resolver;
+	ncfg_secret_ref_t      reference;
+	ncfg_secret_error_t    why;
+	ncfg_secret_t         *secret;
+	int                    wrote;
+
+	if (!name_of(which, "secret name", name, sizeof(name), err, err_size) ||
+	    !ncfg_secret_name_usable(name, err, err_size)) {
+		return 0;
+	}
+	if (snprintf(dir, sizeof(dir), "%s/secrets", desk->state->paths.config) >=
+	    (int)sizeof(dir)) {
+		ncfg_error_set(err, err_size, "the secrets directory's path is too long");
+		return 0;
+	}
+	memset(&resolver, 0, sizeof(resolver));
+	resolver.secrets_dir = dir;
+	memset(&reference, 0, sizeof(reference));
+	reference.provider = (int)NCFG_SECRET_PROVIDER_FILE;
+	reference.name = name;
+	secret = ncfg_secret_resolve(&resolver, &reference, &why, err, err_size);
+	if (!secret) {
+		return 0;
+	}
+	wrote = ncfg_daemon_secret_encode(name, ncfg_secret_expose(secret),
+	    ncfg_secret_length(secret), out, err, err_size);
+	ncfg_secret_free(secret);
+	return wrote;
 }
 
 static int answer_profile_set(ncfg_main_desk_t *desk, ncfg_proto_str_t which, ncfg_buf_t *out,
@@ -1552,6 +1604,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		return answer_secret_put(desk, &request->u.secret_put, out, err, err_size);
 	case NCFG_PROTO_REQ_SECRET_DELETE:
 		return answer_secret_delete(desk, request->u.name, out, err, err_size);
+	case NCFG_PROTO_REQ_SECRET_GET:
+		return answer_secret_get(desk, request->u.name, out, err, err_size);
 	case NCFG_PROTO_REQ_PROFILE_SET:
 		return wrote_configuration(desk,
 		    answer_profile_set(desk, request->u.name, out, err, err_size));

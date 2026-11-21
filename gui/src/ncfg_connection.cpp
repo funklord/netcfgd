@@ -2275,6 +2275,34 @@ bool ncfg_connection::secret_delete(const QString &name, QString *error)
 	return true;
 }
 
+bool ncfg_connection::secret_get(const QString &name, QString *value, QString *error)
+{
+	if (!value) {
+		return false;
+	}
+	value->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	char message[NCFG_ERROR_MAX];
+	char *found = nullptr;
+	const QByteArray which = name.toUtf8();
+
+	if (!ncfg_client_secret_get(client, which.constData(), &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	*value = QString::fromUtf8(found);
+	ncfg_client_secret_value_free(found);
+	return true;
+}
+
 bool ncfg_connection::configs(QList<ncfg_config_row> *out, QString *error)
 {
 	if (!out) {

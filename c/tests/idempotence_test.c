@@ -73,6 +73,7 @@ static const struct {
 	{ NCFG_PROTO_REQ_CONFIG_DELETE, NCFG_ORDER_IDEMPOTENT, "deleted twice is deleted" },
 	{ NCFG_PROTO_REQ_SECRET_PUT, NCFG_ORDER_IDEMPOTENT, "the secret holds that value" },
 	{ NCFG_PROTO_REQ_SECRET_DELETE, NCFG_ORDER_IDEMPOTENT, "deleted twice is deleted" },
+	{ NCFG_PROTO_REQ_SECRET_GET, NCFG_ORDER_IDEMPOTENT, "a read" },
 	{ NCFG_PROTO_REQ_PROBE_PUT, NCFG_ORDER_IDEMPOTENT, "the probe holds that text" },
 	{ NCFG_PROTO_REQ_WIFI_ADD, NCFG_ORDER_IDEMPOTENT, "the block is present" },
 	{ NCFG_PROTO_REQ_WIFI_FORGET, NCFG_ORDER_IDEMPOTENT, "the block is absent" },

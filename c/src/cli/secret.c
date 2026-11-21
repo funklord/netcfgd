@@ -587,18 +587,126 @@ static int seal(const char **rest, size_t count, const ncfg_cli_options_t *optio
 }
 
 /*
+ * `ncfg secret get NAME`: one stored credential's value, for the `root` tier on
+ * this machine (0328, amending 0075's "there is no `get`").
+ *
+ * **Asked of the daemon and never read here**, although root could read the
+ * file: the daemon is where the tier is judged, so `ncfg` running as a member
+ * of a group holding `root` gets the same answer as root itself, and a caller
+ * holding less is refused by the same gate that refuses it everything else.
+ * With `--at` the node refuses it whatever its `remote` block opens: a
+ * credential does not travel (0029).
+ *
+ * The value alone on standard output and a newline, so `$(ncfg secret get
+ * guest)` is the value; `--json` names it as well. The copies this process
+ * held are wiped before they are freed.
+ */
+static int get(const char **rest, size_t count, const ncfg_cli_options_t *options, char *err,
+    size_t err_size)
+{
+	char                 socket_path[NCFG_CLI_PATH_MAX];
+	ncfg_proto_request_t request;
+	ncfg_proto_message_t message;
+	ncfg_proto_str_t     value;
+	char                *copy;
+	int                  ok;
+
+	if (count != 1) {
+		ncfg_error_set(err, err_size,
+		    "`ncfg secret get` takes one name, the one the config refers to as "
+		    "`@secret:NAME`");
+		return 0;
+	}
+	if (!ncfg_secret_name_usable(rest[0], err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_cli_daemon_socket(options, socket_path, sizeof(socket_path))) {
+		ncfg_error_set(err, err_size,
+		    "the run directory makes a socket path too long to connect to");
+		return 0;
+	}
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_SECRET_GET;
+	request.u.name = ncfg_proto_str(rest[0]);
+	if (!ncfg_cli_ask(socket_path, &request, &message, err, err_size)) {
+		return 0;
+	}
+	if (message.kind != NCFG_PROTO_MESSAGE_RESPONSE ||
+	    message.u.response.kind != NCFG_PROTO_RESP_SECRET) {
+		char        what[NCFG_CLI_SENTENCE_MAX];
+		char        said[NCFG_ERROR_MAX];
+		const char *named = "something that is not a response";
+
+		if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
+		    message.u.response.kind == NCFG_PROTO_RESP_ERROR) {
+			(void)ncfg_cli_text(message.u.response.u.error.message, said, sizeof(said));
+			ncfg_proto_message_free(&message);
+			ncfg_error_set(err, err_size, "%s", said);
+			return 0;
+		}
+		if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE) {
+			named = ncfg_cli_describe_answer(&message.u.response, what, sizeof(what));
+		}
+		(void)snprintf(said, sizeof(said), "the daemon sent %s", named);
+		ncfg_proto_message_free(&message);
+		ncfg_error_set(err, err_size, "%s", said);
+		return 0;
+	}
+	value = message.u.response.u.secret.value;
+	/* A file may hold any byte, and a NUL would end the line printed here
+	 * early without a word: say so rather than print a value that is not it. */
+	if (value.bytes == NULL || memchr(value.bytes, '\0', value.length) != NULL) {
+		ncfg_proto_message_free(&message);
+		ncfg_error_set(err, err_size,
+		    "`%s` holds a NUL byte, which a line cannot carry; root can read the file "
+		    "itself", rest[0]);
+		return 0;
+	}
+	copy = malloc(value.length + 1u);
+	if (copy == NULL) {
+		ncfg_proto_message_free(&message);
+		ncfg_error_set(err, err_size, "out of memory");
+		return 0;
+	}
+	memcpy(copy, value.bytes, value.length);
+	copy[value.length] = '\0';
+	ncfg_proto_message_free(&message);
+	if (options->json) {
+		ncfg_json_writer_t writer;
+		ncfg_buf_t         out;
+
+		ncfg_buf_init(&out, 0);
+		ncfg_json_write_init(&writer, &out);
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "name", rest[0]);
+		ncfg_json_write_member_string(&writer, "value", copy);
+		ncfg_json_write_object_end(&writer);
+		ok = ncfg_cli_say_json(&writer, "the credential", err, err_size);
+		if (out.data) {
+			explicit_bzero(out.data, out.capacity);
+		}
+		ncfg_buf_free(&out);
+	} else {
+		ncfg_out_writef("%s\n", copy);
+		ok = 1;
+	}
+	forget(copy);
+	return ok;
+}
+
+/*
  * `ncfg secret SUBCOMMAND`.
  *
  * `set` writes a file that the `file` provider reads, `seal` gives a group of
- * the estate a value the `estate` provider reads, and there is no `get` -- the
- * whole point of a secret reference is that the value travels to the backend
- * that needs it and nowhere else. Decision 0075.
+ * the estate a value the `estate` provider reads, and `get` shows one to the
+ * `root` tier on this machine (0328). Everybody else still gets 0075's answer:
+ * a value goes to the backend that needs it and nowhere else.
  */
 int ncfg_cli_secret(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
 	if (count == 0) {
-		ncfg_error_set(err, err_size, "`ncfg secret` needs a subcommand: set, seal");
+		ncfg_error_set(err, err_size, "`ncfg secret` needs a subcommand: set, seal, get");
 		return 0;
 	}
 	if (strcmp(positional[0], "set") == 0) {
@@ -607,16 +715,10 @@ int ncfg_cli_secret(const ncfg_cli_options_t *options, const char **positional, 
 	if (strcmp(positional[0], "seal") == 0) {
 		return seal(positional + 1, count - 1, options, err, err_size);
 	}
-	if (strcmp(positional[0], "get") == 0 || strcmp(positional[0], "show") == 0 ||
-	    strcmp(positional[0], "print") == 0) {
-		ncfg_error_set(err, err_size,
-		    "there is no `ncfg secret %s`, and that is the point: a secret goes to "
-		    "the backend that needs it and nowhere else (project.md section 2). The "
-		    "file is readable by root if you must -- and if it is a WireGuard key, "
-		    "the kernel has it too", positional[0]);
-		return 0;
+	if (strcmp(positional[0], "get") == 0) {
+		return get(positional + 1, count - 1, options, err, err_size);
 	}
-	ncfg_error_set(err, err_size, "unknown `ncfg secret` subcommand `%.*s`; there are two: set, seal",
+	ncfg_error_set(err, err_size, "unknown `ncfg secret` subcommand `%.*s`; there are three: set, seal, get",
 	    (int)NCFG_CLI_TEXT_MAX, positional[0]);
 	return 0;
 }

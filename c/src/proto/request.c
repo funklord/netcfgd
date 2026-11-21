@@ -58,6 +58,7 @@ static const char *const request_names[NCFG_PROTO_REQ_COUNT] = {
 	"radio_set",
 	"profile_delete",
 	"tunnel_set",
+	"secret_get",
 };
 
 /* The shared member lists, named after what they belong to. */
@@ -142,6 +143,7 @@ static const member_list_t request_members[NCFG_PROTO_REQ_COUNT] = {
 	LIST(members_radio_set),
 	LIST(members_name),     /* profile_delete */
 	LIST(members_radio_set),/* tunnel_set: interface and activate, a radio's */
+	LIST(members_name),     /* secret_get */
 };
 
 #undef LIST
@@ -435,6 +437,7 @@ static int encode_payload(const ncfg_proto_request_t *request, ncfg_json_writer_
 	case NCFG_PROTO_REQ_CONFIG_DELETE:
 	case NCFG_PROTO_REQ_SECRET_DELETE:
 	case NCFG_PROTO_REQ_PROFILE_DELETE:
+	case NCFG_PROTO_REQ_SECRET_GET:
 		if (!request->u.name.bytes) {
 			return missing(err, err_size, kind, "name");
 		}
@@ -754,6 +757,7 @@ int ncfg_proto_decode_request(ncfg_proto_dec_t *dec, uint32_t object, ncfg_proto
 	case NCFG_PROTO_REQ_CONFIG_DELETE:
 	case NCFG_PROTO_REQ_SECRET_DELETE:
 	case NCFG_PROTO_REQ_PROFILE_DELETE:
+	case NCFG_PROTO_REQ_SECRET_GET:
 		if (!ncfg_proto_get_str(dec, object, "name", 1, what, &out->u.name)) {
 			return 0;
 		}

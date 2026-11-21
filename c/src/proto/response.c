@@ -33,6 +33,7 @@ static const char *const response_names[NCFG_PROTO_RESP_COUNT] = {
 	"ap_stations",
 	"ok",
 	"error",
+	"secret",
 };
 
 static const char *const event_names[NCFG_PROTO_EVENT_COUNT] = {
@@ -670,6 +671,11 @@ int ncfg_proto_decode_response(ncfg_proto_dec_t *dec, uint32_t object, ncfg_prot
 	case NCFG_PROTO_RESP_OK:
 		/* Succeeded and had nothing to return. */
 		return 1;
+	case NCFG_PROTO_RESP_SECRET:
+		return ncfg_proto_get_str(dec, object, "name", 1, "a `secret` response",
+		           &out->u.secret.name) &&
+		    ncfg_proto_get_str(dec, object, "value", 1, "a `secret` response",
+		        &out->u.secret.value);
 	case NCFG_PROTO_RESP_ERROR:
 	default:
 		/* **A refusal is an answer**: the daemon replied, which is a

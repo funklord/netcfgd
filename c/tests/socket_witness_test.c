@@ -88,7 +88,7 @@ static void detail(const char *what, const char *why)
 /* What the file holds, and what this must therefore produce. Asserted rather
  * than assumed: a builder that wrote 61 lines over a 68-line file would be a
  * silent truncation of the frozen surface. */
-#define WITNESS_COUNT 69u
+#define WITNESS_COUNT 71u
 
 static char  *lines[WITNESS_LINES];
 /* What this build produced, in the order it produced it. The file is written
@@ -249,7 +249,7 @@ static void the_requests(void)
 		ncfg_buf_free(&out);
 		ncfg_proto_message_free(&message);
 	}
-	check(made_count == 43u, "the first 43 lines are requests, each re-encoded here");
+	check(made_count == 44u, "the first 44 lines are requests, each re-encoded here");
 	for (; at < line_count; at++) {
 		if (strncmp(lines[at], "{\"request\":", 11u) == 0) {
 			check(0, "and no request line sits below them, which the order needs");
@@ -696,6 +696,13 @@ static void the_small_responses(void)
 	one("ok", ncfg_daemon_ok_encode(&out, err, sizeof(err)), &out, err);
 	ncfg_buf_free(&out);
 
+	/* `secret_get`'s answer (0328), with the witness's usual stand-in value. */
+	ncfg_buf_init(&out, 0);
+	one("secret", ncfg_daemon_secret_encode("cafe", "NOT-A-REAL-SECRET", 17u, &out, err,
+	                  sizeof(err)),
+	    &out, err);
+	ncfg_buf_free(&out);
+
 	ncfg_buf_init(&out, 0);
 	one("error", ncfg_daemon_error_encode("not permitted", &out, err, sizeof(err)), &out,
 	    err);
@@ -991,7 +998,7 @@ int main(int argc, char **argv)
 	stop_fakes();
 	testdir_remove(testdir_path);
 
-	check(made_count == WITNESS_COUNT, "this build produces all 69 lines of the witness");
+	check(made_count == WITNESS_COUNT, "this build produces all 71 lines of the witness");
 	if (made_count != WITNESS_COUNT) {
 		printf("  %zu produced, %zu in the file\n", made_count, line_count);
 	}

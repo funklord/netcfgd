@@ -197,7 +197,8 @@ static void every_request_has_the_tier_the_document_gives_it(void)
 		{ NCFG_PROTO_REQ_SECRET_PUT, NCFG_TIER_ROOT },
 		{ NCFG_PROTO_REQ_CONFIG_DELETE, NCFG_TIER_ROOT },
 		{ NCFG_PROTO_REQ_SECRET_DELETE, NCFG_TIER_ROOT },
-		{ NCFG_PROTO_REQ_PROFILE_DELETE, NCFG_TIER_ROOT }
+		{ NCFG_PROTO_REQ_PROFILE_DELETE, NCFG_TIER_ROOT },
+		{ NCFG_PROTO_REQ_SECRET_GET, NCFG_TIER_ROOT }
 	};
 	unsigned char seen[NCFG_PROTO_REQ_COUNT];
 	int           agreed = 1;
@@ -747,6 +748,45 @@ static void a_remote_peer_is_told_what_the_remote_policy_allows(void)
 	    "a remote peer is told what the remote policy allows, not what local does");
 }
 
+/*
+ * A credential's value never leaves the machine (0328, 0029).
+ *
+ * `secret_get` is `root`, and a remote `root = true` is root on this machine
+ * for everything else -- so this is the one request the remote policy cannot
+ * open, refused by kind before the policy is asked. Locally the same caller
+ * with `root` gets it, and one holding `laptop` does not.
+ */
+static void a_credential_is_shown_to_local_root_and_never_remotely(void)
+{
+	ncfg_control_t       control = control_of(principal(NCFG_PRINCIPAL_ROOT, NULL),
+	    principal(NCFG_PRINCIPAL_ANY, NULL), principal(NCFG_PRINCIPAL_ANY, NULL));
+	ncfg_control_t       laptop_only = control_of(principal(NCFG_PRINCIPAL_ROOT, NULL),
+	    principal(NCFG_PRINCIPAL_ANY, NULL), principal(NCFG_PRINCIPAL_ANY, NULL));
+	ncfg_remote_policy_t remote = remote_default();
+	ncfg_authz_roots_t   roots = fixture_roots();
+	ncfg_peer_t          caller = peer_of(1000, 1000, NULL, 0);
+	ncfg_peer_t          root = peer_of(0, 0, NULL, 0);
+	ncfg_proto_request_t get = request_of(NCFG_PROTO_REQ_SECRET_GET);
+	char                 err[NCFG_ERROR_MAX];
+
+	get.u.name = ncfg_proto_str("guest");
+	laptop_only.root = principal(NCFG_PRINCIPAL_ROOT, NULL);
+	check(ncfg_authz_check(&roots, &control, &remote, NCFG_ARRIVED_LOCAL, &caller, &get, err,
+	          sizeof(err)),
+	    "a local caller holding `root` is shown a credential");
+	check(!ncfg_authz_check(&roots, &laptop_only, &remote, NCFG_ARRIVED_LOCAL, &caller, &get,
+	          err, sizeof(err)),
+	    "and one holding only `laptop` is not");
+	remote.view = 1;
+	remote.laptop = 1;
+	remote.root = 1;
+	check(!ncfg_authz_check(&roots, &control, &remote, NCFG_ARRIVED_REMOTE, &root, &get, err,
+	          sizeof(err)),
+	    "and a remote caller is not, though the remote policy opens `root`");
+	check(strstr(err, "off this machine") != NULL,
+	    "and the refusal says the value is not sent off the machine");
+}
+
 /* ------------------------------------------------------ the content gate */
 
 static ncfg_proto_request_t config_put(const char *text)
@@ -1225,6 +1265,7 @@ int main(void)
 	an_open_local_policy_opens_nothing_remotely();
 	a_remote_caller_that_is_root_is_still_bounded_by_the_remote_policy();
 	a_remote_peer_is_told_what_the_remote_policy_allows();
+	a_credential_is_shown_to_local_root_and_never_remotely();
 
 	permitted_asks_both_gates();
 	an_admin_group_member_may_send_config_but_not_a_hook();

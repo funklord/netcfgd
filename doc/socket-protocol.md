@@ -161,9 +161,9 @@ spelling in `hello`'s `tiers`; netcfgd writes and sends only the new ones.
 |---|---|
 | `view` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
 | `laptop` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set`, `tunnel_set` |
-| `root` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
+| `root` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `secret_get`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
 
-**All thirty-two, and it stayed at twenty-three for a long time.** The nine
+**All thirty-three, and it stayed at twenty-three for a long time.** The nine
 that were missing -- the five listings, `radio_set`, and the three that write a
 profile or a probe -- were classified in `authorize.rs` and absent from this
 table, while the prose bullets below described them correctly. Section 2's
@@ -266,9 +266,13 @@ first glance:
   calls the one thing on a machine nobody can get back. Replacing an existing
   one has to be asked for, for the same reason.
 
-  **Inbound only.** There is no request that reads a credential back and there
-  is not going to be: 0031's bridge runs one way, `GetSecrets` refuses, and the
-  document carries references rather than values.
+  **Inbound, except to `root` on the machine itself.** `secret_get` reads one
+  back ([0328](decision/0328-a-stored-credential-is-shown-to-root-on-its-own-machine.md)):
+  the `root` tier only, where a caller who may choose the resolvers gains
+  nothing from a passphrase, and refused from off the machine by kind,
+  whatever the `remote` block opens. Nothing else does: 0031's bridge runs one
+  way, `GetSecrets` refuses, and the document carries references rather than
+  values.
 
 - **`hook_list` is `root`, and it is the one *reading* verb at this tier.**
   It returns the hook scripts themselves, which is the one thing a
@@ -488,6 +492,7 @@ tag itself.
 | `ap_stations` | `ap_stations` | `interface`, `access_point`, `access_control`, `stations` |
 | `radios` | `radios` | `radios`, each with whether it is activated and whether a supplicant is there |
 | `secrets` | `secret_list` | `secrets`: a name, whether it is `stored`, and what it is `used_by` — never a value |
+| `secret` | `secret_get` | `name` and `value`: the one answer that carries a credential, `root` on this machine only (0328) |
 | `modems` | `modem_list` | `modems` |
 | `profiles` | `profile_list` | `profiles` and which is `chosen` |
 | `configs` | `config_list` | `configs` |

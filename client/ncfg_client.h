@@ -1044,8 +1044,8 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * `replace` opens the overwrite that the paragraph above is about: without it
  * an existing secret is refused rather than replaced.
  *
- * Inbound only. There is no call here that reads a secret back and there is
- * not going to be (0029, 0031): what crosses this socket is a value going in.
+ * Inbound, except to `root`: ncfg_client_secret_get() reads one back for that
+ * tier on the daemon's own machine and nobody else (0328).
  *
  * The request buffer is wiped before returning, which is not a guarantee about
  * the caller's own copy of the value.
@@ -2723,6 +2723,25 @@ int ncfg_client_wifi_forget(ncfg_client_t *client, const char *id, char *err, si
  */
 int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err,
                   size_t err_size);
+
+/*
+ * One stored credential's value, for the `root` tier on the daemon's own
+ * machine (0328, amending 0075).
+ *
+ * On success `*value` is a NUL-terminated copy the caller hands to
+ * ncfg_client_secret_value_free(), which wipes it; on failure it is NULL and
+ * `err` holds the daemon's sentence -- which, for a caller below `root` or one
+ * arriving from off the machine, is the refusal. A value holding a NUL byte is
+ * refused here rather than handed back short.
+ *
+ * **Ask ncfg_client_tiers() first** and offer the control only to `root`:
+ * the daemon refuses everybody else, and a button that always fails is worse
+ * than none. What the parsed answer leaves in this library's own buffers is
+ * not wiped; the caller's copy is.
+ */
+int ncfg_client_secret_get(ncfg_client_t *client, const char *name, char **value, char *err,
+               size_t err_size);
+void ncfg_client_secret_value_free(char *value);
 
 /*
  * What an operator has agreed to, beyond the plan itself.

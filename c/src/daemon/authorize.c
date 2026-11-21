@@ -176,7 +176,14 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	[NCFG_PROTO_REQ_CONFIG_DELETE] = NCFG_TIER_ROOT,
 	/* As `profile_save`, which made what this takes away. */
 	[NCFG_PROTO_REQ_PROFILE_DELETE] = NCFG_TIER_ROOT,
-	[NCFG_PROTO_REQ_SECRET_DELETE] = NCFG_TIER_ROOT
+	[NCFG_PROTO_REQ_SECRET_DELETE] = NCFG_TIER_ROOT,
+	/* **Showing a credential is `root`, and only there does it stop being a
+	 * question** (0327): a caller who may choose the resolvers and repoint an
+	 * SSID gains nothing from a passphrase, where `laptop` is the tier meant
+	 * to be less. Never from off the machine, whatever the remote policy
+	 * opens: `check_remote` refuses it by kind, because a credential does not
+	 * travel (0029). */
+	[NCFG_PROTO_REQ_SECRET_GET] = NCFG_TIER_ROOT
 };
 
 ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind)
@@ -362,6 +369,20 @@ static int check_remote(const ncfg_remote_policy_t *remote, const ncfg_proto_req
 	ncfg_tier_t tier = ncfg_tier_of(request->kind);
 	const char *name;
 
+	/*
+	 * **A credential's value is not sent off the machine, whatever the policy
+	 * opens** (0327, 0029). Remote `root` is root on this machine, and could
+	 * point a credential at an access point of its own -- but that attack
+	 * needs the radio here, and handing over the value would make the
+	 * passphrase itself travel, which nothing else in netcfgd does.
+	 */
+	if (request->kind == NCFG_PROTO_REQ_SECRET_GET) {
+		ncfg_error_set(err, err_size,
+		    "not permitted from off this machine: a stored credential's value is shown "
+		    "only to a caller on the machine that holds it, whatever the `remote` block "
+		    "opens");
+		return 0;
+	}
 	if (remote_allows(remote, tier)) {
 		return 1;
 	}

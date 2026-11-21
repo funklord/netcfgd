@@ -75,6 +75,25 @@ int ncfg_daemon_ok_encode(ncfg_buf_t *out, char *err, size_t err_size)
 	return finish(&writer, out, "ok", err, err_size);
 }
 
+int ncfg_daemon_secret_encode(const char *name, const char *value, size_t length, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+
+	if (!out || !name || !value) {
+		ncfg_error_set(err, err_size, "nowhere to put the credential");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "secret");
+	ncfg_json_write_member_string(&writer, "name", name);
+	ncfg_json_write_key(&writer, "value");
+	ncfg_json_write_string_bytes(&writer, value, length);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "secret", err, err_size);
+}
+
 static void write_version(ncfg_json_writer_t *writer, const char *name, int64_t major,
     int64_t minor)
 {

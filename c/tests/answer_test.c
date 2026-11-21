@@ -575,11 +575,34 @@ static void a_secret_is_stored_and_removed(void)
 	}
 	ncfg_buf_free(&out);
 
+	/* Shown back whole to the tier that may see it (0328), through the
+	 * resolver a backend reads it with. */
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_SECRET_GET;
+	request.u.name = ncfg_proto_str("office-psk");
+	if (!ask(&request, &out, err, sizeof(err))) {
+		detail("secret_get refused", err);
+		check(0, "a `secret_get` shows the credential stored");
+	} else {
+		check(strcmp(ncfg_buf_text(&out),
+		          "{\"response\":\"secret\",\"name\":\"office-psk\","
+		          "\"value\":\"correct horse battery staple\"}") == 0,
+		    "a `secret_get` shows the credential stored, and its name");
+	}
+	ncfg_buf_free(&out);
+
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_SECRET_DELETE;
 	request.u.name = ncfg_proto_str("office-psk");
 	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out),
 	    "and a `secret_delete` takes it away");
+	ncfg_buf_free(&out);
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_SECRET_GET;
+	request.u.name = ncfg_proto_str("office-psk");
+	check(!ask(&request, &out, err, sizeof(err)),
+	    "and a `secret_get` of one that is gone is refused");
 	ncfg_buf_free(&out);
 }
 

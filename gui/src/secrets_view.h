@@ -1,9 +1,9 @@
 /*
  * secrets_view.h -- the credentials this machine holds, by name.
  *
- * **Never by value, and the design is what guarantees that rather than a
- * rule.** No value crosses the socket in this direction: `SecretEntry` has no
- * field that could carry one, so there is nothing here to accidentally draw.
+ * **Listed by name, never by value, and the design is what guarantees that
+ * rather than a rule.** `secret_list`'s rows have no field that could carry a
+ * value, so there is nothing in the table to accidentally draw.
  *
  * The list is the union of what the store holds and what the configuration
  * refers to, because the two faults worth finding are opposite ways round:
@@ -18,12 +18,11 @@
  * Neither is visible from anywhere else in the program, which is what earns
  * this a tab rather than a column somewhere.
  *
- * Values go one way only. A MISSING credential can be stored from here, asked
- * for in a password field and sent to `secret_put` at once (10.807); this
- * once said a gui field would be a value in a process that did not need to
- * hold one, which stopped being the project's answer when the network, access
- * point and device dialogs began storing what is typed (10.782, 10.805). What
- * still holds is that nothing is ever read back.
+ * A MISSING credential can be stored from here, asked for in a password field
+ * and sent to `secret_put` at once (10.807). A stored one is shown back only
+ * to the `root` tier on this machine, by `show...` and only when pressed
+ * (0328): the table itself never carries a value, and nothing is shown to a
+ * connection below `root` or to another node of the estate.
  */
 #ifndef NCFG_SECRETS_VIEW_H
 #define NCFG_SECRETS_VIEW_H
@@ -59,6 +58,9 @@ private slots:
 	/* Store a value for the selected MISSING credential, asked for in a
 	 * password field (10.807). */
 	void store_selected();
+	/* Show the selected credential's value, for `root` on this machine
+	 * (0328): asked for when pressed, shown in a box, held no longer. */
+	void show_selected();
 
 private:
 	ncfg_connection *connection;
@@ -67,6 +69,7 @@ private:
 	ncfg_table_view *table;
 	QPushButton     *forget_button;
 	QPushButton     *store_button;
+	QPushButton     *show_button;
 	/* What the selected row said it was used by, so the question can name it.
 	 * Kept beside the table rather than re-read from a cell, because the cell
 	 * holds the rendering and this holds the fact. */

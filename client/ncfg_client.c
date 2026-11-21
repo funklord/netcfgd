@@ -7052,6 +7052,81 @@ int ncfg_client_secret_delete(ncfg_client_t *client, const char *name, char *err
 	return delete_by_name(client, "secret_delete", name, err, err_size);
 }
 
+int ncfg_client_secret_get(ncfg_client_t *client, const char *name, char **value, char *err,
+               size_t err_size)
+{
+	if (!value) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	*value = NULL;
+	if (!name || !*name) {
+		set_error(err, err_size, "no credential to show");
+		return 0;
+	}
+
+	char request[512];
+	int head = snprintf(request, sizeof(request), "{\"request\":\"secret_get\",\"name\":");
+	if (head < 0 || (size_t)head >= sizeof(request)) {
+		set_error(err, err_size, "name is too long to ask about");
+		return 0;
+	}
+	size_t at = (size_t)head;
+	size_t span = ncfg_client_quote(name, request + at, sizeof(request) - at);
+	if (!span || at + span + 2 > sizeof(request)) {
+		set_error(err, err_size, "name is too long to ask about");
+		return 0;
+	}
+	at += span;
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+	uint32_t root = ncfg_json_root(doc);
+	size_t length = 0;
+	const char *text = NULL;
+	if (ncfg_json_string_equals(doc, ncfg_json_member(doc, root, "response"), "secret")) {
+		text = ncfg_json_string(doc, ncfg_json_member(doc, root, "value"), &length);
+	}
+	if (!text) {
+		ncfg_json_free(doc);
+		set_error(err, err_size, "the daemon did not answer with a credential");
+		return 0;
+	}
+	if (memchr(text, '\0', length)) {
+		ncfg_json_free(doc);
+		set_error(err, err_size, "`%s` holds a NUL byte, which cannot be shown as text",
+		          name);
+		return 0;
+	}
+	char *copy = malloc(length + 1);
+	if (!copy) {
+		ncfg_json_free(doc);
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	memcpy(copy, text, length);
+	copy[length] = '\0';
+	ncfg_json_free(doc);
+	*value = copy;
+	return 1;
+}
+
+void ncfg_client_secret_value_free(char *value)
+{
+	if (value) {
+		explicit_bzero(value, strlen(value));
+		free(value);
+	}
+}
+
 int ncfg_client_wifi_disconnect(ncfg_client_t *client, const char *interface, char *err,
                 size_t err_size)
 {

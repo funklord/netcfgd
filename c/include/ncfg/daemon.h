@@ -535,6 +535,10 @@ size_t ncfg_authz_granted(const ncfg_authz_roots_t *roots, const ncfg_control_t 
 
 int ncfg_daemon_error_encode(const char *message, ncfg_buf_t *out, char *err, size_t err_size);
 int ncfg_daemon_ok_encode(ncfg_buf_t *out, char *err, size_t err_size);
+/* `secret_get`'s answer (0327): the name and the value, `length` bytes of it,
+ * written as JSON escapes them. */
+int ncfg_daemon_secret_encode(const char *name, const char *value, size_t length, ncfg_buf_t *out,
+    char *err, size_t err_size);
 int ncfg_daemon_hello_encode(const ncfg_tier_t *tiers, size_t tier_count, ncfg_buf_t *out,
     char *err, size_t err_size);
 

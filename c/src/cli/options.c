@@ -136,6 +136,8 @@ static const char usage_text[] =
     "                                                 Written 0600; --replace to\n"
     "                                                 overwrite an existing one.\n"
     "                                                 Removing one is `rm`\n"
+    "                             get NAME            print its value: the `root`\n"
+    "                                                 tier, on this machine only\n"
     "  ncfg host [OPTIONS]      this user's host, which `--at`, `ncfg hosts` and\n"
     "                           `ncfg join` reach other hosts through. Started\n"
     "                           by them and gone with them; typed, it stays up.\n"

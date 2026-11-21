@@ -1279,6 +1279,11 @@ public:
 	 * (0042) -- so a view offering this owns the confirmation. Ask `tiers()`
 	 * before offering it at all. */
 	bool secret_delete(const QString &name, QString *error);
+	/* One stored credential's value (0328): the `root` tier on this machine
+	 * only -- the daemon refuses it from off the machine whatever `remote`
+	 * opens, so a view offers it only where `tiers().root` holds and `node()`
+	 * is empty. */
+	bool secret_get(const QString &name, QString *value, QString *error);
 
 	/* Why is this interface the way it is. Needs `view`.
 	 *

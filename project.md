@@ -2763,19 +2763,12 @@ tier**, because a caller who can already choose the machine's resolvers and
 repoint an SSID gains nothing from being shown a passphrase. It stays a
 question for the laptop tier, which is the one that is meant to be less.
 
-**Open, and the holder's: whether netcfgd should show one at all** (asked
-2026-11-21). The line above says a `root` caller gains nothing from being
-shown a credential; it does not say netcfgd should offer to show it, and
-[0075](doc/decision/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)
-says it should not -- "there is no `get`": a secret goes to the backend that
-needs it and nowhere else, and `ncfg secret get|show` answers with that
-sentence. A `secret_get` request was sketched while the overhaul landed --
-`root` tier, refused from off the machine whatever `remote` opens (0029),
-read through the same resolver as `@secret:NAME` -- and taken back out
-uncommitted, because building it reverses 0075. What it would serve: giving a
-guest the wifi password from the window, which NetworkManager's applet does
-behind an authentication prompt. Unblocks: a reveal in `ncfg`, the client
-library and the network dialog.
+**Settled by the holder, 2026-11-21: shown to `root`, hidden from everyone
+else** ([0328](doc/decision/0328-a-stored-credential-is-shown-to-root-on-its-own-machine.md),
+amending [0075](doc/decision/0075-a-secret-is-stored-by-a-command-that-never-shows-it.md)'s
+"there is no `get`"). `secret_get NAME` is the `root` tier, refused from off the
+machine by kind whatever `remote` opens (0029), and read through the same
+resolver as `@secret:NAME`. `ncfg secret get NAME` prints the value alone.
 
 ### Inversions already met, as evidence for the pass
 
