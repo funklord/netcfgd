@@ -6822,7 +6822,7 @@ source called 93 of beerssh's 109 untested, in a tree whose suite drives
 them constantly; and a concept sweep over project.md headings returned
 document structure, its best hit a word appearing only in comments.
 
-## 10.34 hooks: the fault 0096 closed for interfaces, still open for networks
+## 10.34 hooks: the fault 0096 closed for interfaces, and for networks since 2026-10-28
 
 Swept on 2026-09-04. Two findings, and the first is the project's own recorded
 fault living on in the block type nobody looked at.
@@ -9206,7 +9206,7 @@ netcfgd's table -- so what remains is a report computed moments before a
 change, which is a property of a ruleset with several writers rather than a
 defect to fix.
 
-## 10.478 OPEN: `profile save` through the C daemon refuses its own snapshot
+## 10.478 `profile save` through the C daemon refused its own snapshot -- fixed
 
 Found by running the suite on a machine with inotify available, which this one
 had not been for the whole of the work above.
