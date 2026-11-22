@@ -423,6 +423,11 @@ static int lower_xfrm(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 		    "an xfrm interface needs a non-zero `if_id`: it is what an IPsec connection's "
 		    "`if_id_in` and `if_id_out` name to send its traffic through this device, "
 		    "and the kernel refuses 0");
+		/* Refused, so the names read above are nobody's (10.906). */
+		free(out->xfrm.report_writer);
+		free(out->xfrm.connection);
+		free(out->xfrm.child);
+		out->xfrm.report_writer = out->xfrm.connection = out->xfrm.child = NULL;
 		return 0;
 	}
 	out->kind = NCFG_KIND_XFRM;

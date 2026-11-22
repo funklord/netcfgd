@@ -1715,6 +1715,9 @@ static void interface_kind_release(void *field)
 	ncfg_type_free(&macvlan_type, &value->macvlan);
 	ncfg_type_free(&tunnel_type, &value->tunnel);
 	ncfg_type_free(&tun_type, &value->tun);
+	/* An IPsec tunnel's device names its writer, connection and child; the
+	 * three strings leaked on every free until 10.906. */
+	ncfg_type_free(&xfrm_type, &value->xfrm);
 }
 
 static const ncfg_custom_t interface_kind_custom = { interface_kind_read, interface_kind_write,

@@ -1025,6 +1025,10 @@ int ncfg_lower_device(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
 					 * Rust's assignment does, and the first goes whole. */
 					ncfg_interface_kind_release(&device.kind);
 					device.kind = kind;
+				} else {
+					/* Refused: whatever the kind's lowering read before
+					 * refusing is nobody's, for every kind (10.906). */
+					ncfg_interface_kind_release(&kind);
 				}
 			} else if (strcmp(head, "qdisc") == 0) {
 				ncfg_qdisc_policy_t policy;

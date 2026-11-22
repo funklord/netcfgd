@@ -6997,6 +6997,23 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.906 An IPsec tunnel's device leaked its names on every free
+
+`make c-san` on 2026-11-22 found five leak reports, two causes. The
+interface-kind release freed every arm but `xfrm`, so the three strings an
+xfrm device carries -- `report_writer`, `connection`, `child` -- leaked on
+every document freed since 0323 made the kind: in the daemon that is every
+reload and every plan of a machine with an IPsec tunnel. And a kind block the
+compiler refused kept whatever it had read before refusing; the mutation
+sweep in `lower_test` reached it with an xfrm block missing its `if_id`. The
+release now frees `xfrm`, and the device lowering releases a refused kind for
+every kind rather than trusting each lowerer to clean up. The sanitized
+suite, 129 groups, is clean after; the same tests leaked before.
+
+**The shape**: a release that lists arms by hand beside a `kind_arm` switch
+that lists them again, and the arm added later reached one list. Nothing
+checks that the two agree except a sanitizer run, which is not in `check`.
+
 ## 10.905 An icmp guard counts in its protocol's family only
 
 An `over` rule with no address is one meter and one rule per family
