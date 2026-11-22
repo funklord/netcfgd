@@ -6997,6 +6997,19 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.907 The fuzzer reaches the firewall's readers
+
+`c/fuzz/kernel_bytes.c` read nft tables and chains and nothing else, so the
+largest parser in `nft.c` -- `ncfg_nft_firewall_rule_read`, which takes
+whatever is in netcfgd's table, a hand edit included -- had never been
+fuzzed, and neither had the forward, MSS, offload, flowtable and generation
+readers. All six are in the harness now, with ten seeds written from one full
+replacement (a logged guard's two marked rows, a range with a reset, an ICMP
+type with a station prefix, a schedule, a forward-chain rule, a port forward,
+the clamp, offload and its flowtable), each kept only where its reader took
+it, so every seed is known to reach its parser. Five minutes of libFuzzer,
+5.9 million inputs, found nothing.
+
 ## 10.906 An IPsec tunnel's device leaked its names on every free
 
 `make c-san` on 2026-11-22 found five leak reports, two causes. The

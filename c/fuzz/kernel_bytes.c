@@ -86,6 +86,30 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 	(void)ncfg_nft_rule_uplink(data, length, text, sizeof(text), err, sizeof(err));
 	(void)ncfg_nft_writes_only_our_table(data, length, err, sizeof(err));
 
+	/* And every reader of what netcfgd's own table holds, which takes a rule
+	 * somebody may have edited by hand: the firewall's rules, a forward's,
+	 * the MSS clamp and flow offload, a flowtable and the generation. The
+	 * firewall rule reader is the largest parser in nft.c and was reached by
+	 * nothing here until 2026-11-22 (10.907). */
+	{
+		ncfg_nft_kernel_rule_t    kernel_rule;
+		ncfg_nft_kernel_forward_t forward;
+		ncfg_nft_flowtable_t      flowtable;
+		char                      time[NCFG_NFT_TIME_TEXT];
+		int                       leaving = 0;
+		uint32_t                  generation = 0u;
+
+		if (ncfg_nft_firewall_rule_read(data, length, &kernel_rule, err, sizeof(err))) {
+			ncfg_nft_kernel_rule_time(&kernel_rule, time, sizeof(time));
+			(void)ncfg_nft_kernel_rule_action_word(&kernel_rule);
+		}
+		(void)ncfg_nft_forward_read(data, length, &forward, err, sizeof(err));
+		(void)ncfg_nft_rule_mss(data, length, text, sizeof(text), &leaving);
+		(void)ncfg_nft_rule_is_offload(data, length);
+		(void)ncfg_nft_flowtable_read(data, length, &flowtable, err, sizeof(err));
+		(void)ncfg_nft_gen_read(data, length, &generation, err, sizeof(err));
+	}
+
 	/* Generic netlink's family lookup, which every family added after
 	 * nl80211 will go through. The name is the fuzzer's too, since a reply
 	 * naming a different family is exactly what must not be believed. */
