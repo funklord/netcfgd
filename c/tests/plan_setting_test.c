@@ -421,7 +421,7 @@ static void observed_firewall(char *out, size_t out_size, long port, const char 
 	(void)snprintf(out, out_size,
 	    "\"links\":[],\"firewall\":{\"input\":\"drop\",\"forward\":\"drop\",\"output\":\"accept\","
 	    "\"rules\":[{\"chain\":\"input\",\"name\":\"ssh\",\"digest\":\"%.16s\",\"action\":\"accept\","
-	    "\"protocol\":\"tcp\",\"port\":%ld}]%s%s%s}",
+	    "\"protocol\":\"tcp\",\"port\":%ld,\"packets\":9,\"bytes\":540}]%s%s%s}",
 	    digest, port, unread ? ",\"unread\":[\"" : "", unread ? unread : "", unread ? "\"]" : "");
 }
 

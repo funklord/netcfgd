@@ -1425,6 +1425,11 @@ static const ncfg_field_t observed_firewall_rule_fields[] = {
 	    .offset = offsetof(ncfg_observed_firewall_rule_t, reset) },
 	{ .name = "over", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_firewall_rule_t, over) },
+	/* Absent where the rule carries no counter (10.901). */
+	{ .name = "packets", .kind = NCFG_F_OPT_INT, R_U64,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, packets) },
+	{ .name = "bytes", .kind = NCFG_F_OPT_INT, R_U64,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, bytes) },
 	{ .name = "mac", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_rule_t, mac) },
 	/* Absent where unset (10.663), so every observation written before it
 	 * reads and writes back unchanged. */

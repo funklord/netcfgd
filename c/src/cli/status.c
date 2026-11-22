@@ -200,6 +200,8 @@ static void print_bluetooth(const ncfg_observed_t *observed)
  * run, so a written rule with several values reads as the several rules it
  * became; a rule netcfgd could not read is named with the reason, because it
  * is somebody's edit inside netcfgd's table and the next apply replaces it.
+ * Each line ends with what its counter has matched, counted from the last
+ * time netcfgd replaced the table (10.901).
  */
 static void print_firewall(const ncfg_observed_t *observed)
 {
@@ -272,6 +274,13 @@ static void print_firewall(const ncfg_observed_t *observed)
 			}
 			if (rule->mac) {
 				ncfg_out_writef(" mac %s", rule->mac);
+			}
+			/* What it has matched since the table was last replaced
+			 * (10.901): the answer to "is my rule doing anything". */
+			if (rule->packets.has) {
+				ncfg_out_writef(": %lld %s, %lld bytes", (long long)rule->packets.value,
+				    rule->packets.value == 1 ? "packet" : "packets",
+				    (long long)(rule->bytes.has ? rule->bytes.value : 0));
 			}
 			ncfg_out_line("");
 		}

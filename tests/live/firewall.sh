@@ -46,8 +46,12 @@ check() {
 		failures=$((failures + 1))
 	fi
 }
+# Every verdict rule carries a counter (10.901), whose numbers are whatever
+# the namespace's own traffic made them, so the listing is read with them
+# taken out: `counter accept`.
 has() { # $1 what, $2 fixed text the listing must hold
-	check "$1" "$(grep -cF -- "$2" "$work/listed" || true)" "1"
+	check "$1" "$(sed -E 's/counter packets [0-9]+ bytes [0-9]+/counter/' "$work/listed" |
+		grep -cF -- "$2" || true)" "1"
 }
 
 cat > "$work/netcfgd.conf" <<'CONF'
@@ -82,22 +86,22 @@ has "and so is forward" "type filter hook forward priority filter; policy drop;"
 # 0302: a forwarded packet is matched by both ends, which is what keeps a
 # guest network off the LAN while it still reaches the uplink.
 has "in forward, the arriving and the leaving interface both" \
-	'iifname "guest0" oifname "lan0" drop comment "name=guest-lan sha256='
+	'iifname "guest0" oifname "lan0" counter drop comment "name=guest-lan sha256='
 has "and output" "type filter hook output priority filter; policy accept;"
 has "a state set reads back as nft writes one" \
-	'ct state established,related accept comment "name=established sha256='
+	'ct state established,related counter accept comment "name=established sha256='
 has "a protocol, a port and a CIDR read back as written" \
-	'tcp dport 22 ip saddr 192.168.0.0/16 accept comment "name=ssh sha256='
+	'tcp dport 22 ip saddr 192.168.0.0/16 counter accept comment "name=ssh sha256='
 has "icmpv6 is the protocol nft calls ipv6-icmp" \
-	'meta l4proto ipv6-icmp accept comment "name=v6ping sha256='
+	'meta l4proto ipv6-icmp counter accept comment "name=v6ping sha256='
 has "a station prefix is a mask nftables applies itself" \
-	'ether saddr & ff:ff:ff:00:00:00 == de:ad:be:00:00:00 drop comment "name=strangers'
+	'ether saddr & ff:ff:ff:00:00:00 == de:ad:be:00:00:00 counter drop comment "name=strangers'
 has "an exact station is an exact comparison" \
-	'ether saddr 02:00:00:00:01:00 drop comment "name=one-station'
+	'ether saddr 02:00:00:00:01:00 counter drop comment "name=one-station'
 has "an IPv6 address, an arriving interface and a reject" \
-	'ip6 saddr 2001:db8::1 iifname "eth0" reject comment "name=one sha256='
+	'ip6 saddr 2001:db8::1 iifname "eth0" counter reject comment "name=one sha256='
 has "in output, the interface is the leaving one and the address the destination" \
-	'tcp dport 25 ip daddr 198.51.100.0/24 oifname "wan0" drop comment "name=smtp-out'
+	'tcp dport 25 ip daddr 198.51.100.0/24 oifname "wan0" counter drop comment "name=smtp-out'
 check "nothing is written outside netcfgd's table" \
 	"$(grep -c '^table ' "$work/listed" || true)" "1"
 
@@ -172,7 +176,7 @@ nft list ruleset > "$work/listed" 2>&1 || true
 check "as one kernel rule per port and address" \
 	"$(grep -c 'comment "name=netbios sha256=' "$work/listed" || true)" "4"
 has "the IPv6 one among them" \
-	'udp dport 138 ip6 saddr fd00::/8 drop comment "name=netbios'
+	'udp dport 138 ip6 saddr fd00::/8 counter drop comment "name=netbios'
 check "all four with one digest, the written rule's" \
 	"$(grep -o 'name=netbios sha256=[0-9a-f]*' "$work/listed" | sort -u | wc -l | tr -d ' ')" "1"
 check "and the stations as two" \
@@ -197,7 +201,7 @@ TZ=CET-1 "$probe" "$work" --replace > "$work/sent" 2>&1 || true
 check "a scheduled rule is taken" "$(cat "$work/sent")" ""
 TZ=UTC nft list ruleset > "$work/listed" 2>&1 || true
 has "the kernel holds it in UTC, the day matched" \
-	'meta hour "07:00"-"08:29:59" meta day "Monday" drop comment "name=monday'
+	'meta hour "07:00"-"08:29:59" meta day "Monday" counter drop comment "name=monday'
 check "a window past midnight is two kernel rules, one digest" \
 	"$(grep -o 'name=nightly sha256=[0-9a-f]*' "$work/listed" | wc -l | tr -d ' ')" "2"
 TZ=CET-1 "$probe" --read > "$work/read" 2>&1 || true
@@ -261,9 +265,9 @@ check "a firewall the machine lacks is planned as one table replacement" \
 check "and applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
 nft list ruleset > "$work/listed" 2>&1 || true
 has "the host list's prefix is enforced in the kernel, as a mask" \
-	'ether saddr & ff:ff:ff:00:00:00 == de:ad:be:00:00:00 drop comment "name=strangers'
+	'ether saddr & ff:ff:ff:00:00:00 == de:ad:be:00:00:00 counter drop comment "name=strangers'
 has "and its exact station as an address" \
-	'ether saddr 02:00:00:00:00:09 drop comment "name=strangers'
+	'ether saddr 02:00:00:00:00:09 counter drop comment "name=strangers'
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "a second plan has nothing to do, a schedule's pieces among the rules" \
 	"$(cat "$work/plan")" "nothing to do"
@@ -274,7 +278,7 @@ check "the clock's offset moving is a firewall to replace" \
 	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
 "$ncfg" status > "$work/status" 2>&1 || true
 check "ncfg status shows the installed firewall as rules" \
-	"$(grep -cE '^    (accept established state established,related|accept ssh protocol tcp port 22|drop strangers mac (de:ad:be:\*|02:00:00:00:00:09))$' "$work/status" || true)" "4"
+	"$(grep -cE '^    (accept established state established,related|accept ssh protocol tcp port 22|drop strangers mac (de:ad:be:\*|02:00:00:00:00:09)): [0-9]+ packets?, [0-9]+ bytes$' "$work/status" || true)" "4"
 
 # A hand edit inside netcfgd's table is a difference, and is replaced.
 nft add rule inet netcfgd input tcp dport 8080 accept
@@ -336,12 +340,13 @@ check "a logged rule is applied" "$(grep -c '^ok   nftables.replace' "$work/appl
 nft list ruleset > "$work/listed" 2>&1 || true
 has "the log is rated, prefixed with the rule, and carries no verdict" \
 	'tcp dport 23 limit rate 10/minute burst 5 packets log prefix "netcfgd input/telnet: " comment "name=telnet'
-has "and the drop follows it" 'tcp dport 23 drop comment "name=telnet'
+has "and the drop follows it" 'tcp dport 23 counter drop comment "name=telnet'
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and the next plan has nothing to do" "$(cat "$work/plan")" "nothing to do"
 "$ncfg" status > "$work/status" 2>&1 || true
 check "ncfg status shows the log's row before the drop's" \
-	"$(grep -E '^    (log|drop) telnet' "$work/status" | tr '\n' ' ')" \
+	"$(grep -E '^    (log|drop) telnet' "$work/status" | sed 's/: [0-9]* packets*, [0-9]* bytes$//' |
+		tr '\n' ' ')" \
 	"    log telnet protocol tcp port 23     drop telnet protocol tcp port 23 "
 
 # A port range (0331): the kernel takes `th dport LOW-HIGH` and the reader
@@ -359,7 +364,7 @@ CONF
 "$ncfg" apply > "$work/apply" 2>&1 || true
 check "a rule with a port range is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
 nft list ruleset > "$work/listed" 2>&1 || true
-has "the range is one kernel match" 'udp dport 6000-6010 accept comment "name=games'
+has "the range is one kernel match" 'udp dport 6000-6010 counter accept comment "name=games'
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
 "$ncfg" status > "$work/status" 2>&1 || true
@@ -381,10 +386,21 @@ CONF
 "$ncfg" apply > "$work/apply" 2>&1 || true
 check "rules matching icmp types are applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
 nft list ruleset > "$work/listed" 2>&1 || true
-has "the kernel matches an icmpv6 type" 'icmpv6 type nd-neighbor-solicit accept comment "name=nd'
-has "and an icmp one" 'icmp type echo-request accept comment "name=ping'
+has "the kernel matches an icmpv6 type" 'icmpv6 type nd-neighbor-solicit counter accept comment "name=nd'
+has "and an icmp one" 'icmp type echo-request counter accept comment "name=ping'
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and the next plan has nothing to do with them" "$(cat "$work/plan")" "nothing to do"
+# Each verdict rule counts what it matched, and `ncfg status` says so (10.901):
+# three echo requests on loopback are three packets on the `ping` rule.
+ip link set lo up
+ping -c 3 -i 0.2 -W 1 127.0.0.1 > /dev/null 2>&1 || true
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status counts what a rule matched" \
+	"$(grep -cE '^    accept ping protocol icmp type 8: 3 packets, [0-9]+ bytes$' "$work/status" || true)" "1"
+check "  and what one did not" \
+	"$(grep -cE '^    accept nd protocol icmpv6 type 135: 0 packets, 0 bytes$' "$work/status" || true)" "1"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "  and a count is not a difference to plan" "$(cat "$work/plan")" "nothing to do"
 # Another type under the same identity is a difference the reader sees.
 handle=$(nft -a list chain inet netcfgd input | sed -n 's/.*name=ping.*# handle \([0-9]*\).*/\1/p')
 comment=$(nft list chain inet netcfgd input | sed -n 's/.*comment "\(name=ping[^"]*\)".*/\1/p')
@@ -407,7 +423,7 @@ CONF
 "$ncfg" apply > "$work/apply" 2>&1 || true
 check "a reject with a reset is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
 nft list ruleset > "$work/listed" 2>&1 || true
-has "the kernel answers with a tcp reset" 'tcp dport 113 reject with tcp reset comment "name=ident'
+has "the kernel answers with a tcp reset" 'tcp dport 113 counter reject with tcp reset comment "name=ident'
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
 # The same identity answering with ICMP instead is a difference the reader
@@ -499,10 +515,10 @@ CONF
 "$ncfg" apply > "$work/apply" 2>&1 || true
 check "tunnel protocol rules are applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
 nft list ruleset > "$work/listed" 2>&1 || true
-has "the kernel matches gre from the peer" 'meta l4proto gre ip saddr 192.0.2.7 accept comment "name=gre'
-has "and esp" 'meta l4proto esp accept comment "name=esp'
-has "and sit's protocol 41" 'meta l4proto ipv6 accept comment "name=sit'
-has "and an sctp port" 'sctp dport 3868 accept comment "name=diameter'
+has "the kernel matches gre from the peer" 'meta l4proto gre ip saddr 192.0.2.7 counter accept comment "name=gre'
+has "and esp" 'meta l4proto esp counter accept comment "name=esp'
+has "and sit's protocol 41" 'meta l4proto ipv6 counter accept comment "name=sit'
+has "and an sctp port" 'sctp dport 3868 counter accept comment "name=diameter'
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and the next plan has nothing to do with them" "$(cat "$work/plan")" "nothing to do"
 "$ncfg" status > "$work/status" 2>&1 || true

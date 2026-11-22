@@ -1613,6 +1613,10 @@ typedef struct {
 	int           reset;      /* `reject with tcp reset`, 0332 */
 	/* An `over` meter's rate, "COUNT/SECONDSs", NULL where none (10.885). */
 	char         *over;
+	/* What the rule's counter has counted since netcfgd last replaced its
+	 * table (10.901); absent where the rule carries no counter. */
+	ncfg_optint_t packets;
+	ncfg_optint_t bytes;
 	char         *mac;
 	/* One UTC piece of a schedule, as `schedule.h` writes it -- `"1 28800
 	 * 32399"`, day then inclusive seconds, `any` for every day -- NULL for a

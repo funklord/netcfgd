@@ -1486,6 +1486,55 @@ static void a_status_becomes_mappings(void)
 	staged_close(&staged);
 }
 
+/*
+ * What each firewall rule matched (10.901), from a status answer: a written
+ * rule's kernel rules summed under its name, a log's rule and a rule with no
+ * counter adding nothing, and a rule of the same name in another chain kept
+ * apart.
+ */
+static const char counts_response[] =
+    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"firewall\":{"
+    "\"input\":\"drop\",\"forward\":\"drop\",\"output\":\"accept\",\"rules\":["
+    "{\"chain\":\"input\",\"name\":\"ssh\",\"digest\":\"a\",\"action\":\"log\","
+    "\"protocol\":\"tcp\",\"port\":22},"
+    "{\"chain\":\"input\",\"name\":\"ssh\",\"digest\":\"a\",\"action\":\"accept\","
+    "\"protocol\":\"tcp\",\"port\":22,\"packets\":5,\"bytes\":300},"
+    "{\"chain\":\"input\",\"name\":\"ssh\",\"digest\":\"a\",\"action\":\"accept\","
+    "\"protocol\":\"tcp\",\"port\":2222,\"packets\":2,\"bytes\":120},"
+    "{\"chain\":\"forward\",\"name\":\"ssh\",\"digest\":\"b\",\"action\":\"drop\","
+    "\"protocol\":\"tcp\",\"packets\":0,\"bytes\":0},"
+    "{\"chain\":\"output\",\"name\":\"old\",\"digest\":\"c\",\"action\":\"drop\","
+    "\"protocol\":\"any\"}]}}\n";
+
+static void a_status_becomes_firewall_counts(void)
+{
+	struct staged          staged;
+	char                   err[NCFG_ERROR_MAX];
+	ncfg_firewall_counts_t counts;
+
+	if (!staged_open(&staged, "a status answer with counters can be staged",
+	        counts_response)) {
+		return;
+	}
+	if (!ncfg_client_firewall_counts(staged.client, &counts, err, sizeof(err))) {
+		ok("a status converts to firewall counts", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("one entry per written rule that counts, per chain", counts.count == 2u, NULL);
+	if (counts.count == 2u) {
+		ok("  its kernel rules summed, the log's adding nothing",
+		    !strcmp(counts.items[0].chain, "input") && !strcmp(counts.items[0].name, "ssh") &&
+		        counts.items[0].packets == 7u && counts.items[0].bytes == 420u,
+		    NULL);
+		ok("  and the same name in another chain kept apart, at zero",
+		    !strcmp(counts.items[1].chain, "forward") && counts.items[1].packets == 0u,
+		    NULL);
+	}
+	ncfg_firewall_counts_free(&counts);
+	staged_close(&staged);
+}
+
 static void a_status_becomes_links(void)
 {
 	struct staged staged;
@@ -3502,6 +3551,7 @@ int main(int argc, char **argv)
 	a_status_becomes_links();
 	a_status_becomes_leases();
 	a_status_becomes_mappings();
+	a_status_becomes_firewall_counts();
 	a_scan_becomes_access_points();
 	a_scan_that_could_not_be_taken_says_so();
 	joining_names_a_network_and_never_a_secret();

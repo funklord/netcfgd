@@ -24,6 +24,7 @@
 #ifndef NCFG_CONNECTION_H
 #define NCFG_CONNECTION_H
 
+#include <QHash>
 #include <QList>
 #include <QStringList>
 #include <QObject>
@@ -404,6 +405,12 @@ struct ncfg_dns_record_row {
 
 /* One lease a netcfgd DHCP server holds (0303). `expires` a Unix time, 0
  * for never; `mac` empty for a DHCPv6 lease. */
+/* One written rule's counters, its kernel rules summed (10.901). */
+struct ncfg_firewall_count_row {
+	qulonglong packets = 0;
+	qulonglong bytes = 0;
+};
+
 struct ncfg_lease_row {
 	QString   interface;
 	QString   address;
@@ -1414,6 +1421,9 @@ public:
 	/* The firewall the configuration declares, whole, for the view that
 	 * writes the block back whole. */
 	bool firewall(ncfg_firewall_settings *out, QString *error);
+	/* What each installed rule has matched since netcfgd last replaced its
+	 * table (10.901), keyed `chain/name`, from the observation. */
+	bool firewall_counts(QHash<QString, ncfg_firewall_count_row> *out, QString *error);
 	/* The host lists the configuration declares, for the tab that edits
 	 * them. */
 	bool host_lists(QList<ncfg_host_list_row> *out, QString *error);

@@ -1662,6 +1662,40 @@ bool ncfg_connection::host_lists(QList<ncfg_host_list_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::firewall_counts(QHash<QString, ncfg_firewall_count_row> *out,
+    QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_firewall_counts_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_firewall_counts(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_firewall_count_row row;
+		row.packets = found.items[i].packets;
+		row.bytes = found.items[i].bytes;
+		out->insert(QStringLiteral("%1/%2").arg(from_c(found.items[i].chain),
+		                from_c(found.items[i].name)),
+		    row);
+	}
+	ncfg_firewall_counts_free(&found);
+	return true;
+}
+
 bool ncfg_connection::leases(QList<ncfg_lease_row> *out, QString *error)
 {
 	if (!out) {

@@ -656,6 +656,101 @@ static void a_logged_rule_is_a_log_then_its_verdict(void)
 }
 
 /*
+ * A counter ahead of every verdict (10.901): a verdict's rule carries one and
+ * reads its count back, a log's rule carries none, and an installed rule with
+ * no counter -- one an older netcfgd wrote -- is not the rule this build
+ * writes, so the first plan after an upgrade replaces it.
+ */
+static void a_verdict_rule_counts_and_a_log_rule_does_not(void)
+{
+	ncfg_firewall_rule_t          rule;
+	ncfg_firewall_t               firewall;
+	ncfg_buf_t                    out;
+	ncfg_nft_batch_t              batch;
+	ncfg_wire_messages_t          walk;
+	ncfg_wire_message_t           message;
+	ncfg_observed_firewall_rule_t seen;
+	ncfg_nft_kernel_rule_t        verdict;
+	char                          err[NCFG_ERROR_MAX];
+	int                           counted_verdicts = 0, counted_logs = 0, verdicts = 0;
+	int                           planted = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"ssh";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_TCP;
+	rule.ports = (int64_t[]){ 22 };
+	rule.port_count = 1u;
+	rule.log = 1;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+	memset(&verdict, 0, sizeof(verdict));
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a logged rule with its counter is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and passes the audit of what netcfgd may write");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+		uint8_t               *bytes = (uint8_t *)message.payload;
+		size_t                 at;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE ||
+		    !ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			continue;
+		}
+		if (one.log) {
+			counted_logs += one.counted;
+			continue;
+		}
+		verdicts++;
+		counted_verdicts += one.counted && one.packets == 0u && one.bytes == 0u;
+		/* What the kernel would hand back after 42 packets: the packets
+		 * member, `{12, 0, NFTA_COUNTER_PACKETS, 0}` and eight bytes, set. */
+		for (at = 0; !planted && at + 12u <= message.payload_length; at++) {
+			if (bytes[at] == 12u && bytes[at + 1u] == 0u &&
+			    bytes[at + 2u] == NFTA_COUNTER_PACKETS && bytes[at + 3u] == 0u &&
+			    at >= 12u && memcmp(&bytes[at - 12u], "\x0c\x00\x01\x00", 4u) == 0) {
+				bytes[at + 11u] = 42u;
+				planted = 1;
+			}
+		}
+		if (planted) {
+			(void)ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &verdict,
+			    err, sizeof(err));
+		}
+	}
+	check(verdicts == 1 && counted_verdicts == 1,
+	    "  the verdict's rule carries a counter, read back at zero");
+	check(counted_logs == 0, "  the log's rule carries none");
+	check(planted && verdict.counted && verdict.packets == 42u,
+	    "  and a count the kernel kept reads back as the count");
+	ncfg_buf_free(&out);
+
+	memset(&seen, 0, sizeof(seen));
+	seen.chain = verdict.chain;
+	seen.name = verdict.name;
+	seen.digest = verdict.digest;
+	seen.action = (char *)"drop";
+	seen.protocol = (char *)"tcp";
+	seen.port.has = 1;
+	seen.port.value = 22;
+	seen.packets.has = 1;
+	seen.packets.value = 42;
+	seen.bytes.has = 1;
+	check(ncfg_nft_kernel_rule_matches(&verdict, &seen),
+	    "  an installed rule matches whatever it has counted");
+	seen.packets.has = 0;
+	seen.bytes.has = 0;
+	check(!ncfg_nft_kernel_rule_matches(&verdict, &seen),
+	    "  and one with no counter, as an older netcfgd wrote it, does not");
+}
+
+/*
  * A port range (0331): one kernel rule per single port and per range, the
  * range as one `range` expression, each read back as what was written.
  */
@@ -1058,6 +1153,8 @@ static size_t observe_built(const ncfg_firewall_t *firewall, ncfg_nft_kernel_rul
 		rules[count].protocol = (char *)ncfg_nft_protocol_word(one->protocol);
 		rules[count].interface = one->interface[0] ? one->interface : NULL;
 		rules[count].time = times[count][0] ? times[count] : NULL;
+		rules[count].packets.has = one->counted;
+		rules[count].bytes.has = one->counted;
 		count++;
 	}
 	ncfg_buf_free(&built);
@@ -2222,6 +2319,7 @@ int main(void)
 	a_rule_is_bounded_in_what_it_becomes();
 	what_is_written_is_read_back();
 	a_translated_rule_is_written_read_and_digested();
+	a_verdict_rule_counts_and_a_log_rule_does_not();
 	an_over_rule_is_a_meter_per_family();
 	a_logged_rule_is_a_log_then_its_verdict();
 	a_port_range_is_one_kernel_rule();

@@ -385,6 +385,13 @@ static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewa
 	}
 	out->translated = one->translated;
 	out->reset = one->reset;
+	if (one->counted) {
+		out->packets.has = 1;
+		out->packets.value = one->packets > (uint64_t)INT64_MAX ? INT64_MAX
+		                                                        : (int64_t)one->packets;
+		out->bytes.has = 1;
+		out->bytes.value = one->bytes > (uint64_t)INT64_MAX ? INT64_MAX : (int64_t)one->bytes;
+	}
 	return 1;
 }
 

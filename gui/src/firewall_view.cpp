@@ -89,7 +89,7 @@ ncfg_firewall_view::ncfg_firewall_view(ncfg_connection *connection, QWidget *par
 
 	QStringList columns;
 	columns << QStringLiteral("chain") << QStringLiteral("name") << QStringLiteral("action")
-	        << QStringLiteral("matches");
+	        << QStringLiteral("matches") << QStringLiteral("matched");
 	table = new ncfg_table_view(columns, QStringLiteral("firewall_view_note"), this);
 	layout->addWidget(table);
 
@@ -146,14 +146,29 @@ void ncfg_firewall_view::refresh()
 		{ "forward", &settings.forward, forward_policy },
 		{ "output", &settings.output, output_policy },
 	};
+	/* What each rule has matched (10.901). A read that fails costs this
+	 * column and nothing else, as UPnP's mappings cost their rows. */
+	QHash<QString, ncfg_firewall_count_row> counts;
+	const bool counted = connection->firewall_counts(&counts, nullptr);
 	QList<QStringList> rows;
 	for (const auto &one : chains) {
 		const int at = one.box->findData(one.chain->policy);
 		one.box->setCurrentIndex(at >= 0 ? at : 0);
 		for (int i = 0; i < one.chain->rules.size(); i++) {
 			const ncfg_firewall_rule_row &rule = one.chain->rules.at(i);
+			const QString key = QStringLiteral("%1/%2").arg(QString::fromLatin1(one.name),
+			    rule.name);
+			QString matched;
+			if (counts.contains(key)) {
+				matched = ncfg_counted(static_cast<qsizetype>(counts.value(key).packets),
+				    "packet", "packets");
+			} else if (counted) {
+				/* Written and not yet applied, or applied by a netcfgd
+				 * that kept no count: said, since a blank reads as none. */
+				matched = QStringLiteral("not counted yet");
+			}
 			rows << QStringList { QString::fromLatin1(one.name), rule.name, rule.action,
-				matches(rule) };
+				matches(rule), matched };
 			places << qMakePair(QString::fromLatin1(one.name), i);
 		}
 	}
@@ -171,7 +186,8 @@ void ncfg_firewall_view::refresh()
 	    "Each chain is evaluated top to bottom, and a packet no rule matched meets the "
 	    "chain's policy. This is the configuration rather than what nftables has now -- the "
 	    "plan tab is where the difference shows, and where a policy that would cut off "
-	    "this machine's own replies is warned about."));
+	    "this machine's own replies is warned about. `matched` is what nftables has "
+	    "counted for the rule since netcfgd last replaced its table."));
 	emit reported(ncfg_counted(rows.size(), "firewall rule", "firewall rules"));
 }
 

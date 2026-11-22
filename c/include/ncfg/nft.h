@@ -513,6 +513,12 @@ typedef struct {
 	/* An `over` meter's rate as the document keeps it, "COUNT/SECONDSs", or
 	 * empty (10.885). */
 	char     over[48];
+	/* A `counter` just ahead of the verdict, on every verdict rule netcfgd
+	 * writes, and what it has counted since the table was last replaced
+	 * (10.901). A log rule carries none. */
+	int      counted;
+	uint64_t packets;
+	uint64_t bytes;
 	char     mac[NCFG_STATION_ADDRESS_SIZE];
 	/* One UTC piece of a schedule (10.663, `schedule.h`): `meta hour` in an
 	 * inclusive range of seconds, and `meta day` where one day is matched. */

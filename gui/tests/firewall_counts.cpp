@@ -1,0 +1,171 @@
+/*
+ * firewall_counts.cpp -- the firewall tab says what each rule matched (0337).
+ *
+ * Every verdict rule netcfgd writes carries a counter, and the tab's `matched`
+ * column is that count, a written rule's kernel rules summed. This drives the
+ * tab against a real daemon over a document with two rules, and how far it
+ * can go depends on where it runs:
+ *
+ *   - **As an ordinary user** the daemon cannot install a table, so the
+ *     status it answers holds no firewall, and each rule reads `not counted
+ *     yet` -- said, rather than the blank a failed read leaves.
+ *   - **As root in a network namespace** (`unshare -rn`, as tests/live/ runs
+ *     firewall.sh), the daemon installs the table on start, three pings on
+ *     loopback land on the `ping` rule, and the tab reads `3 packets` there
+ *     and `0 packets` on the other.
+ *
+ * HOW IT STOPS: one daemon, killed at the end; the wait for its socket is
+ * bounded at ten seconds and the wait for the table at another ten.
+ */
+
+#include "../src/firewall_view.h"
+#include "../src/ncfg_connection.h"
+
+#include <QApplication>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QProcess>
+#include <QTableWidget>
+#include <QTemporaryDir>
+#include <QThread>
+
+#include <cstdio>
+#include <unistd.h>
+
+static int failures;
+
+static void check(const QString &got, const QString &want, const char *what)
+{
+	const bool ok = got == want;
+	fprintf(stderr, "firewall_counts: %-52s %s\n", what, ok ? "ok" : "FAILED");
+	if (!ok) {
+		fprintf(stderr, "               expected: %s\n", qPrintable(want));
+		fprintf(stderr, "               actual:   %s\n", qPrintable(got));
+		failures++;
+	}
+}
+
+/* The `matched` cell of the rule named `name`, or `<absent>`. */
+static QString matched(ncfg_firewall_view *view, const QString &name)
+{
+	view->refresh();
+	auto *cells = view->findChild<QTableWidget *>();
+	if (!cells) {
+		return QStringLiteral("<no table>");
+	}
+	for (int row = 0; row < cells->rowCount(); row++) {
+		if (cells->item(row, 1) && cells->item(row, 1)->text() == name) {
+			return cells->item(row, 4) ? cells->item(row, 4)->text() : QString();
+		}
+	}
+	return QStringLiteral("<absent>");
+}
+
+int main(int argc, char **argv)
+{
+	qputenv("QT_QPA_PLATFORM", "offscreen");
+	QApplication app(argc, argv);
+
+	if (!QFile::exists(QStringLiteral(NETCFGD_BINARY))) {
+		fprintf(stderr, "firewall_counts: skipping: %s is not built\n", NETCFGD_BINARY);
+		return 0;
+	}
+
+	QTemporaryDir work;
+	const QString etc = work.path() + QStringLiteral("/etc");
+	const QString run = work.path() + QStringLiteral("/run");
+	const QString wpa = work.path() + QStringLiteral("/wpa");
+	QDir().mkpath(etc + QStringLiteral("/conf.d"));
+	QDir().mkpath(run);
+	QDir().mkpath(wpa);
+	QFile conf(etc + QStringLiteral("/netcfgd.conf"));
+	if (!conf.open(QIODevice::WriteOnly)) {
+		fprintf(stderr, "firewall_counts: cannot write the configuration\n");
+		return 1;
+	}
+	conf.write("global { control { root = \"any\" } }\n"
+	           "firewall {\n"
+	           "\tinput {\n"
+	           "\t\tpolicy = \"accept\"\n"
+	           "\t\taccept \"ping\" { protocol = \"icmp\"; icmp_type = \"echo-request\" }\n"
+	           "\t\tdrop \"telnet\" { protocol = \"tcp\"; port = 23 }\n"
+	           "\t}\n"
+	           "\tforward { policy = \"accept\" }\n"
+	           "\toutput { policy = \"accept\" }\n"
+	           "}\n");
+	conf.close();
+
+	/* Root here only in a namespace of its own: an ordinary run must never
+	 * reach the host's firewall, and the daemon is told nothing else. */
+	const bool privileged = geteuid() == 0 && qEnvironmentVariableIsSet("NCFG_COUNTS_NAMESPACE");
+	QProcess daemon;
+	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+	environment.insert(QStringLiteral("NCFG_CONFIG_DIR"), etc);
+	environment.insert(QStringLiteral("NCFG_RUN_DIR"), run);
+	environment.insert(QStringLiteral("NCFG_WPA_CTRL_DIR"), wpa);
+	daemon.setProcessEnvironment(environment);
+	if (geteuid() == 0 && !privileged) {
+		fprintf(stderr, "firewall_counts: skipping: root outside a namespace this test "
+		                "made would change the host's firewall\n");
+		return 0;
+	}
+	daemon.start(QStringLiteral(NETCFGD_BINARY), {});
+
+	const QString socket = run + QStringLiteral("/netcfgd.sock");
+	const QString listening = run + QStringLiteral("/fuzznet.sock");
+	QElapsedTimer waited;
+	waited.start();
+	while (!QFile::exists(listening) && waited.elapsed() < 10000) {
+		QThread::msleep(50);
+	}
+	ncfg_connection connection;
+	QString         error;
+	if (!QFile::exists(listening) || !connection.open(socket, &error)) {
+		fprintf(stderr, "firewall_counts: the daemon never started: %s\n", qPrintable(error));
+		daemon.kill();
+		daemon.waitForFinished(2000);
+		return 1;
+	}
+
+	ncfg_firewall_view view(&connection);
+	if (!privileged) {
+		check(matched(&view, QStringLiteral("ping")), QStringLiteral("not counted yet"),
+		    "a rule the kernel does not hold is not counted yet");
+		check(matched(&view, QStringLiteral("telnet")), QStringLiteral("not counted yet"),
+		    "  and neither is the other");
+	} else {
+		/* The table is the daemon's first pass; asked again until it shows. */
+		waited.restart();
+		while (matched(&view, QStringLiteral("ping")) != QLatin1String("0 packets") &&
+		       waited.elapsed() < 10000) {
+			QThread::msleep(200);
+		}
+		check(matched(&view, QStringLiteral("ping")), QStringLiteral("0 packets"),
+		    "an installed rule starts at nothing");
+		QProcess::execute(QStringLiteral("ip"), { QStringLiteral("link"), QStringLiteral("set"),
+		    QStringLiteral("lo"), QStringLiteral("up") });
+		QProcess pinger;
+		pinger.setStandardOutputFile(QProcess::nullDevice());
+		pinger.start(QStringLiteral("ping"), { QStringLiteral("-c"), QStringLiteral("3"),
+		    QStringLiteral("-i"), QStringLiteral("0.2"), QStringLiteral("-W"),
+		    QStringLiteral("1"), QStringLiteral("127.0.0.1") });
+		pinger.waitForFinished(10000);
+		/* The daemon's observation is a pass old at most; the backstop is
+		 * five seconds. */
+		waited.restart();
+		while (matched(&view, QStringLiteral("ping")) != QLatin1String("3 packets") &&
+		       waited.elapsed() < 10000) {
+			QThread::msleep(200);
+		}
+		check(matched(&view, QStringLiteral("ping")), QStringLiteral("3 packets"),
+		    "three pings are three packets on the rule they matched");
+		check(matched(&view, QStringLiteral("telnet")), QStringLiteral("0 packets"),
+		    "  and none on the rule they did not");
+	}
+
+	daemon.kill();
+	daemon.waitForFinished(2000);
+	fprintf(stderr, "firewall_counts: %s\n", failures ? "FAILED" : "all checks passed");
+	return failures ? 1 : 0;
+}

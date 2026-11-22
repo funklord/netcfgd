@@ -3482,6 +3482,20 @@ live:
 	@# the script checks the artifacts.
 	@if command -v qmake6 >/dev/null 2>&1; then 		$(MAKE) --no-print-directory -C client >/dev/null; 		for project in gui/tests/live/*.pro; do 			name=$$(basename $$project .pro); 			mkdir -p gui/tests/live/build/$$name; 			( cd gui/tests/live/build/$$name && qmake6 ../../$$name.pro >/dev/null && 			  $(MAKE) --no-print-directory >/dev/null ) || 				{ echo "live: $$name does not build against this tree" >&2; exit 1; }; 		done; 	fi
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
+	@# The firewall tab's `matched` column against a table the daemon really
+	@# installed (0337): `make -C gui test` runs the same probe as a user, where
+	@# nothing is installed; here, root in a namespace, three pings must read
+	@# as three packets. Built outside the namespace, as above.
+	@case "$(firstword $(MAKEFLAGS))" in -*) ;; *[nt]*) exit 0 ;; esac; \
+	if command -v qmake6 >/dev/null 2>&1; then \
+		mkdir -p gui/tests/build/firewall_counts && \
+		( cd gui/tests/build/firewall_counts && qmake6 ../../firewall_counts.pro >/dev/null && \
+		  $(MAKE) --no-print-directory >/dev/null ) || \
+			{ echo "live: firewall_counts does not build against this tree" >&2; exit 1; }; \
+		timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c \
+			"PATH=\$$PATH:/usr/sbin:/sbin NCFG_COUNTS_NAMESPACE=1 QT_QPA_PLATFORM=offscreen \
+			gui/tests/build/firewall_counts/firewall_counts"; \
+	fi
 	@# The profile verbs against a running daemon. The gui's tray lists and
 	@# switches profiles over the socket rather than off its own disk, so what
 	@# the tray can do is exactly what these two verbs do -- and neither had

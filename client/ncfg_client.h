@@ -1394,6 +1394,29 @@ void ncfg_leases_free(ncfg_leases_t *leases);
  * `view`. */
 int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, size_t err_size);
 
+/*
+ * What each firewall rule has matched (10.901), from the observation: one
+ * entry per written rule, its kernel rules' counters summed, since netcfgd
+ * last replaced its table. A rule that carries no counter -- a log's rule, or
+ * one an older netcfgd wrote -- adds nothing, and a rule with none at all is
+ * not listed. Needs `view`.
+ */
+typedef struct {
+	char              *chain;
+	char              *name;
+	unsigned long long packets;
+	unsigned long long bytes;
+} ncfg_firewall_count_t;
+
+typedef struct {
+	ncfg_firewall_count_t *items;
+	size_t                 count;
+} ncfg_firewall_counts_t;
+
+void ncfg_firewall_counts_free(ncfg_firewall_counts_t *counts);
+int ncfg_client_firewall_counts(ncfg_client_t *client, ncfg_firewall_counts_t *out, char *err,
+    size_t err_size);
+
 /* One port a UPnP or NAT-PMP client had mapped (0310, 10.675): `protocol`
  * TCP or UDP, the port on the uplink, the LAN host and port it reaches,
  * `expires` a Unix time (0 for never), and the client's own description. */

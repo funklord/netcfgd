@@ -6997,6 +6997,37 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.901 Every firewall rule counts, and the window says what each matched
+
+The inventory (10.895) put counters next after logging and parked them on the
+reading back that would make a count worth having. Built:
+[0337](doc/decision/0337-every-verdict-rule-counts.md). Every verdict rule
+carries a `counter` before its verdict, as nft 1.1.3 writes one; the reader
+takes the count and the planner compares only that a rule carries one, so a
+count is never a difference and a rule an older build wrote, with none, is
+replaced by the first plan after an upgrade (`nft_test`). `ncfg status` ends
+each rule's line with `: 3 packets, 252 bytes`, and the window's firewall tab
+has a `matched` column, a written rule's kernel rules summed by
+`ncfg_client_firewall_counts`. Counts start again whenever netcfgd replaces the
+table, which it does whole on any firewall change; the status comment and the
+tab's note say so.
+
+`tests/live/firewall.sh` reads every listing with the counts taken out, since
+the namespace's own traffic sets them, pings loopback three times and finds
+three packets on the `ping` rule and none on `nd`, then plans nothing. A
+reader that drops the count fails that check. Every expected `nft` line in the
+file gained `counter`; no other live script or hull rig expects a verdict's
+text. `gui/tests/firewall_counts.cpp` drives the tab against a real daemon: as
+a user, where nothing is installed, each rule reads `not counted yet`; as root
+in a namespace, which `make live` runs it as, three pings read `3 packets` on
+the rule they matched and `0 packets` on the other -- the daemon's status, the
+client's sum and the view end to end. A view keying the counts wrongly fails
+four of its checks.
+
+**armsr passed whole on 2026-11-22** with 10.897's packaging change: the
+package built by OpenWrt's arm64 toolchain installs, runs the router test and
+survives sysupgrade, as before b2a594ab.
+
 ## 10.900 Flow offload's chain and flowtable were named with an nft keyword
 
 Found finishing 10.899's lens on the whole of the malta document with NAT and
@@ -7081,7 +7112,8 @@ and the malta and armsr payloads copied only the procd script beside it, so the
 package step failed and the guest had no netcfgd to install. Neither rig is in
 `make hull`, which is why nothing said so. Both copy the whole of `packaging/` and
 the example now, so the tool can grow without the rigs falling behind it; malta
-passed whole with the change. armsr has the same change and has not been rerun.
+passed whole with the change. armsr has the same change and passed whole with it
+too (10.901).
 
 ## 10.896 A stopping user host missed one ask in a loaded run -- OPEN
 
@@ -7161,8 +7193,9 @@ new layer, the way `over` was.
 [0330](doc/decision/0330-a-firewall-rule-may-log-at-ten-a-minute.md), `log = true`,
 a kernel rule of its own ahead of the verdict's, rated at ten a minute. Not yet
 beside `over`, whose meter a second rule would count twice; the way through is a
-packet mark, which waits on the marks question above. Counters wait on the same
-reading-back work in `ncfg status` that would make them worth having.
+packet mark, which waits on the marks question above. Counters are built too,
+on every verdict rule and read back into `ncfg status` and the firewall tab:
+[0337](doc/decision/0337-every-verdict-rule-counts.md), 10.901.
 
 **Two of the window's gaps were data loss, not gaps, and are fixed.** The rule
 dialog and the device dialog save a block whole, and their readers never read a

@@ -1637,6 +1637,23 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 		put_over(&expressions, rule->over, family, set_name, over_set_id);
 	}
 
+	/*
+	 * **A counter ahead of every verdict** (10.901), as nft 1.1.3 writes
+	 * `counter`: both members, zero. A firewall that cannot say whether a
+	 * rule is matching cannot be debugged, and `ncfg status` shows the
+	 * count. Ahead of the verdict and after every match, `over`'s meter
+	 * included, so it counts what the rule decided rather than what it
+	 * looked at. Not on a log rule: its verdict's rule counts the same
+	 * packets.
+	 */
+	if (!as_log) {
+		ncfg_buf_init(&data, 0);
+		put_be64(&data, NFTA_COUNTER_BYTES, 0u);
+		put_be64(&data, NFTA_COUNTER_PACKETS, 0u);
+		put_expression(&expressions, "counter", &data);
+		ncfg_buf_free(&data);
+	}
+
 	ncfg_buf_init(&data, 0);
 	if (as_log) {
 		put_log(&expressions, chain, rule->name);
@@ -3581,6 +3598,12 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			    out->name);
 			return 0;
 		}
+		/* A counter is followed by the verdict and by nothing else (10.901). */
+		if (out->counted && strcmp(name, "immediate") != 0 && strcmp(name, "reject") != 0) {
+			ncfg_error_set(err, err_size, "rule `%s` has a `counter` netcfgd does not write",
+			    out->name);
+			return 0;
+		}
 		/* A log's `limit` is followed by its `log` and by nothing else. */
 		if (logging == 1 && strcmp(name, "log") != 0) {
 			ncfg_error_set(err, err_size, "rule `%s` has a `limit` netcfgd does not write",
@@ -3777,6 +3800,17 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			logging = 2;
 			out->log = 1;
 			verdict = 1;
+		} else if (strcmp(name, "counter") == 0) {
+			/* Only once, and not in a log rule (10.901). What it holds is
+			 * the count, which nothing compares. */
+			if (logging) {
+				ncfg_error_set(err, err_size, "rule `%s` has a `counter` netcfgd does not "
+				    "write", out->name);
+				return 0;
+			}
+			out->counted = 1;
+			(void)be64_member(&data, NFTA_COUNTER_PACKETS, &out->packets);
+			(void)be64_member(&data, NFTA_COUNTER_BYTES, &out->bytes);
 		} else if (strcmp(name, "dynset") == 0) {
 			if (out->over[0] || !read_over(&reading, &data, out)) {
 				ncfg_error_set(err, err_size, "rule `%s` has a `dynset` netcfgd does not "
@@ -4266,6 +4300,7 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->over, observed->over) ||
 	    !same_text(expected->port_range, observed->port_range) ||
 	    (expected->reset != 0) != (observed->reset != 0) ||
+	    (expected->counted != 0) != (observed->packets.has != 0) ||
 	    expected->has_icmp_type != observed->icmp_type.has ||
 	    (expected->has_icmp_type && (int64_t)expected->icmp_type != observed->icmp_type.value)) {
 		return 0;

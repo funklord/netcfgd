@@ -491,7 +491,8 @@
 #
 # `ncfg plan` shows the change before anything is written, and `ncfg apply`
 # replaces netcfgd's table in one transaction: all the rules land, or none do
-# and the ones before stay. `ncfg status` lists the rules as installed; a rule
+# and the ones before stay. `ncfg status` lists the rules as installed, each
+# with the packets it has matched since that transaction (0337); a rule
 # somebody added inside netcfgd's table by hand is named there and replaced on
 # the next apply. Another program's table filtering at the same hooks -- a
 # container runtime's, say -- is named in the plan and never touched; both see

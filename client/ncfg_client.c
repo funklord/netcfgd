@@ -3535,6 +3535,98 @@ int ncfg_client_leases(ncfg_client_t *client, ncfg_leases_t *out, char *err, siz
 	return 1;
 }
 
+void ncfg_firewall_counts_free(ncfg_firewall_counts_t *counts)
+{
+	if (!counts) {
+		return;
+	}
+	for (size_t i = 0; i < counts->count; i++) {
+		free(counts->items[i].chain);
+		free(counts->items[i].name);
+	}
+	free(counts->items);
+	counts->items = NULL;
+	counts->count = 0;
+}
+
+int ncfg_client_firewall_counts(ncfg_client_t *client, ncfg_firewall_counts_t *out, char *err,
+    size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_status(client, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+	uint32_t firewall = ncfg_json_member(doc, ncfg_json_root(doc), "firewall");
+	uint32_t rules = ncfg_json_member(doc, firewall, "rules");
+	for (uint32_t i = 0; i < ncfg_json_count(doc, rules); i++) {
+		uint32_t rule = ncfg_json_at(doc, rules, i);
+		uint32_t packets = ncfg_json_member(doc, rule, "packets");
+		char    *chain;
+		char    *name;
+		size_t   at;
+
+		if (ncfg_json_type(doc, packets) != NCFG_JSON_NUMBER) {
+			continue;
+		}
+		chain = member_text(doc, rule, "chain");
+		name = member_text(doc, rule, "name");
+		if (!chain || !name) {
+			free(chain);
+			free(name);
+			ncfg_firewall_counts_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+		/* A written rule is several kernel rules sharing its name: one
+		 * entry, their counts summed. */
+		for (at = 0; at < out->count; at++) {
+			if (strcmp(out->items[at].chain, chain) == 0 &&
+			    strcmp(out->items[at].name, name) == 0) {
+				break;
+			}
+		}
+		if (at == out->count) {
+			ncfg_firewall_count_t *grown =
+			    realloc(out->items, (out->count + 1u) * sizeof(*grown));
+
+			if (!grown) {
+				free(chain);
+				free(name);
+				ncfg_firewall_counts_free(out);
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+			out->items = grown;
+			out->items[at].chain = chain;
+			out->items[at].name = name;
+			out->items[at].packets = 0;
+			out->items[at].bytes = 0;
+			out->count++;
+		} else {
+			free(chain);
+			free(name);
+		}
+		out->items[at].packets += (unsigned long long)ncfg_json_int(doc, packets, 0);
+		out->items[at].bytes +=
+		    (unsigned long long)ncfg_json_int(doc, ncfg_json_member(doc, rule, "bytes"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_mappings_free(ncfg_mappings_t *mappings)
 {
 	if (!mappings) {
