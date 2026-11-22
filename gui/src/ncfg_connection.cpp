@@ -1280,6 +1280,10 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->owner = from_c(found.owner);
 	out->group = from_c(found.group);
 	out->tun_mode = from_c(found.tun_mode);
+	out->xfrm_if_id = found.xfrm_if_id;
+	out->report_writer = from_c(found.report_writer);
+	out->xfrm_connection = from_c(found.xfrm_connection);
+	out->xfrm_child = from_c(found.xfrm_child);
 	out->qdisc_kind = from_c(found.qdisc_kind);
 	out->bandwidth_bits = found.bandwidth_bits;
 	out->ingress_bandwidth_bits = found.ingress_bandwidth_bits;

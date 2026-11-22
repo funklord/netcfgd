@@ -2013,6 +2013,14 @@ typedef struct {
 	 * reports both as `tun`, so this comes from the document and not from the
 	 * link. */
 	char *tun_mode;
+	/* xfrm, an IPsec tunnel's device (0323): the id its SAs carry, the
+	 * account the IKE daemon's updown runs as, and strongSwan's connection
+	 * and child for `ncfg tunnel up` and `down` (10.864). `xfrm_if_id` is 0
+	 * and the three are "" where the document states none. */
+	long long xfrm_if_id;
+	char     *report_writer;
+	char     *xfrm_connection;
+	char     *xfrm_child;
 	/*
 	 * Queueing, which is where bufferbloat is fixed.
 	 *

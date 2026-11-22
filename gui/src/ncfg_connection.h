@@ -772,6 +772,12 @@ struct ncfg_device_config {
 	QString owner;
 	QString group;
 	QString tun_mode;
+	/* xfrm (0323): the SAs' id, 0 where none, the updown's account, and
+	 * strongSwan's connection and child (10.864). */
+	qint64  xfrm_if_id = 0;
+	QString report_writer;
+	QString xfrm_connection;
+	QString xfrm_child;
 	/* Queueing. The rates are bits/s, exactly as the document holds them, so
 	 * a rate finer than the form's kbit survives a save (10.613). The ingress
 	 * rate lives on the `ifb` netcfgd synthesised and is joined back here. */

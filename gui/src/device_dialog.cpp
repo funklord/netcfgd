@@ -44,9 +44,9 @@ const choice toggles[] = {
 };
 
 /* The kinds this form can hold. `physical` is a real card and asks for
- * nothing; the rest are links netcfgd creates. What is deliberately absent --
- * `wireguard`, `pppoe`, `openvpn`, `tun` -- carries keys, credentials or a
- * foreign config file, and a form of these fields would delete them. */
+ * nothing; the rest are links netcfgd creates. `radio` is absent, its phy
+ * having no field here, and a radio device is refused rather than saved
+ * without it (project.md 10.895). */
 const choice kinds[] = {
 	{ "physical -- a real adapter", "physical" },
 	{ "bridge", "bridge" },
@@ -68,6 +68,7 @@ const choice kinds[] = {
 	{ "tun -- carries IP packets", "tun" },
 	{ "tap -- carries ethernet frames", "tap" },
 	{ "dummy", "dummy" },
+	{ "xfrm -- an IPsec tunnel's device", "xfrm" },
 };
 
 /* The kernel's bonding modes, spelled as the config language spells them --
@@ -504,6 +505,21 @@ QStringList ncfg_device_kind_body(const ncfg_device_config &settings)
 		        .replace(QStringLiteral("{  }"), QStringLiteral("{ }"));
 	} else if (kind == QLatin1String("dummy")) {
 		body << QStringLiteral("\tkind = \"dummy\"");
+	} else if (kind == QLatin1String("xfrm")) {
+		/* Each name only where one is given: an absent one is strongSwan's
+		 * or root's default, not a value to pin (0323, 10.864). */
+		QStringList inner;
+		inner << QStringLiteral("if_id = %1").arg(settings.xfrm_if_id);
+		if (!settings.report_writer.isEmpty()) {
+			inner << QStringLiteral("report_writer = \"%1\"").arg(settings.report_writer);
+		}
+		if (!settings.xfrm_connection.isEmpty()) {
+			inner << QStringLiteral("connection = \"%1\"").arg(settings.xfrm_connection);
+		}
+		if (!settings.xfrm_child.isEmpty()) {
+			inner << QStringLiteral("child = \"%1\"").arg(settings.xfrm_child);
+		}
+		body << QStringLiteral("\txfrm { %1 }").arg(inner.join(QStringLiteral("; ")));
 	}
 	return body;
 }
@@ -922,6 +938,29 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	group->setPlaceholderText(QStringLiteral("a group -- blank leaves it to root"));
 	form->addRow(QStringLiteral("group"), group);
 
+	/* **An IPsec tunnel's device** (0323): strongSwan negotiates, netcfgd
+	 * makes the device, and the id is what joins the two -- the connection's
+	 * `if_id_in` and `if_id_out` name it. */
+	xfrm_if_id = new QSpinBox(this);
+	xfrm_if_id->setObjectName(QStringLiteral("device_xfrm_if_id"));
+	xfrm_if_id->setRange(0, 2147483647);
+	xfrm_if_id->setToolTip(QStringLiteral(
+	    "The id the IPsec connection's if_id_in and if_id_out carry: its traffic is sent "
+	    "through this device."));
+	form->addRow(QStringLiteral("interface id"), xfrm_if_id);
+	report_writer = new QLineEdit(this);
+	report_writer->setObjectName(QStringLiteral("device_report_writer"));
+	report_writer->setPlaceholderText(QStringLiteral("the IKE daemon's user -- blank is root"));
+	form->addRow(QStringLiteral("updown runs as"), report_writer);
+	xfrm_connection = new QLineEdit(this);
+	xfrm_connection->setObjectName(QStringLiteral("device_xfrm_connection"));
+	xfrm_connection->setPlaceholderText(QStringLiteral("swanctl connection, for tunnel up and down"));
+	form->addRow(QStringLiteral("connection"), xfrm_connection);
+	xfrm_child = new QLineEdit(this);
+	xfrm_child->setObjectName(QStringLiteral("device_xfrm_child"));
+	xfrm_child->setPlaceholderText(QStringLiteral("its child -- up needs both"));
+	form->addRow(QStringLiteral("child"), xfrm_child);
+
 	/* **Queueing, which is where bufferbloat is fixed** -- and the only way an
 	 * `ifb` device comes into being. Shown for every kind, because any link
 	 * can be shaped: a cable, a radio, a bridge, a tunnel. */
@@ -1258,6 +1297,10 @@ void ncfg_device_dialog::kind_changed()
 		{ ac, "pppoe" },
 		{ owner, "tun tap" },
 		{ group, "tun tap" },
+		{ xfrm_if_id, "xfrm" },
+		{ report_writer, "xfrm" },
+		{ xfrm_connection, "xfrm" },
+		{ xfrm_child, "xfrm" },
 	};
 	for (const auto &row : rows) {
 		const QString wanted = QString::fromLatin1(row.kinds);
@@ -1329,6 +1372,11 @@ void ncfg_device_dialog::load()
 	config->setText(existing.config);
 	owner->setText(existing.owner);
 	group->setText(existing.group);
+	xfrm_if_id->setValue(static_cast<int>(
+	    qBound(qint64(0), existing.xfrm_if_id, qint64(xfrm_if_id->maximum()))));
+	report_writer->setText(existing.report_writer);
+	xfrm_connection->setText(existing.xfrm_connection);
+	xfrm_child->setText(existing.xfrm_child);
 	select(qdisc_kind, existing.qdisc_kind);
 	bandwidth->setValue(rate_shown(existing.bandwidth_bits));
 	ingress_bandwidth->setValue(rate_shown(existing.ingress_bandwidth_bits));
@@ -1461,6 +1509,15 @@ QString ncfg_device_dialog::block_text() const
 	settings.config = config->text().trimmed();
 	settings.owner = owner->text().trimmed();
 	settings.group = group->text().trimmed();
+	/* An id past the box's range -- the language takes 32 bits, a spin box
+	 * 31 -- is shown at the top and written back as it was unless changed. */
+	settings.xfrm_if_id = existing.xfrm_if_id > xfrm_if_id->maximum() &&
+	        xfrm_if_id->value() == xfrm_if_id->maximum()
+	    ? existing.xfrm_if_id
+	    : xfrm_if_id->value();
+	settings.report_writer = report_writer->text().trimmed();
+	settings.xfrm_connection = xfrm_connection->text().trimmed();
+	settings.xfrm_child = xfrm_child->text().trimmed();
 	settings.qdisc_kind = qdisc_kind->currentData().toString();
 	settings.bandwidth_bits = rate_written(bandwidth->value(), existing.bandwidth_bits);
 	settings.ingress_bandwidth_bits =
@@ -1576,6 +1633,11 @@ void ncfg_device_dialog::submit()
 		note->setText(QStringLiteral("a vrf needs the routing table it owns"));
 		return;
 	}
+	if (chosen == QLatin1String("xfrm") && xfrm_if_id->value() == 0) {
+		note->setText(QStringLiteral("an xfrm device needs the non-zero id its IPsec "
+		              "connection's if_id_in and if_id_out carry"));
+		return;
+	}
 	if (qdisc_kind->currentData().toString().isEmpty()
 	    && (bandwidth->value() > 0 || ingress_bandwidth->value() > 0)) {
 		note->setText(QStringLiteral("a shaped rate needs a scheduler to shape with: "
@@ -1638,7 +1700,7 @@ void ncfg_device_dialog::submit()
 
 	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn, members, parent_link,
 		peer, local, remote, private_key, username, password, service, ac, config, owner,
-		group, master };
+		group, master, report_writer, xfrm_connection, xfrm_child };
 	for (const QLineEdit *value : values) {
 		/* A typed credential never reaches the block, so what it may carry is
 		 * the store's business rather than the language's. */

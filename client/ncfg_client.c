@@ -4766,6 +4766,9 @@ void ncfg_device_config_free(ncfg_device_config_t *config)
 	free(config->owner);
 	free(config->group);
 	free(config->tun_mode);
+	free(config->report_writer);
+	free(config->xfrm_connection);
+	free(config->xfrm_child);
 	free(config->qdisc_kind);
 	for (size_t i = 0; i < config->peer_count; i++) {
 		free(config->peers[i].name);
@@ -4887,8 +4890,14 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 	 * a tunnel's: read by the kind, like the other two `mode`s above. */
 	out->owner = member_text(doc, kind, "owner");
 	out->group = member_text(doc, kind, "group");
+	/* xfrm's, whose names no other kind uses (0323, 10.864). */
+	out->xfrm_if_id = (long long)ncfg_json_int(doc, ncfg_json_member(doc, kind, "if_id"), 0);
+	out->report_writer = member_text(doc, kind, "report_writer");
+	out->xfrm_connection = member_text(doc, kind, "connection");
+	out->xfrm_child = member_text(doc, kind, "child");
 	if (!out->username || !out->password || !out->service || !out->ac || !out->config
-	    || !out->owner || !out->group) {
+	    || !out->owner || !out->group || !out->report_writer || !out->xfrm_connection
+	    || !out->xfrm_child) {
 		return 0;
 	}
 
@@ -5218,13 +5227,12 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 	 * so there is nothing for a form to write and the sentence says which of
 	 * the two reasons this is.
 	 */
-	/* **Two kinds the dialog cannot choose** (project.md 10.895): an IPsec
-	 * tunnel's `xfrm` and a radio's `radio`. Their blocks hold an interface id,
-	 * a swanctl connection, a phy -- no field of the form's -- so Save would
-	 * write the device back without them. Refused until it has their fields. */
-	if (out->kind && (strcmp(out->kind, "xfrm") == 0 || strcmp(out->kind, "radio") == 0)) {
-		note_unmodelled(&out->unmodelled, strcmp(out->kind, "xfrm") == 0
-		    ? "xfrm (its if_id, connection and child)" : "radio (its phy)");
+	/* **A kind the dialog cannot choose** (project.md 10.895): a radio's
+	 * `radio`, whose block holds a phy -- no field of the form's -- so Save
+	 * would write the device back without it. An IPsec tunnel's `xfrm` was
+	 * the other until its four fields joined the form (10.903). */
+	if (out->kind && strcmp(out->kind, "radio") == 0) {
+		note_unmodelled(&out->unmodelled, "radio (its phy)");
 	}
 	if (out->kind && strcmp(out->kind, "ifb") == 0) {
 		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "

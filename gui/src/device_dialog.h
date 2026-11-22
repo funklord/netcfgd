@@ -135,6 +135,12 @@ private:
 	/* tun and tap: who may attach to the device. */
 	QLineEdit *owner;
 	QLineEdit *group;
+	/* xfrm: the id an IPsec connection's SAs carry, the account its updown
+	 * runs as, and strongSwan's connection and child (0323, 10.864). */
+	QSpinBox  *xfrm_if_id;
+	QLineEdit *report_writer;
+	QLineEdit *xfrm_connection;
+	QLineEdit *xfrm_child;
 	/* Queueing, which is the only way an `ifb` comes into being. */
 	QComboBox *qdisc_kind;
 	QSpinBox  *bandwidth;

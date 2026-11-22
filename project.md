@@ -6997,6 +6997,25 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.903 The device dialog edits an IPsec tunnel's device
+
+An `xfrm` device was the last kind 10.895 found the window refusing whole, its
+block holding fields no form had: the dialog named it unmodelled rather than
+save it emptied. It has the four now -- the interface id its connection's
+`if_id_in` and `if_id_out` carry, the account the updown runs as, and
+strongSwan's connection and child for `ncfg tunnel up` -- read by
+`ncfg_client_device_config` and written only where given, so an absent one
+stays strongSwan's or root's. An id of 0, which the kernel refuses, is refused
+in the form. The four waivers in `tool/form-unread-keys.txt` are gone, which
+`form_coverage_gate` asked for once the reader mentioned them.
+
+`gui/tests/device_load.cpp` saves one with its id, connection and child and
+one with its id alone, both compiling back unchanged, and one with
+`report_writer`, which the daemon refuses from a caller that is not uid 0 --
+naming the key, which a form that dropped it could not provoke. A form that
+stops writing `child` fails the first. `radio` stays refused, its phy having
+no field in the form.
+
 ## 10.902 The global tab sets the hostname, the confirm window and the drift policy
 
 Three of the window's gaps 10.895 listed as shown read-only, each in its own

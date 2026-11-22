@@ -186,13 +186,21 @@ int main(int argc, char **argv)
 	    QStringLiteral("device wlan0 { wifi { wds = true } }\n"));
 	/* A bridge's spanning-tree timing, which a Save deleted until the reader
 	 * read it (2026-11-21), and an IPsec tunnel's device, which the dialog
-	 * has no fields for and must refuse rather than save emptied. */
+	 * refused until it had the block's four fields (10.903). */
 	owned << qMakePair(QStringLiteral("device-br1"),
 	    QStringLiteral("device br1 {\n\tbridge {\n\t\tstp = true\n\t\tforward_delay = 4\n"
 	                   "\t\thello_time = 2\n\t\tmax_age = 20\n\t\tageing_time = 300\n"
 	                   "\t\tpriority = 4096\n\t}\n}\n"));
 	owned << qMakePair(QStringLiteral("device-ipsec1"),
-	    QStringLiteral("device ipsec1 { xfrm { if_id = 9; connection = \"home\" } }\n"));
+	    QStringLiteral("device ipsec1 { xfrm { if_id = 9; connection = \"home\"; "
+	                   "child = \"all\" } }\n"));
+	owned << qMakePair(QStringLiteral("device-ipsec2"),
+	    QStringLiteral("device ipsec2 { xfrm { if_id = 12 } }\n"));
+	/* `report_writer` hands the device's reports to an account, which only
+	 * uid 0 may write: this test's caller is not, so the save is refused by
+	 * the daemon naming it -- which a form that dropped it could not be. */
+	owned << qMakePair(QStringLiteral("device-ipsec3"),
+	    QStringLiteral("device ipsec3 { xfrm { if_id = 13; report_writer = \"ipsec\" } }\n"));
 	owned << qMakePair(QStringLiteral("device-dum0"),
 	    QStringLiteral("device dum0 {\n\tkind = \"dummy\"\n"
 	                   "\tqdisc { kind = \"cake\"; bandwidth = \"1234567bit\" }\n}\n"));
@@ -281,10 +289,26 @@ int main(int argc, char **argv)
 
 	check(save(&connection, QStringLiteral("br1"), work.path()), QStringLiteral("saved"),
 	    "a bridge saves with its spanning-tree timing unchanged");
+	check(save(&connection, QStringLiteral("ipsec1"), work.path()), QStringLiteral("saved"),
+	    "an IPsec tunnel's device saves with its id, connection and child");
+	check(save(&connection, QStringLiteral("ipsec2"), work.path()), QStringLiteral("saved"),
+	    "  and one with only its id saves without the others pinned");
 	{
-		const QString said = save(&connection, QStringLiteral("ipsec1"), work.path());
-		check(said.contains(QStringLiteral("xfrm")) ? QStringLiteral("refused") : said,
-		    QStringLiteral("refused"), "an IPsec tunnel's device is refused, naming its xfrm block");
+		const QString said = save(&connection, QStringLiteral("ipsec3"), work.path());
+		check(said.contains(QStringLiteral("report_writer")) ? QStringLiteral("kept") : said,
+		    QStringLiteral("kept"), "  and its updown's account is written back, not dropped");
+	}
+	{
+		ncfg_device_dialog dialog(&connection, QStringLiteral("ipsec1"));
+		auto *id = dialog.findChild<QSpinBox *>(QStringLiteral("device_xfrm_if_id"));
+		auto *child = dialog.findChild<QLineEdit *>(QStringLiteral("device_xfrm_child"));
+		check(id && child ? QStringLiteral("%1 %2").arg(id->value()).arg(child->text())
+		                  : QStringLiteral("<missing>"),
+		    QStringLiteral("9 all"), "  the form shows the id and the child it opened on");
+		id->setValue(0);
+		QMetaObject::invokeMethod(&dialog, "submit");
+		check(dialog.outcome().isEmpty() ? QStringLiteral("refused") : dialog.outcome(),
+		    QStringLiteral("refused"), "  and refuses an id of 0, which the kernel would");
 	}
 
 	/* Four-address mode, which a save used to drop. */
