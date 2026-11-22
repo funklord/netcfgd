@@ -7010,6 +7010,11 @@ lock, or a host begun again that the far side takes for nobody's copy
 script threw the failing ask's error away; it now prints it, so the next miss
 says which.
 
+**Not reproduced under load either** (2026-11-22): eight runs of the script
+with a busy loop on each of the 24 CPUs answered 320 asks of 320. CPU contention
+alone is not the condition; the 2026-11-21 load was compiles, which also
+contend for disk and memory. It stays open until a miss prints its error.
+
 ## 10.895 What the firewall language and the window cannot say, inventoried
 
 Asked by the holder on 2026-11-21: the SSH guard had no translation until
