@@ -115,6 +115,9 @@
 #define NCFG_NFT_UPNP_CHAIN_PREROUTING  "prerouting"
 #define NCFG_NFT_UPNP_CHAIN_POSTROUTING "postrouting"
 
+/* The packet mark's bit netcfgd reserves, `document.h`'s (0338). */
+#define NCFG_NFT_MARK_BIT NCFG_FIREWALL_MARK_BIT
+
 /*
  * What a rule's comment can hold: nft refuses a comment over 128 characters,
  * measured (0295), so the name and the digest share that rather than the
@@ -513,6 +516,10 @@ typedef struct {
 	/* An `over` meter's rate as the document keeps it, "COUNT/SECONDSs", or
 	 * empty (10.885). */
 	char     over[48];
+	/* The reserved mark bit (0338): a log's rule that sets it past its
+	 * `over` meter, or the verdict's rule after it that matches it in place
+	 * of the meter. */
+	int      marked;
 	/* A `counter` just ahead of the verdict, on every verdict rule netcfgd
 	 * writes, and what it has counted since the table was last replaced
 	 * (10.901). A log rule carries none. */

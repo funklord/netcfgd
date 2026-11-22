@@ -485,7 +485,9 @@
 #     The names are the protocol's own -- echo-request is 8 or 128.
 #   - `log = true` writes each matching packet to the kernel log, starting
 #     `netcfgd CHAIN/NAME: `, at most ten a minute for the rule so a flood
-#     cannot fill the disk (0330). Not beside `over` yet.
+#     cannot fill the disk (0330). Beside `over` it logs what is over, the
+#     meter counted once through the packet mark's top bit, which netcfgd
+#     reserves: a routing rule's `fwmark` may not use 0x80000000 (0338).
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
 #

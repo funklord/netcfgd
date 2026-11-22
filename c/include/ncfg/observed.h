@@ -1613,6 +1613,10 @@ typedef struct {
 	int           reset;      /* `reject with tcp reset`, 0332 */
 	/* An `over` meter's rate, "COUNT/SECONDSs", NULL where none (10.885). */
 	char         *over;
+	/* The reserved mark bit (0338): a log's rule setting it past its `over`
+	 * meter, or the verdict's rule after it matching it in the meter's
+	 * place. Absent when false. */
+	int           marked;
 	/* What the rule's counter has counted since netcfgd last replaced its
 	 * table (10.901); absent where the rule carries no counter. */
 	ncfg_optint_t packets;

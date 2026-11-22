@@ -465,6 +465,47 @@ check "a ruleset saved from it loads back" "$(nft -f "$work/saved" 2>&1 | head -
 check "and the plan has nothing to do with what was loaded, prefixes and all" \
 	"$(cat "$work/plan")" "nothing to do"
 
+# `log` beside `over` (0338): the log's rule counts the meter and hands the
+# answer to the verdict's in the mark's reserved bit. Counted once a packet,
+# two echo requests in a minute pass and the rest are dropped -- counted twice,
+# as a second meter would, only one would. Saved and loaded back with nft too.
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		drop "ping-guard" { protocol = "icmp"; icmp_type = "echo-request"; over = "2/60s"; log = true }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a logged guard is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+# One pair per family, as an unaddressed guard's meter is (10.885).
+check "the log's rule clears the bit, counts the meter, sets the bit and logs" \
+	"$(grep -c 'icmp type echo-request meta mark set meta mark & 0x7fffffff update @over-' "$work/listed" || true)" "2"
+check "  and logs past the meter at its own rate" \
+	"$(grep -c 'meta mark set meta mark | 0x80000000 limit rate 10/minute burst 5 packets log prefix "netcfgd input/ping-guard: "' "$work/listed" || true)" "2"
+check "the drop matches the bit in the meter's place and clears it" \
+	"$(sed -E 's/counter packets [0-9]+ bytes [0-9]+/counter/' "$work/listed" |
+		grep -c 'icmp type echo-request meta mark & 0x80000000 == 0x80000000 meta mark set meta mark & 0x7fffffff counter drop comment "name=ping-guard' || true)" "2"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "  and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
+ip link set lo up
+check "two pings of five pass a guard of two a minute" \
+	"$(ping -c 5 -i 0.2 -W 1 127.0.0.1 2>/dev/null | grep -o '[0-9]* received')" "2 received"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "  and ncfg status counts the three it dropped, under the log's meter" \
+	"$(grep -cE '^    drop ping-guard protocol icmp type 8 over, as its log counted: 3 packets, [0-9]+ bytes$' "$work/status" || true)" "1"
+check "  the log's rows naming the meter, one per family" \
+	"$(grep -cE '^    log ping-guard protocol icmp type 8 over 2/60s$' "$work/status" || true)" "2"
+nft list ruleset > "$work/saved" 2>&1
+nft flush ruleset
+check "a ruleset with a logged guard loads back" "$(nft -f "$work/saved" 2>&1 | head -2)" ""
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "  and the plan has nothing to do with what was loaded" "$(cat "$work/plan")" "nothing to do"
+
 # Flow offload (0319) beside NAT, saved and loaded back with nft (10.900): its
 # chain and flowtable were named `offload`, a keyword to nft's grammar, so a
 # ruleset saved with them would not load at all. Two applies, since the

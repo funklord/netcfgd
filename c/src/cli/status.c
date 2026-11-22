@@ -275,6 +275,14 @@ static void print_firewall(const ncfg_observed_t *observed)
 			if (rule->mac) {
 				ncfg_out_writef(" mac %s", rule->mac);
 			}
+			/* A meter, and where a log counts it for its verdict (0338), the
+			 * verdict's rule saying where its answer comes from. */
+			if (rule->over) {
+				ncfg_out_writef(" over %s", rule->over);
+			}
+			if (rule->marked && !rule->over) {
+				ncfg_out_writef(" over, as its log counted");
+			}
 			/* What it has matched since the table was last replaced
 			 * (10.901): the answer to "is my rule doing anything". */
 			if (rule->packets.has) {

@@ -4186,7 +4186,8 @@ static void vlan_id_cases(void)
  * file is read first, a phase word followed by `=` is a key and not a hook,
  * and a switch naming no interface is refused rather than doing nothing.
  */
-/* `log = true` on a firewall rule (0330), and refused beside `over`. */
+/* `log = true` on a firewall rule (0330), beside `over` too (0338), and the
+ * mark bit that takes reserved from a routing rule and a WireGuard device. */
 static void firewall_log_cases(void)
 {
 	ncfg_document_t *document;
@@ -4201,10 +4202,25 @@ static void firewall_log_cases(void)
 		    "  and the rule logs");
 		ncfg_document_free(document);
 	}
-	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
 	    "\t\tdrop \"ssh\" {\n\t\t\tprotocol = \"tcp\"\n\t\t\tport = 22\n"
 	    "\t\t\tover = \"8/15m\"\n\t\t\tlog = true\n\t\t}\n\t}\n}\n",
-	    "cannot do yet", "a rule that logs and counts `over` is refused, saying why");
+	    "a rule that logs and counts `over` compiles, and renders back");
+	if (document) {
+		check(document->firewall && document->firewall->input.rules[0].log &&
+		        document->firewall->input.rules[0].over,
+		    "  and keeps both");
+		ncfg_document_free(document);
+	}
+	refuses("rule \"a\" { fwmark = 2147483649; lookup = 1; priority = 100 }\n",
+	    "reserves", "a routing rule's mark on the reserved bit is refused");
+	refuses("rule \"a\" { fwmark = 1; fwmask = 4294967295; lookup = 1; priority = 100 }\n",
+	    "reserves", "  and so is a mask naming it");
+	document = compiles("rule \"a\" { fwmark = 1; fwmask = 255; lookup = 1; priority = 100 }\n",
+	    "  a mark and mask below it compile");
+	ncfg_document_free(document);
+	refuses("device wg0 { wireguard { private_key = \"@secret:w\"; fwmark = 2147483648 } }\n",
+	    "reserves", "  a WireGuard fwmark on the reserved bit is refused");
 }
 
 /* Port ranges beside single ports (0331), and what is not a range. */

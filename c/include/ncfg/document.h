@@ -2789,6 +2789,14 @@ typedef struct {
 	size_t   utc_piece_count;
 } ncfg_firewall_rule_t;
 
+/*
+ * The packet mark's bit netcfgd reserves (0338): a logged `over` rule's log
+ * sets it where the meter is over, for its verdict's rule to match, and both
+ * clear it again. A routing rule's `fwmark` or `fwmask` and a WireGuard
+ * `fwmark` may not use it.
+ */
+#define NCFG_FIREWALL_MARK_BIT 0x80000000u
+
 typedef struct {
 	int                   policy; /* ncfg_firewall_policy_t */
 	ncfg_firewall_rule_t *rules;  /* in the document's order, never sorted */

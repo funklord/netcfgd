@@ -897,22 +897,60 @@ static void put_cmp(ncfg_buf_t *list, uint32_t op, const void *bytes, size_t len
 	ncfg_buf_free(&data);
 }
 
-/* `register 1 = register 1 & MASK`, which is how a prefix -- of an address or
- * a station -- is matched: mask, then compare. */
-static void put_mask(ncfg_buf_t *list, const uint8_t *mask, size_t length)
+/* `register 1 = (register 1 & MASK) ^ XOR`. */
+static void put_bitwise(ncfg_buf_t *list, const void *mask, const void *xor_bytes, size_t length)
 {
 	ncfg_buf_t data;
-	uint8_t    zero[16];
 
-	memset(zero, 0, sizeof(zero));
 	ncfg_buf_init(&data, 0);
 	put_be32(&data, NFTA_BITWISE_SREG, NFT_REG_1);
 	put_be32(&data, NFTA_BITWISE_DREG, NFT_REG_1);
 	put_be32(&data, NFTA_BITWISE_LEN, (uint32_t)length);
 	put_data(&data, NFTA_BITWISE_MASK, mask, length);
-	put_data(&data, NFTA_BITWISE_XOR, zero, length);
+	put_data(&data, NFTA_BITWISE_XOR, xor_bytes, length);
 	put_expression(list, "bitwise", &data);
 	ncfg_buf_free(&data);
+}
+
+/* `register 1 = register 1 & MASK`, which is how a prefix -- of an address or
+ * a station -- is matched: mask, then compare. */
+static void put_mask(ncfg_buf_t *list, const uint8_t *mask, size_t length)
+{
+	uint8_t zero[16];
+
+	memset(zero, 0, sizeof(zero));
+	put_bitwise(list, mask, zero, length);
+}
+
+/*
+ * The packet mark, as nft 1.1.3 writes `meta mark set meta mark & 0x7fffffff`
+ * (AND 0x7fffffff, XOR 0) and `meta mark set meta mark | 0x80000000` (AND
+ * 0x7fffffff, XOR the bit): load, mask, store. The mark is host order in the
+ * register, as `meta` hands it over.
+ */
+static void put_mark_set(ncfg_buf_t *list, uint32_t xor_value)
+{
+	const uint32_t mask = ~NCFG_NFT_MARK_BIT;
+	ncfg_buf_t     data;
+
+	put_meta(list, NFT_META_MARK);
+	put_bitwise(list, &mask, &xor_value, sizeof(mask));
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_META_KEY, NFT_META_MARK);
+	put_be32(&data, NFTA_META_SREG, NFT_REG_1);
+	put_expression(list, "meta", &data);
+	ncfg_buf_free(&data);
+}
+
+/* `meta mark & 0x80000000 == 0x80000000`. */
+static void put_mark_test(ncfg_buf_t *list)
+{
+	const uint32_t bit = NCFG_NFT_MARK_BIT;
+	const uint32_t zero = 0u;
+
+	put_meta(list, NFT_META_MARK);
+	put_bitwise(list, &bit, &zero, sizeof(bit));
+	put_cmp(list, NFT_CMP_EQ, &bit, sizeof(bit));
 }
 
 /* An address or CIDR, as the family nftables names it, its bytes and its
@@ -1630,11 +1668,29 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
 	if (piece) {
 		put_schedule(&expressions, piece);
 	}
-	if (rule->over) {
+	/*
+	 * **A logged `over` rule evaluates its meter once, in the log's rule**
+	 * (0338), and tells the verdict's rule the answer in the packet mark's
+	 * top bit, which netcfgd reserves: cleared ahead of the meter, so a packet
+	 * arriving with it set says nothing, set past it, and ahead of the log's
+	 * own rate, so a log line skipped is not a verdict skipped. The verdict's
+	 * rule matches the bit in place of the meter and clears it again, so
+	 * nothing after netcfgd's chain sees it.
+	 */
+	if (rule->over && rule->log && !as_log) {
+		put_mark_test(&expressions);
+		put_mark_set(&expressions, 0u);
+	} else if (rule->over) {
 		char set_name[NCFG_NFT_NAME_MAX];
 
+		if (as_log) {
+			put_mark_set(&expressions, 0u);
+		}
 		over_set_name(comment, family, set_name, sizeof(set_name));
 		put_over(&expressions, rule->over, family, set_name, over_set_id);
+		if (as_log) {
+			put_mark_set(&expressions, NCFG_NFT_MARK_BIT);
+		}
 	}
 
 	/*
@@ -3001,6 +3057,7 @@ typedef struct {
 	uint32_t offset;
 	uint32_t length;
 	uint8_t  mask[16];
+	uint8_t  xor_bytes[16];
 	size_t   mask_length; /* 0 where nothing was masked */
 	uint8_t  family; /* from `meta nfproto`, for the addresses after it */
 	int      swapped; /* `meta hour` turned to network order, ready to range */
@@ -3538,6 +3595,13 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 	int               verdict = 0;
 	/* 1 once the log's `limit` is read, 2 once its `log` is (0330). */
 	int               logging = 0;
+	/* The reserved mark bit (0338), in the order it is met: cleared ahead of
+	 * a log's meter and set past it, or matched and cleared in its verdict's
+	 * rule. */
+	int               mark_cleared = 0;
+	int               mark_set = 0;
+	int               mark_tested = 0;
+	int               mark_released = 0;
 
 	if (!out) {
 		ncfg_error_set(err, err_size, "a rule read needs somewhere to go");
@@ -3577,6 +3641,7 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		ncfg_wire_attrs_t expression;
 		ncfg_wire_attrs_t data;
 		ncfg_wire_attr_t  data_attr;
+		ncfg_wire_attr_t  stored;
 		char              why[NCFG_ERROR_MAX];
 
 		if (element.kind != NFTA_LIST_ELEM) {
@@ -3610,7 +3675,47 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			    out->name);
 			return 0;
 		}
-		if (strcmp(name, "meta") == 0) {
+		if (strcmp(name, "meta") == 0 && ncfg_wire_attrs_find(&data, NFTA_META_SREG, &stored,
+		        NULL, 0) == NCFG_WIRE_OK) {
+			/* A store: only the mark, only as `put_mark_set` writes it. */
+			uint32_t key = 0;
+			uint32_t mask = 0;
+			uint32_t xor_value = 0;
+
+			(void)be32_member(&data, NFTA_META_KEY, &key);
+			if (reading.what == LOADED_META && reading.key == NFT_META_MARK &&
+			    reading.mask_length == 4u) {
+				memcpy(&mask, reading.mask, sizeof(mask));
+				memcpy(&xor_value, reading.xor_bytes, sizeof(xor_value));
+			}
+			if (key != NFT_META_MARK || reading.what != LOADED_META ||
+			    reading.key != NFT_META_MARK || reading.mask_length != 4u ||
+			    mask != ~NCFG_NFT_MARK_BIT || (xor_value != 0u && xor_value != NCFG_NFT_MARK_BIT) ||
+			    logging) {
+				ncfg_error_set(err, err_size, "rule `%s` sets a packet mark netcfgd does not "
+				    "write", out->name);
+				return 0;
+			}
+			if (xor_value) {
+				/* Set past the meter, once, after it was cleared. */
+				if (!mark_cleared || mark_set || !out->over[0]) {
+					ncfg_error_set(err, err_size, "rule `%s` sets the mark where netcfgd "
+					    "does not", out->name);
+					return 0;
+				}
+				mark_set = 1;
+			} else if (mark_tested && !mark_released) {
+				mark_released = 1;
+			} else if (!mark_tested && !mark_cleared && !out->over[0]) {
+				mark_cleared = 1;
+			} else {
+				ncfg_error_set(err, err_size, "rule `%s` clears the mark where netcfgd does "
+				    "not", out->name);
+				return 0;
+			}
+			reading.what = LOADED_NONE;
+			reading.mask_length = 0;
+		} else if (strcmp(name, "meta") == 0) {
 			reading.what = LOADED_META;
 			reading.mask_length = 0;
 			reading.swapped = 0;
@@ -3711,16 +3816,63 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			(void)be32_member(&data, NFTA_PAYLOAD_LEN, &reading.length);
 		} else if (strcmp(name, "bitwise") == 0) {
 			const uint8_t *mask = NULL;
+			const uint8_t *xor_bytes = NULL;
 			size_t         mask_length = 0;
+			size_t         xor_length = 0;
+			size_t         at;
+			int            flips = 0;
 
 			if (!data_value(&data, NFTA_BITWISE_MASK, &mask, &mask_length) ||
-			    mask_length > sizeof(reading.mask)) {
+			    mask_length > sizeof(reading.mask) ||
+			    (data_value(&data, NFTA_BITWISE_XOR, &xor_bytes, &xor_length) &&
+			    xor_length != mask_length)) {
+				ncfg_error_set(err, err_size, "rule `%s` has a mask netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			memset(reading.xor_bytes, 0, sizeof(reading.xor_bytes));
+			if (xor_bytes) {
+				memcpy(reading.xor_bytes, xor_bytes, xor_length);
+			}
+			for (at = 0; at < mask_length; at++) {
+				flips = flips || reading.xor_bytes[at];
+			}
+			/* Only the mark is ever flipped as well as masked (0338). */
+			if (flips && !(reading.what == LOADED_META && reading.key == NFT_META_MARK)) {
 				ncfg_error_set(err, err_size, "rule `%s` has a mask netcfgd does not write",
 				    out->name);
 				return 0;
 			}
 			memcpy(reading.mask, mask, mask_length);
 			reading.mask_length = mask_length;
+		} else if (strcmp(name, "cmp") == 0 && reading.what == LOADED_META &&
+		    reading.key == NFT_META_MARK) {
+			/* `meta mark & BIT == BIT`, once, in a verdict's rule with no meter
+			 * of its own (0338). */
+			const uint8_t *value = NULL;
+			size_t         value_length = 0;
+			uint32_t       op = 0;
+			uint32_t       mask = 0;
+			uint32_t       xor_value = 0;
+			uint32_t       want = 0;
+
+			if (reading.mask_length == 4u) {
+				memcpy(&mask, reading.mask, sizeof(mask));
+				memcpy(&xor_value, reading.xor_bytes, sizeof(xor_value));
+			}
+			if (data_value(&data, NFTA_CMP_DATA, &value, &value_length) && value_length == 4u) {
+				memcpy(&want, value, sizeof(want));
+			}
+			if (!be32_member(&data, NFTA_CMP_OP, &op) || op != NFT_CMP_EQ ||
+			    mask != NCFG_NFT_MARK_BIT || xor_value != 0u || want != NCFG_NFT_MARK_BIT ||
+			    mark_tested || mark_cleared || out->over[0] || logging) {
+				ncfg_error_set(err, err_size, "rule `%s` matches a packet mark netcfgd does "
+				    "not write", out->name);
+				return 0;
+			}
+			mark_tested = 1;
+			reading.what = LOADED_NONE;
+			reading.mask_length = 0;
 		} else if (strcmp(name, "cmp") == 0) {
 			if (!read_cmp_into(&reading, &data, out, why, sizeof(why))) {
 				ncfg_error_set(err, err_size, "rule `%s`: %s", out->name, why);
@@ -3803,7 +3955,7 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		} else if (strcmp(name, "counter") == 0) {
 			/* Only once, and not in a log rule (10.901). What it holds is
 			 * the count, which nothing compares. */
-			if (logging) {
+			if (logging || (mark_tested && !mark_released)) {
 				ncfg_error_set(err, err_size, "rule `%s` has a `counter` netcfgd does not "
 				    "write", out->name);
 				return 0;
@@ -3812,7 +3964,7 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 			(void)be64_member(&data, NFTA_COUNTER_PACKETS, &out->packets);
 			(void)be64_member(&data, NFTA_COUNTER_BYTES, &out->bytes);
 		} else if (strcmp(name, "dynset") == 0) {
-			if (out->over[0] || !read_over(&reading, &data, out)) {
+			if (out->over[0] || mark_tested || !read_over(&reading, &data, out)) {
 				ncfg_error_set(err, err_size, "rule `%s` has a `dynset` netcfgd does not "
 				    "write", out->name);
 				return 0;
@@ -3828,6 +3980,16 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		ncfg_error_set(err, err_size, "rule `%s` has no verdict", out->name);
 		return 0;
 	}
+	/* The mark in one of its two shapes or not at all (0338): a log's rule
+	 * with a meter clears it ahead and sets it past, and a verdict's rule
+	 * matches it and clears it before the counter. */
+	if (out->log ? (out->over[0] != '\0') != (mark_cleared && mark_set) || mark_tested
+	             : mark_cleared || mark_set || mark_tested != mark_released) {
+		ncfg_error_set(err, err_size, "rule `%s` uses the packet mark where netcfgd does not",
+		    out->name);
+		return 0;
+	}
+	out->marked = mark_set || mark_tested;
 	return 1;
 }
 
@@ -4300,6 +4462,7 @@ int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
 	    !same_text(expected->over, observed->over) ||
 	    !same_text(expected->port_range, observed->port_range) ||
 	    (expected->reset != 0) != (observed->reset != 0) ||
+	    (expected->marked != 0) != (observed->marked != 0) ||
 	    (expected->counted != 0) != (observed->packets.has != 0) ||
 	    expected->has_icmp_type != observed->icmp_type.has ||
 	    (expected->has_icmp_type && (int64_t)expected->icmp_type != observed->icmp_type.value)) {

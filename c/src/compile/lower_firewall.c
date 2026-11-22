@@ -709,21 +709,8 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 			    key);
 		}
 	}
-	/*
-	 * **`log` beside `over` is not offered yet** (0330). The log is rated in
-	 * a kernel rule of its own ahead of the verdict, because a `limit` in the
-	 * verdict's rule would skip the verdict past its rate. An `over` rule's
-	 * meter counts every time it is evaluated, so a second rule evaluating it
-	 * would count each packet twice and halve the threshold written.
-	 */
-	if (rule.log && rule.over) {
-		ncfg_diag(ctx, block->span,
-		    "rule `%s` logs and counts `over`, which netcfgd cannot do yet: the log's own "
-		    "rule would count each packet against the meter a second time. Log a rule "
-		    "without `over`", rule.name);
-		rule_free(&rule);
-		return 0;
-	}
+	/* `log` beside `over` counts the meter once, in the log's rule, and hands
+	 * the answer to the verdict's in the mark bit netcfgd reserves (0338). */
 	/* **An ICMP type belongs to an ICMP rule** (0333), and its names are the
 	 * protocol's: `echo-request` is 8 for one and 128 for the other. */
 	if (icmp_written) {

@@ -118,6 +118,17 @@ static int rule_is_complete(ncfg_lower_ctx_t *ctx, const ncfg_routing_rule_t *ru
 		ncfg_diag(ctx, block->span, "rule `%s` has an `fwmask` but no `fwmark`", label);
 		return 0;
 	}
+	/* **The mark's top bit is netcfgd's** (0338): its firewall sets and
+	 * clears it, so a rule reading it would route by netcfgd's bookkeeping.
+	 * An absent `fwmask` is the kernel's whole word and is not refused; one
+	 * written naming the bit is. */
+	if ((rule->fwmark.has && ((uint64_t)rule->fwmark.value & NCFG_FIREWALL_MARK_BIT)) ||
+	    (rule->fwmask.has && ((uint64_t)rule->fwmask.value & NCFG_FIREWALL_MARK_BIT))) {
+		ncfg_diag(ctx, block->span,
+		    "rule `%s` uses the packet mark's top bit (0x80000000), which netcfgd's "
+		    "firewall reserves; use the lower 31", label);
+		return 0;
+	}
 	return 1;
 }
 

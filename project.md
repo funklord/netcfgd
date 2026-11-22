@@ -6997,6 +6997,25 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.904 A guard may log: the mark's top bit is netcfgd's
+
+The holder answered the marks question on 2026-11-22: reserve `0x80000000`.
+[0338](doc/decision/0338-the-top-mark-bit-is-netcfgds.md) has the shape. A
+logged `over` rule's log clears the bit, counts the meter, sets the bit and
+logs; its verdict's rule matches the bit where the meter was and clears it.
+The reader takes those two shapes and no other, both rows observe as
+`marked`, and a routing rule's `fwmark`/`fwmask` or a WireGuard `fwmark` on
+the bit is refused at compile time.
+
+**The live proof is behaviour, not a listing**: five pings through a logged
+guard of two a minute get two replies, and the meter written in both rules
+(the shape 0330 refused) gets one. nft's own encoding of the three mark
+statements was measured with `nft --debug=netlink` before writing them.
+
+The reader also stopped ignoring a `bitwise`'s XOR: before, a hand edit
+flipping bits in a mask read back as the plain mask. Only the mark is ever
+written with one.
+
 ## 10.903 The device dialog edits an IPsec tunnel's device
 
 An `xfrm` device was the last kind 10.895 found the window refusing whole, its
@@ -7220,9 +7239,10 @@ new layer, the way `over` was.
 
 **Logging is built**, the same day:
 [0330](doc/decision/0330-a-firewall-rule-may-log-at-ten-a-minute.md), `log = true`,
-a kernel rule of its own ahead of the verdict's, rated at ten a minute. Not yet
-beside `over`, whose meter a second rule would count twice; the way through is a
-packet mark, which waits on the marks question above. Counters are built too,
+a kernel rule of its own ahead of the verdict's, rated at ten a minute, and
+beside `over` since 10.904: the meter is counted once, in the log's rule, and
+handed to the verdict's in the mark's reserved top bit
+([0338](doc/decision/0338-the-top-mark-bit-is-netcfgds.md)). Counters are built too,
 on every verdict rule and read back into `ncfg status` and the firewall tab:
 [0337](doc/decision/0337-every-verdict-rule-counts.md), 10.901.
 
@@ -7270,17 +7290,15 @@ turned each of them back into `any`; it is the inverse of the reader's word now.
 `tests/live/port_forward.sh` connects through it from the source named and is
 refused from another network.
 
-**Open, and the holder's: may netcfgd reserve one packet-mark bit?** Logging
-beside `over` (0330 refuses the pair) needs the log's rule to evaluate the
+**Settled by the holder 2026-11-22: netcfgd reserves the top bit,
+`0x80000000`** ([0338](doc/decision/0338-the-top-mark-bit-is-netcfgds.md), 10.904). Logging
+beside `over` (0330 refused the pair) needed the log's rule to evaluate the
 meter once and tell the verdict's rule the answer, and a mark is how one rule
 tells the next: `meta mark set mark | BIT` in the log's rule, `mark & BIT` in
 the verdict's, the bit cleared first so a packet arriving with it set matches
-nothing. The cost is that bit in every packet the guard drops, where policy
-routing (`rule { fwmark }`, a WireGuard `fwmark`) also reads marks -- harmless
-for a packet that is dropped next, but a bit an operator's own scheme might
-already use. Best guess: reserve the top bit, `0x80000000`, refuse a `fwmark`
-or `fwmask` that touches it, and say so in the plan. Unblocks: `log` on an
-`over` rule, which is the SSH guard's own case. `reject` answers tcp with a reset
+nothing. The cost is that bit, which policy routing (`rule { fwmark }`, a
+WireGuard `fwmark`) also reads; the compiler now refuses either naming it.
+`log` on an `over` rule, the SSH guard's own case, is built. `reject` answers tcp with a reset
 where asked: [0332](doc/decision/0332-a-reject-may-answer-tcp-with-a-reset.md).
 
 ## 10.894 A pin move left fuzznet's old objects in the link

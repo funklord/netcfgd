@@ -304,13 +304,13 @@ ncfg_firewall_rule_dialog::ncfg_firewall_rule_dialog(ncfg_connection *connection
 	    "Match a source address's packets only past this rate, counted per address: "
 	    "a drop with 8/15m lets each address make eight connections a quarter of an hour."));
 	form->addRow(QStringLiteral("only over"), over);
-	/* 0330: rated to ten a minute in the kernel, and not beside `over`,
-	 * which the compiler says why when both are asked for. */
+	/* 0330: rated to ten a minute in the kernel; beside `over` too, the
+	 * meter counted once (0338). */
 	log = new QCheckBox(QStringLiteral("write matches to the kernel log"), this);
 	log->setObjectName(QStringLiteral("firewall_log"));
 	log->setToolTip(QStringLiteral(
 	    "Each matching packet is logged with \"netcfgd CHAIN/NAME: \" before it, at most ten "
-	    "a minute for the rule, so a flood cannot fill the disk. Not with \"only over\" yet."));
+	    "a minute for the rule, so a flood cannot fill the disk. With \"only over\", what is logged is what is over."));
 	form->addRow(QString(), log);
 	/* 0332: a tcp reject answers with a reset; the compiler refuses it on
 	 * anything else and says why, so the box is not greyed by guesswork. */

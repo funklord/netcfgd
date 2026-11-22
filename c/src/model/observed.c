@@ -1425,6 +1425,9 @@ static const ncfg_field_t observed_firewall_rule_fields[] = {
 	    .offset = offsetof(ncfg_observed_firewall_rule_t, reset) },
 	{ .name = "over", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_firewall_rule_t, over) },
+	/* Absent when false (0338). */
+	{ .name = "marked", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, marked) },
 	/* Absent where the rule carries no counter (10.901). */
 	{ .name = "packets", .kind = NCFG_F_OPT_INT, R_U64,
 	    .offset = offsetof(ncfg_observed_firewall_rule_t, packets) },

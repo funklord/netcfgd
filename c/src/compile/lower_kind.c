@@ -810,6 +810,13 @@ static int lower_wireguard(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 		    "`wg genkey` produces one and it never belongs in the config");
 		goto drop;
 	}
+	/* The mark's top bit is netcfgd's firewall's (0338). */
+	if (config.fwmark.has && ((uint64_t)config.fwmark.value & NCFG_FIREWALL_MARK_BIT)) {
+		ncfg_diag(ctx, block->span,
+		    "a wireguard `fwmark` uses the packet mark's top bit (0x80000000), which "
+		    "netcfgd's firewall reserves; use the lower 31");
+		goto drop;
+	}
 	/* Two peers with one public key is two halves of one entry: the key is the
 	 * peer's identity, so the kernel would keep whichever came last and the
 	 * other's allowed IPs would silently vanish. */

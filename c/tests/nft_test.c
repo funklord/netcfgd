@@ -751,6 +751,111 @@ static void a_verdict_rule_counts_and_a_log_rule_does_not(void)
 }
 
 /*
+ * `log` beside `over` (0338): the log's rule clears the reserved mark bit,
+ * counts the meter, sets the bit and logs; the verdict's rule matches the bit
+ * in the meter's place and clears it. So the meter is counted once a packet,
+ * each row reads back marked, and a bit other than netcfgd's is refused.
+ */
+static void a_logged_guard_counts_its_meter_once(void)
+{
+	ncfg_firewall_rule_t          rule;
+	ncfg_firewall_t               firewall;
+	ncfg_buf_t                    out;
+	ncfg_nft_batch_t              batch;
+	ncfg_wire_messages_t          walk;
+	ncfg_wire_message_t           message;
+	ncfg_nft_kernel_rule_t        verdict;
+	ncfg_observed_firewall_rule_t seen;
+	char                          err[NCFG_ERROR_MAX];
+	char                          order[16] = "";
+	int                           sets = 0, metered_logs = 0, marked = 0, unread = 0;
+	int                           tampered = 0, refused = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"ssh";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.protocol = NCFG_FIREWALL_PROTO_TCP;
+	rule.ports = (int64_t[]){ 22 };
+	rule.port_count = 1u;
+	rule.over = (char *)"8/900s";
+	rule.log = 1;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+	memset(&verdict, 0, sizeof(verdict));
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a logged guard is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and passes the audit of what netcfgd may write");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+		uint8_t               *bytes = (uint8_t *)message.payload;
+		size_t                 at;
+
+		sets += (message.header.kind & 0xffu) == NFT_MSG_NEWSET;
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (!ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			unread++;
+			continue;
+		}
+		if (strlen(order) + 2u < sizeof(order)) {
+			strcat(order, one.log ? "L" : "V");
+		}
+		marked += one.marked;
+		if (one.log) {
+			metered_logs += strcmp(one.over, "8/900s") == 0 && !one.counted;
+		} else if (!verdict.name[0]) {
+			verdict = one;
+			check(!one.over[0] && one.counted, "  the verdict's rule has no meter of its own, "
+			    "and counts");
+		}
+		/* The log's XOR of the bit, `00 00 00 80` host order on this
+		 * machine, turned into the bit below it: a mark netcfgd does not
+		 * set. */
+		for (at = 0; one.log && !tampered && at + 4u <= message.payload_length; at++) {
+			if (memcmp(&bytes[at], "\x00\x00\x00\x80", 4u) == 0 && at >= 8u &&
+			    bytes[at - 2u] == NFTA_DATA_VALUE) {
+				bytes[at + 3u] = 0x40u;
+				tampered = 1;
+				refused = !ncfg_nft_firewall_rule_read(message.payload,
+				    message.payload_length, &one, err, sizeof(err)) &&
+				    strstr(err, "packet mark") != NULL;
+			}
+		}
+	}
+	check(sets == 2, "  one meter per family, as an unaddressed guard has");
+	check(unread == 0 && strcmp(order, "LVLV") == 0,
+	    "  each family the log's rule then the verdict's, all read back");
+	check(metered_logs == 2, "  the meter in the log's rule, and no counter there");
+	check(marked == 4, "  every one of them marked");
+	check(tampered && refused, "  and a log setting another bit is refused, naming the mark");
+	ncfg_buf_free(&out);
+
+	memset(&seen, 0, sizeof(seen));
+	seen.chain = verdict.chain;
+	seen.name = verdict.name;
+	seen.digest = verdict.digest;
+	seen.action = (char *)"drop";
+	seen.protocol = (char *)"tcp";
+	seen.port.has = 1;
+	seen.port.value = 22;
+	seen.packets.has = 1;
+	seen.bytes.has = 1;
+	seen.marked = 1;
+	check(ncfg_nft_kernel_rule_matches(&verdict, &seen),
+	    "  an installed verdict's rule matching the mark is the expected one");
+	seen.marked = 0;
+	check(!ncfg_nft_kernel_rule_matches(&verdict, &seen),
+	    "  and one that is not marked is a difference");
+}
+
+/*
  * A port range (0331): one kernel rule per single port and per range, the
  * range as one `range` expression, each read back as what was written.
  */
@@ -2320,6 +2425,7 @@ int main(void)
 	what_is_written_is_read_back();
 	a_translated_rule_is_written_read_and_digested();
 	a_verdict_rule_counts_and_a_log_rule_does_not();
+	a_logged_guard_counts_its_meter_once();
 	an_over_rule_is_a_meter_per_family();
 	a_logged_rule_is_a_log_then_its_verdict();
 	a_port_range_is_one_kernel_rule();
