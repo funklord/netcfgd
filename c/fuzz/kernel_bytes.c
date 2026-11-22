@@ -31,6 +31,8 @@
 
 #include "ncfg/devlink.h"
 #include "ncfg/mesh_peer.h"
+#include "ncfg/netlink.h"
+#include "ncfg/qdisc.h"
 #include "ncfg/regdom.h"
 #include "ncfg/base.h"
 #include "ncfg/rule.h"
@@ -39,6 +41,7 @@
 #include "ncfg/rfkill.h"
 #include "ncfg/watch.h"
 #include "ncfg/wds.h"
+#include "ncfg/wiphy.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -146,6 +149,35 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		ncfg_devlink_port_t port;
 
 		(void)ncfg_devlink_port_parse(data, length, &port, err, sizeof(err));
+	}
+
+	/* rtnetlink's dumps, which every observation reads: a link (its kind's
+	 * nest, its alternative names -- the one part allocated), an address, a
+	 * route and a bridge port's VLANs; tc's qdiscs and their redirect; and
+	 * nl80211's description of a radio. None was reached by any target until
+	 * 2026-11-22 (10.907). Each record is freed on either answer, as its
+	 * header says a caller may. */
+	{
+		ncfg_link_record_t         link;
+		ncfg_address_record_t      address;
+		ncfg_route_record_t        route;
+		ncfg_bridge_vlan_records_t vlans;
+		ncfg_qdisc_entry_t         entry;
+		ncfg_qdisc_record_t        qdisc;
+		ncfg_qdisc_redirect_t      redirect;
+		ncfg_qdisc_tcmsg_t         tcmsg;
+		ncfg_wiphy_t               wiphy;
+
+		(void)ncfg_dump_link(data, length, &link, err, sizeof(err));
+		ncfg_link_record_free(&link);
+		(void)ncfg_dump_address(data, length, &address, err, sizeof(err));
+		(void)ncfg_dump_route(data, length, &route, err, sizeof(err));
+		(void)ncfg_dump_bridge_vlans(data, length, &vlans, err, sizeof(err));
+		ncfg_bridge_vlan_records_free(&vlans);
+		(void)ncfg_qdisc_entry_read(data, length, &entry, &qdisc, err, sizeof(err));
+		(void)ncfg_qdisc_redirect_read(data, length, &redirect, err, sizeof(err));
+		(void)ncfg_qdisc_tcmsg_decode(data, length, &tcmsg, err, sizeof(err));
+		(void)ncfg_wiphy_parse(data, length, &wiphy, err, sizeof(err));
 	}
 
 	/* One interface out of nl80211's dump -- its type and four-address mode

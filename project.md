@@ -7010,6 +7010,18 @@ the clamp, offload and its flowtable), each kept only where its reader took
 it, so every seed is known to reach its parser. Five minutes of libFuzzer,
 5.9 million inputs, found nothing.
 
+**The same lens over every parser**: of the readers of outside bytes the
+headers declare, rtnetlink's link, address, route and bridge-VLAN dumps, tc's
+qdisc and redirect readers and the `tcmsg` decoder, and nl80211's wiphy
+description were reached by no target either -- the observation reads the
+first four on every pass. They are in `kernel_bytes` too, each record freed on
+either answer as its header allows, with nineteen `seed-rtnl-*` replies
+captured from a namespace holding a VLAN-filtering bridge, a veth with both
+families' addresses and routes, a VLAN, a VRF, fq_codel, cake and an ingress
+redirect to an ifb -- each kept only where its parser accepted it. No radio
+in a namespace, so wiphy has no seed of its own. Five more minutes, 4 million
+inputs, 2460 edges: nothing.
+
 ## 10.906 An IPsec tunnel's device leaked its names on every free
 
 `make c-san` on 2026-11-22 found five leak reports, two causes. The
