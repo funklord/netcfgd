@@ -206,6 +206,7 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_
 
 		ncfg_nft_kernel_forward_t forward;
 
+		why[0] = '\0';
 		/* The dump is the whole table now (10.592), so the firewall's rules,
 		 * the port forwards (0298) and flow offload's (0319) are in it: they
 		 * are read below, and are not refusals here. */
@@ -234,7 +235,7 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_
 			 * is not trusted to have honoured the filter -- so it is counted
 			 * rather than failing the round.
 			 */
-			if (note[0] == '\0') {
+			if (note[0] == '\0' && why[0] != '\0') {
 				ncfg_error_set(note, sizeof(note), "%s", why);
 			}
 			skipped++;
@@ -289,9 +290,10 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, const ncfg_netlin
 		ncfg_nft_chain_t chain;
 		char             why[NCFG_ERROR_MAX];
 
+		why[0] = '\0';
 		if (!ncfg_nft_chain_read(reply_of->items[at].bytes, reply_of->items[at].length, &chain,
 		    why, sizeof(why))) {
-			if (note[0] == '\0') {
+			if (note[0] == '\0' && why[0] != '\0') {
 				ncfg_error_set(note, sizeof(note), "%s", why);
 			}
 			skipped++;

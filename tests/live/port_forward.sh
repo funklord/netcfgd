@@ -245,6 +245,14 @@ has "and so does its reflection" "$work/listed" \
 	'ip daddr 203.0.113.1 ip saddr 203.0.113.0/30 tcp dport 443 dnat ip to 192.168.1.10:8443 comment "name=wan0/web@reflect sha256='
 "$ncfg" plan > "$work/plan.log" 2>&1 || true
 check "and the next plan has nothing to do with it" "$(head -1 "$work/plan.log")" "nothing to do"
+# Saved and loaded back with nft, which compiles the /30 and the hairpin's /24
+# as loads of their leading bytes: still netcfgd's forward (10.899).
+nft list ruleset > "$work/saved" 2>&1
+nft flush ruleset
+nft -f "$work/saved" > "$work/reload.log" 2>&1 || true
+"$ncfg" plan > "$work/plan.log" 2>&1 || true
+check "a forward saved and loaded back with nft is still the document's" \
+	"$(head -1 "$work/plan.log")" "nothing to do"
 "$ncfg" status > "$work/status.log" 2>&1 || true
 has "ncfg status names the source" "$work/status.log" \
 	"forwards tcp 443 to 192.168.1.10:8443 from 203.0.113.0/30 (web)"

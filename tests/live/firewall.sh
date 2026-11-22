@@ -422,12 +422,15 @@ check "a reset swapped for ICMP under the same identity is planned back" \
 # A per-source meter (10.885) in a unit nft can print (10.898): 8 in 15 minutes
 # is the same bucket as 32 an hour with a burst of 8, and nft has no word for a
 # 900-second unit -- it printed `8/error`, and a ruleset saved from it would not
-# load back. Saved and loaded again here, and the plan still converges.
+# load back. Saved and loaded again here, and the plan still converges -- with
+# prefixes beside it, which nft compiles from text as a load of their leading
+# bytes where netcfgd writes the whole address masked (10.899).
 write_etc <<'CONF'
 firewall {
 	input {
 		policy = "accept"
 		drop "ssh-guard" { protocol = "tcp"; port = 22; state = ["new"]; over = "8/15m" }
+		accept "nets" { from = ["192.168.7.0/24", "10.16.0.0/12", "2001:db8::/32", "2001:db8:8000::/33"] }
 	}
 	forward { policy = "accept" }
 	output { policy = "accept" }
@@ -443,7 +446,8 @@ nft list ruleset > "$work/saved" 2>&1
 nft flush ruleset
 check "a ruleset saved from it loads back" "$(nft -f "$work/saved" 2>&1 | head -2)" ""
 "$ncfg" plan > "$work/plan" 2>&1 || true
-check "and the plan has nothing to do with what was loaded" "$(cat "$work/plan")" "nothing to do"
+check "and the plan has nothing to do with what was loaded, prefixes and all" \
+	"$(cat "$work/plan")" "nothing to do"
 
 # The tunnel and IPsec protocols (0335), and sctp's ports where tcp's are.
 write_etc <<'CONF'

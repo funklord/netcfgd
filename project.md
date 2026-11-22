@@ -6997,6 +6997,28 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.899 A ruleset loaded back with `nft -f` was not netcfgd's any more
+
+Found checking 10.898's lens -- what else does nft not take back as netcfgd wrote
+it -- with the malta rig's document on x86: `nft list ruleset`, `nft flush
+ruleset`, `nft -f` of what was saved. The load succeeded, and afterwards the
+port forward, its reflection and its return path read as `a comparison netcfgd
+does not write`, and the next plan replaced them. nft compiles a prefix from text
+as a load of its **leading bytes** -- `198.51.100.0/24` as three bytes at the
+source address, with a mask only where the prefix is not byte-aligned -- where
+netcfgd writes the whole address masked. One match, two encodings, and the
+readers took only netcfgd's. A machine restoring its ruleset at boot the
+ordinary way would have had netcfgd rewrite its table every boot. Both readers,
+the firewall's and the forward's, take either now, and report the same CIDR text,
+so the planner compares them equal. `tests/live/firewall.sh` and
+`tests/live/port_forward.sh` save, flush and load the ruleset back and plan;
+narrowed back to the whole address, each fails that check.
+
+**And the warning it raised printed a stray byte**: `ncfg_nft_rule_uplink`
+refused a rule at two places without writing a reason, and the observer logged
+its uninitialised buffer. Both refusals say what they refused, and the observer's
+reason buffers start empty.
+
 ## 10.898 A per-source meter printed as `8/error`, and a saved ruleset would not load
 
 Found by 10.897's listing, on MIPS and then on x86 alike: `over = "8/15m"` was

@@ -2919,10 +2919,16 @@ int ncfg_nft_rule_uplink(const void *payload, size_t length, char *out, size_t o
 			continue;
 		}
 		ncfg_wire_attrs_start(&data, attr.value, attr.length);
+		/* Each refusal says so: the observer logs the first, and one that
+		 * said nothing logged whatever its buffer held (10.899). */
 		if (strcmp(name, "meta") == 0 && !read_meta(&data, &seen)) {
+			ncfg_error_set(err, err_size, "a rule loading a `meta` key netcfgd's "
+			    "masquerade does not");
 			return 0;
 		}
 		if (strcmp(name, "cmp") == 0 && !read_cmp(&data, &seen)) {
+			ncfg_error_set(err, err_size, "a rule with a comparison netcfgd's masquerade "
+			    "does not make");
 			return 0;
 		}
 	}
@@ -3283,13 +3289,19 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 			out->icmp_type = value[0];
 			return 1;
 		}
-		if (reading->base == NFT_PAYLOAD_NETWORK_HEADER &&
-		    ((reading->length == 4u && reading->family == NFPROTO_IPV4 &&
+		/* The whole address, masked where the prefix is short, as netcfgd
+		 * writes it; or its leading bytes only, as nft compiles a prefix from
+		 * text -- which is what a ruleset saved and loaded back with `nft -f`
+		 * holds (10.899). The two are one match and read as one. */
+		if (reading->base == NFT_PAYLOAD_NETWORK_HEADER && length == reading->length &&
+		    length >= 1u &&
+		    ((reading->length <= 4u && reading->family == NFPROTO_IPV4 &&
 		    (reading->offset == 12u || reading->offset == 16u)) ||
-		    (reading->length == 16u && reading->family == NFPROTO_IPV6 &&
-		    (reading->offset == 8u || reading->offset == 24u))) && length == reading->length) {
+		    (reading->length <= 16u && reading->family == NFPROTO_IPV6 &&
+		    (reading->offset == 8u || reading->offset == 24u)))) {
 			const int source = reading->offset == 12u || reading->offset == 8u;
 			int       prefix = (int)(length * 8u);
+			uint8_t   whole[16];
 
 			if (reading->mask_length) {
 				prefix = prefix_of(reading->mask, reading->mask_length);
@@ -3298,7 +3310,9 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 					return 0;
 				}
 			}
-			format_address(reading->family, value, (uint32_t)prefix,
+			memset(whole, 0, sizeof(whole));
+			memcpy(whole, value, length);
+			format_address(reading->family, whole, (uint32_t)prefix,
 			    source ? out->from : out->to, sizeof(out->from));
 			return 1;
 		}
@@ -3867,15 +3881,21 @@ static int forward_cmp(const reading_t *reading, uint32_t op, const uint8_t *byt
 		seen->dport = ntohs(port);
 		return 1;
 	}
+	/* A source as netcfgd writes it, the whole address masked, or as nft
+	 * compiles a prefix from text, its leading bytes (10.899). */
+	if (reading->what == LOADED_PAYLOAD && reading->base == NFT_PAYLOAD_NETWORK_HEADER &&
+	    reading->offset == 12u && reading->length >= 1u && reading->length <= 4u &&
+	    length == reading->length && seen->ipv4 &&
+	    (reading->mask_length == 0u || reading->mask_length == length)) {
+		seen->has_saddr = 1;
+		memset(seen->saddr, 0, sizeof(seen->saddr));
+		memcpy(seen->saddr, bytes, length);
+		seen->saddr_prefix = reading->mask_length ? prefix_of(reading->mask, length)
+		                                          : (int)(length * 8u);
+		return seen->saddr_prefix >= 0;
+	}
 	if (reading->what == LOADED_PAYLOAD && reading->base == NFT_PAYLOAD_NETWORK_HEADER &&
 	    reading->length == 4u && length == 4u && seen->ipv4) {
-		if (reading->offset == 12u) {
-			seen->has_saddr = 1;
-			memcpy(seen->saddr, bytes, 4u);
-			seen->saddr_prefix = reading->mask_length == 4u
-			    ? prefix_of(reading->mask, 4u) : 32;
-			return seen->saddr_prefix >= 0;
-		}
 		if (reading->offset == 16u && reading->mask_length == 0u) {
 			seen->has_daddr = 1;
 			memcpy(seen->daddr, bytes, 4u);
