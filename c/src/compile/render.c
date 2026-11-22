@@ -1258,6 +1258,18 @@ static const char *firewall_protocol_word(int protocol)
 		return "icmp";
 	case NCFG_FIREWALL_PROTO_ICMPV6:
 		return "icmpv6";
+	case NCFG_FIREWALL_PROTO_GRE:
+		return "gre";
+	case NCFG_FIREWALL_PROTO_ESP:
+		return "esp";
+	case NCFG_FIREWALL_PROTO_AH:
+		return "ah";
+	case NCFG_FIREWALL_PROTO_SCTP:
+		return "sctp";
+	case NCFG_FIREWALL_PROTO_IPIP:
+		return "ipip";
+	case NCFG_FIREWALL_PROTO_SIT:
+		return "sit";
 	default:
 		return NULL;
 	}

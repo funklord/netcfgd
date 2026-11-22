@@ -148,10 +148,22 @@ static void rule_protocol(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *as
 		*out = NCFG_FIREWALL_PROTO_ICMP;
 	} else if (strcmp(word, "icmpv6") == 0) {
 		*out = NCFG_FIREWALL_PROTO_ICMPV6;
+	} else if (strcmp(word, "gre") == 0) {
+		*out = NCFG_FIREWALL_PROTO_GRE;
+	} else if (strcmp(word, "esp") == 0) {
+		*out = NCFG_FIREWALL_PROTO_ESP;
+	} else if (strcmp(word, "ah") == 0) {
+		*out = NCFG_FIREWALL_PROTO_AH;
+	} else if (strcmp(word, "sctp") == 0) {
+		*out = NCFG_FIREWALL_PROTO_SCTP;
+	} else if (strcmp(word, "ipip") == 0) {
+		*out = NCFG_FIREWALL_PROTO_IPIP;
+	} else if (strcmp(word, "sit") == 0) {
+		*out = NCFG_FIREWALL_PROTO_SIT;
 	} else {
 		ncfg_diag(ctx, assignment->span,
-		    "`%s` is not a protocol netcfgd matches: one of any, tcp, udp, icmp, icmpv6 "
-		    "(0294 names the whole set, and widening it is a decision)", word);
+		    "`%s` is not a protocol netcfgd matches: one of any, tcp, udp, sctp, icmp, "
+		    "icmpv6, gre, esp, ah, ipip, sit (0294, 0335)", word);
 	}
 	free(word);
 }
@@ -750,15 +762,17 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 	 * **A port with a protocol that has none.** The kernel would refuse the
 	 * transaction, and the sentence an operator would read names a netlink
 	 * message rather than the line they wrote -- which is the whole argument
-	 * for refusing here. `any` is included: a port means tcp or udp, and a
-	 * rule that does not say which is a rule whose author has not decided.
+	 * for refusing here. `any` is included: a port means tcp, udp or sctp,
+	 * and a rule that does not say which is a rule whose author has not
+	 * decided. sctp's destination port sits where tcp's does (0335).
 	 */
 	if ((rule.port_count > 0 || rule.port_range_count > 0) &&
 	    rule.protocol != NCFG_FIREWALL_PROTO_TCP &&
-	    rule.protocol != NCFG_FIREWALL_PROTO_UDP) {
+	    rule.protocol != NCFG_FIREWALL_PROTO_UDP &&
+	    rule.protocol != NCFG_FIREWALL_PROTO_SCTP) {
 		ncfg_diag(ctx, block->span,
 		    "rule `%s` matches ports with no protocol that has them: add "
-		    "`protocol = \"tcp\"` or `\"udp\"`", rule.name);
+		    "`protocol = \"tcp\"`, `\"udp\"` or `\"sctp\"`", rule.name);
 		rule_free(&rule);
 		return 0;
 	}

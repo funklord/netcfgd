@@ -7104,6 +7104,13 @@ an interface, a chain of its own in netcfgd's table, measured against what nft
 (M4, M5, the OpenWrt routers next) is reason enough, which is what the run's
 goal-gap walk said.
 
+**The tunnel protocols are built**:
+[0335](doc/decision/0335-a-rule-may-match-the-tunnels-netcfgd-builds.md), `protocol` takes
+`gre`, `esp`, `ah`, `sctp`, `ipip` and `sit`, so a drop-policy input chain can let
+in the GRE, IPIP, SIT and IPsec tunnels netcfgd itself builds without `any` from
+the peer. The undo copy's protocol reader had a table of its own that would have
+turned each of them back into `any`; it is the inverse of the reader's word now.
+
 **Open, and the holder's: may netcfgd reserve one packet-mark bit?** Logging
 beside `over` (0330 refuses the pair) needs the log's rule to evaluate the
 meter once and tell the verdict's rule the answer, and a mark is how one rule

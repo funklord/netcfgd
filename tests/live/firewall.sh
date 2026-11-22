@@ -419,6 +419,41 @@ nft replace rule inet netcfgd input handle "$handle" tcp dport 113 reject commen
 check "a reset swapped for ICMP under the same identity is planned back" \
 	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
 
+# The tunnel and IPsec protocols (0335), and sctp's ports where tcp's are.
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "gre" { protocol = "gre"; from = ["192.0.2.7"] }
+		accept "esp" { protocol = "esp" }
+		accept "sit" { protocol = "sit" }
+		accept "diameter" { protocol = "sctp"; port = 3868 }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "tunnel protocol rules are applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the kernel matches gre from the peer" 'meta l4proto gre ip saddr 192.0.2.7 accept comment "name=gre'
+has "and esp" 'meta l4proto esp accept comment "name=esp'
+has "and sit's protocol 41" 'meta l4proto ipv6 accept comment "name=sit'
+has "and an sctp port" 'sctp dport 3868 accept comment "name=diameter'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the next plan has nothing to do with them" "$(cat "$work/plan")" "nothing to do"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status names the protocol" \
+	"$(grep -c '^    accept esp protocol esp' "$work/status" || true)" "1"
+# Another protocol under the same identity is a difference the reader sees.
+handle=$(nft -a list chain inet netcfgd input | sed -n 's/.*name=esp.*# handle \([0-9]*\).*/\1/p')
+comment=$(nft list chain inet netcfgd input | sed -n 's/.*comment "\(name=esp[^"]*\)".*/\1/p')
+nft replace rule inet netcfgd input handle "$handle" meta l4proto ah accept comment "\"$comment\""
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a protocol swapped under the same identity is planned back" \
+	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
+
 # MSS clamping (0334): a chain of its own at the forward hook, priority
 # mangle, two rules for the interface, read back so the plan converges.
 write_etc <<'CONF'

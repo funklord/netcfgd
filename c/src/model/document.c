@@ -2821,7 +2821,8 @@ static const ncfg_enum_t firewall_policy_set = WORD_SET("firewall policy", firew
 /* `proto` rather than `protocol` in the identifier, which keeps the line
  * inside the column limit and matches `NCFG_FIREWALL_PROTO_*`; the word an
  * operator reads is still "firewall protocol". */
-static const char *const firewall_proto_words[] = { "any", "tcp", "udp", "icmp", "icmpv6" };
+static const char *const firewall_proto_words[] = { "any", "tcp", "udp", "icmp", "icmpv6",
+	"gre", "esp", "ah", "sctp", "ipip", "sit" };
 static const ncfg_enum_t firewall_proto_set = WORD_SET("firewall protocol", firewall_proto_words);
 
 static const ncfg_field_t firewall_rule_fields[] = {

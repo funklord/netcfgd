@@ -1093,6 +1093,18 @@ static uint8_t protocol_number(int protocol)
 		return IPPROTO_ICMP;
 	case NCFG_FIREWALL_PROTO_ICMPV6:
 		return IPPROTO_ICMPV6;
+	case NCFG_FIREWALL_PROTO_GRE:
+		return IPPROTO_GRE;
+	case NCFG_FIREWALL_PROTO_ESP:
+		return IPPROTO_ESP;
+	case NCFG_FIREWALL_PROTO_AH:
+		return IPPROTO_AH;
+	case NCFG_FIREWALL_PROTO_SCTP:
+		return IPPROTO_SCTP;
+	case NCFG_FIREWALL_PROTO_IPIP:
+		return IPPROTO_IPIP;
+	case NCFG_FIREWALL_PROTO_SIT:
+		return IPPROTO_IPV6;
 	default:
 		return 0;
 	}
@@ -3114,6 +3126,24 @@ static int read_cmp_into(reading_t *reading, const ncfg_wire_attrs_t *data,
 			case IPPROTO_ICMPV6:
 				out->protocol = NCFG_FIREWALL_PROTO_ICMPV6;
 				return 1;
+			case IPPROTO_GRE:
+				out->protocol = NCFG_FIREWALL_PROTO_GRE;
+				return 1;
+			case IPPROTO_ESP:
+				out->protocol = NCFG_FIREWALL_PROTO_ESP;
+				return 1;
+			case IPPROTO_AH:
+				out->protocol = NCFG_FIREWALL_PROTO_AH;
+				return 1;
+			case IPPROTO_SCTP:
+				out->protocol = NCFG_FIREWALL_PROTO_SCTP;
+				return 1;
+			case IPPROTO_IPIP:
+				out->protocol = NCFG_FIREWALL_PROTO_IPIP;
+				return 1;
+			case IPPROTO_IPV6:
+				out->protocol = NCFG_FIREWALL_PROTO_SIT;
+				return 1;
 			default:
 				break;
 			}
@@ -4066,6 +4096,18 @@ const char *ncfg_nft_protocol_word(int protocol)
 		return "icmp";
 	case NCFG_FIREWALL_PROTO_ICMPV6:
 		return "icmpv6";
+	case NCFG_FIREWALL_PROTO_GRE:
+		return "gre";
+	case NCFG_FIREWALL_PROTO_ESP:
+		return "esp";
+	case NCFG_FIREWALL_PROTO_AH:
+		return "ah";
+	case NCFG_FIREWALL_PROTO_SCTP:
+		return "sctp";
+	case NCFG_FIREWALL_PROTO_IPIP:
+		return "ipip";
+	case NCFG_FIREWALL_PROTO_SIT:
+		return "sit";
 	default:
 		return NULL;
 	}

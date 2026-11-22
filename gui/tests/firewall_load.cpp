@@ -290,7 +290,7 @@ int main(int argc, char **argv)
 		dialog.findChild<QLineEdit *>(QStringLiteral("firewall_ports"))
 		    ->setText(QStringLiteral("80"));
 		const QString said = press(&dialog, "submit");
-		check(said.startsWith(QStringLiteral("only tcp and udp")) ? QStringLiteral("refused") : said,
+		check(said.startsWith(QStringLiteral("only tcp, udp and sctp")) ? QStringLiteral("refused") : said,
 		    QStringLiteral("refused"), "a port with no protocol is refused");
 	}
 	/* Moving a rule to another chain takes it out of the first. */

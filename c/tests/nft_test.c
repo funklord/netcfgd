@@ -770,6 +770,73 @@ static void icmp_types_are_one_kernel_rule_each(void)
 	ncfg_buf_free(&out);
 }
 
+/* The tunnel and IPsec protocols (0335), each read back as itself, and sctp's
+ * port where tcp's is. */
+static void tunnel_protocols_read_back(void)
+{
+	static const int protocols[] = { NCFG_FIREWALL_PROTO_GRE, NCFG_FIREWALL_PROTO_ESP,
+		NCFG_FIREWALL_PROTO_AH, NCFG_FIREWALL_PROTO_SCTP, NCFG_FIREWALL_PROTO_IPIP,
+		NCFG_FIREWALL_PROTO_SIT };
+	enum { count = sizeof(protocols) / sizeof(protocols[0]) };
+	ncfg_firewall_rule_t rules[count];
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 names[count][8];
+	char                 err[NCFG_ERROR_MAX];
+	int64_t              port = 2905;
+	size_t               at, read = 0, matched = 0;
+	int                  sctp_port = 0;
+
+	memset(rules, 0, sizeof(rules));
+	for (at = 0; at < count; at++) {
+		snprintf(names[at], sizeof(names[at]), "p%zu", at);
+		rules[at].name = names[at];
+		rules[at].action = NCFG_FIREWALL_ACCEPT;
+		rules[at].protocol = protocols[at];
+		if (protocols[at] == NCFG_FIREWALL_PROTO_SCTP) {
+			rules[at].ports = &port;
+			rules[at].port_count = 1u;
+		}
+	}
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.policy = NCFG_FIREWALL_POLICY_DROP;
+	firewall.input.rules = rules;
+	firewall.input.rule_count = count;
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "gre, esp, ah, sctp, ipip and sit rules are built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE ||
+		    !ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err))) {
+			continue;
+		}
+		read++;
+		for (at = 0; at < count; at++) {
+			if (strcmp(one.name, names[at]) == 0 && one.protocol == protocols[at]) {
+				matched++;
+			}
+		}
+		if (one.protocol == NCFG_FIREWALL_PROTO_SCTP && one.has_port && one.port == 2905) {
+			sctp_port = 1;
+		}
+	}
+	check(read == count && matched == count, "  each read back as its own protocol");
+	check(sctp_port, "  and sctp's port read back where tcp's is");
+	for (at = 0; at < count; at++) {
+		const char *word = ncfg_nft_protocol_word(protocols[at]);
+
+		check(word && *word, "  and each has a word for ncfg status");
+	}
+	ncfg_buf_free(&out);
+}
+
 /* A tcp reject answering with a reset (0332), read back as one. */
 static void a_reset_reads_back_as_a_reset(void)
 {
@@ -2073,6 +2140,7 @@ int main(void)
 	a_port_range_is_one_kernel_rule();
 	a_reset_reads_back_as_a_reset();
 	icmp_types_are_one_kernel_rule_each();
+	tunnel_protocols_read_back();
 	an_mss_clamp_is_two_rules_an_interface();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();

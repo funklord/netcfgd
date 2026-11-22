@@ -4270,6 +4270,44 @@ static void firewall_icmp_type_cases(void)
 	    "0 to 255", "a type past 255 is refused");
 }
 
+/* The protocols netcfgd's own tunnels and IPsec carry, and sctp's ports
+ * (0335). */
+static void firewall_tunnel_protocol_cases(void)
+{
+	ncfg_document_t *document;
+
+	document = compiles("firewall {\n\tinput {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"gre\" { protocol = \"gre\"; from = [\"192.0.2.7\"] }\n"
+	    "\t\taccept \"esp\" { protocol = \"esp\" }\n"
+	    "\t\taccept \"ah\" { protocol = \"ah\" }\n"
+	    "\t\taccept \"diameter\" { protocol = \"sctp\"; port = [3868, \"2905-2906\"] }\n"
+	    "\t\taccept \"ipip\" { protocol = \"ipip\" }\n"
+	    "\t\taccept \"sit\" { protocol = \"sit\" }\n\t}\n}\n",
+	    "gre, esp, ah, sctp, ipip and sit compile, and render back");
+	check(document && document->firewall && document->firewall->input.rule_count == 6,
+	    "  as six rules");
+	if (document && document->firewall && document->firewall->input.rule_count == 6) {
+		const ncfg_firewall_rule_t *rules = document->firewall->input.rules;
+
+		check(rules[0].protocol == NCFG_FIREWALL_PROTO_GRE &&
+		        rules[1].protocol == NCFG_FIREWALL_PROTO_ESP &&
+		        rules[2].protocol == NCFG_FIREWALL_PROTO_AH &&
+		        rules[3].protocol == NCFG_FIREWALL_PROTO_SCTP &&
+		        rules[4].protocol == NCFG_FIREWALL_PROTO_IPIP &&
+		        rules[5].protocol == NCFG_FIREWALL_PROTO_SIT,
+		    "  each its own protocol");
+		check(rules[3].port_count == 1 && rules[3].port_range_count == 1,
+		    "  and sctp keeps its port and its range");
+	}
+	ncfg_document_free(document);
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"gre\"; port = 22 }\n\t}\n}\n",
+	    "no protocol that has them", "a port on a gre rule is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"x\" { protocol = \"ospf\" }\n\t}\n}\n",
+	    "not a protocol netcfgd matches", "a protocol outside the set is refused");
+}
+
 /* `clamp_mss = true` on an interface (0334). */
 static void clamp_mss_cases(void)
 {
@@ -4328,6 +4366,7 @@ int main(void)
 	precedence_cases();
 	global_cases();
 	switch_cases();
+	firewall_tunnel_protocol_cases();
 	clamp_mss_cases();
 	firewall_port_range_cases();
 	firewall_reset_cases();

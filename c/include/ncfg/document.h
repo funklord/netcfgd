@@ -2653,7 +2653,15 @@ typedef enum {
 	NCFG_FIREWALL_PROTO_TCP,
 	NCFG_FIREWALL_PROTO_UDP,
 	NCFG_FIREWALL_PROTO_ICMP,
-	NCFG_FIREWALL_PROTO_ICMPV6
+	NCFG_FIREWALL_PROTO_ICMPV6,
+	/* The protocols netcfgd's own tunnels and IPsec carry (0335), after the
+	 * first five so that no stored value moves. */
+	NCFG_FIREWALL_PROTO_GRE,
+	NCFG_FIREWALL_PROTO_ESP,
+	NCFG_FIREWALL_PROTO_AH,
+	NCFG_FIREWALL_PROTO_SCTP,
+	NCFG_FIREWALL_PROTO_IPIP,
+	NCFG_FIREWALL_PROTO_SIT
 } ncfg_firewall_protocol_t;
 
 typedef enum {

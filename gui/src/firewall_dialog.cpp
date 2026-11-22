@@ -24,7 +24,8 @@ const char *const chain_names[] = { "input", "forward", "output" };
 
 /* 0294's vocabulary, the whole of it. */
 const char *const action_words[] = { "accept", "drop", "reject" };
-const char *const protocol_words[] = { "any", "tcp", "udp", "icmp", "icmpv6" };
+const char *const protocol_words[] = { "any", "tcp", "udp", "sctp", "icmp", "icmpv6", "gre",
+	"esp", "ah", "ipip", "sit" };
 
 QString quoted(const QString &text)
 {
@@ -391,7 +392,7 @@ void ncfg_firewall_rule_dialog::shape_changed()
 	 * refused on Save, rather than silently dropped by hiding it. */
 	const QString chosen = protocol->currentData().toString();
 	ports->setEnabled(chosen == QLatin1String("tcp") || chosen == QLatin1String("udp") ||
-	                  !ports->text().trimmed().isEmpty());
+	                  chosen == QLatin1String("sctp") || !ports->text().trimmed().isEmpty());
 	out_interface->setEnabled(chain->currentData().toString() == QLatin1String("forward") ||
 	                          !out_interface->text().trimmed().isEmpty());
 }
@@ -438,9 +439,9 @@ bool ncfg_firewall_rule_dialog::read_rule(ncfg_firewall_rule_row *rule)
 		rule->ports << port;
 	}
 	if ((!rule->ports.isEmpty() || !rule->port_ranges.isEmpty()) && rule->protocol != QLatin1String("tcp") &&
-	    rule->protocol != QLatin1String("udp")) {
-		note->setText(QStringLiteral("only tcp and udp have ports: choose one, or clear the "
-		              "ports"));
+	    rule->protocol != QLatin1String("udp") && rule->protocol != QLatin1String("sctp")) {
+		note->setText(QStringLiteral("only tcp, udp and sctp have ports: choose one, or clear "
+		              "the ports"));
 		return false;
 	}
 	rule->from = split_list(from->text());

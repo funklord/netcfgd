@@ -132,18 +132,19 @@ static int action_of(const char *word)
 	return NCFG_FIREWALL_ACCEPT;
 }
 
+/* The inverse of the reader's word, so that a protocol the reader learns
+ * (0335) cannot come back from the undo copy as `any`, as it would have from a
+ * table of its own here that nobody remembered to grow. */
 static int protocol_of(const char *word)
 {
-	static const struct {
-		const char *word;
-		int         protocol;
-	} words[] = { { "tcp", NCFG_FIREWALL_PROTO_TCP }, { "udp", NCFG_FIREWALL_PROTO_UDP },
-		{ "icmp", NCFG_FIREWALL_PROTO_ICMP }, { "icmpv6", NCFG_FIREWALL_PROTO_ICMPV6 } };
-	size_t at;
+	int protocol;
 
-	for (at = 0; word && at < sizeof(words) / sizeof(words[0]); at++) {
-		if (strcmp(word, words[at].word) == 0) {
-			return words[at].protocol;
+	for (protocol = NCFG_FIREWALL_PROTO_ANY; word && protocol <= NCFG_FIREWALL_PROTO_SIT;
+	    protocol++) {
+		const char *known = ncfg_nft_protocol_word(protocol);
+
+		if (known && strcmp(word, known) == 0) {
+			return protocol;
 		}
 	}
 	return NCFG_FIREWALL_PROTO_ANY;
