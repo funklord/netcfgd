@@ -7273,9 +7273,11 @@ kind's own table, which is how all of it got past; it holds both now.
 [0331](doc/decision/0331-a-port-range-is-a-string-in-the-port-list.md), `port =
 [27015, "6000-6010"]`, one kernel rule per range as per port, read back as
 `port_range`. ICMP types are built too:
-[0333](doc/decision/0333-an-icmp-rule-may-name-its-types.md). What is left of
-what the inventory found missing is MSS clamping, marks, counters and the rest
-it lists; source ports wait for somebody to ask (0331).
+[0333](doc/decision/0333-an-icmp-rule-may-name-its-types.md). MSS clamping and
+counters followed (below); setting or matching a mark for policy routing is
+still absent -- netcfgd's own use of the top bit (0338) is internal -- and the
+rest the inventory lists, source ports among it, waits for somebody to ask
+(0331).
 
 **The window sets the global DNS servers and search domains** beside the mode,
 in the DNS tab's own `50-dns`, and flow offload in the global tab's `50-offload`.
