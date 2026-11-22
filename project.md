@@ -6997,6 +6997,28 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.897 Layer one's new encodings on a big-endian kernel, and two rigs that made no package
+
+`make hull-malta` -- OpenWrt's malta-be kernel in qemu-system-mips, netcfgd built
+with OpenWrt's musl toolchain -- had last passed on 2026-11-13, before state sets
+reached its document and before 0329 to 0336 existed at all. nft keeps some values
+in host byte order, so an encoding copied from what nft writes on x86 can be right
+there and wrong on big-endian, and only a big-endian kernel says which. Its
+`wider.conf` now carries every one of them: a state set, a port range, ICMP and
+ICMPv6 types, a per-source meter, a tcp reset with a rated log, a GRE rule from an
+address, an sctp port, a forward limited to a source and the MSS clamp; `guest.sh`
+asks `nft` for each. **All eleven are there as nft writes them on the MIPS kernel,
+and the second plan has nothing to do** (2026-11-22): the reader agrees with the
+kernel in that byte order too. The same document passes on x86 in a namespace.
+
+**The rig had made no package since 2026-11-18.** `tool/openwrt_apk.sh` gained
+`packaging/netcfgd_select.sh`, the ipsec hook and the example config in b2a594ab,
+and the malta and armsr payloads copied only the procd script beside it, so the
+package step failed and the guest had no netcfgd to install. Neither rig is in
+`make hull`, which is why nothing said so. Both copy the whole of `packaging/` and
+the example now, so the tool can grow without the rigs falling behind it; malta
+passed whole with the change. armsr has the same change and has not been rerun.
+
 ## 10.896 A stopping user host missed one ask in a loaded run -- OPEN
 
 `c/tests/host_user.sh`'s last check asks `status --at` forty times while the

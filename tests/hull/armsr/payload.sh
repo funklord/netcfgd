@@ -43,9 +43,12 @@ top=/overlay
 mkdir -p $top/payload $top/repo/packaging/procd $top/verdict $top/etc
 cp netcfgd-static $top/payload/netcfgd
 "$toolchain/bin/aarch64-openwrt-linux-musl-strip" $top/payload/netcfgd
-# The apk-v3 package of 25.12 (10.813), made by the apk-tools the image built.
-(cd /work && mkdir -p tool packaging/procd && cp /repo/tool/openwrt_apk.sh tool/openwrt_apk.sh &&
-	cp /repo/packaging/procd/netcfgd packaging/procd/netcfgd &&
+# The apk-v3 package of 25.12 (10.813), made by the apk-tools the image built,
+# from every file the tool packs: the whole of packaging/ and the example, not a
+# list here that the tool outgrows (it gained three on 2026-11-18, b2a594ab, and
+# this rig made no package from then until it was found, project.md 10.897).
+(cd /work && mkdir -p tool doc && cp /repo/tool/openwrt_apk.sh tool/openwrt_apk.sh &&
+	cp -R /repo/packaging . && cp /repo/doc/netcfgd.conf.example doc/ &&
 	APK=/armsr/apk-tools/build/src/apk sh tool/openwrt_apk.sh $top/payload/netcfgd aarch64_generic \
 		$top/payload/netcfgd.apk)
 say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"

@@ -81,6 +81,24 @@ say "nft: $(grep -c . /tmp/ruleset) line(s) in netcfgd's table"
 grep -E 'dport' /tmp/ruleset | sed 's/^[[:space:]]*//' | cut -c1-110 >> "$out"
 grep -q 'tcp dport 443 dnat ip to 192.168.1.10:8443' /tmp/ruleset || failed=1
 grep -q 'udp dport 137 drop' /tmp/ruleset && grep -q 'udp dport 138 drop' /tmp/ruleset || failed=1
+# What layer one learned after this rig first ran (0329 to 0336), each with a
+# value a byte order could turn: a range's two bounds, a state's bits, a type, a
+# reset, a rated log, a per-source meter, a protocol, a source and its mask, and
+# the MSS clamp's register. nft printing them is the kernel's reading; the plan
+# below having nothing to do is netcfgd's reading agreeing with it.
+for want in 'udp dport 27000-27015 accept' 'ct state' 'icmp type echo-request accept' \
+    'icmpv6 type nd-neighbor-solicit accept' 'icmpv6 type nd-neighbor-advert accept' \
+    'tcp dport 113 reject with tcp reset' 'log prefix "netcfgd input/ident: "' \
+    'meta l4proto gre ip saddr 198.51.100.7 accept' 'sctp dport 3868 accept' \
+    'ip saddr 198.51.100.0/24 tcp dport 443 dnat ip to 192.168.1.10:8443' \
+    'tcp option maxseg size set rt mtu'; do
+	if ! grep -qF -- "$want" /tmp/ruleset; then
+		say "nft lacks: $want"
+		failed=1
+	fi
+done
+grep -E 'ct state|meter|limit|log|l4proto|maxseg' /tmp/ruleset | sed 's/^[[:space:]]*//' |
+	cut -c1-110 >> "$out"
 
 n=0
 until /usr/bin/ncfg plan > /tmp/plan 2>&1 && grep -q 'nothing to do' /tmp/plan || [ $n -gt 30 ]; do
