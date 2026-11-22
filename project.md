@@ -7035,6 +7035,15 @@ release now frees `xfrm`, and the device lowering releases a refused kind for
 every kind rather than trusting each lowerer to clean up. The sanitized
 suite, 129 groups, is clean after; the same tests leaked before.
 
+**`gcc -fanalyzer` over all of `src/` the same day**: 60 warnings, two real
+-- a dhcp6 address source and an `advertise` block each leaked what they had
+built when the next allocation failed, fixed -- and 58 false positives,
+mostly ownership handed to a struct or an out-parameter, `dup2` onto the
+standard descriptors before exec, and counts the analyser cannot tie to their
+arrays (`cli/secret.c`'s ten, `config_load.c`, `canonical.c`). Re-running it
+is worth it only for new code; the list of what it says and why it is wrong
+is in this entry's commit.
+
 **The shape**: a release that lists arms by hand beside a `kind_arm` switch
 that lists them again, and the arm added later reached one list. Nothing
 checks that the two agree except a sanitizer run, which is not in `check`.

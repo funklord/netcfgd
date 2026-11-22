@@ -178,6 +178,8 @@ int ncfg_has_string(char *const *array, size_t count, const char *text);
 void ncfg_strings_free(char **list, size_t count);
 void ncfg_security_free(ncfg_security_t *security);
 void ncfg_dns_policy_free(ncfg_dns_policy_t *dns);
+/* One source's own allocations, leaving it zeroed; the array is the caller's. */
+void ncfg_address_source_release(ncfg_address_source_t *one);
 void ncfg_address_sources_free(ncfg_address_source_t *list, size_t count);
 void ncfg_routes_free(ncfg_route_t *list, size_t count);
 void ncfg_hooks_free(ncfg_hook_ref_t *list, size_t count);

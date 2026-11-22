@@ -83,21 +83,27 @@ void ncfg_dns_policy_free(ncfg_dns_policy_t *dns)
 	memset(dns, 0, sizeof(*dns));
 }
 
+void ncfg_address_source_release(ncfg_address_source_t *one)
+{
+	free(one->static_address.address);
+	free(one->static_address.peer);
+	free(one->delegated.prefix.source);
+	free(one->delegated.suffix);
+	free(one->dhcp4.client_id);
+	free(one->dhcp4.request_options);
+	if (one->dhcp6.prefix_delegation) {
+		free(one->dhcp6.prefix_delegation->hint);
+		free(one->dhcp6.prefix_delegation);
+	}
+	memset(one, 0, sizeof(*one));
+}
+
 void ncfg_address_sources_free(ncfg_address_source_t *list, size_t count)
 {
 	size_t i;
 
 	for (i = 0; i < count; i++) {
-		free(list[i].static_address.address);
-		free(list[i].static_address.peer);
-		free(list[i].delegated.prefix.source);
-		free(list[i].delegated.suffix);
-		free(list[i].dhcp4.client_id);
-		free(list[i].dhcp4.request_options);
-		if (list[i].dhcp6.prefix_delegation) {
-			free(list[i].dhcp6.prefix_delegation->hint);
-			free(list[i].dhcp6.prefix_delegation);
-		}
+		ncfg_address_source_release(&list[i]);
 	}
 	free(list);
 }

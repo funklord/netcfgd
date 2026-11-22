@@ -1401,6 +1401,7 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 				free(interface.advertise);
 				interface.advertise = calloc(1, sizeof(*interface.advertise));
 				if (!interface.advertise) {
+					release_advertise(&advertise);
 					ncfg_lower_oom(ctx);
 					break;
 				}

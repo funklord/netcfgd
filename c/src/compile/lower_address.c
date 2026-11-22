@@ -614,6 +614,8 @@ void ncfg_lower_config(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value,
 			ncfg_address_source_t *slot = ncfg_push(ctx, list, count, sizeof(*slot));
 
 			if (!slot) {
+				/* Out of memory: what was built is nobody's. */
+				ncfg_address_source_release(&built);
 				break;
 			}
 			*slot = built;
