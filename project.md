@@ -6997,6 +6997,16 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.902 The global tab sets the hostname, the confirm window and the drift policy
+
+Three of the window's gaps 10.895 listed as shown read-only, each in its own
+drop-in (`50-hostname`, `50-confirm`, `50-drift`) that leaving the field at its
+default removes, the shape `50-regdom` and `50-offload` already have.
+`gui/tests/global_load.cpp` writes each through a real daemon, has a hostname
+the compiler refuses left unwritten, and removes all three. `locked`,
+`connectivity` and `remote` stay text-only: `remote` decides who on the estate
+may change this machine, which is a change to make in the file on purpose.
+
 ## 10.901 Every firewall rule counts, and the window says what each matched
 
 The inventory (10.895) put counters next after logging and parked them on the

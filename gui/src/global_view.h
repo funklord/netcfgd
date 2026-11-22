@@ -45,6 +45,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QSpinBox;
 class QTableWidget;
 
 class ncfg_connection;
@@ -74,8 +75,20 @@ private slots:
 	void write_upnp();
 	/* Write the flow offload chosen, or remove this tab's file for off. */
 	void set_offload();
+	/* The hostname typed (`dhcp` for the lease's), or leave it alone again
+	 * where it is blank. */
+	void set_hostname();
+	/* The commit-confirm window every apply arms, or none at 0. */
+	void set_confirm();
+	/* What netcfgd does when the machine drifts, or the build's default. */
+	void set_drift();
 
 private:
+	/* Write `global { KEY = VALUE }` to `file`, or remove the file where
+	 * `value` is empty and it is this tab's; `said` names the choice. */
+	void write_choice(const char *file, bool ours, const char *key, const QString &value,
+	    const QString &said);
+
 	ncfg_connection *connection;
 	QTableWidget    *table;
 	QPushButton     *networking_button;
@@ -95,6 +108,14 @@ private:
 	QPushButton     *offload_button;
 	/* Whether `50-offload` was there at the last refresh: off removes it. */
 	bool             offload_ours = false;
+	/* Hostname, confirm window and drift, each its own drop-in for the
+	 * reason `50-regdom` is: the default is the file's absence. */
+	QLineEdit       *hostname;
+	bool             hostname_ours = false;
+	QSpinBox        *confirm;
+	bool             confirm_ours = false;
+	QComboBox       *drift;
+	bool             drift_ours = false;
 	QLabel          *note;
 	/* What the last refresh read, so the button knows which way it points
 	 * without re-asking the daemon at the moment it is clicked. */

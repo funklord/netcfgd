@@ -23,6 +23,7 @@
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QProcess>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
@@ -168,6 +169,55 @@ int main(int argc, char **argv)
 		check(offload_of(), QStringLiteral("<off>"), "and off again");
 		check(QFile::exists(file) ? QStringLiteral("left") : QStringLiteral("removed"),
 		    QStringLiteral("removed"), "  by removing its file, not by writing off");
+	}
+
+	/* Hostname, confirm window and drift (10.901): each chosen into its own
+	 * file, read back through the daemon, and back to the default by
+	 * removing the file. */
+	{
+		auto *name = view.findChild<QSpinBox *>(QStringLiteral("global_confirm"));
+		auto *host = view.findChild<QLineEdit *>(QStringLiteral("global_hostname"));
+		auto *drift = view.findChild<QComboBox *>(QStringLiteral("global_on_drift"));
+		auto  globals_of = [&connection]() {
+			ncfg_globals globals;
+			QString      why;
+			if (!connection.globals(&globals, &why)) {
+				return why;
+			}
+			return QStringLiteral("%1 %2 %3")
+			    .arg(globals.hostname, QString::number(globals.confirm), globals.on_drift);
+		};
+		const QString etc = work.path() + QStringLiteral("/etc/conf.d/");
+		check(globals_of(), QStringLiteral("none 0 reconcile"), "no hostname, window or drift chosen");
+		host->setText(QStringLiteral("gateway.home"));
+		QMetaObject::invokeMethod(&view, "set_hostname");
+		name->setValue(90);
+		QMetaObject::invokeMethod(&view, "set_confirm");
+		drift->setCurrentIndex(drift->findData(QStringLiteral("report")));
+		QMetaObject::invokeMethod(&view, "set_drift");
+		check(globals_of(), QStringLiteral("gateway.home 90 report"),
+		    "a hostname, a window and a drift policy are each written");
+		check(host->text() + QLatin1Char(' ') + QString::number(name->value()) +
+		        QLatin1Char(' ') + drift->currentData().toString(),
+		    QStringLiteral("gateway.home 90 report"), "  and the fields show them");
+		host->setText(QStringLiteral("not a name!"));
+		QMetaObject::invokeMethod(&view, "set_hostname");
+		check(globals_of(), QStringLiteral("gateway.home 90 report"),
+		    "  a hostname the compiler refuses is not written");
+		host->setText(QStringLiteral("dhcp"));
+		QMetaObject::invokeMethod(&view, "set_hostname");
+		check(globals_of(), QStringLiteral("from_dhcp 90 report"), "  and dhcp is the lease's");
+		host->clear();
+		QMetaObject::invokeMethod(&view, "set_hostname");
+		name->setValue(0);
+		QMetaObject::invokeMethod(&view, "set_confirm");
+		drift->setCurrentIndex(0);
+		QMetaObject::invokeMethod(&view, "set_drift");
+		check(globals_of(), QStringLiteral("none 0 reconcile"), "and each back to the default");
+		check(QString::number(QFile::exists(etc + QStringLiteral("50-hostname.conf"))) +
+		        QString::number(QFile::exists(etc + QStringLiteral("50-confirm.conf"))) +
+		        QString::number(QFile::exists(etc + QStringLiteral("50-drift.conf"))),
+		    QStringLiteral("000"), "  by removing their files, not by writing the default");
 	}
 	stop(&daemon);
 

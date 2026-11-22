@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -36,6 +37,14 @@ const char *const upnp_drop_in = "50-upnp";
 /* Flow offload's (0319), likewise: off is the default and is removing it, so
  * the file holds a choice and never the default written out. */
 const char *const offload_drop_in = "50-offload";
+
+/* Hostname, confirm window and drift (10.902), one file each: leaving a
+ * field at its default removes the file rather than writing the default out,
+ * so the machine follows a later build's default (`working-practice.md`, a
+ * config file records choices). */
+const char *const hostname_drop_in = "50-hostname";
+const char *const confirm_drop_in = "50-confirm";
+const char *const drift_drop_in = "50-drift";
 
 /* The holder's condition for UPnP (10.664 item 5), the plan's own warning in
  * the words a person deciding needs. */
@@ -118,6 +127,48 @@ ncfg_global_view::ncfg_global_view(ncfg_connection *connection, QWidget *parent)
 	offload_row->addStretch();
 	layout->addLayout(offload_row);
 
+	auto *host_row = new QHBoxLayout();
+	hostname = new QLineEdit(this);
+	hostname->setObjectName(QStringLiteral("global_hostname"));
+	hostname->setPlaceholderText(QStringLiteral("hostname, or dhcp -- blank leaves it alone"));
+	hostname->setToolTip(QStringLiteral(
+	    "The name this machine gives itself. `dhcp` takes the one the network's DHCP "
+	    "server hands out. Blank: netcfgd does not touch the hostname."));
+	host_row->addWidget(hostname);
+	auto *hostname_button = new QPushButton(QStringLiteral("set hostname"), this);
+	hostname_button->setObjectName(QStringLiteral("global_set_hostname"));
+	host_row->addWidget(hostname_button);
+	host_row->addSpacing(24);
+	confirm = new QSpinBox(this);
+	confirm->setObjectName(QStringLiteral("global_confirm"));
+	confirm->setRange(0, 86400);
+	confirm->setSuffix(QStringLiteral(" s"));
+	confirm->setSpecialValueText(QStringLiteral("no confirm window"));
+	confirm->setToolTip(QStringLiteral(
+	    "Every apply waits this long for a confirmation, and puts the machine back as it "
+	    "was if none comes -- the way back from a change that cut you off."));
+	host_row->addWidget(confirm);
+	auto *confirm_button = new QPushButton(QStringLiteral("set window"), this);
+	confirm_button->setObjectName(QStringLiteral("global_set_confirm"));
+	host_row->addWidget(confirm_button);
+	host_row->addSpacing(24);
+	drift = new QComboBox(this);
+	drift->setObjectName(QStringLiteral("global_on_drift"));
+	drift->addItem(QStringLiteral("on drift: default (reconcile)"), QString());
+	drift->addItem(QStringLiteral("on drift: reconcile -- put it back"), QStringLiteral("reconcile"));
+	drift->addItem(QStringLiteral("on drift: report -- say so, change nothing"),
+	    QStringLiteral("report"));
+	drift->addItem(QStringLiteral("on drift: ignore -- do not look"), QStringLiteral("ignore"));
+	drift->setToolTip(QStringLiteral(
+	    "What netcfgd does when something else changes what it configured. An interface "
+	    "may say otherwise for itself."));
+	host_row->addWidget(drift);
+	auto *drift_button = new QPushButton(QStringLiteral("set"), this);
+	drift_button->setObjectName(QStringLiteral("global_set_drift"));
+	host_row->addWidget(drift_button);
+	host_row->addStretch();
+	layout->addLayout(host_row);
+
 	note = new QLabel(this);
 	note->setObjectName(QStringLiteral("global_note"));
 	note->setWordWrap(true);
@@ -128,6 +179,9 @@ ncfg_global_view::ncfg_global_view(ncfg_connection *connection, QWidget *parent)
 	connect(country_button, &QPushButton::clicked, this, &ncfg_global_view::set_country);
 	connect(upnp_button, &QPushButton::clicked, this, &ncfg_global_view::toggle_upnp);
 	connect(offload_button, &QPushButton::clicked, this, &ncfg_global_view::set_offload);
+	connect(hostname_button, &QPushButton::clicked, this, &ncfg_global_view::set_hostname);
+	connect(confirm_button, &QPushButton::clicked, this, &ncfg_global_view::set_confirm);
+	connect(drift_button, &QPushButton::clicked, this, &ncfg_global_view::set_drift);
 }
 
 void ncfg_global_view::refresh()
@@ -155,13 +209,34 @@ void ncfg_global_view::refresh()
 	pinned = false;
 	upnp_ours = false;
 	offload_ours = false;
+	hostname_ours = false;
+	confirm_ours = false;
+	drift_ours = false;
 	if (connection->configs(&files, nullptr)) {
 		for (const ncfg_config_row &file : files) {
 			pinned = pinned || file.name == QLatin1String(country_drop_in);
 			upnp_ours = upnp_ours || file.name == QLatin1String(upnp_drop_in);
 			offload_ours = offload_ours || file.name == QLatin1String(offload_drop_in);
+			hostname_ours = hostname_ours || file.name == QLatin1String(hostname_drop_in);
+			confirm_ours = confirm_ours || file.name == QLatin1String(confirm_drop_in);
+			drift_ours = drift_ours || file.name == QLatin1String(drift_drop_in);
 		}
 	}
+	/* `none` and `from_dhcp` are the policy's words; the field takes a name
+	 * or `dhcp`, as the configuration does. */
+	if (globals.hostname == QLatin1String("from_dhcp")) {
+		hostname->setText(QStringLiteral("dhcp"));
+	} else if (globals.hostname == QLatin1String("none")) {
+		hostname->clear();
+	} else {
+		hostname->setText(globals.hostname);
+	}
+	confirm->setValue(globals.confirm);
+	/* Absent reads as `reconcile`, so the default entry stands for it unless
+	 * this tab's file chose it or another file chose something else. */
+	drift->setCurrentIndex(drift_ours || globals.on_drift != QLatin1String("reconcile")
+	        ? qMax(0, drift->findData(globals.on_drift))
+	        : 0);
 	offload->setCurrentIndex(qMax(0, offload->findData(globals.flow_offload)));
 	upnp_on = !globals.upnp_uplink.isEmpty();
 	upnp_button->setText(upnp_on ? QStringLiteral("turn UPnP off")
@@ -445,4 +520,79 @@ void ncfg_global_view::set_offload()
 	        .arg(QString::fromLatin1(offload_drop_in), chosen));
 	emit changed();
 	refresh();
+}
+
+void ncfg_global_view::write_choice(const char *file, bool ours, const char *key,
+    const QString &value, const QString &said)
+{
+	QString error;
+
+	if (value.isEmpty()) {
+		if (!ours) {
+			emit reported(QStringLiteral("%1 is not chosen from here; another file chooses it, "
+			                             "or it already follows the default")
+			        .arg(QString::fromLatin1(key)));
+			return;
+		}
+		if (!connection->config_delete(QString::fromLatin1(file), &error)) {
+			emit reported(error);
+			return;
+		}
+		emit reported(QStringLiteral("removed %1: %2. netcfgd puts it in effect itself; "
+		                             "Apply... shows anything it holds back.")
+		        .arg(QString::fromLatin1(file), said));
+		emit changed();
+		refresh();
+		return;
+	}
+	const QString text =
+	    QStringLiteral("global {\n\t%1 = %2\n}\n").arg(QString::fromLatin1(key), value);
+	if (!connection->config_put(QString::fromLatin1(file), text, true, &error)) {
+		/* The compiler's sentence: a hostname it will not take says why. */
+		note->setText(error);
+		emit reported(error);
+		return;
+	}
+	emit reported(QStringLiteral("wrote %1: %2. netcfgd puts it in effect itself; Apply... "
+	                             "shows anything it holds back.")
+	        .arg(QString::fromLatin1(file), said));
+	emit changed();
+	refresh();
+}
+
+void ncfg_global_view::set_hostname()
+{
+	const QString name = hostname->text().trimmed();
+
+	/* A quote would end the string early; anything else is the compiler's
+	 * to refuse, and its sentence comes back. */
+	if (name.contains(QLatin1Char('"')) || name.contains(QLatin1Char('\\'))) {
+		emit reported(QStringLiteral("a hostname is letters, digits, hyphens and dots"));
+		return;
+	}
+	write_choice(hostname_drop_in, hostname_ours, "hostname",
+	    name.isEmpty() ? QString() : QStringLiteral("\"%1\"").arg(name),
+	    name.isEmpty() ? QStringLiteral("netcfgd leaves the hostname alone")
+	                   : QStringLiteral("the hostname is %1").arg(name));
+}
+
+void ncfg_global_view::set_confirm()
+{
+	const int seconds = confirm->value();
+
+	write_choice(confirm_drop_in, confirm_ours, "confirm",
+	    seconds ? QString::number(seconds) : QString(),
+	    seconds ? QStringLiteral("every apply waits %1 for a confirmation")
+	                  .arg(ncfg_counted(seconds, "second", "seconds"))
+	            : QStringLiteral("no confirm window"));
+}
+
+void ncfg_global_view::set_drift()
+{
+	const QString chosen = drift->currentData().toString();
+
+	write_choice(drift_drop_in, drift_ours, "on_drift",
+	    chosen.isEmpty() ? QString() : QStringLiteral("\"%1\"").arg(chosen),
+	    chosen.isEmpty() ? QStringLiteral("drift follows the default")
+	                     : QStringLiteral("on drift, %1").arg(chosen));
 }
