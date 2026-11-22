@@ -1289,6 +1289,32 @@ static int over_parts(const char *over, uint64_t *count, uint64_t *seconds)
 }
 
 /*
+ * The rate an `over` meter's limit is written with: COUNT per WINDOW as the
+ * same token bucket in the smallest unit nft has a word for -- a second, a
+ * minute, an hour, a day or a week (10.898). The kernel takes any unit, but nft
+ * prints one it has no word for as `8/error`, and a ruleset saved with `nft
+ * list ruleset` then fails to load back. The bucket is the same: the burst
+ * stays COUNT, and the time one packet costs, unit / rate, stays WINDOW /
+ * COUNT, so 8 in 15 minutes is written `32/hour burst 8`. A window no unit
+ * divides evenly keeps itself as the unit, as before.
+ */
+static void over_rate(uint64_t count, uint64_t seconds, uint64_t *rate, uint64_t *unit)
+{
+	static const uint64_t units[] = { 1u, 60u, 3600u, 86400u, 604800u };
+	size_t                at;
+
+	for (at = 0; seconds && at < sizeof(units) / sizeof(units[0]); at++) {
+		if ((count * units[at]) % seconds == 0u) {
+			*rate = count * units[at] / seconds;
+			*unit = units[at];
+			return;
+		}
+	}
+	*rate = count;
+	*unit = seconds;
+}
+
+/*
  * The meter an `over` rule counts in, one per family: `over-` and the first
  * twelve of the rule's digest, then `-4` or `-6`. From the digest so that a
  * changed rule is a new set, and per family because a set's key has one
@@ -1305,12 +1331,13 @@ static void over_set_name(const char *comment, uint8_t family, char *out, size_t
 /*
  * `ip saddr` (or `ip6 saddr`) into register 1, and a `dynset` updating the
  * meter with it, the update carrying a `limit` that matches only past the
- * rate -- nftables' `meter NAME { ip saddr timeout Ns limit rate over C/N
- * seconds burst C packets }`. The token bucket holds COUNT packets and
- * refills COUNT per window, so the COUNT+1st in a burst is the first that
- * matches: an iptables `recent --hitcount COUNT+1 --seconds WINDOW`, near
- * enough to guard the same door. An entry left untouched for a window
- * expires, so a quiet source starts again from a full bucket.
+ * rate -- nftables' `meter NAME { ip saddr timeout Ns limit rate over R/UNIT
+ * burst C packets }`, R/UNIT being C per window (`over_rate`). The token
+ * bucket holds COUNT packets and refills COUNT per window, so the COUNT+1st
+ * in a burst is the first that matches: an iptables `recent --hitcount
+ * COUNT+1 --seconds WINDOW`, near enough to guard the same door. An entry
+ * left untouched for a window expires, so a quiet source starts again from a
+ * full bucket.
  */
 static void put_over(ncfg_buf_t *expressions, const char *over, uint8_t family,
     const char *set_name, uint32_t set_id)
@@ -1318,17 +1345,18 @@ static void put_over(ncfg_buf_t *expressions, const char *over, uint8_t family,
 	ncfg_buf_t data;
 	ncfg_buf_t limit;
 	ncfg_buf_t expr;
-	uint64_t   count = 0, seconds = 0;
+	uint64_t   count = 0, seconds = 0, rate = 0, unit = 0;
 
 	(void)over_parts(over, &count, &seconds);
+	over_rate(count, seconds, &rate, &unit);
 	if (family == NFPROTO_IPV6) {
 		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, 8u, 16u);
 	} else {
 		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, 12u, 4u);
 	}
 	ncfg_buf_init(&limit, 0);
-	put_be64(&limit, NFTA_LIMIT_RATE, count);
-	put_be64(&limit, NFTA_LIMIT_UNIT, seconds);
+	put_be64(&limit, NFTA_LIMIT_RATE, rate);
+	put_be64(&limit, NFTA_LIMIT_UNIT, unit);
 	put_be32(&limit, NFTA_LIMIT_BURST, (uint32_t)count);
 	put_be32(&limit, NFTA_LIMIT_TYPE, NFT_LIMIT_PKTS);
 	put_be32(&limit, NFTA_LIMIT_FLAGS, NFT_LIMIT_F_INV);
@@ -2995,7 +3023,7 @@ static int read_over(const reading_t *reading, const ncfg_wire_attrs_t *data,
 	ncfg_wire_attrs_t limit;
 	ncfg_wire_attr_t  limit_data;
 	char              name[16];
-	uint32_t          op = 0, type = 0, flags = 0;
+	uint32_t          op = 0, type = 0, flags = 0, burst = 0;
 	uint64_t          rate = 0, unit = 0;
 
 	if (reading->what != LOADED_PAYLOAD || reading->base != NFT_PAYLOAD_NETWORK_HEADER ||
@@ -3028,12 +3056,27 @@ static int read_over(const reading_t *reading, const ncfg_wire_attrs_t *data,
 	ncfg_wire_attrs_start(&limit, limit_data.value, limit_data.length);
 	if (!be64_member(&limit, NFTA_LIMIT_RATE, &rate) ||
 	    !be64_member(&limit, NFTA_LIMIT_UNIT, &unit) || rate == 0u || unit == 0u ||
+	    !be32_member(&limit, NFTA_LIMIT_BURST, &burst) || burst == 0u ||
+	    unit > UINT64_MAX / burst || (unit * burst) % rate != 0u ||
 	    (be32_member(&limit, NFTA_LIMIT_TYPE, &type) && type != NFT_LIMIT_PKTS) ||
 	    !be32_member(&limit, NFTA_LIMIT_FLAGS, &flags) || !(flags & NFT_LIMIT_F_INV)) {
 		return 0;
 	}
-	(void)snprintf(out->over, sizeof(out->over), "%llu/%llus", (unsigned long long)rate,
-	    (unsigned long long)unit);
+	/* The burst is the count and the window what it refills in (10.898).
+	 * Only the unit this build writes is netcfgd's: a meter written by an
+	 * earlier one in its window's own unit -- `8/error` to nft -- reads as
+	 * not netcfgd's, so the first plan after an upgrade writes it again. */
+	{
+		const uint64_t window = unit * burst / rate;
+		uint64_t       want_rate = 0, want_unit = 0;
+
+		over_rate(burst, window, &want_rate, &want_unit);
+		if (want_rate != rate || want_unit != unit) {
+			return 0;
+		}
+		(void)snprintf(out->over, sizeof(out->over), "%lu/%llus", (unsigned long)burst,
+		    (unsigned long long)window);
+	}
 	return 1;
 }
 

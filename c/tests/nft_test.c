@@ -531,6 +531,35 @@ static void an_over_rule_is_a_meter_per_family(void)
 	check(sets == 2 && rules == 2, "  a meter and a rule for IPv4, and the same for IPv6");
 	check(read_back == 2, "  each rule read back with the rate the document keeps");
 	ncfg_buf_free(&out);
+	/* Whatever unit it is written in (10.898): a window a minute divides, one
+	 * only its own seconds do, and the hour's 8 in 15 minutes above. */
+	{
+		static const char *const windows[] = { "5/60s", "3/13s", "1/1s", "100/86400s" };
+		size_t                   w;
+		int                      same = 0;
+
+		for (w = 0; w < sizeof(windows) / sizeof(windows[0]); w++) {
+			rule.over = (char *)windows[w];
+			ncfg_buf_init(&out, 0);
+			if (ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err,
+			        sizeof(err))) {
+				ncfg_wire_messages_start(&walk, out.data, out.length);
+				while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+					ncfg_nft_kernel_rule_t one;
+
+					if ((message.header.kind & 0xffu) == NFT_MSG_NEWRULE &&
+					    ncfg_nft_firewall_rule_read(message.payload, message.payload_length,
+					        &one, err, sizeof(err)) && strcmp(one.over, windows[w]) == 0) {
+						same++;
+						break;
+					}
+				}
+			}
+			ncfg_buf_free(&out);
+		}
+		check(same == 4, "  and a rate in any window reads back as the document keeps it");
+		rule.over = (char *)"8/900s";
+	}
 
 	rule.from = from;
 	rule.from_count = 1u;

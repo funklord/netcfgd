@@ -6997,6 +6997,28 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.898 A per-source meter printed as `8/error`, and a saved ruleset would not load
+
+Found by 10.897's listing, on MIPS and then on x86 alike: `over = "8/15m"` was
+written as `limit rate over 8` per a 900-second unit. The kernel takes any unit,
+but nft has words for a second, a minute, an hour, a day and a week only, so
+`nft list ruleset` printed `limit rate over 8/error`, and a ruleset saved with it
+failed to load with `nft -f` -- the SSH guard 10.885 exists for broke anybody
+saving their firewall the ordinary way.
+
+**The same bucket is now written in a unit nft has a word for**: 8 in 15 minutes
+is 32 an hour with a burst of 8, the burst unchanged and the time one packet
+costs (unit / rate, 112.5 s) unchanged, which is all `nft_limit` computes from.
+The reader takes the count from the burst and the window from unit x burst /
+rate, so the document's `8/900s` is what it reads either way; a window no unit
+divides keeps its own seconds as before. **It accepts only the encoding this
+build writes**, so a meter an earlier build installed reads as not netcfgd's
+and the first plan after an upgrade writes it again -- measured: an old build's
+two meters printed `8/error`, this build planned one replace, and after its apply
+both read `32/hour` and the next plan had nothing to do.
+`tests/live/firewall.sh` saves the ruleset, flushes it and loads it back with
+`nft -f`; the old encoding fails four of its checks.
+
 ## 10.897 Layer one's new encodings on a big-endian kernel, and two rigs that made no package
 
 `make hull-malta` -- OpenWrt's malta-be kernel in qemu-system-mips, netcfgd built

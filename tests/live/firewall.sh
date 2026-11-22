@@ -419,6 +419,32 @@ nft replace rule inet netcfgd input handle "$handle" tcp dport 113 reject commen
 check "a reset swapped for ICMP under the same identity is planned back" \
 	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
 
+# A per-source meter (10.885) in a unit nft can print (10.898): 8 in 15 minutes
+# is the same bucket as 32 an hour with a burst of 8, and nft has no word for a
+# 900-second unit -- it printed `8/error`, and a ruleset saved from it would not
+# load back. Saved and loaded again here, and the plan still converges.
+write_etc <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		drop "ssh-guard" { protocol = "tcp"; port = 22; state = ["new"]; over = "8/15m" }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a per-source meter is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+check "its rate is in a unit nft has a word for, in each family's meter" \
+	"$(grep -c 'limit rate over 32/hour burst 8 packets' "$work/listed" || true)" "2"
+check "and nothing in the table is printed as an error" "$(grep -c 'error' "$work/listed" || true)" "0"
+nft list ruleset > "$work/saved" 2>&1
+nft flush ruleset
+check "a ruleset saved from it loads back" "$(nft -f "$work/saved" 2>&1 | head -2)" ""
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the plan has nothing to do with what was loaded" "$(cat "$work/plan")" "nothing to do"
+
 # The tunnel and IPsec protocols (0335), and sctp's ports where tcp's are.
 write_etc <<'CONF'
 firewall {
