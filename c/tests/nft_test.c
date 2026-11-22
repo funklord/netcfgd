@@ -583,6 +583,67 @@ static void an_over_rule_is_a_meter_per_family(void)
 }
 
 /*
+ * An icmp guard counts in IPv4's meter alone and an icmpv6 one in IPv6's
+ * (10.905): the other family's rule matches no packet, and nft prints it as a
+ * ruleset it cannot load back. One whose addresses are all the other
+ * family's is refused, naming the protocol.
+ */
+static void an_icmp_guard_counts_in_its_own_family(void)
+{
+	static const int     protocols[2] = { NCFG_FIREWALL_PROTO_ICMP, NCFG_FIREWALL_PROTO_ICMPV6 };
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 err[NCFG_ERROR_MAX];
+	char                *v6[1] = { (char *)"2001:db8::/32" };
+	size_t               p;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"ping-flood";
+	rule.action = NCFG_FIREWALL_DROP;
+	rule.over = (char *)"20/60s";
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.input.rules = &rule;
+	firewall.input.rule_count = 1u;
+	for (p = 0; p < 2u; p++) {
+		int sets = 0, rules = 0, metered = 0;
+
+		rule.protocol = protocols[p];
+		ncfg_buf_init(&out, 0);
+		check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err,
+		          sizeof(err)),
+		    p ? "an icmpv6 guard is built" : "an icmp guard is built");
+		ncfg_wire_messages_start(&walk, out.data, out.length);
+		while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+			sets += (message.header.kind & 0xffu) == NFT_MSG_NEWSET;
+			if ((message.header.kind & 0xffu) == NFT_MSG_NEWRULE) {
+				ncfg_nft_kernel_rule_t one;
+
+				rules++;
+				if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one,
+				        err, sizeof(err))) {
+					metered = one.over[0] != '\0';
+				}
+			}
+		}
+		check(sets == 1 && rules == 1 && metered,
+		    "  one meter and one rule, in its protocol's family only");
+		ncfg_buf_free(&out);
+	}
+	rule.protocol = NCFG_FIREWALL_PROTO_ICMP;
+	rule.from = v6;
+	rule.from_count = 1u;
+	ncfg_buf_init(&out, 0);
+	check(!ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)) &&
+	        strstr(err, "icmp from addresses of the other family") != NULL,
+	    "an icmp guard on IPv6 sources only is refused, naming why");
+	ncfg_buf_free(&out);
+}
+
+/*
  * `log = true` (0330): each combination is two kernel rules, the log's first
  * -- the matches, a rated `log`, no verdict -- then the verdict's, both under
  * the rule's name and digest. Read back, the first is a log row and the
@@ -2426,6 +2487,7 @@ int main(void)
 	a_translated_rule_is_written_read_and_digested();
 	a_verdict_rule_counts_and_a_log_rule_does_not();
 	a_logged_guard_counts_its_meter_once();
+	an_icmp_guard_counts_in_its_own_family();
 	an_over_rule_is_a_meter_per_family();
 	a_logged_rule_is_a_log_then_its_verdict();
 	a_port_range_is_one_kernel_rule();

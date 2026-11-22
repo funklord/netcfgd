@@ -6997,6 +6997,20 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.905 An icmp guard counts in its protocol's family only
+
+An `over` rule with no address is one meter and one rule per family
+(10.885), and that held for `protocol = "icmp"` too: an IPv6 meter beside
+`meta l4proto icmp`, a rule no packet can match. nft prints it as `icmp type
+echo-request update @over-...-6 { ip6 saddr ... }` and refuses to load that
+back ("conflicting network layer protocols specified: ip vs. ip6"), so a
+ruleset saved from a machine with an icmp guard would not restore. Found by
+the sabotage run for 10.904. Now `icmp` counts in IPv4's meter alone and
+`icmpv6` in IPv6's, and an icmp guard whose addresses are all the other
+family's is refused at plan time, naming the protocol. A machine carrying the
+old pair gets one table replacement after the upgrade, as any rule shape
+change does. `tests/live/firewall.sh` saves and reloads a ruleset holding one.
+
 ## 10.904 A guard may log: the mark's top bit is netcfgd's
 
 The holder answered the marks question on 2026-11-22: reserve `0x80000000`.

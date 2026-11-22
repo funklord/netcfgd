@@ -1821,6 +1821,21 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 				}
 			}
 		}
+		/* **ICMP is one family's protocol** (10.905): `icmp` is IPv4's and
+		 * `icmpv6` IPv6's, so the other family's meter and rule would match
+		 * no packet -- and nft, printing `icmp type` with an `ip6 saddr`
+		 * meter, writes a ruleset it cannot load back. */
+		if (rule->protocol == NCFG_FIREWALL_PROTO_ICMP) {
+			has[1] = 0;
+		} else if (rule->protocol == NCFG_FIREWALL_PROTO_ICMPV6) {
+			has[0] = 0;
+		}
+		if (!has[0] && !has[1]) {
+			ncfg_error_set(err, err_size, "rule `%s/%s` counts `over` for %s from addresses "
+			    "of the other family only, which no packet carries", chain, rule->name,
+			    rule->protocol == NCFG_FIREWALL_PROTO_ICMP ? "icmp" : "icmpv6");
+			return 0;
+		}
 	}
 	/*
 	 * **An `over` rule is one kernel rule per family as well**, where no

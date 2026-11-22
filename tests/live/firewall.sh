@@ -440,12 +440,15 @@ check "a reset swapped for ICMP under the same identity is planned back" \
 # 900-second unit -- it printed `8/error`, and a ruleset saved from it would not
 # load back. Saved and loaded again here, and the plan still converges -- with
 # prefixes beside it, which nft compiles from text as a load of their leading
-# bytes where netcfgd writes the whole address masked (10.899).
+# bytes where netcfgd writes the whole address masked (10.899). An icmp guard
+# is IPv4's alone: an IPv6 meter beside `icmp type` is a rule nft prints and
+# cannot read back (10.905).
 write_etc <<'CONF'
 firewall {
 	input {
 		policy = "accept"
 		drop "ssh-guard" { protocol = "tcp"; port = 22; state = ["new"]; over = "8/15m" }
+		drop "ping-flood" { protocol = "icmp"; icmp_type = "echo-request"; over = "20/60s" }
 		accept "nets" { from = ["192.168.7.0/24", "10.16.0.0/12", "2001:db8::/32", "2001:db8:8000::/33"] }
 	}
 	forward { policy = "accept" }
@@ -482,14 +485,14 @@ CONF
 "$ncfg" apply > "$work/apply" 2>&1 || true
 check "a logged guard is applied" "$(grep -c '^ok   nftables.replace' "$work/apply" || true)" "1"
 nft list ruleset > "$work/listed" 2>&1 || true
-# One pair per family, as an unaddressed guard's meter is (10.885).
+# One pair, IPv4's: an icmp guard counts in one family (10.905).
 check "the log's rule clears the bit, counts the meter, sets the bit and logs" \
-	"$(grep -c 'icmp type echo-request meta mark set meta mark & 0x7fffffff update @over-' "$work/listed" || true)" "2"
+	"$(grep -c 'icmp type echo-request meta mark set meta mark & 0x7fffffff update @over-' "$work/listed" || true)" "1"
 check "  and logs past the meter at its own rate" \
-	"$(grep -c 'meta mark set meta mark | 0x80000000 limit rate 10/minute burst 5 packets log prefix "netcfgd input/ping-guard: "' "$work/listed" || true)" "2"
+	"$(grep -c 'meta mark set meta mark | 0x80000000 limit rate 10/minute burst 5 packets log prefix "netcfgd input/ping-guard: "' "$work/listed" || true)" "1"
 check "the drop matches the bit in the meter's place and clears it" \
 	"$(sed -E 's/counter packets [0-9]+ bytes [0-9]+/counter/' "$work/listed" |
-		grep -c 'icmp type echo-request meta mark & 0x80000000 == 0x80000000 meta mark set meta mark & 0x7fffffff counter drop comment "name=ping-guard' || true)" "2"
+		grep -c 'icmp type echo-request meta mark & 0x80000000 == 0x80000000 meta mark set meta mark & 0x7fffffff counter drop comment "name=ping-guard' || true)" "1"
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "  and the next plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
 ip link set lo up
@@ -498,8 +501,8 @@ check "two pings of five pass a guard of two a minute" \
 "$ncfg" status > "$work/status" 2>&1 || true
 check "  and ncfg status counts the three it dropped, under the log's meter" \
 	"$(grep -cE '^    drop ping-guard protocol icmp type 8 over, as its log counted: 3 packets, [0-9]+ bytes$' "$work/status" || true)" "1"
-check "  the log's rows naming the meter, one per family" \
-	"$(grep -cE '^    log ping-guard protocol icmp type 8 over 2/60s$' "$work/status" || true)" "2"
+check "  the log's row naming the meter" \
+	"$(grep -cE '^    log ping-guard protocol icmp type 8 over 2/60s$' "$work/status" || true)" "1"
 nft list ruleset > "$work/saved" 2>&1
 nft flush ruleset
 check "a ruleset with a logged guard loads back" "$(nft -f "$work/saved" 2>&1 | head -2)" ""
