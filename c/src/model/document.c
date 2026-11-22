@@ -150,6 +150,11 @@ static const char *const interface_kind_words[] = { "physical", "bridge", "bond"
 	"vxlan", "wire_guard", "pppoe", "open_vpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
 	"tun", "ifb", "mesh_point", "radio", "xfrm" };
 static const ncfg_enum_t interface_kind_set = WORD_SET("interface kind", interface_kind_words);
+/* A kind added to the enum is added here to be read at all, so this is where
+ * `NCFG_KIND_LAST` is held to the enum: the release walks every arm up to it
+ * (10.906). */
+_Static_assert(sizeof(interface_kind_words) / sizeof(interface_kind_words[0]) ==
+    (size_t)NCFG_KIND_LAST + 1u, "NCFG_KIND_LAST is not the last kind");
 
 static const char *const qdisc_kind_words[] = { "fq_codel", "cake", "fq", "pfifo_fast",
 	"noqueue" };
@@ -1697,27 +1702,23 @@ static void interface_kind_write(ncfg_json_writer_t *writer, const void *field)
 	ncfg_json_write_object_end(writer);
 }
 
+/*
+ * Every arm, through `kind_arm` itself (10.906): the release once listed the
+ * arms a second time by hand, and the xfrm arm added later reached only the
+ * switch, so its three names leaked on every free. Arms are separate members
+ * rather than a union, so freeing all of them is right whatever `kind` says.
+ */
 static void interface_kind_release(void *field)
 {
 	ncfg_interface_kind_t *value = field;
+	int                    kind;
 
-	ncfg_type_free(&bridge_type, &value->bridge);
-	ncfg_type_free(&bond_type, &value->bond);
-	ncfg_type_free(&vlan_type, &value->vlan);
-	ncfg_type_free(&vxlan_type, &value->vxlan);
-	ncfg_type_free(&wireguard_type, &value->wireguard);
-	ncfg_type_free(&pppoe_type, &value->pppoe);
-	ncfg_type_free(&openvpn_type, &value->openvpn);
-	ncfg_type_free(&veth_type, &value->veth);
-	ncfg_type_free(&mesh_point_type, &value->mesh_point);
-	ncfg_type_free(&radio_type, &value->radio);
-	ncfg_type_free(&vrf_type, &value->vrf);
-	ncfg_type_free(&macvlan_type, &value->macvlan);
-	ncfg_type_free(&tunnel_type, &value->tunnel);
-	ncfg_type_free(&tun_type, &value->tun);
-	/* An IPsec tunnel's device names its writer, connection and child; the
-	 * three strings leaked on every free until 10.906. */
-	ncfg_type_free(&xfrm_type, &value->xfrm);
+	for (kind = 0; kind <= (int)NCFG_KIND_LAST; kind++) {
+		void              *payload = NULL;
+		const ncfg_type_t *type = kind_arm(kind, value, &payload);
+
+		ncfg_type_free(type, payload);
+	}
 }
 
 static const ncfg_custom_t interface_kind_custom = { interface_kind_read, interface_kind_write,

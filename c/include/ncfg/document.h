@@ -883,6 +883,12 @@ typedef enum {
 	NCFG_KIND_XFRM
 } ncfg_interface_kind_tag_t;
 
+/* The last kind, for a walk over every arm (10.906). A define rather than a
+ * count in the enum, which would be a value every exhaustive switch over the
+ * kinds -- the check `-Wswitch` makes -- has to handle. Move it with a new
+ * kind. */
+#define NCFG_KIND_LAST NCFG_KIND_XFRM
+
 typedef struct {
 	int                     kind; /* ncfg_interface_kind_tag_t */
 	ncfg_bridge_config_t    bridge;
