@@ -1883,6 +1883,10 @@ int ncfg_nft_forward_text(const ncfg_forward_rule_t *forward, ncfg_buf_t *out)
 		ncfg_buf_addf(out, "network %s\nvia %s\n", forward->network ? forward->network : "",
 		    forward->via ? forward->via : "");
 	}
+	/* Only where set (0336), so a forward from before has its digest. */
+	if (forward->from && forward->kind != NCFG_FORWARD_RULE_HAIRPIN) {
+		ncfg_buf_addf(out, "from %s\n", forward->from);
+	}
 	return !ncfg_buf_failed(out);
 }
 
@@ -1893,6 +1897,8 @@ typedef struct {
 	size_t        to_length; /* 4, or 16 for an IPv6 forward (0305) */
 	uint8_t       address[4];
 	nft_address_t network;
+	nft_address_t from; /* the source allowed (0336), where `has_from` */
+	int           has_from;
 	char          comment[NCFG_NFT_COMMENT_MAX + 1u];
 } forward_parts_t;
 
@@ -1952,6 +1958,19 @@ static int forward_checked(const ncfg_forward_rule_t *forward, forward_parts_t *
 			return 0;
 		}
 	}
+	/* A source (0336) limits who arrives, so it is the forward's and its
+	 * reflections', never the return path's; and an IPv4 forward's. */
+	if (forward->from) {
+		if (forward->kind == NCFG_FORWARD_RULE_HAIRPIN || parts->to_length != 4u ||
+		    !parse_address(forward->from, &parts->from, err, err_size) ||
+		    parts->from.nfproto != NFPROTO_IPV4) {
+			ncfg_error_set(err, err_size, "port forward `%s/%s` is limited to `%s`, which is "
+			    "not an IPv4 source it can be limited to", forward->interface, forward->name,
+			    forward->from);
+			return 0;
+		}
+		parts->has_from = 1;
+	}
 	if (forward->kind != NCFG_FORWARD_RULE_FORWARD && forward->kind != NCFG_FORWARD_RULE_REFLECT &&
 	    forward->kind != NCFG_FORWARD_RULE_HAIRPIN) {
 		ncfg_error_set(err, err_size, "port forward `%s/%s` is of a kind netcfgd does not write",
@@ -2000,6 +2019,12 @@ static void put_immediate(ncfg_buf_t *list, uint32_t reg, const void *bytes, siz
  *   reflect  iifname != "IF" ip daddr U tcp dport P dnat ip to A:Q
  *   hairpin  oifname "VIA" ip saddr NET ip daddr A tcp dport Q masquerade
  *
+ * and a forward limited to a source (0336) matches `ip saddr S` in the forward
+ * and each reflection, after the family:
+ *
+ *   forward  iifname "IF" ip saddr S tcp dport P dnat ip to A:Q
+ *   reflect  iifname != "IF" ip daddr U ip saddr S tcp dport P dnat ip to A:Q
+ *
  * The translated port is always loaded, so the decoder has one shape per kind.
  * An address is matched as the firewall matches one: the whole address, masked
  * where the prefix is short.
@@ -2046,6 +2071,12 @@ static void forward_rule(ncfg_buf_t *attrs, const ncfg_forward_rule_t *forward,
 			put_meta(&expressions, NFT_META_NFPROTO);
 			put_cmp(&expressions, NFT_CMP_EQ, &ipv4, 1u);
 			put_address_match(&expressions, &host, 0);
+		} else if (parts->has_from) {
+			put_meta(&expressions, NFT_META_NFPROTO);
+			put_cmp(&expressions, NFT_CMP_EQ, &ipv4, 1u);
+		}
+		if (parts->has_from) {
+			put_address_match(&expressions, &parts->from, 1);
 		}
 		/* An IPv6 forward says its family, as `dnat ip6 to` makes nft do:
 		 * the translation alone would pass IPv4 by, but the rule should not
@@ -4004,15 +4035,16 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 	/* Exactly the matches the role is written with, and no others. */
 	switch (out->kind) {
 	case NCFG_FORWARD_RULE_FORWARD:
-		/* IPv4 with no family match, as 0298 wrote it, or IPv6 with one
-		 * (0305) -- the family, the address and the translation agreeing. */
-		shape = seen.iif_op == 1 && !seen.oif[0] && !seen.ipv4 && !seen.has_saddr &&
+		/* IPv4 with no family match, as 0298 wrote it, IPv4 with one and a
+		 * source (0336), or IPv6 with one (0305) -- the family, the address
+		 * and the translation agreeing. */
+		shape = seen.iif_op == 1 && !seen.oif[0] && seen.ipv4 == seen.has_saddr &&
 		    !seen.has_daddr && seen.has_to && seen.has_to_port && seen.nat &&
 		    (seen.ipv6 ? seen.to_length == 16u && seen.nat_family == NFPROTO_IPV6
 		               : seen.to_length == 4u && seen.nat_family == NFPROTO_IPV4);
 		break;
 	case NCFG_FORWARD_RULE_REFLECT:
-		shape = seen.iif_op == 2 && !seen.oif[0] && seen.ipv4 && !seen.has_saddr &&
+		shape = seen.iif_op == 2 && !seen.oif[0] && seen.ipv4 &&
 		    seen.has_daddr && seen.has_to && seen.to_length == 4u && seen.has_to_port &&
 		    seen.nat && seen.nat_family == NFPROTO_IPV4;
 		break;
@@ -4052,6 +4084,10 @@ int ncfg_nft_forward_read(const void *payload, size_t length, ncfg_nft_kernel_fo
 			ncfg_error_set(err, err_size, "forward `%s` is reflected at an address it cannot "
 			    "print", identity.name);
 			return 0;
+		}
+		if (seen.has_saddr) {
+			format_address(NFPROTO_IPV4, seen.saddr, (uint32_t)seen.saddr_prefix, out->from,
+			    sizeof(out->from));
 		}
 	}
 	out->to_port = seen.to_port;

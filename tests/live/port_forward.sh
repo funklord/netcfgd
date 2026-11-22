@@ -20,6 +20,8 @@
 #     not once the forward says `hairpin = false`;
 #   - a rule added by hand to the prerouting chain is a difference, and the
 #     next apply replaces it;
+#   - a forward limited to a source (0336) lets that source through and no
+#     other;
 #   - and a document with no forward leaves no prerouting chain.
 #
 # A user and network namespace can hold an nftables table and its NAT, which
@@ -229,6 +231,38 @@ check "a rule added by hand is a difference the plan replaces" \
 nft list ruleset > "$work/listed" 2>&1 || true
 check "and the apply leaves only the document's forward and its reflection" \
 	"$(grep -c 'dnat ip to' "$work/listed" || true)" "2"
+
+# A forward limited to a source (0336): the wan host gets through while it is
+# the source named, written with host bits and kept as the network, and not
+# once the forward names another network -- the same connection, so the
+# refusal is the source match and nothing else.
+write_config '	port_forward "web" { protocol = "tcp"; port = 443; to = "192.168.1.10"; to_port = 8443; from = "203.0.113.2/30" }'
+"$ncfg" apply > "$work/apply.log" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+has "a forward limited to a source matches it, as the network" "$work/listed" \
+	'iifname "wan0" ip saddr 203.0.113.0/30 tcp dport 443 dnat ip to 192.168.1.10:8443 comment "name=wan0/web sha256='
+has "and so does its reflection" "$work/listed" \
+	'ip daddr 203.0.113.1 ip saddr 203.0.113.0/30 tcp dport 443 dnat ip to 192.168.1.10:8443 comment "name=wan0/web@reflect sha256='
+"$ncfg" plan > "$work/plan.log" 2>&1 || true
+check "and the next plan has nothing to do with it" "$(head -1 "$work/plan.log")" "nothing to do"
+"$ncfg" status > "$work/status.log" 2>&1 || true
+has "ncfg status names the source" "$work/status.log" \
+	"forwards tcp 443 to 192.168.1.10:8443 from 203.0.113.0/30 (web)"
+# Another source under the same identity is a difference the reader sees.
+handle=$(nft -a list chain inet netcfgd prerouting | sed -n 's/.*name=wan0\/web sha256.*# handle \([0-9]*\).*/\1/p')
+comment=$(nft list chain inet netcfgd prerouting | sed -n 's/.*comment "\(name=wan0\/web sha256[^"]*\)".*/\1/p')
+nft replace rule inet netcfgd prerouting handle "$handle" iifname "wan0" ip saddr 198.51.100.0/24 \
+	tcp dport 443 dnat ip to 192.168.1.10:8443 comment "\"$comment\""
+"$ncfg" plan > "$work/plan.log" 2>&1 || true
+check "a source swapped under the same identity is planned back" \
+	"$(grep -c 'nftables.replace' "$work/plan.log" || true)" "1"
+"$ncfg" apply > "$work/apply.log" 2>&1 || true
+serve 10
+check "the source named reaches the server" "$(dial W)" "through, from 203.0.113.2"
+write_config '	port_forward "web" { protocol = "tcp"; port = 443; to = "192.168.1.10"; to_port = 8443; from = "198.51.100.0/24" }'
+"$ncfg" apply > "$work/apply.log" 2>&1 || true
+serve 8
+check "and with another network named it does not" "$(dial W)" "refused"
 
 write_config ""
 "$ncfg" apply > "$work/apply.log" 2>&1 || true

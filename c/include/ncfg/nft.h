@@ -418,6 +418,7 @@ typedef struct {
 	char     address[16];  /* reflect */
 	char     network[20];  /* hairpin, a CIDR */
 	char     via[NCFG_NFT_IFNAME_MAX]; /* hairpin */
+	char     from[20];     /* forward and reflect: the source allowed, or empty (0336) */
 } ncfg_nft_kernel_forward_t;
 
 /*

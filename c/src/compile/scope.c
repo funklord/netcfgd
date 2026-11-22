@@ -370,6 +370,7 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "port_forward.to_port", 0x0002002bu },
 	{ NCFG_BLOCK_INTERFACE, "port_forward.hairpin", 0x0002002cu },
 	{ NCFG_BLOCK_INTERFACE, "clamp_mss", 0x0002002du },
+	{ NCFG_BLOCK_INTERFACE, "port_forward.from", 0x0002002eu },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the

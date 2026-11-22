@@ -1683,7 +1683,8 @@ typedef struct {
 } ncfg_neighbour_entry_t;
 
 /* One port forward, as an editor carries it (10.612): `to_port` -1 where it
- * is the same port, `hairpin` -1 where unset (on) or the 0 or 1 written. */
+ * is the same port, `hairpin` -1 where unset (on) or the 0 or 1 written,
+ * `from` empty where anyone may use it (0336). */
 typedef struct {
 	char *name;
 	char *protocol;
@@ -1691,6 +1692,7 @@ typedef struct {
 	char *to;
 	int   to_port;
 	int   hairpin;
+	char *from;
 } ncfg_forward_entry_t;
 
 typedef struct {

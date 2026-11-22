@@ -875,7 +875,8 @@ static void render_port_forwards(const ncfg_interface_t *interface, ncfg_buf_t *
 		const char *to = forward->to_host ? forward->to_host : forward->to;
 
 		if (!forward->name || !to || strchr(forward->name, '"') ||
-		    strchr(to, '"') || forward->port < 1 || forward->port > 65535) {
+		    strchr(to, '"') || (forward->from && strchr(forward->from, '"')) ||
+		    forward->port < 1 || forward->port > 65535) {
 			ncfg_render_refuse(missing, "interface", interface->name, "a port forward `%s`",
 			    forward->name ? forward->name : "");
 			continue;
@@ -889,6 +890,9 @@ static void render_port_forwards(const ncfg_interface_t *interface, ncfg_buf_t *
 		}
 		if (forward->hairpin.has) {
 			ncfg_buf_addf(body, "\t\thairpin = %s\n", forward->hairpin.value ? "true" : "false");
+		}
+		if (forward->from) {
+			ncfg_buf_addf(body, "\t\tfrom = \"%s\"\n", forward->from);
 		}
 		ncfg_buf_add_text(body, "\t}\n");
 	}

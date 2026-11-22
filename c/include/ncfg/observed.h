@@ -1579,6 +1579,8 @@ typedef struct ncfg_observed_forward {
 	int64_t port;
 	char   *to;
 	int64_t to_port;
+	/* The source a forward or reflection is limited to (0336), or NULL. */
+	char   *from;
 } ncfg_observed_forward_t;
 
 /*

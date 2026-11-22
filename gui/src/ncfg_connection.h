@@ -599,6 +599,7 @@ struct ncfg_interface_config {
 		QString to;
 		int     to_port = -1; /* -1: the same port */
 		int     hairpin = -1; /* -1: unset, which is on */
+		QString from;         /* empty: anyone (0336) */
 	};
 	QList<forward> port_forwards;
 	QString ipv6_token;

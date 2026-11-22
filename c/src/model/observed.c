@@ -1494,7 +1494,9 @@ static const ncfg_field_t observed_forward_fields[] = {
 	    .offset = offsetof(ncfg_observed_forward_t, port) },
 	{ .name = "to", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, to) },
 	{ .name = "to_port", .kind = NCFG_F_INT, R_U16,
-	    .offset = offsetof(ncfg_observed_forward_t, to_port) }
+	    .offset = offsetof(ncfg_observed_forward_t, to_port) },
+	/* Absent where nothing limits the source (0336). */
+	{ .name = "from", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_forward_t, from) }
 };
 static const ncfg_type_t observed_forward_type =
     TYPE("observed port forward", observed_forward_fields);

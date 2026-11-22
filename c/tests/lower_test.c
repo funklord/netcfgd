@@ -1668,6 +1668,29 @@ static void access_point_cases(void)
 	    "  and one that is not a boolean is refused");
 	refuses("interface wan0 {\n\tport_forward \"web\" { protocol = \"tcp\"; port = 443 }\n}\n",
 	    "needs a `protocol`, a `port` and a `to`", "  a forward with nowhere to go is refused");
+	/* A forward limited to a source (0336): kept as the network, `/N` only
+	 * where it is short of 32, and refused for IPv6 or anyone. */
+	document = compiles("interface wan0 {\n"
+	    "\tport_forward \"ssh\" { protocol = \"tcp\"; port = 2222; to = \"192.168.1.10\"; "
+	    "from = \"198.51.100.77/24\" }\n"
+	    "\tport_forward \"rdp\" { protocol = \"tcp\"; port = 3389; to = \"192.168.1.11\"; "
+	    "from = \"198.51.100.7/32\" }\n}\n", "forwards limited to a source compile");
+	if (document) {
+		const ncfg_interface_t *wan = &document->interfaces[0];
+
+		check(wan->port_forward_count == 2u && wan->port_forwards[0].from &&
+		        strcmp(wan->port_forwards[0].from, "198.51.100.7") == 0 &&
+		        wan->port_forwards[1].from &&
+		        strcmp(wan->port_forwards[1].from, "198.51.100.0/24") == 0,
+		    "  each source as the network, a host as a bare address");
+		ncfg_document_free(document);
+	}
+	refuses("interface wan0 {\n\tport_forward \"ssh\" { protocol = \"tcp\"; port = 22; "
+	    "to = \"192.168.1.10\"; from = \"2001:db8::/32\" }\n}\n",
+	    "not a source a port forward can be limited to", "  an IPv6 source is refused");
+	refuses("interface wan0 {\n\tport_forward \"ssh\" { protocol = \"tcp\"; port = 22; "
+	    "to = \"192.168.1.10\"; from = \"0.0.0.0/0\" }\n}\n",
+	    "not a source a port forward can be limited to", "  and so is everyone written as /0");
 	/* **To a reservation by name** (10.618): resolved to its address across
 	 * interfaces, whichever is read first, and the name kept beside it. */
 	document = compiles("interface wan0 {\n"

@@ -477,10 +477,12 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	forwards = a_table(this, form, QStringLiteral("port forwards"),
 	    QStringLiteral("iface_forwards"),
 	    { QStringLiteral("name"), QStringLiteral("protocol"), QStringLiteral("port"),
-	        QStringLiteral("to"), QStringLiteral("to port"), QStringLiteral("hairpin") });
+	        QStringLiteral("to"), QStringLiteral("to port"), QStringLiteral("hairpin"),
+	        QStringLiteral("from") });
 	forwards->setToolTip(QStringLiteral(
 	    "protocol is tcp or udp; to port blank for the same port; hairpin blank or yes for "
-	    "reachable from inside too (0299), no to turn that off."));
+	    "reachable from inside too (0299), no to turn that off; from blank for anyone, or the "
+	    "one IPv4 address or network allowed to use it, such as 203.0.113.0/24 (0336)."));
 
 	advertise = new QCheckBox(QStringLiteral("advertise a prefix to the hosts behind it"), this);
 	advertise->setObjectName(QStringLiteral("iface_advertise"));
@@ -715,7 +717,8 @@ void ncfg_interface_dialog::load_existing()
 		put_row(forwards, { one.name, one.protocol, QString::number(one.port), one.to,
 		    one.to_port > 0 ? QString::number(one.to_port) : QString(),
 		    one.hairpin < 0 ? QString() : (one.hairpin ? QStringLiteral("yes")
-		                                               : QStringLiteral("no")) });
+		                                               : QStringLiteral("no")),
+		    one.from });
 	}
 	advertise->setChecked(existing.advertise);
 	advertise_prefixes->setText(existing.advertise_prefixes);
@@ -1113,6 +1116,9 @@ QString ncfg_interface_dialog::block_text() const
 			            .arg(text_at(forwards, row, 5) == QLatin1String("no")
 			                    ? QStringLiteral("false") : QStringLiteral("true"));
 		}
+		if (!text_at(forwards, row, 6).isEmpty()) {
+			line += QStringLiteral("; from = \"%1\"").arg(text_at(forwards, row, 6));
+		}
 		body << line + QStringLiteral(" }");
 	}
 	if (advertise->isChecked()) {
@@ -1298,10 +1304,11 @@ void ncfg_interface_dialog::submit()
 		    !is_port(text_at(forwards, row, 2)) ||
 		    (!text_at(forwards, row, 4).isEmpty() && !is_port(text_at(forwards, row, 4))) ||
 		    (!hairpin.isEmpty() && hairpin != QLatin1String("yes") &&
-		    hairpin != QLatin1String("no"))) {
+		    hairpin != QLatin1String("no")) ||
+		    (!text_at(forwards, row, 6).isEmpty() && !is_word(text_at(forwards, row, 6)))) {
 			note->setText(QStringLiteral("port forward %1 needs a name, tcp or udp, a port, a "
-			              "host and optionally its port, and hairpin blank, yes or no")
-			                  .arg(row + 1));
+			              "host and optionally its port, hairpin blank, yes or no, and from "
+			              "blank or one address").arg(row + 1));
 			return;
 		}
 	}

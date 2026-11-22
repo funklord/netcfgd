@@ -1447,6 +1447,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 		one.to = from_c(found.port_forwards[i].to);
 		one.to_port = found.port_forwards[i].to_port;
 		one.hairpin = found.port_forwards[i].hairpin;
+		one.from = from_c(found.port_forwards[i].from);
 		out->port_forwards << one;
 	}
 	out->dot1x = found.dot1x != 0;

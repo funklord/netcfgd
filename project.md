@@ -7111,6 +7111,12 @@ in the GRE, IPIP, SIT and IPsec tunnels netcfgd itself builds without `any` from
 the peer. The undo copy's protocol reader had a table of its own that would have
 turned each of them back into `any`; it is the inverse of the reader's word now.
 
+**A port forward may be limited to a source**:
+[0336](doc/decision/0336-a-port-forward-may-be-limited-to-a-source.md), `from =
+"198.51.100.0/24"`, matched in the forward and its reflections and nowhere else.
+`tests/live/port_forward.sh` connects through it from the source named and is
+refused from another network.
+
 **Open, and the holder's: may netcfgd reserve one packet-mark bit?** Logging
 beside `over` (0330 refuses the pair) needs the log's rule to evaluate the
 meter once and tell the verdict's rule the answer, and a mark is how one rule

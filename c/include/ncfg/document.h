@@ -1560,6 +1560,10 @@ typedef struct {
 	/* Reachable from inside too (0299): absent is on, and only `false` is
 	 * ever written. */
 	ncfg_optbool_t hairpin;
+	/* The one source allowed to use it (0336), an IPv4 address or network
+	 * as the compiler wrote it back -- the network, `/N` only where N is
+	 * short of 32 -- or NULL for anyone. */
+	char         *from;
 } ncfg_port_forward_t;
 
 /*
@@ -1589,6 +1593,7 @@ typedef struct {
 	const char *address; /* REFLECT: the uplink address, bare */
 	const char *network; /* HAIRPIN: the host's network, as a CIDR */
 	const char *via;     /* HAIRPIN: the interface towards the host */
+	const char *from;    /* FORWARD, REFLECT: the source allowed, or NULL (0336) */
 } ncfg_forward_rule_t;
 
 #define NCFG_DHCP_SERVER_LEASE_DEFAULT 43200

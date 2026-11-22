@@ -1094,9 +1094,9 @@ static void forwards_are_written_and_read_back(void)
 	static const char *const  uplinks[] = { "wan0" };
 	const ncfg_forward_rule_t forwards[2] = {
 		{ NCFG_FORWARD_RULE_FORWARD, "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10",
-		    8443u, NULL, NULL, NULL },
+		    8443u, NULL, NULL, NULL, NULL },
 		{ NCFG_FORWARD_RULE_FORWARD, "wan0", "dns", NCFG_PORT_FORWARD_UDP, 53u, "192.168.1.11",
-		    53u, NULL, NULL, NULL },
+		    53u, NULL, NULL, NULL, NULL },
 	};
 	ncfg_forward_rule_t       bad;
 	ncfg_buf_t                out;
@@ -1165,7 +1165,7 @@ static void forwards_are_written_and_read_back(void)
 	 * own IPv6 address, read back with its family and in inet_ntop's form. */
 	{
 		const ncfg_forward_rule_t six = { NCFG_FORWARD_RULE_FORWARD, "lan0", "dns6+udp",
-			NCFG_PORT_FORWARD_UDP, 53u, "fd00:7::1", 53u, NULL, NULL, NULL };
+			NCFG_PORT_FORWARD_UDP, 53u, "fd00:7::1", 53u, NULL, NULL, NULL, NULL };
 		int                       found = 0;
 
 		ncfg_buf_init(&out, 0);
@@ -1186,6 +1186,64 @@ static void forwards_are_written_and_read_back(void)
 			}
 		}
 		check(found == 1, "  and reads back as written, its address in inet_ntop's form");
+		ncfg_buf_free(&out);
+	}
+	/* 0336: a forward and a reflection limited to a source, each read back
+	 * with it in the compiler's spelling; and the return path never takes one. */
+	{
+		ncfg_forward_rule_t limited[2];
+		int                 found = 0;
+
+		limited[0] = forwards[0];
+		limited[0].from = "198.51.100.0/24";
+		limited[1] = limited[0];
+		limited[1].kind = NCFG_FORWARD_RULE_REFLECT;
+		limited[1].address = "203.0.113.1";
+		limited[1].from = "198.51.100.7";
+		ncfg_buf_init(&out, 0);
+		check(ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, limited, 2u, NULL, NULL,
+		          0, &batch, err, sizeof(err)),
+		    "a forward and a reflection limited to a source build");
+		ncfg_wire_messages_start(&walk, out.data, out.length);
+		while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+			ncfg_nft_kernel_forward_t one;
+			ncfg_buf_t                text;
+			char                      digest[NCFG_SHA256_HEX_SIZE];
+			const ncfg_forward_rule_t *wrote;
+
+			if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE ||
+			    !ncfg_nft_forward_read(message.payload, message.payload_length, &one, err,
+			        sizeof(err))) {
+				continue;
+			}
+			wrote = one.kind == NCFG_FORWARD_RULE_REFLECT ? &limited[1] : &limited[0];
+			ncfg_buf_init(&text, 0);
+			(void)ncfg_nft_forward_text(wrote, &text);
+			ncfg_sha256_hex(text.data, text.length, digest);
+			ncfg_buf_free(&text);
+			if (strcmp(one.from, wrote->from) == 0 && strcmp(one.to, "192.168.1.10") == 0 &&
+			    one.port == 443u && strncmp(one.digest, digest, NCFG_NFT_DIGEST_HEX) == 0) {
+				found++;
+			}
+		}
+		check(found == 2, "  each read back with its source, a network and an address");
+		ncfg_buf_free(&out);
+
+		bad = limited[0];
+		bad.kind = NCFG_FORWARD_RULE_HAIRPIN;
+		bad.network = "192.168.1.0/24";
+		bad.via = "lan0";
+		ncfg_buf_init(&out, 0);
+		check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, NULL, NULL, 0,
+		          &batch, err, sizeof(err)) && strstr(err, "not an IPv4 source") != NULL,
+		    "  and a return path limited to a source is refused");
+		ncfg_buf_free(&out);
+		bad = limited[0];
+		bad.from = "2001:db8::/32";
+		ncfg_buf_init(&out, 0);
+		check(!ncfg_nft_build_replace_all(&out, 1u, 0, uplinks, 1u, NULL, &bad, 1u, NULL, NULL, 0,
+		          &batch, err, sizeof(err)) && strstr(err, "not an IPv4 source") != NULL,
+		    "  and so is an IPv6 source");
 		ncfg_buf_free(&out);
 	}
 	bad = forwards[0];
@@ -1214,11 +1272,11 @@ static void reflections_and_return_paths_are_read_back(void)
 {
 	const ncfg_forward_rule_t rules[3] = {
 		{ NCFG_FORWARD_RULE_FORWARD, "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10",
-		    8443u, NULL, NULL, NULL },
+		    8443u, NULL, NULL, NULL, NULL },
 		{ NCFG_FORWARD_RULE_REFLECT, "wan0", "web", NCFG_PORT_FORWARD_TCP, 443u, "192.168.1.10",
-		    8443u, "203.0.113.1", NULL, NULL },
+		    8443u, "203.0.113.1", NULL, NULL, NULL },
 		{ NCFG_FORWARD_RULE_HAIRPIN, "wan0", "web", NCFG_PORT_FORWARD_TCP, 8443u, "192.168.1.10",
-		    8443u, NULL, "192.168.1.0/24", "lan0" },
+		    8443u, NULL, "192.168.1.0/24", "lan0", NULL },
 	};
 	ncfg_buf_t           out;
 	ncfg_nft_batch_t     batch;

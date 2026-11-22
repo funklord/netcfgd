@@ -3990,6 +3990,7 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 		free(config->port_forwards[i].name);
 		free(config->port_forwards[i].protocol);
 		free(config->port_forwards[i].to);
+		free(config->port_forwards[i].from);
 	}
 	free(config->port_forwards);
 	free(config->ipv6_token);
@@ -5425,6 +5426,7 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 				    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "to_port"), -1);
 				one->hairpin = ncfg_json_type(doc, hairpin) == NCFG_JSON_BOOL
 				    ? ncfg_json_bool(doc, hairpin, 1) : -1;
+				one->from = member_text(doc, entry, "from");
 			}
 		}
 	}

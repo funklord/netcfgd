@@ -211,7 +211,9 @@ int main(int argc, char **argv)
 		                   /* To the reservation by name (10.618), which Save must
 		                    * write back as the name, not as 192.0.2.20. */
 		                   "\tport_forward \"web\" { protocol = \"tcp\"; port = 443; "
-		                   "to = \"tv\"; to_port = 8443; hairpin = false }\n"
+		                   "to = \"tv\"; to_port = 8443; hairpin = false; "
+		                   /* 0336: written with host bits, kept as the network. */
+		                   "from = \"203.0.113.9/24\" }\n"
 		                   "\tipv6_token = \"::5\"\n"
 		                   "\tguard = \"nfs root\"\n"
 		                   "\tadvertise { backend = \"radvd\"; prefixes = [\"@pd:wan0/1\"]; "
@@ -352,7 +354,7 @@ int main(int argc, char **argv)
 		                                    "address = \"192.0.2.20\" }")) &&
 		        wrote.contains(QStringLiteral("port_forward \"web\" { protocol = \"tcp\"; port = "
 		                                    "443; to = \"tv\"; to_port = 8443; hairpin = "
-		                                    "false }")) &&
+		                                    "false; from = \"203.0.113.0/24\" }")) &&
 		        wrote.contains(QStringLiteral("ipv6_token = \"::5\"")) &&
 		        wrote.contains(QStringLiteral("guard = \"nfs root\"")) &&
 		        wrote.contains(QStringLiteral("\tadvertise {\n\t\tbackend = \"radvd\"\n"

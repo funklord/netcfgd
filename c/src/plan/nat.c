@@ -574,6 +574,9 @@ static ncfg_forward_rule_t *wanted_forwards(ncfg_builder_t *builder, size_t *cou
 			rule.to = forward->to;
 			rule.to_port = (uint16_t)(forward->to_port.has ? forward->to_port.value
 			                                               : forward->port);
+			/* The forward and its reflections; the return path only
+			 * carries what they let in (0336). */
+			rule.from = forward->from;
 			if (!add_rule(&rules, count, &room, &rule)) {
 				goto oom;
 			}
@@ -605,6 +608,7 @@ static ncfg_forward_rule_t *wanted_forwards(ncfg_builder_t *builder, size_t *cou
 				rule.port = rule.to_port;
 				rule.network = network;
 				rule.via = via;
+				rule.from = NULL;
 				if (!add_rule(&rules, count, &room, &rule)) {
 					goto oom;
 				}
@@ -664,6 +668,7 @@ static ncfg_forward_rule_t *installed_forwards(const ncfg_observed_t *observed, 
 		rules[at].address = seen->address;
 		rules[at].network = seen->network;
 		rules[at].via = seen->via;
+		rules[at].from = seen->from;
 	}
 	qsort(rules, observed->port_forward_count, sizeof(*rules), rule_order);
 	return rules;
@@ -684,7 +689,8 @@ static int same_forwards(const ncfg_forward_rule_t *wanted, size_t count,
 		    wanted[at].protocol != installed[at].protocol ||
 		    wanted[at].port != installed[at].port || wanted[at].to_port != installed[at].to_port ||
 		    text_order(wanted[at].to, installed[at].to) != 0 ||
-		    text_order(wanted[at].via, installed[at].via) != 0) {
+		    text_order(wanted[at].via, installed[at].via) != 0 ||
+		    text_order(wanted[at].from, installed[at].from) != 0) {
 			return 0;
 		}
 	}
@@ -713,6 +719,9 @@ static const char *describe_forwards(ncfg_plan_t *plan, const ncfg_forward_rule_
 			    rule->interface ? rule->interface : "", rule->name ? rule->name : "",
 			    rule->protocol == NCFG_PORT_FORWARD_UDP ? "udp" : "tcp", (unsigned)rule->port,
 			    rule->to ? rule->to : "", (unsigned)rule->to_port);
+			if (rule->from) {
+				ncfg_buf_addf(&buf, " from %s", rule->from);
+			}
 			first = 0;
 		} else if (rule->kind == NCFG_FORWARD_RULE_REFLECT) {
 			ncfg_buf_addf(&buf, ", reflected at %s", rule->address ? rule->address : "");

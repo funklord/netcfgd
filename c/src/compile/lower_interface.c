@@ -654,6 +654,45 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 }
 
 /*
+ * A forward's `from` (0336): one IPv4 address or network, written back as the
+ * network with `/N` only where N is short of 32 -- the spelling the kernel
+ * reader prints, so the two compare as text. NULL, with the line named, for
+ * anything else; `/0` is anyone, which is what leaving `from` out says.
+ */
+static char *forward_source(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment)
+{
+	char          *text = ncfg_as_string(ctx, assignment->value);
+	ncfg_address_t address;
+	char           out[NCFG_ADDRESS_MAX];
+	unsigned       at;
+
+	if (!text) {
+		return NULL;
+	}
+	if (!ncfg_address_parse(text, &address, NULL, 0) || address.is_ipv6 ||
+	    (address.has_prefix && address.prefix == 0u)) {
+		ncfg_diag(ctx, assignment->span,
+		    "`%s` is not a source a port forward can be limited to: one IPv4 address or "
+		    "network, such as \"203.0.113.0/24\" (a forward is IPv4)", text);
+		free(text);
+		return NULL;
+	}
+	free(text);
+	if (address.has_prefix && address.prefix < 32u) {
+		for (at = address.prefix; at < 32u; at++) {
+			address.bytes[at / 8u] = (unsigned char)(address.bytes[at / 8u] &
+			    ~(0x80u >> (at % 8u)));
+		}
+	} else {
+		address.has_prefix = 0;
+	}
+	if (!ncfg_address_render(&address, out, sizeof(out), NULL, 0)) {
+		return NULL;
+	}
+	return ncfg_dup(ctx, out);
+}
+
+/*
  * `port_forward "web" { protocol = "tcp"  port = 443  to = "192.168.1.10"
  * to_port = 8443 }` (0298): one inbound port on this interface, translated to
  * a host behind it. The label is its identity; two of one name, or of one
@@ -776,9 +815,16 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 			free(forward.to_host);
 			forward.to_host = NULL;
 			forward.to = text;
+		} else if (strcmp(assignment->key, "from") == 0) {
+			char *source = forward_source(ctx, assignment);
+
+			if (source) {
+				free(forward.from);
+				forward.from = source;
+			}
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown port_forward key `%s`: protocol, port, to, to_port and hairpin",
+			    "unknown port_forward key `%s`: protocol, port, to, to_port, hairpin and from",
 			    assignment->key);
 		}
 	}
@@ -788,6 +834,7 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 		free(forward.name);
 		free(forward.to);
 		free(forward.to_host);
+		free(forward.from);
 		return;
 	}
 	for (i = 0; i < interface->port_forward_count; i++) {
@@ -802,6 +849,7 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 			free(forward.name);
 			free(forward.to);
 			free(forward.to_host);
+			free(forward.from);
 			return;
 		}
 	}
@@ -812,6 +860,7 @@ static void lower_port_forward(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *bl
 		free(forward.name);
 		free(forward.to);
 		free(forward.to_host);
+		free(forward.from);
 		return;
 	}
 	interface->port_forwards = grown;

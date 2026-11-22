@@ -114,9 +114,10 @@ static void print_link_settings(const ncfg_observed_link_t *link,
 
 			if (forward->interface && strcmp(forward->interface, link->name) == 0 &&
 			    (!forward->kind || strcmp(forward->kind, "forward") == 0)) {
-				ncfg_out_writef("    forwards %s %lld to %s:%lld (%s)\n",
+				ncfg_out_writef("    forwards %s %lld to %s:%lld%s%s (%s)\n",
 				    forward->protocol ? forward->protocol : "?", (long long)forward->port,
 				    forward->to ? forward->to : "?", (long long)forward->to_port,
+				    forward->from ? " from " : "", forward->from ? forward->from : "",
 				    forward->name ? forward->name : "?");
 			} else if (forward->interface && strcmp(forward->interface, link->name) == 0) {
 				/* Its reflection and return path (0299), under the forward. */

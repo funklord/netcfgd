@@ -706,6 +706,7 @@ static int read_forwards(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 		slot->kind = observe_dup(one.kind == NCFG_FORWARD_RULE_REFLECT ? "reflect"
 		    : one.kind == NCFG_FORWARD_RULE_HAIRPIN ? "hairpin" : "forward");
 		if ((one.address[0] && !(slot->address = observe_dup(one.address))) ||
+		    (one.from[0] && !(slot->from = observe_dup(one.from))) ||
 		    (one.network[0] && !(slot->network = observe_dup(one.network))) ||
 		    (one.via[0] && !(slot->via = observe_dup(one.via))) || !slot->kind) {
 			ncfg_error_set(err, err_size, "out of memory recording the port forwards");

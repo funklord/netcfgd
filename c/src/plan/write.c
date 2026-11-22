@@ -405,6 +405,9 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 					member_text(writer, "network", forward->network);
 					member_text(writer, "via", forward->via);
 				}
+				if (forward->from) {
+					member_text(writer, "from", forward->from);
+				}
 				digest[NCFG_NFT_DIGEST_HEX] = '\0';
 				ncfg_json_write_member_string(writer, "digest", digest);
 				ncfg_json_write_object_end(writer);
