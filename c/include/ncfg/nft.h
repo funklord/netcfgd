@@ -89,9 +89,15 @@
 #define NCFG_NFT_CHAIN_PREROUTING "prerouting"
 /* Flow offload (0319): a flowtable and the `filter` chain at the forward hook
  * that moves an established TCP or UDP flow into it, written only where the
- * document asks. The same word for both, as nft's own `@offload` reads. */
-#define NCFG_NFT_CHAIN_OFFLOAD "offload"
-#define NCFG_NFT_FLOWTABLE     "offload"
+ * document asks. The same word for both, as `flow add @fastpath` reads.
+ *
+ * **Not `offload`**, which 0319 named them and nft's grammar takes as a
+ * keyword: `nft list ruleset` printed `chain offload {`, and a ruleset saved
+ * from it would not load back with `nft -f`, which loads all of a file or
+ * none of it (10.900). Every name in this table is one nft reads back as a
+ * name; `tests/live/firewall.sh` saves and loads the ruleset to hold that. */
+#define NCFG_NFT_CHAIN_OFFLOAD "fastpath"
+#define NCFG_NFT_FLOWTABLE     "fastpath"
 /* MSS clamping (0334): a `filter` chain at the forward hook, priority mangle,
  * holding two rules per interface that clamps. */
 #define NCFG_NFT_CHAIN_MSS     "mss"
@@ -341,7 +347,7 @@ int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists
  * created netcfgd's table (0319): the flowtable `offload` at the ingress hook,
  * priority `filter`, over `devices`, with `flags offload` where `hardware`;
  * the chain `offload` at the forward hook, priority `filter`, policy accept;
- * and `meta l4proto tcp flow add @offload` and the same for `udp`. `seq` and
+ * and `meta l4proto tcp flow add @fastpath` and the same for `udp`. `seq` and
  * `last_acked` advance as `ncfg_nft_build_replace_all` advances them.
  * Refused before a byte is written where there is no device or a name cannot
  * be an interface's.

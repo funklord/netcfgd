@@ -449,6 +449,38 @@ check "a ruleset saved from it loads back" "$(nft -f "$work/saved" 2>&1 | head -
 check "and the plan has nothing to do with what was loaded, prefixes and all" \
 	"$(cat "$work/plan")" "nothing to do"
 
+# Flow offload (0319) beside NAT, saved and loaded back with nft (10.900): its
+# chain and flowtable were named `offload`, a keyword to nft's grammar, so a
+# ruleset saved with them would not load at all. Two applies, since the
+# flowtable names devices the first one makes.
+write_etc <<'CONF'
+device wan8 { kind = "dummy" }
+device lan8 { kind = "dummy" }
+interface wan8 {
+	config = "192.0.2.8/24"
+	nat = true
+	forwarding = true
+}
+interface lan8 {
+	config = "192.168.8.1/24"
+	forwarding = true
+}
+global { flow_offload = "software" }
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the flowtable is written under a name nft reads as one" 'flowtable fastpath {'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the plan has nothing to do with it" "$(cat "$work/plan")" "nothing to do"
+nft list ruleset > "$work/saved" 2>&1
+nft flush ruleset
+check "a ruleset with flow offload in it loads back" "$(nft -f "$work/saved" 2>&1 | head -2)" ""
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the plan has nothing to do with what was loaded" "$(cat "$work/plan")" "nothing to do"
+ip link del wan8 2>/dev/null || true
+ip link del lan8 2>/dev/null || true
+
 # The tunnel and IPsec protocols (0335), and sctp's ports where tcp's are.
 write_etc <<'CONF'
 firewall {

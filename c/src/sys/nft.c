@@ -2186,7 +2186,7 @@ static int forward_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *la
  * Flow offload (0319)
  * ------------------------------------------------------------------------ */
 
-/* `meta l4proto PROTO flow add @offload`. */
+/* `meta l4proto PROTO flow add @fastpath`. */
 static void offload_rule(ncfg_buf_t *rule, uint8_t protocol)
 {
 	ncfg_buf_t expressions;

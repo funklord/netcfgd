@@ -6997,6 +6997,26 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.900 Flow offload's chain and flowtable were named with an nft keyword
+
+Found finishing 10.899's lens on the whole of the malta document with NAT and
+flow offload: the saved ruleset **did not load at all**. 0319 named the chain at
+the forward hook and its flowtable `offload`, which nft's grammar takes as a
+keyword, so `nft -f` stopped at `chain offload {` -- and it loads a file whole or
+not at all, so a machine restoring its ruleset at boot with flow offload on
+would have come up with no tables, anybody's. Measured against nft 1.1.3's
+grammar: `offload` and `flowtable` are refused as a chain's name and `offload`
+as a flowtable's; every other name netcfgd's table uses, `mss` and the `over-`
+meters included, loads.
+
+Both are `fastpath` now (`NCFG_NFT_CHAIN_OFFLOAD`, `NCFG_NFT_FLOWTABLE`). A
+table an earlier build wrote reads as not netcfgd's, so the first plan after an
+upgrade replaces it -- measured: two `offload` objects, one replace, then two
+`fastpath` ones and nothing to do. `tests/live/firewall.sh` saves a ruleset with
+flow offload in it, flushes, loads it back and plans; with the old name it fails
+both checks. 0319's text still says `offload`; this entry is what supersedes the
+name, and nothing else of 0319 changes.
+
 ## 10.899 A ruleset loaded back with `nft -f` was not netcfgd's any more
 
 Found checking 10.898's lens -- what else does nft not take back as netcfgd wrote

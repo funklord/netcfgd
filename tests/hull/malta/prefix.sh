@@ -194,12 +194,12 @@ else
 				n=$((n + 1))
 			done
 			offloaded=$(grep -c 'dport=8099 .*\[OFFLOAD\]' /proc/net/nf_conntrack 2>/dev/null)
-			say "  flow offload after $n s: $(nft list flowtables inet 2>/dev/null | grep -c 'flowtable offload') flowtable, ${offloaded:-0} offloaded flow(s) to 8099 of $(grep -c 'dport=8099' /proc/net/nf_conntrack 2>/dev/null) seen"
+			say "  flow offload after $n s: $(nft list flowtables inet 2>/dev/null | grep -c 'flowtable fastpath') flowtable, ${offloaded:-0} offloaded flow(s) to 8099 of $(grep -c 'dport=8099' /proc/net/nf_conntrack 2>/dev/null) seen"
 			[ "${offloaded:-0}" -ge 1 ] || {
 				failed=1
 				grep 'dport=8099' /proc/net/nf_conntrack 2>/dev/null | head -2 | cut -c1-200 |
 					sed 's/^/  conntrack: /' >> "$out"
-				nft list table inet netcfgd 2>/dev/null | grep -A3 -E 'flowtable|chain offload' |
+				nft list table inet netcfgd 2>/dev/null | grep -A3 -E 'flowtable|chain fastpath' |
 					head -8 | sed 's/^[[:space:]]*/  nft: /' >> "$out"
 			}
 		fi
