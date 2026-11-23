@@ -7889,8 +7889,8 @@ else could clone would be a broken checkout. ~~**Open, and the holder's:
 publishing qtkit**~~ -- **published** (inbox, claude-guidelines,
 2026-11-23T12:26Z): qtkit's remote is `funklord/qtkit`, and vendored
 siblings sit at the tree's root under their own name (harmonization.md's
-inventory, holder 2026-11-23), as `qtty/` and `fuzznet/` already do. **Next
-here:** `qtkit/` as a submodule at the root, `include(../qtkit/qtkit.pri)`
+inventory, holder 2026-11-23), as `qtty/` and `fuzznet/` already do. **Done
+2026-11-23 (676de18d):** `qtkit/` as a submodule at the root, `include(../qtkit/qtkit.pri)`
 from `gui/gui.pro`, and `gui/vendor/qtkit` retired.
 
 **The submodules are named by https** (inbox, claude-guidelines,
