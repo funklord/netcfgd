@@ -356,6 +356,14 @@ int ncfg_qdisc_build_set_root(ncfg_buf_t *out, uint32_t seq, uint32_t index,
 		    root->kind);
 		return 0;
 	}
+	if (root->nat && strcmp(root->kind, "cake") != 0) {
+		/* `TCA_OPTIONS` is the scheduler's own numbering, as above: under
+		 * anything but `cake` the attribute would be read as something
+		 * else. */
+		ncfg_error_set(err, err_size, "`%s` cannot look hosts up behind NAT; only `cake` can",
+		    root->kind);
+		return 0;
+	}
 	if (root->ingress && !root->has_bandwidth) {
 		/* Ingress mode changes how the shaper accounts for what it drops,
 		 * so it means nothing without a rate to shape to -- and it travels
@@ -380,11 +388,16 @@ int ncfg_qdisc_build_set_root(ncfg_buf_t *out, uint32_t seq, uint32_t index,
 
 	ncfg_buf_init(&attrs, 0);
 	ncfg_wire_attr_put_str(&attrs, TCA_KIND, root->kind);
-	if (root->has_bandwidth) {
+	if (root->has_bandwidth || root->nat) {
 		ncfg_buf_init(&options, 0);
-		put_u64(&options, TCA_CAKE_BASE_RATE64, bytes);
+		if (root->has_bandwidth) {
+			put_u64(&options, TCA_CAKE_BASE_RATE64, bytes);
+		}
 		if (root->ingress) {
 			ncfg_wire_attr_put_u32(&options, TCA_CAKE_INGRESS, 1);
+		}
+		if (root->nat) {
+			ncfg_wire_attr_put_u32(&options, TCA_CAKE_NAT, 1);
 		}
 		ncfg_wire_attr_put_nested(&attrs, TCA_OPTIONS, &options);
 		ncfg_buf_free(&options);
@@ -599,6 +612,14 @@ static int cake_options(const ncfg_wire_attr_t *options, ncfg_qdisc_record_t *re
 			return 0;
 		}
 		record->ingress = ingress != 0;
+	}
+	if (ncfg_wire_attrs_find(&area, TCA_CAKE_NAT, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		uint32_t nat = 0;
+
+		if (!ncfg_wire_attr_u32(&attr, &nat, err, err_size)) {
+			return 0;
+		}
+		record->nat = nat != 0;
 	}
 	return 1;
 }

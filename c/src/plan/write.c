@@ -330,6 +330,10 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		member_text(writer, "kind", op->u.qdisc.kind);
 		member_optint(writer, "bandwidth_bits", op->u.qdisc.bandwidth_bits);
 		ncfg_json_write_member_bool(writer, "ingress", op->u.qdisc.ingress);
+		/* Only where set, so every plan before it is the plan it was. */
+		if (op->u.qdisc.nat) {
+			ncfg_json_write_member_bool(writer, "nat", 1);
+		}
 		break;
 	case NCFG_OP_QDISC_RESET:
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:

@@ -131,6 +131,9 @@ typedef struct {
 	/* Whether `cake` was told it is shaping traffic that has already
 	 * arrived. */
 	int      ingress;
+	/* Whether `cake` looks a flow's host up in conntrack (`TCA_CAKE_NAT`),
+	 * so hosts behind a masquerade are told apart. */
+	int      nat;
 } ncfg_qdisc_record_t;
 
 /* What to install as the root qdisc. */
@@ -148,6 +151,14 @@ typedef struct {
 	 * to account for what the sender will retransmit. Without it an ingress
 	 * shaper undershoots. */
 	int         ingress;
+	/*
+	 * Whether `cake` finds each flow's host behind NAT (`TCA_CAKE_NAT`):
+	 * on a link netcfgd masquerades out of, every LAN host is one address
+	 * by the time cake sees it, and its per-host fairness -- the whole of
+	 * what makes it fair between clients -- shares one host's portion among
+	 * all of them. Set where the planner says so; only `cake` takes it.
+	 */
+	int         nat;
 } ncfg_qdisc_root_t;
 
 /* What one `RTM_GETQDISC` dump entry turned out to be. */

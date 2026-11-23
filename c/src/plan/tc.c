@@ -31,21 +31,23 @@
 
 #include <string.h>
 
-/* `cake at 20000000 bit/s`, or the bare kind where nothing is shaped. */
-static const char *describe(ncfg_plan_t *plan, const char *kind, ncfg_optint_t rate)
+/* `cake at 20000000 bit/s`, or the bare kind where nothing is shaped, and
+ * `, per host behind NAT` where cake looks hosts up. */
+static const char *describe(ncfg_plan_t *plan, const char *kind, ncfg_optint_t rate, int nat)
 {
 	if (!kind) {
 		return "<absent>";
 	}
 	if (!rate.has) {
-		return kind;
+		return nat ? ncfg_plan_internf(plan, "%s, per host behind NAT", kind) : kind;
 	}
-	return ncfg_plan_internf(plan, "%s at %lld bit/s", kind, (long long)rate.value);
+	return ncfg_plan_internf(plan, "%s at %lld bit/s%s", kind, (long long)rate.value,
+	    nat ? ", per host behind NAT" : "");
 }
 
 /* One `qdisc.set`, filled in. */
 static void qdisc_op(ncfg_op_t *op, const char *iface, const char *kind, ncfg_optint_t rate,
-    int ingress)
+    int ingress, int nat)
 {
 	memset(op, 0, sizeof(*op));
 	op->kind = NCFG_OP_QDISC_SET;
@@ -53,6 +55,57 @@ static void qdisc_op(ncfg_op_t *op, const char *iface, const char *kind, ncfg_op
 	op->u.qdisc.kind = kind;
 	op->u.qdisc.bandwidth_bits = rate;
 	op->u.qdisc.ingress = ingress;
+	op->u.qdisc.nat = nat;
+}
+
+/* Whether the interface `name` is one netcfgd masquerades out of. */
+static int masquerades(const ncfg_document_t *desired, const char *name)
+{
+	size_t at;
+
+	for (at = 0; name && at < desired->interface_count; at++) {
+		const ncfg_interface_t *interface = &desired->interfaces[at];
+
+		if (strcmp(interface->name, name) == 0) {
+			return interface->nat.has && interface->nat.value;
+		}
+	}
+	return 0;
+}
+
+/*
+ * **Whether this device's `cake` has to find hosts behind NAT.** cake is fair
+ * between hosts by default, and on a link netcfgd masquerades out of every LAN
+ * host is the one translated address by the time cake sees it -- so its
+ * fairness between clients, which is what it is for on a router, is between
+ * one client and nobody. `TCA_CAKE_NAT` makes it look each flow's host up in
+ * conntrack. Derived, not asked for: it follows from `nat = true` the way the
+ * masquerade does (0022), and on any other link it changes nothing worth a
+ * key. The same for the `ifb` shaping such a link's ingress, which is how a
+ * download is shared between clients.
+ */
+static int behind_nat(const ncfg_document_t *desired, const ncfg_device_t *device)
+{
+	size_t at;
+
+	if (!device->qdisc || device->qdisc->kind != NCFG_QDISC_CAKE) {
+		return 0;
+	}
+	if (masquerades(desired, device->name)) {
+		return 1;
+	}
+	if (device->kind.kind != (int)NCFG_KIND_IFB) {
+		return 0;
+	}
+	for (at = 0; at < desired->device_count; at++) {
+		const ncfg_device_t *shaped = &desired->devices[at];
+
+		if (shaped->ingress_redirect && strcmp(shaped->ingress_redirect, device->name) == 0 &&
+		    masquerades(desired, shaped->name)) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 /*
@@ -72,6 +125,8 @@ void ncfg_plan_qdisc(ncfg_builder_t *builder)
 		const char                 *current = link ? link->qdisc : NULL;
 		ncfg_optint_t               current_rate = { 0, 0 };
 		int                         current_ingress = link && link->qdisc_ingress;
+		int                         current_nat = link && link->qdisc_nat;
+		int                         nat;
 		int                         ours = ncfg_plan_names(
 		    (const char *const *)builder->observed->qdisc_applied,
 		    builder->observed->qdisc_applied_count, device->name);
@@ -100,7 +155,8 @@ void ncfg_plan_qdisc(ncfg_builder_t *builder)
 			memset(&op, 0, sizeof(op));
 			op.kind = NCFG_OP_QDISC_RESET;
 			op.u.iface.iface = device->name;
-			qdisc_op(&inverse, device->name, current, current_rate, current_ingress);
+			qdisc_op(&inverse, device->name, current, current_rate, current_ingress,
+			    current_nat);
 			reason = ncfg_plan_reason_unwanted(device->name, "qdisc", current);
 			ncfg_builder_gate(builder, device->name, &gate);
 			(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count,
@@ -112,21 +168,23 @@ void ncfg_plan_qdisc(ncfg_builder_t *builder)
 		if (!wanted) {
 			continue;
 		}
+		nat = behind_nat(builder->desired, device);
 		if (current && strcmp(current, wanted) == 0 &&
 		    current_rate.has == device->qdisc->bandwidth_bits.has &&
 		    (!current_rate.has ||
 		    current_rate.value == device->qdisc->bandwidth_bits.value) &&
-		    current_ingress == device->qdisc->ingress) {
+		    current_ingress == device->qdisc->ingress && current_nat == nat) {
 			continue;
 		}
 		qdisc_op(&op, device->name, wanted, device->qdisc->bandwidth_bits,
-		    device->qdisc->ingress);
+		    device->qdisc->ingress, nat);
 		reason = ncfg_plan_reason_differs(device->name, "qdisc",
-		    describe(builder->plan, wanted, device->qdisc->bandwidth_bits),
-		    describe(builder->plan, current, current_rate));
+		    describe(builder->plan, wanted, device->qdisc->bandwidth_bits, nat),
+		    describe(builder->plan, current, current_rate, current_nat));
 		ncfg_builder_gate(builder, device->name, &gate);
 		if (current) {
-			qdisc_op(&inverse, device->name, current, current_rate, current_ingress);
+			qdisc_op(&inverse, device->name, current, current_rate, current_ingress,
+			    current_nat);
 			(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count,
 			    &inverse);
 		} else {

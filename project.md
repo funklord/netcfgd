@@ -7020,6 +7020,28 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.911 cake is fair between clients behind the masquerade
+
+0284 names per-client fairness and smart queues among what a router must
+offer. cake is fair between hosts by default, but on an uplink netcfgd
+masquerades out of every LAN host is the one translated address by the time
+cake sees it, so on exactly the link that matters its fairness between
+clients was gone. The planner now sets cake's `nat` (`TCA_CAKE_NAT`, a
+conntrack lookup per flow) on a cake device whose interface has `nat = true`,
+and on the `ifb` shaping such a device's ingress, which is what shares a
+download. Derived rather than a key, the way the masquerade itself is (0022):
+nobody wants per-host fairness off on a NAT uplink, and on any other link it
+does nothing. Read back as `qdisc_nat` for drift, written into the plan and the
+observation only when set, shown by `ncfg status` as `per host behind NAT`;
+`qdisc.c` refuses it under any scheduler but cake, whose options number their
+attributes differently. `tests/live/qdisc.sh` checks tc's own listing.
+
+**Still not built:** a per-client *cap* (a guest held to 5 Mbit/s each).
+cake has none; it would be a policer in the firewall (a per-source meter, as
+`over` is) or an HTB class per host, and the two behave differently enough --
+a policer drops TCP into a sawtooth, a class tree shapes but costs a class
+per client -- that it waits for a case that says which.
+
 ## 10.910 Presets: the firewall's library layer (0341)
 
 0284's layer two, which 0339 put last, is built as

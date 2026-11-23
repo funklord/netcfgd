@@ -308,6 +308,9 @@ typedef struct {
 			const char   *kind;
 			ncfg_optint_t bandwidth_bits;
 			int           ingress;
+			/* `cake` told to find hosts behind NAT, on a link netcfgd
+			 * masquerades out of or the ifb shaping one's ingress. */
+			int           nat;
 		} qdisc;
 		struct {
 			const char *iface;

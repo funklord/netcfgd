@@ -56,6 +56,7 @@ int ncfg_kernel_build_qdisc(ncfg_buf_t *out, uint32_t seq, uint32_t index,
 	}
 	root.kind = op->u.qdisc.kind;
 	root.ingress = op->u.qdisc.ingress;
+	root.nat = op->u.qdisc.nat;
 	root.has_bandwidth = op->u.qdisc.bandwidth_bits.has;
 	root.bandwidth_bits = 0;
 	if (root.has_bandwidth) {

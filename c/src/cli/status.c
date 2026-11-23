@@ -96,7 +96,8 @@ static void print_link_settings(const ncfg_observed_link_t *link,
 			(void)snprintf(shaped, sizeof(shaped), " at %lld bit/s%s",
 			    (long long)link->qdisc_bandwidth_bits.value, inbound);
 		}
-		ncfg_out_writef("    qdisc %s%s%s\n", link->qdisc, shaped, ours);
+		ncfg_out_writef("    qdisc %s%s%s%s\n", link->qdisc, shaped,
+		    link->qdisc_nat ? ", per host behind NAT" : "", ours);
 	}
 	if (link->ingress_redirect) {
 		ncfg_out_writef("    ingress redirected to %s\n", link->ingress_redirect);

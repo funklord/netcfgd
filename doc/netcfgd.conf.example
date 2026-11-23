@@ -620,7 +620,13 @@
 #}
 
 # QUEUEING, which is where bufferbloat is fixed. `cake` with the real
-# upstream bandwidth is the answer for nearly every home connection.
+# upstream bandwidth is the answer for nearly every home connection. It is
+# fair between hosts as well as between flows, so one machine's downloads
+# cannot starve another's call. On an uplink with `nat = true` netcfgd tells
+# it to look each flow's host up behind the translation (cake's `nat`), and
+# the same for the `ifb` an `ingress_bandwidth` makes -- otherwise every LAN
+# host would be one address by the time cake saw it. There is no key for it:
+# it follows from `nat`.
 
 #device eth0 {
 #	qdisc {

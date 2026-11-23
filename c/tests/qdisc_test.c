@@ -189,7 +189,7 @@ int main(void)
 	 * read, and the wrong answer is named as well as the right one.
 	 */
 	{
-		ncfg_qdisc_root_t root = { "cake", 100000000u, 1, 0 };
+		ncfg_qdisc_root_t root = { "cake", 100000000u, 1, 0, 0 };
 		ncfg_buf_t request;
 		ncfg_wire_message_t message;
 		ncfg_wire_attrs_t area;
@@ -263,8 +263,8 @@ int main(void)
 	 * is where it is checked again.
 	 */
 	{
-		ncfg_qdisc_root_t root = { "fq_codel", 100000000u, 1, 0 };
-		ncfg_qdisc_root_t ingress_only = { "cake", 0, 0, 1 };
+		ncfg_qdisc_root_t root = { "fq_codel", 100000000u, 1, 0, 0 };
+		ncfg_qdisc_root_t ingress_only = { "cake", 0, 0, 1, 0 };
 		ncfg_buf_t request;
 
 		ncfg_buf_init(&request, 0);
@@ -287,7 +287,7 @@ int main(void)
 	 * a shaped uplink is a window where traffic is unshaped.
 	 */
 	{
-		ncfg_qdisc_root_t root = { "cake", 50000000u, 1, 1 };
+		ncfg_qdisc_root_t root = { "cake", 50000000u, 1, 1, 0 };
 		ncfg_buf_t request;
 		ncfg_wire_message_t message;
 		ncfg_qdisc_tcmsg_t header;
@@ -324,7 +324,7 @@ int main(void)
 	 * told it is on the ingress path accounts for retransmissions, and one
 	 * told nothing does not. */
 	{
-		ncfg_qdisc_root_t root = { "cake", 50000000u, 1, 0 };
+		ncfg_qdisc_root_t root = { "cake", 50000000u, 1, 0, 0 };
 		ncfg_buf_t request;
 		ncfg_wire_message_t message;
 		ncfg_wire_attrs_t area;
@@ -339,6 +339,35 @@ int main(void)
 		nested(&attr, &options);
 		check(!find(&options, TCA_CAKE_INGRESS, &attr),
 		    "and does not claim to be shaping on the way in");
+		ncfg_buf_free(&request);
+	}
+
+	/* `nat` (TCA_CAKE_NAT) under cake, and refused under anything else,
+	 * whose options number their attributes differently. */
+	{
+		ncfg_qdisc_root_t root = { "cake", 0u, 0, 0, 1 };
+		ncfg_buf_t request;
+		ncfg_wire_message_t message;
+		ncfg_wire_attrs_t area;
+		ncfg_wire_attrs_t options;
+		ncfg_wire_attr_t attr;
+		uint32_t flag = 0;
+
+		ncfg_buf_init(&request, 0);
+		check(ncfg_qdisc_build_set_root(&request, 1, 7, &root, err, sizeof(err)) &&
+		    first_message(&request, &message) && tc_attrs(&message, &area) &&
+		    find(&area, TCA_OPTIONS, &attr),
+		    "an unshaped cake finding hosts behind NAT builds with options");
+		nested(&attr, &options);
+		check(find(&options, TCA_CAKE_NAT, &attr) &&
+		    ncfg_wire_attr_u32(&attr, &flag, NULL, 0) && flag == 1 &&
+		    !find(&options, TCA_CAKE_BASE_RATE64, &attr),
+		    "  carrying the flag and no rate");
+		ncfg_buf_free(&request);
+		root.kind = "fq_codel";
+		ncfg_buf_init(&request, 0);
+		check(!ncfg_qdisc_build_set_root(&request, 1, 7, &root, err, sizeof(err)),
+		    "  and fq_codel asked for it is refused");
 		ncfg_buf_free(&request);
 	}
 

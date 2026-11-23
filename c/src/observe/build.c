@@ -445,6 +445,7 @@ static int build_link(const ncfg_observe_snapshot_t *snapshot, const ncfg_link_r
 			return 0;
 		}
 		link->qdisc_ingress = root->ingress;
+		link->qdisc_nat = root->nat;
 		if (root->has_bandwidth) {
 			int64_t bits;
 

@@ -439,6 +439,44 @@ static void the_kind_and_the_rate_are_both_part_of_the_comparison(void)
 }
 
 /*
+ * cake on a link netcfgd masquerades out of finds hosts behind NAT, derived
+ * from `nat = true`; on any other link it does not, and a cake already doing
+ * so plans nothing.
+ */
+static void cake_behind_a_masquerade_finds_hosts(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	const ncfg_action_t *set;
+	ncfg_plan_t         *plan = planfix_plan(
+	    QDISC_DEVICE("\"kind\":\"cake\",\"bandwidth_bits\":20000000,\"ingress\":false"),
+	    "{\"name\":\"eth0\",\"addressing\":[],\"nat\":true}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0",
+	    ",\"qdisc\":\"cake\",\"qdisc_bandwidth_bits\":20000000") "]", &document, &observed);
+
+	set = plan ? planfix_action(plan, "qdisc.set") : NULL;
+	check(set && set->op.u.qdisc.nat, "cake on a masqueraded uplink is told to find hosts behind NAT");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(
+	    QDISC_DEVICE("\"kind\":\"cake\",\"bandwidth_bits\":20000000,\"ingress\":false"),
+	    "{\"name\":\"eth0\",\"addressing\":[],\"nat\":true}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0",
+	    ",\"qdisc\":\"cake\",\"qdisc_bandwidth_bits\":20000000,\"qdisc_nat\":true") "]",
+	    &document, &observed);
+	check(plan && !planfix_action(plan, "qdisc.set"), "  and one already doing so is left");
+	planfix_release(plan, document, observed);
+
+	plan = one(QDISC_DEVICE("\"kind\":\"cake\",\"bandwidth_bits\":20000000,\"ingress\":false"),
+	    "\"links\":[" PLANFIX_LINK("eth0",
+	    ",\"qdisc\":\"cake\",\"qdisc_bandwidth_bits\":20000000,\"qdisc_nat\":true") "]",
+	    &document, &observed);
+	set = plan ? planfix_action(plan, "qdisc.set") : NULL;
+	check(set && !set->op.u.qdisc.nat, "  while a link that does not masquerade is put back");
+	planfix_release(plan, document, observed);
+}
+
+/*
  * Stopped asking. The kernel default goes back, but only where netcfgd is what
  * moved it: an interface already running `cake` when netcfgd first started is
  * not netcfgd's to reset.
@@ -561,6 +599,7 @@ int main(void)
 	a_selector_is_compared_as_an_address_and_not_as_text();
 
 	the_kind_and_the_rate_are_both_part_of_the_comparison();
+	cake_behind_a_masquerade_finds_hosts();
 	a_qdisc_is_only_reset_where_netcfgd_is_what_moved_it();
 	a_reset_that_could_change_nothing_is_not_planned();
 

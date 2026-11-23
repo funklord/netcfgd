@@ -218,6 +218,32 @@ CONF
 apply "changing only the rate"
 check "a rate change alone is noticed" "$(rate_of veth0)" "50000000"
 
+# An uplink netcfgd masquerades out of: cake has to find each LAN host behind
+# the translation, or all of them share one host's portion. Derived from
+# `nat = true`, with nothing to write.
+write_config <<'CONF'
+device veth0 {
+	veth   { peer = "veth1" }
+	qdisc {
+		kind      = "cake"
+		bandwidth = "50mbit"
+	}
+}
+interface veth0 {
+	config = "10.7.0.1/24"
+	nat    = true
+}
+CONF
+apply "masquerading out of the shaped link"
+if [ -n "$tc" ]; then
+	check "cake on a masqueraded uplink finds hosts behind NAT" \
+		"$("$tc" qdisc show dev veth0 | grep -cw 'nat' || true)" "1"
+fi
+plan=$("$ncfg" plan 2>&1 || true)
+check "and the next plan leaves it" "$(printf '%s' "$plan" | grep -c 'qdisc\.' || true)" "0"
+check "ncfg status says so" \
+	"$("$ncfg" status 2>&1 | grep -c 'qdisc cake at 50000000 bit/s, per host behind NAT' || true)" "1"
+
 # Dropping `qdisc` restores the kernel default rather than leaving cake in
 # place. There is no "no qdisc", so this is a replacement, not a removal.
 write_config <<'CONF'
