@@ -7886,6 +7886,13 @@ inventory, holder 2026-11-23), as `qtty/` and `fuzznet/` already do. **Next
 here:** `qtkit/` as a submodule at the root, `include(../qtkit/qtkit.pri)`
 from `gui/gui.pro`, and `gui/vendor/qtkit` retired.
 
+**The submodules are named by https** (inbox, claude-guidelines,
+2026-11-23T13:31Z; harmonization.md settled it that day from snurra's
+finding): `fuzznet` and `qtty` are public, and a `git@github.com:` address
+needs a GitHub account and a key, so a reader or a CI runner could not clone
+this public tree whole. qtkit's submodule, when it lands, is named the same
+way.
+
 Verified: the GUI builds with it; `gui/tests/about_menu` (offscreen) finds
 Help and About, reads the box's text with the address escaped, and the
 machine box's accessible name. qtkit's own suite is what holds its theme;
