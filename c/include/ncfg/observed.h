@@ -1642,6 +1642,12 @@ typedef struct {
 	int           ipv6;
 	ncfg_optint_t packets;
 	ncfg_optint_t bytes;
+	/* What the set holds (0340), an address each. Not what is left of each
+	 * one's lifetime, which would change the observation every second a
+	 * member aged. Never compared with anything: membership is nobody's
+	 * desired state. */
+	char        **members;
+	size_t        member_count;
 } ncfg_observed_firewall_slot_t;
 
 typedef struct ncfg_observed_firewall {

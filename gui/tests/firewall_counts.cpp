@@ -26,6 +26,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
+#include <QPushButton>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QThread>
@@ -85,9 +86,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	conf.write("global { control { root = \"any\" } }\n"
+	           "preset \"web\" { input { accept \"http\" { protocol = \"tcp\"; port = 80 } } }\n"
 	           "firewall {\n"
+	           "\tpresets = [\"web\"]\n"
 	           "\tinput {\n"
 	           "\t\tpolicy = \"accept\"\n"
+	           "\t\tslot \"quarantine\" { action = \"drop\"; match = \"from\" }\n"
 	           "\t\taccept \"ping\" { protocol = \"icmp\"; icmp_type = \"echo-request\" }\n"
 	           "\t\tdrop \"telnet\" { protocol = \"tcp\"; port = 23 }\n"
 	           "\t}\n"
@@ -162,6 +166,58 @@ int main(int argc, char **argv)
 		    "three pings are three packets on the rule they matched");
 		check(matched(&view, QStringLiteral("telnet")), QStringLiteral("0 packets"),
 		    "  and none on the rule they did not");
+	}
+
+	/* 0341: a preset's rule is shown and is not the tab's to move or edit;
+	 * asked to, it says where the rule is written and writes nothing. Move
+	 * rather than edit, so a guard that failed could not hang this in a
+	 * modal dialog. */
+	{
+		auto       *cells = view.findChild<QTableWidget *>();
+		auto       *up = view.findChild<QPushButton *>(QStringLiteral("firewall_up"));
+		QString     said;
+		const bool  drop_in = QFile::exists(etc + QStringLiteral("/conf.d/firewall.conf"));
+		int         row = -1;
+
+		QObject::connect(&view, &ncfg_firewall_view::reported,
+		    [&said](const QString &summary) { said = summary; });
+		view.refresh();
+		for (int at = 0; cells && at < cells->rowCount(); at++) {
+			if (cells->item(at, 1) && cells->item(at, 1)->text() == QLatin1String("web/http")) {
+				row = at;
+			}
+		}
+		check(row >= 0 ? QStringLiteral("shown") : QStringLiteral("absent"),
+		    QStringLiteral("shown"), "a preset's rule is shown under its preset's name");
+		if (row >= 0 && up) {
+			cells->selectRow(row);
+			up->click();
+		}
+		check(said.contains(QStringLiteral("preset `web`"))
+		        ? QStringLiteral("refused") : QStringLiteral("not refused"),
+		    QStringLiteral("refused"), "  and moving it is refused, naming the preset");
+		/* 0340: a slot is shown first in its chain, and is not the tab's to
+		 * move either. */
+		int slot_row = -1;
+		for (int at = 0; cells && at < cells->rowCount(); at++) {
+			if (cells->item(at, 1) &&
+			    cells->item(at, 1)->text() == QLatin1String("slot quarantine")) {
+				slot_row = at;
+			}
+		}
+		check(slot_row == 0 ? QStringLiteral("first") : QString::number(slot_row),
+		    QStringLiteral("first"), "a slot is shown, first in its chain");
+		said.clear();
+		if (slot_row >= 0 && up) {
+			cells->selectRow(slot_row);
+			up->click();
+		}
+		check(said.contains(QStringLiteral("ncfg slot")) ? QStringLiteral("refused")
+		                                                 : QStringLiteral("not refused"),
+		    QStringLiteral("refused"), "  and moving it is refused, saying how it is written");
+		check(QFile::exists(etc + QStringLiteral("/conf.d/firewall.conf")) == drop_in
+		        ? QStringLiteral("unwritten") : QStringLiteral("written"),
+		    QStringLiteral("unwritten"), "  with nothing written");
 	}
 
 	daemon.kill();

@@ -154,6 +154,20 @@ void ncfg_firewall_view::refresh()
 	for (const auto &one : chains) {
 		const int at = one.box->findData(one.chain->policy);
 		one.box->setCurrentIndex(at >= 0 ? at : 0);
+		/* The slots first, as the kernel meets them (0340). A negative place
+		 * says the row is a slot, which this tab shows and does not edit. */
+		for (int i = 0; i < one.chain->slot_list.size(); i++) {
+			const ncfg_firewall_slot_row &slot = one.chain->slot_list.at(i);
+			QString what = QStringLiteral("members written live (ncfg slot), by %1")
+			                   .arg(slot.match == QLatin1String("to") ? QStringLiteral("destination")
+			                                                          : QStringLiteral("source"));
+			if (slot.timeout > 0) {
+				what += QStringLiteral(", each for %1 s unless given its own").arg(slot.timeout);
+			}
+			rows << QStringList { QString::fromLatin1(one.name),
+				QStringLiteral("slot %1").arg(slot.name), slot.action, what, QString() };
+			places << qMakePair(QString::fromLatin1(one.name), -1 - i);
+		}
 		for (int i = 0; i < one.chain->rules.size(); i++) {
 			const ncfg_firewall_rule_row &rule = one.chain->rules.at(i);
 			const QString key = QStringLiteral("%1/%2").arg(QString::fromLatin1(one.name),
@@ -216,10 +230,46 @@ void ncfg_firewall_view::set_policies()
 	                       next.output.policy));
 }
 
+/* The preset a rule comes from (0341), or an empty string for the
+ * firewall's own: `PRESET/RULE` is a preset's, written in its own block. */
+static QString preset_of(const QString &rule)
+{
+	const int slash = rule.indexOf(QLatin1Char('/'));
+	return slash < 0 ? QString() : rule.left(slash);
+}
+
+/* Whether the rule at `row` is a preset's, said where the tab can be seen
+ * saying it rather than opening a dialog whose Save the compiler refuses. */
+bool ncfg_firewall_view::refuse_preset_rule(int row)
+{
+	if (places.at(row).second < 0) {
+		emit reported(QStringLiteral("a slot is opened in the firewall block and its members are "
+		                             "written live with `ncfg slot`; the slot itself is changed "
+		                             "in the files tab (0340)"));
+		return true;
+	}
+	const ncfg_firewall_chain_row *chain =
+	    ncfg_firewall_chain(&settings, places.at(row).first);
+	const QString name = chain && places.at(row).second < chain->rules.size()
+	    ? chain->rules.at(places.at(row).second).name : QString();
+	const QString preset = preset_of(name);
+
+	if (preset.isEmpty()) {
+		return false;
+	}
+	emit reported(QStringLiteral("%1 comes from preset `%2`, after this firewall's own rules; "
+	                             "it is changed in that `preset` block, in the files tab")
+	                  .arg(name, preset));
+	return true;
+}
+
 void ncfg_firewall_view::move(int by)
 {
 	const int row = table->selected_row();
 	if (row < 0 || row >= places.size()) {
+		return;
+	}
+	if (refuse_preset_rule(row)) {
 		return;
 	}
 	const QString            chain_name = places.at(row).first;
@@ -228,7 +278,8 @@ void ncfg_firewall_view::move(int by)
 	ncfg_firewall_chain_row *chain = ncfg_firewall_chain(&next, chain_name);
 	/* Within its chain only: a rule's chain is what it filters, and moving it
 	 * to another is an edit the dialog makes on purpose. */
-	if (!chain || at + by < 0 || at + by >= chain->rules.size()) {
+	if (!chain || at + by < 0 || at + by >= chain->rules.size() ||
+	    !preset_of(chain->rules.at(at + by).name).isEmpty()) {
 		return;
 	}
 	chain->rules.swapItemsAt(at, at + by);
@@ -250,6 +301,9 @@ void ncfg_firewall_view::edit_selected()
 {
 	const int row = table->selected_row();
 	if (row < 0 || row >= places.size()) {
+		return;
+	}
+	if (refuse_preset_rule(row)) {
 		return;
 	}
 	ncfg_firewall_rule_dialog dialog(connection, settings, places.at(row).first,

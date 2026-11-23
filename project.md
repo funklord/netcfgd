@@ -1151,6 +1151,20 @@ APIs, and the event names as two client libraries use them.
 *"If we do this at all, we delay it until later. As it is an endless churn
 against a moving target."* Not built; a later decision starts from this reading.
 
+**A question for the holder: what a zone is** (0284's layer three; 0339
+left "the zone grammar and how a zone names a host" open, and slots (0340)
+and presets (0341) are built on either side of it). It decides what gets
+built, and the aims do not choose between the readings. **Best guess, not
+built:** a zone is an estate-scoped block naming a purpose and what it may
+reach -- `zone "guest" { reach = ["internet"] }` -- a host puts one of its own
+interfaces in a zone (`interface lan1 { zone = "guest" }`), and each host
+compiles the zones its interfaces are in into forward rules between them,
+after its written rules and before its presets. The other reading is a zone
+as a set of *hosts* (by estate name or address) with rules about traffic to
+and from them, compiled on every host into rules matching those hosts'
+addresses -- membership kept current through slots. Which one, or both, is
+the holder's call.
+
 **Two things that were open, and are settled.**
 
 - ~~**The generated profile's header contradicts the renderer.**~~ **Settled by the
@@ -7022,6 +7036,10 @@ writes the list and leaves a preset's rules to the preset, and the undo copy
 recovers the list from the rule names. `tests/live/firewall.sh` checks the
 kernel's order and a converged plan.
 
+**The firewall tab shows a preset's rules and does not edit them**: asked to
+edit or move one, it says which preset the rule is from and that the change
+belongs in that block, and writes nothing.
+
 **Host-private for now.** A preset is a library, which is what a group
 shares, but its keys are nested chain and rule keys with no kind numbers in
 the registry (`scope.c`). Making presets travel needs those numbers designed;
@@ -7066,9 +7084,11 @@ removal, the static-value refusal and a network refused.
   less what lapsed meanwhile. A quarantine is not open from boot.
 
 **Open:** the narrower tier, "this slot
-and nothing else", waits for a writer that is not an operator; `ncfg status`
-lists each slot's rules and not its members; zones (layer three) are not built,
-and presets (layer two) are, in 10.910.
+and nothing else", waits for a writer that is not an operator; zones (layer
+three) are not built -- what a zone is waits on the holder (the register) --
+and presets (layer two) are, in 10.910. `ncfg status` lists each slot's
+members under its rule, by address: what is left of a member's lifetime would
+change the observation every second, so it is not shown.
 
 ## 10.908 The fields nothing read leave the model, and DNS's five are reached (0339)
 
@@ -7118,7 +7138,14 @@ states them, as it is told `domain` -- so a scope that stops stating one leaves
 resolved's last per-link value until `resolvectl revert`. A revert before each
 delivery would close it at the cost of a moment with no servers on the link;
 not done without measuring that on a machine running resolved, which this one
-is not.
+is not. **A cheaper close, read from systemd's source 2026-11-23 and not yet
+measured:** the D-Bus link setters `SetDNSOverTLS` and `SetDNSSEC` take `""`
+as unset (stored as the invalid sentinel, logged as "default"), so telling
+resolved `""` where a scope states nothing would hand the link back to the
+global setting with no moment lacking servers. Current `resolvectl` turns `""`
+into NULL and calls the Varlink `io.systemd.Resolve.Link` methods instead
+(NEWS, 263), whose handling of NULL, and the versions where either path
+exists, were not read. So it waits on a machine with resolved, still.
 
 ## 10.907 The fuzzer reaches the firewall's readers
 

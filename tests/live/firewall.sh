@@ -694,6 +694,10 @@ check "a name that is not a slot is a static value, refused" \
 timeout 30 "$ncfg" slot add quarantine 192.0.2.0/24 > "$work/said" 2>&1 || true
 check "and so is a network" "$(grep -c 'single addresses' "$work/said" || true)" "1"
 timeout 30 "$ncfg" slot add quarantine 192.0.2.10 > "$work/said" 2>&1 || true
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status lists a slot's members under it" \
+	"$(grep -A3 'slot quarantine: drop what it holds, matched by source, IPv4' "$work/status" |
+		grep -c '^      192.0.2.10$' || true)" "1"
 check "a live write is recorded for after a reboot" \
 	"$(grep -c '^192.0.2.10 0$' "$work/slot/quarantine" 2>/dev/null || true)" "1"
 kill "$daemon_pid" 2>/dev/null || true

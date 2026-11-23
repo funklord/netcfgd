@@ -779,6 +779,70 @@ static int read_forwards(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 	return 1;
 }
 
+/*
+ * What each slot holds (0340), one dump a slot and family, after the rules
+ * have said which slots there are. A dump that is not answered leaves that
+ * slot's members unlisted rather than failing the observation: the members
+ * are for a person reading `ncfg status`, and nothing plans from them.
+ */
+static int read_slot_members(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
+    char *err, size_t err_size)
+{
+	size_t at;
+
+	if (!observed->firewall) {
+		return 1;
+	}
+	for (at = 0; at < observed->firewall->slot_count; at++) {
+		ncfg_observed_firewall_slot_t *slot = &observed->firewall->slots[at];
+		ncfg_nft_slot_member_t        *members = NULL;
+		ncfg_netlink_reply_t           reply;
+		ncfg_buf_t                     message;
+		ncfg_buf_t                     body;
+		uint16_t                       kind = 0;
+		uint16_t                       flags = 0;
+		char                           why[NCFG_ERROR_MAX];
+		size_t                         count = 0;
+		size_t                         one;
+
+		memset(&reply, 0, sizeof(reply));
+		ncfg_buf_init(&message, 0);
+		ncfg_buf_init(&body, 0);
+		why[0] = '\0';
+		if (!ncfg_nft_build_slot_dump(&message, 0, slot->name, slot->ipv6, why, sizeof(why)) ||
+		    !ncfg_wire_request_parts(&message, "nftables", &kind, &flags, &body, why,
+		        sizeof(why)) ||
+		    !kernel->exchange(kernel->context, kind, flags, &body, NULL, &reply, why,
+		        sizeof(why))) {
+			ncfg_netlink_reply_free(&reply);
+			ncfg_buf_free(&message);
+			ncfg_buf_free(&body);
+			continue;
+		}
+		ncfg_buf_free(&message);
+		ncfg_buf_free(&body);
+		for (one = 0; one < reply.count; one++) {
+			(void)ncfg_nft_slot_members_read(reply.items[one].bytes, reply.items[one].length,
+			    &members, &count, NULL, 0);
+		}
+		ncfg_netlink_reply_free(&reply);
+		for (one = 0; one < count && one < ceiling_of(kernel); one++) {
+			char address[64];
+			char line[96];
+
+			ncfg_nft_slot_member_text(&members[one], address, sizeof(address));
+			(void)snprintf(line, sizeof(line), "%s", address);
+			if (!observe_list_add(&slot->members, &slot->member_count, line)) {
+				free(members);
+				ncfg_error_set(err, err_size, "out of memory recording a slot's members");
+				return 0;
+			}
+		}
+		free(members);
+	}
+	return 1;
+}
+
 int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
     char *err, size_t err_size)
 {
@@ -881,7 +945,8 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 				    read_firewall(kernel, &rules, &chains, observed, err, err_size) &&
 				    read_forwards(kernel, &rules, observed, err, err_size) &&
 				    read_offload(&flowtables, &rules, observed, err, err_size) &&
-				    read_clamp(&rules, observed, err, err_size);
+				    read_clamp(&rules, observed, err, err_size) &&
+				    read_slot_members(kernel, observed, err, err_size);
 				ncfg_netlink_reply_free(&rules);
 				ncfg_netlink_reply_free(&chains);
 				ncfg_netlink_reply_free(&flowtables);

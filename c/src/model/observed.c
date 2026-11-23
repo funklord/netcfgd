@@ -1433,7 +1433,10 @@ static const ncfg_field_t observed_firewall_slot_fields[] = {
 	{ .name = "packets", .kind = NCFG_F_OPT_INT, R_U64,
 	    .offset = offsetof(ncfg_observed_firewall_slot_t, packets) },
 	{ .name = "bytes", .kind = NCFG_F_OPT_INT, R_U64,
-	    .offset = offsetof(ncfg_observed_firewall_slot_t, bytes) }
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, bytes) },
+	{ .name = "members", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, members),
+	    .count_offset = offsetof(ncfg_observed_firewall_slot_t, member_count) }
 };
 static const ncfg_type_t observed_firewall_slot_type =
     TYPE("observed firewall slot", observed_firewall_slot_fields);

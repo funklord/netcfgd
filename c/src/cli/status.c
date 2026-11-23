@@ -210,6 +210,7 @@ static void print_firewall(const ncfg_observed_t *observed)
 	const char                     *policies[3];
 	size_t                          c;
 	size_t                          at;
+	size_t                          member;
 
 	if (!firewall) {
 		return;
@@ -238,6 +239,9 @@ static void print_firewall(const ncfg_observed_t *observed)
 				    (long long)(slot->bytes.has ? slot->bytes.value : 0));
 			}
 			ncfg_out_line("");
+			for (member = 0; member < slot->member_count; member++) {
+				ncfg_out_writef("      %s\n", slot->members[member]);
+			}
 		}
 		for (at = 0; at < firewall->rule_count; at++) {
 			const ncfg_observed_firewall_rule_t *rule = &firewall->rules[at];

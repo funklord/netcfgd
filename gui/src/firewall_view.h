@@ -51,6 +51,7 @@ signals:
 
 private:
 	void move(int by);
+	bool refuse_preset_rule(int row);
 	void write(const ncfg_firewall_settings &next, const QString &said);
 
 	ncfg_connection        *connection;
