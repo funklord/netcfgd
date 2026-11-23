@@ -113,6 +113,22 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		(void)ncfg_nft_gen_read(data, length, &generation, err, sizeof(err));
 	}
 
+	/* A slot's rule and a slot's members (0340): the first read on every
+	 * observation, the second before every replacement and on every pass
+	 * that lists members. */
+	{
+		ncfg_nft_kernel_slot_t  opened;
+		ncfg_nft_slot_member_t *members = NULL;
+		size_t                  count = 0u;
+
+		(void)ncfg_nft_rule_slot(data, length, &opened);
+		(void)ncfg_nft_slot_members_read(data, length, &members, &count, err, sizeof(err));
+		for (size_t one = 0u; one < count; one++) {
+			ncfg_nft_slot_member_text(&members[one], text, sizeof(text));
+		}
+		free(members);
+	}
+
 	/* Generic netlink's family lookup, which every family added after
 	 * nl80211 will go through. The name is the fuzzer's too, since a reply
 	 * naming a different family is exactly what must not be believed. */
