@@ -881,11 +881,18 @@ static int lower_slot(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	return 1;
 }
 
-/* One chain: a policy and the rules under it, in the order they were written.
+/*
+ * One chain: a policy and the rules under it, in the order they were written.
  * Never sorted -- nftables evaluates a chain in order, so the order is the
- * policy, and `ssh` before `netbios` accepts what the later rule drops. */
+ * policy, and `ssh` before `netbios` accepts what the later rule drops.
+ *
+ * `preset` names the preset the chain is in (0341), or is NULL for the
+ * firewall's own. A preset's chain has rules and nothing else -- no policy,
+ * which is the host's answer, and no slot, which the host opens -- and each
+ * rule is named `PRESET/RULE`.
+ */
 static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
-    const char *chain_name, ncfg_firewall_chain_t *out)
+    const char *chain_name, ncfg_firewall_chain_t *out, const char *preset)
 {
 	ncfg_firewall_chain_t chain;
 	int                   policy_named = 0;
@@ -898,7 +905,12 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 		const ncfg_ast_item_t *item = block->items.at[i];
 
 		if (item->kind == NCFG_AST_ITEM_ASSIGNMENT) {
-			if (strcmp(item->as.assignment.key, "policy") == 0) {
+			if (preset && strcmp(item->as.assignment.key, "policy") == 0) {
+				ncfg_diag(ctx, item->as.assignment.span,
+				    "preset `%s` sets the %s chain's policy: a policy is what the host "
+				    "does with what nothing matched, and is the host's own firewall's "
+				    "to say", preset, chain_name);
+			} else if (strcmp(item->as.assignment.key, "policy") == 0) {
 				chain_policy(ctx, &item->as.assignment, &chain.policy);
 				policy_named = 1;
 			} else {
@@ -910,6 +922,12 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			continue;
 		}
 		if (item->kind != NCFG_AST_ITEM_BLOCK) {
+			continue;
+		}
+		if (preset && strcmp(item->as.block.head, "slot") == 0) {
+			ncfg_diag(ctx, item->as.block.span,
+			    "preset `%s` opens a slot: a slot is opened by the host that is "
+			    "written into, in its own firewall", preset);
 			continue;
 		}
 		if (strcmp(item->as.block.head, "slot") == 0) {
@@ -944,6 +962,29 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			}
 			if (!lower_rule(ctx, &item->as.block, action, &rule)) {
 				continue;
+			}
+			/* **A `/` is the preset's mark** (0341): `web/http` is the
+			 * rule `http` from preset `web`, so a written rule may not
+			 * wear one, and a preset's rule is given it here. */
+			if (strchr(rule.name, '/') != NULL) {
+				ncfg_diag(ctx, item->as.block.span,
+				    "rule `%s` has a `/` in its name, which marks a preset's rule "
+				    "(`PRESET/RULE`)", rule.name);
+				rule_free(&rule);
+				continue;
+			}
+			if (preset) {
+				size_t length = strlen(preset) + 1u + strlen(rule.name) + 1u;
+				char  *named = malloc(length);
+
+				if (!named) {
+					ncfg_lower_oom(ctx);
+					rule_free(&rule);
+					continue;
+				}
+				(void)snprintf(named, length, "%s/%s", preset, rule.name);
+				free(rule.name);
+				rule.name = named;
 			}
 			/* A packet this host sends has no sending station yet: its link
 			 * header is built after the output hook, so `ether saddr` there
@@ -1021,7 +1062,7 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	 * answers are "everything else is allowed" and "everything else is
 	 * blocked", and a firewall whose author did not say which is not a
 	 * firewall. */
-	if (!policy_named) {
+	if (!policy_named && !preset) {
 		ncfg_diag(ctx, block->span,
 		    "chain `%s` has no `policy`: say `policy = \"accept\"` or `\"drop\"`, since "
 		    "the two are opposite answers for every packet no rule matched", chain_name);
@@ -1030,6 +1071,195 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	}
 	*out = chain;
 	return 1;
+}
+
+/* Whether `name` can name a preset: a slot's alphabet, since it prefixes a
+ * rule's name in the kernel's comment and in a red row. */
+static int preset_name_ok(const char *name)
+{
+	return ncfg_firewall_slot_name_valid(name);
+}
+
+/* `presets = ["web", "dns"]` (0341): each name once, each one a preset can
+ * have. Whether each is defined is answered once every block is read. */
+static void firewall_presets(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    ncfg_firewall_t *firewall)
+{
+	ncfg_words_t words;
+	size_t       i, j;
+
+	memset(&words, 0, sizeof(words));
+	if (!ncfg_as_words(ctx, assignment->value, &words)) {
+		ncfg_words_free(&words);
+		return;
+	}
+	ncfg_strings_free(firewall->presets, firewall->preset_count);
+	firewall->presets = NULL;
+	firewall->preset_count = 0;
+	ctx->presets_span = assignment->span;
+	ctx->presets_source = ctx->source;
+	for (i = 0; i < words.count; i++) {
+		const char *name = words.at[i].text;
+		int         twice = 0;
+
+		if (!preset_name_ok(name)) {
+			ncfg_diag(ctx, assignment->span,
+			    "`%s` cannot name a preset: a letter, then letters, digits, `-` or `_`", name);
+			continue;
+		}
+		for (j = 0; j < firewall->preset_count; j++) {
+			twice = twice || strcmp(firewall->presets[j], name) == 0;
+		}
+		if (twice) {
+			ncfg_diag(ctx, assignment->span, "preset `%s` is named twice in `presets`", name);
+			continue;
+		}
+		(void)ncfg_push_string(ctx, &firewall->presets, &firewall->preset_count, name);
+	}
+	ncfg_words_free(&words);
+}
+
+/* `from`'s rules appended to `into`, which takes them over. */
+static int chain_append(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *into,
+    ncfg_firewall_chain_t *from)
+{
+	ncfg_firewall_rule_t *grown;
+
+	if (from->rule_count == 0u) {
+		return 1;
+	}
+	grown = realloc(into->rules, (into->rule_count + from->rule_count) * sizeof(*grown));
+	if (!grown) {
+		ncfg_lower_oom(ctx);
+		return 0;
+	}
+	into->rules = grown;
+	memcpy(&into->rules[into->rule_count], from->rules, from->rule_count * sizeof(*grown));
+	into->rule_count += from->rule_count;
+	free(from->rules);
+	from->rules = NULL;
+	from->rule_count = 0;
+	return 1;
+}
+
+/* One preset block lowered into three chains of rules. 0 where it is not one
+ * the language allows, which has been said. */
+static int lower_preset(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
+    ncfg_firewall_chain_t chains[3])
+{
+	static const char *const names[3] = { "input", "forward", "output" };
+	const char              *preset = merged->block->label;
+	int                      seen[3] = { 0, 0, 0 };
+	size_t                   i, c;
+
+	memset(chains, 0, 3u * sizeof(*chains));
+	if (!preset || !preset_name_ok(preset)) {
+		ncfg_diag(ctx, merged->block->span,
+		    "`preset` needs a name: a letter, then letters, digits, `-` or `_`, as "
+		    "`preset \"web\" { ... }`");
+		return 0;
+	}
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t *item = merged->items[i].item;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_ASSIGNMENT) {
+			ncfg_diag(ctx, item->as.assignment.span,
+			    "`%s` is not valid directly inside a preset: it holds the chains "
+			    "`input`, `forward` and `output`, and their rules", item->as.assignment.key);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_BLOCK) {
+			continue;
+		}
+		for (c = 0; c < 3u; c++) {
+			if (strcmp(item->as.block.head, names[c]) == 0) {
+				break;
+			}
+		}
+		if (c == 3u) {
+			ncfg_diag(ctx, item->as.block.span,
+			    "`%s` is not a firewall chain: a preset's are input, forward and output",
+			    item->as.block.head);
+			continue;
+		}
+		if (seen[c]) {
+			ncfg_diag(ctx, item->as.block.span, "preset `%s` has a second `%s` chain",
+			    preset, names[c]);
+			continue;
+		}
+		seen[c] = 1;
+		(void)lower_chain(ctx, &item->as.block, names[c], &chains[c], preset);
+	}
+	return 1;
+}
+
+void ncfg_lower_presets(ncfg_lower_ctx_t *ctx, const struct ncfg_merged *merged)
+{
+	ncfg_firewall_t *firewall = ctx && ctx->document ? ctx->document->firewall : NULL;
+	size_t           used, b, c;
+
+	if (!ctx || !merged) {
+		return;
+	}
+	/* Every preset is checked, used or not: a library with a broken entry
+	 * is found when it is written rather than when a host first uses it. */
+	for (b = 0; b < merged->block_count; b++) {
+		ncfg_firewall_chain_t chains[3];
+		const char           *label = merged->blocks[b].block->label;
+		size_t                at;
+		int                   is_used = 0;
+
+		if (strcmp(merged->blocks[b].block->head, "preset") != 0) {
+			continue;
+		}
+		/* A used one is lowered below, and said once. */
+		for (at = 0; firewall && label && at < firewall->preset_count; at++) {
+			is_used = is_used || strcmp(firewall->presets[at], label) == 0;
+		}
+		if (is_used) {
+			continue;
+		}
+		if (lower_preset(ctx, &merged->blocks[b], chains)) {
+			for (c = 0; c < 3u; c++) {
+				chain_free(&chains[c]);
+			}
+		}
+	}
+	if (!firewall) {
+		return;
+	}
+	/* Then the used ones, in the order `presets` names them, each after the
+	 * written rules and every preset named before it (0339). */
+	for (used = 0; used < firewall->preset_count; used++) {
+		const ncfg_merged_block_t *found = NULL;
+		ncfg_firewall_chain_t      chains[3];
+
+		for (b = 0; b < merged->block_count; b++) {
+			const ncfg_ast_block_t *block = merged->blocks[b].block;
+
+			if (strcmp(block->head, "preset") == 0 && block->label &&
+			    strcmp(block->label, firewall->presets[used]) == 0) {
+				found = &merged->blocks[b];
+			}
+		}
+		if (!found) {
+			ctx->source = ctx->presets_source;
+			ncfg_diag(ctx, ctx->presets_span,
+			    "the firewall uses preset `%s`, and no `preset \"%s\"` block defines it",
+			    firewall->presets[used], firewall->presets[used]);
+			continue;
+		}
+		if (!lower_preset(ctx, found, chains)) {
+			continue;
+		}
+		(void)chain_append(ctx, &firewall->input, &chains[0]);
+		(void)chain_append(ctx, &firewall->forward, &chains[1]);
+		(void)chain_append(ctx, &firewall->output, &chains[2]);
+		for (c = 0; c < 3u; c++) {
+			chain_free(&chains[c]);
+		}
+	}
 }
 
 void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged)
@@ -1082,11 +1312,16 @@ void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merge
 		const ncfg_ast_item_t *item = merged->items[i].item;
 
 		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_ASSIGNMENT &&
+		    strcmp(item->as.assignment.key, "presets") == 0) {
+			firewall_presets(ctx, &item->as.assignment, firewall);
+			continue;
+		}
 		if (item->kind == NCFG_AST_ITEM_ASSIGNMENT) {
 			ncfg_diag(ctx, item->as.assignment.span,
 			    "`%s` is not valid directly inside `firewall`: the chains are "
-			    "`input`, `forward` and `output`, and the keys go in them",
-			    item->as.assignment.key);
+			    "`input`, `forward` and `output`, and the keys go in them, beside "
+			    "`presets`", item->as.assignment.key);
 			continue;
 		}
 		if (item->kind != NCFG_AST_ITEM_BLOCK) {
@@ -1120,7 +1355,7 @@ void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merge
 				continue;
 			}
 			*seen = 1;
-			(void)lower_chain(ctx, &item->as.block, head, target);
+			(void)lower_chain(ctx, &item->as.block, head, target, NULL);
 		}
 	}
 	/* **A slot's name is the firewall's, not the chain's** (0340): a live

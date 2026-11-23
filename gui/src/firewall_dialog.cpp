@@ -141,6 +141,9 @@ QString ncfg_firewall_block(const ncfg_firewall_settings &settings)
 		&settings.output };
 
 	body << QStringLiteral("firewall {");
+	if (!settings.presets.isEmpty()) {
+		body << QStringLiteral("\tpresets = %1").arg(quoted_list(settings.presets));
+	}
 	for (int c = 0; c < 3; c++) {
 		/* **The policy is always written**: the compiler refuses a chain
 		 * without one, and a block with no policy for a chain nobody set
@@ -162,6 +165,10 @@ QString ncfg_firewall_block(const ncfg_firewall_settings &settings)
 			body << line + QStringLiteral(" }");
 		}
 		for (const ncfg_firewall_rule_row &rule : chains[c]->rules) {
+			/* A preset's rule is the preset's to write (0341). */
+			if (rule.name.contains(QLatin1Char('/'))) {
+				continue;
+			}
 			write_rule(body, rule);
 		}
 		body << QStringLiteral("\t}");

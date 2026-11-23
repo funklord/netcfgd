@@ -1981,6 +1981,14 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\taccept \"lan-out\" { interface = \"lan0\" }\n"
 	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so do a chain's slots (0340)");
+	round_trips("preset \"web\" {\n\tinput {\n"
+	    "\t\taccept \"http\" { protocol = \"tcp\"; port = [80, 443] }\n\t}\n}\n"
+	    "preset \"quiet\" {\n}\n"
+	    "firewall {\n\tpresets = [\"web\", \"quiet\"]\n"
+	    "\tinput {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ssh\" { protocol = \"tcp\"; port = 22 }\n\t}\n"
+	    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so do the presets a firewall uses, an empty one too (0341)");
 }
 
 static void a_firewall_round_trips(void)

@@ -1334,6 +1334,10 @@ typedef struct {
 	ncfg_firewall_chain_entry_t input;
 	ncfg_firewall_chain_entry_t forward;
 	ncfg_firewall_chain_entry_t output;
+	/* The presets the firewall uses (0341), ", "-joined, empty for none.
+	 * Their rules are in the chains, named `PRESET/RULE`, and belong to the
+	 * preset rather than to the block a Save writes. */
+	char                       *presets;
 } ncfg_firewall_config_t;
 
 void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall);

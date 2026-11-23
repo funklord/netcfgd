@@ -1525,9 +1525,81 @@ static void render_firewall_chain(const ncfg_firewall_chain_t *chain, const char
 		ncfg_buf_add_text(body, " }\n");
 	}
 	for (at = 0; at < chain->rule_count; at++) {
+		/* A preset's rule is written in its preset, not here (0341). */
+		if (strchr(chain->rules[at].name, '/') != NULL) {
+			continue;
+		}
 		render_firewall_rule(&chain->rules[at], body, missing, name);
 	}
 	ncfg_buf_add_text(body, "\t}\n");
+}
+
+/*
+ * The presets a firewall uses (0341), each a `preset` block holding the rules
+ * named `PRESET/RULE` in each chain, under their own names. A preset that
+ * contributed no rules is written empty, so the firewall's `presets` still
+ * names something defined. A `/` rule whose preset is not listed is refused.
+ */
+static void render_presets(const ncfg_firewall_t *firewall, ncfg_buf_t *text,
+    ncfg_unrenderable_t *missing)
+{
+	static const char *const names[3] = { "input", "forward", "output" };
+	const ncfg_firewall_chain_t *chains[3];
+	size_t                       p, c, r;
+
+	chains[0] = &firewall->input;
+	chains[1] = &firewall->forward;
+	chains[2] = &firewall->output;
+	for (c = 0; c < 3u; c++) {
+		for (r = 0; r < chains[c]->rule_count; r++) {
+			const char *slash = strchr(chains[c]->rules[r].name, '/');
+			int         listed = 0;
+
+			if (!slash) {
+				continue;
+			}
+			for (p = 0; p < firewall->preset_count; p++) {
+				listed = listed ||
+				    (strlen(firewall->presets[p]) == (size_t)(slash - chains[c]->rules[r].name) &&
+				    strncmp(firewall->presets[p], chains[c]->rules[r].name,
+				        (size_t)(slash - chains[c]->rules[r].name)) == 0);
+			}
+			if (!listed) {
+				ncfg_render_refuse(missing, "firewall", names[c],
+				    "rule `%s` is a preset's, and the firewall uses no such preset",
+				    chains[c]->rules[r].name);
+			}
+		}
+	}
+	for (p = 0; p < firewall->preset_count; p++) {
+		const char  *preset = firewall->presets[p];
+		const size_t length = strlen(preset);
+
+		ncfg_buf_add_text(text, "\npreset ");
+		ncfg_render_quote(text, preset);
+		ncfg_buf_add_text(text, " {\n");
+		for (c = 0; c < 3u; c++) {
+			int opened = 0;
+
+			for (r = 0; r < chains[c]->rule_count; r++) {
+				ncfg_firewall_rule_t one = chains[c]->rules[r];
+
+				if (strncmp(one.name, preset, length) != 0 || one.name[length] != '/') {
+					continue;
+				}
+				if (!opened) {
+					ncfg_buf_addf(text, "\t%s {\n", names[c]);
+					opened = 1;
+				}
+				one.name = one.name + length + 1u;
+				render_firewall_rule(&one, text, missing, names[c]);
+			}
+			if (opened) {
+				ncfg_buf_add_text(text, "\t}\n");
+			}
+		}
+		ncfg_buf_add_text(text, "}\n");
+	}
 }
 
 static void render_firewall(const ncfg_document_t *document, ncfg_buf_t *text,
@@ -1541,7 +1613,19 @@ static void render_firewall(const ncfg_document_t *document, ncfg_buf_t *text,
 		 * the same as three chains that accept everything. */
 		return;
 	}
+	render_presets(document->firewall, text, missing);
 	ncfg_buf_init(&body, 0);
+	if (document->firewall->preset_count) {
+		ncfg_render_list_t list;
+		size_t             at;
+
+		ncfg_render_list_init(&list);
+		for (at = 0; at < document->firewall->preset_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&list), document->firewall->presets[at]);
+		}
+		ncfg_render_list_emit(&body, "\t", "presets", &list, 0);
+		ncfg_render_list_free(&list);
+	}
 	render_firewall_chain(&document->firewall->input, "input", &body, missing);
 	render_firewall_chain(&document->firewall->forward, "forward", &body, missing);
 	render_firewall_chain(&document->firewall->output, "output", &body, missing);

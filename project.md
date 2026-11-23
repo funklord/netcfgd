@@ -7006,6 +7006,27 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.910 Presets: the firewall's library layer (0341)
+
+0284's layer two, which 0339 put last, is built as
+[0341](doc/decision/0341-a-preset-is-a-named-set-of-rules-a-firewall-uses.md) says:
+`preset "web" { input { accept "http" { ... } } }` is an ordinary top-level
+block, so the factory layer can ship one and a drop-in add or `override` one,
+and `firewall { presets = ["web"] }` uses it. Its rules are appended after
+the written ones in the order named, each called `PRESET/RULE`; a written
+rule may not have a `/`. A preset holds rules only -- a policy or a slot in
+one is refused -- and every preset is checked, used or not. The document
+keeps the expanded rules and the `presets` list; the renderer writes the
+preset blocks back from the prefixed rules (an empty one too), the window
+writes the list and leaves a preset's rules to the preset, and the undo copy
+recovers the list from the rule names. `tests/live/firewall.sh` checks the
+kernel's order and a converged plan.
+
+**Host-private for now.** A preset is a library, which is what a group
+shares, but its keys are nested chain and rule keys with no kind numbers in
+the registry (`scope.c`). Making presets travel needs those numbers designed;
+until then a preset reaches another host the way any host-private block does.
+
 ## 10.909 Slots: the firewall's live layer (0340)
 
 0339 put live updates first and left how a node opens a slot, who writes into
@@ -7046,8 +7067,8 @@ removal, the static-value refusal and a network refused.
 
 **Open:** the narrower tier, "this slot
 and nothing else", waits for a writer that is not an operator; `ncfg status`
-does not list members yet; zones (layer three) and presets (layer two) are not
-built.
+lists each slot's rules and not its members; zones (layer three) are not built,
+and presets (layer two) are, in 10.910.
 
 ## 10.908 The fields nothing read leave the model, and DNS's five are reached (0339)
 

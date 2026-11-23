@@ -92,6 +92,10 @@ typedef struct {
 	 * every interface lowered first (0310). */
 	ncfg_span_t             upnp_span;
 	const char             *upnp_source;
+	/* Where the firewall's `presets` was written, for a preset it names and
+	 * nothing defines (0341). */
+	ncfg_span_t             presets_span;
+	const char             *presets_source;
 } ncfg_lower_ctx_t;
 
 /* Note that something could not be allocated. Sticky. */
@@ -371,6 +375,10 @@ void ncfg_lower_global_block(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *b
  * second one is refused and the first stands: there is one ruleset, and two
  * merged would interleave their rules in an order nobody wrote. */
 void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block);
+
+/* Every `preset` block checked, and the ones the firewall uses appended to
+ * its chains after the written rules (0341). After every block is lowered. */
+void ncfg_lower_presets(ncfg_lower_ctx_t *ctx, const struct ncfg_merged *merged);
 /* A `dns` scope, wherever one is written: in `global`, on an interface, or on
  * a network. One reader, because three spellings of one scope is how they come
  * to accept different words. */

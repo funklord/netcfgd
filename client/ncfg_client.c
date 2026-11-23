@@ -3194,6 +3194,8 @@ void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall)
 	firewall_chain_free(&firewall->input);
 	firewall_chain_free(&firewall->forward);
 	firewall_chain_free(&firewall->output);
+	free(firewall->presets);
+	firewall->presets = NULL;
 	firewall->present = 0;
 }
 
@@ -3392,7 +3394,9 @@ int ncfg_client_firewall(ncfg_client_t *client, ncfg_firewall_config_t *out, cha
 		return 1;
 	}
 	out->present = 1;
-	if (!read_firewall_chain(doc, ncfg_json_member(doc, firewall, "input"), &out->input) ||
+	out->presets = join_strings(doc, ncfg_json_member(doc, firewall, "presets"));
+	if (!out->presets ||
+	    !read_firewall_chain(doc, ncfg_json_member(doc, firewall, "input"), &out->input) ||
 	    !read_firewall_chain(doc, ncfg_json_member(doc, firewall, "forward"), &out->forward) ||
 	    !read_firewall_chain(doc, ncfg_json_member(doc, firewall, "output"), &out->output)) {
 		ncfg_firewall_config_free(out);

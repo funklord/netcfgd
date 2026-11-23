@@ -2911,7 +2911,10 @@ static const ncfg_field_t firewall_fields[] = {
 	{ .name = "forward", .kind = NCFG_F_STRUCT, .type = &firewall_chain_type,
 	    .offset = offsetof(ncfg_firewall_t, forward) },
 	{ .name = "output", .kind = NCFG_F_STRUCT, .type = &firewall_chain_type,
-	    .offset = offsetof(ncfg_firewall_t, output) }
+	    .offset = offsetof(ncfg_firewall_t, output) },
+	{ .name = "presets", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_t, presets),
+	    .count_offset = offsetof(ncfg_firewall_t, preset_count) }
 };
 static const ncfg_type_t firewall_type = TYPE("firewall", firewall_fields);
 

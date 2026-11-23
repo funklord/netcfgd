@@ -1637,6 +1637,7 @@ bool ncfg_connection::firewall(ncfg_firewall_settings *out, QString *error)
 		return false;
 	}
 	out->present = found.present != 0;
+	out->presets = firewall_list(found.presets);
 	out->input = firewall_chain(found.input);
 	out->forward = firewall_chain(found.forward);
 	out->output = firewall_chain(found.output);

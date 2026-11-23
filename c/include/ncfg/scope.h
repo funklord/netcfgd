@@ -104,6 +104,9 @@ typedef enum {
 	/* An interface held up or down apart from its block (0329). Last, for
 	 * the reason above. */
 	NCFG_BLOCK_SWITCH,
+	/* A named set of firewall rules a firewall uses (0341). Last, for the
+	 * reason above. */
+	NCFG_BLOCK_PRESET,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

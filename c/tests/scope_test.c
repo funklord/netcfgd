@@ -77,7 +77,10 @@ static const struct {
 	{ "dns_record", NCFG_SCOPE_GROUP },
 	{ "block_list", NCFG_SCOPE_GROUP },
 	/* Whether this machine's tunnel is up is this machine's (0329). */
-	{ "switch", NCFG_SCOPE_HOST_PRIVATE }
+	{ "switch", NCFG_SCOPE_HOST_PRIVATE },
+	/* A preset's keys are a chain's and a rule's, with no kind numbers yet
+	 * (0341). */
+	{ "preset", NCFG_SCOPE_HOST_PRIVATE }
 };
 
 #define EXPECTED_COUNT (sizeof(EXPECTED) / sizeof(EXPECTED[0]))

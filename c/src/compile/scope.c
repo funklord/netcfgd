@@ -16,7 +16,7 @@
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
 	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh",
-	"host_list", "dns_record", "block_list", "switch" };
+	"host_list", "dns_record", "block_list", "switch", "preset" };
 
 const char *ncfg_block_name(int block)
 {
@@ -101,7 +101,12 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	[NCFG_BLOCK_BLOCK_LIST] = NCFG_SCOPE_GROUP,
 	/* Whether this machine's tunnel is up is this machine's, and the person
 	 * at it is who flips it (0329). */
-	[NCFG_BLOCK_SWITCH] = NCFG_SCOPE_HOST_PRIVATE
+	[NCFG_BLOCK_SWITCH] = NCFG_SCOPE_HOST_PRIVATE,
+	/* A firewall preset (0341) is a library's, and a library is what a group
+	 * shares -- but its keys are a chain's and a rule's, nested, and the kind
+	 * registry has no numbers for those. Host-private until it does, which
+	 * is the narrow direction this header argues for. */
+	[NCFG_BLOCK_PRESET] = NCFG_SCOPE_HOST_PRIVATE
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)

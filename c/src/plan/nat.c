@@ -315,6 +315,34 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 			return NULL;
 		}
 	}
+	/* The presets the rules came from (0341), in the order their rules are
+	 * met -- which is the order `presets` named them, since each preset's
+	 * rules follow the one before. A preset that contributed no rule leaves
+	 * nothing in the kernel to recover it from, and changes nothing there. */
+	for (c = 0; c < 3u; c++) {
+		size_t r;
+
+		for (r = 0; r < chains[c]->rule_count; r++) {
+			const char *name = chains[c]->rules[r].name;
+			const char *slash = strchr(name, '/');
+			char        preset[NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
+			size_t      p;
+			int         known = 0;
+
+			if (!slash || (size_t)(slash - name) > NCFG_FIREWALL_SLOT_NAME_MAX) {
+				continue;
+			}
+			memcpy(preset, name, (size_t)(slash - name));
+			preset[slash - name] = '\0';
+			for (p = 0; p < firewall->preset_count; p++) {
+				known = known || strcmp(firewall->presets[p], preset) == 0;
+			}
+			if (!known && !add_text(&firewall->presets, &firewall->preset_count, preset)) {
+				ncfg_firewall_free(firewall);
+				return NULL;
+			}
+		}
+	}
 	/* The slots (0340), one per pair of family rules, in their order. */
 	for (at = 0; at < observed->slot_count; at++) {
 		const ncfg_observed_firewall_slot_t *one = &observed->slots[at];

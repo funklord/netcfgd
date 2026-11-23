@@ -2095,6 +2095,44 @@ static void firewall_slot_cases(void)
 	    "cannot name a slot", "  and a name no set can carry");
 }
 
+/* Presets (0341): a used one's rules after the written ones, named
+ * `PRESET/RULE`, in the order `presets` names them; the refusals by name. */
+static void firewall_preset_cases(void)
+{
+	ncfg_document_t *document = compiles(
+	    "preset \"dns\" { input { accept \"dns\" { protocol = \"udp\"; port = 53 } } }\n"
+	    "preset \"web\" { input { accept \"http\" { protocol = \"tcp\"; port = 80 } } }\n"
+	    "preset \"idle\" { output { drop \"x\" { protocol = \"tcp\"; port = 1 } } }\n"
+	    "firewall {\n\tpresets = [\"web\", \"dns\"]\n"
+	    "\tinput {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ssh\" { protocol = \"tcp\"; port = 22 }\n\t}\n"
+	    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "a firewall using two presets compiles");
+
+	check(document && document->firewall && document->firewall->input.rule_count == 3 &&
+	        strcmp(document->firewall->input.rules[0].name, "ssh") == 0 &&
+	        strcmp(document->firewall->input.rules[1].name, "web/http") == 0 &&
+	        strcmp(document->firewall->input.rules[2].name, "dns/dns") == 0,
+	    "  the written rule first, then each preset's in the order named");
+	check(document && document->firewall && document->firewall->output.rule_count == 0 &&
+	        document->firewall->preset_count == 2,
+	    "  an unused preset contributes nothing, and the list is kept");
+	ncfg_document_free(document);
+	refuses("firewall {\n\tpresets = [\"nope\"]\n\tinput { policy = \"accept\" }\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "no `preset \"nope\"` block defines it", "a preset used and not defined is refused");
+	refuses("preset \"p\" { input { policy = \"drop\" } }\n",
+	    "is the host's own firewall's", "  and a preset setting a chain's policy");
+	refuses("preset \"p\" { input { slot \"s\" { action = \"drop\"; match = \"from\" } } }\n",
+	    "opens a slot", "  and one opening a slot");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\taccept \"a/b\" { protocol = \"tcp\"; port = 1 }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "marks a preset's rule", "  and a written rule wearing a preset's `/`");
+	refuses("preset \"p\" { output { drop \"x\" { mac = [\"02:00:00:00:00:01\"] } } }\n",
+	    "output chain", "  and an unused preset is still checked, rule by rule");
+}
+
 /* A rule's schedule (10.663): normalised as written, days in week order, and
  * the refusals saying why. */
 static void firewall_schedule_cases(void)
@@ -4518,6 +4556,7 @@ int main(void)
 	firewall_mac_cases();
 	firewall_out_interface_cases();
 	firewall_slot_cases();
+	firewall_preset_cases();
 	firewall_schedule_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();

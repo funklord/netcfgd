@@ -2830,6 +2830,12 @@ typedef struct {
 	ncfg_firewall_chain_t input;
 	ncfg_firewall_chain_t forward;
 	ncfg_firewall_chain_t output;
+	/* The presets this firewall uses, in the order named (0341). Their rules
+	 * are already in the chains, after the written ones, each named
+	 * `PRESET/RULE`; the names are kept so the firewall renders as written.
+	 * Omitted when empty, so a firewall with none is the document it was. */
+	char                **presets;
+	size_t                preset_count;
 } ncfg_firewall_t;
 
 /*

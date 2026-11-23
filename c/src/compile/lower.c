@@ -1040,6 +1040,9 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		ctx.source = block->source;
 		if (strcmp(head, "global") == 0) {
 			ncfg_lower_global_block(&ctx, block);
+		} else if (strcmp(head, "preset") == 0) {
+			/* Lowered once every block is read, by `ncfg_lower_presets`. */
+			continue;
 		} else if (strcmp(head, "firewall") == 0) {
 			firewall_span = block->block->span;
 			firewall_source = block->source;
@@ -1333,6 +1336,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	expand_ingress_shapers(&ctx, shapers, shaper_count);
 	check_linksets(&ctx, linksets, linkset_count);
 	resolve_host_lists(&ctx, referrers, referrer_count);
+	/* The presets first: their rules name host lists as written rules do. */
+	ncfg_lower_presets(&ctx, merged);
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
 	resolve_forward_hosts(&ctx, forwarders, forwarder_count);
 	resolve_block_lists(&ctx, blockers, blocker_count);

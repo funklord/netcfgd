@@ -601,6 +601,24 @@
 #	}
 #}
 
+# PRESETS: named sets of firewall rules, kept once and used by name (0341). A
+# preset holds chains of rules in the firewall's own grammar and nothing else
+# -- no policy, which is the host's answer, and no slot. A firewall uses one
+# with `presets = ["web-server"]`, and its rules go after the firewall's own,
+# in the order named, each called `PRESET/RULE` (`web-server/http` in `ncfg
+# status`), so a rule written here always comes before a preset's. A preset
+# is an ordinary block: one in a drop-in or shipped with the package is a
+# library entry, and `override preset "NAME"` replaces a shipped one.
+
+#preset "web-server" {
+#	input {
+#		accept "http" {
+#			protocol = "tcp"
+#			port     = [80, 443]
+#		}
+#	}
+#}
+
 # QUEUEING, which is where bufferbloat is fixed. `cake` with the real
 # upstream bandwidth is the answer for nearly every home connection.
 

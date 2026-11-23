@@ -720,6 +720,32 @@ check "a slot no longer declared is gone, members and all" \
 check "and so is its record" "$(test -e "$work/slot/quarantine" && echo kept || echo gone)" \
 	"gone"
 
+# A preset (0341): its rules after the written ones, under its own name.
+write_etc <<'CONF'
+preset "web" {
+	input {
+		accept "http" { protocol = "tcp"; port = [80, 443] }
+	}
+}
+firewall {
+	presets = ["web"]
+	input {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "ssh" { protocol = "tcp"; port = 22 }
+	}
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+check "a preset's rules follow the written ones in the kernel" \
+	"$(sed -n '/chain input {/,/}/p' "$work/listed" | grep -o 'name=[a-z/]*' | tr '\n' ' ')" \
+	"name=established name=ssh name=web/http name=web/http "
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and a firewall using a preset is converged" "$(cat "$work/plan")" "nothing to do"
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true

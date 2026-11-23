@@ -369,6 +369,9 @@ struct ncfg_firewall_settings {
 	ncfg_firewall_chain_row input;
 	ncfg_firewall_chain_row forward;
 	ncfg_firewall_chain_row output;
+	/* The presets used (0341). Their rules are in the chains, named
+	 * `PRESET/RULE`, and are written by the preset, not by a Save here. */
+	QStringList             presets;
 };
 
 /* One host list (10.591): its name and its members, as written. */

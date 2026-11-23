@@ -798,6 +798,44 @@ static int check_slots(const ncfg_firewall_t *firewall, char *err, size_t err_si
 		    NCFG_FIREWALL_SLOT_MAX);
 		return 0;
 	}
+	/* The presets (0341): each name once and one a preset can have, and a
+	 * rule wearing a `/` belongs to one of them -- otherwise the document
+	 * holds a rule no configuration could have written. */
+	for (s = 0; s < firewall->preset_count; s++) {
+		if (!ncfg_firewall_slot_name_valid(firewall->presets[s])) {
+			ncfg_error_set(err, err_size, "`%s` cannot name a firewall preset",
+			    firewall->presets[s] ? firewall->presets[s] : "");
+			return 0;
+		}
+		for (t = 0; t < s; t++) {
+			if (strcmp(firewall->presets[t], firewall->presets[s]) == 0) {
+				ncfg_error_set(err, err_size, "duplicate firewall preset entry: %s",
+				    firewall->presets[s]);
+				return 0;
+			}
+		}
+	}
+	for (c = 0; c < 3u; c++) {
+		for (s = 0; s < chains[c]->rule_count; s++) {
+			const char *name = chains[c]->rules[s].name;
+			const char *slash = name ? strchr(name, '/') : NULL;
+			int         listed = 0;
+
+			if (!slash) {
+				continue;
+			}
+			for (t = 0; t < firewall->preset_count; t++) {
+				listed = listed || (strlen(firewall->presets[t]) == (size_t)(slash - name) &&
+				    strncmp(firewall->presets[t], name, (size_t)(slash - name)) == 0);
+			}
+			if (!listed) {
+				ncfg_error_set(err, err_size,
+				    "firewall rule `%s` is a preset's, and the firewall uses no such preset",
+				    name);
+				return 0;
+			}
+		}
+	}
 	return 1;
 }
 

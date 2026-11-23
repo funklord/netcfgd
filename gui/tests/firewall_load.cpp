@@ -114,6 +114,7 @@ static QString dump(const ncfg_firewall_settings &settings)
 	const ncfg_firewall_chain_row *chains[] = { &settings.input, &settings.forward,
 		&settings.output };
 	lines << QStringLiteral("present=%1").arg(settings.present);
+	lines << QStringLiteral("presets=%1").arg(settings.presets.join(QLatin1Char(',')));
 	for (const ncfg_firewall_chain_row *chain : chains) {
 		lines << QStringLiteral("policy=%1").arg(chain->policy);
 		for (const ncfg_firewall_slot_row &slot : chain->slot_list) {
@@ -142,10 +143,13 @@ static QString dump(const ncfg_firewall_settings &settings)
 
 static const char base[] =
     "global { control { root = \"any\" } }\n"
-    "host_list \"kids\" { mac = [\"00:11:22:33:44:01\"] }\n";
+    "host_list \"kids\" { mac = [\"00:11:22:33:44:01\"] }\n"
+    /* A preset from the library, outside the tab's drop-in (0341). */
+    "preset \"mail\" { output { drop \"smtp\" { protocol = \"tcp\"; port = 25 } } }\n";
 
 static const char every_key[] =
     "firewall {\n"
+    "\tpresets = [\"mail\"]\n"
     "\tinput {\n"
     "\t\tpolicy = \"drop\"\n"
     "\t\taccept \"established\" { state = [\"established\", \"related\"] }\n"
@@ -202,7 +206,13 @@ int main(int argc, char **argv)
 	              QString::number(loaded.input.rules.size()),
 	              QString::number(loaded.forward.rules.size()),
 	              QString::number(loaded.output.rules.size())),
-	    QStringLiteral("1 drop drop accept 4/2/0"), "  every chain, its policy and its rules");
+	    QStringLiteral("1 drop drop accept 4/2/1"), "  every chain, its policy and its rules");
+	/* 0341: the preset's rule is in its chain, under its preset's name, and
+	 * a Save writes the list and leaves the rule to the preset. */
+	check(QStringLiteral("%1 %2")
+	          .arg(loaded.presets.join(QLatin1Char(',')),
+	              loaded.output.rules.isEmpty() ? QString() : loaded.output.rules.at(0).name),
+	    QStringLiteral("mail mail/smtp"), "  and the preset it uses, with its rule");
 	/* The counts the check above asserts. This read `== 3` from before the
 	 * SSH guard was the fourth input rule (10.885), so every check below was
 	 * skipped in silence until 2026-11-21 -- the guard's own among them. */
