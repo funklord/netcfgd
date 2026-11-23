@@ -7044,7 +7044,11 @@ set holds and what its rules matched (from the status, summed over both
 families, under `chain/slot:NAME` so no rule's name collides), and *add to
 slot...* and *remove from slot...* write a member live -- an address, and for
 an addition an optional lifetime after it -- through the client's new
-`ncfg_client_slot_set`. The slot itself is still changed in the files tab.
+`ncfg_client_slot_set`. And the tab edits the slots and the presets list
+themselves: *new slot...* and *view / change* on a slot's row open a dialog of
+its four keys (a slot of the same name anywhere is replaced, since the name is
+the firewall's), *delete slot* removes one, and a presets field sets the list.
+The preset blocks stay in the files tab, as a library does.
 `firewall_counts` checks both ways: unprivileged, a slot the kernel does not
 hold says so and a write is refused with the daemon's sentence; in its
 namespace variant a member written from the tab shows in the row within a

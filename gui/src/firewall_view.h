@@ -38,6 +38,12 @@ public:
 	 * Public so a test can drive it past the input dialog. */
 	bool write_slot_member(const QString &slot, const QString &address, bool add,
 	    const QString &lifetime);
+	/* The firewall's presets (0341), and its slots (0340), as the tab's
+	 * controls write them; public for the reason the one above is. A slot
+	 * of the same name is replaced, so this edits as well as adds. */
+	bool set_presets(const QStringList &presets);
+	bool put_slot(const QString &chain, const ncfg_firewall_slot_row &slot);
+	bool remove_slot(const QString &name);
 
 public slots:
 	void refresh();
@@ -59,7 +65,8 @@ private:
 	bool refuse_preset_rule(int row);
 	QString slot_at(int row) const;
 	void ask_member(bool add);
-	void write(const ncfg_firewall_settings &next, const QString &said);
+	bool write(const ncfg_firewall_settings &next, const QString &said);
+	void slot_dialog(const QString &chain, const ncfg_firewall_slot_row &existing);
 
 	ncfg_connection        *connection;
 	ncfg_firewall_settings  settings;
@@ -75,6 +82,8 @@ private:
 	QPushButton     *down_button;
 	QPushButton     *member_add_button;
 	QPushButton     *member_remove_button;
+	QPushButton     *slot_delete_button;
+	class QLineEdit *presets_edit;
 };
 
 #endif /* NCFG_FIREWALL_VIEW_H */

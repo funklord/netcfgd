@@ -86,8 +86,16 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	conf.write("global { control { root = \"any\" } }\n"
-	           "preset \"web\" { input { accept \"http\" { protocol = \"tcp\"; port = 80 } } }\n"
-	           "firewall {\n"
+	           "preset \"web\" { input { accept \"http\" { protocol = \"tcp\"; port = 80 } } }\n");
+	conf.close();
+	/* The firewall in the drop-in the tab writes, as the window keeps it:
+	 * in netcfgd.conf, a write from the tab would be a second block. */
+	conf.setFileName(etc + QStringLiteral("/conf.d/firewall.conf"));
+	if (!conf.open(QIODevice::WriteOnly)) {
+		fprintf(stderr, "firewall_counts: cannot write the firewall drop-in\n");
+		return 1;
+	}
+	conf.write("firewall {\n"
 	           "\tpresets = [\"web\"]\n"
 	           "\tinput {\n"
 	           "\t\tpolicy = \"accept\"\n"
@@ -144,12 +152,16 @@ int main(int argc, char **argv)
 		check(matched(&view, QStringLiteral("slot quarantine")),
 		    QStringLiteral("not in the kernel yet"), "a slot the kernel does not hold says so");
 		QString said_write;
-		QObject::connect(&view, &ncfg_firewall_view::reported,
+		/* Disconnected before `said_write` goes: a connection outlives the
+		 * block, and the next signal would write into freed memory. */
+		const QMetaObject::Connection listening = QObject::connect(&view,
+		    &ncfg_firewall_view::reported,
 		    [&said_write](const QString &summary) { said_write = summary; });
 		check(view.write_slot_member(QStringLiteral("quarantine"), QStringLiteral("192.0.2.7"),
 		          true, QString()) || said_write.isEmpty()
 		          ? QStringLiteral("unexplained") : QStringLiteral("refused, saying why"),
 		    QStringLiteral("refused, saying why"), "  and a member written into it is refused");
+		QObject::disconnect(listening);
 	} else {
 		/* The table is the daemon's first pass; asked again until it shows. */
 		waited.restart();
@@ -214,11 +226,14 @@ int main(int argc, char **argv)
 		auto       *cells = view.findChild<QTableWidget *>();
 		auto       *up = view.findChild<QPushButton *>(QStringLiteral("firewall_up"));
 		QString     said;
-		const bool  drop_in = QFile::exists(etc + QStringLiteral("/conf.d/firewall.conf"));
+		QFile       before_file(etc + QStringLiteral("/conf.d/firewall.conf"));
+		const QByteArray drop_in = before_file.open(QIODevice::ReadOnly) ? before_file.readAll()
+		                                                                 : QByteArray();
+		before_file.close();
 		int         row = -1;
 
-		QObject::connect(&view, &ncfg_firewall_view::reported,
-		    [&said](const QString &summary) { said = summary; });
+		const QMetaObject::Connection listening = QObject::connect(&view,
+		    &ncfg_firewall_view::reported, [&said](const QString &summary) { said = summary; });
 		view.refresh();
 		for (int at = 0; cells && at < cells->rowCount(); at++) {
 			if (cells->item(at, 1) && cells->item(at, 1)->text() == QLatin1String("web/http")) {
@@ -253,9 +268,53 @@ int main(int argc, char **argv)
 		check(said.contains(QStringLiteral("ncfg slot")) ? QStringLiteral("refused")
 		                                                 : QStringLiteral("not refused"),
 		    QStringLiteral("refused"), "  and moving it is refused, saying how it is written");
-		check(QFile::exists(etc + QStringLiteral("/conf.d/firewall.conf")) == drop_in
+		QFile after_file(etc + QStringLiteral("/conf.d/firewall.conf"));
+		check((after_file.open(QIODevice::ReadOnly) ? after_file.readAll() : QByteArray()) == drop_in
 		        ? QStringLiteral("unwritten") : QStringLiteral("written"),
 		    QStringLiteral("unwritten"), "  with nothing written");
+		QObject::disconnect(listening);
+	}
+
+	/* 0340, 0341: the tab writes the presets list and slots, and they come
+	 * back from the daemon as written. */
+	{
+		QString why_refused;
+		const QMetaObject::Connection listening = QObject::connect(&view,
+		    &ncfg_firewall_view::reported,
+		    [&why_refused](const QString &summary) { why_refused = summary; });
+		check(view.set_presets({ QStringLiteral("web") }) ? QStringLiteral("written")
+		                                                   : why_refused,
+		    QStringLiteral("written"), "the presets list is written from the tab");
+		ncfg_firewall_settings back;
+		QString                why;
+		check(connection.firewall(&back, &why) ? back.presets.join(QLatin1Char(',')) : why,
+		    QStringLiteral("web"), "  and reads back");
+		ncfg_firewall_slot_row guests;
+		guests.name = QStringLiteral("guests");
+		guests.action = QStringLiteral("accept");
+		guests.match = QStringLiteral("to");
+		guests.timeout = 3600;
+		check(view.put_slot(QStringLiteral("forward"), guests) ? QStringLiteral("written")
+		                                                        : QStringLiteral("refused"),
+		    QStringLiteral("written"), "a slot is added from the tab");
+		check(connection.firewall(&back, &why) && back.forward.slot_list.size() == 1
+		          ? QStringLiteral("%1 %2 %3 %4")
+		                .arg(back.forward.slot_list.at(0).name, back.forward.slot_list.at(0).action,
+		                    back.forward.slot_list.at(0).match)
+		                .arg(back.forward.slot_list.at(0).timeout)
+		          : why,
+		    QStringLiteral("guests accept to 3600"), "  into its chain, as written");
+		guests.action = QStringLiteral("drop");
+		(void)view.put_slot(QStringLiteral("output"), guests);
+		check(connection.firewall(&back, &why) && back.forward.slot_list.isEmpty() &&
+		          back.output.slot_list.size() == 1
+		          ? back.output.slot_list.at(0).action : why,
+		    QStringLiteral("drop"), "  and one of the same name is replaced, not doubled");
+		check(view.remove_slot(QStringLiteral("guests")) && connection.firewall(&back, &why) &&
+		          back.output.slot_list.isEmpty() && back.input.slot_list.size() == 1
+		          ? QStringLiteral("removed") : why,
+		    QStringLiteral("removed"), "  and removed, leaving the others");
+		QObject::disconnect(listening);
 	}
 
 	daemon.kill();

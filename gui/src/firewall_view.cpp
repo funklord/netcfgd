@@ -8,11 +8,15 @@
 #include "table_view.h"
 
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QVBoxLayout>
 
 namespace {
@@ -88,6 +92,23 @@ ncfg_firewall_view::ncfg_firewall_view(ncfg_connection *connection, QWidget *par
 	policies->addWidget(policies_button);
 	policies->addStretch();
 	layout->addLayout(policies);
+	/* The presets the firewall uses (0341), comma- or space-separated; their
+	 * blocks are written in the files tab, as a library is. */
+	auto *presets_row = new QHBoxLayout();
+	presets_edit = new QLineEdit(this);
+	presets_edit->setObjectName(QStringLiteral("firewall_presets"));
+	presets_edit->setPlaceholderText(QStringLiteral("presets used, after this firewall's rules"));
+	presets_edit->setAccessibleName(QStringLiteral("presets"));
+	auto *presets_button = new QPushButton(QStringLiteral("set presets"), this);
+	presets_button->setObjectName(QStringLiteral("firewall_set_presets"));
+	presets_row->addWidget(new QLabel(QStringLiteral("presets"), this));
+	presets_row->addWidget(presets_edit, 1);
+	presets_row->addWidget(presets_button);
+	layout->addLayout(presets_row);
+	connect(presets_button, &QPushButton::clicked, this, [this]() {
+		(void)set_presets(presets_edit->text().split(QRegularExpression(QStringLiteral("[,\\s]+")),
+		    Qt::SkipEmptyParts));
+	});
 
 	QStringList columns;
 	columns << QStringLiteral("chain") << QStringLiteral("name") << QStringLiteral("action")
@@ -116,6 +137,21 @@ ncfg_firewall_view::ncfg_firewall_view(ncfg_connection *connection, QWidget *par
 	table->add_control(member_remove_button);
 	member_add_button->setEnabled(false);
 	member_remove_button->setEnabled(false);
+	auto *slot_new_button = new QPushButton(QStringLiteral("new slot..."), this);
+	slot_new_button->setObjectName(QStringLiteral("firewall_slot_new"));
+	table->add_control(slot_new_button);
+	slot_delete_button = new QPushButton(QStringLiteral("delete slot"), this);
+	slot_delete_button->setObjectName(QStringLiteral("firewall_slot_delete"));
+	table->add_control(slot_delete_button);
+	slot_delete_button->setEnabled(false);
+	connect(slot_new_button, &QPushButton::clicked, this,
+	    [this]() { slot_dialog(QString(), ncfg_firewall_slot_row()); });
+	connect(slot_delete_button, &QPushButton::clicked, this, [this]() {
+		const QString slot = slot_at(table->selected_row());
+		if (!slot.isEmpty()) {
+			(void)remove_slot(slot);
+		}
+	});
 	for (QPushButton *button : { edit_button, up_button, down_button }) {
 		button->setEnabled(false);
 	}
@@ -137,6 +173,7 @@ ncfg_firewall_view::ncfg_firewall_view(ncfg_connection *connection, QWidget *par
 		}
 		member_add_button->setEnabled(slot);
 		member_remove_button->setEnabled(slot);
+		slot_delete_button->setEnabled(slot);
 	});
 }
 
@@ -153,6 +190,7 @@ void ncfg_firewall_view::refresh()
 		return;
 	}
 	settings = found;
+	presets_edit->setText(settings.presets.join(QStringLiteral(", ")));
 
 	const struct {
 		const char                    *name;
@@ -237,17 +275,134 @@ void ncfg_firewall_view::refresh()
 	emit reported(ncfg_counted(rows.size(), "firewall rule", "firewall rules"));
 }
 
-void ncfg_firewall_view::write(const ncfg_firewall_settings &next, const QString &said)
+bool ncfg_firewall_view::write(const ncfg_firewall_settings &next, const QString &said)
 {
 	QString error;
 	if (!ncfg_firewall_write(connection, next, &error)) {
 		emit reported(error);
-		return;
+		return false;
 	}
 	emit reported(QStringLiteral("wrote %1: %2. netcfgd puts it in effect itself; Apply... shows anything it holds back.")
 	                  .arg(QString::fromLatin1(ncfg_firewall_drop_in), said));
 	refresh();
 	emit changed();
+	return true;
+}
+
+bool ncfg_firewall_view::set_presets(const QStringList &presets)
+{
+	ncfg_firewall_settings next = settings;
+	next.present = true;
+	next.presets = presets;
+	return write(next, presets.isEmpty() ? QStringLiteral("no presets")
+	                                     : QStringLiteral("presets %1").arg(presets.join(", ")));
+}
+
+bool ncfg_firewall_view::put_slot(const QString &chain, const ncfg_firewall_slot_row &slot)
+{
+	ncfg_firewall_settings next = settings;
+	next.present = true;
+	/* A slot's name is the firewall's: one of that name anywhere goes. */
+	for (ncfg_firewall_chain_row *each : { &next.input, &next.forward, &next.output }) {
+		for (int at = each->slot_list.size() - 1; at >= 0; at--) {
+			if (each->slot_list.at(at).name == slot.name) {
+				each->slot_list.removeAt(at);
+			}
+		}
+	}
+	ncfg_firewall_chain_row *into = ncfg_firewall_chain(&next, chain);
+	if (!into) {
+		emit reported(QStringLiteral("%1 is not a chain").arg(chain));
+		return false;
+	}
+	into->slot_list << slot;
+	return write(next, QStringLiteral("slot %1 in %2").arg(slot.name, chain));
+}
+
+bool ncfg_firewall_view::remove_slot(const QString &name)
+{
+	ncfg_firewall_settings next = settings;
+	bool                   found = false;
+	for (ncfg_firewall_chain_row *each : { &next.input, &next.forward, &next.output }) {
+		for (int at = each->slot_list.size() - 1; at >= 0; at--) {
+			if (each->slot_list.at(at).name == name) {
+				each->slot_list.removeAt(at);
+				found = true;
+			}
+		}
+	}
+	if (!found) {
+		emit reported(QStringLiteral("there is no slot %1").arg(name));
+		return false;
+	}
+	return write(next, QStringLiteral("slot %1 removed, and its members with it").arg(name));
+}
+
+/* A slot's four keys, new or prefilled from the one being changed. */
+void ncfg_firewall_view::slot_dialog(const QString &chain, const ncfg_firewall_slot_row &existing)
+{
+	QDialog dialog(this);
+	dialog.setWindowTitle(existing.name.isEmpty() ? QStringLiteral("New slot")
+	                                              : QStringLiteral("Slot %1").arg(existing.name));
+	auto *form = new QFormLayout(&dialog);
+	auto *where = new QComboBox(&dialog);
+	for (const char *one : { "input", "forward", "output" }) {
+		where->addItem(QString::fromLatin1(one), QString::fromLatin1(one));
+	}
+	where->setCurrentIndex(where->findData(chain.isEmpty() ? QStringLiteral("forward") : chain));
+	auto *name = new QLineEdit(existing.name, &dialog);
+	name->setPlaceholderText(QStringLiteral("quarantine"));
+	auto *action = new QComboBox(&dialog);
+	for (const char *one : { "drop", "reject", "accept" }) {
+		action->addItem(QString::fromLatin1(one), QString::fromLatin1(one));
+	}
+	if (!existing.action.isEmpty()) {
+		action->setCurrentIndex(action->findData(existing.action));
+	}
+	auto *match = new QComboBox(&dialog);
+	match->addItem(QStringLiteral("source (from)"), QStringLiteral("from"));
+	match->addItem(QStringLiteral("destination (to)"), QStringLiteral("to"));
+	match->setCurrentIndex(match->findData(existing.match == QLatin1String("to")
+	                                           ? QStringLiteral("to") : QStringLiteral("from")));
+	auto *timeout = new QLineEdit(existing.timeout > 0
+	                                  ? QStringLiteral("%1s").arg(existing.timeout) : QString(),
+	    &dialog);
+	timeout->setPlaceholderText(QStringLiteral("blank: until removed; or 90s, 30m, 1h, 2d"));
+	form->addRow(QStringLiteral("chain"), where);
+	form->addRow(QStringLiteral("name"), name);
+	form->addRow(QStringLiteral("members get"), action);
+	form->addRow(QStringLiteral("matched by"), match);
+	form->addRow(QStringLiteral("lifetime"), timeout);
+	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+	form->addRow(buttons);
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	ncfg_firewall_slot_row slot;
+	slot.name = name->text().trimmed();
+	slot.action = action->currentData().toString();
+	slot.match = match->currentData().toString();
+	/* The lifetime in seconds, as the document holds it; the compiler
+	 * refuses a spelling it cannot read, and says why. */
+	const QString life = timeout->text().trimmed();
+	if (!life.isEmpty()) {
+		static const QString units = QStringLiteral("smhd");
+		const qsizetype unit = units.indexOf(life.right(1));
+		bool            number = false;
+		const long      count = life.left(life.size() - 1).toLong(&number);
+		static const long scale[] = { 1, 60, 3600, 86400 };
+		if (unit < 0 || !number || count <= 0) {
+			emit reported(QStringLiteral("`%1` is not a lifetime: a count and s, m, h or d").arg(life));
+			return;
+		}
+		slot.timeout = count * scale[unit];
+	}
+	if (!existing.name.isEmpty() && existing.name != slot.name) {
+		(void)remove_slot(existing.name);
+	}
+	(void)put_slot(where->currentData().toString(), slot);
 }
 
 void ncfg_firewall_view::set_policies()
@@ -275,9 +430,9 @@ static QString preset_of(const QString &rule)
 bool ncfg_firewall_view::refuse_preset_rule(int row)
 {
 	if (places.at(row).second < 0) {
-		emit reported(QStringLiteral("a slot is opened in the firewall block and its members are "
-		                             "written live with `ncfg slot`; the slot itself is changed "
-		                             "in the files tab (0340)"));
+		emit reported(QStringLiteral("a slot always comes first in its chain, so it does not "
+		                             "move; view / change edits it, and its members are written "
+		                             "live with add and remove, or `ncfg slot` (0340)"));
 		return true;
 	}
 	const ncfg_firewall_chain_row *chain =
@@ -390,6 +545,15 @@ void ncfg_firewall_view::edit_selected()
 {
 	const int row = table->selected_row();
 	if (row < 0 || row >= places.size()) {
+		return;
+	}
+	/* A slot's row opens the slot's own dialog (0340). */
+	if (places.at(row).second < 0) {
+		const ncfg_firewall_chain_row *chain = ncfg_firewall_chain(&settings, places.at(row).first);
+		const int at = -1 - places.at(row).second;
+		if (chain && at < chain->slot_list.size()) {
+			slot_dialog(places.at(row).first, chain->slot_list.at(at));
+		}
 		return;
 	}
 	if (refuse_preset_rule(row)) {
