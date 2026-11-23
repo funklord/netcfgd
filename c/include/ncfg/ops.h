@@ -307,6 +307,12 @@ int ncfg_ops_set_link_mtu(ncfg_buf_t *out, uint32_t seq, uint32_t index, uint32_
 int ncfg_ops_set_link_mac(ncfg_buf_t *out, uint32_t seq, uint32_t index, const uint8_t mac[6],
     char *err, size_t err_size);
 
+/* A bridge port's isolation (`IFLA_BRPORT_ISOLATED`, 10.912), as the slave
+ * data of an `RTM_NEWLINK` on the port: `bridge` as the slave kind and the
+ * one attribute, so nothing else about the port is restated. */
+int ncfg_ops_set_port_isolated(ncfg_buf_t *out, uint32_t seq, uint32_t index, int isolated,
+    char *err, size_t err_size);
+
 /* Enslave to a master, or release with index 0 -- which is how netlink spells
  * "no master". */
 int ncfg_ops_set_link_master(ncfg_buf_t *out, uint32_t seq, uint32_t index, uint32_t master,

@@ -3226,12 +3226,11 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	    "{\"id\":\"office\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
 	    "\"autoconnect\":true,\"metered\":false,\"bssid\":[\"02:00:00:00:00:01\"],"
 	    "\"addressing\":[{\"source\":\"dhcp4\"},{\"source\":\"dhcp6\","
-	    "\"mode\":\"managed\",\"prefix_delegation\":{\"length\":56}}],"
+	    "\"prefix_delegation\":{\"length\":56}}],"
 	    "\"routes\":[{\"destination\":\"10.0.0.0/8\",\"via\":\"192.168.1.1\"}],"
 	    "\"hooks\":[]},"
 	    "{\"id\":\"plain\",\"security\":{\"type\":\"open\"},\"hidden\":false,"
-	    "\"autoconnect\":true,\"metered\":false,\"addressing\":[{\"source\":\"dhcp6\","
-	    "\"mode\":\"other_conf\"}],"
+	    "\"autoconnect\":true,\"metered\":false,\"addressing\":[{\"source\":\"dhcp6\"}],"
 	    "\"routes\":[],\"hooks\":[]}"
 	    "],\"globals\":{}}\n"
 	    "{\"response\":\"document\",\"schema_version\":1,\"access_points\":["
@@ -3262,10 +3261,10 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 			equals("  with the dhcp6 one's prefix delegation as its options",
 			    networks.items[0].sources[1].options, "pd pd_length 56");
 		}
-		/* A `dhcp6` mode the language cannot write -- it has no word for one
-		 * -- is named rather than dropped by a form that writes `dhcp6`. */
-		equals("and a dhcp6 mode no configuration can say is named",
-		    networks.items[1].unmodelled, "addressing (a dhcp6 mode or rapid commit)");
+		/* A `dhcp6` source is the whole of what a lease says since its mode
+		 * and rapid commit left the model (0339), so nothing is named. */
+		equals("and a plain dhcp6 source names nothing",
+		    networks.items[1].unmodelled, "");
 	}
 	ncfg_saved_networks_free(&networks);
 

@@ -116,6 +116,8 @@ typedef enum {
 	NCFG_OP_LINK_SET_RINGS,
 	/* A station radio's four-address (WDS) mode, over nl80211 (10.587). */
 	NCFG_OP_LINK_SET_WDS,
+	/* A bridge port's isolation (`IFLA_BRPORT_ISOLATED`, 10.912). */
+	NCFG_OP_LINK_SET_ISOLATED,
 	NCFG_OP_LINK_SET_IPV6_TOKEN,
 	NCFG_OP_RULE_ADD,
 	NCFG_OP_RULE_DEL,
@@ -212,6 +214,11 @@ typedef struct {
 			const char *name;
 			int         on;
 		} set_wds;
+		/* The same shape: a port and whether it is isolated. */
+		struct {
+			const char *name;
+			int         on;
+		} set_isolated;
 		struct {
 			const char   *iface;
 			const char   *addr;

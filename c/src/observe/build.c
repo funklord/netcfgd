@@ -415,6 +415,7 @@ static int build_link(const ncfg_observe_snapshot_t *snapshot, const ncfg_link_r
 			return 0;
 		}
 	}
+	link->port_isolated = record->has_port_isolated && record->port_isolated;
 	if (record->has_master) {
 		other = name_of(snapshot, record->master);
 		if (other) {

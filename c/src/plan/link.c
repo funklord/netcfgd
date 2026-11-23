@@ -452,7 +452,70 @@ static uint32_t plan_wds(ncfg_builder_t *builder, const char *name,
 	return ncfg_builder_push(builder, &op, &reason, gate->ids, gate->count, &inverse);
 }
 
+static uint32_t plan_master(ncfg_builder_t *builder, const char *name);
+
+/*
+ * A bridge port's isolation (10.912), once it is the bridge's port: after the
+ * enslave where this plan makes one, since the kernel holds the setting on
+ * the port's membership and a freshly enslaved port starts without it.
+ * **Enforced either way on a port whose master the document names**, so taking
+ * `isolated` out undoes it; a bond's port and a radio hostapd has not bridged
+ * yet are left alone.
+ */
+static void plan_isolated(ncfg_builder_t *builder, const char *name, uint32_t enslave)
+{
+	const ncfg_device_t        *device = ncfg_plan_device(builder->desired, name);
+	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, name);
+	const ncfg_device_t        *master;
+	ncfg_plan_ids_t             gate = { NULL, 0, 0 };
+	ncfg_op_t                   op;
+	ncfg_op_t                   inverse;
+	ncfg_reason_t               reason;
+	int                         enslaved;
+	int                         current;
+
+	if (!device || !device->master) {
+		return;
+	}
+	master = ncfg_plan_device(builder->desired, device->master);
+	if (!master || master->kind.kind != (int)NCFG_KIND_BRIDGE) {
+		return;
+	}
+	/* A port this plan creates and enslaves starts unisolated, like any
+	 * fresh one, so it is planned now rather than a pass later. */
+	enslaved = link && link->master && strcmp(link->master, device->master) == 0;
+	if (!enslaved && enslave == NCFG_PLAN_NO_ACTION) {
+		return;
+	}
+	current = enslaved && link->port_isolated != 0;
+	if ((device->isolated != 0) == current) {
+		return;
+	}
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_SET_ISOLATED;
+	op.u.set_isolated.name = name;
+	op.u.set_isolated.on = device->isolated != 0;
+	inverse = op;
+	inverse.u.set_isolated.on = current;
+	reason = ncfg_plan_reason_differs(name, "isolated", device->isolated ? "true" : "false",
+	    current ? "true" : "false");
+	ncfg_builder_gate(builder, name, &gate);
+	if (enslave != NCFG_PLAN_NO_ACTION) {
+		ncfg_plan_ids_push(builder->plan, &gate, enslave);
+	}
+	(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
+	ncfg_plan_ids_free(&gate);
+}
+
 uint32_t ncfg_plan_master(ncfg_builder_t *builder, const char *name)
+{
+	const uint32_t id = plan_master(builder, name);
+
+	plan_isolated(builder, name, id);
+	return id;
+}
+
+static uint32_t plan_master(ncfg_builder_t *builder, const char *name)
 {
 	const ncfg_device_t        *device = ncfg_plan_device(builder->desired, name);
 	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, name);

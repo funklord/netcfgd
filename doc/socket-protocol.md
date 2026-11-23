@@ -161,7 +161,7 @@ spelling in `hello`'s `tiers`; netcfgd writes and sends only the new ones.
 |---|---|
 | `view` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
 | `laptop` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set`, `tunnel_set` |
-| `root` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `secret_get`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put` |
+| `root` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `secret_get`, `hook_list`, `profile_set`, `profile_save`, `profile_delete`, `probe_put`, `slot_set` |
 
 **All thirty-three, and it stayed at twenty-three for a long time.** The nine
 that were missing -- the five listings, `radio_set`, and the three that write a
@@ -559,6 +559,7 @@ are using and one that will cut them off.
 | `link.set_bond` | yes |  |
 | `link.set_bridge` | yes |  |
 | `link.set_ipv6_token` |  |  |
+| `link.set_isolated` |  |  |
 | `link.set_mac` | yes |  |
 | `link.set_macvlan` | yes |  |
 | `link.set_master` | yes |  |

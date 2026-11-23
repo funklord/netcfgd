@@ -1847,7 +1847,11 @@ static const ncfg_field_t device_fields[] = {
 	 * document written before this field existed has no written devices as far
 	 * as the renderer is concerned, which is what it did anyway. */
 	{ .name = "declared", .kind = NCFG_F_BOOL,
-	    .offset = offsetof(ncfg_device_t, declared) }
+	    .offset = offsetof(ncfg_device_t, declared) },
+	/* A bridge port's isolation (10.912). Last and omitted when false, for
+	 * the reason the members before it give. */
+	{ .name = "isolated", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_device_t, isolated) }
 };
 static const ncfg_type_t device_type = TYPE("device", device_fields);
 

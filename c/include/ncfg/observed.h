@@ -706,6 +706,9 @@ typedef struct {
 	ncfg_optint_t qdisc_bandwidth_bits;
 	/* `cake` finding hosts behind NAT (`TCA_CAKE_NAT`). Absent when false. */
 	int           qdisc_nat;
+	/* A bridge port kept from the bridge's other isolated ports
+	 * (`IFLA_BRPORT_ISOLATED`, 10.912). Absent when false. */
+	int           port_isolated;
 	/* An XFRM interface's `if_id` (0323), compared because one with another
 	 * id sends its traffic to no SA at all. */
 	ncfg_optint_t xfrm_if_id;

@@ -1348,6 +1348,15 @@ typedef struct {
 	 * only here describe the same machine and plan identically.
 	 */
 	int                   declared;
+	/*
+	 * A bridge port kept from the bridge's other isolated ports (10.912):
+	 * the kernel's `IFLA_BRPORT_ISOLATED`, so a guest segment's ports --
+	 * each radio, each wired port -- reach the uplink and not each other.
+	 * Only with a `master` that is a bridge. Enforced either way on a port
+	 * whose master the document names, so taking the key out undoes it.
+	 * Omitted when false, so every document before it is the one it was.
+	 */
+	int                   isolated;
 } ncfg_device_t;
 
 /* ------------------------------------------------------------------------ *

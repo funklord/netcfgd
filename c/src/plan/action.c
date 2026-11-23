@@ -95,6 +95,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "link.set_rings";
 	case NCFG_OP_LINK_SET_WDS:
 		return "link.set_wds";
+	case NCFG_OP_LINK_SET_ISOLATED:
+		return "link.set_isolated";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 		return "link.set_ipv6_token";
 	case NCFG_OP_RULE_ADD:
@@ -284,6 +286,9 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	/* Measured: a station stays associated while its four-address mode is
 	 * changed (10.587), so nothing in flight is cut by it. */
 	case NCFG_OP_LINK_SET_WDS:
+	/* Isolating a port changes which of the bridge's ports reach each other,
+	 * not whether this machine keeps its own connection (10.912). */
+	case NCFG_OP_LINK_SET_ISOLATED:
 	/* A neighbour list only changes what a station is told about where it
 	 * may go; nothing associated is moved by it (10.595). */
 	case NCFG_OP_NEIGHBOUR_ADD:
@@ -346,6 +351,8 @@ static const char *subject_class(int kind)
 		return "rings";
 	case NCFG_OP_LINK_SET_WDS:
 		return "wds";
+	case NCFG_OP_LINK_SET_ISOLATED:
+		return "isolated";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 		return "token";
 	case NCFG_OP_ADDR_ADD:
@@ -545,6 +552,8 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 		return op->u.set_rings.name;
 	case NCFG_OP_LINK_SET_WDS:
 		return op->u.set_wds.name;
+	case NCFG_OP_LINK_SET_ISOLATED:
+		return op->u.set_isolated.name;
 	case NCFG_OP_LINK_DELETE:
 	case NCFG_OP_LINK_UNSET_MASTER:
 	case NCFG_OP_LINK_UP:

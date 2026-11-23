@@ -2095,6 +2095,23 @@ static void firewall_slot_cases(void)
 	    "cannot name a slot", "  and a name no set can carry");
 }
 
+/* A bridge port's isolation (10.912): a bridge's port only. */
+static void isolated_port_cases(void)
+{
+	ncfg_document_t *document = compiles(
+	    "device br0 { bridge { members = [\"eth1\"] } }\ndevice eth1 { isolated = true }\n",
+	    "an isolated bridge port compiles");
+	const ncfg_device_t *port = document ? ncfg_document_device(document, "eth1") : NULL;
+
+	check(port && port->isolated && port->master && strcmp(port->master, "br0") == 0,
+	    "  and the port is isolated in its bridge");
+	ncfg_document_free(document);
+	refuses("device eth2 { isolated = true }\n", "it is a port of nothing",
+	    "an isolated device that is no bridge's port is refused");
+	refuses("device bond0 { bond { members = [\"eth1\"] } }\ndevice eth1 { isolated = true }\n",
+	    "is a bridge port's setting", "  and so is a bond's");
+}
+
 /* Presets (0341): a used one's rules after the written ones, named
  * `PRESET/RULE`, in the order `presets` names them; the refusals by name. */
 static void firewall_preset_cases(void)
@@ -4557,6 +4574,7 @@ int main(void)
 	firewall_out_interface_cases();
 	firewall_slot_cases();
 	firewall_preset_cases();
+	isolated_port_cases();
 	firewall_schedule_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();

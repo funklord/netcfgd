@@ -2158,9 +2158,9 @@ int ncfg_new_choices(const ncfg_access_point_t *points, size_t count, ncfg_new_c
  * saved-network parse is the second caller rather than the first.
  */
 static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
-                        ncfg_address_source_t **into, size_t *into_count, char **unmodelled);
+                        ncfg_address_source_t **into, size_t *into_count);
 static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_route_t **into,
-                       size_t *into_count, char **unmodelled);
+                       size_t *into_count);
 static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t *dns,
                     char **unmodelled);
 
@@ -2423,9 +2423,9 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		 * fields: what of them a field cannot hold is named, as on an
 		 * interface. */
 		if (!read_sources(doc, ncfg_json_member(doc, entry, "addressing"),
-		        &item->sources, &item->source_count, &item->unmodelled)
+		        &item->sources, &item->source_count)
 		    || !read_routes(doc, ncfg_json_member(doc, entry, "routes"), &item->routes,
-		        &item->route_count, &item->unmodelled)
+		        &item->route_count)
 		    || !read_dns(doc, ncfg_json_member(doc, entry, "dns"), &item->dns,
 		        &item->unmodelled)) {
 			set_error(err, err_size, "out of memory");
@@ -4192,13 +4192,11 @@ static int add_number_option(char **options, const char *word, const ncfg_json_d
  * One addressing entry back in the language's words: its `address` (the CIDR,
  * or the `@pd:` reference) and its `options`, the modifiers after the head.
  *
- * **Only what the language can say.** A `dhcp6` mode other than `managed` or
- * rapid commit, a `dhcp4` with anything set, a delegation's index: the
- * compiler never produces them, so a document holding one came from
- * somewhere a form should not overwrite, and it is named rather than dropped.
+ * Every member a source has is one the language can say, since the DHCP
+ * lease settings and a delegation's index left the model (0339).
  */
 static int source_text(const ncfg_json_doc_t *doc, uint32_t entry, const char *source,
-                       ncfg_address_source_t *out, char **unmodelled)
+                       ncfg_address_source_t *out)
 {
 	out->options = dup_string("");
 	if (!out->options) {
@@ -4268,12 +4266,9 @@ static int source_text(const ncfg_json_doc_t *doc, uint32_t entry, const char *s
  * The `addressing` list, as a form carries it.
  *
  * Every source in the document's order, with the CIDR beside a static one.
- * What has no field is reported through `unmodelled` rather than approximated
- * to the nearest thing that does -- approximating is what silently rewrites a
- * configuration on the next save.
  */
 static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
-                        ncfg_address_source_t **into, size_t *into_count, char **unmodelled)
+                        ncfg_address_source_t **into, size_t *into_count)
 {
 	uint32_t count = ncfg_json_count(doc, list);
 
@@ -4292,7 +4287,7 @@ static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
 		if (!(*into)[i].source) {
 			return 0;
 		}
-		if (!source_text(doc, entry, (*into)[i].source, &(*into)[i], unmodelled)) {
+		if (!source_text(doc, entry, (*into)[i].source, &(*into)[i])) {
 			return 0;
 		}
 	}
@@ -4300,14 +4295,12 @@ static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
 }
 
 /*
- * The `routes` list, as a form carries it: destination, gateway and metric.
- *
- * A route carrying anything else -- a source address, a table, a scope, an
- * onlink flag -- is named through `unmodelled`, because those are the parts a
- * three-column table would delete on save.
+ * The `routes` list, as a form carries it: destination, gateway, metric,
+ * source, table and onlink -- every member a route has since its `scope` and
+ * `proto` left the model (0339), so there is nothing left to name unmodelled.
  */
 static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_route_t **into,
-                       size_t *into_count, char **unmodelled)
+                       size_t *into_count)
 {
 	uint32_t count = ncfg_json_count(doc, list);
 
@@ -5232,6 +5225,12 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "
 		    "interface it belongs to)");
 	}
+	/* A bridge port's isolation (10.912), which the form has no field for
+	 * yet: named, so Save refuses rather than taking it away. */
+	if (ncfg_json_bool(doc, ncfg_json_member(doc, found, "isolated"), 0)) {
+		note_unmodelled(&out->unmodelled, "isolated (a bridge port kept from its "
+		    "bridge's other isolated ports)");
+	}
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");
 	}
@@ -5300,9 +5299,9 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	}
 
 	if (!read_sources(doc, ncfg_json_member(doc, found, "addressing"), &out->sources,
-	        &out->source_count, &out->unmodelled)
+	        &out->source_count)
 	    || !read_routes(doc, ncfg_json_member(doc, found, "routes"), &out->routes,
-	        &out->route_count, &out->unmodelled)
+	        &out->route_count)
 	    || !read_dns(doc, ncfg_json_member(doc, found, "dns"), &out->dns,
 	        &out->unmodelled)) {
 		set_error(err, err_size, "out of memory");

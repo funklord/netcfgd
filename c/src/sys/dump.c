@@ -734,6 +734,29 @@ int ncfg_dump_link(const void *payload, size_t length, ncfg_link_record_t *out, 
 	if (!info_data(&linkinfo, have_linkinfo, &data, &have_data, err, err_size)) {
 		goto refused;
 	}
+	/* A bridge port's own settings, in the slave data beside the kind. Only
+	 * isolation is read: it is the one netcfgd sets (10.912). */
+	if (have_linkinfo) {
+		char              slave_kind[sizeof(out->kind)];
+		ncfg_wire_attrs_t slave;
+		int               have_slave = 0;
+		uint8_t           isolated = 0;
+
+		slave_kind[0] = '\0';
+		if (!area_string(&linkinfo, IFLA_INFO_SLAVE_KIND, slave_kind, sizeof(slave_kind),
+		        &found, err, err_size) ||
+		    !area_nest(&linkinfo, IFLA_INFO_SLAVE_DATA, &slave, &have_slave, err,
+		        err_size)) {
+			goto refused;
+		}
+		if (have_slave && strcmp(slave_kind, "bridge") == 0) {
+			if (!area_u8(&slave, IFLA_BRPORT_ISOLATED, &isolated, &found, err, err_size)) {
+				goto refused;
+			}
+			out->has_port_isolated = found;
+			out->port_isolated = isolated != 0;
+		}
+	}
 	if (have_data) {
 		ncfg_tunnel_family_t family = ncfg_tunnel_family(out->kind);
 

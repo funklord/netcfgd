@@ -748,6 +748,11 @@ typedef struct {
 	uint32_t parent;
 	int      has_bond;
 	ncfg_bond_info_t bond;
+	/* A bridge port's isolation (`IFLA_BRPORT_ISOLATED`), from the slave
+	 * data a port's own dump carries. `has_port_isolated` where the port is
+	 * a bridge's and the kernel said. */
+	int      has_port_isolated;
+	int      port_isolated;
 	int      has_bridge;
 	/* Read because a bridge configured at creation and never compared is a
 	 * bridge whose edited `stp` or `forward_delay` does nothing, and the

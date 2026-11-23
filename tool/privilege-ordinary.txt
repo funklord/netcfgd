@@ -231,3 +231,30 @@ url
 # drop matches, and a bridge's max_age (10.889), a timer like hello_time.
 over
 max_age
+#
+# Firewall rule keys since: an icmp rule's types (0333), a reject's TCP reset
+# (0332), logging at ten a minute (0330). Each narrows or describes a rule.
+icmp_type
+reset
+log
+#
+# An uplink's MSS clamp (0334): a rewrite of what forwarded SYNs carry.
+clamp_mss
+#
+# A DNS scope's resolver options, transport and DNSSEC (0339), and their
+# top-level forms: how this machine asks its resolvers, which a desktop
+# user already chooses by choosing the servers.
+options
+transport
+dnssec
+dns_options
+dns_transport
+dns_dnssec
+#
+# A firewall slot's `match` (0340): which address its members are matched
+# on. Writing members is the root tier's `slot_set`, not a key.
+match
+#
+# A bridge port's isolation (10.912): which of a bridge's ports reach each
+# other, a property of the network.
+isolated

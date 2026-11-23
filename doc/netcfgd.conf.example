@@ -1656,6 +1656,16 @@
 #	routes = "default via 192.0.2.1"
 #}
 
+# A bridge's PORT may be `isolated`: isolated ports reach the bridge and its
+# other, unisolated ports -- the uplink, the router itself -- and not each
+# other. That is the wired and cross-radio half of a guest network:
+# `isolate_stations` keeps one radio's guests apart, and two radios, or a
+# guest wall socket, bridged together still reach each other without it.
+# Only on a bridge's port, and enforced either way, so taking the line out
+# undoes it. With the bridge above and a guest port among its members:
+#
+#     device eth3 { isolated = true }
+
 # A BOND, for two cables to one switch.
 
 #device bond0 {

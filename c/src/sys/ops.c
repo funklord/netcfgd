@@ -697,6 +697,29 @@ int ncfg_ops_set_link_mac(ncfg_buf_t *out, uint32_t seq, uint32_t index, const u
 	return built;
 }
 
+int ncfg_ops_set_port_isolated(ncfg_buf_t *out, uint32_t seq, uint32_t index, int isolated,
+    char *err, size_t err_size)
+{
+	ncfg_buf_t data;
+	ncfg_buf_t info;
+	ncfg_buf_t attrs;
+	uint8_t    flag = isolated ? 1u : 0u;
+	int        built;
+
+	ncfg_buf_init(&data, 0);
+	ncfg_buf_init(&info, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put(&data, IFLA_BRPORT_ISOLATED, &flag, 1u);
+	ncfg_wire_attr_put_str(&info, IFLA_INFO_SLAVE_KIND, "bridge");
+	ncfg_wire_attr_put_nested(&info, IFLA_INFO_SLAVE_DATA, &data);
+	ncfg_wire_attr_put_nested(&attrs, IFLA_LINKINFO, &info);
+	built = link_request(out, RTM_NEWLINK, NCFG_OPS_ACK_FLAGS, seq, index, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&info);
+	ncfg_buf_free(&data);
+	return built;
+}
+
 int ncfg_ops_set_link_master(ncfg_buf_t *out, uint32_t seq, uint32_t index, uint32_t master,
     char *err, size_t err_size)
 {

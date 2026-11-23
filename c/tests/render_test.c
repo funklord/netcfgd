@@ -1989,6 +1989,9 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\taccept \"ssh\" { protocol = \"tcp\"; port = 22 }\n\t}\n"
 	    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so do the presets a firewall uses, an empty one too (0341)");
+	round_trips("device br0 {\n\tbridge { members = [\"eth1\"] }\n}\n"
+	    "device eth1 {\n\tisolated = true\n}\n",
+	    "and so does an isolated bridge port (10.912)");
 }
 
 static void a_firewall_round_trips(void)

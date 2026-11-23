@@ -484,6 +484,33 @@ static int set_master(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, siz
 	return ok;
 }
 
+/* A bridge port's isolation (10.912), on the port itself. */
+static int set_isolated(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err,
+    size_t err_size)
+{
+	ncfg_buf_t message;
+	uint32_t   index = index_of(op->u.set_isolated.name, err, err_size);
+	uint32_t   seq;
+	int        ok;
+
+	if (index == 0) {
+		return 0;
+	}
+	seq = ncfg_netlink_take_seq(&kernel->socket);
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_ops_set_port_isolated(&message, seq, index, op->u.set_isolated.on, err,
+	    err_size);
+	if (ok) {
+		char doing[NCFG_ERROR_MAX];
+
+		(void)snprintf(doing, sizeof(doing), "%s bridge port %s",
+		    op->u.set_isolated.on ? "isolate" : "stop isolating", op->u.set_isolated.name);
+		ok = send_built(kernel, &message, seq, op->kind, doing, err, err_size);
+	}
+	ncfg_buf_free(&message);
+	return ok;
+}
+
 /* ------------------------------------------------------------------------ *
  * Addresses
  * ------------------------------------------------------------------------ */
@@ -820,6 +847,8 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		    err, err_size);
 	case NCFG_OP_LINK_SET_MASTER:
 		return set_master(kernel, op, err, err_size);
+	case NCFG_OP_LINK_SET_ISOLATED:
+		return set_isolated(kernel, op, err, err_size);
 	case NCFG_OP_ADDR_ADD:
 		return address(kernel, op->u.addr_add.iface, op->u.addr_add.addr, 1, op->kind,
 		    err, err_size);
@@ -891,6 +920,7 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		return ncfg_kernel_rings_op(&world, op, err, err_size);
 	case NCFG_OP_LINK_SET_WDS:
 		return ncfg_kernel_wds_op(&world, op, err, err_size);
+
 	case NCFG_OP_RULE_ADD:
 		return ncfg_kernel_rule_op(&world, op, 1, err, err_size);
 	case NCFG_OP_RULE_DEL:

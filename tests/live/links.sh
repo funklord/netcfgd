@@ -160,8 +160,11 @@ interface lan1 {
 device brbare { bridge { } }
 interface brbare { config = "10.9.8.1/24" }
 device barep {
-	kind   = "dummy"
-	master = "brbare"
+	kind     = "dummy"
+	master   = "brbare"
+	# Kept from the bridge's other isolated ports (10.912), in the same apply
+	# that creates and enslaves it.
+	isolated = true
 }
 CONF
 
@@ -621,6 +624,8 @@ contains "and the next plan has nothing to do" 	"$("$ncfg" plan 2>&1 | head -1)"
 # the host's.
 contains "a port with no interface block is enslaved" "$(detail barep)" "master brbare"
 contains "and is brought up rather than left down" "$(ip link show barep)" ",UP,"
+contains "an isolated port is isolated by the apply that enslaves it" "$(detail barep)" \
+	"isolated on"
 
 second=$("$ncfg" apply 2>&1)
 contains "one apply converges" "$second" "nothing to do"

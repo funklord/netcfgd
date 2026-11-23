@@ -342,6 +342,9 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 	case NCFG_OP_LINK_SET_WDS:
 		out->u.set_wds.name = ncfg_plan_intern(plan, in->u.set_wds.name);
 		return;
+	case NCFG_OP_LINK_SET_ISOLATED:
+		out->u.set_isolated.name = ncfg_plan_intern(plan, in->u.set_isolated.name);
+		return;
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		out->u.set_link_modes.name = ncfg_plan_intern(plan, in->u.set_link_modes.name);
 		return;

@@ -798,7 +798,7 @@ static int bare_ifb(const ncfg_device_t *device, int64_t *rate)
 	if (!device->managed || device->on_unmanage != NCFG_ON_UNMANAGE_LEAVE ||
 	    device->wifi || device->modem || device->mtu.has ||
 	    device->mac || device->link_settings || device->master ||
-	    device->ingress_redirect || device->bridge_vlan_count > 0) {
+	    device->ingress_redirect || device->bridge_vlan_count > 0 || device->isolated) {
 		return 0;
 	}
 	*rate = device->qdisc->bandwidth_bits.value;
@@ -1047,6 +1047,9 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		ncfg_buf_add_text(&body, "\tmaster = ");
 		ncfg_render_quote(&body, device->master);
 		ncfg_buf_add_char(&body, '\n');
+	}
+	if (device->isolated) {
+		ncfg_buf_add_text(&body, "\tisolated = true\n");
 	}
 	render_bridge_vlans(device->bridge_vlans, device->bridge_vlan_count, name, &body,
 	    missing);

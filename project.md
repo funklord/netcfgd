@@ -7020,6 +7020,36 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.912 A bridge port may be isolated
+
+0284's client isolation inside a segment had its radio half --
+`isolate_stations`, hostapd's `ap_isolate` -- and not the rest: two radios,
+or a guest wall socket, bridged into one guest segment still reached each
+other. `device eth3 { isolated = true }` sets the kernel's
+`IFLA_BRPORT_ISOLATED` on a bridge's port, so isolated ports reach the bridge
+and its unisolated ports (the uplink, the router) and not each other. It is the
+new op `link.set_isolated`, an `RTM_NEWLINK` carrying only the bridge slave
+data, planned after the enslave (in the same apply as a port it creates) and
+read back from the link dump's slave data as `port_isolated`. **Enforced
+either way on a port whose master the document names**, so taking the key out
+undoes it; refused on anything but a bridge's port. Not disruptive: it changes
+which ports reach each other, not this machine's own connection. The device
+dialog names it as unmodelled, so a Save refuses rather than dropping it,
+until the form has a field. `tests/live/links.sh` checks `ip -d link` in a
+namespace; the plan witness gained the op (the vocabulary is fifty-five).
+
+Found doing it: the client's address and route readers still carried the
+`unmodelled` parameter for DHCP and route fields 0339 removed, unused, and
+`client_test` still fed a DHCPv6 `mode` the daemon now refuses -- the client
+suite had not been run since 0339's removal. Both are put right. And a run
+of every `make check` gate found more the earlier commits of this run and
+0339's had left: `slot_set` missing from the protocol document's tier table,
+twelve keys the privilege gate had never classified (four from 0330-0334, the
+rest from 0339, 0340 and this one; all ordinary), the flat `dns_` spellings
+unwaived in the key coverage list, and three field waivers naming fields 0339
+removed. The lesson is the obvious one: run `make check`'s gates, not the
+ones remembered, before calling a model or protocol change done.
+
 ## 10.911 cake is fair between clients behind the masquerade
 
 0284 names per-client fairness and smart queues among what a router must

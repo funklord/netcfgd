@@ -863,7 +863,8 @@ static void lower_modem(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 static int is_structural_key(const char *key)
 {
 	return strcmp(key, "master") == 0 || strcmp(key, "vlans") == 0 ||
-	    strcmp(key, "kind") == 0 || strcmp(key, "qdisc") == 0;
+	    strcmp(key, "kind") == 0 || strcmp(key, "qdisc") == 0 ||
+	    strcmp(key, "isolated") == 0;
 }
 
 static void lower_structural_key(ncfg_lower_ctx_t *ctx, ncfg_device_t *device,
@@ -874,6 +875,17 @@ static void lower_structural_key(ncfg_lower_ctx_t *ctx, ncfg_device_t *device,
 	if (strcmp(key, "master") == 0) {
 		free(device->master);
 		device->master = ncfg_as_interface_name(ctx, assignment->value);
+		return;
+	}
+	/* `isolated = true` (10.912): a bridge port kept from the bridge's other
+	 * isolated ports. Whether there is a master, and that it is a bridge, is
+	 * checked once every device is read. */
+	if (strcmp(key, "isolated") == 0) {
+		int flag;
+
+		if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+			device->isolated = flag;
+		}
 		return;
 	}
 	if (strcmp(key, "vlans") == 0) {

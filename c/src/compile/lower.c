@@ -1336,6 +1336,40 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 	expand_ingress_shapers(&ctx, shapers, shaper_count);
 	check_linksets(&ctx, linksets, linkset_count);
 	resolve_host_lists(&ctx, referrers, referrer_count);
+	/* An isolated port is a bridge's (10.912): the kernel keeps isolation
+	 * as a bridge port's setting and has none for a bond's or a lone link. */
+	for (i = 0; i < ctx.document->device_count; i++) {
+		const ncfg_device_t *device = &ctx.document->devices[i];
+		const ncfg_device_t *master = NULL;
+		size_t               at;
+
+		if (!device->isolated) {
+			continue;
+		}
+		for (at = 0; device->master && at < ctx.document->device_count; at++) {
+			if (strcmp(ctx.document->devices[at].name, device->master) == 0) {
+				master = &ctx.document->devices[at];
+			}
+		}
+		if (!master || master->kind.kind != (int)NCFG_KIND_BRIDGE) {
+			const ncfg_merged_block_t *written = &merged->blocks[0];
+
+			for (at = 0; at < merged->block_count; at++) {
+				const ncfg_ast_block_t *block = merged->blocks[at].block;
+
+				if (strcmp(block->head, "device") == 0 && block->label &&
+				    strcmp(block->label, device->name) == 0) {
+					written = &merged->blocks[at];
+				}
+			}
+			ctx.source = written->source;
+			ncfg_diag(&ctx, written->block->span,
+			    "device `%s` is `isolated`, which is a bridge port's setting, and %s",
+			    device->name, !device->master ? "it is a port of nothing"
+			                                  : "its master is not a bridge this "
+			                                    "configuration describes");
+		}
+	}
 	/* The presets first: their rules name host lists as written rules do. */
 	ncfg_lower_presets(&ctx, merged);
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);

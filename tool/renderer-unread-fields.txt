@@ -25,6 +25,3 @@ ncfg_document_t.schema_version  the document's format, excluded from equality
 ncfg_document_t.generated_by  provenance, excluded from equality
 ncfg_hook_ref_t.phase         inside `hooks`, which render_link.c refuses whole
 ncfg_hook_ref_t.sha256        inside `hooks`, which render_link.c refuses whole
-ncfg_hook_ref_t.run_as        inside `hooks`, which render_link.c refuses whole
-ncfg_device_match_t.driver    inside a `match` block, which render_device.c refuses whole
-ncfg_device_match_t.name_glob  inside a `match` block, which render_device.c refuses whole
