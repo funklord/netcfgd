@@ -551,6 +551,9 @@ QString ncfg_device_block(const QString &name, const ncfg_device_config &setting
 	if (!settings.master.isEmpty() && !settings.master_by_members) {
 		body << QStringLiteral("\tmaster = \"%1\"").arg(settings.master);
 	}
+	if (settings.isolated) {
+		body << QStringLiteral("\tisolated = true");
+	}
 	if (!settings.vlans.isEmpty()) {
 		QStringList runs;
 		for (const ncfg_bridge_vlan_row &vlan : settings.vlans) {
@@ -1031,6 +1034,10 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	master->setObjectName(QStringLiteral("device_master"));
 	master->setPlaceholderText(QStringLiteral("br0 -- blank for none"));
 	port_form->addRow(QStringLiteral("joins"), master);
+	isolated = new QCheckBox(QStringLiteral("isolated: reaches the bridge's other ports, "
+	                                        "and not its other isolated ones"), this);
+	isolated->setObjectName(QStringLiteral("device_isolated"));
+	port_form->addRow(QString(), isolated);
 	vlans = new QTableWidget(0, 3, this);
 	vlans->setObjectName(QStringLiteral("device_vlans"));
 	vlans->setHorizontalHeaderLabels(
@@ -1381,6 +1388,7 @@ void ncfg_device_dialog::load()
 	bandwidth->setValue(rate_shown(existing.bandwidth_bits));
 	ingress_bandwidth->setValue(rate_shown(existing.ingress_bandwidth_bits));
 	master->setText(existing.master);
+	isolated->setChecked(existing.isolated);
 	if (existing.master_by_members) {
 		master->setReadOnly(true);
 		master->setToolTip(QStringLiteral("%1 lists this device among its members; "
@@ -1524,6 +1532,7 @@ QString ncfg_device_dialog::block_text() const
 	    rate_written(ingress_bandwidth->value(), existing.ingress_bandwidth_bits);
 	settings.master = master->text().trimmed();
 	settings.master_by_members = existing.master_by_members;
+	settings.isolated = isolated->isChecked();
 	for (int row = 0; row < vlans->rowCount(); row++) {
 		ncfg_bridge_vlan_row vlan;
 		vlan.vids = vlans->item(row, 0) ? vlans->item(row, 0)->text().trimmed() : QString();

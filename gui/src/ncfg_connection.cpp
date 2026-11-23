@@ -1289,6 +1289,7 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->ingress_bandwidth_bits = found.ingress_bandwidth_bits;
 	out->master = from_c(found.master);
 	out->master_by_members = found.master_by_members != 0;
+	out->isolated = found.isolated != 0;
 	/* Runs of consecutive ids with the same flags become one row, so
 	 * `20-30` comes back as written rather than as eleven. A pvid is never
 	 * a range -- the language refuses one -- so it stays alone. */

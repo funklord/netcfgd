@@ -801,6 +801,8 @@ struct ncfg_device_config {
 	 * where it is then edited. */
 	QString master;
 	bool    master_by_members = false;
+	/* Kept from the bridge's other isolated ports (10.912). */
+	bool    isolated = false;
 	QList<ncfg_bridge_vlan_row> vlans;
 	int     mtu = 0;
 	QString mac;

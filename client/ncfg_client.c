@@ -5225,12 +5225,8 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "
 		    "interface it belongs to)");
 	}
-	/* A bridge port's isolation (10.912), which the form has no field for
-	 * yet: named, so Save refuses rather than taking it away. */
-	if (ncfg_json_bool(doc, ncfg_json_member(doc, found, "isolated"), 0)) {
-		note_unmodelled(&out->unmodelled, "isolated (a bridge port kept from its "
-		    "bridge's other isolated ports)");
-	}
+	/* A bridge port's isolation (10.912). */
+	out->isolated = ncfg_json_bool(doc, ncfg_json_member(doc, found, "isolated"), 0);
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");
 	}

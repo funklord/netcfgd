@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 	owned << qMakePair(QStringLiteral("device-eth0"),
 	    QStringLiteral("device eth0 { mtu = 1500 }\n"));
 	owned << qMakePair(QStringLiteral("device-eth1"),
-	    QStringLiteral("device eth1 {\n\tmaster = \"br0\"\n"
+	    QStringLiteral("device eth1 {\n\tmaster = \"br0\"\n\tisolated = true\n"
 	                   "\tvlans = [\"10 pvid untagged\", \"20-22\"]\n}\n"));
 	owned << qMakePair(QStringLiteral("device-wlan0"),
 	    QStringLiteral("device wlan0 { wifi { wds = true } }\n"));
@@ -249,19 +249,24 @@ int main(int argc, char **argv)
 		    "a port's master loads");
 		check(table ? QString::number(table->rowCount()) : QStringLiteral("<missing>"),
 		    QStringLiteral("2"), "and its vlans as two rows, the range kept whole");
+		auto *kept_apart = dialog.findChild<QCheckBox *>(QStringLiteral("device_isolated"));
+		check(kept_apart && kept_apart->isChecked() ? QStringLiteral("isolated")
+		                                            : QStringLiteral("not"),
+		    QStringLiteral("isolated"), "and that it is isolated (10.912)");
 	}
 	check(save(&connection, QStringLiteral("eth1"), work.path()), QStringLiteral("saved"),
 	    "a port with vlans can be saved");
 	const QString port = read_file(conf_d + QStringLiteral("device-eth1.conf"));
 	check(port.startsWith(QStringLiteral("# Written by netcfgd's gui")) &&
 	        port.contains(QStringLiteral("\tmaster = \"br0\"\n")) &&
+	        port.contains(QStringLiteral("\tisolated = true\n")) &&
 	        port.contains(QStringLiteral("\tvlans = [\"10 pvid untagged\", \"20-22\"]\n"))
 	        ? QStringLiteral("written")
 	        : port,
 	    QStringLiteral("written"), "  written by the dialog, master and vlans");
 	ncfg_device_config eth1;
 	check(connection.device_config(QStringLiteral("eth1"), &eth1, &error) &&
-	        eth1.master == QStringLiteral("br0") && eth1.vlans.size() == 2 &&
+	        eth1.master == QStringLiteral("br0") && eth1.isolated && eth1.vlans.size() == 2 &&
 	        eth1.vlans[0].vids == QStringLiteral("10") && eth1.vlans[0].pvid &&
 	        eth1.vlans[0].untagged && eth1.vlans[1].vids == QStringLiteral("20-22")
 	        ? QStringLiteral("kept")

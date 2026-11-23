@@ -2063,6 +2063,8 @@ typedef struct {
 	 */
 	char *master;
 	int   master_by_members;
+	/* A bridge port kept from the bridge's other isolated ports (10.912). */
+	int   isolated;
 	ncfg_bridge_vlan_entry_t *bridge_vlans;
 	size_t                    bridge_vlan_count;
 	int   mtu;         /* 0 where the document states none */

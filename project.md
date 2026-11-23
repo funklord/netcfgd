@@ -7034,8 +7034,7 @@ read back from the link dump's slave data as `port_isolated`. **Enforced
 either way on a port whose master the document names**, so taking the key out
 undoes it; refused on anything but a bridge's port. Not disruptive: it changes
 which ports reach each other, not this machine's own connection. The device
-dialog names it as unmodelled, so a Save refuses rather than dropping it,
-until the form has a field. `tests/live/links.sh` checks `ip -d link` in a
+dialog has a checkbox for it in its port group. `tests/live/links.sh` checks `ip -d link` in a
 namespace; the plan witness gained the op (the vocabulary is fifty-five).
 
 Found doing it: the client's address and route readers still carried the

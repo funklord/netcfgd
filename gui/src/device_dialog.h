@@ -151,6 +151,7 @@ private:
 	/* A port of a bridge or bond: what it joins, and the VLANs it carries. */
 	QGroupBox    *port_box;
 	QLineEdit    *master;
+	QCheckBox    *isolated;
 	QTableWidget *vlans;
 	QPushButton  *vlan_add;
 	QPushButton  *vlan_drop;
