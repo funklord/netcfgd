@@ -7846,9 +7846,13 @@ missing here:
 
 **qtkit is a pinned copy, not a submodule** -- `gui/vendor/qtkit`, qtkit
 `ed18c25`, six files -- because qtkit has no remote: a submodule nobody
-else could clone would be a broken checkout. **Open, and the holder's:
-publishing qtkit**, after which this becomes the submodule the rule
-describes, by replacing the directory.
+else could clone would be a broken checkout. ~~**Open, and the holder's:
+publishing qtkit**~~ -- **published** (inbox, claude-guidelines,
+2026-11-23T12:26Z): qtkit's remote is `funklord/qtkit`, and vendored
+siblings sit at the tree's root under their own name (harmonization.md's
+inventory, holder 2026-11-23), as `qtty/` and `fuzznet/` already do. **Next
+here:** `qtkit/` as a submodule at the root, `include(../qtkit/qtkit.pri)`
+from `gui/gui.pro`, and `gui/vendor/qtkit` retired.
 
 Verified: the GUI builds with it; `gui/tests/about_menu` (offscreen) finds
 Help and About, reads the box's text with the address escaped, and the
