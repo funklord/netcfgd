@@ -1151,6 +1151,22 @@ APIs, and the event names as two client libraries use them.
 *"If we do this at all, we delay it until later. As it is an endless churn
 against a moving target."* Not built; a later decision starts from this reading.
 
+**Waiting on the holder's word here, and on fuzznet: one fuzznet product
+for the machine's node** (relayed by raidcfgd 2026-11-24, not authority).
+netcfgd and raidcfgd share root's fuzznet store, and fuzznet measured (its sec
+1419) that the node's remote hop checks one capability, from the serving
+daemon's `--fuzznet-service` and `--fuzznet-product` -- so whichever daemon
+starts first decides whose paired devices are accepted: netcfgd's
+`FZN_PRODUCT_NETCFGD` (3, passed in `daemon_main.c` and `node/user_host.c`,
+held equal by `node.c`'s static assert) or raidcfgd's 5. The holder chose, in
+raidcfgd's session, fuzznet's option (b): *"go with fuzznet's recommendation,
+one product for the machine"* -- a product number meaning "this machine's
+node", passed by both daemons, with devices re-paired to it. fuzznet has been
+asked for the constant. **What it changes here, once confirmed:** the two
+`--fuzznet-product` defaults and the assert move to that constant, and
+devices paired with product 3 are paired again. Not done until the holder
+says so in this tree and the constant exists.
+
 **A question for the holder: what a zone is** (0284's layer three; 0339
 left "the zone grammar and how a zone names a host" open, and slots (0340)
 and presets (0341) are built on either side of it). It decides what gets
