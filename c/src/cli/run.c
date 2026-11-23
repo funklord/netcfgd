@@ -442,6 +442,48 @@ static int command_tunnel(const ncfg_cli_options_t *options, const char **positi
 }
 
 /*
+ * `ncfg slot add|remove SLOT ADDRESS [LIFETIME]` (0340): a member written
+ * into a firewall slot live, at the `root` tier, at once and without an
+ * apply. A name the configuration does not open as a slot is refused by the
+ * daemon -- a static value is not written live (0339). With `--at`, on that
+ * host; with `--at` naming many, on each of them: one quarantine, the
+ * estate's.
+ */
+static int command_slot(const ncfg_cli_options_t *options, const char **positional,
+    size_t count)
+{
+	ncfg_proto_request_t request;
+	int                  add;
+	int                  code;
+
+	if (count < 3u || count > 4u ||
+	    (strcmp(positional[0], "add") != 0 && strcmp(positional[0], "remove") != 0) ||
+	    (count == 4u && strcmp(positional[0], "add") != 0)) {
+		return fail("usage: ncfg slot add SLOT ADDRESS [LIFETIME], or ncfg slot remove SLOT "
+		    "ADDRESS; LIFETIME is \"30m\" and the like, and without it the slot's own");
+	}
+	add = strcmp(positional[0], "add") == 0;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_SLOT_SET;
+	request.u.slot_set.slot = ncfg_proto_str(positional[1]);
+	request.u.slot_set.address = ncfg_proto_str(positional[2]);
+	request.u.slot_set.add = (unsigned char)(add ? 1 : 0);
+	if (count == 4u) {
+		request.u.slot_set.lifetime = ncfg_proto_str(positional[3]);
+	}
+	code = ask_for_ok(options, &request);
+	if (code != NCFG_CLI_EXIT_OK) {
+		return code;
+	}
+	if (options->json) {
+		return say_json_ok();
+	}
+	ncfg_out_writef("%s %s %s slot `%s`\n", add ? "added" : "removed", positional[2],
+	    add ? "to" : "from", positional[1]);
+	return NCFG_CLI_EXIT_OK;
+}
+
+/*
  * `ncfg wifi activate|deactivate <radio>`.
  *
  * **The interface is named rather than defaulted**, unlike `scan` and
@@ -2664,7 +2706,7 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
     const char **positional, size_t count)
 {
 	static const char *const carried[] = { "wifi", "modem", "reload", "confirm", "revert",
-		"apply", "config", "secret", "profile", "tui", "monitor", "tunnel" };
+		"apply", "config", "secret", "profile", "tui", "monitor", "tunnel", "slot" };
 	char   why[NCFG_ERROR_MAX];
 	size_t at;
 
@@ -2673,7 +2715,7 @@ static int at_refused(const char *command, const ncfg_cli_options_t *options,
 	 * would be a table of "ok" with nothing read. */
 	if (ncfg_fuzznet_target_is_many(options->at)) {
 		static const char *const changing[] = { "reload", "apply", "confirm", "revert",
-			"config", "secret", "profile" };
+			"config", "secret", "profile", "slot" };
 
 		for (at = 0; at < sizeof(changing) / sizeof(changing[0]); at++) {
 			if (strcmp(command, changing[at]) == 0) {
@@ -2764,6 +2806,9 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	}
 	if (strcmp(command, "tunnel") == 0) {
 		return command_tunnel(options, positional, count);
+	}
+	if (strcmp(command, "slot") == 0) {
+		return command_slot(options, positional, count);
 	}
 	if (strcmp(command, "monitor") == 0) {
 		return command_monitor(options);

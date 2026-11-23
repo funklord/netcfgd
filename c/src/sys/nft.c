@@ -282,6 +282,7 @@ static int audit_message(const ncfg_wire_message_t *message, char *err, size_t e
 	case NFT_MSG_GETTABLE:
 	case NFT_MSG_GETCHAIN:
 	case NFT_MSG_GETRULE:
+	case NFT_MSG_GETSETELEM:
 		/*
 		 * Reading outside netcfgd's table is deliberate and is not a hole
 		 * in this check. 0022 requires netcfgd to detect a *second* table
@@ -305,8 +306,9 @@ static int audit_message(const ncfg_wire_message_t *message, char *err, size_t e
 		    err_size) &&
 		    chain_must_be_ours(&area, NFTA_RULE_CHAIN, err, err_size);
 	case NFT_MSG_NEWSET:
-		/* An `over` rule's meter (10.885): a set in netcfgd's table, named
-		 * as `over_set_name` names one, and nothing else. */
+		/* An `over` rule's meter (10.885) or a slot's set (0340): a set in
+		 * netcfgd's table, named as `over_set_name` or
+		 * `ncfg_nft_slot_set_name` names one, and nothing else. */
 		{
 			char set_name[NCFG_NFT_NAME_MAX];
 
@@ -314,8 +316,28 @@ static int audit_message(const ncfg_wire_message_t *message, char *err, size_t e
 			    !read_name(&area, NFTA_SET_NAME, set_name, sizeof(set_name), err, err_size)) {
 				return 0;
 			}
-			if (strncmp(set_name, "over-", 5) != 0) {
-				ncfg_error_set(err, err_size, "a set `%s`, which is not an `over` meter",
+			if (strncmp(set_name, "over-", 5) != 0 && strncmp(set_name, "slot-", 5) != 0) {
+				ncfg_error_set(err, err_size,
+				    "a set `%s`, which is neither an `over` meter nor a slot", set_name);
+				return 0;
+			}
+			return 1;
+		}
+	case NFT_MSG_NEWSETELEM:
+	case NFT_MSG_DELSETELEM:
+		/* A slot's members (0340), written live or carried across a
+		 * replacement: a slot's set in netcfgd's table, and no other. */
+		{
+			char set_name[NCFG_NFT_NAME_MAX];
+
+			if (!name_must_be(&area, NFTA_SET_ELEM_LIST_TABLE, NCFG_NFT_TABLE, "table", err,
+			        err_size) ||
+			    !read_name(&area, NFTA_SET_ELEM_LIST_SET, set_name, sizeof(set_name), err,
+			        err_size)) {
+				return 0;
+			}
+			if (strncmp(set_name, "slot-", 5) != 0) {
+				ncfg_error_set(err, err_size, "members of a set `%s`, which is not a slot",
 				    set_name);
 				return 0;
 			}
@@ -2466,6 +2488,435 @@ static int put_mss(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
 	return ok;
 }
 
+/* ------------------------------------------------------------------------ *
+ * Slots (0340)
+ * ------------------------------------------------------------------------ */
+
+/* The readers' helpers, defined with the readers below. */
+static int be64_member(const ncfg_wire_attrs_t *area, uint16_t kind, uint64_t *out);
+static int data_value(const ncfg_wire_attrs_t *area, uint16_t kind, const uint8_t **bytes,
+    size_t *length);
+
+void ncfg_nft_slot_set_name(const char *slot, int ipv6, char *out, size_t out_size)
+{
+	(void)snprintf(out, out_size, "slot-%s-%c", slot ? slot : "", ipv6 ? '6' : '4');
+}
+
+/* What a slot's rule carries, which is the whole slot: the reader takes the
+ * slot back from it, and the verdict and the lookup are checked against it. */
+static int slot_comment(const ncfg_firewall_slot_t *slot, char *out, size_t out_size)
+{
+	int wrote = snprintf(out, out_size, "slot=%s match=%s timeout=%lld", slot->name,
+	    slot->match == NCFG_FIREWALL_SLOT_TO ? "to" : "from", (long long)slot->timeout);
+
+	return wrote > 0 && (size_t)wrote < out_size && (size_t)wrote <= NCFG_NFT_COMMENT_MAX;
+}
+
+/* The set: one family's addresses, each member with a lifetime of its own
+ * where its writer gave one, the slot's `timeout` where not. No `eval` flag:
+ * nothing in the ruleset writes into it, only a live write does. */
+static int slot_set_message(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    const ncfg_firewall_slot_t *slot, uint8_t family, uint32_t set_id, char *err,
+    size_t err_size)
+{
+	ncfg_buf_t attrs;
+	char       set_name[NCFG_NFT_NAME_MAX];
+	int        ok;
+
+	ncfg_nft_slot_set_name(slot->name, family == NFPROTO_IPV6, set_name, sizeof(set_name));
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_NAME, set_name);
+	put_be32(&attrs, NFTA_SET_FLAGS, NFT_SET_TIMEOUT);
+	put_be32(&attrs, NFTA_SET_KEY_TYPE, family == NFPROTO_IPV6 ? 8u : 7u);
+	put_be32(&attrs, NFTA_SET_KEY_LEN, family == NFPROTO_IPV6 ? 16u : 4u);
+	put_be32(&attrs, NFTA_SET_ID, set_id);
+	if (slot->timeout > 0) {
+		put_be64(&attrs, NFTA_SET_TIMEOUT, (uint64_t)slot->timeout * 1000u);
+	}
+	*last_acked = *seq;
+	ok = build(transaction, NFT_MSG_NEWSET, (uint16_t)(NLM_F_ACK | NLM_F_CREATE), (*seq)++,
+	    NFPROTO_INET, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	return ok;
+}
+
+/*
+ * One family's rule for a slot, as nft writes `ip saddr @slot-NAME-4 counter
+ * drop`: the family, the address into register 1, the lookup, a counter, the
+ * verdict -- `reject` as a rule's is, ICMPX port-unreachable.
+ */
+static void slot_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_slot_t *slot,
+    uint8_t family, uint32_t set_id, const char *comment)
+{
+	ncfg_buf_t expressions;
+	ncfg_buf_t data;
+	ncfg_buf_t userdata;
+	char       set_name[NCFG_NFT_NAME_MAX];
+	const int  source = slot->match != NCFG_FIREWALL_SLOT_TO;
+
+	ncfg_nft_slot_set_name(slot->name, family == NFPROTO_IPV6, set_name, sizeof(set_name));
+	ncfg_buf_init(&expressions, 0);
+	put_meta(&expressions, NFT_META_NFPROTO);
+	put_cmp(&expressions, NFT_CMP_EQ, &family, 1u);
+	if (family == NFPROTO_IPV6) {
+		put_payload(&expressions, NFT_PAYLOAD_NETWORK_HEADER, source ? 8u : 24u, 16u);
+	} else {
+		put_payload(&expressions, NFT_PAYLOAD_NETWORK_HEADER, source ? 12u : 16u, 4u);
+	}
+	ncfg_buf_init(&data, 0);
+	ncfg_wire_attr_put_str(&data, NFTA_LOOKUP_SET, set_name);
+	put_be32(&data, NFTA_LOOKUP_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_LOOKUP_SET_ID, set_id);
+	put_expression(&expressions, "lookup", &data);
+	ncfg_buf_free(&data);
+
+	ncfg_buf_init(&data, 0);
+	put_be64(&data, NFTA_COUNTER_BYTES, 0u);
+	put_be64(&data, NFTA_COUNTER_PACKETS, 0u);
+	put_expression(&expressions, "counter", &data);
+	ncfg_buf_free(&data);
+
+	ncfg_buf_init(&data, 0);
+	if (slot->action == NCFG_FIREWALL_REJECT) {
+		const uint8_t code = NFT_REJECT_ICMPX_PORT_UNREACH;
+
+		put_be32(&data, NFTA_REJECT_TYPE, NFT_REJECT_ICMPX_UNREACH);
+		ncfg_wire_attr_put(&data, NFTA_REJECT_ICMP_CODE, &code, 1u);
+		put_expression(&expressions, "reject", &data);
+	} else {
+		ncfg_buf_t code;
+		ncfg_buf_t verdict;
+
+		ncfg_buf_init(&code, 0);
+		put_be32(&code, NFTA_VERDICT_CODE,
+		    slot->action == NCFG_FIREWALL_DROP ? (uint32_t)NF_DROP : (uint32_t)NF_ACCEPT);
+		ncfg_buf_init(&verdict, 0);
+		ncfg_wire_attr_put_nested(&verdict, NFTA_DATA_VERDICT, &code);
+		put_be32(&data, NFTA_IMMEDIATE_DREG, NFT_REG_VERDICT);
+		ncfg_wire_attr_put_nested(&data, NFTA_IMMEDIATE_DATA, &verdict);
+		put_expression(&expressions, "immediate", &data);
+		ncfg_buf_free(&verdict);
+		ncfg_buf_free(&code);
+	}
+	ncfg_buf_free(&data);
+
+	ncfg_buf_init(&userdata, 0);
+	{
+		const uint8_t head[2] = { 0u, (uint8_t)(strlen(comment) + 1u) };
+
+		ncfg_buf_add(&userdata, head, sizeof(head));
+		ncfg_buf_add(&userdata, comment, strlen(comment) + 1u);
+	}
+	ncfg_wire_attr_put_str(attrs, NFTA_RULE_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(attrs, NFTA_RULE_CHAIN, chain);
+	ncfg_wire_attr_put_nested(attrs, NFTA_RULE_EXPRESSIONS, &expressions);
+	ncfg_wire_attr_put(attrs, NFTA_RULE_USERDATA, userdata.data, userdata.length);
+	ncfg_buf_free(&userdata);
+	ncfg_buf_free(&expressions);
+}
+
+/* One member as a set element: its key, and its lifetime where it has one. */
+static void put_member(ncfg_buf_t *list, const uint8_t *address, int ipv6, uint64_t lifetime_ms)
+{
+	ncfg_buf_t element;
+	ncfg_buf_t key;
+
+	ncfg_buf_init(&element, 0);
+	ncfg_buf_init(&key, 0);
+	ncfg_wire_attr_put(&key, NFTA_DATA_VALUE, address, ipv6 ? 16u : 4u);
+	ncfg_wire_attr_put_nested(&element, NFTA_SET_ELEM_KEY, &key);
+	if (lifetime_ms > 0u) {
+		put_be64(&element, NFTA_SET_ELEM_TIMEOUT, lifetime_ms);
+	}
+	ncfg_wire_attr_put_nested(list, NFTA_LIST_ELEM, &element);
+	ncfg_buf_free(&key);
+	ncfg_buf_free(&element);
+}
+
+/* The members of one slot's set of one family carried into it, one message,
+ * after the set and before the rule that looks in it. Nothing where none. */
+static int member_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    const char *slot, int ipv6, uint32_t set_id, const ncfg_nft_slot_member_t *members,
+    size_t member_count, char *err, size_t err_size)
+{
+	ncfg_buf_t attrs;
+	ncfg_buf_t list;
+	char       set_name[NCFG_NFT_NAME_MAX];
+	size_t     at;
+	size_t     carried = 0;
+	int        ok;
+
+	ncfg_buf_init(&list, 0);
+	for (at = 0; at < member_count; at++) {
+		if (members[at].ipv6 == ipv6 && strcmp(members[at].slot, slot) == 0) {
+			put_member(&list, members[at].address, ipv6, members[at].remaining_ms);
+			carried++;
+		}
+	}
+	if (carried == 0u) {
+		ncfg_buf_free(&list);
+		return 1;
+	}
+	ncfg_nft_slot_set_name(slot, ipv6, set_name, sizeof(set_name));
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_ELEM_LIST_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_ELEM_LIST_SET, set_name);
+	put_be32(&attrs, NFTA_SET_ELEM_LIST_SET_ID, set_id);
+	ncfg_wire_attr_put_nested(&attrs, NFTA_SET_ELEM_LIST_ELEMENTS, &list);
+	*last_acked = *seq;
+	ok = build(transaction, NFT_MSG_NEWSETELEM, (uint16_t)(NLM_F_ACK | NLM_F_CREATE), (*seq)++,
+	    NFPROTO_INET, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&list);
+	return ok;
+}
+
+/* A chain's slots: each one's two sets and the members carried into them,
+ * then its two rules, ahead of the chain's first written rule -- 0339's
+ * precedence. */
+static int slot_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
+    const char *chain, const ncfg_firewall_chain_t *written,
+    const ncfg_nft_slot_member_t *members, size_t member_count, char *err, size_t err_size)
+{
+	size_t at;
+
+	for (at = 0; at < written->slot_count; at++) {
+		const ncfg_firewall_slot_t *slot = &written->slots[at];
+		char                        comment[NCFG_NFT_COMMENT_MAX + 1u];
+		uint32_t                    ids[2];
+		size_t                      fam;
+
+		if (!ncfg_firewall_slot_name_valid(slot->name) ||
+		    !slot_comment(slot, comment, sizeof(comment))) {
+			ncfg_error_set(err, err_size, "`%s` cannot name a slot",
+			    slot->name ? slot->name : "");
+			return 0;
+		}
+		for (fam = 0; fam < 2u; fam++) {
+			ids[fam] = *seq + 2000000u;
+			if (!slot_set_message(transaction, seq, last_acked, slot,
+			        fam ? NFPROTO_IPV6 : NFPROTO_IPV4, ids[fam], err, err_size) ||
+			    !member_messages(transaction, seq, last_acked, slot->name, (int)fam, ids[fam],
+			        members, member_count, err, err_size)) {
+				return 0;
+			}
+		}
+		for (fam = 0; fam < 2u; fam++) {
+			ncfg_buf_t attrs;
+			int        ok;
+
+			ncfg_buf_init(&attrs, 0);
+			slot_rule(&attrs, chain, slot, fam ? NFPROTO_IPV6 : NFPROTO_IPV4, ids[fam],
+			    comment);
+			*last_acked = *seq;
+			ok = build(transaction, NFT_MSG_NEWRULE,
+			    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), (*seq)++, NFPROTO_INET,
+			    &attrs, err, err_size);
+			ncfg_buf_free(&attrs);
+			if (!ok) {
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+void ncfg_nft_slot_member_text(const ncfg_nft_slot_member_t *member, char *out,
+    size_t out_size)
+{
+	format_address(member->ipv6 ? NFPROTO_IPV6 : NFPROTO_IPV4, member->address,
+	    member->ipv6 ? 128u : 32u, out, out_size);
+}
+
+int ncfg_nft_slot_member_parse(const char *slot, const char *address,
+    ncfg_nft_slot_member_t *out)
+{
+	nft_address_t parsed;
+
+	if (!out || !ncfg_firewall_slot_name_valid(slot) || !address ||
+	    !parse_address(address, &parsed, NULL, 0) || parsed.prefix != parsed.length * 8u) {
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	memcpy(out->slot, slot, strlen(slot) + 1u);
+	out->ipv6 = parsed.nfproto == NFPROTO_IPV6;
+	memcpy(out->address, parsed.bytes, parsed.length);
+	return 1;
+}
+
+int ncfg_nft_build_slot_dump(ncfg_buf_t *out, uint32_t seq, const char *slot, int ipv6,
+    char *err, size_t err_size)
+{
+	ncfg_buf_t attrs;
+	char       set_name[NCFG_NFT_NAME_MAX];
+	int        built;
+
+	if (!ncfg_firewall_slot_name_valid(slot)) {
+		ncfg_error_set(err, err_size, "`%s` cannot name a slot", slot ? slot : "");
+		return 0;
+	}
+	ncfg_nft_slot_set_name(slot, ipv6, set_name, sizeof(set_name));
+	ncfg_buf_init(&attrs, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_ELEM_LIST_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_ELEM_LIST_SET, set_name);
+	built = build(out, NFT_MSG_GETSETELEM, NLM_F_DUMP, seq, NFPROTO_INET, &attrs, err,
+	    err_size);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+int ncfg_nft_slot_members_read(const void *payload, size_t length,
+    ncfg_nft_slot_member_t **members, size_t *count, char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t list;
+	ncfg_wire_attr_t  attr;
+	char              name[NCFG_NFT_NAME_MAX];
+	char              slot[NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
+	size_t            span;
+	int               ipv6;
+
+	if (!members || !count || !payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	if (((const uint8_t *)payload)[0] != NFPROTO_INET ||
+	    !read_name(&area, NFTA_SET_ELEM_LIST_TABLE, name, sizeof(name), err, err_size) ||
+	    strcmp(name, NCFG_NFT_TABLE) != 0 ||
+	    !read_name(&area, NFTA_SET_ELEM_LIST_SET, name, sizeof(name), err, err_size)) {
+		ncfg_error_set(err, err_size, "set members outside netcfgd's table, which are not read");
+		return 0;
+	}
+	span = strlen(name);
+	if (span < 8u || strncmp(name, "slot-", 5) != 0 || name[span - 2u] != '-' ||
+	    (name[span - 1u] != '4' && name[span - 1u] != '6') ||
+	    span - 7u > NCFG_FIREWALL_SLOT_NAME_MAX) {
+		ncfg_error_set(err, err_size, "members of `%s`, which is not a slot's set", name);
+		return 0;
+	}
+	memcpy(slot, name + 5, span - 7u);
+	slot[span - 7u] = '\0';
+	ipv6 = name[span - 1u] == '6';
+	if (!ncfg_firewall_slot_name_valid(slot)) {
+		ncfg_error_set(err, err_size, "members of `%s`, which is not a slot's set", name);
+		return 0;
+	}
+	if (ncfg_wire_attrs_find(&area, NFTA_SET_ELEM_LIST_ELEMENTS, &attr, NULL, 0) !=
+	        NCFG_WIRE_OK) {
+		return 1; /* a set with no members */
+	}
+	ncfg_wire_attrs_start(&list, attr.value, attr.length);
+	while (ncfg_wire_attrs_next(&list, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t       element;
+		const uint8_t          *bytes = NULL;
+		size_t                  bytes_length = 0;
+		uint64_t                timeout = 0, expiration = 0;
+		ncfg_nft_slot_member_t *grown;
+		ncfg_nft_slot_member_t *one;
+
+		if (attr.kind != NFTA_LIST_ELEM) {
+			continue;
+		}
+		ncfg_wire_attrs_start(&element, attr.value, attr.length);
+		if (!data_value(&element, NFTA_SET_ELEM_KEY, &bytes, &bytes_length) ||
+		    bytes_length != (ipv6 ? 16u : 4u)) {
+			ncfg_error_set(err, err_size, "a member of `%s` whose key is %zu bytes", name,
+			    bytes_length);
+			return 0;
+		}
+		(void)be64_member(&element, NFTA_SET_ELEM_TIMEOUT, &timeout);
+		(void)be64_member(&element, NFTA_SET_ELEM_EXPIRATION, &expiration);
+		grown = realloc(*members, (*count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_error_set(err, err_size, "out of memory reading a slot's members");
+			return 0;
+		}
+		*members = grown;
+		one = &grown[(*count)++];
+		memset(one, 0, sizeof(*one));
+		memcpy(one->slot, slot, strlen(slot) + 1u);
+		one->ipv6 = ipv6;
+		memcpy(one->address, bytes, bytes_length);
+		/* What is left, where the member has a lifetime at all. A member
+		 * about to expire is carried with a millisecond rather than none,
+		 * which would make it permanent. */
+		one->remaining_ms = timeout ? (expiration ? expiration : 1u) : 0u;
+	}
+	return 1;
+}
+
+int ncfg_nft_build_slot_write(ncfg_buf_t *out, uint32_t first_seq, const char *slot, int add,
+    const char *address, uint64_t seconds, ncfg_nft_batch_t *batch, char *err,
+    size_t err_size)
+{
+	ncfg_buf_t    transaction;
+	ncfg_buf_t    attrs;
+	ncfg_buf_t    list;
+	nft_address_t parsed;
+	char          set_name[NCFG_NFT_NAME_MAX];
+	uint32_t      seq = first_seq;
+	uint32_t      last_acked = first_seq;
+	int           ok;
+
+	if (!out || !batch || !address) {
+		ncfg_error_set(err, err_size, "a slot write needs a member and somewhere to go");
+		return 0;
+	}
+	memset(batch, 0, sizeof(*batch));
+	if (!ncfg_firewall_slot_name_valid(slot)) {
+		ncfg_error_set(err, err_size, "`%s` cannot name a slot", slot ? slot : "");
+		return 0;
+	}
+	if (!parse_address(address, &parsed, err, err_size)) {
+		return 0;
+	}
+	if (parsed.prefix != parsed.length * 8u) {
+		ncfg_error_set(err, err_size,
+		    "`%s` is a network, and a slot's members are single addresses (0340)", address);
+		return 0;
+	}
+	if (seconds > 604800u) {
+		ncfg_error_set(err, err_size, "a member lives a week at most");
+		return 0;
+	}
+	ncfg_nft_slot_set_name(slot, parsed.nfproto == NFPROTO_IPV6, set_name, sizeof(set_name));
+	ncfg_buf_init(&transaction, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_buf_init(&list, 0);
+	put_member(&list, parsed.bytes, parsed.nfproto == NFPROTO_IPV6, add ? seconds * 1000u : 0u);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_ELEM_LIST_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(&attrs, NFTA_SET_ELEM_LIST_SET, set_name);
+	ncfg_wire_attr_put_nested(&attrs, NFTA_SET_ELEM_LIST_ELEMENTS, &list);
+	ok = batch_marker(&transaction, NFNL_MSG_BATCH_BEGIN, seq++, err, err_size);
+	if (ok) {
+		last_acked = seq;
+		/* Adding a member already there renews it rather than failing: no
+		 * NLM_F_EXCL, so a writer that repeats itself is not an error. */
+		ok = build(&transaction, add ? NFT_MSG_NEWSETELEM : NFT_MSG_DELSETELEM,
+		    (uint16_t)(NLM_F_ACK | (add ? NLM_F_CREATE : 0)), seq++, NFPROTO_INET, &attrs, err,
+		    err_size);
+	}
+	if (ok) {
+		ok = batch_marker(&transaction, NFNL_MSG_BATCH_END, seq++, err, err_size);
+	}
+	if (ok) {
+		ok = ncfg_nft_writes_only_our_table(transaction.data, transaction.length, err,
+		    err_size);
+	}
+	if (ok) {
+		ncfg_buf_add(out, transaction.data, transaction.length);
+		ok = !ncfg_buf_failed(out);
+	}
+	if (ok) {
+		batch->last_acked = last_acked;
+		batch->next_seq = seq;
+	}
+	ncfg_buf_free(&list);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&transaction);
+	return ok;
+}
+
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size)
@@ -2487,6 +2938,18 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
     const ncfg_forward_rule_t *forwards, size_t forward_count,
     const ncfg_nft_offload_t *offload, const char *const *clamp, size_t clamp_count,
     ncfg_nft_batch_t *batch, char *err, size_t err_size)
+{
+	return ncfg_nft_build_replace_carrying(out, first_seq, table_exists, uplinks, uplink_count,
+	    firewall, forwards, forward_count, offload, clamp, clamp_count, NULL, 0, batch, err,
+	    err_size);
+}
+
+int ncfg_nft_build_replace_carrying(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
+    const ncfg_forward_rule_t *forwards, size_t forward_count,
+    const ncfg_nft_offload_t *offload, const char *const *clamp, size_t clamp_count,
+    const ncfg_nft_slot_member_t *members, size_t member_count, ncfg_nft_batch_t *batch,
+    char *err, size_t err_size)
 {
 	ncfg_buf_t transaction;
 	ncfg_buf_t attrs;
@@ -2634,6 +3097,10 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 				    (uint16_t)(NLM_F_ACK | NLM_F_CREATE), seq++, NFPROTO_INET, &attrs,
 				    err, err_size);
 				ncfg_buf_free(&attrs);
+				if (ok) {
+					ok = slot_messages(&transaction, &seq, &last_acked, names[c],
+					    chains[c], members, member_count, err, err_size);
+				}
 				for (r = 0; ok && r < chains[c]->rule_count; r++) {
 					ok = firewall_rule_messages(&transaction, &seq, &last_acked, names[c],
 					    &chains[c]->rules[r], err, err_size);
@@ -3598,6 +4065,197 @@ int ncfg_nft_rule_mss(const void *payload, size_t length, char *interface,
 	return 1;
 }
 
+/* A slot rule's comment, "slot=NAME match=WORD timeout=N", into `out`. */
+static int read_slot_comment(const ncfg_wire_attrs_t *area, ncfg_nft_kernel_slot_t *out)
+{
+	ncfg_wire_attr_t attr;
+	const uint8_t   *at;
+	size_t           left;
+
+	if (ncfg_wire_attrs_find(area, NFTA_RULE_USERDATA, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	at = attr.value;
+	left = attr.length;
+	while (left >= 2u) {
+		const uint8_t type = at[0];
+		const uint8_t length = at[1];
+
+		if ((size_t)length + 2u > left) {
+			return 0;
+		}
+		if (type == 0u && length > 0u && at[2 + length - 1] == '\0') {
+			char      text[NCFG_NFT_COMMENT_MAX + 1u];
+			char      name[NCFG_FIREWALL_SLOT_NAME_MAX + 2u];
+			char      match[8];
+			long long timeout = -1;
+			char      tail = 0;
+
+			if (length > sizeof(text)) {
+				return 0;
+			}
+			memcpy(text, at + 2, length);
+			if (sscanf(text, "slot=%49s match=%7s timeout=%lld%c", name, match, &timeout,
+			        &tail) != 3 ||
+			    !ncfg_firewall_slot_name_valid(name) || timeout < 0 || timeout > 604800) {
+				return 0;
+			}
+			if (strcmp(match, "from") == 0) {
+				out->slot.match = NCFG_FIREWALL_SLOT_FROM;
+			} else if (strcmp(match, "to") == 0) {
+				out->slot.match = NCFG_FIREWALL_SLOT_TO;
+			} else {
+				return 0;
+			}
+			memcpy(out->name, name, strlen(name) + 1u);
+			out->slot.timeout = timeout;
+			return 1;
+		}
+		at += 2u + length;
+		left -= 2u + (size_t)length;
+	}
+	return 0;
+}
+
+int ncfg_nft_rule_slot(const void *payload, size_t length, ncfg_nft_kernel_slot_t *out)
+{
+	static const char *const order[] = { "meta", "cmp", "payload", "lookup", "counter" };
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t list;
+	ncfg_wire_attr_t  attr;
+	char              name[NCFG_NFT_NAME_MAX];
+	char              expected[NCFG_NFT_NAME_MAX];
+	size_t            at = 0;
+	int               verdict = 0;
+	uint8_t           family = 0;
+
+	if (!out) {
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	if (!payload_attrs(payload, length, &area, NULL, 0) ||
+	    ((const uint8_t *)payload)[0] != NFPROTO_INET ||
+	    !read_name(&area, NFTA_RULE_TABLE, name, sizeof(name), NULL, 0) ||
+	    strcmp(name, NCFG_NFT_TABLE) != 0 ||
+	    !read_name(&area, NFTA_RULE_CHAIN, out->chain, sizeof(out->chain), NULL, 0) ||
+	    (strcmp(out->chain, NCFG_NFT_CHAIN_INPUT) != 0 &&
+	    strcmp(out->chain, NCFG_NFT_CHAIN_FORWARD) != 0 &&
+	    strcmp(out->chain, NCFG_NFT_CHAIN_OUTPUT) != 0) ||
+	    !read_slot_comment(&area, out) ||
+	    ncfg_wire_attrs_find(&area, NFTA_RULE_EXPRESSIONS, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		return 0;
+	}
+	out->slot.name = out->name;
+	ncfg_wire_attrs_start(&list, attr.value, attr.length);
+	while (ncfg_wire_attrs_next(&list, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t expression;
+		ncfg_wire_attrs_t data;
+		ncfg_wire_attr_t  data_attr;
+		const uint8_t    *bytes = NULL;
+		size_t            count = 0;
+		uint32_t          value = 0;
+
+		if (attr.kind != NFTA_LIST_ELEM) {
+			continue;
+		}
+		ncfg_wire_attrs_start(&expression, attr.value, attr.length);
+		if (verdict || !read_name(&expression, NFTA_EXPR_NAME, name, sizeof(name), NULL, 0) ||
+		    ncfg_wire_attrs_find(&expression, NFTA_EXPR_DATA, &data_attr, NULL, 0) !=
+		        NCFG_WIRE_OK) {
+			return 0;
+		}
+		ncfg_wire_attrs_start(&data, data_attr.value, data_attr.length);
+		if (at < sizeof(order) / sizeof(order[0]) && strcmp(name, order[at]) != 0) {
+			return 0;
+		}
+		switch (at) {
+		case 0: /* meta nfproto */
+			if (!be32_member(&data, NFTA_META_KEY, &value) || value != NFT_META_NFPROTO) {
+				return 0;
+			}
+			break;
+		case 1: /* ipv4 or ipv6 */
+			if (!data_value(&data, NFTA_CMP_DATA, &bytes, &count) || count != 1u ||
+			    (bytes[0] != NFPROTO_IPV4 && bytes[0] != NFPROTO_IPV6)) {
+				return 0;
+			}
+			family = bytes[0];
+			out->ipv6 = family == NFPROTO_IPV6;
+			break;
+		case 2: { /* the address the slot matches */
+			const int source = out->slot.match == NCFG_FIREWALL_SLOT_FROM;
+			uint32_t  offset = 0, size = 0;
+
+			if (!be32_member(&data, NFTA_PAYLOAD_BASE, &value) ||
+			    value != NFT_PAYLOAD_NETWORK_HEADER ||
+			    !be32_member(&data, NFTA_PAYLOAD_OFFSET, &offset) ||
+			    !be32_member(&data, NFTA_PAYLOAD_LEN, &size)) {
+				return 0;
+			}
+			if (family == NFPROTO_IPV6 ? (size != 16u || offset != (source ? 8u : 24u))
+			                           : (size != 4u || offset != (source ? 12u : 16u))) {
+				return 0;
+			}
+			break;
+		}
+		case 3: /* the slot's own set */
+			ncfg_nft_slot_set_name(out->name, out->ipv6, expected, sizeof(expected));
+			if (!read_name(&data, NFTA_LOOKUP_SET, name, sizeof(name), NULL, 0) ||
+			    strcmp(name, expected) != 0) {
+				return 0;
+			}
+			break;
+		case 4: { /* counter */
+			uint64_t number = 0;
+
+			if (be64_member(&data, NFTA_COUNTER_PACKETS, &number)) {
+				out->packets = number;
+			}
+			if (be64_member(&data, NFTA_COUNTER_BYTES, &number)) {
+				out->bytes = number;
+			}
+			break;
+		}
+		default:
+			if (strcmp(name, "reject") == 0) {
+				uint32_t type = 0;
+
+				if (!be32_member(&data, NFTA_REJECT_TYPE, &type) ||
+				    type != NFT_REJECT_ICMPX_UNREACH) {
+					return 0;
+				}
+				out->slot.action = NCFG_FIREWALL_REJECT;
+			} else if (strcmp(name, "immediate") == 0) {
+				ncfg_wire_attr_t  nested;
+				ncfg_wire_attrs_t verdict_area;
+				ncfg_wire_attrs_t code_area;
+
+				if (ncfg_wire_attrs_find(&data, NFTA_IMMEDIATE_DATA, &nested, NULL, 0) !=
+				        NCFG_WIRE_OK) {
+					return 0;
+				}
+				ncfg_wire_attrs_start(&verdict_area, nested.value, nested.length);
+				if (ncfg_wire_attrs_find(&verdict_area, NFTA_DATA_VERDICT, &nested, NULL, 0) !=
+				        NCFG_WIRE_OK) {
+					return 0;
+				}
+				ncfg_wire_attrs_start(&code_area, nested.value, nested.length);
+				if (!be32_member(&code_area, NFTA_VERDICT_CODE, &value) ||
+				    (value != NF_DROP && value != NF_ACCEPT)) {
+					return 0;
+				}
+				out->slot.action = value == NF_DROP ? NCFG_FIREWALL_DROP : NCFG_FIREWALL_ACCEPT;
+			} else {
+				return 0;
+			}
+			verdict = 1;
+			break;
+		}
+		at++;
+	}
+	return verdict && at == sizeof(order) / sizeof(order[0]) + 1u;
+}
+
 int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
     ncfg_nft_kernel_rule_t *out, char *err, size_t err_size)
 {
@@ -4531,6 +5189,7 @@ int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
 	ncfg_wire_messages_t walk;
 	ncfg_wire_message_t  message;
 	size_t               at = 0;
+	size_t               slots = 0;
 	int                  same = 1;
 
 	refusal[0] = '\0';
@@ -4553,8 +5212,25 @@ int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
 	ncfg_wire_messages_start(&walk, built.data, built.length);
 	while (same && ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
 		ncfg_nft_kernel_rule_t expected;
+		ncfg_nft_kernel_slot_t opened;
 
 		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		/* A slot's rule (0340), against the observed slots in their order:
+		 * the slot as its rule carries it, never its members. */
+		if (ncfg_nft_rule_slot(message.payload, message.payload_length, &opened)) {
+			const ncfg_observed_firewall_slot_t *seen =
+			    slots < observed->slot_count ? &observed->slots[slots] : NULL;
+
+			same = seen && seen->chain && seen->name && seen->action && seen->match &&
+			    strcmp(seen->chain, opened.chain) == 0 &&
+			    strcmp(seen->name, opened.name) == 0 &&
+			    strcmp(seen->action, ncfg_nft_action_word(opened.slot.action)) == 0 &&
+			    strcmp(seen->match,
+			        opened.slot.match == NCFG_FIREWALL_SLOT_TO ? "to" : "from") == 0 &&
+			    seen->timeout == opened.slot.timeout && seen->ipv6 == opened.ipv6;
+			slots++;
 			continue;
 		}
 		if (!ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &expected,
@@ -4566,7 +5242,7 @@ int ncfg_nft_firewall_matches(const ncfg_firewall_t *desired,
 		at++;
 	}
 	ncfg_buf_free(&built);
-	return same && at == observed->rule_count;
+	return same && at == observed->rule_count && slots == observed->slot_count;
 }
 
 

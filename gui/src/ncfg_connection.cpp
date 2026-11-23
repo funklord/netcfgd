@@ -1572,6 +1572,15 @@ static ncfg_firewall_chain_row firewall_chain(const ncfg_firewall_chain_entry_t 
 	ncfg_firewall_chain_row row;
 
 	row.policy = from_c(chain.policy);
+	for (size_t i = 0; i < chain.slot_count; i++) {
+		ncfg_firewall_slot_row slot;
+
+		slot.name = from_c(chain.slot_list[i].name);
+		slot.action = from_c(chain.slot_list[i].action);
+		slot.match = from_c(chain.slot_list[i].match);
+		slot.timeout = chain.slot_list[i].timeout;
+		row.slot_list << slot;
+	}
 	for (size_t i = 0; i < chain.rule_count; i++) {
 		const ncfg_firewall_entry_t &entry = chain.rules[i];
 		ncfg_firewall_rule_row       rule;

@@ -1501,6 +1501,29 @@ static void render_firewall_chain(const ncfg_firewall_chain_t *chain, const char
 	 * program wrote and would then refuse to read. */
 	ncfg_buf_addf(body, "\t%s {\n\t\tpolicy = \"%s\"\n", name,
 	    chain->policy == NCFG_FIREWALL_POLICY_DROP ? "drop" : "accept");
+	/* The slots first, since they are evaluated first (0340). */
+	for (at = 0; at < chain->slot_count; at++) {
+		const ncfg_firewall_slot_t *slot = &chain->slots[at];
+		const char                 *action = firewall_action_word(slot->action);
+
+		if (!action || !ncfg_firewall_slot_name_valid(slot->name) ||
+		    (slot->match != NCFG_FIREWALL_SLOT_FROM && slot->match != NCFG_FIREWALL_SLOT_TO)) {
+			ncfg_render_refuse(missing, "firewall", name,
+			    "a slot this build cannot write back");
+			continue;
+		}
+		ncfg_buf_add_text(body, "\t\tslot ");
+		ncfg_render_quote(body, slot->name);
+		ncfg_buf_addf(body, " { action = \"%s\"; match = \"%s\"", action,
+		    slot->match == NCFG_FIREWALL_SLOT_TO ? "to" : "from");
+		if (slot->timeout > 0) {
+			char text[32];
+
+			ncfg_firewall_duration_text(slot->timeout, text, sizeof(text));
+			ncfg_buf_addf(body, "; timeout = \"%s\"", text);
+		}
+		ncfg_buf_add_text(body, " }\n");
+	}
 	for (at = 0; at < chain->rule_count; at++) {
 		render_firewall_rule(&chain->rules[at], body, missing, name);
 	}

@@ -315,6 +315,46 @@ static ncfg_firewall_t *installed(const ncfg_observed_firewall_t *observed)
 			return NULL;
 		}
 	}
+	/* The slots (0340), one per pair of family rules, in their order. */
+	for (at = 0; at < observed->slot_count; at++) {
+		const ncfg_observed_firewall_slot_t *one = &observed->slots[at];
+		ncfg_firewall_chain_t               *chain = NULL;
+		ncfg_firewall_slot_t                *grown;
+		size_t                               s;
+		int                                  known = 0;
+
+		for (c = 0; c < 3u; c++) {
+			if (one->chain && strcmp(one->chain, names[c]) == 0) {
+				chain = chains[c];
+			}
+		}
+		if (!chain || !one->name) {
+			continue;
+		}
+		for (s = 0; s < chain->slot_count; s++) {
+			known = known || strcmp(chain->slots[s].name, one->name) == 0;
+		}
+		if (known) {
+			continue;
+		}
+		grown = realloc(chain->slots, (chain->slot_count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_firewall_free(firewall);
+			return NULL;
+		}
+		chain->slots = grown;
+		memset(&chain->slots[chain->slot_count], 0, sizeof(*grown));
+		chain->slots[chain->slot_count].name = strdup(one->name);
+		chain->slots[chain->slot_count].action = action_of(one->action);
+		chain->slots[chain->slot_count].match =
+		    one->match && strcmp(one->match, "to") == 0 ? NCFG_FIREWALL_SLOT_TO
+		                                                 : NCFG_FIREWALL_SLOT_FROM;
+		chain->slots[chain->slot_count].timeout = one->timeout;
+		if (!chain->slots[chain->slot_count++].name) {
+			ncfg_firewall_free(firewall);
+			return NULL;
+		}
+	}
 	return firewall;
 }
 

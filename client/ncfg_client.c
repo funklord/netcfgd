@@ -3173,9 +3173,17 @@ static void firewall_chain_free(ncfg_firewall_chain_entry_t *chain)
 	}
 	free(chain->rules);
 	free(chain->policy);
+	for (size_t i = 0; i < chain->slot_count; i++) {
+		free(chain->slot_list[i].name);
+		free(chain->slot_list[i].action);
+		free(chain->slot_list[i].match);
+	}
+	free(chain->slot_list);
 	chain->rules = NULL;
 	chain->rule_count = 0;
 	chain->policy = NULL;
+	chain->slot_list = NULL;
+	chain->slot_count = 0;
 }
 
 void ncfg_firewall_config_free(ncfg_firewall_config_t *firewall)
@@ -3264,10 +3272,33 @@ static int read_firewall_chain(const ncfg_json_doc_t *doc, uint32_t object,
 {
 	uint32_t rules = ncfg_json_member(doc, object, "rules");
 	uint32_t count = ncfg_json_count(doc, rules);
+	uint32_t slots = ncfg_json_member(doc, object, "slots");
+	uint32_t slot_count = ncfg_json_count(doc, slots);
 
 	chain->policy = member_text(doc, object, "policy");
 	if (!chain->policy) {
 		return 0;
+	}
+	/* The slots (0340), each whole: the tab saves the block whole, and a
+	 * slot it did not read would be gone after any edit. */
+	if (slot_count) {
+		chain->slot_list = calloc(slot_count, sizeof(*chain->slot_list));
+		if (!chain->slot_list) {
+			return 0;
+		}
+		chain->slot_count = slot_count;
+		for (uint32_t i = 0; i < slot_count; i++) {
+			uint32_t                    entry = ncfg_json_at(doc, slots, i);
+			ncfg_firewall_slot_entry_t *slot = &chain->slot_list[i];
+
+			slot->name = member_text(doc, entry, "name");
+			slot->action = member_text(doc, entry, "action");
+			slot->match = member_text(doc, entry, "match");
+			slot->timeout = (long)ncfg_json_int(doc, ncfg_json_member(doc, entry, "timeout"), 0);
+			if (!slot->name || !slot->action || !slot->match) {
+				return 0;
+			}
+		}
 	}
 	if (!count) {
 		return 1;

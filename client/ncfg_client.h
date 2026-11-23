@@ -1306,12 +1306,25 @@ typedef struct {
 	char *icmp_types;
 } ncfg_firewall_entry_t;
 
-/* One base chain: its policy and its rules, in the document's order -- which
- * is the order nftables evaluates them in. */
+/* One slot (0340): a set the chain opens for live updates. `timeout` is
+ * seconds, 0 for none. Read so a Save keeps it. */
 typedef struct {
-	char                  *policy;
-	ncfg_firewall_entry_t *rules;
-	size_t                 rule_count;
+	char *name;
+	char *action;
+	char *match;
+	long  timeout;
+} ncfg_firewall_slot_entry_t;
+
+/* One base chain: its policy and its rules, in the document's order -- which
+ * is the order nftables evaluates them in -- and its slots, which come first. */
+typedef struct {
+	char                       *policy;
+	ncfg_firewall_entry_t      *rules;
+	size_t                      rule_count;
+	/* Not `slots`, which Qt defines as a macro in every file the GUI
+	 * includes this from. */
+	ncfg_firewall_slot_entry_t *slot_list;
+	size_t                      slot_count;
 } ncfg_firewall_chain_entry_t;
 
 /* `present` 0 where the document has no `firewall` block, which is not three

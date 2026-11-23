@@ -39,11 +39,21 @@
  */
 #include "kernel_internal.h"
 
+#include "ncfg/apply.h"
 #include "ncfg/base.h"
+#include "ncfg/log.h"
+#include "ncfg/state.h"
 
+#include <dirent.h>
+#include <errno.h>
+#include <limits.h>
 #include <linux/netfilter.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 /* The same deadline `kernel.c` and `kernel_genl.c` give a request. */
 #define REQUEST_SECONDS 5
@@ -76,8 +86,268 @@ int ncfg_kernel_nat_table_seen(const ncfg_netlink_reply_t *reply)
 	return 0;
 }
 
+const char *ncfg_slot_dir(void)
+{
+	const char *dir = getenv("NCFG_SLOT_DIR");
+
+	return dir && dir[0] ? dir : NCFG_SLOT_DIR;
+}
+
+/*
+ * One slot's members as the kernel holds them, both families, appended. A set
+ * that is not there has none, and says nothing; any other failure is said on
+ * the log and is 0.
+ */
+static int slot_dump_one(ncfg_netlink_t *socket, const char *slot,
+    ncfg_nft_slot_member_t **members, size_t *count)
+{
+	int ipv6;
+	int ok = 1;
+
+	for (ipv6 = 0; ipv6 < 2; ipv6++) {
+		ncfg_netlink_reply_t reply;
+		ncfg_buf_t           message;
+		char                 detail[NCFG_ERROR_MAX];
+		uint32_t             seq = ncfg_netlink_take_seq(socket);
+		size_t               at;
+
+		detail[0] = '\0';
+		memset(&reply, 0, sizeof(reply));
+		ncfg_buf_init(&message, 0);
+		if (ncfg_nft_build_slot_dump(&message, seq, slot, ipv6, detail, sizeof(detail)) &&
+		    ncfg_netlink_send_batch(socket, message.data, message.length, seq, &reply,
+		        detail, sizeof(detail))) {
+			for (at = 0; at < reply.count; at++) {
+				if (!ncfg_nft_slot_members_read(reply.items[at].bytes,
+				        reply.items[at].length, members, count, detail, sizeof(detail))) {
+					ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+					    "slot `%s`: a member was not read: %s", slot, detail);
+					ok = 0;
+				}
+			}
+		} else if (strstr(detail, "ENOENT") == NULL &&
+		    strstr(detail, "No such file") == NULL) {
+			ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+			    "slot `%s`: its members could not be read: %s", slot, detail);
+			ok = 0;
+		}
+		ncfg_netlink_reply_free(&reply);
+		ncfg_buf_free(&message);
+	}
+	return ok;
+}
+
+/* Calls `visit` for every slot `firewall` declares. */
+static void each_slot(const ncfg_firewall_t *firewall, void (*visit)(const char *, void *),
+    void *context)
+{
+	const ncfg_firewall_chain_t *chains[3];
+	size_t                       c, s;
+
+	if (!firewall) {
+		return;
+	}
+	chains[0] = &firewall->input;
+	chains[1] = &firewall->forward;
+	chains[2] = &firewall->output;
+	for (c = 0; c < 3u; c++) {
+		for (s = 0; s < chains[c]->slot_count; s++) {
+			visit(chains[c]->slots[s].name, context);
+		}
+	}
+}
+
+typedef struct {
+	ncfg_netlink_t          *socket;
+	ncfg_nft_slot_member_t **members;
+	size_t                  *count;
+} slot_gather_t;
+
+static void gather_from_kernel(const char *slot, void *context)
+{
+	slot_gather_t *gather = context;
+
+	(void)slot_dump_one(gather->socket, slot, gather->members, gather->count);
+}
+
+/*
+ * One slot's record, rewritten from what the kernel holds now (0340): after a
+ * live write and after every replacement, so the file is the membership as of
+ * the last change netcfgd made. A slot with no members has no file. A record
+ * that cannot be written is said on the log and changes nothing else: the
+ * kernel holds the membership, and only a reboot would show the difference.
+ */
+static void slot_record(ncfg_netlink_t *socket, const char *slot)
+{
+	ncfg_nft_slot_member_t *members = NULL;
+	size_t                  count = 0;
+	size_t                  at;
+	char                    path[PATH_MAX];
+	char                    why[NCFG_ERROR_MAX];
+	ncfg_buf_t              text;
+	const long long         now = (long long)time(NULL);
+	const char             *dir = ncfg_slot_dir();
+
+	if (!slot_dump_one(socket, slot, &members, &count)) {
+		free(members);
+		return; /* what the kernel holds is unknown, so the record stands */
+	}
+	if ((size_t)snprintf(path, sizeof(path), "%s/%s", dir, slot) >= sizeof(path)) {
+		free(members);
+		return;
+	}
+	if (count == 0u) {
+		if (unlink(path) != 0 && errno != ENOENT) {
+			ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+			    "slot `%s`: its old record %s could not be removed: %s", slot, path,
+			    strerror(errno));
+		}
+		free(members);
+		return;
+	}
+	ncfg_buf_init(&text, 0);
+	for (at = 0; at < count; at++) {
+		char address[64];
+
+		ncfg_nft_slot_member_text(&members[at], address, sizeof(address));
+		ncfg_buf_addf(&text, "%s %lld\n", address, members[at].remaining_ms
+		    ? now + (long long)((members[at].remaining_ms + 999u) / 1000u) : 0LL);
+	}
+	free(members);
+	why[0] = '\0';
+	if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+		ncfg_error_set(why, sizeof(why), "%s: %s", dir, strerror(errno));
+	} else if (ncfg_buf_failed(&text)) {
+		ncfg_error_set(why, sizeof(why), "out of memory");
+	} else if (!ncfg_write_atomically(path, text.data, text.length, 0600, why, sizeof(why)) &&
+	    why[0] == '\0') {
+		ncfg_error_set(why, sizeof(why), "the write failed");
+	}
+	if (why[0] != '\0') {
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "slot `%s`: its members are in the kernel but not recorded, so a reboot would "
+		    "empty it: %s", slot, why);
+	}
+	ncfg_buf_free(&text);
+}
+
+static void record_one(const char *slot, void *context)
+{
+	slot_record(context, slot);
+}
+
+/* The records of slots the firewall no longer declares, removed by the name
+ * the directory gives, and only where that name is one a slot can have. */
+static void slot_forget(const ncfg_firewall_t *firewall)
+{
+	DIR           *dir = opendir(ncfg_slot_dir());
+	struct dirent *entry;
+
+	if (!dir) {
+		return;
+	}
+	while ((entry = readdir(dir)) != NULL) {
+		const ncfg_firewall_chain_t *chains[3];
+		size_t                       c, s;
+		int                          declared = 0;
+		char                         path[PATH_MAX];
+
+		if (!ncfg_firewall_slot_name_valid(entry->d_name)) {
+			continue;
+		}
+		if (firewall) {
+			chains[0] = &firewall->input;
+			chains[1] = &firewall->forward;
+			chains[2] = &firewall->output;
+			for (c = 0; c < 3u; c++) {
+				for (s = 0; s < chains[c]->slot_count; s++) {
+					declared = declared ||
+					    strcmp(chains[c]->slots[s].name, entry->d_name) == 0;
+				}
+			}
+		}
+		if (!declared && (size_t)snprintf(path, sizeof(path), "%s/%s", ncfg_slot_dir(),
+		        entry->d_name) < sizeof(path)) {
+			(void)unlink(path);
+		}
+	}
+	closedir(dir);
+}
+
+typedef struct {
+	ncfg_nft_slot_member_t **members;
+	size_t                  *count;
+	long long                now;
+} slot_restore_t;
+
+/* One slot's record read back, its lapsed members left out. */
+static void restore_one(const char *slot, void *context)
+{
+	slot_restore_t *restore = context;
+	char            path[PATH_MAX];
+	char            line[128];
+	FILE           *file;
+
+	if ((size_t)snprintf(path, sizeof(path), "%s/%s", ncfg_slot_dir(), slot) >= sizeof(path)) {
+		return;
+	}
+	file = fopen(path, "re");
+	if (!file) {
+		return;
+	}
+	while (fgets(line, sizeof(line), file)) {
+		char                    address[64];
+		long long               expires = -1;
+		ncfg_nft_slot_member_t  one;
+		ncfg_nft_slot_member_t *grown;
+
+		if (sscanf(line, "%63s %lld", address, &expires) != 2 || expires < 0 ||
+		    (expires != 0 && expires <= restore->now) ||
+		    !ncfg_nft_slot_member_parse(slot, address, &one)) {
+			continue;
+		}
+		one.remaining_ms = expires ? (uint64_t)(expires - restore->now) * 1000u : 0u;
+		grown = realloc(*restore->members, (*restore->count + 1u) * sizeof(*grown));
+		if (!grown) {
+			break;
+		}
+		*restore->members = grown;
+		grown[(*restore->count)++] = one;
+	}
+	fclose(file);
+}
+
+/*
+ * The members every declared slot is to start the new table with (0340):
+ * where the table is there, what its sets hold; where it is not -- the first
+ * apply after a boot -- what was recorded, less what has lapsed since.
+ */
+static void slot_members(ncfg_netlink_t *socket, int table_exists,
+    const ncfg_firewall_t *firewall, ncfg_nft_slot_member_t **members, size_t *count)
+{
+	*members = NULL;
+	*count = 0;
+	if (table_exists) {
+		slot_gather_t gather = { socket, members, count };
+
+		each_slot(firewall, gather_from_kernel, &gather);
+	} else {
+		slot_restore_t restore = { members, count, (long long)time(NULL) };
+
+		each_slot(firewall, restore_one, &restore);
+	}
+}
+
 int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const ncfg_op_t *op, ncfg_nft_batch_t *batch, char *err, size_t err_size)
+{
+	return ncfg_kernel_build_nat_carrying(out, first_seq, table_exists, op, NULL, 0, batch,
+	    err, err_size);
+}
+
+int ncfg_kernel_build_nat_carrying(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const ncfg_op_t *op, const ncfg_nft_slot_member_t *members, size_t member_count,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	if (!op || !batch) {
 		ncfg_error_set(err, err_size, "there is no nftables action to carry out");
@@ -105,15 +375,16 @@ int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
 		offload.hardware = op->u.nftables.offload.value == NCFG_FLOW_OFFLOAD_HARDWARE;
 		offload.devices = op->u.nftables.offload_devices;
 		offload.device_count = op->u.nftables.offload_device_count;
-		return ncfg_nft_build_replace_all(out, first_seq, table_exists, op->u.nftables.uplinks,
-		    op->u.nftables.uplink_count, op->u.nftables.firewall, op->u.nftables.forwards,
-		    op->u.nftables.forward_count, &offload, op->u.nftables.clamp,
-		    op->u.nftables.clamp_count, batch, err, err_size);
+		return ncfg_nft_build_replace_carrying(out, first_seq, table_exists,
+		    op->u.nftables.uplinks, op->u.nftables.uplink_count, op->u.nftables.firewall,
+		    op->u.nftables.forwards, op->u.nftables.forward_count, &offload,
+		    op->u.nftables.clamp, op->u.nftables.clamp_count, members, member_count, batch,
+		    err, err_size);
 	}
-	return ncfg_nft_build_replace_all(out, first_seq, table_exists, op->u.nftables.uplinks,
+	return ncfg_nft_build_replace_carrying(out, first_seq, table_exists, op->u.nftables.uplinks,
 	    op->u.nftables.uplink_count, op->u.nftables.firewall, op->u.nftables.forwards,
 	    op->u.nftables.forward_count, NULL, op->u.nftables.clamp, op->u.nftables.clamp_count,
-	    batch, err, err_size);
+	    members, member_count, batch, err, err_size);
 }
 
 /*
@@ -233,11 +504,13 @@ int ncfg_kernel_nat_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
     size_t err_size)
 {
 	ncfg_netlink_t   socket;
-	ncfg_nft_batch_t batch;
-	ncfg_buf_t       message;
-	uint32_t         seq;
-	int              exists = 0;
-	int              ok;
+	ncfg_nft_batch_t        batch;
+	ncfg_buf_t              message;
+	uint32_t                seq;
+	int                     exists = 0;
+	int                     ok;
+	ncfg_nft_slot_member_t *members = NULL;
+	size_t                  member_count = 0;
 
 	(void)world;
 	ncfg_netlink_init(&socket);
@@ -261,10 +534,15 @@ int ncfg_kernel_nat_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
 		return 0;
 	}
 
+	/* What each slot holds now, or held before a reboot, to be written into
+	 * its new sets (0340). */
+	slot_members(&socket, exists, op->u.nftables.firewall, &members, &member_count);
 	memset(&batch, 0, sizeof(batch));
 	seq = ncfg_netlink_take_seq(&socket);
 	ncfg_buf_init(&message, 0);
-	ok = ncfg_kernel_build_nat(&message, seq, exists, op, &batch, err, err_size);
+	ok = ncfg_kernel_build_nat_carrying(&message, seq, exists, op, members, member_count,
+	    &batch, err, err_size);
+	free(members);
 	if (ok && batch.empty) {
 		/*
 		 * **Nothing was built and nothing must be sent.** There was no table
@@ -286,6 +564,12 @@ int ncfg_kernel_nat_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
 		 */
 		ok = ncfg_kernel_send(&socket, &message, batch.last_acked, op->kind,
 		    "replace the `" NCFG_NFT_TABLE "` table", err, err_size);
+		/* The records follow the table: each declared slot's rewritten from
+		 * what it now holds, and any other slot's removed. */
+		if (ok) {
+			each_slot(op->u.nftables.firewall, record_one, &socket);
+			slot_forget(op->u.nftables.firewall);
+		}
 		/*
 		 * **A hardware flowtable a driver cannot carry, named** (0319). The
 		 * kernel answers `EOPNOTSUPP` for the whole transaction, and the
@@ -302,6 +586,96 @@ int ncfg_kernel_nat_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
 			    "so NAT and the firewall were not replaced either. `flow_offload = "
 			    "\"software\"` works on every device (0319)");
 		}
+	}
+	ncfg_buf_free(&message);
+	ncfg_netlink_close(&socket);
+	return ok;
+}
+
+/* The slot `name` declares, or NULL. */
+static const ncfg_firewall_slot_t *declared_slot(const ncfg_document_t *desired,
+    const char *name)
+{
+	const ncfg_firewall_chain_t *chains[3];
+	size_t                       c, s;
+
+	if (!desired || !desired->firewall || !name) {
+		return NULL;
+	}
+	chains[0] = &desired->firewall->input;
+	chains[1] = &desired->firewall->forward;
+	chains[2] = &desired->firewall->output;
+	for (c = 0; c < 3u; c++) {
+		for (s = 0; s < chains[c]->slot_count; s++) {
+			if (strcmp(chains[c]->slots[s].name, name) == 0) {
+				return &chains[c]->slots[s];
+			}
+		}
+	}
+	return NULL;
+}
+
+int ncfg_firewall_slot_write(const ncfg_document_t *desired, const char *slot, int add,
+    const char *address, const char *lifetime, char *err, size_t err_size)
+{
+	ncfg_netlink_t   socket;
+	ncfg_nft_batch_t batch;
+	ncfg_buf_t       message;
+	int64_t          seconds = 0;
+	int              code = 0;
+	int              ok;
+
+	if (!declared_slot(desired, slot)) {
+		ncfg_error_set(err, err_size,
+		    "`%s` is not a slot this configuration opens, so it is a static value and "
+		    "is not written live (0339); a chain opens one with `slot \"%s\" { ... }`",
+		    slot ? slot : "", slot ? slot : "");
+		return 0;
+	}
+	if (lifetime && lifetime[0] && !ncfg_firewall_duration(lifetime, &seconds)) {
+		ncfg_error_set(err, err_size,
+		    "`%s` is not a lifetime: a count and s, m, h or d, such as \"30m\", a week at most",
+		    lifetime);
+		return 0;
+	}
+	if (!add && lifetime && lifetime[0]) {
+		ncfg_error_set(err, err_size, "a lifetime is for a member being added");
+		return 0;
+	}
+	ncfg_buf_init(&message, 0);
+	ncfg_netlink_init(&socket);
+	if (!ncfg_nft_build_slot_write(&message, 1u, slot, add, address, (uint64_t)seconds, &batch,
+	        err, err_size)) {
+		ncfg_buf_free(&message);
+		return 0;
+	}
+	if (!ncfg_netlink_open_protocol(&socket, NCFG_NFT_NETLINK_PROTOCOL, 0, err, err_size) ||
+	    !ncfg_netlink_set_timeout(&socket, REQUEST_SECONDS, err, err_size)) {
+		ncfg_buf_free(&message);
+		ncfg_netlink_close(&socket);
+		return 0;
+	}
+	/* The sequence numbers the socket hands out, rather than the 1 the
+	 * transaction was checked with: rebuilt once the socket exists. */
+	ncfg_buf_free(&message);
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_nft_build_slot_write(&message, ncfg_netlink_take_seq(&socket), slot, add,
+	    address, (uint64_t)seconds, &batch, err, err_size);
+	if (ok) {
+		ok = ncfg_kernel_send_reporting(&socket, &message, batch.last_acked, &code,
+		    add ? "add a member to a slot" : "remove a member from a slot", err, err_size);
+	}
+	if (!ok && (code == ENOENT || code == -ENOENT)) {
+		if (!add) {
+			ok = 1; /* not a member: what removing it asks for */
+		} else {
+			ncfg_error_set(err, err_size,
+			    "slot `%s` is declared but not in the kernel yet: `ncfg apply` puts it there",
+			    slot);
+		}
+	}
+	if (ok) {
+		slot_record(&socket, slot);
 	}
 	ncfg_buf_free(&message);
 	ncfg_netlink_close(&socket);

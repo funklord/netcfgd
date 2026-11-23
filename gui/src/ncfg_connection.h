@@ -346,9 +346,20 @@ struct ncfg_firewall_rule_row {
 	QList<int>  icmp_types;
 };
 
+/* One slot (0340), carried so a Save keeps it: the tab has no editor for
+ * one yet. `timeout` is seconds, 0 for none. */
+struct ncfg_firewall_slot_row {
+	QString name;
+	QString action;
+	QString match;
+	long    timeout = 0;
+};
+
 struct ncfg_firewall_chain_row {
 	QString                       policy;
 	QList<ncfg_firewall_rule_row> rules;
+	/* Not `slots`, which Qt defines as a macro. */
+	QList<ncfg_firewall_slot_row> slot_list;
 };
 
 /* `present` false where the document has no `firewall` block, which is not

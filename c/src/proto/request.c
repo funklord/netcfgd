@@ -59,6 +59,7 @@ static const char *const request_names[NCFG_PROTO_REQ_COUNT] = {
 	"profile_delete",
 	"tunnel_set",
 	"secret_get",
+	"slot_set",
 };
 
 /* The shared member lists, named after what they belong to. */
@@ -78,6 +79,7 @@ static const char *const members_secret_put[] = { "name", "value", "replace" };
 static const char *const members_name[] = { "name" };
 static const char *const members_profile_save[] = { "name", "replace" };
 static const char *const members_radio_set[] = { "interface", "activate" };
+static const char *const members_slot_set[] = { "slot", "address", "add", "lifetime" };
 
 typedef struct {
 	const char *const *names;
@@ -144,6 +146,7 @@ static const member_list_t request_members[NCFG_PROTO_REQ_COUNT] = {
 	LIST(members_name),     /* profile_delete */
 	LIST(members_radio_set),/* tunnel_set: interface and activate, a radio's */
 	LIST(members_name),     /* secret_get */
+	LIST(members_slot_set),
 };
 
 #undef LIST
@@ -464,6 +467,18 @@ static int encode_payload(const ncfg_proto_request_t *request, ncfg_json_writer_
 		member_str(writer, "interface", request->u.tunnel_set.interface);
 		ncfg_json_write_member_bool(writer, "activate", request->u.tunnel_set.activate);
 		break;
+	case NCFG_PROTO_REQ_SLOT_SET:
+		if (!request->u.slot_set.slot.bytes) {
+			return missing(err, err_size, kind, "slot");
+		}
+		if (!request->u.slot_set.address.bytes) {
+			return missing(err, err_size, kind, "address");
+		}
+		member_str(writer, "slot", request->u.slot_set.slot);
+		member_str(writer, "address", request->u.slot_set.address);
+		ncfg_json_write_member_bool(writer, "add", request->u.slot_set.add);
+		member_str_if(writer, "lifetime", request->u.slot_set.lifetime);
+		break;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
 		ncfg_error_set(err, err_size, "a request of no known kind");
@@ -783,6 +798,14 @@ int ncfg_proto_decode_request(ncfg_proto_dec_t *dec, uint32_t object, ncfg_proto
 		        &out->u.tunnel_set.interface) ||
 		    !ncfg_proto_get_bool(dec, object, "activate", 1, 0, what,
 		        &out->u.tunnel_set.activate)) {
+			return 0;
+		}
+		break;
+	case NCFG_PROTO_REQ_SLOT_SET:
+		if (!ncfg_proto_get_str(dec, object, "slot", 1, what, &out->u.slot_set.slot) ||
+		    !ncfg_proto_get_str(dec, object, "address", 1, what, &out->u.slot_set.address) ||
+		    !ncfg_proto_get_bool(dec, object, "add", 1, 0, what, &out->u.slot_set.add) ||
+		    !ncfg_proto_get_str(dec, object, "lifetime", 0, what, &out->u.slot_set.lifetime)) {
 			return 0;
 		}
 		break;

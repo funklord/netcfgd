@@ -128,6 +128,7 @@ NESTED = {
 	"steering_fields": ACCESS_POINT_READER,
 	"firewall_chain_fields": FIREWALL_READER,
 	"firewall_rule_fields": FIREWALL_READER,
+	"firewall_slot_fields": FIREWALL_READER,
 }
 
 

@@ -247,6 +247,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_RADIOS:
 	case NCFG_PROTO_REQ_RADIO_SET:
 	case NCFG_PROTO_REQ_TUNNEL_SET:
+	case NCFG_PROTO_REQ_SLOT_SET:
 	/* The three that are a model and an envelope: `daemon.h` encodes each
 	 * from the model's own writer, so none can come to disagree with the file
 	 * of the same shape under `/run`. */
@@ -953,6 +954,37 @@ static int answer_tunnel_set(ncfg_main_desk_t *desk, const ncfg_proto_tunnel_set
 	}
 	/* The protocol's `ok`: what comes of it arrives as the tunnel's report,
 	 * which `status` shows, so there is nothing more to answer with. */
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+/*
+ * A live write into a firewall slot (0340), against the document in force:
+ * a slot it does not declare is a static value and refused (0339). Straight
+ * to the kernel, without a plan or an apply -- a membership change is not a
+ * configuration change, and is never drift.
+ */
+static int answer_slot_set(ncfg_main_desk_t *desk, const ncfg_proto_slot_set_t *set,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	char slot[NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
+	char address[64];
+	char lifetime[16];
+
+	if (!name_of(set->slot, "slot", slot, sizeof(slot), err, err_size) ||
+	    !name_of(set->address, "address", address, sizeof(address), err, err_size)) {
+		return 0;
+	}
+	lifetime[0] = '\0';
+	if (set->lifetime.bytes &&
+	    !name_of(set->lifetime, "lifetime", lifetime, sizeof(lifetime), err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_firewall_slot_write(desk->state ? desk->state->desired : NULL, slot,
+	        set->add ? 1 : 0, address, lifetime[0] ? lifetime : NULL, err, err_size)) {
+		return 0;
+	}
+	ncfg_log_emitf("firewall", NCFG_LOG_INFO, "slot `%s`: %s %s%s%s", slot,
+	    set->add ? "added" : "removed", address, lifetime[0] ? " for " : "", lifetime);
 	return ncfg_daemon_ok_encode(out, err, err_size);
 }
 
@@ -1695,6 +1727,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		return answer_radio_set(desk, &request->u.radio_set, out, err, err_size);
 	case NCFG_PROTO_REQ_TUNNEL_SET:
 		return answer_tunnel_set(desk, &request->u.tunnel_set, out, err, err_size);
+	case NCFG_PROTO_REQ_SLOT_SET:
+		return answer_slot_set(desk, &request->u.slot_set, out, err, err_size);
 	case NCFG_PROTO_REQ_CONFIG_PUT:
 		return wrote_configuration(desk,
 		    answer_config_put(desk, &request->u.put, out, err, err_size));

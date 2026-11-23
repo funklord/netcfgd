@@ -137,8 +137,17 @@ static int read_back(void)
 	        sizeof(err));
 	for (at = 0; ok && at < reply.count; at++) {
 		ncfg_nft_kernel_rule_t one;
+		ncfg_nft_kernel_slot_t opened;
 		char                   why[512];
 
+		/* A slot's rule (0340): the slot its comment carries, as read. */
+		if (ncfg_nft_rule_slot(reply.items[at].bytes, reply.items[at].length, &opened)) {
+			printf("slot %s %s %s match=%s timeout=%lld %s\n", opened.chain, opened.name,
+			    ncfg_nft_action_word(opened.slot.action),
+			    opened.slot.match == NCFG_FIREWALL_SLOT_TO ? "to" : "from",
+			    (long long)opened.slot.timeout, opened.ipv6 ? "ipv6" : "ipv4");
+			continue;
+		}
 		if (ncfg_nft_firewall_rule_read(reply.items[at].bytes, reply.items[at].length, &one,
 		        why, sizeof(why))) {
 			print_rule(&one);

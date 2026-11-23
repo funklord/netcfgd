@@ -59,6 +59,8 @@ static const char usage_text[] =
     "  ncfg tunnel up|down IFACE  turn a VPN on or off: a `wireguard` or `openvpn`\n"
     "                           device is held by a `switch`, an IPsec `xfrm` one is\n"
     "                           asked of strongSwan\n"
+    "  ncfg slot add|remove SLOT ADDRESS [LIFETIME]  a member written into a\n"
+    "                           firewall slot live, without an apply (0340)\n"
     "  ncfg explain SUBJECT      why is it like this? SUBJECT is one of:\n"
     "                             interface NAME\n"
     "                             address   IFACE CIDR\n"

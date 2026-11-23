@@ -9,7 +9,7 @@
  *   what it cannot say is that this build can PRODUCE the file.
  *
  * WHAT IT DOES
- *   Writes all 68 lines, in the file's order, each through the encoder the
+ *   Writes all WITNESS_COUNT lines, in the file's order, each through the encoder the
  *   daemon answers with -- and compares what it wrote against what is
  *   committed, so the comparison and the bless are the same program. Four
  *   groups:
@@ -38,7 +38,7 @@
  * TERMINATION, SINCE THIS FORKS
  *   Three python fakes, each under `timeout 60`, started once and stopped on
  *   every exit path including the failing ones. No loop over anything but the
- *   68 lines. `fakewifi.h` carries the detail and the reason the kill has to
+ *   WITNESS_COUNT lines. `fakewifi.h` carries the detail and the reason the kill has to
  *   reach a process group.
  */
 #include "fakewifi.h"
@@ -88,7 +88,7 @@ static void detail(const char *what, const char *why)
 /* What the file holds, and what this must therefore produce. Asserted rather
  * than assumed: a builder that wrote 61 lines over a 68-line file would be a
  * silent truncation of the frozen surface. */
-#define WITNESS_COUNT 71u
+#define WITNESS_COUNT 72u
 
 static char  *lines[WITNESS_LINES];
 /* What this build produced, in the order it produced it. The file is written
@@ -249,7 +249,7 @@ static void the_requests(void)
 		ncfg_buf_free(&out);
 		ncfg_proto_message_free(&message);
 	}
-	check(made_count == 44u, "the first 44 lines are requests, each re-encoded here");
+	check(made_count == 45u, "the first 45 lines are requests, each re-encoded here");
 	for (; at < line_count; at++) {
 		if (strncmp(lines[at], "{\"request\":", 11u) == 0) {
 			check(0, "and no request line sits below them, which the order needs");
@@ -423,7 +423,7 @@ static int start_the_radios(const char *fakes)
 #define HOMEFIBER_HEX "486f6d654669626572"
 
 /*
- * The six the fakes answer: lines 44 to 48 and 54.
+ * The six the fakes answer: lines 45 to 49 and 55.
  *
  * **Every value here is the fake's, not this file's**, which is what 0281
  * decided. The witness said `home` at -40 dBm where the fake has answered
@@ -449,7 +449,7 @@ static void the_wifi_answers(void)
 	if (!known || !devices || !access_point || !observed || !off) {
 		return;
 	}
-	/* 44: a scan nothing has interfered with. */
+	/* 45: a scan nothing has interfered with. */
 	ncfg_buf_init(&out, 0);
 	one("a fresh scan",
 	    ncfg_wifi_scan(&where, known, ncfg_wifi_blocked_switch(observed, "wlan0"), "wlan0",
@@ -457,7 +457,7 @@ static void the_wifi_answers(void)
 	    &out, err);
 	ncfg_buf_free(&out);
 
-	/* 45: and one the supplicant refused, which answers with what it last saw
+	/* 46: and one the supplicant refused, which answers with what it last saw
 	 * and says why that is what it is. */
 	check(tell_fake(ctrl_dir, "wlan0", "FAIL_NEXT_SCAN -16"),
 	    "the radio is told to refuse the next scan");
@@ -468,14 +468,14 @@ static void the_wifi_answers(void)
 	    &out, err);
 	ncfg_buf_free(&out);
 
-	/* 46: the radios the kernel reports, and the gap between activated and
+	/* 47: the radios the kernel reports, and the gap between activated and
 	 * answering. */
 	ncfg_buf_init(&out, 0);
 	one("the radio list", ncfg_wifi_radios(&where, devices, observed, &out, err, sizeof(err)),
 	    &out, err);
 	ncfg_buf_free(&out);
 
-	/* 47: what one radio is doing, with two networks it has given up on --
+	/* 48: what one radio is doing, with two networks it has given up on --
 	 * which `STATUS` never carried and `LIST_NETWORKS` is asked for. */
 	check(tell_fake(ctrl_dir, "wlan0", "DISABLE [TEMP-DISABLED] Office") &&
 	        tell_fake(ctrl_dir, "wlan0", "DISABLE [DISABLED] Lab"),
@@ -486,7 +486,7 @@ static void the_wifi_answers(void)
 	    err);
 	ncfg_buf_free(&out);
 
-	/* 48: the same radio with its kill switch pressed, which is the answer
+	/* 49: the same radio with its kill switch pressed, which is the answer
 	 * `STATUS` cannot distinguish from "nothing is there". */
 	ncfg_buf_init(&out, 0);
 	one("a switched-off radio's status",
@@ -497,11 +497,11 @@ static void the_wifi_answers(void)
 	ncfg_document_free(devices);
 	ncfg_observed_free(observed);
 	ncfg_observed_free(off);
-	/* 54's document is wanted later, so it is freed by its own producer. */
+	/* 55's document is wanted later, so it is freed by its own producer. */
 	ncfg_document_free(access_point);
 }
 
-/* 54, which is hostapd's rather than the supplicant's and so is produced
+/* 55, which is hostapd's rather than the supplicant's and so is produced
  * where the witness puts it. */
 static void the_stations(void)
 {
@@ -998,7 +998,7 @@ int main(int argc, char **argv)
 	stop_fakes();
 	testdir_remove(testdir_path);
 
-	check(made_count == WITNESS_COUNT, "this build produces all 71 lines of the witness");
+	check(made_count == WITNESS_COUNT, "this build produces all 72 lines of the witness");
 	if (made_count != WITNESS_COUNT) {
 		printf("  %zu produced, %zu in the file\n", made_count, line_count);
 	}

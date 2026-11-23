@@ -2755,10 +2755,62 @@ typedef struct {
  */
 #define NCFG_FIREWALL_MARK_BIT 0x80000000u
 
+/* Which address of a packet a slot's members are matched against (0340). */
+typedef enum {
+	NCFG_FIREWALL_SLOT_FROM,
+	NCFG_FIREWALL_SLOT_TO
+} ncfg_firewall_slot_match_t;
+
+/*
+ * A slot (0340): a named set the chain opens for live updates, whose members
+ * get `action` ahead of every rule in the chain (0339's precedence). The
+ * document holds the slot and never its members -- membership is written
+ * live, and is nobody's desired state.
+ */
+typedef struct {
+	/* Unique across the whole firewall, since a live write names a slot and
+	 * nothing else. */
+	char   *name;
+	int     action;  /* ncfg_firewall_action_t */
+	int     match;   /* ncfg_firewall_slot_match_t */
+	/* Seconds a member written with no lifetime of its own stays; 0 for
+	 * until it is removed. */
+	int64_t timeout;
+} ncfg_firewall_slot_t;
+
+/* At most this many slots in one firewall: each is two sets and two kernel
+ * rules, and a live write searches them by name. */
+#define NCFG_FIREWALL_SLOT_MAX 64u
+
+/* The longest slot name: the set it becomes, `slot-NAME-4`, keeps within
+ * nftables' set name and leaves the rule comment room. */
+#define NCFG_FIREWALL_SLOT_NAME_MAX 48u
+
+/*
+ * A slot member's lifetime as written: a count and one of s, m, h or d --
+ * "90s", "30m", "1h", "2d" -- at least a second and at most a week. The
+ * language, `ncfg slot add --for` and the daemon read it the same way. 1 and
+ * the seconds, or 0 for anything else.
+ */
+int ncfg_firewall_duration(const char *text, int64_t *seconds);
+
+/* `seconds` written back in the largest unit that holds it exactly, so
+ * "3600s" reads as "1h". */
+void ncfg_firewall_duration_text(int64_t seconds, char *out, size_t out_size);
+
+/* Whether `name` can name a slot: letters, digits, `-` and `_`, starting with
+ * a letter, at most NCFG_FIREWALL_SLOT_NAME_MAX. Narrow because it becomes a
+ * set name and travels in a live write. */
+int ncfg_firewall_slot_name_valid(const char *name);
+
 typedef struct {
 	int                   policy; /* ncfg_firewall_policy_t */
 	ncfg_firewall_rule_t *rules;  /* in the document's order, never sorted */
 	size_t                rule_count;
+	/* After the rules so that a chain without slots is the document it was;
+	 * in the order written, which is the order they are evaluated in. */
+	ncfg_firewall_slot_t *slots;
+	size_t                slot_count;
 } ncfg_firewall_chain_t;
 
 /*

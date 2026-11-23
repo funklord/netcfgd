@@ -1974,6 +1974,13 @@ static void a_firewall_mac_round_trips(void)
 	    "\t\tdrop \"ssh-guard\" { protocol = \"tcp\"; port = 22; over = \"8/15m\" }\n"
 	    "\t}\n\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
 	    "and so does a per-source guard (10.885)");
+	round_trips("firewall {\n\tinput { policy = \"accept\" }\n\tforward {\n"
+	    "\t\tpolicy = \"drop\"\n"
+	    "\t\tslot \"quarantine\" { action = \"drop\"; match = \"from\" }\n"
+	    "\t\tslot \"guests\" { action = \"accept\"; match = \"to\"; timeout = \"3600s\" }\n"
+	    "\t\taccept \"lan-out\" { interface = \"lan0\" }\n"
+	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
+	    "and so do a chain's slots (0340)");
 }
 
 static void a_firewall_round_trips(void)

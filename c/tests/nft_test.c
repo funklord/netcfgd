@@ -1017,6 +1017,142 @@ static void an_mss_clamp_is_two_rules_an_interface(void)
 	ncfg_buf_free(&out);
 }
 
+/* Slots (0340): two sets and two rules a slot, ahead of the chain's written
+ * rules, each rule read back as the slot. */
+static void a_slot_is_two_sets_and_two_rules_first(void)
+{
+	ncfg_buf_t            out;
+	ncfg_nft_batch_t      batch;
+	ncfg_wire_messages_t  walk;
+	ncfg_wire_message_t   message;
+	ncfg_firewall_t       firewall;
+	ncfg_firewall_rule_t  rule;
+	ncfg_firewall_slot_t  slots[1];
+	char                  name[] = "quarantine";
+	char                  rule_name[] = "lan-out";
+	char                  err[NCFG_ERROR_MAX];
+	int                   sets = 0, slot_rules = 0, first_rule_after = 0, ipv6 = 0;
+
+	memset(&firewall, 0, sizeof(firewall));
+	memset(&rule, 0, sizeof(rule));
+	memset(slots, 0, sizeof(slots));
+	rule.name = rule_name;
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	slots[0].name = name;
+	slots[0].action = NCFG_FIREWALL_REJECT;
+	slots[0].match = NCFG_FIREWALL_SLOT_TO;
+	slots[0].timeout = 600;
+	firewall.forward.policy = NCFG_FIREWALL_POLICY_DROP;
+	firewall.forward.rules = &rule;
+	firewall.forward.rule_count = 1;
+	firewall.forward.slots = slots;
+	firewall.forward.slot_count = 1;
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a firewall with a slot is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and its sets pass the audit");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_slot_t opened;
+		ncfg_nft_kernel_rule_t one;
+
+		sets += (message.header.kind & 0xffu) == NFT_MSG_NEWSET;
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (ncfg_nft_rule_slot(message.payload, message.payload_length, &opened)) {
+			slot_rules += strcmp(opened.chain, "forward") == 0 &&
+			    strcmp(opened.name, "quarantine") == 0 &&
+			    opened.slot.action == NCFG_FIREWALL_REJECT &&
+			    opened.slot.match == NCFG_FIREWALL_SLOT_TO && opened.slot.timeout == 600;
+			ipv6 += opened.ipv6;
+		} else if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one,
+		               NULL, 0)) {
+			first_rule_after = slot_rules == 2;
+		}
+	}
+	check(sets == 2 && slot_rules == 2 && ipv6 == 1,
+	    "  as a set and a rule per family, each read back as the slot");
+	check(first_rule_after, "  ahead of the chain's written rule (0339)");
+	ncfg_buf_free(&out);
+
+	slots[0].name = (char *)"no spaces";
+	ncfg_buf_init(&out, 0);
+	check(!ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a slot name no set can carry is refused before anything is written");
+	ncfg_buf_free(&out);
+}
+
+/* A slot's members carried across a replacement, and a live write (0340). */
+static void slot_members_are_carried_and_written(void)
+{
+	ncfg_buf_t             out;
+	ncfg_nft_batch_t       batch;
+	ncfg_wire_messages_t   walk;
+	ncfg_wire_message_t    message;
+	ncfg_firewall_t        firewall;
+	ncfg_firewall_slot_t   slots[1];
+	ncfg_nft_slot_member_t members[3];
+	char                   name[] = "quarantine";
+	char                   err[NCFG_ERROR_MAX];
+	int                    order_ok = 1, elements = 0, sets = 0, rules = 0;
+
+	memset(&firewall, 0, sizeof(firewall));
+	memset(slots, 0, sizeof(slots));
+	memset(members, 0, sizeof(members));
+	slots[0].name = name;
+	slots[0].action = NCFG_FIREWALL_DROP;
+	firewall.input.slots = slots;
+	firewall.input.slot_count = 1;
+	/* One of each family, and one of a slot the document no longer has. */
+	(void)strcpy(members[0].slot, "quarantine");
+	members[0].address[0] = 192;
+	members[0].address[3] = 7;
+	(void)strcpy(members[1].slot, "quarantine");
+	members[1].ipv6 = 1;
+	members[1].address[0] = 0x20;
+	members[1].remaining_ms = 60000u;
+	(void)strcpy(members[2].slot, "gone");
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace_carrying(&out, 1u, 1, NULL, 0, &firewall, NULL, 0, NULL, NULL,
+	          0, members, 3u, &batch, err, sizeof(err)),
+	    "a replacement carrying a slot's members is built");
+	check(ncfg_nft_writes_only_our_table(out.data, out.length, err, sizeof(err)),
+	    "  and the members pass the audit");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		const unsigned kind = message.header.kind & 0xffu;
+
+		if (kind == NFT_MSG_NEWSET) {
+			sets++;
+		} else if (kind == NFT_MSG_NEWSETELEM) {
+			order_ok = order_ok && sets > elements && rules == 0;
+			elements++;
+		} else if (kind == NFT_MSG_NEWRULE) {
+			rules++;
+		}
+	}
+	check(elements == 2 && order_ok,
+	    "  one element message a family, each after its set and before the rules");
+	ncfg_buf_free(&out);
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_slot_write(&out, 1u, "quarantine", 1, "192.0.2.7", 600u, &batch, err,
+	          sizeof(err)),
+	    "a live write is one audited transaction");
+	ncfg_buf_free(&out);
+	ncfg_buf_init(&out, 0);
+	check(!ncfg_nft_build_slot_write(&out, 1u, "quarantine", 1, "192.0.2.0/24", 0u, &batch,
+	          err, sizeof(err)) && strstr(err, "single addresses") != NULL,
+	    "  and a network is refused, naming why");
+	check(!ncfg_nft_build_slot_write(&out, 1u, "../x", 0, "192.0.2.7", 0u, &batch, err,
+	          sizeof(err)),
+	    "  and so is a name no slot can have");
+	check(out.length == 0u, "  with nothing written for either");
+	ncfg_buf_free(&out);
+}
+
 /* ICMP types (0333): one kernel rule each, each read back as its type. */
 static void icmp_types_are_one_kernel_rule_each(void)
 {
@@ -2495,6 +2631,8 @@ int main(void)
 	icmp_types_are_one_kernel_rule_each();
 	tunnel_protocols_read_back();
 	an_mss_clamp_is_two_rules_an_interface();
+	a_slot_is_two_sets_and_two_rules_first();
+	slot_members_are_carried_and_written();
 	a_schedule_is_written_in_utc_and_read_back();
 	only_the_clock_moving_is_recognised();
 	forwards_are_written_and_read_back();

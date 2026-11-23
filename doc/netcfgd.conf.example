@@ -518,6 +518,17 @@
 #     cannot fill the disk (0330). Beside `over` it logs what is over, the
 #     meter counted once through the packet mark's top bit, which netcfgd
 #     reserves: a routing rule's `fwmark` may not use 0x80000000 (0338).
+#   - A `slot` opens a set the chain's members are written into live, without
+#     an apply: `slot "quarantine" { action = "drop"; match = "from" }`. Its
+#     members -- single addresses, either family -- get `action` ahead of
+#     every rule in the chain, matched on their source (`from`) or
+#     destination (`to`). `timeout = "1h"` is how long a member stays when
+#     its writer gives no lifetime; without it, until removed. A name is the
+#     firewall's own, not the chain's. The members are nobody's desired
+#     state, so `ncfg plan` never calls them drift, and an apply carries
+#     them into the new table. `ncfg slot add quarantine 192.0.2.7 30m` and
+#     `ncfg slot remove quarantine 192.0.2.7` write them; a name that is not
+#     a slot is refused (0340).
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
 #
@@ -560,6 +571,8 @@
 #	}
 #	forward {
 #		policy = "drop"
+#		# Hosts written in live are dropped before any rule below.
+#		slot "quarantine" { action = "drop"; match = "from" }
 #		accept "established" {
 #			state = ["established", "related"]
 #		}

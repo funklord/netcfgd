@@ -149,6 +149,18 @@ QString ncfg_firewall_block(const ncfg_firewall_settings &settings)
 		    chains[c]->policy.isEmpty() ? QStringLiteral("accept") : chains[c]->policy;
 		body << QStringLiteral("\t%1 {").arg(QString::fromLatin1(chain_names[c]));
 		body << QStringLiteral("\t\tpolicy = %1").arg(quoted(policy));
+		/* The slots first, as the compiler writes them (0340). The timeout
+		 * in seconds, which the language reads as written. */
+		for (const ncfg_firewall_slot_row &slot : chains[c]->slot_list) {
+			QString line = QStringLiteral("\t\tslot %1 { action = %2; match = %3")
+			                   .arg(quoted(slot.name), quoted(slot.action), quoted(slot.match));
+
+			if (slot.timeout > 0) {
+				line += QStringLiteral("; timeout = %1")
+				            .arg(quoted(QStringLiteral("%1s").arg(slot.timeout)));
+			}
+			body << line + QStringLiteral(" }");
+		}
 		for (const ncfg_firewall_rule_row &rule : chains[c]->rules) {
 			write_rule(body, rule);
 		}

@@ -33,7 +33,8 @@ command -v nft >/dev/null 2>&1 || skip "no nft(8) to read the ruleset back with"
 nft list tables >/dev/null 2>&1 || skip "this namespace cannot use nftables"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-firewall.XXXXXX")
-trap 'rm -rf "$work"' EXIT INT TERM
+daemon_pid=""
+trap '[ -n "$daemon_pid" ] && kill "$daemon_pid" 2>/dev/null; rm -rf "$work"' EXIT INT TERM
 
 failures=0
 check() {
@@ -237,6 +238,8 @@ ncfg="$build/ncfg"
 [ -x "$ncfg" ] || skip "ncfg is not built"
 mkdir -p "$work/etc" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
+# A slot's record (0340) where this test can read it, not /var/lib.
+export NCFG_SLOT_DIR="$work/slot"
 # A fixed zone, so the schedule's pieces do not depend on where this runs.
 export TZ=UTC0
 write_etc() {
@@ -603,6 +606,119 @@ nft delete rule inet netcfgd mss handle "$handle"
 check "a clamp missing one direction is planned back" \
 	"$(grep -c 'nftables.replace' "$work/plan" || true)" "1"
 ip link del wan9 2>/dev/null || true
+
+# Slots (0340): a set per family a chain opens for live updates, and a rule
+# for each ahead of the chain's first written rule.
+write_etc <<'CONF'
+firewall {
+	input { policy = "accept" }
+	forward {
+		policy = "drop"
+		accept "lan-out" { interface = "lan0" }
+		slot "quarantine" { action = "drop"; match = "from" }
+		slot "guests" { action = "accept"; match = "to"; timeout = "1h" }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+has "a slot is a set of one family's addresses, with lifetimes" \
+	'set slot-quarantine-4 {'
+has "and the IPv6 one beside it" 'set slot-guests-6 {'
+check "the slot's default lifetime is both its sets'" \
+	"$(grep -c 'timeout 1h' "$work/listed" || true)" "2"
+has "its rule matches the source against the set" \
+	'ip saddr @slot-quarantine-4 counter drop comment "slot=quarantine match=from timeout=0"'
+has "a destination slot, accepting, in IPv6" \
+	'ip6 daddr @slot-guests-6 counter accept comment "slot=guests match=to timeout=3600"'
+check "the slots come first in their chain, the written rule last" \
+	"$(sed -n '/chain forward {/,/}/p' "$work/listed" | grep -o 'slot=quarantine\|slot=guests\|name=lan-out' |
+		tr '\n' ' ')" "slot=quarantine slot=quarantine slot=guests slot=guests name=lan-out "
+"$probe" --read > "$work/read" 2>&1 || true
+check "the reader takes each slot back from its rule" \
+	"$(grep -c '^slot forward ' "$work/read" || true) $(grep -c '^refused' "$work/read" || true)" \
+	"4 0"
+read_has "with its action, match and lifetime" \
+	"slot forward guests accept match=to timeout=3600 ipv6"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a table with slots is converged" "$(cat "$work/plan")" "nothing to do"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "ncfg status lists a slot by family, with its count" \
+	"$(grep -Ec 'slot quarantine: drop what it holds, matched by source, IPv(4|6): [0-9]+ packets?, [0-9]+ bytes' \
+		"$work/status" || true)" "2"
+nft add element inet netcfgd slot-quarantine-4 '{ 192.0.2.7 }'
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "a member is not drift" "$(cat "$work/plan")" "nothing to do"
+nft add element inet netcfgd slot-guests-6 '{ 2001:db8::7 timeout 30m }'
+# A change elsewhere in the firewall replaces the table, and the members go
+# with their slots into the new one (0340).
+sed -i 's/accept "lan-out" { interface = "lan0" }/accept "lan-out" { interface = "lan1" }/' \
+	"$work/etc/netcfgd.conf"
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+has "the apply took the change" 'iifname "lan1" counter accept comment "name=lan-out'
+check "a member stays in its slot across the replacement" \
+	"$(sed -n '/set slot-quarantine-4 {/,/}/p' "$work/listed" | grep -c '192.0.2.7' || true)" "1"
+# What is left becomes its lifetime, so it expires when it would have: the
+# kernel's own `expires` on an added member is not asked of it, since a
+# kernel refusing it would refuse the whole table.
+check "and one with a lifetime keeps what is left of it" \
+	"$(sed -n '/set slot-guests-6 {/,/}/p' "$work/listed" |
+		grep -Ec '2001:db8::7 timeout 29m[0-9]+s[0-9]*m?s? expires 29m' || true)" "1"
+# A live write through the daemon (0340): `ncfg slot` at the root tier, which
+# the namespace's uid 0 is. The daemon applies nothing on start, so what
+# changes in the kernel is the write alone.
+"$build/netcfgd" --fuzznet-dir "" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+daemon_pid=$!
+waited=0
+while [ ! -S "$work/run/netcfgd.sock" ] && [ "$waited" -lt 100 ]; do
+	sleep 0.1
+	waited=$((waited + 1))
+done
+timeout 30 "$ncfg" slot add quarantine 192.0.2.9 10m > "$work/said" 2>&1 || true
+check "ncfg slot add writes a member live" "$(cat "$work/said")" \
+	"added 192.0.2.9 to slot \`quarantine\`"
+nft list set inet netcfgd slot-quarantine-4 > "$work/listed" 2>&1 || true
+check "and the kernel holds it, with its lifetime" \
+	"$(grep -Ec '192.0.2.9 timeout 10m' "$work/listed" || true)" "1"
+timeout 30 "$ncfg" slot remove quarantine 192.0.2.9 > "$work/said" 2>&1 || true
+nft list set inet netcfgd slot-quarantine-4 > "$work/listed" 2>&1 || true
+check "ncfg slot remove takes it out again" "$(grep -c '192.0.2.9' "$work/listed" || true)" "0"
+timeout 30 "$ncfg" slot remove quarantine 192.0.2.9 > "$work/said" 2>&1 || true
+check "and removing it twice is no error" "$(cat "$work/said")" \
+	"removed 192.0.2.9 from slot \`quarantine\`"
+timeout 30 "$ncfg" slot add lan-out 192.0.2.9 > "$work/said" 2>&1 || true
+check "a name that is not a slot is a static value, refused" \
+	"$(grep -c 'is not a slot this configuration opens' "$work/said" || true)" "1"
+timeout 30 "$ncfg" slot add quarantine 192.0.2.0/24 > "$work/said" 2>&1 || true
+check "and so is a network" "$(grep -c 'single addresses' "$work/said" || true)" "1"
+timeout 30 "$ncfg" slot add quarantine 192.0.2.10 > "$work/said" 2>&1 || true
+check "a live write is recorded for after a reboot" \
+	"$(grep -c '^192.0.2.10 0$' "$work/slot/quarantine" 2>/dev/null || true)" "1"
+kill "$daemon_pid" 2>/dev/null || true
+wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+
+# A reboot, as far as the firewall can tell: the table gone, the record kept.
+# One member in the record lapsed while the machine was down.
+printf '192.0.2.11 1\n' >> "$work/slot/quarantine"
+nft delete table inet netcfgd
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list set inet netcfgd slot-quarantine-4 > "$work/listed" 2>&1 || true
+check "the first apply after it writes the recorded members back" \
+	"$(grep -c '192.0.2.10' "$work/listed" || true)" "1"
+check "less one whose lifetime ran out meanwhile" \
+	"$(grep -c '192.0.2.11' "$work/listed" || true)" "0"
+
+# A slot the document stops declaring takes its members with it.
+sed -i '/slot "quarantine"/d' "$work/etc/netcfgd.conf"
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+check "a slot no longer declared is gone, members and all" \
+	"$(grep -c 'slot-quarantine' "$work/listed" || true)" "0"
+check "and so is its record" "$(test -e "$work/slot/quarantine" && echo kept || echo gone)" \
+	"gone"
 
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"

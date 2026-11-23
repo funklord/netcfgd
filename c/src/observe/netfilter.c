@@ -210,8 +210,12 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_
 		/* The dump is the whole table now (10.592), so the firewall's rules,
 		 * the port forwards (0298) and flow offload's (0319) are in it: they
 		 * are read below, and are not refusals here. */
+		ncfg_nft_kernel_slot_t opened;
+
 		if (ncfg_nft_firewall_rule_read(reply_of->items[at].bytes, reply_of->items[at].length,
 		        &firewall, NULL, 0) ||
+		    ncfg_nft_rule_slot(reply_of->items[at].bytes, reply_of->items[at].length,
+		        &opened) ||
 		    ncfg_nft_forward_read(reply_of->items[at].bytes, reply_of->items[at].length,
 		        &forward, NULL, 0) ||
 		    ncfg_nft_rule_is_offload(reply_of->items[at].bytes, reply_of->items[at].length)) {
@@ -339,6 +343,32 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, const ncfg_netlin
 }
 
 /* One decoded kernel rule, in the observation's words. */
+/* One slot rule, appended in words (0340). */
+static int observed_slot_add(ncfg_observed_firewall_t *found, const ncfg_nft_kernel_slot_t *one)
+{
+	ncfg_observed_firewall_slot_t *grown;
+	ncfg_observed_firewall_slot_t *out;
+
+	grown = realloc(found->slots, (found->slot_count + 1u) * sizeof(*grown));
+	if (!grown) {
+		return 0;
+	}
+	found->slots = grown;
+	out = &found->slots[found->slot_count++];
+	memset(out, 0, sizeof(*out));
+	out->chain = observe_dup(one->chain);
+	out->name = observe_dup(one->name);
+	out->action = observe_dup(ncfg_nft_action_word(one->slot.action));
+	out->match = observe_dup(one->slot.match == NCFG_FIREWALL_SLOT_TO ? "to" : "from");
+	out->timeout = one->slot.timeout;
+	out->ipv6 = one->ipv6;
+	out->packets.has = 1;
+	out->packets.value = (int64_t)one->packets;
+	out->bytes.has = 1;
+	out->bytes.value = (int64_t)one->bytes;
+	return out->chain && out->name && out->action && out->match;
+}
+
 static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewall_rule_t *out)
 {
 	unsigned bit;
@@ -520,7 +550,19 @@ static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink
 			ncfg_nft_kernel_rule_t         one;
 			ncfg_observed_firewall_rule_t *slot;
 			char                           why[NCFG_ERROR_MAX];
+			ncfg_nft_kernel_slot_t         opened;
 
+			/* A slot's rule (0340) is read as one, in its chain's pass. */
+			if (ncfg_nft_rule_slot(reply->items[at].bytes, reply->items[at].length,
+			        &opened)) {
+				if (strcmp(opened.chain, chains[c]) == 0 &&
+				    !observed_slot_add(found, &opened)) {
+					ncfg_observed_firewall_free(found);
+					ncfg_error_set(err, err_size, "out of memory recording the firewall");
+					return 0;
+				}
+				continue;
+			}
 			if (!ncfg_nft_firewall_rule_read(reply->items[at].bytes, reply->items[at].length,
 			        &one, why, sizeof(why))) {
 				/* The NAT chain's rules are not the firewall's, and are read

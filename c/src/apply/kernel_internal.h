@@ -416,6 +416,11 @@ int ncfg_kernel_build_offloads(ncfg_buf_t *out, const ncfg_genl_family_t *family
 int ncfg_kernel_build_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const ncfg_op_t *op, ncfg_nft_batch_t *batch, char *err, size_t err_size);
 
+/* The same, writing `members` into the slots' new sets (0340). */
+int ncfg_kernel_build_nat_carrying(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const ncfg_op_t *op, const ncfg_nft_slot_member_t *members, size_t member_count,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size);
+
 /* Whether one table dump payload is netcfgd's own table, for `table_exists`. */
 int ncfg_kernel_nat_table_seen(const ncfg_netlink_reply_t *reply);
 

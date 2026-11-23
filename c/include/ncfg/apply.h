@@ -1022,4 +1022,24 @@ int ncfg_dhcpcd_control_payload(const void *bytes, size_t length, char *out, siz
  */
 char *ncfg_dhcpcd_config_file_of(const char *run_dir, const char *interface, const char *family);
 
+/*
+ * A live write into a slot (0340): `address` added to (`add` 1) or removed
+ * from the slot `slot` that `desired`'s firewall declares, at once and
+ * without an apply. `lifetime` is "30m" and the like, or NULL for the slot's
+ * own. **A name the document does not declare as a slot is refused** -- that
+ * is 0339's static value -- and so is a slot the kernel does not hold yet.
+ * Removing a member that is not there is success.
+ */
+int ncfg_firewall_slot_write(const ncfg_document_t *desired, const char *slot, int add,
+    const char *address, const char *lifetime, char *err, size_t err_size);
+
+/*
+ * Where a slot's members are recorded so a reboot does not empty it (0340):
+ * one file a slot, `ADDRESS EXPIRES` a line, EXPIRES the Unix second it
+ * lapses or 0 for never. `NCFG_SLOT_DIR` in the environment moves it, for a
+ * test; it is not under `/run`, which a reboot clears.
+ */
+#define NCFG_SLOT_DIR "/var/lib/netcfgd/slot"
+const char *ncfg_slot_dir(void);
+
 #endif /* NCFG_APPLY_H */

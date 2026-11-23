@@ -77,6 +77,10 @@ static void chain_free(ncfg_firewall_chain_t *chain)
 		rule_free(&chain->rules[i]);
 	}
 	free(chain->rules);
+	for (i = 0; i < chain->slot_count; i++) {
+		free(chain->slots[i].name);
+	}
+	free(chain->slots);
 	memset(chain, 0, sizeof(*chain));
 }
 
@@ -767,6 +771,116 @@ static int lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block, int 
 	return 1;
 }
 
+/*
+ * `slot "NAME" { action = ...; match = ...; timeout = ... }` (0340): a set the
+ * chain opens for live updates. `action` and `match` are required, since a
+ * slot that does not say what its members get is not one a writer can use.
+ */
+static int lower_slot(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_firewall_slot_t *out)
+{
+	ncfg_firewall_slot_t slot;
+	int                  have_action = 0;
+	int                  have_match = 0;
+	int                  ok = 1;
+	size_t               i;
+
+	memset(&slot, 0, sizeof(slot));
+	slot.name = ncfg_require_label(ctx, block);
+	if (!slot.name) {
+		return 0;
+	}
+	if (!ncfg_firewall_slot_name_valid(slot.name)) {
+		ncfg_diag(ctx, block->span,
+		    "`%s` cannot name a slot: a letter, then letters, digits, `-` or `_`, "
+		    "%u at most, since it becomes a set's name and is what a live write names",
+		    slot.name, NCFG_FIREWALL_SLOT_NAME_MAX);
+		free(slot.name);
+		return 0;
+	}
+	for (i = 0; i < block->items.count; i++) {
+		const ncfg_ast_item_t       *item = block->items.at[i];
+		const ncfg_ast_assignment_t *assignment;
+		char                        *text;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span,
+			    "`%s` is not valid inside a slot: a slot is keys only",
+			    item->as.block.head);
+			ok = 0;
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "action") == 0) {
+			text = ncfg_as_string(ctx, assignment->value);
+			if (!text) {
+				ok = 0;
+				continue;
+			}
+			if (!rule_action(text, &slot.action)) {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a slot's action: one of accept, drop, reject", text);
+				ok = 0;
+			} else {
+				have_action = 1;
+			}
+			free(text);
+		} else if (strcmp(assignment->key, "match") == 0) {
+			text = ncfg_as_string(ctx, assignment->value);
+			if (!text) {
+				ok = 0;
+				continue;
+			}
+			if (strcmp(text, "from") == 0) {
+				slot.match = NCFG_FIREWALL_SLOT_FROM;
+				have_match = 1;
+			} else if (strcmp(text, "to") == 0) {
+				slot.match = NCFG_FIREWALL_SLOT_TO;
+				have_match = 1;
+			} else {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not what a slot matches: `from`, a packet's source "
+				    "address, or `to`, its destination", text);
+				ok = 0;
+			}
+			free(text);
+		} else if (strcmp(assignment->key, "timeout") == 0) {
+			text = ncfg_as_string(ctx, assignment->value);
+			if (!text) {
+				ok = 0;
+				continue;
+			}
+			if (!ncfg_firewall_duration(text, &slot.timeout)) {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a slot's timeout: a count and s, m, h or d, such as "
+				    "\"30m\", a week at most", text);
+				ok = 0;
+			}
+			free(text);
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "`%s` is not a slot key: `action`, `match` and `timeout`",
+			    assignment->key);
+			ok = 0;
+		}
+	}
+	if (ok && (!have_action || !have_match)) {
+		ncfg_diag(ctx, block->span,
+		    "slot `%s` does not say %s: a writer has to know what being in it does",
+		    slot.name, !have_action ? "its `action`" : "what it `match`es");
+		ok = 0;
+	}
+	if (!ok) {
+		free(slot.name);
+		return 0;
+	}
+	*out = slot;
+	return 1;
+}
+
 /* One chain: a policy and the rules under it, in the order they were written.
  * Never sorted -- nftables evaluates a chain in order, so the order is the
  * policy, and `ssh` before `netbios` accepts what the later rule drops. */
@@ -798,6 +912,24 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 		if (item->kind != NCFG_AST_ITEM_BLOCK) {
 			continue;
 		}
+		if (strcmp(item->as.block.head, "slot") == 0) {
+			ncfg_firewall_slot_t  slot;
+			ncfg_firewall_slot_t *grown;
+
+			if (!lower_slot(ctx, &item->as.block, &slot)) {
+				continue;
+			}
+			grown = realloc(chain.slots, (chain.slot_count + 1u) * sizeof(*grown));
+			if (!grown) {
+				ncfg_lower_oom(ctx);
+				free(slot.name);
+				chain_free(&chain);
+				return 0;
+			}
+			chain.slots = grown;
+			chain.slots[chain.slot_count++] = slot;
+			continue;
+		}
 		{
 			ncfg_firewall_rule_t rule;
 			int                  action = 0;
@@ -806,7 +938,8 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			if (!rule_action(item->as.block.head, &action)) {
 				ncfg_diag(ctx, item->as.block.span,
 				    "`%s` is not a firewall action: a rule is `accept`, `drop` or "
-				    "`reject`, each with a name", item->as.block.head);
+				    "`reject`, each with a name, and a `slot` opens a set for live "
+				    "updates", item->as.block.head);
 				continue;
 			}
 			if (!lower_rule(ctx, &item->as.block, action, &rule)) {
@@ -988,6 +1121,44 @@ void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merge
 			}
 			*seen = 1;
 			(void)lower_chain(ctx, &item->as.block, head, target);
+		}
+	}
+	/* **A slot's name is the firewall's, not the chain's** (0340): a live
+	 * write names a slot and nothing else, so two of one name could not be
+	 * told apart. */
+	{
+		const ncfg_firewall_chain_t *chains[3] = { &firewall->input, &firewall->forward,
+			&firewall->output };
+		size_t c, s, total = 0;
+
+		for (c = 0; c < 3u; c++) {
+			total += chains[c]->slot_count;
+			for (s = 0; s < chains[c]->slot_count; s++) {
+				const char *name = chains[c]->slots[s].name;
+				size_t      d, t;
+				int         twice = 0;
+
+				for (d = 0; d <= c && !twice; d++) {
+					size_t end = d == c ? s : chains[d]->slot_count;
+
+					for (t = 0; t < end; t++) {
+						if (strcmp(chains[d]->slots[t].name, name) == 0) {
+							twice = 1;
+							break;
+						}
+					}
+				}
+				if (twice) {
+					ncfg_diag(ctx, merged->block->span,
+					    "two slots are named `%s`: a live write names a slot and "
+					    "nothing else, so the name has to be the firewall's own", name);
+				}
+			}
+		}
+		if (total > NCFG_FIREWALL_SLOT_MAX) {
+			ncfg_diag(ctx, merged->block->span,
+			    "%zu slots, and a firewall opens %u at most", total,
+			    NCFG_FIREWALL_SLOT_MAX);
 		}
 	}
 	ctx->document->firewall = firewall;

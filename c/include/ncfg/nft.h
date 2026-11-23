@@ -391,6 +391,18 @@ typedef struct {
 	size_t             device_count;
 } ncfg_nft_offload_t;
 
+/*
+ * One member of a slot (0340): an address of one family, and what is left of
+ * its lifetime in milliseconds -- 0 for none, a member that stays until it is
+ * removed.
+ */
+typedef struct {
+	char     slot[NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
+	int      ipv6;
+	uint8_t  address[16];
+	uint64_t remaining_ms;
+} ncfg_nft_slot_member_t;
+
 /* `clamp` names the interfaces whose forwarded TCP connections have their
  * MSS clamped to the route's (0334), sorted; NULL and 0 for none. */
 int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
@@ -398,6 +410,66 @@ int ncfg_nft_build_replace_all(ncfg_buf_t *out, uint32_t first_seq, int table_ex
     const ncfg_forward_rule_t *forwards, size_t forward_count,
     const ncfg_nft_offload_t *offload, const char *const *clamp, size_t clamp_count,
     ncfg_nft_batch_t *batch, char *err, size_t err_size);
+
+/* The same, carrying a slot's members into its new sets (0340): each member
+ * whose slot the firewall still declares is written with what is left of its
+ * lifetime, in the transaction that replaces the table, so a slot keeps its
+ * membership across an apply. */
+int ncfg_nft_build_replace_carrying(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
+    const ncfg_forward_rule_t *forwards, size_t forward_count,
+    const ncfg_nft_offload_t *offload, const char *const *clamp, size_t clamp_count,
+    const ncfg_nft_slot_member_t *members, size_t member_count, ncfg_nft_batch_t *batch,
+    char *err, size_t err_size);
+
+/* The set a slot's members of one family are in (0340): `slot-NAME-4` or
+ * `slot-NAME-6`. */
+void ncfg_nft_slot_set_name(const char *slot, int ipv6, char *out, size_t out_size);
+
+/* One slot rule read back (0340): the chain, and the slot as its comment
+ * carries it, checked against the rule's lookup and verdict. */
+typedef struct {
+	char                 chain[NCFG_NFT_NAME_MAX];
+	char                 name[NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
+	int                  ipv6;
+	ncfg_firewall_slot_t slot; /* `name` points at the member above */
+	uint64_t             packets;
+	uint64_t             bytes;
+} ncfg_nft_kernel_slot_t;
+
+
+/* A member as text, "ADDRESS", and back: 1, or 0 for text that is not a
+ * single address. `remaining_ms` is left as the caller set it. */
+void ncfg_nft_slot_member_text(const ncfg_nft_slot_member_t *member, char *out,
+    size_t out_size);
+int ncfg_nft_slot_member_parse(const char *slot, const char *address,
+    ncfg_nft_slot_member_t *out);
+
+/* A dump of one set's members, for `slot-NAME-4` or `slot-NAME-6`. */
+int ncfg_nft_build_slot_dump(ncfg_buf_t *out, uint32_t seq, const char *slot, int ipv6,
+    char *err, size_t err_size);
+
+/*
+ * The members one reply to that dump carries, appended to `*members` (grown
+ * with realloc, `*count` advanced). Only a reply for a slot's set in
+ * netcfgd's table is read; anything else is 0 with the reason.
+ */
+int ncfg_nft_slot_members_read(const void *payload, size_t length,
+    ncfg_nft_slot_member_t **members, size_t *count, char *err, size_t err_size);
+
+/*
+ * A live write (0340): one member added to (`add` 1) or removed from a
+ * slot's set, as one transaction of its own, audited as the replacement is.
+ * `seconds` is the member's lifetime, 0 for the slot's own.
+ */
+int ncfg_nft_build_slot_write(ncfg_buf_t *out, uint32_t first_seq, const char *slot, int add,
+    const char *address, uint64_t seconds, ncfg_nft_batch_t *batch, char *err,
+    size_t err_size);
+
+/* Whether a rule reply is a slot's, in netcfgd's table and one of its three
+ * filter chains, exactly as `ncfg_nft_build_replace_all` writes one. 0 for
+ * anything else. */
+int ncfg_nft_rule_slot(const void *payload, size_t length, ncfg_nft_kernel_slot_t *out);
 
 /*
  * Whether a rule reply is one of 0334's, in netcfgd's table, in its `mss`

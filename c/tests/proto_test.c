@@ -315,6 +315,12 @@ static int fully_populated(ncfg_proto_request_kind_t kind, ncfg_proto_request_t 
 		out->u.tunnel_set.interface = ncfg_proto_str("ipsec0");
 		out->u.tunnel_set.activate = 1;
 		return 1;
+	case NCFG_PROTO_REQ_SLOT_SET:
+		out->u.slot_set.slot = ncfg_proto_str("quarantine");
+		out->u.slot_set.address = ncfg_proto_str("192.0.2.7");
+		out->u.slot_set.add = 1;
+		out->u.slot_set.lifetime = ncfg_proto_str("30m");
+		return 1;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
 		return 0;

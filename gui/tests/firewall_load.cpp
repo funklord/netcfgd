@@ -116,6 +116,11 @@ static QString dump(const ncfg_firewall_settings &settings)
 	lines << QStringLiteral("present=%1").arg(settings.present);
 	for (const ncfg_firewall_chain_row *chain : chains) {
 		lines << QStringLiteral("policy=%1").arg(chain->policy);
+		for (const ncfg_firewall_slot_row &slot : chain->slot_list) {
+			lines << QStringLiteral("slot|%1|%2|%3|%4")
+			             .arg(slot.name, slot.action, slot.match)
+			             .arg(slot.timeout);
+		}
 		for (const ncfg_firewall_rule_row &rule : chain->rules) {
 			QStringList ports;
 			for (int port : rule.ports) {
@@ -151,6 +156,8 @@ static const char every_key[] =
     "\t}\n"
     "\tforward {\n"
     "\t\tpolicy = \"drop\"\n"
+    "\t\tslot \"quarantine\" { action = \"drop\"; match = \"from\" }\n"
+    "\t\tslot \"guests\" { action = \"accept\"; match = \"to\"; timeout = \"1h\" }\n"
     "\t\tdrop \"guest-lan\" { interface = \"guest0\"; out_interface = \"lan0\"; "
     "hours = \"22:00-07:00\"; days = [\"mon\", \"tue\"]; translated = true }\n"
     "\t\taccept \"out\" { out_interface = \"wan0\"; to = [\"192.0.2.0/24\"]; "
@@ -234,6 +241,14 @@ int main(int argc, char **argv)
 		          ? QStringLiteral("yes") : QStringLiteral("no"),
 		    QStringLiteral("yes"), "  and that a rule logs");
 	}
+	/* 0340: the tab has no editor for a slot, so it carries each whole. */
+	check(loaded.forward.slot_list.size() == 2
+	          ? QStringLiteral("%1 %2 %3 %4")
+	                .arg(loaded.forward.slot_list.at(1).name, loaded.forward.slot_list.at(1).action,
+	                    loaded.forward.slot_list.at(1).match)
+	                .arg(loaded.forward.slot_list.at(1).timeout)
+	          : QString::number(loaded.forward.slot_list.size()),
+	    QStringLiteral("guests accept to 3600"), "  and a chain's slots, each whole");
 
 	/* **Save with no change, and nothing moves.** The block the tab would
 	 * write is compared before and after, so a key the round trip lost shows

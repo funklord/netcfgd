@@ -754,6 +754,53 @@ static int check_dns_capability(const char *scope, const ncfg_dns_policy_t *dns,
 	return check_dns_delivery(scope, dns, effective, err, err_size);
 }
 
+/*
+ * A firewall's slots (0340): each name one a set can carry, once across the
+ * whole firewall, and no more than the cap. The lowerer says all of this too;
+ * a stored document is read without it.
+ */
+static int check_slots(const ncfg_firewall_t *firewall, char *err, size_t err_size)
+{
+	const ncfg_firewall_chain_t *chains[3];
+	size_t                       c, s, d, t, total = 0;
+
+	if (!firewall) {
+		return 1;
+	}
+	chains[0] = &firewall->input;
+	chains[1] = &firewall->forward;
+	chains[2] = &firewall->output;
+	for (c = 0; c < 3u; c++) {
+		total += chains[c]->slot_count;
+		for (s = 0; s < chains[c]->slot_count; s++) {
+			const char *name = chains[c]->slots[s].name;
+
+			if (!ncfg_firewall_slot_name_valid(name)) {
+				ncfg_error_set(err, err_size, "`%s` cannot name a firewall slot",
+				    name ? name : "");
+				return 0;
+			}
+			for (d = 0; d <= c; d++) {
+				size_t end = d == c ? s : chains[d]->slot_count;
+
+				for (t = 0; t < end; t++) {
+					if (strcmp(chains[d]->slots[t].name, name) == 0) {
+						ncfg_error_set(err, err_size,
+						    "duplicate firewall slot entry: %s", name);
+						return 0;
+					}
+				}
+			}
+		}
+	}
+	if (total > NCFG_FIREWALL_SLOT_MAX) {
+		ncfg_error_set(err, err_size, "%zu firewall slots, and %u is the most", total,
+		    NCFG_FIREWALL_SLOT_MAX);
+		return 0;
+	}
+	return 1;
+}
+
 static int check_hooks(const ncfg_hook_ref_t *hooks, size_t count, char *err, size_t err_size)
 {
 	size_t i;
@@ -793,6 +840,9 @@ int ncfg_document_validate(const ncfg_document_t *document, char *err, size_t er
 		return 0;
 	}
 
+	if (!check_slots(document->firewall, err, err_size)) {
+		return 0;
+	}
 	most = document->device_count;
 	if (document->interface_count > most) {
 		most = document->interface_count;

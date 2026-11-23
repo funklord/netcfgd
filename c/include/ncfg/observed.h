@@ -1628,6 +1628,22 @@ typedef struct {
 	char         *time;
 } ncfg_observed_firewall_rule_t;
 
+/*
+ * One slot rule of the installed firewall (0340): a slot is two, one per
+ * family. Words, as a rule's are. The members are not here: they are written
+ * live and are nobody's desired state.
+ */
+typedef struct {
+	char         *chain;
+	char         *name;
+	char         *action; /* accept, drop or reject */
+	char         *match;  /* from or to */
+	int64_t       timeout;
+	int           ipv6;
+	ncfg_optint_t packets;
+	ncfg_optint_t bytes;
+} ncfg_observed_firewall_slot_t;
+
 typedef struct ncfg_observed_firewall {
 	/* `accept` or `drop`, or NULL where the chain is not there. */
 	char                          *input;
@@ -1641,6 +1657,9 @@ typedef struct ncfg_observed_firewall {
 	 * its table, reported as such and replaced on the next apply. */
 	char                         **unread;
 	size_t                         unread_count;
+	/* In chain order and the kernel's within each, as the rules are. */
+	ncfg_observed_firewall_slot_t *slots;
+	size_t                         slot_count;
 } ncfg_observed_firewall_t;
 
 /* Release one and what it holds, for the pass that replaces it. NULL is

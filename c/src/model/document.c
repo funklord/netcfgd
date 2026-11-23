@@ -21,6 +21,7 @@
 
 #include "ncfg/document.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -681,6 +682,67 @@ int ncfg_dns_sni_valid(const char *name)
 
 	return length > 0u && length <= 253u &&
 	    strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") == length;
+}
+
+int ncfg_firewall_duration(const char *text, int64_t *seconds)
+{
+	unsigned long amount = 0;
+	char          unit = 0;
+	char          tail = 0;
+	int64_t       value;
+
+	if (!text || !seconds || text[0] < '0' || text[0] > '9' ||
+	    sscanf(text, "%lu%c%c", &amount, &unit, &tail) != 2 || amount == 0 ||
+	    amount > 604800UL) {
+		return 0;
+	}
+	switch (unit) {
+	case 's':
+		value = (int64_t)amount;
+		break;
+	case 'm':
+		value = (int64_t)amount * 60;
+		break;
+	case 'h':
+		value = (int64_t)amount * 3600;
+		break;
+	case 'd':
+		value = (int64_t)amount * 86400;
+		break;
+	default:
+		return 0;
+	}
+	if (value > 604800) {
+		return 0;
+	}
+	*seconds = value;
+	return 1;
+}
+
+void ncfg_firewall_duration_text(int64_t seconds, char *out, size_t out_size)
+{
+	if (!out || out_size == 0u) {
+		return;
+	}
+	if (seconds > 0 && seconds % 86400 == 0) {
+		(void)snprintf(out, out_size, "%lldd", (long long)(seconds / 86400));
+	} else if (seconds > 0 && seconds % 3600 == 0) {
+		(void)snprintf(out, out_size, "%lldh", (long long)(seconds / 3600));
+	} else if (seconds > 0 && seconds % 60 == 0) {
+		(void)snprintf(out, out_size, "%lldm", (long long)(seconds / 60));
+	} else {
+		(void)snprintf(out, out_size, "%llds", (long long)seconds);
+	}
+}
+
+int ncfg_firewall_slot_name_valid(const char *name)
+{
+	size_t length = name ? strlen(name) : 0u;
+
+	return length > 0u && length <= NCFG_FIREWALL_SLOT_NAME_MAX &&
+	    ((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z')) &&
+	    strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") ==
+	        length;
 }
 
 int ncfg_dns_policy_needs_routing(const ncfg_dns_policy_t *policy)
@@ -2806,6 +2868,24 @@ static const ncfg_field_t firewall_rule_fields[] = {
 };
 static const ncfg_type_t firewall_rule_type = TYPE("firewall rule", firewall_rule_fields);
 
+static const char *const firewall_slot_match_words[] = { "from", "to" };
+static const ncfg_enum_t firewall_slot_match_set =
+    WORD_SET("firewall slot match", firewall_slot_match_words);
+
+/* A slot (0340). A week is the longest default lifetime, as it is `over`'s
+ * longest window: a membership meant to last longer is a static value. */
+static const ncfg_field_t firewall_slot_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_firewall_slot_t, name) },
+	{ .name = "action", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
+	    .choices = &firewall_action_set, .offset = offsetof(ncfg_firewall_slot_t, action) },
+	{ .name = "match", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
+	    .choices = &firewall_slot_match_set, .offset = offsetof(ncfg_firewall_slot_t, match) },
+	{ .name = "timeout", .kind = NCFG_F_INT, .flags = NCFG_FF_OMIT_ZERO, .low = 0,
+	    .high = 604800, .offset = offsetof(ncfg_firewall_slot_t, timeout) }
+};
+static const ncfg_type_t firewall_slot_type = TYPE("firewall slot", firewall_slot_fields);
+
 static const ncfg_field_t firewall_chain_fields[] = {
 	{ .name = "policy", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
 	    .choices = &firewall_policy_set, .offset = offsetof(ncfg_firewall_chain_t, policy) },
@@ -2816,7 +2896,12 @@ static const ncfg_field_t firewall_chain_fields[] = {
 	{ .name = "rules", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &firewall_rule_type, .element_size = sizeof(ncfg_firewall_rule_t),
 	    .offset = offsetof(ncfg_firewall_chain_t, rules),
-	    .count_offset = offsetof(ncfg_firewall_chain_t, rule_count) }
+	    .count_offset = offsetof(ncfg_firewall_chain_t, rule_count) },
+	/* In the order written, never sorted, for the rules' reason. */
+	{ .name = "slots", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &firewall_slot_type, .element_size = sizeof(ncfg_firewall_slot_t),
+	    .offset = offsetof(ncfg_firewall_chain_t, slots),
+	    .count_offset = offsetof(ncfg_firewall_chain_t, slot_count) }
 };
 static const ncfg_type_t firewall_chain_type = TYPE("firewall chain", firewall_chain_fields);
 

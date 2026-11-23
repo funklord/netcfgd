@@ -339,6 +339,9 @@ typedef enum {
 	 * `root` tier, where showing a credential stops being a question, and
 	 * never from off the machine: a credential does not travel (0029). */
 	NCFG_PROTO_REQ_SECRET_GET,
+	/* A live write into a firewall slot (0340): a member added or removed,
+	 * at once and without an apply. `u.slot_set`. */
+	NCFG_PROTO_REQ_SLOT_SET,
 	/* Not a request. The bound every exhaustive walk in this module uses in
 	 * place of the `match` the Rust gets checked for it. */
 	NCFG_PROTO_REQ_COUNT
@@ -460,6 +463,15 @@ typedef struct {
 /* The same two members as a radio's: the device, and up or down. */
 typedef ncfg_proto_radio_set_t ncfg_proto_tunnel_set_t;
 
+/* A slot's member (0340): which slot, which address, added or removed, and
+ * for how long as the language writes it ("30m"), absent for the slot's own. */
+typedef struct {
+	ncfg_proto_str_t slot;
+	ncfg_proto_str_t address;
+	ncfg_proto_str_t lifetime;
+	unsigned char    add;
+} ncfg_proto_slot_set_t;
+
 /*
  * One request.
  *
@@ -489,6 +501,7 @@ typedef struct {
 		ncfg_proto_profile_save_t profile_save;
 		ncfg_proto_radio_set_t    radio_set;
 		ncfg_proto_tunnel_set_t   tunnel_set;
+		ncfg_proto_slot_set_t     slot_set;
 	} u;
 } ncfg_proto_request_t;
 

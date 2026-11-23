@@ -221,6 +221,24 @@ static void print_firewall(const ncfg_observed_t *observed)
 	ncfg_out_line("firewall (netcfgd's nftables table)");
 	for (c = 0; c < 3u; c++) {
 		ncfg_out_writef("  %s: policy %s\n", chains[c], policies[c] ? policies[c] : "absent");
+		/* The slots first, as the kernel meets them (0340): one line a
+		 * family, with what its rule has matched. */
+		for (at = 0; at < firewall->slot_count; at++) {
+			const ncfg_observed_firewall_slot_t *slot = &firewall->slots[at];
+
+			if (!slot->chain || strcmp(slot->chain, chains[c]) != 0) {
+				continue;
+			}
+			ncfg_out_writef("    slot %s: %s what it holds, matched %s, %s", slot->name,
+			    slot->action, slot->match && strcmp(slot->match, "to") == 0
+			        ? "by destination" : "by source", slot->ipv6 ? "IPv6" : "IPv4");
+			if (slot->packets.has) {
+				ncfg_out_writef(": %lld %s, %lld bytes", (long long)slot->packets.value,
+				    slot->packets.value == 1 ? "packet" : "packets",
+				    (long long)(slot->bytes.has ? slot->bytes.value : 0));
+			}
+			ncfg_out_line("");
+		}
 		for (at = 0; at < firewall->rule_count; at++) {
 			const ncfg_observed_firewall_rule_t *rule = &firewall->rules[at];
 			size_t                               state;

@@ -2050,6 +2050,51 @@ static void firewall_out_interface_cases(void)
 	    "is not a rate", "  and a rate it cannot read is refused by name");
 }
 
+/* Slots (0340): declared in their chain, named once across the firewall,
+ * with the refusals saying why. */
+static void firewall_slot_cases(void)
+{
+	ncfg_document_t *document = compiles("firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward {\n\t\tpolicy = \"drop\"\n"
+	    "\t\tslot \"quarantine\" { action = \"drop\"; match = \"from\" }\n"
+	    "\t\tslot \"guests\" { action = \"accept\"; match = \"to\"; timeout = \"90m\" }\n"
+	    "\t}\n\toutput { policy = \"accept\" }\n}\n",
+	    "a firewall with slots compiles");
+
+	check(document && document->firewall && document->firewall->forward.slot_count == 2,
+	    "a chain's slots are lowered, in the order written");
+	if (document && document->firewall && document->firewall->forward.slot_count == 2) {
+		const ncfg_firewall_slot_t *one = &document->firewall->forward.slots[0];
+		const ncfg_firewall_slot_t *two = &document->firewall->forward.slots[1];
+
+		check(strcmp(one->name, "quarantine") == 0 && one->action == NCFG_FIREWALL_DROP &&
+		        one->match == NCFG_FIREWALL_SLOT_FROM && one->timeout == 0,
+		    "  with its action and match, and no lifetime where none is said");
+		check(strcmp(two->name, "guests") == 0 && two->action == NCFG_FIREWALL_ACCEPT &&
+		        two->match == NCFG_FIREWALL_SLOT_TO && two->timeout == 5400,
+		    "  and a lifetime in seconds where one is");
+	}
+	ncfg_document_free(document);
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tslot \"q\" { action = \"drop\"; match = \"from\" }\n\t}\n"
+	    "\tforward {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tslot \"q\" { action = \"drop\"; match = \"to\" }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n",
+	    "two slots are named", "a slot name used in two chains is refused");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tslot \"q\" { match = \"from\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "does not say its `action`", "  and so is a slot that does not say what it does");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tslot \"q\" { action = \"drop\"; match = \"from\"; timeout = \"8d\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "not a slot's timeout", "  and a lifetime past a week");
+	refuses("firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tslot \"a b\" { action = \"drop\"; match = \"from\" }\n\t}\n"
+	    "\tforward { policy = \"accept\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "cannot name a slot", "  and a name no set can carry");
+}
+
 /* A rule's schedule (10.663): normalised as written, days in week order, and
  * the refusals saying why. */
 static void firewall_schedule_cases(void)
@@ -4472,6 +4517,7 @@ int main(void)
 	host_list_cases();
 	firewall_mac_cases();
 	firewall_out_interface_cases();
+	firewall_slot_cases();
 	firewall_schedule_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();

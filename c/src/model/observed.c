@@ -1414,6 +1414,30 @@ static const ncfg_field_t observed_firewall_rule_fields[] = {
 static const ncfg_type_t observed_firewall_rule_type =
     TYPE("observed firewall rule", observed_firewall_rule_fields);
 
+/* A slot's rule (0340). Every member but the counts and `timeout` is always
+ * written; the list itself is absent where there are none, so every
+ * observation written before it reads and writes back unchanged. */
+static const ncfg_field_t observed_firewall_slot_fields[] = {
+	{ .name = "chain", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, chain) },
+	{ .name = "name", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, name) },
+	{ .name = "action", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, action) },
+	{ .name = "match", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, match) },
+	{ .name = "timeout", .kind = NCFG_F_INT, .flags = NCFG_FF_OMIT_ZERO, .low = 0,
+	    .high = 604800, .offset = offsetof(ncfg_observed_firewall_slot_t, timeout) },
+	{ .name = "ipv6", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, ipv6) },
+	{ .name = "packets", .kind = NCFG_F_OPT_INT, R_U64,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, packets) },
+	{ .name = "bytes", .kind = NCFG_F_OPT_INT, R_U64,
+	    .offset = offsetof(ncfg_observed_firewall_slot_t, bytes) }
+};
+static const ncfg_type_t observed_firewall_slot_type =
+    TYPE("observed firewall slot", observed_firewall_slot_fields);
+
 static const ncfg_field_t observed_firewall_fields[] = {
 	{ .name = "input", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_t, input) },
 	{ .name = "forward", .kind = NCFG_F_STR,
@@ -1425,7 +1449,12 @@ static const ncfg_field_t observed_firewall_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_firewall_t, rule_count) },
 	{ .name = "unread", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_firewall_t, unread),
-	    .count_offset = offsetof(ncfg_observed_firewall_t, unread_count) }
+	    .count_offset = offsetof(ncfg_observed_firewall_t, unread_count) },
+	{ .name = "slots", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_firewall_slot_type,
+	    .element_size = sizeof(ncfg_observed_firewall_slot_t),
+	    .offset = offsetof(ncfg_observed_firewall_t, slots),
+	    .count_offset = offsetof(ncfg_observed_firewall_t, slot_count) }
 };
 static const ncfg_type_t observed_firewall_type =
     TYPE("observed firewall", observed_firewall_fields);

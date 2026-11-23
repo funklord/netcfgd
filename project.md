@@ -7006,6 +7006,49 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.909 Slots: the firewall's live layer (0340)
+
+0339 put live updates first and left how a node opens a slot, who writes into
+one and how long a member lives. [0340](doc/decision/0340-a-slot-is-a-named-set-a-chain-opens-for-live-updates.md)
+answers the three, and it is built:
+
+- **The grammar** is `slot "NAME" { action = "drop"; match = "from"; timeout =
+  "1h" }` inside a chain, the name the firewall's own. The model holds the slot
+  and never its members.
+- **In the kernel** a slot is `slot-NAME-4` and `slot-NAME-6`, sets with
+  per-member timeouts, and a rule for each at the head of its chain, ahead of
+  every written rule. The rule's comment carries the slot
+  (`slot=NAME match=from timeout=N`), so `ncfg_nft_rule_slot` reads it back for
+  drift and for the undo copy, and the reader of written rules never sees it as
+  a hand edit. Members are never drift.
+- **Written live** with `ncfg slot add SLOT ADDRESS [LIFETIME]` and `ncfg slot
+  remove SLOT ADDRESS`, the `slot_set` request at the `root` tier, straight to
+  the kernel as one audited transaction. A name the document does not open is
+  refused as a static value. `--at` carries it, to one host or many.
+- **Carried across an apply**: the replacement dumps each declared slot's sets
+  first and writes the members into the new ones in the same transaction. What
+  is left of a member's lifetime becomes its timeout, rather than the original
+  timeout plus the kernel's `expires`: a kernel refusing `expires` on an added
+  element would refuse the whole table.
+- **The window** carries a chain's slots through a Save (`slot_list` in the
+  client and the GUI, since `slots` is a Qt macro); it has no editor for one.
+
+`tests/live/firewall.sh` proves each against a kernel in a namespace: the sets
+and rules as nft lists them, the order in the chain, a converged plan with a
+member present, a member and a timed member carried across a replacement, a
+slot no longer declared gone with its members, and the daemon's live write,
+removal, the static-value refusal and a network refused.
+
+- **Across a reboot**: each slot's members are recorded in
+  `/var/lib/netcfgd/slot/NAME` (`NCFG_SLOT_DIR` moves it) after every live
+  write and replacement, and the first apply with no table writes them back,
+  less what lapsed meanwhile. A quarantine is not open from boot.
+
+**Open:** the narrower tier, "this slot
+and nothing else", waits for a writer that is not an operator; `ncfg status`
+does not list members yet; zones (layer three) and presets (layer two) are not
+built.
+
 ## 10.908 The fields nothing read leave the model, and DNS's five are reached (0339)
 
 The holder's answer of 2026-11-23: what the language cannot reach goes, unless

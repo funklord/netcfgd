@@ -140,6 +140,11 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	[NCFG_PROTO_REQ_RELOAD] = NCFG_TIER_ROOT,
 	[NCFG_PROTO_REQ_PROFILE_SET] = NCFG_TIER_ROOT,
 	[NCFG_PROTO_REQ_PROFILE_SAVE] = NCFG_TIER_ROOT,
+	/* A live write into a firewall slot (0340) is the operator's: who is
+	 * let through or kept out is the firewall, and 0311's simple case is an
+	 * operator of the estate. A narrower tier, "this slot and nothing else",
+	 * waits for a writer that is not an operator. */
+	[NCFG_PROTO_REQ_SLOT_SET] = NCFG_TIER_ROOT,
 	/*
 	 * **Reading a hook body is `root`, where reading a probe is not.** Both
 	 * are programs netcfgd runs as root, and the difference is who wrote them
