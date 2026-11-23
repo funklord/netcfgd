@@ -68,7 +68,6 @@ void ncfg_dns_policy_free(ncfg_dns_policy_t *dns)
 	if (!dns) {
 		return;
 	}
-	free(dns->mode.command);
 	for (i = 0; i < dns->server_count; i++) {
 		free(dns->servers[i].addr);
 		free(dns->servers[i].sni);
@@ -125,7 +124,6 @@ void ncfg_hooks_free(ncfg_hook_ref_t *list, size_t count)
 	for (i = 0; i < count; i++) {
 		free(list[i].path);
 		free(list[i].sha256);
-		free(list[i].run_as);
 	}
 	free(list);
 }

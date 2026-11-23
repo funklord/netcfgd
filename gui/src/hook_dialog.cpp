@@ -148,13 +148,11 @@ ncfg_hook_dialog::ncfg_hook_dialog(const ncfg_hook_script &existing, QWidget *pa
 	 * Said before anything is typed, because both halves are found out at the
 	 * worst moment otherwise. Writing a hook is root on this machine -- a hook
 	 * body is the production `check_content` refuses from anybody else -- and
-	 * `run_as` is not a thing this build can be asked for at all.
+	 * a hook always runs as root.
 	 */
 	note->setText(QStringLiteral(
-	    "This hook runs as root. netcfgd's hook runner can drop to another user, and "
-	    "the configuration language has no key to name one, so there is nothing to "
-	    "offer here yet -- a `run_as=` line in the body is a shell assignment and "
-	    "changes nothing.\nSaving the interface needs root: a hook is a program "
+	    "This hook runs as root and is stopped if it runs longer than a minute. A "
+	    "`run_as=` line in the body is a shell assignment and changes nothing.\nSaving the interface needs root: a hook is a program "
 	    "netcfgd runs privileged, which the daemon refuses to take from anybody else."));
 	layout->addWidget(note);
 

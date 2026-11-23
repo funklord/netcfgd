@@ -218,16 +218,8 @@ static void an_unimplemented_backend_is_refused_by_name(const char *run)
 	    strstr(message, "odhcpd") != NULL,
 	    "odhcpd is refused by name rather than handed radvd's configuration");
 
-	policy.backend.kind = NCFG_RA_BACKEND_EXEC;
-	policy.backend.command = (char *)(void *)"/usr/bin/somethingelse";
-	message[0] = '\0';
-	check(!ncfg_ra_start(run, "lan0", &policy, prefixes, 1u, NULL, 0u, "/nonexistent/radvd",
-	      message, sizeof(message)) &&
-	    strstr(message, "somethingelse") != NULL,
-	    "and an exec backend is named rather than substituted too");
-
 	check(ncfg_ra_run_dir(run, dir, sizeof(dir), NULL, 0) && !testdir_exists(dir),
-	    "neither refusal created the run directory on the way to refusing");
+	    "the refusal created no run directory on the way to refusing");
 }
 
 /*

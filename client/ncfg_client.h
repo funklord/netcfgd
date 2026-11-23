@@ -962,9 +962,9 @@ typedef struct {
  * A network to add to the configuration.
  *
  * Typed fields and nothing else, which is decision 0117's whole point: a
- * config file may name a hook, and a hook's `run_as` defaults to root, so a
- * request able to carry config *text* would be remote code execution. There is
- * no field here that could name a hook, a path or a `run_as`.
+ * config file may name a hook, and a hook runs as root, so a request able to
+ * carry config *text* would be remote code execution. There is no field here
+ * that could name a hook or a path.
  *
  * `ssid` is lowercase hex and required -- an SSID is 0..32 arbitrary octets, so
  * hex is the only form that always works. Everything else may be NULL or
@@ -1060,7 +1060,7 @@ int ncfg_client_wifi_add(ncfg_client_t *client, const ncfg_network_t *network, c
  * **This is `root`, and the tier is not the whole guard.** It writes
  * configuration, so the daemon runs `check_content` over the text afterwards
  * and refuses anything granting more than configuring a network -- a hook, a
- * path, a `run_as` -- from anybody but uid 0. That closes the direct route to
+ * path -- from anybody but uid 0. That closes the direct route to
  * running a program as root; it does not make the tier less than root, which
  * is why it is called that (0327).
  *
@@ -1528,13 +1528,8 @@ typedef struct {
 	char *interface;
 	char *phase;
 	char *path;
-	/* The user it drops to, or empty where it runs as the daemon. Shown
-	 * because design section 9 makes it a privilege boundary rather than a
-	 * detail, and a hook running as root when somebody meant otherwise is
-	 * exactly what a list is for. */
-	char *run_as;
-	/* Seconds before it is killed, or 0 where the default applies. */
-	int   timeout;
+	/* Every hook runs as root and is stopped at the daemon's default
+	 * timeout; the model has no field for either (0339). */
 } ncfg_hook_t;
 
 typedef struct {
@@ -2729,7 +2724,7 @@ int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t er
  * this call. What activation writes is a `device` block, and a client that
  * sent one as *text* would be sending configuration -- which is remote code
  * execution and is `root`. An interface name and a flag can name no hook, no
- * path and no `run_as`, so the message bounds what it can ask for.
+ * path, so the message bounds what it can ask for.
  */
 int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int activate, char *err,
               size_t err_size);

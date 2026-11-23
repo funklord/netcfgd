@@ -841,7 +841,7 @@ static void permitted_asks_both_gates(void)
  * The property the whole classification exists for. `admin` is what writing
  * configuration needs, and a site that opens it -- which is the stated intent
  * for local -- would be granting root outright if config text could carry a
- * hook, because a hook with no `run_as` runs as the daemon's user. So the tier
+ * hook, because a hook runs as the daemon's user. So the tier
  * lets the request through and the content gate stops it.
  */
 static void an_admin_group_member_may_send_config_but_not_a_hook(void)

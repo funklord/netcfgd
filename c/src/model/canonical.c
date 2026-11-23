@@ -332,15 +332,7 @@ static int compare_hook(const void *left, const void *right)
 	if (difference != 0) {
 		return difference;
 	}
-	difference = compare_text(one->sha256, other->sha256);
-	if (difference != 0) {
-		return difference;
-	}
-	difference = compare_text(one->run_as, other->run_as);
-	if (difference != 0) {
-		return difference;
-	}
-	return compare_optint(&one->timeout, &other->timeout);
+	return compare_text(one->sha256, other->sha256);
 }
 
 static int compare_bridge_vlan(const void *left, const void *right)

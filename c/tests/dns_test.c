@@ -50,8 +50,7 @@
  *   here is under one `mkdtemp` directory and **is passed explicitly**: the C
  *   port reads no environment variable for a resolver path, which is the whole
  *   reason a check cannot reach one by forgetting to set something. Nothing
- *   here runs `resolvconf`, `resolvectl`, dnsmasq or unbound; the one program
- *   started is a shell script this test wrote, for the `exec` mode.
+ *   here runs `resolvconf`, `resolvectl`, dnsmasq or unbound.
  */
 #include "ncfg/base.h"
 #include "ncfg/dns.h"
@@ -342,45 +341,6 @@ static void the_forwarders_route_rather_than_flatten(void)
 	    "\tname: \".\"\n"
 	    "\tforward-addr: 10.0.0.53\n",
 	    "and a scope with no routing domain is the catch-all zone");
-	free(text);
-}
-
-/*
- * The escape hatch's wire format, asserted whole.
- *
- * A script reading this is an integration somebody wrote once and expects to
- * keep working, which is why it is hand-rolled rather than derived from an
- * internal type -- and why the control-character escaping is checked: JSON
- * requires every control character escaped and not only the five with short
- * forms, and a suffix that arrived with a tab in it would otherwise produce a
- * document the script's own parser refuses.
- */
-static void the_exec_modes_document_is_json_a_script_can_read(void)
-{
-	ncfg_dns_server_t     servers[1];
-	ncfg_routing_domain_t domains[1];
-	char                 *search[] = { (char *)(void *)"a\tb" };
-	ncfg_dns_policy_t     policy;
-	ncfg_dns_scope_t      scope;
-	char                  message[NCFG_ERROR_MAX];
-	char                 *text;
-
-	servers[0] = server_of((char *)(void *)"10.0.0.53");
-	memset(domains, 0, sizeof(domains));
-	domains[0].suffix = (char *)(void *)"corp.example";
-	domains[0].exclusive = 1;
-	policy = policy_of(servers, 1u, search, 1u);
-	policy.mode.mode = NCFG_DNS_MODE_EXEC;
-	policy.domains = domains;
-	policy.domain_count = 1u;
-	scope.name = "vpn0";
-	scope.policy = &policy;
-
-	text = ncfg_dns_scopes_json(&scope, 1u, message, sizeof(message));
-	check_text(text,
-	    "{\"scopes\":[{\"name\":\"vpn0\",\"servers\":[\"10.0.0.53\"],\"search\":[\"a\\tb\"],"
-	    "\"domains\":[{\"suffix\":\"corp.example\",\"exclusive\":true}]}]}\n",
-	    "the exec mode's document escapes control characters and keeps the scopes apart");
 	free(text);
 }
 
@@ -788,14 +748,6 @@ static void a_delivery_writes_the_file_and_the_record(const char *base)
 }
 
 /*
- * The exec mode hands the scopes to a script on stdin, without a shell.
- *
- * The command is a config value, and a shell would make the DNS mode a place
- * where a config file becomes arbitrary code with word splitting attached --
- * the same rule the secret resolver's exec provider follows. The stand-in here
- * is a script this test wrote; no resolver is involved.
- */
-/*
  * A staging write that fails after the open leaves nothing beside the target.
  *
  * **The case the other refusals here cannot reach.** Every one of them refuses
@@ -882,65 +834,6 @@ static void a_staging_write_that_fails_leaves_nothing_behind(const char *base)
 	}
 	(void)closedir(directory);
 	check(left_behind == 0u, "  and leaves no staging file beside the resolver");
-}
-
-static void the_exec_mode_feeds_a_script_on_stdin(const char *base)
-{
-	ncfg_dns_server_t  servers[1];
-	ncfg_dns_policy_t  policy;
-	ncfg_dns_scope_t   scope;
-	ncfg_dns_targets_t targets;
-	char               run[512];
-	char               script[1024];
-	char               seen[1024];
-	char               command[2048];
-	char               body[4096];
-	char               message[NCFG_ERROR_MAX];
-	char              *got;
-
-	(void)testdir_in(base, "exec", run, sizeof(run));
-	check(mkdir(run, 0755) == 0, "a run directory for the exec mode");
-	(void)testdir_in(run, "hatch.sh", script, sizeof(script));
-	(void)testdir_in(run, "stdin", seen, sizeof(seen));
-	(void)snprintf(body, sizeof(body), "#!/bin/sh\ncat > '%s'\nprintf '%%s' \"$1\" >> '%s'\n",
-	    seen, seen);
-	check(testdir_write(script, body, strlen(body)) && chmod(script, 0755) == 0,
-	    "the stand-in script is written and executable");
-
-	servers[0] = server_of((char *)(void *)"10.0.0.53");
-	policy = policy_of(servers, 1u, NULL, 0u);
-	policy.mode.mode = NCFG_DNS_MODE_EXEC;
-	/* Two words, so the splitting is exercised -- and split on whitespace
-	 * alone, never by a shell. */
-	(void)snprintf(command, sizeof(command), "%s an-argument", script);
-	policy.mode.command = command;
-	scope.name = NCFG_DNS_GLOBAL_SCOPE;
-	scope.policy = &policy;
-
-	memset(&targets, 0, sizeof(targets));
-	targets.run_dir = run;
-
-	message[0] = '\0';
-	check(ncfg_dns_deliver(&scope, 1u, &targets, NULL, NULL, message, sizeof(message)),
-	    "the exec mode runs the script the document named");
-	if (message[0] != '\0') {
-		printf("  said: %s\n", message);
-	}
-	got = testdir_read(seen, NULL);
-	check_text(got,
-	    "{\"scopes\":[{\"name\":\"globals\",\"servers\":[\"10.0.0.53\"],\"search\":[],"
-	    "\"domains\":[]}]}\nan-argument",
-	    "and hands it the whole scope document on stdin, with its arguments split");
-	free(got);
-
-	/* A script that is not there is named rather than reported as a generic
-	 * failure to run something. */
-	policy.mode.command = (char *)(void *)"/nonexistent/dns-hatch";
-	message[0] = '\0';
-	check(!ncfg_dns_deliver(&scope, 1u, &targets, NULL, NULL, message, sizeof(message)) &&
-	    strstr(message, "/nonexistent/dns-hatch") != NULL &&
-	    strstr(message, "is not there") != NULL,
-	    "a script that is not there is named in the refusal");
 }
 
 /*
@@ -1080,7 +973,6 @@ int main(void)
 	resolv_conf_says_who_wrote_it();
 	a_resolvconf_blob_covers_one_scope_only();
 	the_forwarders_route_rather_than_flatten();
-	the_exec_modes_document_is_json_a_script_can_read();
 
 	a_writable_file_in_a_read_only_directory_is_still_written(base);
 	the_fallback_will_not_write_through_a_symlink(base);
@@ -1092,7 +984,6 @@ int main(void)
 	the_none_mode_touches_nothing(base);
 	a_delivery_writes_the_file_and_the_record(base);
 	a_staging_write_that_fails_leaves_nothing_behind(base);
-	the_exec_mode_feeds_a_script_on_stdin(base);
 	a_forwarder_with_no_directory_is_refused(base);
 
 	testdir_remove(base);

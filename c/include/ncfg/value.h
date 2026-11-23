@@ -404,8 +404,7 @@ typedef enum {
 	NCFG_DNS_MODE_OPENRESOLV,
 	NCFG_DNS_MODE_RESOLVED,
 	NCFG_DNS_MODE_DNSMASQ,
-	NCFG_DNS_MODE_UNBOUND,
-	NCFG_DNS_MODE_EXEC
+	NCFG_DNS_MODE_UNBOUND
 } ncfg_dns_mode_t;
 
 const char *ncfg_dns_mode_name(int mode);

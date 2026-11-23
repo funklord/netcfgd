@@ -463,16 +463,7 @@ int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t
 		ncfg_buf_add_char(slot, '"');
 	}
 
-	if (dns->mode.mode == NCFG_DNS_MODE_EXEC) {
-		/* The model has the mode and the language has no word for it: no
-		 * lowering has an arm for `exec`, so there is nothing to write and
-		 * the command it carries has nowhere to go. Neither implementation
-		 * does -- this said `lower.rs`, which sends a reader of this file to
-		 * the wrong one for a fact that is true of both. */
-		ncfg_render_refuse(missing, scope, name, "dns mode exec");
-	} else {
-		mode = ncfg_dns_mode_name(dns->mode.mode);
-	}
+	mode = ncfg_dns_mode_name(dns->mode.mode);
 	mode_differs = dns->mode.mode != NCFG_DNS_MODE_NONE;
 
 	if (servers.count == 0 && search.count == 0 && domains.count == 0 && !mode_differs) {

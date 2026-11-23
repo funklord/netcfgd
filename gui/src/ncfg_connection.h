@@ -442,8 +442,6 @@ struct ncfg_hook_row {
 	QString interface;
 	QString phase;
 	QString path;
-	QString run_as;
-	int     timeout = 0;
 };
 
 /* One hook script: the program, rather than the reference to it.
@@ -1276,7 +1274,7 @@ public:
 
 	/* Take a radio on, or hand it back. `laptop` tier: what it writes is a
 	 * `device` block, but what crosses is a name and a flag, which can name
-	 * no hook, no path and no `run_as`. */
+	 * no hook and no path. */
 	bool set_radio(const QString &interface, bool activate, QString *error);
 
 	/* Bring an IPsec tunnel up or take it down (10.864): the daemon asks

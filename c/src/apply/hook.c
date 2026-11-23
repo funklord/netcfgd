@@ -16,13 +16,10 @@
  *   the work it was waiting for carried on.
  *
  * WHAT IS DELIBERATELY NOT HERE
- *   **`run_as` is refused rather than honoured.** The Rust resolves the user
- *   with `getpwnam` and drops privilege in the child; `process.h` says outright
- *   that this port keeps NSS away from the privileged process, and it is final.
- *   So a hook naming a user does not run at all -- which is the direction the
- *   Rust's own test insists on: "the wrong answer here is not an error but
- *   `runs anyway, as root`". A hook that asked to be unprivileged can never
- *   run privileged instead. See the sentence in `drop_refusal`.
+ *   **A hook runs as root, for the default time, always.** The model once
+ *   carried `run_as` and `timeout`; no configuration could set either, and
+ *   `run_as` could not be honoured anyway, since `process.h` keeps NSS away
+ *   from the privileged process. 0339 removed both.
  */
 #include "ncfg/apply.h"
 
@@ -561,31 +558,18 @@ static int wait_within(pid_t child, unsigned seconds, int *status)
  * The runner
  * ------------------------------------------------------------------------ */
 
-/*
- * Why a hook naming a user does not run.
- *
- * The Rust resolves the name and drops privilege in the child, and fails
- * closed in both directions: an unknown user does not run at all rather than
- * running as whoever the daemon happens to be. This port cannot resolve the
- * name -- `process.h` keeps NSS out of the privileged process, deliberately
- * and permanently -- so it takes the same closed direction for every name
- * rather than the privileged one for any.
- */
-static ncfg_hook_outcome_t drop_refusal(const ncfg_hook_ref_t *hook, char *err, size_t err_size)
-{
-	return fail(hook->phase, err, err_size,
-	    "%s asks to run as `%s`, and this build resolves no user names in the "
-	    "privileged process (see process.h); not running it, rather than running it "
-	    "as root instead", hook->path, hook->run_as);
-}
-
 ncfg_hook_outcome_t ncfg_hook_run(const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *env,
     char *err, size_t err_size)
+{
+	return ncfg_hook_run_within(hook, env, NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS, err, err_size);
+}
+
+ncfg_hook_outcome_t ncfg_hook_run_within(const ncfg_hook_ref_t *hook,
+    const ncfg_hook_env_t *env, unsigned seconds, char *err, size_t err_size)
 {
 	ncfg_hook_outcome_t refused = NCFG_HOOK_NOTED;
 	char              **made;
 	pid_t               child;
-	unsigned            seconds;
 	int                 exec_errno = 0;
 	int                 status = 0;
 	int                 ended;
@@ -593,9 +577,6 @@ ncfg_hook_outcome_t ncfg_hook_run(const ncfg_hook_ref_t *hook, const ncfg_hook_e
 	if (!hook || !hook->path) {
 		ncfg_error_set(err, err_size, "there is no hook to run");
 		return NCFG_HOOK_NOTED;
-	}
-	if (hook->run_as) {
-		return drop_refusal(hook, err, err_size);
 	}
 	if (!unchanged(hook, err, err_size, &refused)) {
 		return refused;
@@ -614,17 +595,6 @@ ncfg_hook_outcome_t ncfg_hook_run(const ncfg_hook_ref_t *hook, const ncfg_hook_e
 		    exec_errno ? strerror(exec_errno) : "the process could not be started");
 	}
 
-	/*
-	 * `ncfg_hook_ref_t::timeout` is never anything but absent -- the
-	 * configuration language has no key for it -- so this number is what every
-	 * hook on every machine gets. The field is read anyway, because a
-	 * mechanism that ignores its own input is one that silently stops working
-	 * the day the key arrives.
-	 */
-	seconds = NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS;
-	if (hook->timeout.has && hook->timeout.value > 0 && hook->timeout.value <= 86400) {
-		seconds = (unsigned)hook->timeout.value;
-	}
 	ended = wait_within(child, seconds, &status);
 	if (ended < 0) {
 		return fail(hook->phase, err, err_size,

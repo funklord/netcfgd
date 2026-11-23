@@ -462,26 +462,13 @@ static const ncfg_custom_t ssid_custom = { ssid_read, ssid_write, NULL, NULL, NU
  * The DNS policy, copied from document.c because it is private there
  * ------------------------------------------------------------------------ */
 
+/* The mode, a word. */
 static int dns_mode_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, char *err,
     size_t err_size)
 {
 	ncfg_dns_mode_value_t *value = field;
-	uint32_t               only;
 
-	if (ncfg_json_type(doc, node) == NCFG_JSON_STRING) {
-		return ncfg_field_enum(&dns_mode_set, doc, node, &value->mode, err, err_size);
-	}
-	only = ncfg_field_only_member(doc, node);
-	if (only == NCFG_JSON_NONE || ncfg_json_member(doc, node, "exec") != only) {
-		ncfg_error_set(err, err_size,
-		    "a dns mode is a word, or `{\"exec\": \"...\"}` for the one that runs a script");
-		return 0;
-	}
-	value->mode = NCFG_DNS_MODE_EXEC;
-	free(value->command);
-	value->command = ncfg_field_string(doc, only, "the command of dns mode `exec`", err,
-	    err_size);
-	return value->command != NULL;
+	return ncfg_field_enum(&dns_mode_set, doc, node, &value->mode, err, err_size);
 }
 
 static void dns_mode_write(ncfg_json_writer_t *writer, const void *field)
@@ -489,27 +476,13 @@ static void dns_mode_write(ncfg_json_writer_t *writer, const void *field)
 	const ncfg_dns_mode_value_t *value = field;
 	const char                  *word = ncfg_field_enum_name(&dns_mode_set, value->mode);
 
-	if (value->mode == NCFG_DNS_MODE_EXEC) {
-		ncfg_json_write_object_begin(writer);
-		ncfg_json_write_member_string(writer, "exec", value->command);
-		ncfg_json_write_object_end(writer);
-		return;
-	}
 	if (word) {
 		ncfg_json_write_string(writer, word);
 	}
 }
 
-static void dns_mode_release(void *field)
-{
-	ncfg_dns_mode_value_t *value = field;
-
-	free(value->command);
-	value->command = NULL;
-}
-
-static const ncfg_custom_t dns_mode_custom = { dns_mode_read, dns_mode_write, NULL,
-	dns_mode_release, NULL };
+static const ncfg_custom_t dns_mode_custom = { dns_mode_read, dns_mode_write, NULL, NULL,
+	NULL };
 
 static const ncfg_field_t dns_server_fields[] = {
 	{ .name = "addr", .kind = NCFG_F_CUSTOM, .flags = NCFG_FF_REQUIRED, .custom = &address_text,

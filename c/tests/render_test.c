@@ -3874,12 +3874,7 @@ static void the_refusals_no_corpus_reaches(void)
 		ncfg_ra_policy_t *policy = document->interfaces[0].advertise;
 
 		check(renders(document), "an advertise block renders, which is the control");
-		/* An advertise block with nothing to advertise, and one whose backend is
-		 * `exec` -- the compiler accepts both so the renderer can say so. */
-		policy->backend.kind = NCFG_RA_BACKEND_EXEC;
-		check(refusal_names(document, "br0", "backend of exec"),
-		    "  and an advertise backend of exec is refused");
-		policy->backend.kind = NCFG_RA_BACKEND_AUTO;
+		/* An advertise block with nothing to advertise. */
 		{
 			/* Put back before the document is freed, which frees as many
 			 * prefixes as the count says -- zero would orphan the one there. */

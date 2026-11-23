@@ -644,8 +644,6 @@ static int run_hook(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_
 		if (kernel->hooks[i].path && op->u.hook.path &&
 		    strcmp(kernel->hooks[i].path, op->u.hook.path) == 0) {
 			reference.sha256 = kernel->hooks[i].sha256;
-			reference.run_as = kernel->hooks[i].run_as;
-			reference.timeout = kernel->hooks[i].timeout;
 			break;
 		}
 	}

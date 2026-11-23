@@ -9,8 +9,8 @@
  *
  * TYPED, LIKE `wifi add` AND FOR THE SAME REASON
  *   The subcommand takes three principals and renders the block itself; it
- *   never accepts config text. A config file may name a hook and a hook's
- *   `run_as` is absent by default, which means root -- so a privileged command
+ *   never accepts config text. A config file may name a hook and a hook runs
+ *   as root -- so a privileged command
  *   that wrote text a caller supplied would be a way to run anything as root.
  *   There is no field here that could name a hook or a path.
  *

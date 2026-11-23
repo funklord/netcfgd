@@ -5695,7 +5695,6 @@ void ncfg_client_hooks_free(ncfg_hooks_t *hooks)
 		free(hooks->items[i].interface);
 		free(hooks->items[i].phase);
 		free(hooks->items[i].path);
-		free(hooks->items[i].run_as);
 	}
 	free(hooks->items);
 	hooks->items = NULL;
@@ -5753,9 +5752,6 @@ int ncfg_client_hooks(ncfg_client_t *client, ncfg_hooks_t *out, char *err, size_
 			out->items[row].interface = dup_string(name ? name : "");
 			out->items[row].phase = member_text(doc, entry, "phase");
 			out->items[row].path = member_text(doc, entry, "path");
-			out->items[row].run_as = member_text(doc, entry, "run_as");
-			out->items[row].timeout =
-			    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "timeout"), 0);
 		}
 		free(name);
 	}

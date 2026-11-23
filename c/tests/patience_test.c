@@ -37,23 +37,12 @@ static void check(int condition, const char *what)
 	}
 }
 
-/* A hook with no stated timeout, which is the default case. */
+/* A hook, which every one is stopped at the default timeout (0339). */
 static ncfg_hook_ref_t defaulted(void)
 {
 	ncfg_hook_ref_t hook;
 
 	memset(&hook, 0, sizeof(hook));
-	return hook;
-}
-
-/* A hook that states one, including zero. */
-static ncfg_hook_ref_t stated(int64_t seconds)
-{
-	ncfg_hook_ref_t hook;
-
-	memset(&hook, 0, sizeof(hook));
-	hook.timeout.has = 1;
-	hook.timeout.value = seconds;
 	return hook;
 }
 
@@ -91,25 +80,6 @@ static void four_phases_are_four_timeouts(void)
 	check(ncfg_apply_stated_patience_seconds(&document) ==
 	        4ul * (unsigned long)NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS,
 	    "four default hooks on one interface sum rather than maximise");
-}
-
-static void a_stated_timeout_wins_including_zero(void)
-{
-	ncfg_document_t  document;
-	ncfg_interface_t iface;
-	ncfg_hook_ref_t  hooks[2];
-
-	memset(&document, 0, sizeof(document));
-	memset(&iface, 0, sizeof(iface));
-	hooks[0] = stated(5);
-	hooks[1] = stated(0);
-	iface.hooks = hooks;
-	iface.hook_count = 2u;
-	document.interfaces = &iface;
-	document.interface_count = 1u;
-
-	check(ncfg_apply_stated_patience_seconds(&document) == 5ul,
-	    "a hook's own timeout is used, and a stated zero is honoured as zero");
 }
 
 /*
@@ -163,7 +133,6 @@ int main(void)
 {
 	an_empty_document_costs_nothing();
 	four_phases_are_four_timeouts();
-	a_stated_timeout_wins_including_zero();
 	networks_cost_one_association_between_them();
 	the_reporting_machine_adds_up();
 

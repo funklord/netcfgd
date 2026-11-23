@@ -1935,44 +1935,6 @@ static void the_phase_s_own_variable_reaches_the_hook(const char *dir)
 }
 
 /*
- * A hook naming a user does not run at all.
- *
- * The direction matters more than the assertion, and it is the Rust's own
- * sentence: the wrong answer here is not "an error" but "runs anyway, as
- * root". A hook that asked to be unprivileged and was handed the daemon's
- * privileges instead is worse than one that did not run, because nothing
- * reports it. This port cannot resolve a user name at all -- `process.h` keeps
- * NSS out of the privileged process -- so it takes the closed direction for
- * every name rather than the privileged one for any.
- */
-static void a_hook_asking_to_drop_privilege_does_not_run_as_root_instead(const char *dir)
-{
-	ncfg_hook_ref_t hook;
-	ncfg_hook_env_t env;
-	char            path[320];
-	char            message[NCFG_ERROR_MAX];
-	char            marker[320];
-	char            body[512];
-
-	(void)snprintf(marker, sizeof(marker), "%s/dropped", dir);
-	(void)snprintf(body, sizeof(body), "touch %s", marker);
-	if (!write_hook(dir, body, &hook, path, sizeof(path))) {
-		check(0, "a hook that asked to be unprivileged does not run privileged instead");
-		return;
-	}
-	hook.phase = NCFG_HOOK_PHASE_PRE_UP;
-	hook.run_as = LIT("root");
-	memset(&env, 0, sizeof(env));
-	env.iface = "eth0";
-	message[0] = '\0';
-	check(ncfg_hook_run(&hook, &env, message, sizeof(message)) == NCFG_HOOK_VETOED &&
-	    strstr(message, "run as") && access(marker, F_OK) != 0,
-	    "a hook that asked to be unprivileged does not run privileged instead");
-	free(hook.sha256);
-	(void)remove(marker);
-}
-
-/*
  * A hook that finishes inside its bound succeeds, and is told what it needs.
  *
  * The control for the timeout below: without it, a bound that killed
@@ -2001,8 +1963,6 @@ static void a_prompt_hook_succeeds_and_is_told_its_phase(const char *dir)
 		return;
 	}
 	hook.phase = NCFG_HOOK_PHASE_LEASE;
-	hook.timeout.has = 1;
-	hook.timeout.value = 30;
 	memset(&env, 0, sizeof(env));
 	env.iface = "eth0";
 	env.addr = "10.0.0.5/24";
@@ -2070,12 +2030,10 @@ static void a_hooks_own_children_are_killed_with_it(const char *dir)
 	/* `post_up`, so the outcome is `Noted`: the same bound in a veto phase is
 	 * the same mechanism, and the phase split is checked on its own above. */
 	hook.phase = NCFG_HOOK_PHASE_POST_UP;
-	hook.timeout.has = 1;
-	hook.timeout.value = 1;
 	memset(&env, 0, sizeof(env));
 	env.iface = "eth0";
 	message[0] = '\0';
-	check(ncfg_hook_run(&hook, &env, message, sizeof(message)) == NCFG_HOOK_NOTED &&
+	check(ncfg_hook_run_within(&hook, &env, 1u, message, sizeof(message)) == NCFG_HOOK_NOTED &&
 	    strstr(message, "did not finish within 1s"),
 	    "a hook that outstays its bound is killed, and the phase decides");
 
@@ -2127,7 +2085,6 @@ static void the_hook_runner(void)
 		return;
 	}
 	a_changed_hook_does_not_run(dir);
-	a_hook_asking_to_drop_privilege_does_not_run_as_root_instead(dir);
 	the_phase_s_own_variable_reaches_the_hook(dir);
 	a_prompt_hook_succeeds_and_is_told_its_phase(dir);
 	a_hooks_own_children_are_killed_with_it(dir);

@@ -120,10 +120,6 @@ static int reference_for(int phase, const char *body, size_t body_length, char *
 	out->phase = phase;
 	out->path = path;
 	out->sha256 = hash;
-	/* `run_as` and `timeout` are absent on every machine: the model carries
-	 * them and the runner honours both, and the configuration language has no
-	 * key for either (0258). Writing anything here would be inventing a
-	 * mechanism no operator can reach. */
 	return 1;
 }
 

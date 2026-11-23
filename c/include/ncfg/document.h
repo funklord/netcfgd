@@ -312,8 +312,9 @@ typedef struct {
 	int           phase; /* ncfg_hook_phase_t, from value.h */
 	char         *path;  /* absolute; `validate` refuses anything else */
 	char         *sha256; /* content hash, so drift can notice a changed hook */
-	char         *run_as; /* absent means the daemon's own user, which is root */
-	ncfg_optint_t timeout;
+	/* A hook runs as the daemon's own user, which is root, and is stopped at
+	 * NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS. The `run_as` and `timeout` that once
+	 * sat here could not be set and were removed by 0339. */
 } ncfg_hook_ref_t;
 
 /* ------------------------------------------------------------------------ *
@@ -321,15 +322,11 @@ typedef struct {
  * ------------------------------------------------------------------------ */
 
 /*
- * A mode, and the command the one open-ended mode carries.
- *
- * `exec` hands the whole scoped structure to a script as JSON on stdin -- the
- * escape hatch, and the reason `ncfg_dns_mode_t` alone is not enough to hold a
- * mode. `command` is meaningful only for `NCFG_DNS_MODE_EXEC`.
+ * A mode. A struct of one member because it once also carried the command of
+ * an `exec` mode, which 0339 removed; every supported resolver has its own.
  */
 typedef struct {
-	int   mode; /* ncfg_dns_mode_t, from value.h */
-	char *command;
+	int mode; /* ncfg_dns_mode_t, from value.h */
 } ncfg_dns_mode_value_t;
 
 typedef struct {
@@ -1370,15 +1367,13 @@ typedef enum {
 	NCFG_RA_BACKEND_ODHCPD,
 	NCFG_RA_BACKEND_RADVD,
 	/* OpenWrt 25.12 carries no radvd in any feed; uradvd is its packages
-	 * feed's (project.md 10.817). Before `exec`, which stays last: the word
-	 * tables read every word but the last as a plain string. */
-	NCFG_RA_BACKEND_URADVD,
-	NCFG_RA_BACKEND_EXEC
+	 * feed's (project.md 10.817). */
+	NCFG_RA_BACKEND_URADVD
 } ncfg_ra_backend_kind_t;
 
+/* One member: the `exec` backend and its command went with 0339. */
 typedef struct {
-	int   kind;    /* ncfg_ra_backend_kind_t */
-	char *command; /* meaningful only for NCFG_RA_BACKEND_EXEC */
+	int kind; /* ncfg_ra_backend_kind_t */
 } ncfg_ra_backend_t;
 
 typedef struct {

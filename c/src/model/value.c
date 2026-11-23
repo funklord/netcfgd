@@ -45,7 +45,7 @@ static const char *const drift_policy_names[] = { "report", "reconcile", "ignore
 
 static const char *const dns_mode_names[] = {
 	"none", "write_resolv_conf", "resolvconf", "openresolv", "resolved",
-	"dnsmasq", "unbound", "exec"
+	"dnsmasq", "unbound"
 };
 
 static const char *name_of(const char *const *names, size_t count, unsigned int which)

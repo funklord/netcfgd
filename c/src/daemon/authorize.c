@@ -90,7 +90,7 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	 * do** (0327). Wide and dangerous, and necessary anyway -- joining a
 	 * network chooses where the machine's traffic goes. What bounds it is the
 	 * shape of these requests: each is typed and carries no configuration
-	 * text, so none can name a hook, a path, a `run_as`, a resolver or a
+	 * text, so none can name a hook, a path, a resolver or a
 	 * control policy (0117).
 	 *
 	 * Scanning is not reading: it transmits probe requests and interrupts
@@ -115,7 +115,7 @@ static const ncfg_tier_t tier_table[NCFG_PROTO_REQ_COUNT] = {
 	/* Taking a radio on is `laptop` for the same reason. What it writes is a
 	 * `device` block, and a client sending one as *text* would be sending
 	 * configuration -- 0117's remote code execution, and `root`. An
-	 * interface name and a boolean can name no hook, no path and no `run_as`,
+	 * interface name and a boolean can name no hook and no path,
 	 * so a member of the `netcfgd` group can turn on the radio in their own
 	 * laptop without being able to decide who else may. */
 	[NCFG_PROTO_REQ_RADIO_SET] = NCFG_TIER_LAPTOP,

@@ -658,116 +658,6 @@ static int write_forwarder(const ncfg_dns_scope_t *scopes, size_t count, const c
 	return ok;
 }
 
-/*
- * Hand the whole scoped structure to a script, as JSON on stdin.
- *
- * The escape hatch, and the only backend that receives scopes rather than a
- * rendering of them -- 0007 is explicit that a site wanting resolved's
- * `MulticastDNS` or anything else outside the model puts it here.
- *
- * **Run without a shell.** The command is a config value, and a shell would
- * make the DNS mode a place where a config file becomes arbitrary code with
- * word splitting attached -- the same rule the secret resolver's exec provider
- * follows.
- */
-static int hand_to_script(const ncfg_dns_scope_t *scopes, size_t count, const char *command,
-    char *err, size_t err_size)
-{
-	char        *work;
-	const char **argv = NULL;
-	size_t       word_count = 0;
-	size_t       capacity = 0;
-	char        *at;
-	char        *text = NULL;
-	int          exited_ok = 0;
-	int          status = 0;
-	char         said[NCFG_ERROR_MAX];
-	char         how[64];
-	int          ok;
-
-	if (!command || command[0] == '\0') {
-		ncfg_error_set(err, err_size, "the exec dns mode needs a command");
-		return 0;
-	}
-	work = ncfg_backend_strdup(command);
-	if (!work) {
-		ncfg_error_set(err, err_size, "out of memory reading the exec dns command");
-		return 0;
-	}
-	/* Split on whitespace and nothing else. No quoting, no globbing, no
-	 * substitution: a shell here would be the one place a configuration file
-	 * becomes arbitrary code. */
-	at = work;
-	while (*at != '\0') {
-		char *start;
-
-		while (*at == ' ' || *at == '\t' || *at == '\n' || *at == '\r') {
-			at++;
-		}
-		if (*at == '\0') {
-			break;
-		}
-		start = at;
-		while (*at != '\0' && *at != ' ' && *at != '\t' && *at != '\n' && *at != '\r') {
-			at++;
-		}
-		if (*at != '\0') {
-			*at++ = '\0';
-		}
-		if (word_count + 2u > capacity) {
-			size_t       wanted = capacity ? capacity * 2u : 8u;
-			const char **grown = realloc(argv, wanted * sizeof(*grown));
-
-			if (!grown) {
-				free(argv);
-				free(work);
-				ncfg_error_set(err, err_size, "out of memory reading the exec dns command");
-				return 0;
-			}
-			argv = grown;
-			capacity = wanted;
-		}
-		argv[word_count++] = start;
-	}
-	if (word_count == 0u) {
-		free(argv);
-		free(work);
-		ncfg_error_set(err, err_size, "the exec dns mode needs a command");
-		return 0;
-	}
-	argv[word_count] = NULL;
-
-	text = ncfg_dns_scopes_json(scopes, count, err, err_size);
-	if (!text) {
-		free(argv);
-		free(work);
-		return 0;
-	}
-	said[0] = '\0';
-	ok = run_with_input(argv[0], argv, text, &exited_ok, &status, said, sizeof(said));
-	free(text);
-	if (!ok) {
-		if (strcmp(said, "notfound") == 0) {
-			ncfg_error_set(err, err_size, "the dns script `%s` is not there", argv[0]);
-		} else {
-			ncfg_error_set(err, err_size, "could not run %s: %s", argv[0], said);
-		}
-		free(argv);
-		free(work);
-		return 0;
-	}
-	if (!exited_ok) {
-		describe_status(status, how, sizeof(how));
-		ncfg_error_set(err, err_size, "the dns script `%s` %s", argv[0], how);
-		free(argv);
-		free(work);
-		return 0;
-	}
-	free(argv);
-	free(work);
-	return 1;
-}
-
 /* --------------------------------------------------------- what was done */
 
 int ncfg_dns_record(const ncfg_dns_scope_t *scopes, size_t count, const char *run_dir, char *err,
@@ -953,11 +843,6 @@ int ncfg_dns_deliver(const ncfg_dns_scope_t *scopes, size_t count,
 	case NCFG_DNS_MODE_UNBOUND:
 		if (!write_forwarder(scopes, count, targets->unbound_conf, "unbound", err,
 		    err_size)) {
-			return 0;
-		}
-		break;
-	case NCFG_DNS_MODE_EXEC:
-		if (!hand_to_script(scopes, count, scopes[0].policy->mode.command, err, err_size)) {
 			return 0;
 		}
 		break;

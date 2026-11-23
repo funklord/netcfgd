@@ -7020,6 +7020,14 @@ re-blessed (pre-release, so a minor change under 0038):
   stays in `ncfg_route_t` as the planner's: a route it removes carries the
   protocol the kernel reported. A reference names its source's first prefix.
 
+- **A hook's `run_as` and `timeout`.** A hook runs as root and is stopped at
+  60 seconds; the GUI's hooks table lost its two always-default columns.
+  `ncfg_hook_run_within` takes the bound explicitly so the group-kill test
+  still runs in one second.
+- **The DNS `exec` mode and the RA `exec` backend**, with the script hand-off
+  and `ncfg_dns_scopes_json` that existed only for it. The RA one was never
+  implemented; the DNS one ran a script as root with the whole policy.
+
 A document that still carries one is refused by name ("carries `index`, which
 this build does not know"), which is the reader's rule for every unknown
 member. Nothing outside the tests and the fuzz seeds wrote them.

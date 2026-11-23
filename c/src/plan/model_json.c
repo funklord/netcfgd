@@ -219,24 +219,12 @@ void ncfg_plan_write_rule(ncfg_json_writer_t *writer, const ncfg_routing_rule_t 
 	ncfg_json_write_object_end(writer);
 }
 
-/*
- * A DNS mode, which is a word except for `exec`.
- *
- * `exec` carries the command it runs, so it is the one arm serde writes as an
- * object -- `{"exec": "..."}` -- and a writer that spelled it as a bare word
- * would produce a policy with the command silently gone.
- */
+/* A DNS mode, a word. */
 static void write_dns_mode(ncfg_json_writer_t *writer, const ncfg_dns_mode_value_t *mode)
 {
 	const char *word;
 
 	ncfg_json_write_key(writer, "mode");
-	if (mode->mode == NCFG_DNS_MODE_EXEC) {
-		ncfg_json_write_object_begin(writer);
-		member_text(writer, "exec", mode->command);
-		ncfg_json_write_object_end(writer);
-		return;
-	}
 	word = ncfg_dns_mode_name(mode->mode);
 	if (word) {
 		ncfg_json_write_string(writer, word);

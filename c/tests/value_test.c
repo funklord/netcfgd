@@ -300,17 +300,16 @@ int main(void)
 			{ NCFG_DNS_MODE_OPENRESOLV,        "openresolv"        },
 			{ NCFG_DNS_MODE_RESOLVED,          "resolved"          },
 			{ NCFG_DNS_MODE_DNSMASQ,           "dnsmasq"           },
-			{ NCFG_DNS_MODE_UNBOUND,           "unbound"           },
-			{ NCFG_DNS_MODE_EXEC,              "exec"              }
+			{ NCFG_DNS_MODE_UNBOUND,           "unbound"           }
 		};
 		char message[NCFG_ERROR_MAX];
-		ncfg_dns_mode_t back = NCFG_DNS_MODE_EXEC;
+		ncfg_dns_mode_t back = NCFG_DNS_MODE_UNBOUND;
 		size_t i;
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
 			const char *word = ncfg_dns_mode_name((int)modes[i].value);
-			ncfg_dns_mode_t got = NCFG_DNS_MODE_EXEC;
+			ncfg_dns_mode_t got = NCFG_DNS_MODE_NONE;
 
 			if (!word || strcmp(word, modes[i].word) != 0) {
 				round_trip = 0;
@@ -322,21 +321,21 @@ int main(void)
 			}
 		}
 		check(round_trip, "every dns mode round-trips through its word");
-		check(ncfg_dns_mode_name((ncfg_dns_mode_t)8) == NULL, "and the modes stop at eight");
+		check(ncfg_dns_mode_name((ncfg_dns_mode_t)7) == NULL, "and the modes stop at seven");
 		/* `resolvconf` and `resolved` are different tools and adjacent
 		 * words, which is the pair worth pinning rather than asserting in
 		 * general that a table is a table. */
 		check(strcmp(ncfg_dns_mode_name(NCFG_DNS_MODE_RESOLVCONF), "resolvconf") == 0 &&
 		    strcmp(ncfg_dns_mode_name(NCFG_DNS_MODE_RESOLVED), "resolved") == 0,
 		    "`resolvconf` and `resolved` are two modes, not one");
-		back = NCFG_DNS_MODE_EXEC;
+		back = NCFG_DNS_MODE_UNBOUND;
 		check(ncfg_dns_mode_from_name("resolv.conf", &back, NULL, 0) &&
 		    back == NCFG_DNS_MODE_WRITE_RESOLV_CONF,
 		    "the file's own name is the alias `lower.rs` takes");
-		back = NCFG_DNS_MODE_EXEC;
+		back = NCFG_DNS_MODE_UNBOUND;
 		message[0] = '\0';
 		check(!ncfg_dns_mode_from_name("systemd-resolved", &back, message,
-		    sizeof(message)) && back == NCFG_DNS_MODE_EXEC && message[0] != '\0',
+		    sizeof(message)) && back == NCFG_DNS_MODE_UNBOUND && message[0] != '\0',
 		    "an unknown dns mode does not quietly become `none`");
 	}
 

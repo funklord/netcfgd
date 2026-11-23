@@ -468,11 +468,9 @@ int ncfg_ra_start(const char *run, const char *iface, const ncfg_ra_policy_t *po
 		    "netcfgd will use whichever is installed",
 		    iface);
 		return 0;
-	case NCFG_RA_BACKEND_EXEC:
 	default:
 		ncfg_error_set(err, err_size,
-		    "`%s` asks for `%s` to advertise, which this build does not implement", iface,
-		    policy->backend.command ? policy->backend.command : "");
+		    "`%s` asks for an advertisement backend this build does not know", iface);
 		return 0;
 	}
 

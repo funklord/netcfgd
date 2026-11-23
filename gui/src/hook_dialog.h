@@ -11,10 +11,9 @@
  * interface is a duplicate the loader refuses -- correctly. So the interface
  * editor owns the block and this returns a phase and a body to it.
  *
- * **What is deliberately absent is `run_as` and `timeout`.** The model has
- * both fields and the hook runner honours both; the configuration language has
- * no key for either, so there is nothing a form could write that would reach
- * them. `netcfgd.conf.example` showed `run_as=nobody` inside a hook body as
+ * **There is no `run_as` and no `timeout`.** A hook runs as root and is
+ * stopped at the default; the model's fields for either could not be set and
+ * were removed by 0339. `netcfgd.conf.example` showed `run_as=nobody` inside a hook body as
  * though it worked, and it does not: those lines are shell, the hook still
  * runs as root, and the example is corrected in the same round as this file.
  * Offering a field here would have been the third copy of that mistake.

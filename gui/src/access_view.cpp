@@ -482,8 +482,8 @@ void ncfg_access_view::apply()
 
 	/* Three typed principals and a verb. No path, no config text, nothing the
 	 * helper has to parse as a file -- the same rule `wifi_add` follows, and
-	 * for the same reason: a config file may name a hook whose `run_as`
-	 * defaults to root. */
+	 * for the same reason: a config file may name a hook, which runs as
+	 * root. */
 	const QString command = QStringLiteral("set %1 %2 %3\n")
 	                        .arg(chosen(view_choice), chosen(laptop_choice), chosen(root_choice));
 	helper->write(command.toUtf8());

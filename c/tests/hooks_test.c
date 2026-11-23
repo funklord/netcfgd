@@ -142,9 +142,7 @@ static void recording_touches_nothing(const char *run_dir)
 	    "the reference names the file the document will refer to");
 	check(reference.sha256 && strcmp(reference.sha256, hex_of("#!/bin/sh\necho hi\n")) == 0,
 	    "and carries the hash of the script, shebang included");
-	check(reference.phase == NCFG_HOOK_PHASE_POST_UP && reference.run_as == NULL &&
-	    reference.timeout.has == 0,
-	    "run_as and timeout are absent, as they are on every machine (0258)");
+	check(reference.phase == NCFG_HOOK_PHASE_POST_UP, "and its phase");
 	check(ncfg_pending_hooks_count(pending) == 1u, "one is waiting");
 	check(!testdir_exists(testdir_in(run_dir, "hooks", hooks_dir, sizeof(hooks_dir))),
 	    "recording creates no directory, let alone the file");

@@ -22,7 +22,7 @@ ncfg_hooks_view::ncfg_hooks_view(ncfg_connection *connection, QWidget *parent)
     : QWidget(parent), connection(connection)
 {
 	QStringList columns;
-	columns << QStringLiteral("interface") << QStringLiteral("phase") << QStringLiteral("path") << QStringLiteral("runs as") << QStringLiteral("timeout");
+	columns << QStringLiteral("interface") << QStringLiteral("phase") << QStringLiteral("path");
 	table = new ncfg_table_view(columns, QStringLiteral("hooks_note"), this);
 
 	/* One button, and it opens the interface editor rather than a form of its
@@ -140,8 +140,6 @@ void ncfg_hooks_view::refresh()
 		cells << item.interface;
 		cells << item.phase;
 		cells << item.path;
-		cells << (item.run_as.isEmpty() ? QStringLiteral("root (the daemon)") : item.run_as);
-		cells << (item.timeout ? QString::number(item.timeout) : QString());
 		cells_by_row << cells;
 	}
 	table->show_rows(cells_by_row);
@@ -155,17 +153,10 @@ void ncfg_hooks_view::refresh()
 		emit reported(QStringLiteral("no hooks configured"));
 		return;
 	}
-	/* **Every row says root, and it is not a coincidence.** The hook runner
-	 * drops to `run_as` and kills at `timeout` where the document names them,
-	 * and the configuration language has no key for either -- so nothing on
-	 * any machine can put anything but the default in these two columns. Said
-	 * here because the columns otherwise read as a setting somebody forgot to
-	 * use. */
+	/* Said once rather than as two columns that could only ever hold the
+	 * default (0339 removed `run_as` and `timeout` from the model). */
 	table->set_note(QStringLiteral(
-	    "Every hook runs as root with the default timeout: netcfgd's hook runner can "
-	    "drop to another user and stop a hook that overruns, and the configuration "
-	    "language has no key to ask for either, so these two columns cannot yet say "
-	    "anything else. A `run_as=` line inside a hook body is a shell assignment and "
-	    "does nothing."));
+	    "Every hook runs as root and is stopped if it runs longer than a minute. "
+	    "A `run_as=` line inside a hook body is a shell assignment and does nothing."));
 	emit reported(ncfg_counted(cells_by_row.size(), "hook", "hooks"));
 }

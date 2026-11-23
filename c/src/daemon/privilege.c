@@ -121,8 +121,8 @@ const char *ncfg_privilege_why(ncfg_privilege_reason_t reason)
 {
 	switch (reason) {
 	case NCFG_PRIV_HOOK:
-		return "a hook body is shell, and a hook with no `run_as` runs as the daemon's "
-		       "own user, which is root";
+		return "a hook body is shell, and a hook runs as the daemon's own user, which "
+		       "is root";
 	case NCFG_PRIV_PROBE:
 		return "a probe block is a program netcfgd runs, as root";
 	case NCFG_PRIV_SECRET_EXEC:

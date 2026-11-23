@@ -350,8 +350,8 @@ typedef enum {
  * execution would not think to look.
  */
 typedef enum {
-	/* A hook body is shell, and `run_as` absent means the daemon's own user,
-	 * which is root. */
+	/* A hook body is shell, and a hook runs as the daemon's own user, which
+	 * is root. */
 	NCFG_PRIV_HOOK = 0,
 	/* 0119's probe block: a program, how often to run it, how long to wait. */
 	NCFG_PRIV_PROBE,
@@ -2295,8 +2295,8 @@ typedef int (*ncfg_wifi_install_fn)(void *context, const ncfg_wifi_profile_t *pr
  *
  * The request carries typed fields and never config text, so the daemon
  * renders the block and **this function's shape is what bounds the
- * privilege**: there is no field here that could name a hook, a path or a
- * `run_as`, and a hook's `run_as` defaults to root.
+ * privilege**: there is no field here that could name a hook or a path, and
+ * a hook runs as root.
  *
  * Named `configure_network` in the Rust and not `add_network`, because
  * `ncfg_supplicant_add_network` already means something different one layer

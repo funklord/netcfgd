@@ -209,16 +209,6 @@ char *ncfg_dns_unbound_conf(const ncfg_dns_scope_t *scopes, size_t count, char *
     size_t err_size);
 
 /*
- * Every scope, as JSON, for the exec mode.
- *
- * Hand-rolled rather than run through the document writer: a script reading
- * this is an integration somebody wrote once and expects to keep working, and
- * a wire format that changed whenever an internal type did would break it.
- */
-char *ncfg_dns_scopes_json(const ncfg_dns_scope_t *scopes, size_t count, char *err,
-    size_t err_size);
-
-/*
  * Put `text` at `path`, through a temporary in the same directory.
  *
  * A resolver reading during the write must see the old file or the new one and

@@ -181,7 +181,7 @@ static const ncfg_enum_t flow_offload_set = WORD_SET("flow offload", flow_offloa
 static const char *const cert_source_words[] = { "path", "stored" };
 static const char *const principal_words[] = { "root", "any", "user", "group" };
 static const char *const hostname_policy_words[] = { "none", "from_dhcp", "static" };
-static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "uradvd", "exec" };
+static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "uradvd" };
 
 const char *ncfg_address_source_kind_name(int kind)
 {
@@ -963,40 +963,17 @@ static const ncfg_field_t hook_fields[] = {
 	{ .name = "path", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_hook_ref_t, path) },
 	{ .name = "sha256", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
-	    .offset = offsetof(ncfg_hook_ref_t, sha256) },
-	{ .name = "run_as", .kind = NCFG_F_STR, .offset = offsetof(ncfg_hook_ref_t, run_as) },
-	{ .name = "timeout", .kind = NCFG_F_OPT_INT, R_U32,
-	    .offset = offsetof(ncfg_hook_ref_t, timeout) }
+	    .offset = offsetof(ncfg_hook_ref_t, sha256) }
 };
 static const ncfg_type_t hook_type = TYPE("hook", hook_fields);
 
-/*
- * The mode, which is a word except for the one variant that carries a command.
- *
- * `exec` is a mode the model has and the configuration language cannot yet
- * write -- `lower.rs` has no arm for the word -- but a document arriving as
- * JSON carries it, so this reads and writes it.
- */
+/* The mode, a word. */
 static int dns_mode_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, char *err,
     size_t err_size)
 {
 	ncfg_dns_mode_value_t *value = field;
-	uint32_t               only;
 
-	if (ncfg_json_type(doc, node) == NCFG_JSON_STRING) {
-		return ncfg_field_enum(&dns_mode_set, doc, node, &value->mode, err, err_size);
-	}
-	only = ncfg_field_only_member(doc, node);
-	if (only == NCFG_JSON_NONE || ncfg_json_member(doc, node, "exec") != only) {
-		ncfg_error_set(err, err_size,
-		    "a dns mode is a word, or `{\"exec\": \"...\"}` for the one that runs a script");
-		return 0;
-	}
-	value->mode = NCFG_DNS_MODE_EXEC;
-	free(value->command);
-	value->command = ncfg_field_string(doc, only, "the command of dns mode `exec`", err,
-	    err_size);
-	return value->command != NULL;
+	return ncfg_field_enum(&dns_mode_set, doc, node, &value->mode, err, err_size);
 }
 
 static void dns_mode_write(ncfg_json_writer_t *writer, const void *field)
@@ -1004,27 +981,13 @@ static void dns_mode_write(ncfg_json_writer_t *writer, const void *field)
 	const ncfg_dns_mode_value_t *value = field;
 	const char                  *word = ncfg_field_enum_name(&dns_mode_set, value->mode);
 
-	if (value->mode == NCFG_DNS_MODE_EXEC) {
-		ncfg_json_write_object_begin(writer);
-		ncfg_json_write_member_string(writer, "exec", value->command);
-		ncfg_json_write_object_end(writer);
-		return;
-	}
 	if (word) {
 		ncfg_json_write_string(writer, word);
 	}
 }
 
-static void dns_mode_release(void *field)
-{
-	ncfg_dns_mode_value_t *value = field;
-
-	free(value->command);
-	value->command = NULL;
-}
-
-static const ncfg_custom_t dns_mode_custom = { dns_mode_read, dns_mode_write, NULL,
-	dns_mode_release, NULL };
+static const ncfg_custom_t dns_mode_custom = { dns_mode_read, dns_mode_write, NULL, NULL,
+	NULL };
 
 static const ncfg_field_t dns_server_fields[] = {
 	{ .name = "addr", .kind = NCFG_F_CUSTOM, .flags = NCFG_FF_REQUIRED, .custom = &address_text,
@@ -1837,57 +1800,31 @@ static int ra_backend_read(const ncfg_json_doc_t *doc, uint32_t node, void *fiel
     size_t err_size)
 {
 	ncfg_ra_backend_t *value = field;
-	uint32_t           only;
 	size_t             i;
 
 	if (ncfg_json_type(doc, node) == NCFG_JSON_STRING) {
-		for (i = 0; i < COUNT_OF(ra_backend_words) - 1u; i++) {
+		for (i = 0; i < COUNT_OF(ra_backend_words); i++) {
 			if (ncfg_json_string_equals(doc, node, ra_backend_words[i])) {
 				value->kind = (int)i;
 				return 1;
 			}
 		}
-		ncfg_error_set(err, err_size, "that is not a router advertisement backend");
-		return 0;
 	}
-	only = ncfg_field_only_member(doc, node);
-	if (only == NCFG_JSON_NONE || ncfg_json_member(doc, node, "exec") != only) {
-		ncfg_error_set(err, err_size,
-		    "a router advertisement backend is a word, or `{\"exec\": \"...\"}`");
-		return 0;
-	}
-	value->kind = NCFG_RA_BACKEND_EXEC;
-	free(value->command);
-	value->command = ncfg_field_string(doc, only, "the command of backend `exec`", err,
-	    err_size);
-	return value->command != NULL;
+	ncfg_error_set(err, err_size, "that is not a router advertisement backend");
+	return 0;
 }
 
 static void ra_backend_write(ncfg_json_writer_t *writer, const void *field)
 {
 	const ncfg_ra_backend_t *value = field;
 
-	if (value->kind == NCFG_RA_BACKEND_EXEC) {
-		ncfg_json_write_object_begin(writer);
-		ncfg_json_write_member_string(writer, "exec", value->command);
-		ncfg_json_write_object_end(writer);
-		return;
-	}
 	if (value->kind >= 0 && (size_t)value->kind < COUNT_OF(ra_backend_words)) {
 		ncfg_json_write_string(writer, ra_backend_words[value->kind]);
 	}
 }
 
-static void ra_backend_release(void *field)
-{
-	ncfg_ra_backend_t *value = field;
-
-	free(value->command);
-	value->command = NULL;
-}
-
-static const ncfg_custom_t ra_backend_custom = { ra_backend_read, ra_backend_write, NULL,
-	ra_backend_release, NULL };
+static const ncfg_custom_t ra_backend_custom = { ra_backend_read, ra_backend_write, NULL, NULL,
+	NULL };
 
 static const ncfg_field_t ra_fields[] = {
 	{ .name = "backend", .kind = NCFG_F_CUSTOM, .custom = &ra_backend_custom,

@@ -152,12 +152,9 @@ void ncfg_lower_dns_key(ncfg_lower_ctx_t *ctx, ncfg_dns_policy_t *policy,
 		/*
 		 * The spellings are `value.h`'s, which also takes `resolv.conf` for
 		 * `write_resolv_conf` -- the file's own name, which is what an
-		 * operator reaches for. **`exec` is refused here**, and that is the
-		 * one place this reader is narrower than the enum: `DnsMode::Exec`
-		 * carries a command, the language has no way to write one, and
-		 * accepting the word would compile a mode with nothing to run.
+		 * operator reaches for.
 		 */
-		if (!ncfg_dns_mode_from_name(name, &mode, NULL, 0) || mode == NCFG_DNS_MODE_EXEC) {
+		if (!ncfg_dns_mode_from_name(name, &mode, NULL, 0)) {
 			ncfg_diag(ctx, assignment->value->span,
 			    "unknown dns mode `%s`: one of: none, write_resolv_conf, resolvconf, "
 			    "openresolv, resolved, dnsmasq, unbound", name);

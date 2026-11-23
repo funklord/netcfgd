@@ -2247,10 +2247,9 @@
 
 # The environment a hook gets is prefixed `NCFG_`.
 #
-# A HOOK RUNS AS ROOT. There is no way to ask for anything else: netcfgd's
-# hook runner will drop to a named user and will kill a hook that overruns,
-# and the configuration language has no key for either, so nothing you can
-# write here reaches them.
+# A HOOK RUNS AS ROOT, and is killed if it runs longer than 60 seconds.
+# There is no way to ask for another user or another limit; a hook that needs
+# longer starts its work in the background and returns.
 #
 # This file used to show `run_as=nobody` and `timeout=30` as the first two
 # lines of a hook body, as though they were settings. They are not. A hook

@@ -16,39 +16,10 @@
 #include "ncfg/document.h"
 #include "ncfg/supplicant.h"
 
-/*
- * One hook's timeout: its own where it states one, the default where it does
- * not.
- *
- * **A stated zero is taken at face value.** `ncfg_optint_t` distinguishes
- * absent from present, so a hook configured with no timeout is the author
- * saying something rather than saying nothing, and substituting the default
- * would be this file overruling the document -- which `project.md` puts the
- * wrong way round.
- */
-static unsigned long hook_seconds(const ncfg_hook_ref_t *hook)
+/* Every hook is stopped at the default; there is no other timeout (0339). */
+static unsigned long hooks_seconds(size_t count)
 {
-	if (!hook) {
-		return 0ul;
-	}
-	if (hook->timeout.has && hook->timeout.value > 0) {
-		return (unsigned long)hook->timeout.value;
-	}
-	if (hook->timeout.has) {
-		return 0ul;
-	}
-	return (unsigned long)NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS;
-}
-
-static unsigned long hooks_seconds(const ncfg_hook_ref_t *hooks, size_t count)
-{
-	unsigned long total = 0ul;
-	size_t        at;
-
-	for (at = 0u; at < count; at++) {
-		total += hook_seconds(&hooks[at]);
-	}
-	return total;
+	return (unsigned long)count * (unsigned long)NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS;
 }
 
 unsigned long ncfg_apply_stated_patience_seconds(const ncfg_document_t *desired)
@@ -67,8 +38,7 @@ unsigned long ncfg_apply_stated_patience_seconds(const ncfg_document_t *desired)
 	 * waits for four of them.
 	 */
 	for (at = 0u; at < desired->interface_count; at++) {
-		total += hooks_seconds(desired->interfaces[at].hooks,
-		    desired->interfaces[at].hook_count);
+		total += hooks_seconds(desired->interfaces[at].hook_count);
 	}
 
 	/*
@@ -78,8 +48,7 @@ unsigned long ncfg_apply_stated_patience_seconds(const ncfg_document_t *desired)
 	 * be caused by an apply.
 	 */
 	for (at = 0u; at < desired->network_count; at++) {
-		total += hooks_seconds(desired->networks[at].hooks,
-		    desired->networks[at].hook_count);
+		total += hooks_seconds(desired->networks[at].hook_count);
 	}
 
 	/*

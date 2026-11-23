@@ -55,14 +55,12 @@ void ncfg_lower_hook(ncfg_lower_ctx_t *ctx, const ncfg_ast_hook_t *hook, const c
 		ncfg_diag(ctx, hook->span, "%s", why[0] ? why : "this caller cannot accept hooks");
 		free(built.path);
 		free(built.sha256);
-		free(built.run_as);
 		return;
 	}
 	slot = ncfg_push(ctx, list, count, sizeof(*slot));
 	if (!slot) {
 		free(built.path);
 		free(built.sha256);
-		free(built.run_as);
 		return;
 	}
 	*slot = built;
@@ -222,7 +220,6 @@ static void release_advertise(ncfg_ra_policy_t *policy)
 	}
 	free(policy->prefixes);
 	ncfg_strings_free(policy->static_prefixes, policy->static_prefix_count);
-	free(policy->backend.command);
 }
 
 /*

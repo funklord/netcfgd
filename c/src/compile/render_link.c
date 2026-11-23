@@ -575,20 +575,15 @@ static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t 
  * What an interface tells the hosts behind it.
  *
  * **In the enum's order, which is not the order the parser's own diagnostic
- * lists**: the enum is auto, odhcpd, radvd, uradvd, exec and the message says
+ * lists**: the enum is auto, odhcpd, radvd, uradvd and the message says
  * "auto, radvd, uradvd, odhcpd". A table written from the message would name the wrong daemon
  * for every policy that sets one, and a document naming the wrong daemon
  * compiles -- so nothing downstream would report it.
  */
-static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "uradvd", "exec" };
+static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "uradvd" };
 
 /*
  * `advertise { }`, which was refused whole.
- *
- * One of this policy's fields cannot come from a config file and is named
- * rather than written. `exec` is in the backend enum and `lower_advertise`
- * accepts only auto, radvd, uradvd and odhcpd, so a policy carrying it arrived some
- * other way and its command has nowhere to go.
  *
  * **An empty prefix list is refused rather than written**, because a document
  * needs one: `lower_advertise` rejects a block without `prefixes`, so writing
@@ -605,10 +600,6 @@ static void render_advertise(const ncfg_ra_policy_t *policy, const char *name, n
 	ncfg_render_list_t prefixes;
 	size_t             i;
 
-	if (policy->backend.kind == NCFG_RA_BACKEND_EXEC) {
-		ncfg_render_refuse(missing, "interface", name, "an advertise backend of exec");
-		return;
-	}
 	if (policy->prefix_count == 0 && policy->static_prefix_count == 0) {
 		ncfg_render_refuse(missing, "interface", name, "an advertise block with no prefix");
 		return;

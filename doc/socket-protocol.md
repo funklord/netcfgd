@@ -244,7 +244,7 @@ first glance:
   It carries configuration, and the same request can hold a wifi network or a
   shell script, so a second gate runs after the tier one: the text is parsed
   and classified, and a production naming a program netcfgd would run as root
-  -- a hook, a `run_as`, a probe -- needs **uid 0 on this machine**, not only
+  -- a hook, a probe -- needs **uid 0 on this machine**, not only
   the `root` tier, which a site may have opened to a group. That closes the
   direct route to running a program as root and no more: it does not make the
   tier less than root, since the routes and resolvers it may choose are an
@@ -830,10 +830,10 @@ secret provider so the file holds an `@secret:` reference and nothing else
 ([0117](decision/0117-adding-a-network-is-a-typed-request-not-a-written-file.md)).
 
 The distinction is the point rather than a detail. A config file may name a
-hook, and a hook's `run_as` is absent by default, which means root — so a
+hook, and a hook runs as root — so a
 request carrying config *text* is remote code execution, while one carrying an
-SSID and a passphrase is not. `wifi_add` has no field that could name a hook, a
-path or a `run_as`. **The id is validated inside the writer**, not by the
+SSID and a passphrase is not. `wifi_add` has no field that could name a hook or a
+path. **The id is validated inside the writer**, not by the
 caller: it becomes a filename and a secret name, so `../../../tmp/x` is refused
 there rather than wherever somebody remembered to ask.
 

@@ -406,10 +406,9 @@ typedef struct {
 /*
  * `wifi_add`: typed fields, never config text and never a path.
  *
- * A config file may name a hook, and a hook's `run_as` is absent by default,
- * which means root -- so a request carrying config *text* is remote code
+ * A config file may name a hook, and a hook runs as root -- so a request carrying config *text* is remote code
  * execution, and one carrying an SSID and a passphrase is not. This message
- * cannot express a hook, a path or a `run_as` because it has no such field:
+ * cannot express a hook or a path because it has no such field:
  * the privilege it grants is bounded by its shape rather than by the caller's
  * good manners (0117).
  *

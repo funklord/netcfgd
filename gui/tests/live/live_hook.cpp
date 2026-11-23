@@ -121,11 +121,6 @@ int main(int argc, char **argv)
 		for (const ncfg_hook_row &row : declared) {
 			if (row.interface == iface) {
 				found = true;
-				/* Empty on every machine, because the language has no key for
-				 * it. Asserted so that the day one appears, somebody has to
-				 * come here and say so. */
-				check("and runs as nobody in particular, which means root",
-				    row.run_as.isEmpty(), row.run_as);
 			}
 		}
 		check("and names this interface", found);

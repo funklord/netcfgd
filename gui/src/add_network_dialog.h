@@ -9,8 +9,7 @@
  *   A `network` block in a plain text file, written by the daemon because a
  *   desktop client has no permission to write `/etc/netcfgd` itself. Decision
  *   0117: the request carries **typed fields, never config text and never a
- *   path**, because a config file may name a hook and a hook's `run_as`
- *   defaults to root.
+ *   path**, because a config file may name a hook and a hook runs as root.
  *
  *   So this dialog collects exactly what that request has room for. It is not a
  *   general configuration editor and must not grow into one -- a field here

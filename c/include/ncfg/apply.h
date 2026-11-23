@@ -675,6 +675,14 @@ typedef struct {
 ncfg_hook_outcome_t ncfg_hook_run(const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *env,
     char *err, size_t err_size);
 
+/*
+ * The same, bounded by `seconds` rather than NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS.
+ * Every caller in the daemon uses `ncfg_hook_run`; this exists so a test can
+ * prove the group kill in one second rather than sixty.
+ */
+ncfg_hook_outcome_t ncfg_hook_run_within(const ncfg_hook_ref_t *hook,
+    const ncfg_hook_env_t *env, unsigned seconds, char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * The executor that talks to the kernel
  * ------------------------------------------------------------------------ */

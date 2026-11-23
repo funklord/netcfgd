@@ -1974,8 +1974,6 @@ bool ncfg_connection::hooks(QList<ncfg_hook_row> *out, QString *error)
 		row.interface = from_c(found.items[i].interface);
 		row.phase = from_c(found.items[i].phase);
 		row.path = from_c(found.items[i].path);
-		row.run_as = from_c(found.items[i].run_as);
-		row.timeout = found.items[i].timeout;
 		out->append(row);
 	}
 	ncfg_client_hooks_free(&found);
