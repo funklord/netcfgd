@@ -439,6 +439,31 @@ else
 	check "a root system service has no HOME of /, so the store is root's" \
 		"$home_ok" "yes"
 
+	# **And that the store under that home is reachable**, which the HOME
+	# check above did not ask: `ProtectHome=yes` makes /root inaccessible, so
+	# the daemon's node could not open its store and ran with none -- no
+	# estate, no fuzznet socket -- under systemd only. Found by raidcfgd,
+	# which shares the store (2026-11-23). The unit's own ProtectHome= and
+	# BindPaths=, imposed; the directory made first, as the unit's
+	# ExecStartPre= does, since a bind of a missing source fails the unit.
+	store=/root/.local/share/fuzznet
+	mkdir -p -m 0700 "$store"
+	home_properties="-p ProtectHome=$(sed -n 's/^ProtectHome=\(.*\)$/\1/p' "$unit" | tail -1)"
+	for bound in $(sed -n 's/^BindPaths=\(.*\)$/\1/p' "$unit"); do
+		home_properties="$home_properties -p BindPaths=$bound"
+	done
+	store_state=$(timeout 60 systemd-run --quiet --wait --pipe --collect $home_properties \
+		/bin/sh -c "touch $store/.sandbox-probe && rm $store/.sandbox-probe && echo rw" \
+		2>/dev/null || echo denied)
+	check "the unit's ProtectHome= leaves root's fuzznet store writable" "$store_state" "rw"
+	# The control: ProtectHome=yes with no bind must deny it, or `rw` above
+	# says nothing about the unit's lines.
+	store_sealed=$(timeout 60 systemd-run --quiet --wait --pipe --collect -p ProtectHome=yes \
+		/bin/sh -c "touch $store/.sandbox-probe && rm $store/.sandbox-probe && echo rw" \
+		2>/dev/null || echo denied)
+	check "and ProtectHome=yes alone would not, so that answer is the unit's" \
+		"$store_sealed" "denied"
+
 	# **And that a script in netcfgd's runtime directory can be executed.**
 	# systemd mounts /run `noexec` by default since v256, and netcfgd writes
 	# scripts there for the programs it drives: udhcpc's, odhcp6c's prefix

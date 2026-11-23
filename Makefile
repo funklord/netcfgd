@@ -1309,7 +1309,7 @@ packaging:
 	  "an uninstalled program -- and went on doing it, because whoever added" \
 	  "it was running the python gates rather than make check. 0188."; \
 	declared=$$( { \
-		sed -n 's/^Exec\(Start\|Stop\|Reload\|StartPre\|StartPost\|StopPost\)=-\?\([^ ]*\).*/\2/p' \
+		sed -n 's/^Exec\(Start\|Stop\|Reload\|StartPre\|StartPost\|StopPost\)=[-+]\?\([^ ]*\).*/\2/p' \
 			packaging/systemd/netcfgd.service; \
 		sed -n 's/^Exec\(Start\|Stop\|Reload\|StartPre\|StartPost\|StopPost\)=-\?\([^ ]*\).*/\2/p' \
 			packaging/systemd/netcfgd-nm.service; \
@@ -1317,7 +1317,12 @@ packaging:
 		sed -n 's/.*procd_set_param command \([^ ]*\).*/\1/p' packaging/procd/netcfgd; \
 		sed -n 's/^\t*\(\/[^ ]*ncfg\) .*/\1/p' packaging/procd/netcfgd; \
 	} | sort -u); \
+	: "/bin/mkdir is the system's, named rather than matched: the unit makes" \
+	  "root's fuzznet store before binding it back over ProtectHome= (10.913)."; \
 	for path in $$declared; do \
+		case "$$path" in \
+		/bin/mkdir) continue ;; \
+		esac; \
 		case "$$installed" in \
 		*"$$path"*) ;; \
 		*) echo "packaging: $$path is named by an init script and never installed"; \

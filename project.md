@@ -7020,6 +7020,46 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.913 Under systemd the daemon could not reach its fuzznet store
+
+**Reported by raidcfgd 2026-11-23** (its inbox message, which shares the
+store): `packaging/systemd/netcfgd.service` had `ProtectHome=yes`, which makes
+/root inaccessible, and the node's default store is
+`/root/.local/share/fuzznet` -- so under systemd, and only there, the node
+could not open and the daemon ran with no estate and no fuzznet socket.
+**Measured** in the vm tier under systemd 257: `tests/live/sandbox_writes.sh`
+now imposes the unit's own `ProtectHome=` and `BindPaths=` and writes into the
+store, with a control that `ProtectHome=yes` alone is denied; it failed against
+the old unit and passes with `ProtectHome=tmpfs`,
+`BindPaths=/root/.local/share/fuzznet` and an `ExecStartPre=+/bin/mkdir -p -m
+0700` of the store, which is raidcfgd's own pairing. The packaging gate's
+installed-path check names `/bin/mkdir` as the system's and now strips
+systemd's `+` prefix as it did `-`. The earlier HOME check (10.677) asked where
+the store is, never whether the sandbox lets the daemon reach it.
+
+**Recorded, not built: the face for a client that is not root.**
+raidcfgd's second observation: a client at the desk reads `store=` from
+`/run/netcfgd/node` and then `<store>/face`, which is under /root and
+unreadable to it, so it falls back to netcfgd's own socket -- and where
+raidcfgd is the face, that socket is a follower's, served by fuzznet to its own
+user alone. raidcfgd writes the face it read as `face=` in its node file.
+Copying that here conflicts with this tree's rule for the node file,
+`node_test`'s "no role that would go stale": the face moves when the daemons
+restart, and an old face's socket can still exist as a follower's. A sound fix
+publishes the face where it stays current -- the daemon rewriting it when it
+changes, or fuzznet keeping a readable copy under /run -- and the second is
+fuzznet's to decide. Who is in it: a non-root `ncfg` on a machine running both
+daemons with raidcfgd started first, which is a RAID server's operator.
+
+**Recorded, not built: 16 GUI tests do not compile under `fmake --eject` /
+`fmake test`** (fmake's sweep, 2026-11-23): each `.pro` supplies
+`NETCFGD_BINARY` as an absolute path into the tree, and `fmake.toml` does not; a
+17th, `phone_pair`, wants `fuzznet/qr/qr.h`, which the `fuzznet` exclude keeps
+off the path. A plain `fmake` is unaffected (tests are not built by default)
+and `make -C gui test` builds and runs them all. fmake's `@define` lives in the
+source and has no way, read here, to say a path relative to the tree's root;
+that is a question for fmake rather than sixteen fallbacks here.
+
 ## 10.912 A bridge port may be isolated
 
 0284's client isolation inside a segment had its radio half --

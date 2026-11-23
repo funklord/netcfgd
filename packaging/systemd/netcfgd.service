@@ -53,6 +53,11 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=exec
+# The fuzznet store is root's, under /root (the node's default, which
+# raidcfgd shares); ProtectHome= below hides /root and the bind brings the
+# store back, and a bind of a missing source fails the unit, so it is made
+# first, with `+` so the sandbox does not apply to the mkdir.
+ExecStartPre=+/bin/mkdir -p -m 0700 /root/.local/share/fuzznet
 ExecStart=/usr/sbin/netcfgd
 ExecReload=/usr/bin/ncfg reload
 Restart=on-failure
@@ -148,7 +153,13 @@ RestartSec=2
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_SYS_CHROOT CAP_SETUID CAP_SETGID CAP_NET_BIND_SERVICE CAP_KILL
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_NET_BIND_SERVICE CAP_KILL
 NoNewPrivileges=yes
-ProtectHome=yes
+# **Not `yes`**: that made /root inaccessible, so the node could not open
+# its store and the daemon ran with no estate and no fuzznet socket under
+# systemd only -- measured under systemd 257 by tests/live/sandbox_writes.sh
+# in the vm tier, after raidcfgd, sharing the store, reported it (10.913).
+# `tmpfs` hides every home as `yes` does, and the store alone is bound back.
+ProtectHome=tmpfs
+BindPaths=/root/.local/share/fuzznet
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 RestrictNamespaces=yes
