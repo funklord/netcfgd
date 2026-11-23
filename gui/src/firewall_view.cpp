@@ -9,7 +9,9 @@
 
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -105,6 +107,15 @@ ncfg_firewall_view::ncfg_firewall_view(ncfg_connection *connection, QWidget *par
 	down_button = new QPushButton(QStringLiteral("move down"), this);
 	down_button->setObjectName(QStringLiteral("firewall_down"));
 	table->add_control(down_button);
+	/* A slot's members, written live (0340): enabled on a slot's row. */
+	member_add_button = new QPushButton(QStringLiteral("add to slot..."), this);
+	member_add_button->setObjectName(QStringLiteral("firewall_slot_add"));
+	table->add_control(member_add_button);
+	member_remove_button = new QPushButton(QStringLiteral("remove from slot..."), this);
+	member_remove_button->setObjectName(QStringLiteral("firewall_slot_remove"));
+	table->add_control(member_remove_button);
+	member_add_button->setEnabled(false);
+	member_remove_button->setEnabled(false);
 	for (QPushButton *button : { edit_button, up_button, down_button }) {
 		button->setEnabled(false);
 	}
@@ -115,11 +126,17 @@ ncfg_firewall_view::ncfg_firewall_view(ncfg_connection *connection, QWidget *par
 	connect(up_button, &QPushButton::clicked, this, &ncfg_firewall_view::move_up);
 	connect(down_button, &QPushButton::clicked, this, &ncfg_firewall_view::move_down);
 	connect(table, &ncfg_table_view::activated, this, &ncfg_firewall_view::edit_selected);
+	connect(member_add_button, &QPushButton::clicked, this, [this]() { ask_member(true); });
+	connect(member_remove_button, &QPushButton::clicked, this, [this]() { ask_member(false); });
 	connect(table, &ncfg_table_view::selection_changed, this, [this]() {
-		const bool chosen = table->selected_row() >= 0;
+		const int  row = table->selected_row();
+		const bool chosen = row >= 0;
+		const bool slot = chosen && row < places.size() && places.at(row).second < 0;
 		for (QPushButton *button : { edit_button, up_button, down_button }) {
 			button->setEnabled(chosen);
 		}
+		member_add_button->setEnabled(slot);
+		member_remove_button->setEnabled(slot);
 	});
 }
 
@@ -164,8 +181,23 @@ void ncfg_firewall_view::refresh()
 			if (slot.timeout > 0) {
 				what += QStringLiteral(", each for %1 s unless given its own").arg(slot.timeout);
 			}
+			/* What it holds now, and what its two rules have matched. */
+			const QString key = QStringLiteral("%1/slot:%2").arg(QString::fromLatin1(one.name),
+			    slot.name);
+			QString held;
+			if (counts.contains(key)) {
+				const ncfg_firewall_count_row &seen = counts.value(key);
+				held = QStringLiteral("%1; %2")
+				           .arg(seen.members.isEmpty()
+				                    ? QStringLiteral("empty")
+				                    : seen.members.join(QStringLiteral(", ")),
+				               ncfg_counted(static_cast<qsizetype>(seen.packets), "packet",
+				                   "packets"));
+			} else if (counted) {
+				held = QStringLiteral("not in the kernel yet");
+			}
 			rows << QStringList { QString::fromLatin1(one.name),
-				QStringLiteral("slot %1").arg(slot.name), slot.action, what, QString() };
+				QStringLiteral("slot %1").arg(slot.name), slot.action, what, held };
 			places << qMakePair(QString::fromLatin1(one.name), -1 - i);
 		}
 		for (int i = 0; i < one.chain->rules.size(); i++) {
@@ -260,6 +292,63 @@ bool ncfg_firewall_view::refuse_preset_rule(int row)
 	emit reported(QStringLiteral("%1 comes from preset `%2`, after this firewall's own rules; "
 	                             "it is changed in that `preset` block, in the files tab")
 	                  .arg(name, preset));
+	return true;
+}
+
+/* The slot a row is, or empty for a rule's row. */
+QString ncfg_firewall_view::slot_at(int row) const
+{
+	if (row < 0 || row >= places.size() || places.at(row).second >= 0) {
+		return QString();
+	}
+	const ncfg_firewall_chain_row *chain =
+	    places.at(row).first == QLatin1String("input")     ? &settings.input
+	    : places.at(row).first == QLatin1String("forward") ? &settings.forward
+	                                                       : &settings.output;
+	const int at = -1 - places.at(row).second;
+	return at < chain->slot_list.size() ? chain->slot_list.at(at).name : QString();
+}
+
+/* Asks for an address -- and for an addition, optionally a lifetime after it,
+ * "192.0.2.7 30m" -- then writes it. */
+void ncfg_firewall_view::ask_member(bool add)
+{
+	const QString slot = slot_at(table->selected_row());
+	if (slot.isEmpty()) {
+		return;
+	}
+	bool          given = false;
+	const QString text = QInputDialog::getText(this,
+	    add ? QStringLiteral("Add to slot %1").arg(slot)
+	        : QStringLiteral("Remove from slot %1").arg(slot),
+	    add ? QStringLiteral("Address, and a lifetime after it if it should lapse "
+	                         "(\"192.0.2.7 30m\"):")
+	        : QStringLiteral("Address:"),
+	    QLineEdit::Normal, QString(), &given);
+	if (!given) {
+		return;
+	}
+	const QStringList words = text.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+	if (words.isEmpty() || words.size() > (add ? 2 : 1)) {
+		emit reported(add ? QStringLiteral("an address, and optionally a lifetime after it")
+		                  : QStringLiteral("one address"));
+		return;
+	}
+	(void)write_slot_member(slot, words.at(0), add, words.size() > 1 ? words.at(1) : QString());
+}
+
+bool ncfg_firewall_view::write_slot_member(const QString &slot, const QString &address, bool add,
+    const QString &lifetime)
+{
+	QString error;
+	if (!connection->set_slot_member(slot, address, add, lifetime, &error)) {
+		emit reported(error);
+		return false;
+	}
+	emit reported(QStringLiteral("%1 %2 %3 slot %4; no apply, and it is never drift")
+	                  .arg(add ? QStringLiteral("added") : QStringLiteral("removed"), address,
+	                      add ? QStringLiteral("to") : QStringLiteral("from"), slot));
+	refresh();
 	return true;
 }
 

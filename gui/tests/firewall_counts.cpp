@@ -138,6 +138,18 @@ int main(int argc, char **argv)
 		    "a rule the kernel does not hold is not counted yet");
 		check(matched(&view, QStringLiteral("telnet")), QStringLiteral("not counted yet"),
 		    "  and neither is the other");
+		/* 0340: a slot the kernel does not hold says so, and a live write
+		 * into it is refused with the daemon's sentence rather than in
+		 * silence. */
+		check(matched(&view, QStringLiteral("slot quarantine")),
+		    QStringLiteral("not in the kernel yet"), "a slot the kernel does not hold says so");
+		QString said_write;
+		QObject::connect(&view, &ncfg_firewall_view::reported,
+		    [&said_write](const QString &summary) { said_write = summary; });
+		check(view.write_slot_member(QStringLiteral("quarantine"), QStringLiteral("192.0.2.7"),
+		          true, QString()) || said_write.isEmpty()
+		          ? QStringLiteral("unexplained") : QStringLiteral("refused, saying why"),
+		    QStringLiteral("refused, saying why"), "  and a member written into it is refused");
 	} else {
 		/* The table is the daemon's first pass; asked again until it shows. */
 		waited.restart();
@@ -166,6 +178,32 @@ int main(int argc, char **argv)
 		    "three pings are three packets on the rule they matched");
 		check(matched(&view, QStringLiteral("telnet")), QStringLiteral("0 packets"),
 		    "  and none on the rule they did not");
+		/* 0340: a member written from the tab lands in the kernel and shows
+		 * in the slot's row; removed, it goes. */
+		check(view.write_slot_member(QStringLiteral("quarantine"), QStringLiteral("192.0.2.7"),
+		          true, QStringLiteral("10m")) ? QStringLiteral("written")
+		                                       : QStringLiteral("refused"),
+		    QStringLiteral("written"), "a member is written into a slot from the tab");
+		/* The row is the daemon's observation, a pass old at most. */
+		waited.restart();
+		while (!matched(&view, QStringLiteral("slot quarantine")).startsWith(
+		           QStringLiteral("192.0.2.7;")) && waited.elapsed() < 10000) {
+			QThread::msleep(200);
+		}
+		check(matched(&view, QStringLiteral("slot quarantine")).startsWith(
+		          QStringLiteral("192.0.2.7;")) ? QStringLiteral("shown")
+		                                        : matched(&view, QStringLiteral("slot quarantine")),
+		    QStringLiteral("shown"), "  and shows in the slot's row");
+		(void)view.write_slot_member(QStringLiteral("quarantine"), QStringLiteral("192.0.2.7"),
+		    false, QString());
+		waited.restart();
+		while (!matched(&view, QStringLiteral("slot quarantine")).startsWith(
+		           QStringLiteral("empty;")) && waited.elapsed() < 10000) {
+			QThread::msleep(200);
+		}
+		check(matched(&view, QStringLiteral("slot quarantine")).startsWith(QStringLiteral("empty;"))
+		          ? QStringLiteral("gone") : matched(&view, QStringLiteral("slot quarantine")),
+		    QStringLiteral("gone"), "  and removed, is gone");
 	}
 
 	/* 0341: a preset's rule is shown and is not the tab's to move or edit;

@@ -1423,6 +1423,11 @@ typedef struct {
 	char              *name;
 	unsigned long long packets;
 	unsigned long long bytes;
+	/* A slot's entry (0340) rather than a rule's: `name` is the slot's,
+	 * both families' counts summed, and `members` its addresses, ", "-joined
+	 * and empty for none. NULL `members` on a rule's entry. */
+	int                slot;
+	char              *members;
 } ncfg_firewall_count_t;
 
 typedef struct {
@@ -2759,6 +2764,16 @@ int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int acti
  */
 int ncfg_client_tunnel_set(ncfg_client_t *client, const char *interface, int activate, char *err,
                size_t err_size);
+
+/*
+ * A firewall slot's member written live (0340): `address` added to (`add` 1)
+ * or removed from `slot`, at once and without an apply. `lifetime` is "30m"
+ * and the like, or NULL for the slot's own. `root` tier: who is let through
+ * or kept out is the firewall. A name the configuration does not open as a
+ * slot is refused by the daemon, by name.
+ */
+int ncfg_client_slot_set(ncfg_client_t *client, const char *slot, const char *address, int add,
+    const char *lifetime, char *err, size_t err_size);
 
 int ncfg_client_wifi_scan(ncfg_client_t *client, const char *interface, ncfg_scan_t *out,
               char *err, size_t err_size);

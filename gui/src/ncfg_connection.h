@@ -423,6 +423,8 @@ struct ncfg_dns_record_row {
 struct ncfg_firewall_count_row {
 	qulonglong packets = 0;
 	qulonglong bytes = 0;
+	/* A slot's members (0340), empty for a rule. */
+	QStringList members;
 };
 
 struct ncfg_lease_row {
@@ -1298,6 +1300,10 @@ public:
 	 * once it has asked -- the tunnel's addresses say when it is up. `wifi`
 	 * tier, for set_radio's reason. */
 	bool set_tunnel(const QString &interface, bool activate, QString *error);
+	/* A firewall slot's member written live (0340); `lifetime` empty for the
+	 * slot's own. */
+	bool set_slot_member(const QString &slot, const QString &address, bool add,
+	    const QString &lifetime, QString *error);
 
 	/*
 	 * Scan, and say through `stale` why the results are the previous scan's.

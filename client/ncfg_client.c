@@ -3578,6 +3578,7 @@ void ncfg_firewall_counts_free(ncfg_firewall_counts_t *counts)
 	for (size_t i = 0; i < counts->count; i++) {
 		free(counts->items[i].chain);
 		free(counts->items[i].name);
+		free(counts->items[i].members);
 	}
 	free(counts->items);
 	counts->items = NULL;
@@ -3645,10 +3646,9 @@ int ncfg_client_firewall_counts(ncfg_client_t *client, ncfg_firewall_counts_t *o
 				return 0;
 			}
 			out->items = grown;
+			memset(&out->items[at], 0, sizeof(out->items[at]));
 			out->items[at].chain = chain;
 			out->items[at].name = name;
-			out->items[at].packets = 0;
-			out->items[at].bytes = 0;
 			out->count++;
 		} else {
 			free(chain);
@@ -3657,6 +3657,78 @@ int ncfg_client_firewall_counts(ncfg_client_t *client, ncfg_firewall_counts_t *o
 		out->items[at].packets += (unsigned long long)ncfg_json_int(doc, packets, 0);
 		out->items[at].bytes +=
 		    (unsigned long long)ncfg_json_int(doc, ncfg_json_member(doc, rule, "bytes"), 0);
+	}
+	/* The slots (0340): a rule a family, one entry a slot, with what each
+	 * family's set holds joined into one list. */
+	uint32_t slots = ncfg_json_member(doc, firewall, "slots");
+	for (uint32_t i = 0; i < ncfg_json_count(doc, slots); i++) {
+		uint32_t slot = ncfg_json_at(doc, slots, i);
+		uint32_t members = ncfg_json_member(doc, slot, "members");
+		char    *chain = member_text(doc, slot, "chain");
+		char    *name = member_text(doc, slot, "name");
+		size_t   at;
+
+		if (!chain || !name) {
+			free(chain);
+			free(name);
+			ncfg_firewall_counts_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+		for (at = 0; at < out->count; at++) {
+			if (out->items[at].slot && strcmp(out->items[at].chain, chain) == 0 &&
+			    strcmp(out->items[at].name, name) == 0) {
+				break;
+			}
+		}
+		if (at == out->count) {
+			ncfg_firewall_count_t *grown =
+			    realloc(out->items, (out->count + 1u) * sizeof(*grown));
+
+			if (!grown) {
+				free(chain);
+				free(name);
+				ncfg_firewall_counts_free(out);
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+			out->items = grown;
+			memset(&out->items[at], 0, sizeof(out->items[at]));
+			out->items[at].chain = chain;
+			out->items[at].name = name;
+			out->items[at].slot = 1;
+			out->items[at].members = dup_string("");
+			out->count++;
+			if (!out->items[at].members) {
+				ncfg_firewall_counts_free(out);
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+		} else {
+			free(chain);
+			free(name);
+		}
+		out->items[at].packets +=
+		    (unsigned long long)ncfg_json_int(doc, ncfg_json_member(doc, slot, "packets"), 0);
+		out->items[at].bytes +=
+		    (unsigned long long)ncfg_json_int(doc, ncfg_json_member(doc, slot, "bytes"), 0);
+		for (uint32_t m = 0; m < ncfg_json_count(doc, members); m++) {
+			size_t      length = 0;
+			const char *address = ncfg_json_string(doc, ncfg_json_at(doc, members, m),
+			    &length);
+			char        one[64];
+
+			(void)snprintf(one, sizeof(one), "%.*s", (int)length, address ? address : "");
+			if (one[0] && !join_one(&out->items[at].members, one)) {
+				ncfg_firewall_counts_free(out);
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(doc);
+				return 0;
+			}
+		}
 	}
 	ncfg_json_free(doc);
 	return 1;
@@ -6230,6 +6302,66 @@ int ncfg_client_radio_set(ncfg_client_t *client, const char *interface, int acti
 		return 0;
 	}
 	return interface_set(client, "radio_set", interface, activate, err, err_size);
+}
+
+int ncfg_client_slot_set(ncfg_client_t *client, const char *slot, const char *address, int add,
+    const char *lifetime, char *err, size_t err_size)
+{
+	char   request[512];
+	size_t at;
+	int    span;
+
+	if (!slot || !address) {
+		set_error(err, err_size, "a slot write needs a slot and an address");
+		return 0;
+	}
+	at = (size_t)snprintf(request, sizeof(request), "{\"request\":\"slot_set\",\"slot\":");
+	if (!ncfg_client_quote(slot, request + at, sizeof(request) - at)) {
+		set_error(err, err_size, "that slot name does not fit in one request");
+		return 0;
+	}
+	at += strlen(request + at);
+	span = snprintf(request + at, sizeof(request) - at, ",\"address\":");
+	if (span < 0 || (size_t)span >= sizeof(request) - at) {
+		return 0;
+	}
+	at += (size_t)span;
+	if (!ncfg_client_quote(address, request + at, sizeof(request) - at)) {
+		set_error(err, err_size, "that address does not fit in one request");
+		return 0;
+	}
+	at += strlen(request + at);
+	span = snprintf(request + at, sizeof(request) - at, ",\"add\":%s", add ? "true" : "false");
+	if (span < 0 || (size_t)span >= sizeof(request) - at) {
+		return 0;
+	}
+	at += (size_t)span;
+	if (lifetime && lifetime[0]) {
+		span = snprintf(request + at, sizeof(request) - at, ",\"lifetime\":");
+		if (span < 0 || (size_t)span >= sizeof(request) - at) {
+			return 0;
+		}
+		at += (size_t)span;
+		if (!ncfg_client_quote(lifetime, request + at, sizeof(request) - at)) {
+			set_error(err, err_size, "that lifetime does not fit in one request");
+			return 0;
+		}
+		at += strlen(request + at);
+	}
+	if (at + 2u > sizeof(request)) {
+		set_error(err, err_size, "that slot write does not fit in one request");
+		return 0;
+	}
+	request[at++] = '}';
+	request[at] = '\0';
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, request, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size);
+	ncfg_json_free(doc);
+	return done;
 }
 
 int ncfg_client_tunnel_set(ncfg_client_t *client, const char *interface, int activate, char *err,

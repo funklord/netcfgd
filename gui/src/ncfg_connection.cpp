@@ -1703,6 +1703,15 @@ bool ncfg_connection::firewall_counts(QHash<QString, ncfg_firewall_count_row> *o
 		ncfg_firewall_count_row row;
 		row.packets = found.items[i].packets;
 		row.bytes = found.items[i].bytes;
+		/* A slot under `chain/slot:NAME`, which no rule's name can be
+		 * mistaken for since the view asks for it by that key. */
+		if (found.items[i].slot) {
+			row.members = firewall_list(found.items[i].members);
+			out->insert(QStringLiteral("%1/slot:%2").arg(from_c(found.items[i].chain),
+			                from_c(found.items[i].name)),
+			    row);
+			continue;
+		}
 		out->insert(QStringLiteral("%1/%2").arg(from_c(found.items[i].chain),
 		                from_c(found.items[i].name)),
 		    row);
@@ -2118,6 +2127,29 @@ bool ncfg_connection::set_radio(const QString &interface, bool activate, QString
 	const QByteArray name = interface.toUtf8();
 	if (!ncfg_client_radio_set(client, name.constData(), activate ? 1 : 0, message,
 	              sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	return true;
+}
+
+bool ncfg_connection::set_slot_member(const QString &slot, const QString &address, bool add,
+    const QString &lifetime, QString *error)
+{
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+	char             message[NCFG_ERROR_MAX];
+	const QByteArray name = slot.toUtf8();
+	const QByteArray member = address.toUtf8();
+	const QByteArray life = lifetime.toUtf8();
+	if (!ncfg_client_slot_set(client, name.constData(), member.constData(), add ? 1 : 0,
+	        lifetime.isEmpty() ? nullptr : life.constData(), message, sizeof(message))) {
 		if (error) {
 			*error = QString::fromUtf8(message);
 		}

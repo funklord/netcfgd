@@ -34,6 +34,11 @@ class ncfg_firewall_view : public QWidget {
 public:
 	explicit ncfg_firewall_view(ncfg_connection *connection, QWidget *parent = nullptr);
 
+	/* A slot's member written live (0340), as the tab's buttons write one.
+	 * Public so a test can drive it past the input dialog. */
+	bool write_slot_member(const QString &slot, const QString &address, bool add,
+	    const QString &lifetime);
+
 public slots:
 	void refresh();
 
@@ -52,6 +57,8 @@ signals:
 private:
 	void move(int by);
 	bool refuse_preset_rule(int row);
+	QString slot_at(int row) const;
+	void ask_member(bool add);
 	void write(const ncfg_firewall_settings &next, const QString &said);
 
 	ncfg_connection        *connection;
@@ -66,6 +73,8 @@ private:
 	QPushButton     *edit_button;
 	QPushButton     *up_button;
 	QPushButton     *down_button;
+	QPushButton     *member_add_button;
+	QPushButton     *member_remove_button;
 };
 
 #endif /* NCFG_FIREWALL_VIEW_H */

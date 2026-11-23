@@ -1853,6 +1853,39 @@ static void storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer(void)
  * to press a button that cannot work, because the radio belongs to another
  * manager and netcfgd declines those.
  */
+/* A slot write (0340): the slot, the address, which way, and a lifetime only
+ * where one is given. */
+static void a_slot_write_names_the_slot_and_the_member(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	char sent[1024];
+
+	if (!staged_open(&staged, "two slot writes can be staged",
+	        "{\"response\":\"ok\"}\n{\"response\":\"ok\"}\n")) {
+		return;
+	}
+	if (ncfg_client_slot_set(staged.client, "quarantine", "192.0.2.7", 1, "30m", err,
+	        sizeof(err))) {
+		equals("a slot write names the slot, the member, the way and the lifetime",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"slot_set\",\"slot\":\"quarantine\",\"address\":\"192.0.2.7\","
+		       "\"add\":true,\"lifetime\":\"30m\"}\n");
+	} else {
+		ok("a slot write names the slot, the member, the way and the lifetime", 0, err);
+	}
+	if (ncfg_client_slot_set(staged.client, "quarantine", "2001:db8::7", 0, NULL, err,
+	        sizeof(err))) {
+		equals("  and a removal carries no lifetime",
+		       received(staged.server, sent, sizeof(sent)),
+		       "{\"request\":\"slot_set\",\"slot\":\"quarantine\",\"address\":\"2001:db8::7\","
+		       "\"add\":false}\n");
+	} else {
+		ok("  and a removal carries no lifetime", 0, err);
+	}
+	staged_close(&staged);
+}
+
 static void radios_carry_the_three_states_a_client_has_to_tell_apart(void)
 {
 	struct staged staged;
@@ -3558,6 +3591,7 @@ int main(int argc, char **argv)
 	an_enterprise_network_sends_a_nested_eap_object();
 	storing_a_secret_carries_a_value_too_big_for_a_fixed_buffer();
 	radios_carry_the_three_states_a_client_has_to_tell_apart();
+	a_slot_write_names_the_slot_and_the_member();
 	a_modem_carries_the_card_read_in_each_source();
 	a_station_list_carries_who_and_the_lease_they_hold();
 	saved_networks_come_from_the_document_not_a_scan();

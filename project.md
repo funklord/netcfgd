@@ -7036,6 +7036,20 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.914 The window writes a slot's members
+
+A slot's members could be written only with `ncfg slot`; the firewall tab
+showed the slot and refused to touch it. Now the slot's row says what the
+set holds and what its rules matched (from the status, summed over both
+families, under `chain/slot:NAME` so no rule's name collides), and *add to
+slot...* and *remove from slot...* write a member live -- an address, and for
+an addition an optional lifetime after it -- through the client's new
+`ncfg_client_slot_set`. The slot itself is still changed in the files tab.
+`firewall_counts` checks both ways: unprivileged, a slot the kernel does not
+hold says so and a write is refused with the daemon's sentence; in its
+namespace variant a member written from the tab shows in the row within a
+pass and goes when removed.
+
 ## 10.913 Under systemd the daemon could not reach its fuzznet store
 
 **Reported by raidcfgd 2026-11-23** (its inbox message, which shares the
