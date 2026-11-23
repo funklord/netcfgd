@@ -461,8 +461,8 @@ static void render_the_witness(int argc, char **argv)
 		 * is refused -- correctly, and saying why. */
 		("an ingress redirect to `ifb-eth0`, which is not a device this build "
 		 "would have made for it"),
-		"global: dns options", "global: dnssec",
-		"global: dns transport", "global: a dns server with a port or sni",
+		/* A dns scope's options, dnssec, transport and a server's port and
+		 * sni were here, and render since 0339. */
 		/* `interface d-0: advertise` was here and renders now. */
 		/* `interface d-0: guard` was here and renders now. */
 		"interface d-0: hooks",
@@ -473,8 +473,8 @@ static void render_the_witness(int argc, char **argv)
 		 * render now, which leaves every address source the model has with
 		 * a rendering. */
 		/* A route's scope and proto and a dhcp lease's settings were here,
-		 * and left the model by 0339. */
-		"network n-eap: dns options" };
+		 * and left the model by 0339; a scope's dns options render since. */
+	};
 	const char         *path = witness_path(argc, argv);
 	size_t              raw_length = 0;
 	char               *raw = slurp(path, &raw_length);
@@ -2369,18 +2369,10 @@ static void what_cannot_be_rendered_is_named(void)
  */
 static void the_refusals_no_config_file_can_reach(void)
 {
-	char *dns = refusals_of_json(DOC("\"globals\":{\"dns\":{\"mode\":\"resolved\","
-	    "\"servers\":[{\"addr\":\"192.0.2.53\",\"port\":853,\"sni\":\"dns.example\"}],"
-	    "\"options\":[\"ndots:2\"],\"dnssec\":\"yes\",\"transport\":\"tls\"}},"
-	    NO_DEVICES NO_INTERFACES NO_NETWORKS));
 	char *device = refusals_of_json(DOC(PLAIN_GLOBALS "\"devices\":[{\"name\":\"eth0\","
 	    "\"ingress_redirect\":\"ifb-eth0\","
 	    "\"qdisc\":{\"kind\":\"cake\"}}]," NO_INTERFACES NO_NETWORKS));
 
-	check(holds(dns, "global: dns options") && holds(dns, "global: dnssec") &&
-	    holds(dns, "global: dns transport") &&
-	    holds(dns, "global: a dns server with a port or sni"),
-	    "a DNS scope's four unwritable facts are each named");
 	/* The qdisc was named here too. It renders now -- this fixture's `cake`
 	 * carries no rate and no ingress flag, so it comes back as the short form
 	 * -- and only what is still unrenderable is asserted.
@@ -2393,8 +2385,23 @@ static void the_refusals_no_config_file_can_reach(void)
 	check(holds(device, "device eth0: an ingress redirect to `ifb-eth0`") &&
 	    lacks(device, "device eth0: qdisc"),
 	    "and a redirect onto a device that is not there");
-	free(dns);
 	free(device);
+}
+
+/*
+ * A DNS scope's options, transport, dnssec and a server's port and TLS name
+ * come back from a profile save as the language wrote them (0339).
+ */
+static void a_dns_scopes_tls_and_options_round_trip(void)
+{
+	round_trips("global {\n\tdns {\n\t\tmode = \"resolved\"\n"
+	    "\t\tservers = [\"192.0.2.53:853#dns.example\", \"[2001:db8::53]:853#dns.example\"]\n"
+	    "\t\ttransport = \"tls\"\n\t\tdnssec = \"allow\"\n\t}\n}\n",
+	    "a TLS upstream with ports, names and dnssec round-trips");
+	round_trips("global {\n\tdns {\n\t\tmode = \"write_resolv_conf\"\n"
+	    "\t\tservers = [\"192.0.2.53\"]\n\t\toptions = [\"edns0\", \"ndots:2\"]\n"
+	    "\t\ttransport = \"plain\"\n\t}\n}\n",
+	    "resolv.conf options and a stated plain transport round-trip");
 }
 
 /*
@@ -4044,6 +4051,7 @@ int main(int argc, char **argv)
 
 	what_cannot_be_rendered_is_named();
 	the_refusals_no_config_file_can_reach();
+	a_dns_scopes_tls_and_options_round_trip();
 	override_is_written_only_where_the_caller_says();
 	a_caller_that_discards_the_refusals_is_refused();
 

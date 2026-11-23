@@ -12,6 +12,7 @@
 #include "ncfg/buf.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /*
@@ -301,9 +302,16 @@ char *ncfg_dns_dnsmasq_conf(const ncfg_dns_scope_t *scopes, size_t count, char *
 			continue;
 		}
 		for (at = 0u; at < policy->server_count; at++) {
-			const char *addr = policy->servers[at].addr;
+			char        addr[160];
 			size_t      which;
 
+			/* dnsmasq's port follows a `#` (0339). */
+			if (policy->servers[at].port.has) {
+				(void)snprintf(addr, sizeof(addr), "%s#%lld", policy->servers[at].addr,
+				    (long long)policy->servers[at].port.value);
+			} else {
+				(void)snprintf(addr, sizeof(addr), "%s", policy->servers[at].addr);
+			}
 			if (policy->domain_count == 0u) {
 				ncfg_buf_addf(&buf, "server=%s\n", addr);
 				continue;
@@ -358,8 +366,21 @@ char *ncfg_dns_unbound_conf(const ncfg_dns_scope_t *scopes, size_t count, char *
 
 			ncfg_buf_add_text(&buf, "forward-zone:\n");
 			ncfg_buf_addf(&buf, "\tname: \"%s\"\n", zone);
+			/* unbound's port follows an `@` and the certificate's name a
+			 * `#` (0339). unbound checks that name only when its own
+			 * `server:` section trusts a certificate bundle
+			 * (`tls-system-cert: yes`), which is the operator's. */
 			for (at = 0u; at < policy->server_count; at++) {
-				ncfg_buf_addf(&buf, "\tforward-addr: %s\n", policy->servers[at].addr);
+				const ncfg_dns_server_t *server = &policy->servers[at];
+
+				ncfg_buf_addf(&buf, "\tforward-addr: %s", server->addr);
+				if (server->port.has) {
+					ncfg_buf_addf(&buf, "@%lld", (long long)server->port.value);
+				}
+				if (server->sni) {
+					ncfg_buf_addf(&buf, "#%s", server->sni);
+				}
+				ncfg_buf_add_char(&buf, '\n');
 			}
 			if (policy->transport.has &&
 			    policy->transport.value == (int64_t)NCFG_DNS_TRANSPORT_TLS) {

@@ -7006,7 +7006,7 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
-## 10.908 The fields nothing read leave the model (0339)
+## 10.908 The fields nothing read leave the model, and DNS's five are reached (0339)
 
 The holder's answer of 2026-11-23: what the language cannot reach goes, unless
 it has behaviour and an obvious need. Done in groups, each with the witnesses
@@ -7033,6 +7033,28 @@ re-blessed (pre-release, so a minor change under 0038):
 A document that still carries one is refused by name ("carries `index`, which
 this build does not know"), which is the reader's rule for every unknown
 member. Nothing outside the tests and the fuzz seeds wrote them.
+
+**And the five with behaviour and an obvious need are reached.** A DNS scope
+takes `options` (resolv.conf's line), `transport` (`plain` or `tls`) and
+`dnssec` (`no`, `allow`, `yes`), each also as a `dns_`-prefixed top-level key
+with wire numbers of their own (`scope.c`); a server takes resolved's spelling,
+`address:port#name` or `[v6]:port#name`. Each mode delivers what it can --
+resolved gets `address:port#name`, `dnsovertls` and `dnssec` per link; unbound
+`address@port#name` and `forward-tls-upstream`; dnsmasq `address#port`; the
+resolv.conf modes the options -- and the document refuses the rest by name,
+so a TLS upstream is never written into a plain resolv.conf and a port is
+never silently 53. `https` stays in the model and is refused: nothing netcfgd
+drives speaks it. The renderer writes all of it back, and the mutation sweep
+made validation share the language's name check (`ncfg_dns_sni_valid`) and
+port range, since a document holding `#a/b=c` rendered text that would not
+compile.
+
+**Open, small:** resolved is told `dnsovertls` and `dnssec` only where a scope
+states them, as it is told `domain` -- so a scope that stops stating one leaves
+resolved's last per-link value until `resolvectl revert`. A revert before each
+delivery would close it at the cost of a moment with no servers on the link;
+not done without measuring that on a machine running resolved, which this one
+is not.
 
 ## 10.907 The fuzzer reaches the firewall's readers
 

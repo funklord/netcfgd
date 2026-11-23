@@ -411,38 +411,42 @@ void ncfg_render_opening(ncfg_buf_t *text, const char *kind, const char *name,
  * field is at its default is right for `global`, where the block carries no
  * meaning of its own, and was wrong for the other two.
  */
-int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t *body,
-    ncfg_unrenderable_t *missing, const char *scope, const char *name)
+int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t *body)
 {
+	static const char *const transports[] = { "plain", "tls" };
+	static const char *const dnssecs[] = { "no", "allow", "yes" };
 	ncfg_render_list_t servers;
 	ncfg_render_list_t search;
 	ncfg_render_list_t domains;
+	ncfg_render_list_t options;
 	const char        *mode = NULL;
 	int                mode_differs;
 	size_t             i;
 
-	/* Four facts the model has and the configuration language cannot write:
-	 * `lower_dns` reads `servers`, `search`, `domains` and `mode` and nothing
-	 * else, and hardcodes a server's port and sni to absent. So these
-	 * refusals cannot fire from a document the compiler produced. They cost
-	 * nothing and are kept, because this takes a document rather than a config
-	 * file and a missing refusal costs a silent drop. */
-	if (dns->option_count > 0) {
-		ncfg_render_refuse(missing, scope, name, "dns options");
-	}
-	if (dns->dnssec.has) {
-		ncfg_render_refuse(missing, scope, name, "dnssec");
-	}
-	if (dns->transport.has) {
-		ncfg_render_refuse(missing, scope, name, "dns transport");
-	}
-
 	ncfg_render_list_init(&servers);
 	for (i = 0; i < dns->server_count; i++) {
-		if (dns->servers[i].port.has || dns->servers[i].sni) {
-			ncfg_render_refuse(missing, scope, name, "a dns server with a port or sni");
+		const ncfg_dns_server_t *server = &dns->servers[i];
+		ncfg_buf_t               text;
+
+		/* The language's spelling, which is resolved's: `[v6]:port` and
+		 * `v4:port`, then `#name` (0339). */
+		ncfg_buf_init(&text, 0);
+		if (server->port.has) {
+			ncfg_buf_addf(&text, strchr(server->addr ? server->addr : "", ':') ? "[%s]:%lld"
+			                                                                   : "%s:%lld",
+			    server->addr ? server->addr : "", (long long)server->port.value);
+		} else {
+			ncfg_buf_add_text(&text, server->addr ? server->addr : "");
 		}
-		ncfg_render_quote(ncfg_render_list_next(&servers), dns->servers[i].addr);
+		if (server->sni) {
+			ncfg_buf_addf(&text, "#%s", server->sni);
+		}
+		ncfg_render_quote(ncfg_render_list_next(&servers), ncfg_buf_text(&text));
+		ncfg_buf_free(&text);
+	}
+	ncfg_render_list_init(&options);
+	for (i = 0; i < dns->option_count; i++) {
+		ncfg_render_quote(ncfg_render_list_next(&options), dns->options[i]);
 	}
 	ncfg_render_list_init(&search);
 	for (i = 0; i < dns->search_count; i++) {
@@ -466,10 +470,12 @@ int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t
 	mode = ncfg_dns_mode_name(dns->mode.mode);
 	mode_differs = dns->mode.mode != NCFG_DNS_MODE_NONE;
 
-	if (servers.count == 0 && search.count == 0 && domains.count == 0 && !mode_differs) {
+	if (servers.count == 0 && search.count == 0 && domains.count == 0 && options.count == 0 &&
+	    !dns->transport.has && !dns->dnssec.has && !mode_differs) {
 		ncfg_render_list_free(&servers);
 		ncfg_render_list_free(&search);
 		ncfg_render_list_free(&domains);
+		ncfg_render_list_free(&options);
 		return 0;
 	}
 	ncfg_buf_addf(body, "%sdns {\n", indent);
@@ -479,10 +485,23 @@ int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t
 	ncfg_render_list_emit(body, indent, "\tservers", &servers, 1);
 	ncfg_render_list_emit(body, indent, "\tsearch", &search, 1);
 	ncfg_render_list_emit(body, indent, "\tdomains", &domains, 1);
+	ncfg_render_list_emit(body, indent, "\toptions", &options, 1);
+	/* Written where stated, whatever it equals: a stated `plain` is a choice
+	 * a later default must not take away. */
+	if (dns->transport.has && dns->transport.value >= 0 &&
+	    dns->transport.value < (int64_t)NCFG_COUNT_OF(transports)) {
+		ncfg_buf_addf(body, "%s\ttransport = \"%s\"\n", indent,
+		    transports[dns->transport.value]);
+	}
+	if (dns->dnssec.has && dns->dnssec.value >= 0 &&
+	    dns->dnssec.value < (int64_t)NCFG_COUNT_OF(dnssecs)) {
+		ncfg_buf_addf(body, "%s\tdnssec = \"%s\"\n", indent, dnssecs[dns->dnssec.value]);
+	}
 	ncfg_buf_addf(body, "%s}\n", indent);
 	ncfg_render_list_free(&servers);
 	ncfg_render_list_free(&search);
 	ncfg_render_list_free(&domains);
+	ncfg_render_list_free(&options);
 	return 1;
 }
 
@@ -669,8 +688,7 @@ static void render_connectivity(const ncfg_connectivity_policy_t *policy, ncfg_b
 	ncfg_buf_add_text(body, "\t}\n");
 }
 
-static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
-    ncfg_unrenderable_t *missing)
+static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text)
 {
 	const ncfg_globals_t *globals = &document->globals;
 	ncfg_buf_t            body;
@@ -740,7 +758,7 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 		ncfg_render_quote(&body, globals->regdom);
 		ncfg_buf_add_char(&body, '\n');
 	}
-	(void)ncfg_render_dns(&globals->dns, "\t", &body, missing, "global", NULL);
+	(void)ncfg_render_dns(&globals->dns, "\t", &body);
 	render_control(&globals->control, &body);
 	render_remote(&globals->remote, &body);
 	render_upnp(globals->upnp, &body);
@@ -1660,7 +1678,7 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	 * configuration language cannot express either, and the compiler
 	 * regenerates both. */
 	ncfg_buf_add_text(text, header);
-	render_globals(document, text, missing);
+	render_globals(document, text);
 	render_firewall(document, text, missing);
 	for (i = 0; i < document->interface_count; i++) {
 		ncfg_render_interface(&document->interfaces[i], overrides, text, missing);

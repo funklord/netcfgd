@@ -67,6 +67,114 @@ static int principal_parse(ncfg_lower_ctx_t *ctx, const char *text, ncfg_princip
  * The DNS scope
  * ------------------------------------------------------------------------ */
 
+/*
+ * One server: an address, then optionally a port and the name its TLS
+ * certificate carries, in resolved's own spelling (0339):
+ *
+ *     192.0.2.53   192.0.2.53:853   192.0.2.53#dns.example
+ *     192.0.2.53:853#dns.example    2001:db8::53#dns.example
+ *     [2001:db8::53]:853#dns.example
+ *
+ * An IPv6 address with a port needs the brackets, because its own colons
+ * would otherwise swallow the port. Whether the delivering mode can carry a
+ * port or a name is the document's question, asked once the mode is known.
+ */
+static int dns_server_of(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span,
+    ncfg_dns_server_t *out)
+{
+	char        host[128];
+	const char *hash = strchr(text, '#');
+	const char *port_text = NULL;
+	size_t      host_length = hash ? (size_t)(hash - text) : strlen(text);
+
+	memset(out, 0, sizeof(*out));
+	if (host_length == 0u || host_length >= sizeof(host)) {
+		ncfg_diag(ctx, span, "`%s` is not an IP address", text);
+		return 0;
+	}
+	memcpy(host, text, host_length);
+	host[host_length] = '\0';
+	if (host[0] == '[') {
+		char *close = strchr(host, ']');
+
+		if (!close || (close[1] != '\0' && close[1] != ':')) {
+			ncfg_diag(ctx, span, "`%s` is not an IP address: a bracketed one is "
+			    "`[address]` or `[address]:port`", text);
+			return 0;
+		}
+		if (close[1] == ':') {
+			port_text = close + 2;
+		}
+		*close = '\0';
+		memmove(host, host + 1, strlen(host + 1) + 1u);
+	} else {
+		char *colon = strchr(host, ':');
+
+		/* One colon is an IPv4 address and a port; more is IPv6 alone. */
+		if (colon && !strchr(colon + 1, ':')) {
+			*colon = '\0';
+			port_text = colon + 1;
+		}
+	}
+	if (!ncfg_is_bare_address(host)) {
+		ncfg_diag(ctx, span, "`%s` is not an IP address", text);
+		return 0;
+	}
+	if (port_text) {
+		char         *end;
+		unsigned long port = strtoul(port_text, &end, 10);
+
+		if (end == port_text || *end != '\0' || port == 0ul || port > 65535ul) {
+			ncfg_diag(ctx, span, "`%s` names a port that is not 1 to 65535", text);
+			return 0;
+		}
+		out->port.has = 1;
+		out->port.value = (int64_t)port;
+	}
+	if (hash) {
+		const char *name = hash + 1;
+
+		if (!ncfg_dns_sni_valid(name)) {
+			ncfg_diag(ctx, span, "`%s` names a TLS server name that is not a host name",
+			    text);
+			return 0;
+		}
+		out->sni = ncfg_dup(ctx, name);
+		if (!out->sni) {
+			return 0;
+		}
+	}
+	out->addr = ncfg_canonical_address(ctx, host);
+	if (!out->addr) {
+		free(out->sni);
+		out->sni = NULL;
+		return 0;
+	}
+	return 1;
+}
+
+/* A word out of a fixed list, or a diagnostic naming the list. */
+static int dns_word(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment,
+    const char *const *words, size_t count, const char *what, int64_t *out)
+{
+	char  *text = ncfg_as_string(ctx, assignment->value);
+	size_t at;
+
+	if (!text) {
+		return 0;
+	}
+	for (at = 0u; at < count; at++) {
+		if (strcmp(text, words[at]) == 0) {
+			*out = (int64_t)at;
+			free(text);
+			return 1;
+		}
+	}
+	ncfg_diag(ctx, assignment->value->span, "`%s` is not %s", text, what);
+	free(text);
+	return 0;
+}
+
 void ncfg_lower_dns_key(ncfg_lower_ctx_t *ctx, ncfg_dns_policy_t *policy,
     const ncfg_ast_assignment_t *assignment)
 {
@@ -83,21 +191,19 @@ void ncfg_lower_dns_key(ncfg_lower_ctx_t *ctx, ncfg_dns_policy_t *policy,
 		}
 		for (i = 0; i < words.count; i++) {
 			ncfg_dns_server_t *server;
-			char              *canonical;
+			ncfg_dns_server_t  parsed;
 
-			if (!ncfg_is_bare_address(words.at[i].text)) {
-				ncfg_diag(ctx, words.at[i].span, "`%s` is not an IP address",
-				    words.at[i].text);
+			if (!dns_server_of(ctx, words.at[i].text, words.at[i].span, &parsed)) {
 				continue;
 			}
-			canonical = ncfg_canonical_address(ctx, words.at[i].text);
 			server = ncfg_push(ctx, &policy->servers, &policy->server_count,
 			    sizeof(*policy->servers));
 			if (!server) {
-				free(canonical);
+				free(parsed.addr);
+				free(parsed.sni);
 				break;
 			}
-			server->addr = canonical;
+			*server = parsed;
 		}
 		ncfg_words_free(&words);
 		return;
@@ -162,6 +268,43 @@ void ncfg_lower_dns_key(ncfg_lower_ctx_t *ctx, ncfg_dns_policy_t *policy,
 			policy->mode.mode = (int)mode;
 		}
 		free(name);
+		return;
+	}
+	/* resolv.conf's `options` line, word for word (0339). */
+	if (strcmp(key, "dns_options") == 0 || strcmp(key, "options") == 0) {
+		if (!ncfg_as_words(ctx, assignment->value, &words)) {
+			ncfg_words_free(&words);
+			return;
+		}
+		for (i = 0; i < words.count; i++) {
+			(void)ncfg_push_string(ctx, &policy->options, &policy->option_count,
+			    words.at[i].text);
+		}
+		ncfg_words_free(&words);
+		return;
+	}
+	/* `https` is in the model's set and refused here: no resolver netcfgd
+	 * drives speaks DNS over HTTPS (0339). */
+	if (strcmp(key, "dns_transport") == 0 || strcmp(key, "transport") == 0) {
+		static const char *const transports[] = { "plain", "tls" };
+		int64_t value;
+
+		if (dns_word(ctx, assignment, transports, 2u,
+		    "a dns transport: one of plain, tls (DNS over TLS)", &value)) {
+			policy->transport.has = 1;
+			policy->transport.value = value;
+		}
+		return;
+	}
+	if (strcmp(key, "dns_dnssec") == 0 || strcmp(key, "dnssec") == 0) {
+		static const char *const modes[] = { "no", "allow", "yes" };
+		int64_t value;
+
+		if (dns_word(ctx, assignment, modes, 3u, "a dnssec setting: one of no, allow, yes",
+		    &value)) {
+			policy->dnssec.has = 1;
+			policy->dnssec.value = value;
+		}
 		return;
 	}
 	ncfg_diag(ctx, assignment->span, "unknown dns key `%s`", key);
@@ -502,7 +645,9 @@ void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 		return;
 	}
 	if (strcmp(key, "dns") == 0 || strcmp(key, "dns_search") == 0 ||
-	    strcmp(key, "dns_mode") == 0 || strcmp(key, "dns_domains") == 0) {
+	    strcmp(key, "dns_mode") == 0 || strcmp(key, "dns_domains") == 0 ||
+	    strcmp(key, "dns_options") == 0 || strcmp(key, "dns_transport") == 0 ||
+	    strcmp(key, "dns_dnssec") == 0) {
 		ncfg_lower_dns_key(ctx, &globals->dns, assignment);
 		return;
 	}

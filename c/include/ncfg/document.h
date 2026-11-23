@@ -382,6 +382,11 @@ typedef struct {
 	ncfg_optint_t          transport; /* ncfg_dns_transport_t where `has` */
 } ncfg_dns_policy_t;
 
+/* Whether `name` can be a DNS server's TLS name: a host name, letters, digits,
+ * dots and hyphens, 1 to 253 of them. The language and the document ask the
+ * same question, so a document's name always writes back (0339). */
+int ncfg_dns_sni_valid(const char *name);
+
 /* Whether this scope asks for anything a flat mode cannot deliver. */
 int ncfg_dns_policy_needs_routing(const ncfg_dns_policy_t *policy);
 

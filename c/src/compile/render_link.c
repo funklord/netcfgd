@@ -879,7 +879,7 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 	    &body, missing);
 	render_routes(interface->routes, interface->route_count, "interface", name, &body, missing);
 	if (interface->dns &&
-	    !ncfg_render_dns(interface->dns, "\t", &body, missing, "interface", name)) {
+	    !ncfg_render_dns(interface->dns, "\t", &body)) {
 		/* See `ncfg_render_dns`: present and empty is not the same document as
 		 * absent, and the difference is whether a lease's resolvers are taken
 		 * or ignored. */
@@ -1504,7 +1504,7 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 	render_addressing(network->addressing, network->addressing_count, "network", id, &body,
 	    missing);
 	render_routes(network->routes, network->route_count, "network", id, &body, missing);
-	if (network->dns && !ncfg_render_dns(network->dns, "\t", &body, missing, "network", id)) {
+	if (network->dns && !ncfg_render_dns(network->dns, "\t", &body)) {
 		/* Present and empty says the same thing here as on an interface. */
 		ncfg_buf_add_text(&body, "\tdns { }\n");
 	}

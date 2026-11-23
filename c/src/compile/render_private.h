@@ -107,8 +107,7 @@ void ncfg_render_opening(ncfg_buf_t *text, const char *kind, const char *name,
 
 /* One DNS scope. Returns whether it wrote a block at all, which the callers
  * that have an empty-block meaning need; see the definition. */
-int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t *body,
-    ncfg_unrenderable_t *missing, const char *scope, const char *name);
+int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t *body);
 
 void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);

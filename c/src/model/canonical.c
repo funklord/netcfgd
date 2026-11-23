@@ -642,6 +642,88 @@ static int check_multiplicity(const char *scope, const ncfg_address_source_t *so
 }
 
 /*
+ * What each mode can carry of the rest of a scope (0339).
+ *
+ * **Refused rather than dropped**, for the reason 0007 refuses routing on a
+ * flat mode: a TLS upstream handed to a plain resolv.conf is a cleartext query
+ * the operator believes is encrypted, and a port resolv.conf cannot spell is
+ * a server that silently becomes port 53.
+ *
+ *     options          resolv.conf's line: write_resolv_conf, resolvconf, openresolv
+ *     transport tls    resolved, unbound
+ *     dnssec           resolved, which takes it per link
+ *     a server's port  resolved, dnsmasq, unbound
+ *     a server's sni   resolved, unbound -- and only beside transport tls
+ */
+static int check_dns_delivery(const char *scope, const ncfg_dns_policy_t *dns, int mode,
+    char *err, size_t err_size)
+{
+	const char *name = ncfg_dns_mode_name(mode);
+	int         flat = mode == NCFG_DNS_MODE_WRITE_RESOLV_CONF ||
+	    mode == NCFG_DNS_MODE_RESOLVCONF || mode == NCFG_DNS_MODE_OPENRESOLV;
+	int         tls = dns->transport.has && dns->transport.value == NCFG_DNS_TRANSPORT_TLS;
+	size_t      at;
+
+	if (!name) {
+		name = "?";
+	}
+	if (dns->option_count > 0u && !flat) {
+		ncfg_error_set(err, err_size,
+		    "dns scope %s sets options, which are resolv.conf's and mode %s does not "
+		    "write one", scope, name);
+		return 0;
+	}
+	if (dns->transport.has && dns->transport.value == NCFG_DNS_TRANSPORT_HTTPS) {
+		ncfg_error_set(err, err_size,
+		    "dns scope %s asks for DNS over HTTPS, which no resolver netcfgd drives "
+		    "speaks", scope);
+		return 0;
+	}
+	if (tls && mode != NCFG_DNS_MODE_RESOLVED && mode != NCFG_DNS_MODE_UNBOUND) {
+		ncfg_error_set(err, err_size,
+		    "dns scope %s asks for DNS over TLS, which mode %s cannot carry: resolved and "
+		    "unbound can", scope, name);
+		return 0;
+	}
+	if (dns->dnssec.has && mode != NCFG_DNS_MODE_RESOLVED) {
+		ncfg_error_set(err, err_size,
+		    "dns scope %s sets dnssec, which mode %s cannot set per scope: resolved can",
+		    scope, name);
+		return 0;
+	}
+	for (at = 0u; at < dns->server_count; at++) {
+		const ncfg_dns_server_t *server = &dns->servers[at];
+
+		if (server->port.has && mode != NCFG_DNS_MODE_RESOLVED &&
+		    mode != NCFG_DNS_MODE_DNSMASQ && mode != NCFG_DNS_MODE_UNBOUND) {
+			ncfg_error_set(err, err_size,
+			    "dns scope %s gives %s a port, which mode %s cannot spell", scope,
+			    server->addr ? server->addr : "a server", name);
+			return 0;
+		}
+		if (server->port.has && (server->port.value < 1 || server->port.value > 65535)) {
+			ncfg_error_set(err, err_size,
+			    "dns scope %s gives %s port %lld, which is not 1 to 65535", scope,
+			    server->addr ? server->addr : "a server", (long long)server->port.value);
+			return 0;
+		}
+		if (server->sni && !ncfg_dns_sni_valid(server->sni)) {
+			ncfg_error_set(err, err_size,
+			    "dns scope %s names `%s` as %s's TLS server name, which is not a host name",
+			    scope, server->sni, server->addr ? server->addr : "a server");
+			return 0;
+		}
+		if (server->sni && !tls) {
+			ncfg_error_set(err, err_size,
+			    "dns scope %s names %s's TLS server name, and its transport is not tls",
+			    scope, server->addr ? server->addr : "a server");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
  * Decision 0007's capability check, asked of the mode that will actually
  * deliver this scope.
  *
@@ -669,7 +751,7 @@ static int check_dns_capability(const char *scope, const ncfg_dns_policy_t *dns,
 		    ncfg_dns_mode_name(effective));
 		return 0;
 	}
-	return 1;
+	return check_dns_delivery(scope, dns, effective, err, err_size);
 }
 
 static int check_hooks(const ncfg_hook_ref_t *hooks, size_t count, char *err, size_t err_size)

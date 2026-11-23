@@ -4448,9 +4448,9 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t
 	if (ncfg_json_count(doc, ncfg_json_member(doc, scope, "options"))) {
 		note_unmodelled(unmodelled, "dns (options)");
 	}
-	/* A server with a port or an SNI name: neither has a spelling in the
-	 * language, which takes a server as a bare address, so a document holding
-	 * one came from somewhere a form should not overwrite. */
+	/* A server with a port or an SNI name: the language spells both
+	 * (`address:port#name`, 0339) and this form has a field for neither, so a
+	 * save from it would drop them -- it is refused instead. */
 	uint32_t servers = ncfg_json_member(doc, scope, "servers");
 	for (uint32_t i = 0; i < ncfg_json_count(doc, servers); i++) {
 		uint32_t server = ncfg_json_at(doc, servers, i);

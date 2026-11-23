@@ -517,6 +517,44 @@ static int run_resolvectl(const char *program, const char *verb, const char *lin
 }
 
 /*
+ * One server in resolved's spelling: `address`, `address:port`,
+ * `[v6]:port`, each optionally followed by `#name`. Allocated; NULL on OOM.
+ */
+static const char *resolved_server(const ncfg_dns_server_t *server)
+{
+	const char *addr = server->addr ? server->addr : "";
+	int         v6 = strchr(addr, ':') != NULL;
+	size_t      length = strlen(addr) + (server->sni ? strlen(server->sni) : 0u) + 16u;
+	char       *out = malloc(length);
+
+	if (!out) {
+		return NULL;
+	}
+	if (server->port.has) {
+		(void)snprintf(out, length, v6 ? "[%s]:%lld" : "%s:%lld", addr,
+		    (long long)server->port.value);
+	} else {
+		(void)snprintf(out, length, "%s", addr);
+	}
+	if (server->sni) {
+		size_t used = strlen(out);
+
+		(void)snprintf(out + used, length - used, "#%s", server->sni);
+	}
+	return out;
+}
+
+static void free_servers(const char **servers, size_t count)
+{
+	size_t at;
+
+	for (at = 0u; servers && at < count; at++) {
+		free((void *)servers[at]);
+	}
+	free((void *)servers);
+}
+
+/*
  * Hand each scope to `systemd-resolved` through `resolvectl`.
  *
  * Through the command rather than D-Bus, for the reason 0014 gave about iwd: a
@@ -557,18 +595,48 @@ static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const 
 				return 0;
 			}
 			for (which = 0u; which < policy->server_count; which++) {
-				servers[which] = policy->servers[which].addr;
+				servers[which] = resolved_server(&policy->servers[which]);
+				if (!servers[which]) {
+					break;
+				}
+			}
+			if (which < policy->server_count) {
+				free_servers(servers, which);
+				ncfg_error_set(err, err_size, "out of memory listing %s's servers", link);
+				return 0;
 			}
 		}
 		ok = run_resolvectl(program, "dns", link, servers,
 		    policy ? policy->server_count : 0u, err, err_size);
-		free((void *)servers);
+		free_servers(servers, policy ? policy->server_count : 0u);
 		if (!ok) {
 			return 0;
 		}
 
 		if (!policy) {
 			continue;
+		}
+		/*
+		 * **Set where the scope states them, and left alone where it does
+		 * not** -- the same bargain `domain` below already has, and the same
+		 * gap: a scope that stops stating one leaves resolved's last per-link
+		 * value until the link is reverted (project.md 10.908).
+		 */
+		if (policy->transport.has) {
+			const char *word = policy->transport.value == NCFG_DNS_TRANSPORT_TLS ? "yes" : "no";
+
+			if (!run_resolvectl(program, "dnsovertls", link, &word, 1u, err, err_size)) {
+				return 0;
+			}
+		}
+		if (policy->dnssec.has) {
+			const char *word = policy->dnssec.value == NCFG_DNSSEC_YES ? "yes"
+			    : policy->dnssec.value == NCFG_DNSSEC_ALLOW               ? "allow-downgrade"
+			                                                             : "no";
+
+			if (!run_resolvectl(program, "dnssec", link, &word, 1u, err, err_size)) {
+				return 0;
+			}
 		}
 		domains = calloc(policy->domain_count + policy->search_count + 1u, sizeof(*domains));
 		if (!domains) {

@@ -163,6 +163,36 @@
 # `none` is the default, and it is the right answer on a machine where
 # something else already owns /etc/resolv.conf.
 #
+# DNS over TLS, DNSSEC and a server on another port. A server may carry a
+# port and the name its TLS certificate must show, in resolved's spelling:
+# `address:port#name`, or `[address]:port#name` for IPv6 -- an IPv6 address
+# with a port needs the brackets, or its own colons swallow the port.
+#
+#global {
+#	dns {
+#		mode      = "resolved"
+#		servers   = ["192.0.2.53:853#dns.example", "[2001:db8::53]:853#dns.example"]
+#		transport = "tls"
+#		dnssec    = "allow"
+#	}
+#}
+#
+# Not every mode can carry each of these, and one that cannot is refused when
+# the configuration compiles rather than quietly sent in the clear:
+#
+#   transport = "tls"   resolved and unbound. unbound checks the name only
+#                       where its own `server:` section trusts a certificate
+#                       bundle (`tls-system-cert: yes`).
+#   dnssec              resolved, per link: no, allow or yes.
+#   a server's port     resolved, dnsmasq and unbound.
+#   a server's #name    only beside transport = "tls".
+#   options             resolv.conf's `options` line -- edns0, ndots:2 and
+#                       the like -- for write_resolv_conf, resolvconf and
+#                       openresolv.
+#
+# Taking `transport` or `dnssec` out of a resolved scope leaves resolved's
+# last setting for that link until `resolvectl revert`.
+#
 # What to do when the machine stops matching the configuration. `report` says
 # so and changes nothing; it is the default because a daemon that silently
 # undoes your `ip` command while you are debugging is worse than one that

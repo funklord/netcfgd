@@ -1281,9 +1281,11 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 		return;
 	}
 	if (strcmp(key, "dns") == 0 || strcmp(key, "dns_search") == 0 ||
-	    strcmp(key, "dns_mode") == 0 || strcmp(key, "dns_domains") == 0) {
+	    strcmp(key, "dns_mode") == 0 || strcmp(key, "dns_domains") == 0 ||
+	    strcmp(key, "dns_options") == 0 || strcmp(key, "dns_transport") == 0 ||
+	    strcmp(key, "dns_dnssec") == 0) {
 		*dns_touched = 1;
-		/* All four keys record the one path, and the first of them wins once
+		/* All seven keys record the one path, and the first of them wins once
 		 * the table is canonicalised -- which is right: what a reader is sent
 		 * to is where this interface's DNS policy started being written. */
 		ncfg_record(ctx, ctx->source, assignment->span, "interfaces[%s].dns", interface->name);

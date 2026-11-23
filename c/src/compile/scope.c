@@ -129,7 +129,7 @@ static const struct {
 	const char  *alias;
 	const char  *canonical;
 } ALIASES[] = {
-	/* `global` and `interface` both offer the four dns keys at the top level
+	/* `global` and `interface` both offer the seven dns keys at the top level
 	 * and inside a `dns` block; the top-level spelling is canonical. */
 	{ NCFG_BLOCK_GLOBAL, "dns.dns", "dns" },
 	{ NCFG_BLOCK_GLOBAL, "dns.servers", "dns" },
@@ -139,6 +139,12 @@ static const struct {
 	{ NCFG_BLOCK_GLOBAL, "dns.mode", "dns_mode" },
 	{ NCFG_BLOCK_GLOBAL, "dns.dns_domains", "dns_domains" },
 	{ NCFG_BLOCK_GLOBAL, "dns.domains", "dns_domains" },
+	{ NCFG_BLOCK_GLOBAL, "dns.dns_options", "dns_options" },
+	{ NCFG_BLOCK_GLOBAL, "dns.options", "dns_options" },
+	{ NCFG_BLOCK_GLOBAL, "dns.dns_transport", "dns_transport" },
+	{ NCFG_BLOCK_GLOBAL, "dns.transport", "dns_transport" },
+	{ NCFG_BLOCK_GLOBAL, "dns.dns_dnssec", "dns_dnssec" },
+	{ NCFG_BLOCK_GLOBAL, "dns.dnssec", "dns_dnssec" },
 	{ NCFG_BLOCK_INTERFACE, "dns.dns", "dns" },
 	{ NCFG_BLOCK_INTERFACE, "dns.servers", "dns" },
 	{ NCFG_BLOCK_INTERFACE, "dns.dns_search", "dns_search" },
@@ -147,12 +153,21 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "dns.mode", "dns_mode" },
 	{ NCFG_BLOCK_INTERFACE, "dns.dns_domains", "dns_domains" },
 	{ NCFG_BLOCK_INTERFACE, "dns.domains", "dns_domains" },
+	{ NCFG_BLOCK_INTERFACE, "dns.dns_options", "dns_options" },
+	{ NCFG_BLOCK_INTERFACE, "dns.options", "dns_options" },
+	{ NCFG_BLOCK_INTERFACE, "dns.dns_transport", "dns_transport" },
+	{ NCFG_BLOCK_INTERFACE, "dns.transport", "dns_transport" },
+	{ NCFG_BLOCK_INTERFACE, "dns.dns_dnssec", "dns_dnssec" },
+	{ NCFG_BLOCK_INTERFACE, "dns.dnssec", "dns_dnssec" },
 	/* A `network` has the sub-block and no top-level spelling, so the
 	 * canonical path keeps the prefix. */
 	{ NCFG_BLOCK_NETWORK, "dns.servers", "dns.dns" },
 	{ NCFG_BLOCK_NETWORK, "dns.search", "dns.dns_search" },
 	{ NCFG_BLOCK_NETWORK, "dns.mode", "dns.dns_mode" },
 	{ NCFG_BLOCK_NETWORK, "dns.domains", "dns.dns_domains" },
+	{ NCFG_BLOCK_NETWORK, "dns.options", "dns.dns_options" },
+	{ NCFG_BLOCK_NETWORK, "dns.transport", "dns.dns_transport" },
+	{ NCFG_BLOCK_NETWORK, "dns.dnssec", "dns.dns_dnssec" },
 	/* `lookup` and `table` are one field in `ncfg_lower_rule`. */
 	{ NCFG_BLOCK_RULE, "lookup", "table" }
 };
@@ -202,6 +217,9 @@ static const struct {
 	{ NCFG_BLOCK_GLOBAL, "dns_mode", NCFG_SCOPE_ESTATE },
 	{ NCFG_BLOCK_GLOBAL, "dns_search", NCFG_SCOPE_ESTATE },
 	{ NCFG_BLOCK_GLOBAL, "dns_domains", NCFG_SCOPE_ESTATE },
+	{ NCFG_BLOCK_GLOBAL, "dns_options", NCFG_SCOPE_ESTATE },
+	{ NCFG_BLOCK_GLOBAL, "dns_transport", NCFG_SCOPE_ESTATE },
+	{ NCFG_BLOCK_GLOBAL, "dns_dnssec", NCFG_SCOPE_ESTATE },
 	{ NCFG_BLOCK_GLOBAL, "connectivity", NCFG_SCOPE_ESTATE },
 
 	/*
@@ -256,6 +274,9 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "dns_mode", NCFG_SCOPE_ESTATE },
 	{ NCFG_BLOCK_INTERFACE, "dns_search", NCFG_SCOPE_ESTATE },
 	{ NCFG_BLOCK_INTERFACE, "dns_domains", NCFG_SCOPE_ESTATE },
+	{ NCFG_BLOCK_INTERFACE, "dns_options", NCFG_SCOPE_ESTATE },
+	{ NCFG_BLOCK_INTERFACE, "dns_transport", NCFG_SCOPE_ESTATE },
+	{ NCFG_BLOCK_INTERFACE, "dns_dnssec", NCFG_SCOPE_ESTATE },
 	{ NCFG_BLOCK_INTERFACE, "advertise.dns", NCFG_SCOPE_ESTATE },
 
 	/*
@@ -315,6 +336,9 @@ static const struct {
 	{ NCFG_BLOCK_GLOBAL, "dns_domains", 0x00010004u },
 	{ NCFG_BLOCK_GLOBAL, "connectivity.requires", 0x00010005u },
 	{ NCFG_BLOCK_GLOBAL, "connectivity.ignore", 0x00010006u },
+	{ NCFG_BLOCK_GLOBAL, "dns_options", 0x00010007u },
+	{ NCFG_BLOCK_GLOBAL, "dns_transport", 0x00010008u },
+	{ NCFG_BLOCK_GLOBAL, "dns_dnssec", 0x00010009u },
 
 	/* interface -- the block travels by default, so this is everything
 	 * except the host-private exceptions above. `config` and
@@ -371,6 +395,9 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "port_forward.hairpin", 0x0002002cu },
 	{ NCFG_BLOCK_INTERFACE, "clamp_mss", 0x0002002du },
 	{ NCFG_BLOCK_INTERFACE, "port_forward.from", 0x0002002eu },
+	{ NCFG_BLOCK_INTERFACE, "dns_options", 0x0002002fu },
+	{ NCFG_BLOCK_INTERFACE, "dns_transport", 0x00020030u },
+	{ NCFG_BLOCK_INTERFACE, "dns_dnssec", 0x00020031u },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the
@@ -408,6 +435,9 @@ static const struct {
 	{ NCFG_BLOCK_NETWORK, "wifi.roam.signal", 0x00030017u },
 	{ NCFG_BLOCK_NETWORK, "wifi.roam.interval", 0x00030018u },
 	{ NCFG_BLOCK_NETWORK, "wifi.roam.slow_interval", 0x00030019u },
+	{ NCFG_BLOCK_NETWORK, "dns.dns_options", 0x0003001au },
+	{ NCFG_BLOCK_NETWORK, "dns.dns_transport", 0x0003001bu },
+	{ NCFG_BLOCK_NETWORK, "dns.dns_dnssec", 0x0003001cu },
 
 	/*
 	 * access_point -- what is offered, not who offers it. `device` is

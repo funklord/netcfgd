@@ -914,13 +914,68 @@ static void dns_cases(void)
 		    "  and means the same mode");
 		ncfg_document_free(document);
 	}
-	/*
-	 * `exec` is a mode the model has and the language cannot write: it carries
-	 * a command, and accepting the word would compile a mode with nothing to
-	 * run.
-	 */
+	/* `exec` left the model with 0339, so it is a word like any other. */
 	refuses("global { dns { mode = \"exec\" } }\n", "unknown dns mode",
-	    "`exec` is a document mode the language cannot write");
+	    "`exec` is not a dns mode");
+
+	/*
+	 * A server's port and TLS name, resolved's spelling, and the scope's
+	 * transport, dnssec and options (0339).
+	 */
+	document = compiles("global { dns {\n\t\tmode = \"resolved\"\n"
+	    "\t\tservers = [\"192.0.2.53:853#dns.example\", \"[2001:db8::53]:853#dns.example\","
+	    " \"198.51.100.1\", \"2001:db8::1#v6.example\"]\n"
+	    "\t\ttransport = \"tls\"\n\t\tdnssec = \"allow\"\n\t} }\n",
+	    "a TLS upstream with ports and names compiles");
+	if (document) {
+		const ncfg_dns_policy_t *dns = &document->globals.dns;
+		int                      ported = 0;
+		int                      named = 0;
+		size_t                   at;
+
+		for (at = 0u; at < dns->server_count; at++) {
+			ported += dns->servers[at].port.has && dns->servers[at].port.value == 853;
+			named += dns->servers[at].sni != NULL;
+		}
+		check(dns->server_count == 4u && ported == 2 && named == 3,
+		    "  with each server's port and name where it gave one");
+		check(dns->transport.has && dns->transport.value == NCFG_DNS_TRANSPORT_TLS &&
+		    dns->dnssec.has && dns->dnssec.value == NCFG_DNSSEC_ALLOW,
+		    "  and the transport and dnssec");
+		ncfg_document_free(document);
+	}
+	document = compiles("dns_mode = \"write_resolv_conf\"\ndns_options = [\"edns0\", \"ndots:2\"]\n",
+	    "resolv.conf options compile at the top level");
+	if (document) {
+		check(document->globals.dns.option_count == 2u &&
+		    strcmp(document->globals.dns.options[1], "ndots:2") == 0,
+		    "  in the order written");
+		ncfg_document_free(document);
+	}
+	refuses("global { dns { mode = \"resolved\"; options = [\"edns0\"] } }\n",
+	    "resolv.conf's", "options under a mode that writes no resolv.conf are refused");
+	refuses("global { dns { mode = \"dnsmasq\"; transport = \"tls\" } }\n",
+	    "cannot carry", "DNS over TLS under a mode that cannot carry it is refused");
+	refuses("global { dns { mode = \"unbound\"; transport = \"https\" } }\n",
+	    "not a dns transport", "DNS over HTTPS is refused, no backend speaking it");
+	refuses("global { dns { mode = \"unbound\"; dnssec = \"yes\" } }\n",
+	    "cannot set per scope", "dnssec is refused outside resolved");
+	refuses("global { dns { mode = \"write_resolv_conf\"; servers = [\"192.0.2.1:5353\"] } }\n",
+	    "cannot spell", "a port resolv.conf cannot spell is refused, not dropped to 53");
+	refuses("global { dns { mode = \"unbound\"; servers = [\"192.0.2.1#dns.example\"] } }\n",
+	    "transport is not tls", "a TLS name with no TLS is refused");
+	refuses("global { dns { servers = [\"192.0.2.1:70000\"] } }\n",
+	    "not 1 to 65535", "a port out of range is refused");
+	refuses("global { dns { servers = [\"[2001:db8::1]x\"] } }\n",
+	    "bracketed", "a bracketed address with something after it is refused");
+	document = compiles("global { dns { mode = \"dnsmasq\"; servers = [\"2001:db8::1:5353\"] } }\n",
+	    "an unbracketed IPv6 address is an address, its colons its own");
+	if (document) {
+		check(document->globals.dns.server_count == 1u &&
+		    !document->globals.dns.servers[0].port.has,
+		    "  with no port read out of it");
+		ncfg_document_free(document);
+	}
 	refuses("global { dns { mode = \"wombat\" } }\n", "unknown dns mode",
 	    "an unknown dns mode is refused");
 	refuses("global { dns { servers = [\"not-an-address\"] } }\n", "is not an IP address",

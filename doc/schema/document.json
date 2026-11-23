@@ -10,8 +10,7 @@
       "servers": [
         {
           "addr": "192.0.2.53",
-          "port": 853,
-          "sni": "dns.example"
+          "port": 853
         }
       ],
       "search": [
@@ -23,11 +22,8 @@
           "exclusive": true
         }
       ],
-      "options": [
-        "ndots:2"
-      ],
-      "dnssec": "yes",
-      "transport": "tls"
+      "options": [],
+      "transport": "plain"
     },
     "on_drift_default": "report",
     "confirm_default": 90,
@@ -967,19 +963,15 @@
         "servers": [
           {
             "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "port": 853
           }
         ],
         "search": [
           "example"
         ],
         "domains": [],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "options": [],
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -1101,9 +1093,7 @@
         "mode": "write_resolv_conf",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -1113,8 +1103,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -1236,9 +1225,7 @@
         "mode": "resolvconf",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -1248,8 +1235,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -1371,9 +1357,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -1388,8 +1372,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -1525,9 +1508,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
+        "options": [],
         "dnssec": "yes",
         "transport": "tls"
       },
@@ -1652,8 +1633,7 @@
         "servers": [
           {
             "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "port": 853
           }
         ],
         "search": [
@@ -1665,11 +1645,8 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "options": [],
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -1805,10 +1782,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
+        "options": [],
         "transport": "tls"
       },
       "hooks": [
@@ -1945,10 +1919,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
-        "dnssec": "yes",
+        "options": [],
         "transport": "tls"
       },
       "hooks": [
@@ -2071,9 +2042,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2088,8 +2057,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -2211,9 +2179,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2228,8 +2194,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -2351,9 +2316,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2368,8 +2331,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -2491,9 +2453,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2508,8 +2468,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -2631,9 +2590,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2648,8 +2605,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -2771,9 +2727,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2788,8 +2742,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -2911,9 +2864,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -2928,8 +2879,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3051,9 +3001,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3068,8 +3016,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3191,9 +3138,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3208,8 +3153,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3331,9 +3275,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3348,8 +3290,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3471,9 +3412,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3488,8 +3427,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3611,9 +3549,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3628,8 +3564,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3751,9 +3686,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3768,8 +3701,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -3891,9 +3823,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -3908,8 +3838,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -4031,9 +3960,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -4048,8 +3975,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -4171,9 +4097,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -4188,8 +4112,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -4311,9 +4234,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -4328,8 +4249,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -4451,9 +4371,7 @@
         "mode": "openresolv",
         "servers": [
           {
-            "addr": "192.0.2.53",
-            "port": 853,
-            "sni": "dns.example"
+            "addr": "192.0.2.53"
           }
         ],
         "search": [
@@ -4468,8 +4386,7 @@
         "options": [
           "ndots:2"
         ],
-        "dnssec": "yes",
-        "transport": "tls"
+        "transport": "plain"
       },
       "hooks": [
         {
@@ -4616,9 +4533,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
+        "options": [],
         "dnssec": "yes",
         "transport": "tls"
       },
@@ -4693,9 +4608,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
+        "options": [],
         "dnssec": "yes",
         "transport": "tls"
       },
@@ -4770,9 +4683,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
+        "options": [],
         "dnssec": "yes",
         "transport": "tls"
       },
@@ -4852,9 +4763,7 @@
             "exclusive": true
           }
         ],
-        "options": [
-          "ndots:2"
-        ],
+        "options": [],
         "dnssec": "yes",
         "transport": "tls"
       },

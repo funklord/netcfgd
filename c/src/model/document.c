@@ -675,6 +675,14 @@ int ncfg_dns_mode_can_route(int mode)
 	}
 }
 
+int ncfg_dns_sni_valid(const char *name)
+{
+	size_t length = name ? strlen(name) : 0u;
+
+	return length > 0u && length <= 253u &&
+	    strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") == length;
+}
+
 int ncfg_dns_policy_needs_routing(const ncfg_dns_policy_t *policy)
 {
 	return policy && policy->domain_count != 0;
