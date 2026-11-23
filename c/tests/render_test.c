@@ -452,7 +452,8 @@ static void render_the_witness(int argc, char **argv)
 		 * the next reader think the gap is still open. */
 		/* `ethtool settings` and the blanket `qdisc` were here and render now; the
 		 * ingress-metering half of a qdisc is still refused and is below. */
-		"a match block", "a qdisc metering arriving traffic",
+		/* `a match block` was here; the device's `match` left the model (0339). */
+		"a qdisc metering arriving traffic",
 		/* `ingress_redirect` was a blanket refusal and is now a specific
 		 * one: the shaper is undone where the pair is the shape this build
 		 * makes, and named where it is not. Every device in the witness
@@ -2373,7 +2374,7 @@ static void the_refusals_no_config_file_can_reach(void)
 	    "\"options\":[\"ndots:2\"],\"dnssec\":\"yes\",\"transport\":\"tls\"}},"
 	    NO_DEVICES NO_INTERFACES NO_NETWORKS));
 	char *device = refusals_of_json(DOC(PLAIN_GLOBALS "\"devices\":[{\"name\":\"eth0\","
-	    "\"match\":{\"driver\":\"e1000e\"},\"ingress_redirect\":\"ifb-eth0\","
+	    "\"ingress_redirect\":\"ifb-eth0\","
 	    "\"qdisc\":{\"kind\":\"cake\"}}]," NO_INTERFACES NO_NETWORKS));
 
 	check(holds(dns, "global: dns options") && holds(dns, "global: dnssec") &&
@@ -2389,10 +2390,9 @@ static void the_refusals_no_config_file_can_reach(void)
 	 * be undone and the message says which device is missing. A pair this
 	 * build would have made is undone instead, which
 	 * `an_ingress_shaper_is_undone` covers. */
-	check(holds(device, "device eth0: a match block") &&
-	    holds(device, "device eth0: an ingress redirect to `ifb-eth0`") &&
+	check(holds(device, "device eth0: an ingress redirect to `ifb-eth0`") &&
 	    lacks(device, "device eth0: qdisc"),
-	    "and a device's match, and a redirect onto a device that is not there");
+	    "and a redirect onto a device that is not there");
 	free(dns);
 	free(device);
 }

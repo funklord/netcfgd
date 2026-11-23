@@ -756,12 +756,13 @@ static int our_ifb_name(const char *name, const char *shaped)
  * 2026-11-07 `radio` (10.748), and 616, 624, then 640 from 2026-11-14 `xfrm`
  * and its `report_writer`, `connection` and `child` (0323, 10.863, 10.864) --
  * configs a synthesised `ifb` never carries, so `bare_ifb` needs no clause for
- * any of them; nor 656 from 2026-11-21, the bridge's `max_age` (10.889). */
+ * any of them; nor 656 from 2026-11-21, the bridge's `max_age` (10.889). 648
+ * from 2026-11-23, when the device's `match` left the model (0339). */
 /* Only here, because the point is that whoever adds a field meets it, and the
  * figure is an ABI's: i386 and a 32-bit ARM do not even agree with each other,
  * and a build for a router must not stop over a reminder (10.741). */
 #ifdef __x86_64__
-#define NCFG_RENDER_DEVICE_SIZE 656u /* measured, x86-64, 2026-11-21 */
+#define NCFG_RENDER_DEVICE_SIZE 648u /* measured, x86-64, 2026-11-23 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
     "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
 #endif
@@ -795,7 +796,7 @@ static int bare_ifb(const ncfg_device_t *device, int64_t *rate)
 	}
 	/* What it leaves alone, and what must still be alone. */
 	if (!device->managed || device->on_unmanage != NCFG_ON_UNMANAGE_LEAVE ||
-	    device->match || device->wifi || device->modem || device->mtu.has ||
+	    device->wifi || device->modem || device->mtu.has ||
 	    device->mac || device->link_settings || device->master ||
 	    device->ingress_redirect || device->bridge_vlan_count > 0) {
 		return 0;
@@ -1036,14 +1037,6 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		return;
 	}
 	ingress = shaper_rate(document, device);
-
-	/* `match` is one of the six the model has and the configuration language
-	 * cannot reach -- `lower_device` never assigns it -- so this refusal
-	 * cannot fire from a compiled document. It is kept for the reason the DNS
-	 * ones are. */
-	if (device->match) {
-		ncfg_render_refuse(missing, "device", name, "a match block");
-	}
 
 	ncfg_buf_init(&body, 0);
 	if (!device->managed) {

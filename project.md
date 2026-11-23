@@ -7027,6 +7027,8 @@ re-blessed (pre-release, so a minor change under 0038):
 - **The DNS `exec` mode and the RA `exec` backend**, with the script hand-off
   and `ncfg_dns_scopes_json` that existed only for it. The RA one was never
   implemented; the DNS one ran a script as root with the whole policy.
+- **A device's `match`** (`mac`, `path`, `driver`, `name_glob`), which nothing
+  read: a device is named. Renaming by property would be a feature of its own.
 
 A document that still carries one is refused by name ("carries `index`, which
 this build does not know"), which is the reader's rule for every unknown

@@ -1190,19 +1190,6 @@ const char *const *ncfg_offload_field_names(int field, size_t *count);
  */
 int ncfg_link_settings_offload(const ncfg_link_settings_t *settings, int field);
 
-/*
- * How a device is identified. Every present field must match.
- *
- * Matching is preferred over naming because a name is assigned by the kernel
- * and can move between boots, while a MAC or a PCI path does not.
- */
-typedef struct {
-	char *mac;
-	char *path;
-	char *driver;
-	char *name_glob;
-} ncfg_device_match_t;
-
 typedef enum {
 	NCFG_WIFI_BACKEND_AUTO,
 	NCFG_WIFI_BACKEND_IWD,
@@ -1292,8 +1279,10 @@ typedef enum {
 } ncfg_on_unmanage_t;
 
 typedef struct {
-	char                *name; /* kernel name, and the sorting key */
-	ncfg_device_match_t *match; /* NULL where the name alone is enough */
+	/* Kernel name, and the sorting key. A device is named, never matched by
+	 * MAC, path or driver: the `match` that once sat here could not be set
+	 * and was removed by 0339. */
+	char                *name;
 	/* When false, netcfgd never touches this device at all. Enforced at the
 	 * planner's action choke point (0035); before that it was honoured only by
 	 * the filter deciding which devices are radios, so the flag read as

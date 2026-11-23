@@ -1713,15 +1713,6 @@ static const ncfg_field_t link_settings_fields[] = {
 };
 static const ncfg_type_t link_settings_type = TYPE("link settings", link_settings_fields);
 
-static const ncfg_field_t device_match_fields[] = {
-	{ .name = "mac", .kind = NCFG_F_STR, .offset = offsetof(ncfg_device_match_t, mac) },
-	{ .name = "path", .kind = NCFG_F_STR, .offset = offsetof(ncfg_device_match_t, path) },
-	{ .name = "driver", .kind = NCFG_F_STR, .offset = offsetof(ncfg_device_match_t, driver) },
-	{ .name = "name_glob", .kind = NCFG_F_STR,
-	    .offset = offsetof(ncfg_device_match_t, name_glob) }
-};
-static const ncfg_type_t device_match_type = TYPE("device match", device_match_fields);
-
 static const ncfg_field_t wifi_device_fields[] = {
 	{ .name = "backend", .kind = NCFG_F_ENUM, .choices = &wifi_backend_set,
 	    .fallback = NCFG_WIFI_BACKEND_AUTO,
@@ -1756,8 +1747,6 @@ static const ncfg_type_t modem_type = TYPE("modem policy", modem_fields);
 static const ncfg_field_t device_fields[] = {
 	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_device_t, name) },
-	{ .name = "match", .kind = NCFG_F_OPT_STRUCT, .type = &device_match_type,
-	    .element_size = sizeof(ncfg_device_match_t), .offset = offsetof(ncfg_device_t, match) },
 	{ .name = "managed", .kind = NCFG_F_BOOL, .fallback = 1,
 	    .offset = offsetof(ncfg_device_t, managed) },
 	{ .name = "on_unmanage", .kind = NCFG_F_ENUM, .choices = &on_unmanage_set,

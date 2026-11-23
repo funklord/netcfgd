@@ -870,12 +870,6 @@
     },
     {
       "name": "wlan0",
-      "match": {
-        "mac": "02:00:00:00:00:02",
-        "path": "pci-0000:03:00.0",
-        "driver": "iwlwifi",
-        "name_glob": "wl*"
-      },
       "managed": true,
       "on_unmanage": "clear",
       "wifi": {

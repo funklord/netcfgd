@@ -5197,14 +5197,6 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "
 		    "interface it belongs to)");
 	}
-	/* `match` alone (10.613): the configuration language cannot write one, so a
-	 * document holding it came from somewhere a form should not overwrite.
-	 * `master`, `bridge_vlans` and an inexact rate are fields now, and
-	 * `access_control` was never a device's member -- it is an access
-	 * point's -- so naming it here guarded nothing. */
-	if (ncfg_json_type(doc, ncfg_json_member(doc, found, "match")) != NCFG_JSON_NULL) {
-		note_unmodelled(&out->unmodelled, "match");
-	}
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");
 	}
