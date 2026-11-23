@@ -42,7 +42,6 @@
  */
 static const char *const secret_provider_words[] = { "file", "keyring", "pass", "exec",
 	                                             "estate" };
-static const char *const route_scope_words[] = { "global", "link", "host" };
 static const char *const dnssec_words[] = { "no", "allow", "yes" };
 static const char *const dns_transport_words[] = { "plain", "tls", "https" };
 static const char *const vlan_protocol_words[] = { "dot1q", "dot1ad" };
@@ -190,8 +189,6 @@ void ncfg_plan_write_route(ncfg_json_writer_t *writer, const ncfg_route_t *route
 	member_optint(writer, "metric", route->metric);
 	member_optint(writer, "table", route->table);
 	member_text(writer, "src", route->src);
-	member_optenum(writer, "scope", route->scope, route_scope_words,
-	    COUNT(route_scope_words));
 	/* Always written: a plain `bool` in the model, and the ordering rule reads
 	 * it, so a reader that had to guess would be guessing about whether a
 	 * route waits for an address. */

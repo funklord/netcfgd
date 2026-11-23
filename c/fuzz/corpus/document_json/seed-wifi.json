@@ -45,10 +45,7 @@
       "enabled": true,
       "addressing": [
         {
-          "source": "dhcp4",
-          "hostname_mode": "none",
-          "request_options": [],
-          "backend": "auto"
+          "source": "dhcp4"
         }
       ],
       "routes": [],

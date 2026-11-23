@@ -89,8 +89,6 @@ void ncfg_address_source_release(ncfg_address_source_t *one)
 	free(one->static_address.peer);
 	free(one->delegated.prefix.source);
 	free(one->delegated.suffix);
-	free(one->dhcp4.client_id);
-	free(one->dhcp4.request_options);
 	if (one->dhcp6.prefix_delegation) {
 		free(one->dhcp6.prefix_delegation->hint);
 		free(one->dhcp6.prefix_delegation);

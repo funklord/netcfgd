@@ -104,7 +104,7 @@ static int quiet(const ncfg_plan_t *plan)
 
 #define ADVERTISING_LAN \
 	"{\"name\":\"lan0\",\"addressing\":[],\"advertise\":{\"backend\":\"radvd\"," \
-	"\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}"
+	"\"prefixes\":[{\"source\":\"wan0\",\"subnet\":1}]}}"
 
 #define PLAIN_LAN "{\"name\":\"lan0\",\"addressing\":[]}"
 
@@ -163,7 +163,7 @@ static void the_daemon_waits_for_the_addressing(void)
 	ncfg_plan_t         *plan = planfix_plan(LAN_DEVICE,
 	    "{\"name\":\"lan0\",\"addressing\":[{\"source\":\"static\","
 	    "\"address\":\"2001:db8:0:101::1/64\"}],\"advertise\":{\"backend\":\"radvd\","
-	    "\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}", "", "",
+	    "\"prefixes\":[{\"source\":\"wan0\",\"subnet\":1}]}}", "", "",
 	    "\"links\":[" PLANFIX_LINK("lan0", "") "]," DELEGATION, &document, &observed);
 	const ncfg_action_t *start;
 	const ncfg_action_t *added;

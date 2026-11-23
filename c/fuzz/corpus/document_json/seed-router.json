@@ -64,7 +64,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -89,7 +88,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           }
         ],
@@ -127,15 +125,10 @@
       "enabled": true,
       "addressing": [
         {
-          "source": "dhcp4",
-          "hostname_mode": "none",
-          "request_options": [],
-          "backend": "auto"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": false,
           "prefix_delegation": {
             "length": 56
           }

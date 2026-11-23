@@ -58,9 +58,9 @@ static const char *const psk_proto_words[] = { "wpa2", "wpa3", "wpa2+wpa3" };
 
 /*
  * `dhcp6` and `slaac` carry settings the language expresses as modifiers after
- * the word, and `dhcp` carries settings it cannot express at all.
+ * the word; `dhcp` carries none (0339 removed the lease fields nothing read).
  *
- * The modifiers are written; what has no words is named. `slaac privacy` is
+ * The modifiers are written. `slaac privacy` is
  * worth the distinction on its own: losing it puts a machine back on stable
  * addresses, which is a privacy property the operator chose and which nothing
  * downstream would report.
@@ -78,43 +78,11 @@ static const char *const psk_proto_words[] = { "wpa2", "wpa3", "wpa2+wpa3" };
  * same document, `pd_length` implying `pd`, and writing `pd` out is this
  * module's own choice rather than a correction. 10.441 has the measurement.
  */
-static void render_lease_modifiers(const ncfg_address_source_t *source, ncfg_buf_t *slot,
-    ncfg_unrenderable_t *missing, const char *scope, const char *name)
+static void render_lease_modifiers(const ncfg_address_source_t *source, ncfg_buf_t *slot)
 {
-	if (source->kind == NCFG_ADDRESS_SOURCE_DHCP4) {
-		const ncfg_dhcp4_t *lease = &source->dhcp4;
-
-		/* `dhcp` takes no modifiers at all -- `no_modifiers` in `lower.rs`
-		 * refuses every one -- so each of these is a fact the language has
-		 * nowhere to put. Unreachable from a compiled document, where the
-		 * lease is always the default, and kept for a document that arrived
-		 * some other way. */
-		if (lease->hostname_mode != NCFG_HOSTNAME_MODE_NONE) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp lease's hostname mode");
-		}
-		if (lease->client_id) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp lease's client id");
-		}
-		if (lease->metric.has) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp lease's metric");
-		}
-		if (lease->request_option_count > 0) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp lease's requested options");
-		}
-		if (lease->backend != NCFG_DHCP4_BACKEND_AUTO) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp lease's backend");
-		}
-		return;
-	}
 	if (source->kind == NCFG_ADDRESS_SOURCE_DHCP6) {
 		const ncfg_dhcp6_t *lease = &source->dhcp6;
 
-		if (lease->mode != NCFG_DHCP6_MODE_MANAGED) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp6 lease's mode");
-		}
-		if (lease->rapid_commit) {
-			ncfg_render_refuse(missing, scope, name, "a dhcp6 lease's rapid commit");
-		}
 		if (lease->prefix_delegation) {
 			/* `pd` alone asks for whatever the ISP offers; the other two say
 			 * what to ask for, and each implies `pd` -- so `pd` is written
@@ -216,24 +184,13 @@ static void render_static_address(const ncfg_static_t *address, const char *scop
  * which is this file's rule for every default -- and it is safe here only
  * because the default is a constant in `delegated_source` rather than something
  * derived from the prefix.
- *
- * A prefix's `index` is hardcoded to 0 on the way in, the spelling having no
- * third part, so a non-zero one is named rather than dropped. Same reasoning as
- * `render_advertise`, and the same refusal would be wrong to share: these are
- * two different things a document can carry and an operator fixes them in two
- * different places.
+
  */
-static void render_delegated(const ncfg_delegated_t *delegated, const char *scope,
-    const char *name, ncfg_buf_t *slot, ncfg_unrenderable_t *missing)
+static void render_delegated(const ncfg_delegated_t *delegated, ncfg_buf_t *slot)
 {
 	static const char *const default_suffix = "::1/64";
 	ncfg_buf_t               value;
 
-	if (delegated->prefix.index != 0) {
-		ncfg_render_refuse(missing, scope, name,
-		    "a delegated address naming which delegation it is");
-		return;
-	}
 	ncfg_buf_init(&value, 0);
 	ncfg_buf_addf(&value, "@pd:%s",
 	    delegated->prefix.source ? delegated->prefix.source : "");
@@ -282,8 +239,7 @@ static void render_addressing(const ncfg_address_source_t *sources, size_t count
 			word = "reported";
 			break;
 		case NCFG_ADDRESS_SOURCE_DELEGATED:
-			render_delegated(&source->delegated, scope, name,
-			    ncfg_render_list_next(&config), missing);
+			render_delegated(&source->delegated, ncfg_render_list_next(&config));
 			continue;
 		default:
 			ncfg_render_refuse(missing, scope, name, "%s addressing",
@@ -294,7 +250,7 @@ static void render_addressing(const ncfg_address_source_t *sources, size_t count
 		slot = ncfg_render_list_next(&config);
 		ncfg_buf_add_char(slot, '"');
 		ncfg_buf_add_text(slot, word);
-		render_lease_modifiers(source, slot, missing, scope, name);
+		render_lease_modifiers(source, slot);
 		ncfg_buf_add_char(slot, '"');
 	}
 	ncfg_render_list_emit(body, "\t", "config", &config, 0);
@@ -368,17 +324,6 @@ static void render_routes(const ncfg_route_t *routes, size_t count, const char *
 		 * so a route that needs it fails to install without it. */
 		if (route->onlink) {
 			ncfg_buf_add_text(&phrase, " onlink");
-		}
-		/* No route phrase can express these two -- the keywords are `via`,
-		 * `metric`, `table`, `src` and `onlink` -- so they are named rather
-		 * than written. Reachable only from a document some other producer
-		 * built, which is exactly when a silent drop would be hardest to
-		 * trace. */
-		if (route->scope.has) {
-			ncfg_render_refuse(missing, scope, name, "a route with a scope");
-		}
-		if (route->proto.has) {
-			ncfg_render_refuse(missing, scope, name, "a route with a proto");
 		}
 		ncfg_render_quote(ncfg_render_list_next(&phrases), ncfg_buf_text(&phrase));
 		ncfg_buf_free(&phrase);
@@ -640,13 +585,10 @@ static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "urad
 /*
  * `advertise { }`, which was refused whole.
  *
- * Two of this policy's fields cannot come from a config file and are named
+ * One of this policy's fields cannot come from a config file and is named
  * rather than written. `exec` is in the backend enum and `lower_advertise`
  * accepts only auto, radvd, uradvd and odhcpd, so a policy carrying it arrived some
- * other way and its command has nowhere to go. A prefix's `index` is likewise
- * hardcoded to 0 on the way in -- the reference syntax is `@pd:<interface>` with
- * an optional `/<subnet>` and has no third part -- so a non-zero one would be
- * dropped in silence, which is what this refuses to do.
+ * other way and its command has nowhere to go.
  *
  * **An empty prefix list is refused rather than written**, because a document
  * needs one: `lower_advertise` rejects a block without `prefixes`, so writing
@@ -677,11 +619,6 @@ static void render_advertise(const ncfg_ra_policy_t *policy, const char *name, n
 		const ncfg_prefix_ref_t *prefix = &policy->prefixes[i];
 		ncfg_buf_t               reference;
 
-		if (prefix->index != 0) {
-			ncfg_render_refuse(missing, "interface", name,
-			    "an advertised prefix naming which delegation it is");
-			continue;
-		}
 		ncfg_buf_init(&reference, 0);
 		ncfg_buf_addf(&reference, "@pd:%s", prefix->source ? prefix->source : "");
 		if (prefix->subnet != 0) {

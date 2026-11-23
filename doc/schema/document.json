@@ -930,19 +930,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -956,7 +947,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -975,9 +965,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1037,7 +1025,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -1080,19 +1067,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -1106,7 +1084,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -1125,9 +1102,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1187,7 +1162,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -1230,19 +1204,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -1256,7 +1221,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -1275,9 +1239,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1337,7 +1299,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -1380,19 +1341,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -1406,7 +1358,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -1425,9 +1376,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1492,7 +1441,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -1535,19 +1483,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -1561,7 +1500,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -1580,9 +1518,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1647,7 +1583,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -1690,19 +1625,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -1716,7 +1642,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -1735,9 +1660,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1802,7 +1725,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -1845,19 +1767,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -1871,7 +1784,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -1890,9 +1802,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -1957,7 +1867,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2000,19 +1909,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2026,7 +1926,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2045,9 +1944,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -2114,7 +2011,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2157,19 +2053,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2183,7 +2070,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2202,9 +2088,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -2269,7 +2153,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2312,19 +2195,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2338,7 +2212,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2357,9 +2230,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -2424,7 +2295,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2467,19 +2337,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2493,7 +2354,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2512,9 +2372,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -2579,7 +2437,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2622,19 +2479,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2648,7 +2496,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2667,9 +2514,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -2734,7 +2579,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2777,19 +2621,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2803,7 +2638,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2822,9 +2656,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -2889,7 +2721,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -2932,19 +2763,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -2958,7 +2780,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -2977,9 +2798,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3044,7 +2863,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -3087,19 +2905,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -3113,7 +2922,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -3132,9 +2940,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3199,7 +3005,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -3242,19 +3047,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -3268,7 +3064,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -3287,9 +3082,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3354,7 +3147,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -3397,19 +3189,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -3423,7 +3206,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -3442,9 +3224,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3509,7 +3289,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -3552,19 +3331,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -3578,7 +3348,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -3597,9 +3366,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3664,7 +3431,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -3707,19 +3473,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -3733,7 +3490,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -3752,9 +3508,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3819,7 +3573,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -3862,19 +3615,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -3888,7 +3632,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -3907,9 +3650,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -3974,7 +3715,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4017,19 +3757,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4043,7 +3774,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -4062,9 +3792,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -4129,7 +3857,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4172,19 +3899,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4198,7 +3916,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -4217,9 +3934,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -4284,7 +3999,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4327,19 +4041,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4353,7 +4058,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -4372,9 +4076,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -4439,7 +4141,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4482,19 +4183,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4508,7 +4200,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -4527,9 +4218,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -4594,7 +4283,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4637,19 +4325,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4663,7 +4342,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -4682,9 +4360,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -4749,7 +4425,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4792,19 +4467,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4818,7 +4484,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -4837,9 +4502,7 @@
           "metric": 200,
           "table": 254,
           "src": "192.0.2.1",
-          "scope": "link",
-          "onlink": true,
-          "proto": 110
+          "onlink": true
         }
       ],
       "dns": {
@@ -4904,7 +4567,6 @@
         "prefixes": [
           {
             "source": "wan0",
-            "index": 0,
             "subnet": 0
           }
         ],
@@ -4967,19 +4629,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -4993,7 +4646,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -5054,19 +4706,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -5080,7 +4723,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -5141,19 +4783,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -5167,7 +4800,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"
@@ -5233,19 +4865,10 @@
           "valid_lifetime": 7200
         },
         {
-          "source": "dhcp4",
-          "hostname_mode": "send_fqdn",
-          "client_id": "01:02",
-          "metric": 100,
-          "request_options": [
-            121
-          ],
-          "backend": "dhcpcd"
+          "source": "dhcp4"
         },
         {
           "source": "dhcp6",
-          "mode": "managed",
-          "rapid_commit": true,
           "prefix_delegation": {
             "hint": "2001:db8::/56",
             "length": 56
@@ -5259,7 +4882,6 @@
           "source": "delegated",
           "prefix": {
             "source": "wan0",
-            "index": 0,
             "subnet": 1
           },
           "suffix": "::1/64"

@@ -48,15 +48,13 @@ int ncfg_plan_delegated_address(const ncfg_builder_t *builder,
 		    delegated->prefix.source ? delegated->prefix.source : "<absent>");
 		return 0;
 	}
-	if (delegated->prefix.index < 0 ||
-	    (uint64_t)delegated->prefix.index >= (uint64_t)delegation->prefix_count) {
+	if (delegation->prefix_count == 0u) {
 		ncfg_error_set(err, err_size,
-		    "%s has %zu delegated prefix(es) and this source asks for index %lld",
-		    delegated->prefix.source ? delegated->prefix.source : "<absent>",
-		    delegation->prefix_count, (long long)delegated->prefix.index);
+		    "waiting on a delegated prefix from %s, which has none yet",
+		    delegated->prefix.source ? delegated->prefix.source : "<absent>");
 		return 0;
 	}
-	return ncfg_address_from_delegation(delegation->prefixes[(size_t)delegated->prefix.index],
+	return ncfg_address_from_delegation(delegation->prefixes[0],
 	    delegated->prefix.subnet, delegated->suffix, out, out_size, err, err_size);
 }
 

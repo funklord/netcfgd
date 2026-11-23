@@ -632,7 +632,7 @@ static void a_client_the_document_no_longer_asks_for_is_stopped(void)
 #define DELEGATED_LAN0 \
 	"\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}]," \
 	"\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[{\"source\":\"delegated\"," \
-	"\"prefix\":{\"source\":\"wan0\",\"index\":0,\"subnet\":1},\"suffix\":\"::1/64\"}]}]"
+	"\"prefix\":{\"source\":\"wan0\",\"subnet\":1},\"suffix\":\"::1/64\"}]}]"
 
 #define DELEGATION(prefix) \
 	"\"delegations\":[{\"interface\":\"wan0\",\"prefixes\":[\"" prefix "\"]}]"
@@ -744,7 +744,7 @@ static void a_route_waits_for_the_derived_address_that_covers_its_gateway(void)
 	ncfg_plan_t         *plan = plan_of("{}",
 	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}],"
 	    "\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[{\"source\":\"delegated\","
-	    "\"prefix\":{\"source\":\"wan0\",\"index\":0,\"subnet\":1},\"suffix\":\"::1/64\"}],"
+	    "\"prefix\":{\"source\":\"wan0\",\"subnet\":1},\"suffix\":\"::1/64\"}],"
 	    "\"routes\":[{\"destination\":\"default\",\"via\":\"2001:db8:0:101::ff\"}]}]",
 	    "\"links\":[" LINK_UP("lan0") "]," DELEGATION("2001:db8:0:100::/56"),
 	    &document, &observed);
@@ -771,18 +771,6 @@ static void a_reference_that_cannot_be_resolved_is_said_rather_than_guessed(void
 	    "a delegation that has not arrived is waited for, not guessed at");
 	planfix_release(plan, document, observed);
 
-	plan = plan_of("{}",
-	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}],"
-	    "\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[{\"source\":\"delegated\","
-	    "\"prefix\":{\"source\":\"wan0\",\"index\":3,\"subnet\":0},"
-	    "\"suffix\":\"::1/64\"}]}]",
-	    "\"links\":[" LINK_UP("lan0") "]," DELEGATION("2001:db8:0:100::/56"),
-	    &document, &observed);
-	check(plan && !has_name(plan, "addr.add") &&
-	    planfix_warned(plan, "wan0 has 1 delegated prefix(es) and this source asks for index 3"),
-	    "an index the lease does not carry is named, with how many there were");
-	planfix_release(plan, document, observed);
-
 	/*
 	 * A sub-prefix shorter than the block it is carved from would silently
 	 * widen the interface's route to cover addresses the ISP did not give this
@@ -791,7 +779,7 @@ static void a_reference_that_cannot_be_resolved_is_said_rather_than_guessed(void
 	plan = plan_of("{}",
 	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}],"
 	    "\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[{\"source\":\"delegated\","
-	    "\"prefix\":{\"source\":\"wan0\",\"index\":0,\"subnet\":0},"
+	    "\"prefix\":{\"source\":\"wan0\",\"subnet\":0},"
 	    "\"suffix\":\"::1/48\"}]}]",
 	    "\"links\":[" LINK_UP("lan0") "]," DELEGATION("2001:db8:0:100::/56"),
 	    &document, &observed);

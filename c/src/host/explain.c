@@ -734,8 +734,7 @@ static int indirect_source(const ncfg_document_t *desired, const ncfg_observed_t
 			continue;
 		}
 		delegation = ncfg_observed_delegation(observed, delegated->prefix.source);
-		if (!delegation || delegated->prefix.index < 0 ||
-		    (size_t)delegated->prefix.index >= delegation->prefix_count) {
+		if (!delegation || delegation->prefix_count == 0u) {
 			continue;
 		}
 		/* A malformed pair is simply not this address, so the sentence the
@@ -743,7 +742,7 @@ static int indirect_source(const ncfg_document_t *desired, const ncfg_observed_t
 		 * that shows it, because there the same configuration is what will
 		 * never produce an address at all. */
 		if (!ncfg_address_from_delegation(
-		        delegation->prefixes[(size_t)delegated->prefix.index],
+		        delegation->prefixes[0],
 		        delegated->prefix.subnet, delegated->suffix, derived, sizeof(derived), NULL,
 		        0)) {
 			continue;
@@ -755,7 +754,7 @@ static int indirect_source(const ncfg_document_t *desired, const ncfg_observed_t
 		    "the configuration builds it from `%s`, which %s was delegated as %s",
 		    delegated->suffix ? delegated->suffix : "",
 		    delegated->prefix.source ? delegated->prefix.source : "",
-		    delegation->prefixes[(size_t)delegated->prefix.index]);
+		    delegation->prefixes[0]);
 		(void)snprintf(source, source_size, "%s%s", PREFIXES_DIR,
 		    delegated->prefix.source ? delegated->prefix.source : "");
 		return 1;

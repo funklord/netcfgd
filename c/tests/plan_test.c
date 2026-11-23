@@ -249,8 +249,6 @@ static ncfg_route_t witness_route(void)
 	route.table.has = 1;
 	route.table.value = 254;
 	route.src = LIT("192.168.1.10");
-	route.scope.has = 1;
-	route.scope.value = NCFG_ROUTE_SCOPE_GLOBAL;
 	route.onlink = 1;
 	route.proto.has = 1;
 	route.proto.value = 110;

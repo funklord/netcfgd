@@ -1558,7 +1558,7 @@ static void an_associated_radio_takes_its_networks_metric(void)
 	"\"dns\":{\"mode\":\"write_resolv_conf\",\"servers\":[" \
 	"{\"addr\":\"2001:db8:0:101::1\"},{\"addr\":\"10.0.0.53\"}]}," \
 	"\"advertise\":{\"backend\":\"radvd\"," \
-	"\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}]"
+	"\"prefixes\":[{\"source\":\"wan0\",\"subnet\":1}]}}]"
 
 static void what_an_interface_advertises_is_resolved_for_the_executor(void)
 {
@@ -1660,7 +1660,7 @@ static void an_unmanaged_device_is_not_advertised_on(void)
 	    "\"managed\":false}],"
 	    "\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[],"
 	    "\"advertise\":{\"backend\":\"radvd\","
-	    "\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}]");
+	    "\"prefixes\":[{\"source\":\"wan0\",\"subnet\":1}]}}]");
 	state.observed = observed_of("\"links\":[]," WORLD_DELEGATION);
 	err[0] = '\0';
 	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
@@ -1685,7 +1685,6 @@ static void the_planner_and_the_daemon_resolve_one_reference_the_same_way(void)
 
 	memset(&reference, 0, sizeof(reference));
 	reference.source = (char *)(uintptr_t)"wan0";
-	reference.index = 0;
 	reference.subnet = 1;
 	/*
 	 * **One function, asked twice** -- which is the whole of what lifting it
@@ -1697,10 +1696,6 @@ static void the_planner_and_the_daemon_resolve_one_reference_the_same_way(void)
 	check(ncfg_observed_prefix_of(observed, &reference, mine, sizeof(mine)) &&
 	    strcmp(mine, "2001:db8:0:101::/64") == 0,
 	    "a reference resolves to the block its subnet selector names");
-	reference.index = 7;
-	check(!ncfg_observed_prefix_of(observed, &reference, theirs, sizeof(theirs)),
-	    "and an index the lease does not carry resolves to nothing, not to something wrong");
-	reference.index = 0;
 	reference.source = (char *)(uintptr_t)"nosuch";
 	check(!ncfg_observed_prefix_of(observed, &reference, theirs, sizeof(theirs)),
 	    "and so does a source no delegation is held for");

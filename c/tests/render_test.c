@@ -471,8 +471,8 @@ static void render_the_witness(int argc, char **argv)
 		/* `delegated addressing` and `reported addressing` were here and
 		 * render now, which leaves every address source the model has with
 		 * a rendering. */
-		"a route with a scope", "a route with a proto",
-		"a dhcp lease's client id", "a dhcp lease's requested options",
+		/* A route's scope and proto and a dhcp lease's settings were here,
+		 * and left the model by 0339. */
 		"network n-eap: dns options" };
 	const char         *path = witness_path(argc, argv);
 	size_t              raw_length = 0;
@@ -2375,10 +2375,6 @@ static void the_refusals_no_config_file_can_reach(void)
 	char *device = refusals_of_json(DOC(PLAIN_GLOBALS "\"devices\":[{\"name\":\"eth0\","
 	    "\"match\":{\"driver\":\"e1000e\"},\"ingress_redirect\":\"ifb-eth0\","
 	    "\"qdisc\":{\"kind\":\"cake\"}}]," NO_INTERFACES NO_NETWORKS));
-	char *lease = refusals_of_json(DOC(PLAIN_GLOBALS NO_DEVICES
-	    "\"interfaces\":[{\"name\":\"eth0\",\"addressing\":[{\"source\":\"dhcp4\","
-	    "\"client_id\":\"01:02\",\"backend\":\"dhcpcd\",\"metric\":100}]}],"
-	    NO_NETWORKS));
 
 	check(holds(dns, "global: dns options") && holds(dns, "global: dnssec") &&
 	    holds(dns, "global: dns transport") &&
@@ -2397,13 +2393,8 @@ static void the_refusals_no_config_file_can_reach(void)
 	    holds(device, "device eth0: an ingress redirect to `ifb-eth0`") &&
 	    lacks(device, "device eth0: qdisc"),
 	    "and a device's match, and a redirect onto a device that is not there");
-	check(holds(lease, "interface eth0: a dhcp lease's client id") &&
-	    holds(lease, "interface eth0: a dhcp lease's backend") &&
-	    holds(lease, "interface eth0: a dhcp lease's metric"),
-	    "and a dhcp lease's settings, which `dhcp` takes no modifiers for");
 	free(dns);
 	free(device);
-	free(lease);
 }
 
 /*
@@ -3852,9 +3843,8 @@ static void a_delimiter_inside_a_value_is_refused(void)
  * with no test of its own -- a static address's `peer`.
  *
  * Each is reachable only from a document the configuration language cannot
- * write, which is why no corpus reaches them: the `index` of a delegation has
- * no spelling in `@pd:`, a `peer` is parsed as an address, and an openvpn
- * block without a config file does not compile. A document read from JSON
+ * write, which is why no corpus reaches them: a `peer` is parsed as an
+ * address, and an openvpn block without a config file does not compile. A document read from JSON
  * holds all of them.
  */
 static void the_refusals_no_corpus_reaches(void)
@@ -3877,32 +3867,13 @@ static void the_refusals_no_corpus_reaches(void)
 	}
 	ncfg_document_free(document);
 
-	/* `index` says which of several delegations, and `@pd:` has no spelling for
-	 * it, so the renderer refuses rather than losing it. */
-	document = compiled("interface br0 {\n\tconfig = [\"@pd:wan0\"]\n}\n",
-	    "a case's own delegation");
-	if (document && document->interface_count == 1u
-	    && document->interfaces[0].addressing_count == 1u) {
-		check(renders(document), "a delegation renders, which is the control");
-		document->interfaces[0].addressing[0].delegated.prefix.index = 1;
-		check(refusal_names(document, "br0", "which delegation it is"),
-		    "  and one naming which delegation it is is refused");
-	}
-	ncfg_document_free(document);
-
-	/* The same member on an advertised prefix, which is a separate site. */
+	/* An advertise block's refusals. */
 	document = compiled("interface br0 {\n\tconfig = [\"192.168.1.1/24\"]\n"
 	    "\tadvertise { prefixes = [\"@pd:wan0\"] }\n}\n", "a case's own advertise block");
 	if (document && document->interface_count == 1u && document->interfaces[0].advertise) {
 		ncfg_ra_policy_t *policy = document->interfaces[0].advertise;
 
 		check(renders(document), "an advertise block renders, which is the control");
-		if (policy->prefix_count > 0u) {
-			policy->prefixes[0].index = 1;
-			check(refusal_names(document, "br0", "which delegation it is"),
-			    "  and an advertised prefix naming one is refused");
-			policy->prefixes[0].index = 0;
-		}
 		/* An advertise block with nothing to advertise, and one whose backend is
 		 * `exec` -- the compiler accepts both so the renderer can say so. */
 		policy->backend.kind = NCFG_RA_BACKEND_EXEC;
@@ -4000,21 +3971,6 @@ static void the_arms_line_coverage_missed(void)
 		vpn->config = NULL;
 		check(refusal_names(document, "vpn0", "no config file"),
 		    "  and a tunnel with no config file is refused");
-	}
-	ncfg_document_free(document);
-
-	/* A dhcp6 lease asking for a mode, which the language has no key for. */
-	document = compiled("interface eth0 {\n\tconfig = [\"dhcp6\"]\n}\n",
-	    "a case's own dhcp6 interface");
-	check(document != NULL && document->interface_count == 1u
-	    && document->interfaces[0].addressing_count == 1u,
-	    "a dhcp6 interface compiles");
-	if (document && document->interface_count == 1u
-	    && document->interfaces[0].addressing_count == 1u) {
-		check(renders(document), "  and renders, which is the control");
-		document->interfaces[0].addressing[0].dhcp6.mode = NCFG_DHCP6_MODE_OTHER_CONF;
-		check(refusal_names(document, "eth0", "dhcp6 lease's mode"),
-		    "  and a lease naming a mode is refused");
 	}
 	ncfg_document_free(document);
 }

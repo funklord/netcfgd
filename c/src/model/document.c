@@ -89,14 +89,8 @@ static const char *const secret_provider_words[] = { "file", "keyring", "pass", 
 	                                             "estate" };
 static const ncfg_enum_t secret_provider_set = WORD_SET("secret provider", secret_provider_words);
 
-static const char *const hostname_mode_words[] = { "none", "send", "send_fqdn" };
-static const ncfg_enum_t hostname_mode_set = WORD_SET("hostname mode", hostname_mode_words);
 
-static const char *const dhcp4_backend_words[] = { "auto", "dhcpcd", "udhcpc", "builtin" };
-static const ncfg_enum_t dhcp4_backend_set = WORD_SET("dhcp4 backend", dhcp4_backend_words);
 
-static const char *const dhcp6_mode_words[] = { "managed", "other_conf" };
-static const ncfg_enum_t dhcp6_mode_set = WORD_SET("dhcp6 mode", dhcp6_mode_words);
 
 static const char *const slaac_privacy_words[] = { "none", "prefer_temporary" };
 static const ncfg_enum_t slaac_privacy_set = WORD_SET("slaac privacy", slaac_privacy_words);
@@ -105,8 +99,6 @@ static const char *const address_source_words[] = { "static", "delegated", "dhcp
 	"slaac", "link_local", "reported" };
 static const ncfg_enum_t address_source_set = WORD_SET("addressing source", address_source_words);
 
-static const char *const route_scope_words[] = { "global", "link", "host" };
-static const ncfg_enum_t route_scope_set = WORD_SET("route scope", route_scope_words);
 
 static const char *const dnssec_words[] = { "no", "allow", "yes" };
 static const ncfg_enum_t dnssec_set = WORD_SET("dnssec posture", dnssec_words);
@@ -788,7 +780,6 @@ static const ncfg_type_t secret_ref_type = TYPE("secret reference", secret_ref_f
 static const ncfg_field_t prefix_ref_fields[] = {
 	{ .name = "source", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_prefix_ref_t, source) },
-	{ .name = "index", .kind = NCFG_F_INT, R_U8, .offset = offsetof(ncfg_prefix_ref_t, index) },
 	{ .name = "subnet", .kind = NCFG_F_INT, R_U16,
 	    .offset = offsetof(ncfg_prefix_ref_t, subnet) }
 };
@@ -824,24 +815,9 @@ static const ncfg_field_t pd_request_fields[] = {
 };
 static const ncfg_type_t pd_request_type = TYPE("prefix delegation request", pd_request_fields);
 
-static const ncfg_field_t dhcp4_fields[] = {
-	{ .name = "hostname_mode", .kind = NCFG_F_ENUM, .choices = &hostname_mode_set,
-	    .fallback = NCFG_HOSTNAME_MODE_NONE, .offset = offsetof(ncfg_dhcp4_t, hostname_mode) },
-	{ .name = "client_id", .kind = NCFG_F_STR, .offset = offsetof(ncfg_dhcp4_t, client_id) },
-	{ .name = "metric", .kind = NCFG_F_OPT_INT, R_U32, .offset = offsetof(ncfg_dhcp4_t, metric) },
-	{ .name = "request_options", .kind = NCFG_F_INT_LIST, R_U8,
-	    .offset = offsetof(ncfg_dhcp4_t, request_options),
-	    .count_offset = offsetof(ncfg_dhcp4_t, request_option_count) },
-	{ .name = "backend", .kind = NCFG_F_ENUM, .choices = &dhcp4_backend_set,
-	    .fallback = NCFG_DHCP4_BACKEND_AUTO, .offset = offsetof(ncfg_dhcp4_t, backend) }
-};
-static const ncfg_type_t dhcp4_type = TAGGED("dhcp4 lease", dhcp4_fields, "source");
+static const ncfg_type_t dhcp4_type = { "dhcp4 lease", NULL, 0, "source" };
 
 static const ncfg_field_t dhcp6_fields[] = {
-	{ .name = "mode", .kind = NCFG_F_ENUM, .choices = &dhcp6_mode_set,
-	    .fallback = NCFG_DHCP6_MODE_MANAGED, .offset = offsetof(ncfg_dhcp6_t, mode) },
-	{ .name = "rapid_commit", .kind = NCFG_F_BOOL,
-	    .offset = offsetof(ncfg_dhcp6_t, rapid_commit) },
 	{ .name = "prefix_delegation", .kind = NCFG_F_OPT_STRUCT, .type = &pd_request_type,
 	    .element_size = sizeof(ncfg_pd_request_t),
 	    .offset = offsetof(ncfg_dhcp6_t, prefix_delegation) }
@@ -892,7 +868,7 @@ static int address_source_read(const ncfg_json_doc_t *doc, uint32_t node, void *
 		break;
 	case NCFG_ADDRESS_SOURCE_DHCP4:
 		type = &dhcp4_type;
-		payload = &source->dhcp4;
+		payload = &source->kind;
 		break;
 	case NCFG_ADDRESS_SOURCE_DHCP6:
 		type = &dhcp6_type;
@@ -934,9 +910,6 @@ static void address_source_write(ncfg_json_writer_t *writer, const void *field)
 	case NCFG_ADDRESS_SOURCE_DELEGATED:
 		ncfg_type_write(&delegated_type, writer, &source->delegated);
 		break;
-	case NCFG_ADDRESS_SOURCE_DHCP4:
-		ncfg_type_write(&dhcp4_type, writer, &source->dhcp4);
-		break;
 	case NCFG_ADDRESS_SOURCE_DHCP6:
 		ncfg_type_write(&dhcp6_type, writer, &source->dhcp6);
 		break;
@@ -960,7 +933,6 @@ static void address_source_release(void *field)
 
 	ncfg_type_free(&static_type, &source->static_address);
 	ncfg_type_free(&delegated_type, &source->delegated);
-	ncfg_type_free(&dhcp4_type, &source->dhcp4);
 	ncfg_type_free(&dhcp6_type, &source->dhcp6);
 	ncfg_type_free(&slaac_type, &source->slaac);
 }
@@ -981,10 +953,7 @@ static const ncfg_field_t route_fields[] = {
 	{ .name = "table", .kind = NCFG_F_OPT_INT, R_U32, .offset = offsetof(ncfg_route_t, table) },
 	{ .name = "src", .kind = NCFG_F_CUSTOM, .custom = &address_text,
 	    .offset = offsetof(ncfg_route_t, src) },
-	{ .name = "scope", .kind = NCFG_F_OPT_ENUM, .choices = &route_scope_set,
-	    .offset = offsetof(ncfg_route_t, scope) },
-	{ .name = "onlink", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_route_t, onlink) },
-	{ .name = "proto", .kind = NCFG_F_OPT_INT, R_U8, .offset = offsetof(ncfg_route_t, proto) }
+	{ .name = "onlink", .kind = NCFG_F_BOOL, .offset = offsetof(ncfg_route_t, onlink) }
 };
 static const ncfg_type_t route_type = TYPE("route", route_fields);
 

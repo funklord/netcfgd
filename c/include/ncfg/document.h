@@ -172,42 +172,13 @@ typedef struct {
 #define NCFG_DELEGATION_SOURCE_MAX 63
 
 typedef struct {
-	char   *source; /* interface whose delegation supplies it */
-	int64_t index;  /* which delegated prefix; u8 */
+	char   *source; /* interface whose delegation supplies it; its first prefix */
 	int64_t subnet; /* sub-prefix selector; u16 */
 } ncfg_prefix_ref_t;
 
 /* ------------------------------------------------------------------------ *
  * Addressing sources
  * ------------------------------------------------------------------------ */
-
-/* Whether and how to send a hostname in a DHCP request. */
-typedef enum {
-	NCFG_HOSTNAME_MODE_NONE,
-	NCFG_HOSTNAME_MODE_SEND,
-	NCFG_HOSTNAME_MODE_SEND_FQDN
-} ncfg_hostname_mode_t;
-
-/*
- * Which DHCPv4 client runs.
- *
- * `builtin` is recognised and unimplemented. It is in the set because adding a
- * variant after the freeze is a major version bump, and a build without the
- * client must fail with "this build has no built-in DHCP client" rather than
- * "unknown value" (`doc/decision/0004`).
- */
-typedef enum {
-	NCFG_DHCP4_BACKEND_AUTO,
-	NCFG_DHCP4_BACKEND_DHCPCD,
-	NCFG_DHCP4_BACKEND_UDHCPC,
-	NCFG_DHCP4_BACKEND_BUILTIN
-} ncfg_dhcp4_backend_t;
-
-/* DHCPv6 operating mode. */
-typedef enum {
-	NCFG_DHCP6_MODE_MANAGED,
-	NCFG_DHCP6_MODE_OTHER_CONF
-} ncfg_dhcp6_mode_t;
 
 /* IPv6 privacy address handling. */
 typedef enum {
@@ -235,20 +206,16 @@ typedef struct {
 	ncfg_optint_t length;
 } ncfg_pd_request_t;
 
-/* A DHCPv4 lease. */
+/*
+ * A DHCPv6 lease, optionally including prefix delegation.
+ *
+ * A DHCPv4 lease has no struct at all: what a client sends (a hostname, a
+ * client id, the options it asks for) is said in the operator's own
+ * `dhcpcd.conf`, which the client is started on, and which client runs is
+ * what is installed. The fields that once said those things were never read
+ * and were removed by 0339; so were this one's `mode` and `rapid_commit`.
+ */
 typedef struct {
-	int           hostname_mode; /* ncfg_hostname_mode_t */
-	char         *client_id;
-	ncfg_optint_t metric;
-	int64_t      *request_options; /* DHCP option numbers */
-	size_t        request_option_count;
-	int           backend; /* ncfg_dhcp4_backend_t */
-} ncfg_dhcp4_t;
-
-/* A DHCPv6 lease, optionally including prefix delegation. */
-typedef struct {
-	int                mode; /* ncfg_dhcp6_mode_t */
-	int                rapid_commit;
 	ncfg_pd_request_t *prefix_delegation; /* NULL where none is asked for */
 } ncfg_dhcp6_t;
 
@@ -285,7 +252,6 @@ typedef struct {
 	int              kind; /* ncfg_address_source_kind_t */
 	ncfg_static_t    static_address;
 	ncfg_delegated_t delegated;
-	ncfg_dhcp4_t     dhcp4;
 	ncfg_dhcp6_t     dhcp6;
 	ncfg_slaac_t     slaac;
 } ncfg_address_source_t;
@@ -318,23 +284,20 @@ int ncfg_address_source_is_singleton(int kind);
  * this or every unqualified route looks absent and is reinstalled. */
 #define NCFG_ROUTE_MAIN_TABLE 254
 
-typedef enum {
-	NCFG_ROUTE_SCOPE_GLOBAL,
-	NCFG_ROUTE_SCOPE_LINK,
-	NCFG_ROUTE_SCOPE_HOST
-} ncfg_route_scope_t;
-
 typedef struct {
 	char         *destination; /* CIDR, or `default` */
 	char         *via;         /* next hop; an address, never a prefix */
 	ncfg_optint_t metric;
 	ncfg_optint_t table;
 	char         *src; /* preferred source address */
-	ncfg_optint_t scope; /* ncfg_route_scope_t where `has` */
 	/* Next hop is on-link though no address covers it. Exempts this route
 	 * from the ordering rule that puts `addr.add` before `route.add`. */
 	int           onlink;
-	ncfg_optint_t proto; /* absent means NCFG_ROUTE_PROTO on install */
+	/* Never in a document: a route netcfgd installs always carries
+	 * NCFG_ROUTE_PROTO, which is how it knows the route is its own (0002).
+	 * The planner sets it on a route it removes, to the protocol the kernel
+	 * reported, so the delete names the route that is there (0339). */
+	ncfg_optint_t proto;
 } ncfg_route_t;
 
 /*

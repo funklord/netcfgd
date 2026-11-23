@@ -306,7 +306,7 @@ static void a_delegated_address_names_the_delegation_it_came_from(void)
 	ncfg_document_t     *document = document_of(
 	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}],"
 	    "\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[{\"source\":\"delegated\","
-	    "\"prefix\":{\"source\":\"wan0\",\"index\":0,\"subnet\":0},\"suffix\":\"::1/64\"}]}]");
+	    "\"prefix\":{\"source\":\"wan0\",\"subnet\":0},\"suffix\":\"::1/64\"}]}]");
 	ncfg_observed_t     *observed = observed_of(
 	    "\"addresses\":[{\"interface\":\"lan0\",\"address\":\"2001:db8:1234::1/64\","
 	    "\"proto\":110,\"ownership\":\"ours\",\"origin\":\"delegated\"}],"

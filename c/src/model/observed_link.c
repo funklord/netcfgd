@@ -368,8 +368,7 @@ int ncfg_observed_prefix_of(const ncfg_observed_t *observed, const ncfg_prefix_r
 	if (!delegation) {
 		return 0;
 	}
-	if (reference->index < 0 ||
-	    (uint64_t)reference->index >= (uint64_t)delegation->prefix_count) {
+	if (delegation->prefix_count == 0u) {
 		return 0;
 	}
 	/*
@@ -379,7 +378,7 @@ int ncfg_observed_prefix_of(const ncfg_observed_t *observed, const ncfg_prefix_r
 	 * explanation is the planner, which says it about the reference rather
 	 * than about the arithmetic.
 	 */
-	return ncfg_address_from_delegation(delegation->prefixes[(size_t)reference->index],
+	return ncfg_address_from_delegation(delegation->prefixes[0],
 	    reference->subnet, "::/64", out, out_size, NULL, 0);
 }
 

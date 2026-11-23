@@ -35,7 +35,7 @@ static void check(int condition, const char *what)
 	"{\"name\":\"established\",\"action\":\"accept\",\"states\":[\"established\",\"related\"]}"
 #define WAN_DEVICE "{\"name\":\"wan0\",\"kind\":{\"kind\":\"physical\"}}"
 #define WAN(sources) "{\"name\":\"wan0\",\"addressing\":[" sources "]}"
-#define DHCP6 "{\"source\":\"dhcp6\",\"mode\":\"managed\",\"rapid_commit\":false}"
+#define DHCP6 "{\"source\":\"dhcp6\"}"
 #define DHCP4 "{\"source\":\"dhcp4\"}"
 #define WG_DEVICE \
 	"{\"name\":\"wg0\",\"kind\":{\"kind\":\"wire_guard\"," \

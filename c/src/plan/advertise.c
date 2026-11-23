@@ -68,8 +68,7 @@ static int resolvable(const ncfg_builder_t *builder, const ncfg_ra_policy_t *pol
 		const ncfg_delegation_t *delegation =
 		    ncfg_observed_delegation(builder->observed, policy->prefixes[i].source);
 
-		if (delegation && policy->prefixes[i].index >= 0 &&
-		    (uint64_t)policy->prefixes[i].index < (uint64_t)delegation->prefix_count) {
+		if (delegation && delegation->prefix_count > 0u) {
 			return 1;
 		}
 	}

@@ -214,7 +214,6 @@ static int dhcp6_source(ncfg_lower_ctx_t *ctx, const entry_t *entry, ncfg_addres
 
 	memset(&request, 0, sizeof(request));
 	out->kind = NCFG_ADDRESS_SOURCE_DHCP6;
-	out->dhcp6.mode = NCFG_DHCP6_MODE_MANAGED;
 	for (i = 0; i < entry->modifier_count; i++) {
 		const char *keyword = entry->modifiers[i].keyword;
 		const char *argument = entry->modifiers[i].argument;
@@ -333,7 +332,6 @@ static int delegated_source(ncfg_lower_ctx_t *ctx, const entry_t *entry,
 	}
 	out->kind = NCFG_ADDRESS_SOURCE_DELEGATED;
 	out->delegated.prefix.source = ncfg_dup(ctx, source);
-	out->delegated.prefix.index = 0;
 	out->delegated.prefix.subnet = subnet;
 	out->delegated.suffix = ncfg_dup(ctx, suffix);
 	return 1;
@@ -377,8 +375,6 @@ static int address_source(ncfg_lower_ctx_t *ctx, const entry_t *entry, ncfg_addr
 			return 0;
 		}
 		out->kind = NCFG_ADDRESS_SOURCE_DHCP4;
-		out->dhcp4.hostname_mode = NCFG_HOSTNAME_MODE_NONE;
-		out->dhcp4.backend = NCFG_DHCP4_BACKEND_AUTO;
 		return 1;
 	}
 	if (strcmp(text, "dhcp6") == 0 || strcmp(text, "dhcpv6") == 0) {

@@ -148,11 +148,11 @@ static void a_firewall_that_drops_the_requests_is_said(void)
 #define STATIC6 "{\"source\":\"static\",\"address\":\"fd00::1/64\"}"
 /* `advertise` takes a delegated prefix only, so the managed case is one. */
 #define DELEGATED6 \
-	"{\"source\":\"delegated\",\"prefix\":{\"source\":\"wan0\",\"index\":0," \
+	"{\"source\":\"delegated\",\"prefix\":{\"source\":\"wan0\"," \
 	"\"subnet\":1},\"suffix\":\"::1/64\"}"
 #define MANAGED \
 	",\"advertise\":{\"backend\":\"auto\",\"prefixes\":[{\"source\":\"wan0\"," \
-	"\"index\":0,\"subnet\":1}],\"managed\":true,\"other_config\":false,\"dns\":true}"
+	"\"subnet\":1}],\"managed\":true,\"other_config\":false,\"dns\":true}"
 
 static void a_dhcpv6_range_nobody_is_told_of_is_said(void)
 {

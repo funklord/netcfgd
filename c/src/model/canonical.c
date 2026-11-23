@@ -310,10 +310,6 @@ static int compare_route(const void *left, const void *right)
 	if (difference != 0) {
 		return difference;
 	}
-	difference = compare_optint(&one->scope, &other->scope);
-	if (difference != 0) {
-		return difference;
-	}
 	difference = compare_flag(one->onlink, other->onlink);
 	if (difference != 0) {
 		return difference;
@@ -371,9 +367,6 @@ static int compare_prefix_ref(const void *left, const void *right)
 
 	if (difference != 0) {
 		return difference;
-	}
-	if (one->index != other->index) {
-		return one->index < other->index ? -1 : 1;
 	}
 	if (one->subnet != other->subnet) {
 		return one->subnet < other->subnet ? -1 : 1;

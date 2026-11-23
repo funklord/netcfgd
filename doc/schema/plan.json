@@ -242,7 +242,6 @@
           "metric": 700,
           "table": 254,
           "src": "192.168.1.10",
-          "scope": "global",
           "onlink": true,
           "proto": 110
         }
@@ -265,7 +264,6 @@
           "metric": 700,
           "table": 254,
           "src": "192.168.1.10",
-          "scope": "global",
           "onlink": true,
           "proto": 110
         }
@@ -283,7 +281,6 @@
           "metric": 700,
           "table": 254,
           "src": "192.168.1.10",
-          "scope": "global",
           "onlink": true,
           "proto": 110
         }
@@ -306,7 +303,6 @@
           "metric": 700,
           "table": 254,
           "src": "192.168.1.10",
-          "scope": "global",
           "onlink": true,
           "proto": 110
         }

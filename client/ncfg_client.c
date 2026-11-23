@@ -4181,9 +4181,6 @@ static int source_text(const ncfg_json_doc_t *doc, uint32_t entry, const char *s
 			free(suffix);
 			return 0;
 		}
-		if (ncfg_json_int(doc, ncfg_json_member(doc, prefix, "index"), 0) != 0) {
-			note_unmodelled(unmodelled, "addressing (a delegation's index)");
-		}
 		if (subnet) {
 			(void)snprintf(text, sizeof(text), "@pd:%s/%lld=%s", from, subnet, suffix);
 		} else {
@@ -4209,16 +4206,7 @@ static int source_text(const ncfg_json_doc_t *doc, uint32_t entry, const char *s
 	}
 	if (strcmp(source, "dhcp6") == 0) {
 		uint32_t pd = ncfg_json_member(doc, entry, "prefix_delegation");
-		char    *mode = member_text(doc, entry, "mode");
 
-		if (!mode) {
-			return 0;
-		}
-		if ((mode[0] && strcmp(mode, "managed") != 0)
-		    || ncfg_json_bool(doc, ncfg_json_member(doc, entry, "rapid_commit"), 0)) {
-			note_unmodelled(unmodelled, "addressing (a dhcp6 mode or rapid commit)");
-		}
-		free(mode);
 		if (ncfg_json_type(doc, pd) != NCFG_JSON_OBJECT) {
 			return 1;
 		}
@@ -4237,23 +4225,6 @@ static int source_text(const ncfg_json_doc_t *doc, uint32_t entry, const char *s
 
 		free(privacy);
 		return ok;
-	}
-	if (strcmp(source, "dhcp4") == 0) {
-		char *mode = member_text(doc, entry, "hostname_mode");
-		char *backend = member_text(doc, entry, "backend");
-		char *client_id = member_text(doc, entry, "client_id");
-		int   beyond = (mode && mode[0] && strcmp(mode, "none") != 0)
-		    || (backend && backend[0] && strcmp(backend, "auto") != 0)
-		    || (client_id && client_id[0])
-		    || ncfg_json_type(doc, ncfg_json_member(doc, entry, "metric")) == NCFG_JSON_NUMBER
-		    || ncfg_json_count(doc, ncfg_json_member(doc, entry, "request_options")) != 0;
-
-		free(mode);
-		free(backend);
-		free(client_id);
-		if (beyond) {
-			note_unmodelled(unmodelled, "addressing (a dhcp4 option)");
-		}
 	}
 	return 1;
 }
@@ -4325,18 +4296,6 @@ static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_route_t *
 		(*into)[i].onlink = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "onlink"), 0);
 		if (!(*into)[i].destination || !(*into)[i].via || !(*into)[i].src) {
 			return 0;
-		}
-		/* `scope` and `proto` alone (10.615): the route line has no word for
-		 * either, so a document holding one came from somewhere a form
-		 * should not overwrite. `src`, `table` and `onlink` are columns now. */
-		static const char *const beyond[] = { "scope", "proto" };
-		for (size_t j = 0; j < sizeof(beyond) / sizeof(beyond[0]); j++) {
-			uint32_t extra = ncfg_json_member(doc, entry, beyond[j]);
-			if (extra == NCFG_JSON_NONE || ncfg_json_type(doc, extra) == NCFG_JSON_NULL) {
-				continue;
-			}
-			note_unmodelled(unmodelled, "routes (a scope or protocol)");
-			break;
 		}
 	}
 	return 1;
@@ -5562,10 +5521,6 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 				char      one[160];
 				char     *grown;
 
-				if (ncfg_json_int(doc, ncfg_json_member(doc, ref, "index"), 0) != 0) {
-					note_unmodelled(&out->unmodelled,
-					    "advertise (a prefix naming which delegation it is)");
-				}
 				if (subnet) {
 					snprintf(one, sizeof(one), "@pd:%s/%lld", source ? source : "", subnet);
 				} else {

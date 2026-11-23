@@ -1016,7 +1016,6 @@ static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 					goto drop;
 				}
 				slot->source = ncfg_dup(ctx, name);
-				slot->index = 0;
 				slot->subnet = subnet;
 			}
 			ncfg_words_free(&words);

@@ -7006,6 +7006,24 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.908 The fields nothing read leave the model (0339)
+
+The holder's answer of 2026-11-23: what the language cannot reach goes, unless
+it has behaviour and an obvious need. Done in groups, each with the witnesses
+re-blessed (pre-release, so a minor change under 0038):
+
+- **A DHCP lease's settings.** `dhcp4` carries no fields now -- its
+  `hostname_mode`, `client_id`, `metric`, `request_options` and `backend` are
+  gone, and so are `dhcp6`'s `mode` and `rapid_commit`. dhcpcd runs on the
+  operator's `dhcpcd.conf`, and the client's metric comes from the interface.
+- **A route's `scope` and `proto`, and a prefix reference's `index`.** `proto`
+  stays in `ncfg_route_t` as the planner's: a route it removes carries the
+  protocol the kernel reported. A reference names its source's first prefix.
+
+A document that still carries one is refused by name ("carries `index`, which
+this build does not know"), which is the reader's rule for every unknown
+member. Nothing outside the tests and the fuzz seeds wrote them.
+
 ## 10.907 The fuzzer reaches the firewall's readers
 
 `c/fuzz/kernel_bytes.c` read nft tables and chains and nothing else, so the

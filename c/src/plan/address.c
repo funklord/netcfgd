@@ -530,7 +530,6 @@ static void teardown_routes(ncfg_builder_t *builder)
 		model.metric = seen->metric;
 		model.table = seen->table;
 		model.src = seen->src;
-		model.scope = seen->scope;
 		model.onlink = 0;
 		model.proto = seen->proto;
 
