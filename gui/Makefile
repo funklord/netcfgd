@@ -53,7 +53,35 @@ $(CLIENT_LIB):
 # every build for the same reason the client library is -- a stale libqtty.a
 # against moved headers is the same debugging session, and qtty is pre-alpha.
 QTTY_DIR = ../qtty
+QTKIT_DIR = ../qtkit
 QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
+
+# qtkit, the theme the window follows a dark desktop with. Unlike qtty it is
+# not optional, so where it cannot be had the build stops and says which of
+# three reasons it is (0273's spelling) rather than building a window that
+# ignores the desktop. Fetched at the commit the gitlink names and no other.
+.PHONY: qtkit
+qtkit:
+	@if [ -f $(QTKIT_DIR)/qtkit.pri ]; then \
+		:; \
+	elif ! command -v git >/dev/null 2>&1; then \
+		echo "gui: $(QTKIT_DIR) is empty and git is not installed, so qtkit cannot"; \
+		echo "gui:   be fetched. Install git, or build from a release that carries it."; \
+		exit 1; \
+	elif ! git -C .. rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "gui: $(QTKIT_DIR) is empty and this is not a git checkout, so there is"; \
+		echo "gui:   no submodule to fetch."; \
+		exit 1; \
+	else \
+		echo "gui: $(QTKIT_DIR) is empty; fetching the qtkit submodule"; \
+		GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true \
+		timeout 600 git -C .. submodule update --init -- qtkit || { \
+			echo "gui:   could not fetch it: no network, or the remote refused."; \
+			exit 1; }; \
+		[ -f $(QTKIT_DIR)/qtkit.pri ] || { \
+			echo "gui:   fetched, and $(QTKIT_DIR)/qtkit.pri is still not there."; \
+			exit 1; }; \
+	fi
 
 # **Fetched, not asked for.** This printed `run 'git submodule update --init'`
 # and built the window without a terminal frontend -- so a clone made the
@@ -66,9 +94,9 @@ QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
 # qtty developer with the submodule on their own branch would find the build
 # had moved it under them. An empty directory belongs to nobody.
 #
-# **And it stays non-fatal, and it must not hang.** The submodule's URL is ssh,
-# so a machine with no key or no network cannot fetch it -- and the GUI is
-# meant to build there. Measured while writing this: pointed at a remote that
+# **And it stays non-fatal, and it must not hang.** A machine with no network
+# (or, while the URL was ssh, no key) cannot fetch it -- and the GUI is meant
+# to build there. Measured while writing this: pointed at a remote that
 # does not exist, `git submodule update` did not fail, it **waited** -- for
 # credentials it was never going to be given -- and the build sat there until
 # an outer timeout killed it. A fetch that asks a question in the middle of
@@ -118,11 +146,11 @@ qtty:
 # qmake only when its input moved, so a second `make` writes nothing: `qtty` is
 # phony, and as a plain prerequisite it ran qmake every time. Order-only here, and
 # its library is named, because gui.pro decides `--tui` by whether that exists.
-$(BUILD_DIR)/Makefile: gui.pro $(wildcard $(QTTY_LIB)) | qtty
+$(BUILD_DIR)/Makefile: gui.pro $(wildcard $(QTTY_LIB)) | qtty qtkit
 	@mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) ../gui.pro
 
-$(TARGET): $(CLIENT_LIB) qtty $(BUILD_DIR)/Makefile $(wildcard src/*.cpp src/*.h)
+$(TARGET): $(CLIENT_LIB) qtty qtkit $(BUILD_DIR)/Makefile $(wildcard src/*.cpp src/*.h)
 	$(MAKE) -C $(BUILD_DIR)
 
 run: $(TARGET)

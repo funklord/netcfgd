@@ -7876,7 +7876,14 @@ missing here:
   machine box on the toolbar. The GUI has no icon-only button; its
   controls are in form rows, which name them by their labels.
 
-**qtkit is a pinned copy, not a submodule** -- `gui/vendor/qtkit`, qtkit
+~~**qtkit is a pinned copy, not a submodule**~~ -- **a submodule at the root
+since 2026-11-23**, `qtkit/` at `e6325af`, which differs from the copy it
+replaced only in qtkit's own documents and test build; `gui/Makefile` fetches
+it at the pinned commit and stops the build where it cannot, since unlike
+qtty the window needs it. Verified: the window and the
+GUI suite build against `../qtkit` (`theme.cpp` and `flow_layout.cpp` compile
+from it), the rule fails naming the path where the file is absent after a
+fetch, and a second `make` writes no file. What follows is the entry as it stood: `gui/vendor/qtkit`, qtkit
 `ed18c25`, six files -- because qtkit has no remote: a submodule nobody
 else could clone would be a broken checkout. ~~**Open, and the holder's:
 publishing qtkit**~~ -- **published** (inbox, claude-guidelines,

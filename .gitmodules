@@ -4,3 +4,6 @@
 [submodule "fuzznet"]
 	path = fuzznet
 	url = https://github.com/funklord/fuzznet.git
+[submodule "qtkit"]
+	path = qtkit
+	url = https://github.com/funklord/qtkit.git
