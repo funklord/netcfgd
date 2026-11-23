@@ -1147,15 +1147,22 @@ station over; that still happens between the station and the APs. Sources:
 the community API reference at ubntwiki.com
 (`products/software/UniFi-controller/api`), Art of WiFi's notes on the two
 APIs, and the event names as two client libraries use them.
-**Whether that is worth building is the holder's.**
+**Deferred by the holder, 2026-11-23** ([0339](doc/decision/0339-live-rules-win-and-there-is-no-controller.md)):
+*"If we do this at all, we delay it until later. As it is an endless churn
+against a moving target."* Not built; a later decision starts from this reading.
 
-**Two things open that a worker should not settle alone.**
+**Two things that were open, and are settled.**
 
 - ~~**The generated profile's header contradicts the renderer.**~~ **Settled by the
   holder's rule of 2026-11-06, a config file records choices, not values (10.743):**
   the renderer was right and the sentence was false.
-- **Twenty places in the model are verified unreachable from the
-  configuration language, and that is a floor rather than a count** -- it was
+- **Settled by the holder 2026-11-23 ([0339](doc/decision/0339-live-rules-win-and-there-is-no-controller.md)):
+  remove what has no behaviour or no obvious need, reach the rest.** The DNS
+  `options`, `transport`, `dnssec` and a server's port and SNI are reached; every
+  other field below is removed. The table in 0339 says why each. What follows is
+  the entry as it stood.
+  ~~**Twenty places in the model are verified unreachable from the
+  configuration language, and that is a floor rather than a count**~~ -- it was
   seventeen until 10.172 found three more while rendering them, two of those
   by the very collision 10.171 had recorded as its blind spot. 10.171
   says why a cheap total here cannot be trusted: three greps were built for it
