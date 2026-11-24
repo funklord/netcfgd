@@ -2802,6 +2802,10 @@ static const ncfg_type_t globals_type = TYPE("globals block", globals_fields);
 
 static const char *const firewall_action_words[] = { "accept", "drop", "reject" };
 static const ncfg_enum_t firewall_action_set = WORD_SET("firewall action", firewall_action_words);
+/* A slot's, which may also be `none` (10.933), in the enum's order. */
+static const char *const firewall_slot_action_words[] = { "accept", "drop", "reject", "none" };
+static const ncfg_enum_t firewall_slot_action_set =
+    WORD_SET("firewall slot action", firewall_slot_action_words);
 
 /* **No `reject`**, nftables having no `policy reject`: a chain's policy is what
  * happens to a packet no rule matched, and the kernel offers two. A document
@@ -2897,7 +2901,7 @@ static const ncfg_field_t firewall_slot_fields[] = {
 	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_firewall_slot_t, name) },
 	{ .name = "action", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
-	    .choices = &firewall_action_set, .offset = offsetof(ncfg_firewall_slot_t, action) },
+	    .choices = &firewall_slot_action_set, .offset = offsetof(ncfg_firewall_slot_t, action) },
 	{ .name = "match", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
 	    .choices = &firewall_slot_match_set, .offset = offsetof(ncfg_firewall_slot_t, match) },
 	{ .name = "timeout", .kind = NCFG_F_INT, .flags = NCFG_FF_OMIT_ZERO, .low = 0,

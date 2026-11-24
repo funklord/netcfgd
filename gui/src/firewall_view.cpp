@@ -353,7 +353,7 @@ void ncfg_firewall_view::slot_dialog(const QString &chain, const ncfg_firewall_s
 	auto *name = new QLineEdit(existing.name, &dialog);
 	name->setPlaceholderText(QStringLiteral("quarantine"));
 	auto *action = new QComboBox(&dialog);
-	for (const char *one : { "drop", "reject", "accept" }) {
+	for (const char *one : { "drop", "reject", "accept", "none" }) {
 		action->addItem(QString::fromLatin1(one), QString::fromLatin1(one));
 	}
 	if (!existing.action.isEmpty()) {

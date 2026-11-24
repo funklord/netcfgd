@@ -1882,6 +1882,62 @@ static void offload_is_written(void)
 	}
 }
 
+/*
+ * A rule's address that is a slot's set (10.932): `@slot:NAME` becomes one
+ * kernel rule per family, each looking the address up in that family's set,
+ * read back as written; the digest is the written rule's, so the two share
+ * it. The language does not reach this yet -- a zone's live membership
+ * waits on a set-only slot -- so this is the encoder's own contract.
+ */
+static void a_slot_in_a_rule_is_a_lookup_per_family(void)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_t      firewall;
+	ncfg_buf_t           out;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                *to[1] = { (char *)"@slot:printers" };
+	char                 err[NCFG_ERROR_MAX];
+	char                 digests[2][24];
+	int                  rules = 0, read_back = 0;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = (char *)"to-printers";
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	rule.interface = (char *)"lan0";
+	rule.to = to;
+	rule.to_count = 1u;
+	memset(&firewall, 0, sizeof(firewall));
+	firewall.forward.policy = NCFG_FIREWALL_POLICY_DROP;
+	firewall.forward.rules = &rule;
+	firewall.forward.rule_count = 1u;
+	memset(digests, 0, sizeof(digests));
+
+	ncfg_buf_init(&out, 0);
+	check(ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err, sizeof(err)),
+	    "a rule to a slot's members is built");
+	ncfg_wire_messages_start(&walk, out.data, out.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		ncfg_nft_kernel_rule_t one;
+
+		if ((message.header.kind & 0xffu) != NFT_MSG_NEWRULE) {
+			continue;
+		}
+		if (ncfg_nft_firewall_rule_read(message.payload, message.payload_length, &one, err,
+		        sizeof(err)) && strcmp(one.to, "@slot:printers") == 0 && rules < 2) {
+			(void)snprintf(digests[rules], sizeof(digests[rules]), "%s", one.digest);
+			read_back++;
+		}
+		rules++;
+	}
+	check(rules == 2, "  one kernel rule per family");
+	check(read_back == 2, "  each read back as the slot it was written with");
+	check(digests[0][0] && strcmp(digests[0], digests[1]) == 0,
+	    "  and both carrying the written rule's one digest");
+	ncfg_buf_free(&out);
+}
+
 int main(void)
 {
 	char err[NCFG_ERROR_MAX];
@@ -2654,6 +2710,7 @@ int main(void)
 	a_logged_guard_counts_its_meter_once();
 	an_icmp_guard_counts_in_its_own_family();
 	an_over_rule_is_a_meter_per_family();
+	a_slot_in_a_rule_is_a_lookup_per_family();
 	a_logged_rule_is_a_log_then_its_verdict();
 	a_port_range_is_one_kernel_rule();
 	a_reset_reads_back_as_a_reset();

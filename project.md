@@ -7050,6 +7050,68 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.933 A slot that only counts, and a zone of a slot's members
+
+A zone's hosts are written into the document, so a device joining "kids" took
+an apply. Naming a slot's members, `hosts = ["@slot:kids"]`, makes membership
+live -- `ncfg slot add kids 192.168.1.40` and the device is in the zone at
+once -- but every slot had a head rule with a verdict, so a slot used as
+membership would also accept or drop its members ahead of everything,
+around the zone's reach.
+
+So a slot takes `action = "none"`: its head rule keeps the lookup and the
+counter and has no verdict, and the packet goes on to the rules naming it.
+Considered and not taken: a set with no rule at all. Slots are observed and
+converged from their head rules (`ncfg_nft_rule_slot`); a bare set would
+read as absent and be planned again on every pass, and making it visible
+means dumping sets and carrying the slot's description in their userdata --
+a second observer for what one rule with no verdict already gives, counters
+and `ncfg status` included. `none` is a slot's word only: rules keep the
+three-word set, so `none "x" { ... }` stays refused.
+
+**The zone opens the slot it names** where the host's firewall does not --
+`none`, from, in forward -- marked as the zone's so the renderer leaves it
+out, as it leaves the zone's `>` rules. Considered first and dropped:
+refusing a host whose firewall opens no such slot. A zone reaches every
+host of the estate (0284's controller layer), so that refusal would make
+the operator declare the slot on every host by hand, or have the zone fail
+on each one that had not. A slot the host declares itself is used as
+written -- a `drop` slot named by a zone still drops its members first.
+10.932's check still refuses a written rule naming a slot nobody opens.
+
+The zone's rules carry `@slot:NAME` as 10.932's do, one lookup per family,
+its `client_limit` included. `lower_test`: the `hosts>LINK` rule naming
+the slot, the slot opened counting-only and left out of a render,
+`@slot:` naming nothing refused, `none` compiled for a slot and refused as
+a rule. `tests/live/firewall.sh`: head rules with no verdict, converged,
+status saying the slot counts. `tests/live/zone_cap.sh`, through a router
+namespace: a client outside the slot at about 10 Gbit/s, the same client
+written into `slot-kids-4` with no apply held at 5 Mbit/s up and 5 down,
+and the plan still converged after the write.
+
+## 10.932 A rule may name a slot's members
+
+A slot (0340) is a set written live, matched by its own rule at the head of
+its chain. A rule could not name one: `to = ["@slot:printers"]` now matches
+an address looked up in the slot's set, per family -- `ip daddr
+@slot-printers-4` and `ip6 daddr @slot-printers-6` -- so a member written with
+`ncfg slot add` is matched by the rule at once, with no apply. Refused at
+compile time where the firewall opens no such slot: the kernel would refuse a
+lookup in a set nobody made, at apply.
+
+In the encoder, a `@slot:NAME` entry is expanded to one per family before the
+rule is split into kernel rules -- a set has one key length -- and matched by
+a lookup by name, which the kernel resolves among the sets the same
+transaction creates (measured: the apply takes it). The digest is the written
+rule's, slots unexpanded, so both family rules carry one. The reader takes a
+lookup on a `slot-` set back to `@slot:NAME`, so a second plan has nothing to
+do. `nft_test`: the two kernel rules and their one digest, read back.
+`lower_test`: compiles where the slot is opened, refused where not.
+`tests/live/firewall.sh`: both lookups in the kernel, and converged.
+
+A zone whose hosts are a slot's members is 10.933, which needed one more
+piece first.
+
 ## 10.931 A zone of hosts is capped too
 
 10.930 left a cap on a zone of hosts unbuilt: `client_limit` keyed on links

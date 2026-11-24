@@ -820,9 +820,13 @@ static int lower_slot(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				ok = 0;
 				continue;
 			}
-			if (!rule_action(text, &slot.action)) {
+			if (strcmp(text, "none") == 0) {
+				/* A set other rules name, and no verdict of its own (10.933). */
+				slot.action = NCFG_FIREWALL_NONE;
+				have_action = 1;
+			} else if (!rule_action(text, &slot.action)) {
 				ncfg_diag(ctx, assignment->span,
-				    "`%s` is not a slot's action: one of accept, drop, reject", text);
+				    "`%s` is not a slot's action: one of accept, drop, reject, none", text);
 				ok = 0;
 			} else {
 				have_action = 1;
@@ -1196,6 +1200,44 @@ static int lower_preset(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged
 	return 1;
 }
 
+/*
+ * A rule's `from` or `to` naming a slot's members, `@slot:NAME` (10.932), names
+ * one this firewall opens: the kernel would refuse a lookup in a set nobody
+ * made, at apply rather than here. Written rules and presets' alike.
+ */
+static void check_slot_references(ncfg_lower_ctx_t *ctx, const ncfg_firewall_t *firewall)
+{
+	const ncfg_firewall_chain_t *chains[3] = { &firewall->input, &firewall->forward,
+		&firewall->output };
+	size_t                       c, r, a, d, k;
+
+	for (c = 0; c < 3u; c++) {
+		for (r = 0; r < chains[c]->rule_count; r++) {
+			const ncfg_firewall_rule_t *rule = &chains[c]->rules[r];
+
+			for (a = 0; a < rule->from_count + rule->to_count; a++) {
+				const char *one = a < rule->from_count ? rule->from[a]
+				                                       : rule->to[a - rule->from_count];
+				int         known = 0;
+
+				if (strncmp(one, "@slot:", 6u) != 0) {
+					continue;
+				}
+				for (d = 0; d < 3u; d++) {
+					for (k = 0; k < chains[d]->slot_count; k++) {
+						known = known || strcmp(chains[d]->slots[k].name, one + 6) == 0;
+					}
+				}
+				if (!known) {
+					ncfg_diag(ctx, ctx->presets_span,
+					    "rule `%s` names `%s`, and the firewall opens no slot `%s`",
+					    rule->name, one, one + 6);
+				}
+			}
+		}
+	}
+}
+
 void ncfg_lower_presets(ncfg_lower_ctx_t *ctx, const struct ncfg_merged *merged)
 {
 	ncfg_firewall_t *firewall = ctx && ctx->document ? ctx->document->firewall : NULL;
@@ -1262,6 +1304,7 @@ void ncfg_lower_presets(ncfg_lower_ctx_t *ctx, const struct ncfg_merged *merged)
 			chain_free(&chains[c]);
 		}
 	}
+	check_slot_references(ctx, firewall);
 }
 
 void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged)
@@ -1470,6 +1513,20 @@ int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, nc
 				ncfg_address_t address;
 				char           why[NCFG_ERROR_MAX];
 
+				/* A slot's members (10.933): hosts that change with no apply,
+				 * written live with `ncfg slot add`. The firewall opening the
+				 * slot is checked once the chains are whole. */
+				if (strncmp(named.at[one].text, "@slot:", 6u) == 0) {
+					if (!ncfg_firewall_slot_name_valid(named.at[one].text + 6)) {
+						ncfg_diag(ctx, named.at[one].span,
+						    "zone `%s`'s host `%s` does not name a slot", out->name,
+						    named.at[one].text);
+						continue;
+					}
+					(void)ncfg_push_string(ctx, &out->hosts, &out->host_count,
+					    named.at[one].text);
+					continue;
+				}
 				if (!ncfg_address_parse(named.at[one].text, &address, why, sizeof(why))) {
 					ncfg_diag(ctx, named.at[one].span, "zone `%s`'s host `%s`: %s", out->name,
 					    named.at[one].text, why);
@@ -1746,6 +1803,45 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 		    "this host puts interfaces in zones and has no `firewall` block: a zone "
 		    "compiles into the firewall's forward chain, so it needs one to compile into");
 		return;
+	}
+	/*
+	 * **A zone opens the slot its hosts name** (10.933), where the firewall
+	 * does not: zones reach every host of the estate, and a refusal on each
+	 * one that had not declared the slot would make the operator write it
+	 * on every host by hand. Counting only, `none`, so its members get the
+	 * zone's reach and nothing else; a slot the host declares itself is
+	 * used as written.
+	 */
+	for (z = 0; z < document->zone_count; z++) {
+		for (r = 0; r < document->zones[z].host_count; r++) {
+			const char             *host = document->zones[z].hosts[r];
+			ncfg_firewall_chain_t  *chains[3] = { &document->firewall->input,
+				&document->firewall->forward, &document->firewall->output };
+			ncfg_firewall_slot_t   *opened;
+			size_t                  c, k;
+			int                     known = 0;
+
+			if (strncmp(host, "@slot:", 6u) != 0) {
+				continue;
+			}
+			for (c = 0; c < 3u; c++) {
+				for (k = 0; k < chains[c]->slot_count; k++) {
+					known = known || strcmp(chains[c]->slots[k].name, host + 6) == 0;
+				}
+			}
+			if (known) {
+				continue;
+			}
+			opened = ncfg_push(ctx, &document->firewall->forward.slots,
+			    &document->firewall->forward.slot_count, sizeof(*opened));
+			if (!opened) {
+				return;
+			}
+			opened->name = ncfg_dup(ctx, host + 6);
+			opened->action = NCFG_FIREWALL_NONE;
+			opened->match = NCFG_FIREWALL_SLOT_FROM;
+			opened->zone = 1;
+		}
 	}
 	/*
 	 * **The caps first, ahead of the written rules** (10.928): a forward

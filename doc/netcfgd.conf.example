@@ -528,7 +528,10 @@
 #     state, so `ncfg plan` never calls them drift, and an apply carries
 #     them into the new table. `ncfg slot add quarantine 192.0.2.7 30m` and
 #     `ncfg slot remove quarantine 192.0.2.7` write them; a name that is not
-#     a slot is refused (0340).
+#     a slot is refused (0340). A rule's `from` or `to` may name a slot's
+#     members, `to = ["@slot:quarantine"]`, looked up in its set as the
+#     slot's own rule is -- live, a member written later matched with no
+#     apply; a slot the firewall does not open is refused (10.932).
 #   - With `policy = "drop"` on input, allow established traffic first, or
 #     every reply to this host's own connections is dropped.
 #
@@ -653,6 +656,14 @@
 #
 #     zone "printers" { reach = []; hosts = ["192.168.1.20"] }
 #     zone "trusted"  { reach = ["internet", "printers"] }
+#
+# Hosts that change without an apply are a slot's members: `hosts =
+# ["@slot:kids"]`, and `ncfg slot add kids 192.168.1.40` puts a device in
+# the zone at once, its cap included. The zone opens the slot on each host
+# whose firewall does not -- `action = "none"`, a slot that only counts and
+# has no verdict of its own, so its members get the zone's reach and
+# nothing else -- and a slot the host declares itself is used as written
+# (10.933).
 #
 # A zone may reach itself, which lets its own links forward between them --
 # two LAN ports, or a LAN and its radio, as one trusted network:

@@ -159,6 +159,40 @@ echo "  capped by address: up $by_up Mbit/s, down $by_down Mbit/s"
 check "a client in a zone of hosts is held near 5 Mbit/s each way" \
 	"$([ "$by_up" -ge 1 ] && [ "$by_up" -le 6 ] && [ "$by_down" -ge 1 ] && [ "$by_down" -le 6 ] && echo held || echo "$by_up/$by_down")" "held"
 
+# 10.933: the same client in a zone whose hosts are a slot's members, the
+# slot opened by the zone itself: uncapped until it is written into the slot,
+# with no apply between, and capped from then on.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+zone "kids" { reach = ["internet"]; hosts = ["@slot:kids"]; client_limit = "5mbit" }
+zone "internet" { reach = [] }
+interface zg0 { config = "10.81.0.1/24"; forwarding = true }
+interface zw0 { config = "10.82.0.1/24"; zone = "internet"; forwarding = true }
+firewall {
+	input { policy = "accept" }
+	forward {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "others" { interface = "zg0" }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a zone of a slot's members applies" "$(grep -c '^FAIL' "$work/apply" || true)" "0"
+outside=$(measure "")
+# The set write `ncfg slot add` makes through the daemon (firewall.sh drives
+# that path); here the element is written directly, as nothing else runs.
+nft add element inet netcfgd slot-kids-4 '{ 10.81.0.2 }' > "$work/slot" 2>&1 || true
+member_up=$(measure "")
+member_down=$(measure -R)
+echo "  outside the slot: up $outside Mbit/s; a member: up $member_up, down $member_down Mbit/s"
+check "a client not yet in the slot is not capped" \
+	"$([ "$outside" -ge 60 ] && echo free || echo "$outside")" "free"
+check "and once written into it, held near 5 Mbit/s each way with no apply" \
+	"$([ "$member_up" -ge 1 ] && [ "$member_up" -le 6 ] && [ "$member_down" -ge 1 ] && [ "$member_down" -le 6 ] && echo held || echo "$member_up/$member_down")" "held"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and the plan is still converged" "$(tail -1 "$work/plan")" "nothing to do"
+
 write ''
 "$ncfg" apply > "$work/apply" 2>&1 || true
 free_up=$(measure "")

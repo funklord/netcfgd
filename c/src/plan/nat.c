@@ -129,6 +129,9 @@ static int action_of(const char *word)
 	if (word && strcmp(word, "reject") == 0) {
 		return NCFG_FIREWALL_REJECT;
 	}
+	if (word && strcmp(word, "none") == 0) {
+		return NCFG_FIREWALL_NONE;
+	}
 	return NCFG_FIREWALL_ACCEPT;
 }
 

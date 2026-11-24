@@ -820,6 +820,55 @@ check "and each printer answers it with replies only" \
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and a zone of hosts is converged" "$(cat "$work/plan")" "nothing to do"
 
+# 10.932: a rule naming a slot's members looks the address up in the slot's
+# set, live: a member added later is matched with no apply.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+device sl0 { kind = "dummy" }
+interface sl0 { config = "10.75.0.1/24" }
+firewall {
+	input {
+		policy = "accept"
+		slot "printers" { action = "drop"; match = "from" }
+	}
+	forward {
+		policy = "drop"
+		accept "to-printers" { to = ["@slot:printers"] }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+check "a rule naming a slot looks each family up in its set" \
+	"$(grep -c 'daddr @slot-printers-[46] counter packets 0 bytes 0 accept comment "name=to-printers' "$work/listed" || true)" "2"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and a rule naming a slot is converged" "$(cat "$work/plan")" "nothing to do"
+
+# 10.933: a slot that only counts -- `action = "none"` -- has its head rule
+# with no verdict, so its members go on to the rules naming it.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+device sl0 { kind = "dummy" }
+interface sl0 { config = "10.75.0.1/24" }
+firewall {
+	input { policy = "accept" }
+	forward {
+		policy = "drop"
+		slot "printers" { action = "none"; match = "to" }
+		accept "to-printers" { to = ["@slot:printers"] }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+check "a slot that only counts has no verdict" \
+	"$(grep -c 'daddr @slot-printers-[46] counter packets 0 bytes 0 comment "slot=printers' "$work/listed" || true)" "2"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and is converged" "$(cat "$work/plan")" "nothing to do"
+"$ncfg" status > "$work/status" 2>&1 || true
+check "and ncfg status says it counts" \
+	"$(grep -c 'slot printers: counts what it holds' "$work/status" || true)" "2"
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true

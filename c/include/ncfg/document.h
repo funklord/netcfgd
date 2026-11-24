@@ -2645,7 +2645,11 @@ typedef struct {
 typedef enum {
 	NCFG_FIREWALL_ACCEPT,
 	NCFG_FIREWALL_DROP,
-	NCFG_FIREWALL_REJECT
+	NCFG_FIREWALL_REJECT,
+	/* A slot's only (10.933): its members counted and no verdict, so the
+	 * packet goes on -- a set other rules name, `@slot:NAME`. No rule takes
+	 * it: a rule with no verdict would only count. */
+	NCFG_FIREWALL_NONE
 } ncfg_firewall_action_t;
 
 /* A chain's policy, which is what happens to a packet no rule matched. Only
@@ -2822,6 +2826,9 @@ typedef struct {
 	/* Seconds a member written with no lifetime of its own stays; 0 for
 	 * until it is removed. */
 	int64_t timeout;
+	/* Opened by a zone naming it, `hosts = ["@slot:NAME"]`, not written
+	 * (10.933): the renderer leaves it out, as it does a zone's rules. */
+	int     zone;
 } ncfg_firewall_slot_t;
 
 /* At most this many slots in one firewall: each is two sets and two kernel

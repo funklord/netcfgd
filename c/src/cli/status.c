@@ -280,8 +280,10 @@ static void print_firewall(const ncfg_observed_t *observed)
 			if (!slot->chain || strcmp(slot->chain, chains[c]) != 0) {
 				continue;
 			}
+			/* `none` only counts, a set other rules name (10.933). */
 			ncfg_out_writef("    slot %s: %s what it holds, matched %s, %s", slot->name,
-			    slot->action, slot->match && strcmp(slot->match, "to") == 0
+			    slot->action && strcmp(slot->action, "none") == 0 ? "counts" : slot->action,
+			    slot->match && strcmp(slot->match, "to") == 0
 			        ? "by destination" : "by source", slot->ipv6 ? "IPv6" : "IPv4");
 			if (slot->packets.has) {
 				ncfg_out_writef(": %lld %s, %lld bytes", (long long)slot->packets.value,

@@ -2284,6 +2284,98 @@ static void zone_cases(void)
 	    "  up from its addresses and down to them, sorted, first in the chain");
 	ncfg_document_free(document);
 
+	/* 10.932: a written rule naming a slot's members compiles where the
+	 * firewall opens the slot, and is refused where it does not. */
+	document = compiles(
+	    "firewall {\n\tinput {\n\t\tpolicy = \"accept\"\n"
+	    "\t\tslot \"printers\" { action = \"drop\"; match = \"from\" }\n\t}\n"
+	    "\tforward {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"to-printers\" { to = [\"@slot:printers\"] }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n",
+	    "a rule naming a slot's members compiles");
+	ncfg_document_free(document);
+	/* 10.933: a slot that only counts, and rules may not take `none`. */
+	document = compiles(
+	    "firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward {\n\t\tpolicy = \"drop\"\n"
+	    "\t\tslot \"printers\" { action = \"none\"; match = \"to\" }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n",
+	    "a slot that only counts compiles");
+	check(document && document->firewall &&
+	    document->firewall->forward.slots[0].action == NCFG_FIREWALL_NONE,
+	    "  as a slot with no verdict");
+	ncfg_document_free(document);
+	refuses("firewall {\n\tinput { policy = \"accept\" }\n"
+	        "\tforward {\n\t\tpolicy = \"drop\"\n\t\tnone \"x\" { port = 1 }\n\t}\n"
+	        "\toutput { policy = \"accept\" }\n}\n",
+	    "", "  and no rule takes `none`");
+	refuses("firewall {\n\tinput { policy = \"accept\" }\n"
+	        "\tforward {\n\t\tpolicy = \"drop\"\n"
+	        "\t\taccept \"to-printers\" { to = [\"@slot:printers\"] }\n\t}\n"
+	        "\toutput { policy = \"accept\" }\n}\n",
+	    "opens no slot `printers`", "  and one naming a slot nobody opens is refused");
+
+	/* 10.933: a zone's hosts may be a slot's members, refused where the
+	 * firewall opens no such slot. */
+	document = compiles(
+	    "device lan0 { kind = \"dummy\" }\n"
+	    "zone \"internet\" { }\n"
+	    "zone \"kids\" { hosts = [\"@slot:kids\"]; reach = [\"internet\"] }\n"
+	    "interface lan0 { zone = \"internet\" }\n"
+	    "firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward {\n\t\tpolicy = \"drop\"\n"
+	    "\t\tslot \"kids\" { action = \"none\"; match = \"from\" }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n",
+	    "a zone whose hosts are a slot's members compiles");
+	{
+		size_t at;
+		int    found = 0;
+
+		for (at = 0; document && document->firewall &&
+		     at < document->firewall->forward.rule_count; at++) {
+			const ncfg_firewall_rule_t *rule = &document->firewall->forward.rules[at];
+
+			found = found || (strcmp(rule->name, "kids>internet:hosts>lan0") == 0 &&
+			    rule->from_count == 1u && strcmp(rule->from[0], "@slot:kids") == 0);
+		}
+		check(found, "  its rule naming the slot as its source");
+	}
+	ncfg_document_free(document);
+	/* Where the firewall opens no such slot, the zone opens it: counting
+	 * only, in forward, and left out of what the renderer writes back. */
+	document = compiles("device lan0 { kind = \"dummy\" }\n"
+	    "zone \"internet\" { }\n"
+	    "zone \"kids\" { hosts = [\"@slot:kids\"]; reach = [\"internet\"] }\n"
+	    "interface lan0 { zone = \"internet\" }\n"
+	    "firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "a zone naming a slot no chain opens compiles");
+	check(document && document->firewall && document->firewall->forward.slot_count == 1u &&
+	    strcmp(document->firewall->forward.slots[0].name, "kids") == 0 &&
+	    document->firewall->forward.slots[0].action == NCFG_FIREWALL_NONE &&
+	    document->firewall->forward.slots[0].zone,
+	    "  and opens it in forward, counting only");
+	{
+		ncfg_buf_t          written;
+		ncfg_unrenderable_t missing;
+		char                message[NCFG_ERROR_MAX];
+		int                 rendered;
+
+		ncfg_buf_init(&written, 0);
+		ncfg_unrenderable_init(&missing);
+		rendered = document && ncfg_render(document, NULL, &written, &missing, message,
+		    sizeof(message));
+		ncfg_buf_add(&written, "", 1u);
+		check(rendered && !strstr((const char *)written.data, "slot \"kids\"") &&
+		    strstr((const char *)written.data, "@slot:kids"),
+		    "  which the renderer leaves to the zone");
+		ncfg_unrenderable_free(&missing);
+		ncfg_buf_free(&written);
+	}
+	ncfg_document_free(document);
+	refuses("zone \"kids\" { hosts = [\"@slot:\"] }\n", "does not name a slot",
+	    "  and `@slot:` naming nothing is refused");
+
 	refuses("zone \"printers\" { hosts = [\"not-an-address\"] }\n", "zone `printers`'s host",
 	    "a host that is no address is refused at compile time");
 	document = compiles("zone \"printers\" { hosts = [\"192.0.2.10\"]; reach = [\"printers\"] }\n",

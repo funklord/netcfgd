@@ -1504,7 +1504,13 @@ static void render_firewall_chain(const ncfg_firewall_chain_t *chain, const char
 	/* The slots first, since they are evaluated first (0340). */
 	for (at = 0; at < chain->slot_count; at++) {
 		const ncfg_firewall_slot_t *slot = &chain->slots[at];
-		const char                 *action = firewall_action_word(slot->action);
+
+		/* A zone's, which the zone writes back (10.933). */
+		if (slot->zone) {
+			continue;
+		}
+		const char                 *action = slot->action == NCFG_FIREWALL_NONE
+		                                         ? "none" : firewall_action_word(slot->action);
 
 		if (!action || !ncfg_firewall_slot_name_valid(slot->name) ||
 		    (slot->match != NCFG_FIREWALL_SLOT_FROM && slot->match != NCFG_FIREWALL_SLOT_TO)) {

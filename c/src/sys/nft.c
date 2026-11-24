@@ -975,6 +975,17 @@ static void put_mark_test(ncfg_buf_t *list)
 	put_cmp(list, NFT_CMP_EQ, &bit, sizeof(bit));
 }
 
+/* Free `count` strings and the array holding them. */
+static void ncfg_strings_free_list(char **list, size_t count)
+{
+	size_t at;
+
+	for (at = 0; list && at < count; at++) {
+		free(list[at]);
+	}
+	free(list);
+}
+
 /* An address or CIDR, as the family nftables names it, its bytes and its
  * prefix length. */
 typedef struct {
@@ -982,6 +993,9 @@ typedef struct {
 	uint8_t  bytes[16];
 	uint32_t length;
 	uint32_t prefix;
+	/* A slot's set rather than an address (10.932): `@slot:NAME`, expanded to
+	 * one family by the caller as `@slot:NAME/4` or `/6`. Empty otherwise. */
+	char     slot[NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
 } nft_address_t;
 
 /*
@@ -1030,6 +1044,22 @@ static int parse_address(const char *text, nft_address_t *out, char *err, size_t
 	long        prefix = -1;
 
 	memset(out, 0, sizeof(*out));
+	/* A slot's set, one family of it (10.932): only the expanded form, so an
+	 * unexpanded `@slot:NAME` is not taken for either family by mistake. */
+	if (strncmp(text, "@slot:", 6u) == 0) {
+		const size_t name = slash ? (size_t)(slash - text) - 6u : 0u;
+
+		if (!slash || name == 0u || name > NCFG_FIREWALL_SLOT_NAME_MAX ||
+		    (strcmp(slash, "/4") != 0 && strcmp(slash, "/6") != 0)) {
+			ncfg_error_set(err, err_size, "`%s` is not one family of a slot", text);
+			return 0;
+		}
+		memcpy(out->slot, text + 6, name);
+		out->slot[name] = '\0';
+		out->nfproto = slash[1] == '6' ? NFPROTO_IPV6 : NFPROTO_IPV4;
+		out->length = slash[1] == '6' ? 16u : 4u;
+		return 1;
+	}
 	if (span == 0u || span >= sizeof(host)) {
 		ncfg_error_set(err, err_size, "`%s` is not an address", text);
 		return 0;
@@ -1076,6 +1106,21 @@ static void put_address_match(ncfg_buf_t *list, const nft_address_t *address, in
 		offset = source ? 8u : 24u;
 	}
 	put_payload(list, NFT_PAYLOAD_NETWORK_HEADER, offset, address->length);
+	/* A slot's members (10.932): the address looked up in the slot's set,
+	 * by name -- a set the same transaction makes is found by it. */
+	if (address->slot[0]) {
+		ncfg_buf_t data;
+		char       set_name[NCFG_NFT_NAME_MAX];
+
+		ncfg_nft_slot_set_name(address->slot, address->nfproto == NFPROTO_IPV6, set_name,
+		    sizeof(set_name));
+		ncfg_buf_init(&data, 0);
+		ncfg_wire_attr_put_str(&data, NFTA_LOOKUP_SET, set_name);
+		put_be32(&data, NFTA_LOOKUP_SREG, NFT_REG_1);
+		put_expression(list, "lookup", &data);
+		ncfg_buf_free(&data);
+		return;
+	}
 	memset(mask, 0, sizeof(mask));
 	for (at = 0; at < address->prefix; at++) {
 		mask[at / 8u] = (uint8_t)(mask[at / 8u] | (0x80u >> (at % 8u)));
@@ -1114,7 +1159,8 @@ static void normal_address(const char *text, char *out, size_t out_size)
 	nft_address_t address;
 	uint32_t      at;
 
-	if (!parse_address(text, &address, NULL, 0)) {
+	/* A slot's set is its name, never an address (10.932). */
+	if (!parse_address(text, &address, NULL, 0) || address.slot[0]) {
 		(void)snprintf(out, out_size, "%s", text);
 		return;
 	}
@@ -1845,8 +1891,98 @@ static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewa
  */
 #define FIREWALL_EXPANSION_MAX 256u
 
+/*
+ * A rule's addresses with each `@slot:NAME` (10.932) made two, `@slot:NAME/4`
+ * and `/6` -- one kernel rule per family, as a set has one key length. NULL
+ * and 0 where the list names no slot; *made says whether `out` was
+ * allocated.
+ */
+static int expand_slots(char *const *in, size_t count, char ***out, size_t *out_count,
+    int *made)
+{
+	size_t at;
+	size_t slots = 0;
+	size_t to = 0;
+	char **list;
+
+	*made = 0;
+	*out = (char **)(uintptr_t)in;
+	*out_count = count;
+	for (at = 0; at < count; at++) {
+		slots += strncmp(in[at], "@slot:", 6u) == 0 && !strchr(in[at], '/');
+	}
+	if (!slots) {
+		return 1;
+	}
+	list = calloc(count + slots, sizeof(*list));
+	if (!list) {
+		return 0;
+	}
+	for (at = 0; at < count; at++) {
+		if (strncmp(in[at], "@slot:", 6u) == 0 && !strchr(in[at], '/')) {
+			size_t length = strlen(in[at]) + 3u;
+
+			list[to] = malloc(length);
+			list[to + 1u] = malloc(length);
+			if (!list[to] || !list[to + 1u]) {
+				free(list[to]);
+				free(list[to + 1u]);
+				ncfg_strings_free_list(list, to);
+				return 0;
+			}
+			(void)snprintf(list[to], length, "%s/4", in[at]);
+			(void)snprintf(list[to + 1u], length, "%s/6", in[at]);
+			to += 2u;
+		} else {
+			list[to] = strdup(in[at]);
+			if (!list[to]) {
+				ncfg_strings_free_list(list, to);
+				return 0;
+			}
+			to++;
+		}
+	}
+	*out = list;
+	*out_count = to;
+	*made = 1;
+	return 1;
+}
+
+static int firewall_rule_messages_one(ncfg_buf_t *transaction, uint32_t *seq,
+    uint32_t *last_acked, const char *chain, const ncfg_firewall_rule_t *rule,
+    const ncfg_firewall_rule_t *written, char *err, size_t err_size);
+
 static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32_t *last_acked,
     const char *chain, const ncfg_firewall_rule_t *rule, char *err, size_t err_size)
+{
+	ncfg_firewall_rule_t expanded = *rule;
+	int                  made_from = 0;
+	int                  made_to = 0;
+	int                  ok;
+
+	if (!expand_slots(rule->from, rule->from_count, &expanded.from, &expanded.from_count,
+	        &made_from) ||
+	    !expand_slots(rule->to, rule->to_count, &expanded.to, &expanded.to_count, &made_to)) {
+		if (made_from) {
+			ncfg_strings_free_list(expanded.from, expanded.from_count);
+		}
+		ncfg_error_set(err, err_size, "out of memory expanding rule `%s`'s slots", rule->name);
+		return 0;
+	}
+	ok = firewall_rule_messages_one(transaction, seq, last_acked, chain,
+	    made_from || made_to ? &expanded : rule, rule, err, err_size);
+	if (made_from) {
+		ncfg_strings_free_list(expanded.from, expanded.from_count);
+	}
+	if (made_to) {
+		ncfg_strings_free_list(expanded.to, expanded.to_count);
+	}
+	return ok;
+}
+
+static int firewall_rule_messages_one(ncfg_buf_t *transaction, uint32_t *seq,
+    uint32_t *last_acked, const char *chain, const ncfg_firewall_rule_t *rule,
+    const ncfg_firewall_rule_t *written, char *err, size_t err_size)
 {
 	const size_t ports = rule->port_count + rule->port_range_count + rule->icmp_type_count
 	    ? rule->port_count + rule->port_range_count + rule->icmp_type_count : 1u;
@@ -1876,7 +2012,8 @@ static int firewall_rule_messages(ncfg_buf_t *transaction, uint32_t *seq, uint32
 		    (unsigned)FIREWALL_EXPANSION_MAX);
 		return 0;
 	}
-	if (!rule_comment(chain, rule, comment, sizeof(comment), err, err_size)) {
+	/* The digest is the written rule's, slots unexpanded (10.932). */
+	if (!rule_comment(chain, written, comment, sizeof(comment), err, err_size)) {
 		return 0;
 	}
 	/* Which families an `over` rule counts in: those its addresses name, or
@@ -2630,7 +2767,9 @@ static void slot_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_
 	ncfg_buf_free(&data);
 
 	ncfg_buf_init(&data, 0);
-	if (slot->action == NCFG_FIREWALL_REJECT) {
+	if (slot->action == NCFG_FIREWALL_NONE) {
+		/* Counted, and on to the next rule (10.933). */
+	} else if (slot->action == NCFG_FIREWALL_REJECT) {
 		const uint8_t code = NFT_REJECT_ICMPX_PORT_UNREACH;
 
 		put_be32(&data, NFTA_REJECT_TYPE, NFT_REJECT_ICMPX_UNREACH);
@@ -4321,6 +4460,11 @@ int ncfg_nft_rule_slot(const void *payload, size_t length, ncfg_nft_kernel_slot_
 		}
 		at++;
 	}
+	/* No verdict is a slot that only counts (10.933). */
+	if (!verdict && at == sizeof(order) / sizeof(order[0])) {
+		out->slot.action = NCFG_FIREWALL_NONE;
+		return 1;
+	}
 	return verdict && at == sizeof(order) / sizeof(order[0]) + 1u;
 }
 
@@ -4612,6 +4756,30 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 				return 0;
 			}
 			mark_tested = 1;
+			reading.what = LOADED_NONE;
+			reading.mask_length = 0;
+		} else if (strcmp(name, "lookup") == 0 && reading.what == LOADED_PAYLOAD &&
+		    reading.base == NFT_PAYLOAD_NETWORK_HEADER &&
+		    ((reading.length == 4u && (reading.offset == 12u || reading.offset == 16u)) ||
+		    (reading.length == 16u && (reading.offset == 8u || reading.offset == 24u)))) {
+			/* A slot's members (10.932): `ip saddr @slot-NAME-4`, read back as
+			 * the `@slot:NAME` the rule was written with. Only a slot's set. */
+			char         set[NCFG_NFT_NAME_MAX];
+			const int    source = reading.offset == 12u || reading.offset == 8u;
+			size_t       named;
+
+			if (!read_name(&data, NFTA_LOOKUP_SET, set, sizeof(set), NULL, 0) ||
+			    strncmp(set, "slot-", 5u) != 0 || (named = strlen(set)) < 8u ||
+			    named > 5u + NCFG_FIREWALL_SLOT_NAME_MAX + 2u ||
+			    set[named - 2u] != '-' ||
+			    set[named - 1u] != (reading.length == 16u ? '6' : '4')) {
+				ncfg_error_set(err, err_size, "rule `%s` looks up a set netcfgd does not write",
+				    out->name);
+				return 0;
+			}
+			set[named - 2u] = '\0';
+			(void)snprintf(source ? out->from : out->to, sizeof(out->from), "@slot:%.48s",
+			    set + 5);
 			reading.what = LOADED_NONE;
 			reading.mask_length = 0;
 		} else if (strcmp(name, "cmp") == 0) {
@@ -5114,6 +5282,8 @@ const char *ncfg_nft_action_word(int action)
 		return "drop";
 	case NCFG_FIREWALL_REJECT:
 		return "reject";
+	case NCFG_FIREWALL_NONE:
+		return "none";
 	default:
 		return NULL;
 	}
