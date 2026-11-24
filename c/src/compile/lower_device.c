@@ -119,7 +119,7 @@ const char *ncfg_qdisc_kind_name(int kind)
  * bare number is bits per second, which is the unit everything else here is
  * in.
  */
-static int rate_bits(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, int64_t *out)
+int ncfg_lower_rate_bits(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, int64_t *out)
 {
 	static const struct {
 		const char *suffix;
@@ -218,7 +218,7 @@ int ncfg_lower_qdisc(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			bandwidth_span = assignment->span;
 			text = ncfg_as_string(ctx, assignment->value);
 			if (text) {
-				if (rate_bits(ctx, text, assignment->span, &policy.bandwidth_bits.value)) {
+				if (ncfg_lower_rate_bits(ctx, text, assignment->span, &policy.bandwidth_bits.value)) {
 					policy.bandwidth_bits.has = 1;
 				}
 				free(text);
@@ -227,7 +227,7 @@ int ncfg_lower_qdisc(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			ingress_span = assignment->span;
 			text = ncfg_as_string(ctx, assignment->value);
 			if (text) {
-				if (rate_bits(ctx, text, assignment->span,
+				if (ncfg_lower_rate_bits(ctx, text, assignment->span,
 				    &policy.ingress_bandwidth_bits.value)) {
 					policy.ingress_bandwidth_bits.has = 1;
 				}

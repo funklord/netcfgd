@@ -1898,6 +1898,9 @@ typedef struct {
 	char   *name; /* the label, and the sorting key */
 	char  **reach;
 	size_t  reach_count;
+	/* Each client's cap, as written -- `5mbit` -- or NULL (10.928): every
+	 * address on one of the zone's links held to it, each way. */
+	char   *client_limit;
 } ncfg_zone_t;
 
 /*

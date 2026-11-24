@@ -558,6 +558,35 @@ static void an_over_rule_is_a_meter_per_family(void)
 			ncfg_buf_free(&out);
 		}
 		check(same == 4, "  and a rate in any window reads back as the document keeps it");
+	}
+	/* A zone's cap (10.928): bytes a second, keyed on the source or, with
+	 * `@dst`, the destination -- each read back exactly, or the planner would
+	 * see a hand edit on every pass. */
+	{
+		static const char *const caps[] = { "B625000/1s", "B625000/1s@dst", "B1000/1s" };
+		size_t                   w;
+		int                      same = 0;
+
+		for (w = 0; w < sizeof(caps) / sizeof(caps[0]); w++) {
+			rule.over = (char *)caps[w];
+			ncfg_buf_init(&out, 0);
+			if (ncfg_nft_build_replace(&out, 1u, 0, NULL, 0, &firewall, &batch, err,
+			        sizeof(err))) {
+				ncfg_wire_messages_start(&walk, out.data, out.length);
+				while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+					ncfg_nft_kernel_rule_t one;
+
+					if ((message.header.kind & 0xffu) == NFT_MSG_NEWRULE &&
+					    ncfg_nft_firewall_rule_read(message.payload, message.payload_length,
+					        &one, err, sizeof(err)) && strcmp(one.over, caps[w]) == 0) {
+						same++;
+						break;
+					}
+				}
+			}
+			ncfg_buf_free(&out);
+		}
+		check(same == 3, "  and a cap in bytes, either way, reads back as compiled");
 		rule.over = (char *)"8/900s";
 	}
 

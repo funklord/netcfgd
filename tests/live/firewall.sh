@@ -761,7 +761,7 @@ check "and a firewall using a preset is converged" "$(cat "$work/plan")" "nothin
 # Zones (10.927): a guest link reaching the uplink and not the LAN, compiled
 # into the forward chain after the written rules, each with its reply rule.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
-zone "guest" { reach = ["internet"] }
+zone "guest" { reach = ["internet"]; client_limit = "5mbit" }
 zone "internet" { reach = [] }
 zone "lan" { reach = ["internet", "guest"] }
 device zg0 { kind = "dummy" }
@@ -782,8 +782,13 @@ CONF
 "$ncfg" apply > "$work/apply" 2>&1 || true
 nft list ruleset > "$work/listed" 2>&1 || true
 check "a zone's rules follow the written ones in the kernel" \
-	"$(sed -n '/chain forward {/,/}/p' "$work/listed" | grep -o 'name=[a-z0-9<>:]*' | tr '\n' ' ')" \
-	"name=ssh name=guest>internet:zg0>zw0 name=guest>internet:zw0<zg0 name=lan>guest:zl0>zg0 name=lan>guest:zg0<zl0 name=lan>internet:zl0>zw0 name=lan>internet:zw0<zl0 "
+	"$(awk '/chain forward \{/{f=1} /chain output \{/{f=0} f' "$work/listed" | grep -o 'name=[a-z0-9<>:]*' | uniq | tr '\n' ' ')" \
+	"name=guest>limit:up:zg0 name=guest>limit:down:zg0 name=ssh name=guest>internet:zg0>zw0 name=guest>internet:zw0<zg0 name=lan>guest:zl0>zg0 name=lan>guest:zg0<zl0 name=lan>internet:zl0>zw0 name=lan>internet:zw0<zl0 "
+# 10.928: the guest zone's cap, ahead of everything, per client each way.
+check "the cap holds what each guest client sends, keyed on its source" \
+	"$(grep -c 'iifname "zg0" update @over-[0-9a-f]*-4 { ip saddr timeout 1s limit rate over 625000 bytes/second burst 78125 bytes }.* drop ' "$work/listed" || true)" "1"
+check "and what each receives, keyed on its destination" \
+	"$(grep -c 'oifname "zg0" update @over-[0-9a-f]*-4 { ip daddr timeout 1s limit rate over 625000 bytes/second burst 78125 bytes }.* drop ' "$work/listed" || true)" "1"
 check "the guest link is let out by the uplink" \
 	"$(grep -c 'iifname "zg0" oifname "zw0" counter packets 0 bytes 0 accept' "$work/listed" || true)" "1"
 check "and the uplink lets only its replies back" \

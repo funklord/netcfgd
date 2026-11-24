@@ -3385,6 +3385,9 @@ live:
 	@# (doc/journal.md 10.592). The probe is an example, so it is built here.
 	@$(MAKE) --no-print-directory -C c examples
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/firewall.sh"
+	@# A zone's per-client cap as throughput (10.928): iperf3 through a router
+	@# namespace each way under 5mbit, and the same rig uncapped as the control.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/zone_cap.sh"
 	@# Port forwards (0298): applied by ncfg, read back, and a connection from
 	@# a wan namespace through the router to a lan one, with the control that
 	@# the same connection fails once the forward is gone.

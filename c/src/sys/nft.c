@@ -1334,18 +1334,61 @@ static int rule_comment(const char *chain, const ncfg_firewall_rule_t *rule, cha
  * same on every kernel rule it became.
  */
 /* "COUNT/SECONDSs" into its two numbers; 0 where it is not that shape. */
-static int over_parts(const char *over, uint64_t *count, uint64_t *seconds)
+/*
+ * An `over` in its two forms: `COUNT/SECONDSs`, packets per window keyed on the
+ * source (10.885), and `BBYTES/SECONDSs`, bytes per window -- a zone's
+ * per-client cap (10.928), which a written rule cannot spell and the renderer
+ * never writes -- keyed on the source, or on the destination with `@dst`.
+ */
+static int over_spec(const char *over, uint64_t *count, uint64_t *seconds, int *bytes,
+    int *destination)
 {
 	unsigned long a = 0, b = 0;
 	char          unit = 0, tail = 0;
+	const char   *text = over;
 
-	if (!over || sscanf(over, "%lu/%lu%c%c", &a, &b, &unit, &tail) != 3 || unit != 's' ||
-	    a == 0 || b == 0) {
+	*bytes = 0;
+	*destination = 0;
+	if (!text) {
+		return 0;
+	}
+	if (text[0] == 'B') {
+		const char *at = strchr(text, '@');
+
+		*bytes = 1;
+		text++;
+		if (at) {
+			if (strcmp(at, "@dst") != 0) {
+				return 0;
+			}
+			*destination = 1;
+		}
+	}
+	if (sscanf(text, "%lu/%lu%c%c", &a, &b, &unit, &tail) < 3 || unit != 's' || a == 0 ||
+	    b == 0 || (!*destination && sscanf(text, "%lu/%lu%c%c", &a, &b, &unit, &tail) != 3)) {
 		return 0;
 	}
 	*count = a;
 	*seconds = b;
 	return 1;
+}
+
+/*
+ * A cap's burst: an eighth of its window's bytes, and never less than two
+ * full frames (10.928). A whole window's worth let a three-second transfer
+ * average 8 Mbit/s under a 5 Mbit/s cap -- the bucket's first second spent on
+ * top of the rate.
+ */
+static uint64_t cap_burst(uint64_t bytes)
+{
+	return bytes / 8u > 3000u ? bytes / 8u : 3000u;
+}
+
+static int over_parts(const char *over, uint64_t *count, uint64_t *seconds)
+{
+	int bytes, destination;
+
+	return over_spec(over, count, seconds, &bytes, &destination);
 }
 
 /*
@@ -1406,19 +1449,28 @@ static void put_over(ncfg_buf_t *expressions, const char *over, uint8_t family,
 	ncfg_buf_t limit;
 	ncfg_buf_t expr;
 	uint64_t   count = 0, seconds = 0, rate = 0, unit = 0;
+	int        bytes = 0, destination = 0;
 
-	(void)over_parts(over, &count, &seconds);
-	over_rate(count, seconds, &rate, &unit);
-	if (family == NFPROTO_IPV6) {
-		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, 8u, 16u);
+	(void)over_spec(over, &count, &seconds, &bytes, &destination);
+	if (bytes) {
+		/* A rate in bytes keeps its own window as the unit: nft has a word
+		 * for a second, and a cap is per second. */
+		rate = count;
+		unit = seconds;
 	} else {
-		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, 12u, 4u);
+		over_rate(count, seconds, &rate, &unit);
+	}
+	/* The source address, or the destination for a cap's way in. */
+	if (family == NFPROTO_IPV6) {
+		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, destination ? 24u : 8u, 16u);
+	} else {
+		put_payload(expressions, NFT_PAYLOAD_NETWORK_HEADER, destination ? 16u : 12u, 4u);
 	}
 	ncfg_buf_init(&limit, 0);
 	put_be64(&limit, NFTA_LIMIT_RATE, rate);
 	put_be64(&limit, NFTA_LIMIT_UNIT, unit);
-	put_be32(&limit, NFTA_LIMIT_BURST, (uint32_t)count);
-	put_be32(&limit, NFTA_LIMIT_TYPE, NFT_LIMIT_PKTS);
+	put_be32(&limit, NFTA_LIMIT_BURST, (uint32_t)(bytes ? cap_burst(count) : count));
+	put_be32(&limit, NFTA_LIMIT_TYPE, bytes ? NFT_LIMIT_PKT_BYTES : NFT_LIMIT_PKTS);
 	put_be32(&limit, NFTA_LIMIT_FLAGS, NFT_LIMIT_F_INV);
 	ncfg_buf_init(&expr, 0);
 	ncfg_wire_attr_put_str(&expr, NFTA_EXPR_NAME, "limit");
@@ -3588,12 +3640,15 @@ static int read_over(const reading_t *reading, const ncfg_wire_attrs_t *data,
 	uint32_t          op = 0, type = 0, flags = 0, burst = 0;
 	uint64_t          rate = 0, unit = 0;
 
+	int               destination;
+
 	if (reading->what != LOADED_PAYLOAD || reading->base != NFT_PAYLOAD_NETWORK_HEADER ||
-	    !((reading->offset == 12u && reading->length == 4u) ||
-	    (reading->offset == 8u && reading->length == 16u)) ||
+	    !(((reading->offset == 12u || reading->offset == 16u) && reading->length == 4u) ||
+	    ((reading->offset == 8u || reading->offset == 24u) && reading->length == 16u)) ||
 	    !be32_member(data, NFTA_DYNSET_OP, &op) || op != NFT_DYNSET_OP_UPDATE) {
 		return 0;
 	}
+	destination = reading->offset == 16u || reading->offset == 24u;
 	if (ncfg_wire_attrs_find(data, NFTA_DYNSET_EXPR, &nest, NULL, 0) == NCFG_WIRE_OK) {
 		ncfg_wire_attrs_start(&one, nest.value, nest.length);
 	} else if (ncfg_wire_attrs_find(data, NFTA_DYNSET_EXPRESSIONS, &nest, NULL, 0) ==
@@ -3619,9 +3674,22 @@ static int read_over(const reading_t *reading, const ncfg_wire_attrs_t *data,
 	if (!be64_member(&limit, NFTA_LIMIT_RATE, &rate) ||
 	    !be64_member(&limit, NFTA_LIMIT_UNIT, &unit) || rate == 0u || unit == 0u ||
 	    !be32_member(&limit, NFTA_LIMIT_BURST, &burst) || burst == 0u ||
-	    unit > UINT64_MAX / burst || (unit * burst) % rate != 0u ||
-	    (be32_member(&limit, NFTA_LIMIT_TYPE, &type) && type != NFT_LIMIT_PKTS) ||
 	    !be32_member(&limit, NFTA_LIMIT_FLAGS, &flags) || !(flags & NFT_LIMIT_F_INV)) {
+		return 0;
+	}
+	(void)be32_member(&limit, NFTA_LIMIT_TYPE, &type);
+	/* A zone's cap (10.928): bytes, one window's worth as the burst, keyed
+	 * either way -- exactly what `put_over` writes for `B...`. */
+	if (type == NFT_LIMIT_PKT_BYTES) {
+		if (burst != cap_burst(rate)) {
+			return 0;
+		}
+		(void)snprintf(out->over, sizeof(out->over), "B%llu/%llus%s",
+		    (unsigned long long)rate, (unsigned long long)unit, destination ? "@dst" : "");
+		return 1;
+	}
+	if (type != NFT_LIMIT_PKTS || destination || unit > UINT64_MAX / burst ||
+	    (unit * burst) % rate != 0u) {
 		return 0;
 	}
 	/* The burst is the count and the window what it refills in (10.898).

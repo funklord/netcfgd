@@ -1453,10 +1453,32 @@ int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, nc
 			continue;
 		}
 		assignment = &item->as.assignment;
+		/* Each client's cap (10.928): a rate as a queue's is written. */
+		if (strcmp(assignment->key, "client_limit") == 0) {
+			char   *text = ncfg_as_string(ctx, assignment->value);
+			int64_t bits = 0;
+
+			if (!text) {
+				continue;
+			}
+			if (!ncfg_lower_rate_bits(ctx, text, assignment->span, &bits)) {
+				free(text);
+				continue;
+			}
+			if (bits < 8) {
+				ncfg_diag(ctx, assignment->span,
+				    "`client_limit = \"%s\"` is less than a byte a second", text);
+				free(text);
+				continue;
+			}
+			free(out->client_limit);
+			out->client_limit = text;
+			continue;
+		}
 		if (strcmp(assignment->key, "reach") != 0) {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown zone key `%s`: a zone says which zones it may `reach`",
-			    assignment->key);
+			    "unknown zone key `%s`: a zone says which zones it may `reach`, and "
+			    "may set a `client_limit`", assignment->key);
 			continue;
 		}
 		if (!ncfg_as_words(ctx, assignment->value, &words)) {
@@ -1507,6 +1529,52 @@ static const ncfg_zone_t *zone_named(const ncfg_document_t *document, const char
 		}
 	}
 	return NULL;
+}
+
+/*
+ * One link's cap (10.928): two drop rules, one for what its clients send --
+ * the meter keyed on the source -- and one for what they receive, keyed on
+ * the destination, each over `bytes` a second. Put first in the chain by the
+ * caller.
+ */
+static int zone_cap(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *caps, const char *zone,
+    const char *link, int64_t bytes)
+{
+	static const char *const ways[2] = { "up", "down" };
+	int                      way;
+
+	for (way = 0; way < 2; way++) {
+		ncfg_firewall_rule_t  rule;
+		ncfg_firewall_rule_t *grown;
+		char                  name[160];
+		char                  over[48];
+
+		(void)snprintf(name, sizeof(name), "%s>limit:%s:%s", zone, ways[way], link);
+		(void)snprintf(over, sizeof(over), "B%lld/1s%s", (long long)bytes, way ? "@dst" : "");
+		memset(&rule, 0, sizeof(rule));
+		rule.name = strdup(name);
+		rule.action = NCFG_FIREWALL_DROP;
+		rule.over = strdup(over);
+		if (way == 0) {
+			rule.interface = strdup(link);
+		} else {
+			rule.out_interface = strdup(link);
+		}
+		if (!rule.name || !rule.over || (way == 0 ? !rule.interface : !rule.out_interface)) {
+			ncfg_lower_oom(ctx);
+			rule_free(&rule);
+			return 0;
+		}
+		grown = realloc(caps->rules, (caps->rule_count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_lower_oom(ctx);
+			rule_free(&rule);
+			return 0;
+		}
+		caps->rules = grown;
+		caps->rules[caps->rule_count++] = rule;
+	}
+	return 1;
 }
 
 /* One compiled rule: accept from `in` out of `out`, named `NAME`, and only a
@@ -1607,6 +1675,53 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 		    "this host puts interfaces in zones and has no `firewall` block: a zone "
 		    "compiles into the firewall's forward chain, so it needs one to compile into");
 		return;
+	}
+	/*
+	 * **The caps first, ahead of the written rules** (10.928): a forward
+	 * chain almost always opens with `accept established`, which would let
+	 * every download past a cap placed among the zone's rules -- and a cap
+	 * grants nothing; it holds the zone's traffic whatever accepts it later,
+	 * as a qdisc does. 0339's order is about which layer's permission
+	 * decides, and a limit is not a permission.
+	 */
+	{
+		ncfg_firewall_chain_t caps;
+
+		memset(&caps, 0, sizeof(caps));
+		for (z = 0; z < document->zone_count; z++) {
+			const ncfg_zone_t *zone = &document->zones[z];
+			int64_t            bits = 0;
+
+			if (!zone->client_limit ||
+			    !ncfg_lower_rate_bits(ctx, zone->client_limit, ctx->zones_span, &bits)) {
+				continue;
+			}
+			for (a = 0; a < document->interface_count; a++) {
+				const ncfg_interface_t *in = &document->interfaces[a];
+
+				if (in->zone && strcmp(in->zone, zone->name) == 0) {
+					(void)zone_cap(ctx, &caps, zone->name, in->name, bits / 8);
+				}
+			}
+		}
+		if (caps.rule_count) {
+			ncfg_firewall_chain_t *forward = &document->firewall->forward;
+			ncfg_firewall_rule_t  *joined = realloc(caps.rules,
+			    (caps.rule_count + forward->rule_count) * sizeof(*joined));
+
+			if (!joined) {
+				ncfg_lower_oom(ctx);
+				chain_free(&caps);
+				return;
+			}
+			memcpy(joined + caps.rule_count, forward->rules,
+			    forward->rule_count * sizeof(*joined));
+			free(forward->rules);
+			forward->rules = joined;
+			forward->rule_count += caps.rule_count;
+		} else {
+			free(caps.rules);
+		}
 	}
 	for (z = 0; z < document->zone_count; z++) {
 		const ncfg_zone_t *zone = &document->zones[z];

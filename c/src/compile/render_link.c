@@ -1313,7 +1313,13 @@ void ncfg_render_zone(const ncfg_zone_t *zone, const ncfg_overrides_t *overrides
 		}
 		ncfg_render_quote(text, zone->reach[i]);
 	}
-	ncfg_buf_add_text(text, "]\n}\n");
+	ncfg_buf_add_text(text, "]\n");
+	if (zone->client_limit) {
+		ncfg_buf_add_text(text, "\tclient_limit = ");
+		ncfg_render_quote(text, zone->client_limit);
+		ncfg_buf_add_text(text, "\n");
+	}
+	ncfg_buf_add_text(text, "}\n");
 }
 
 /* A list of strings as `key = ["a", "b"]`, for a record's addresses. */

@@ -386,6 +386,8 @@ void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 void ncfg_lower_presets(ncfg_lower_ctx_t *ctx, const struct ncfg_merged *merged);
 /* Zones (10.927): one block, and the compile into this host's forward chain,
  * run once every block is lowered and before the presets. */
+/* A rate such as `100mbit`, in bits per second (lower_device.c). */
+int ncfg_lower_rate_bits(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, int64_t *out);
 int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, ncfg_zone_t *out);
 void ncfg_lower_zones(ncfg_lower_ctx_t *ctx);
 /* A `dns` scope, wherever one is written: in `global`, on an interface, or on

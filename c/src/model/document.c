@@ -2438,7 +2438,9 @@ static const ncfg_field_t zone_fields[] = {
 	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_zone_t, name) },
 	{ .name = "reach", .kind = NCFG_F_STR_LIST, .offset = offsetof(ncfg_zone_t, reach),
-	    .count_offset = offsetof(ncfg_zone_t, reach_count) }
+	    .count_offset = offsetof(ncfg_zone_t, reach_count) },
+	/* Absent where the zone caps nobody (10.928). */
+	{ .name = "client_limit", .kind = NCFG_F_STR, .offset = offsetof(ncfg_zone_t, client_limit) }
 };
 static const ncfg_type_t zone_type = TYPE("zone", zone_fields);
 

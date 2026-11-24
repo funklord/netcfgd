@@ -1180,9 +1180,9 @@ forward rules, after its written rules and before its presets (0339's order),
 and a host that cannot reach the estate keeps enforcing the last zones it had
 (0284: never fail open). The per-host result resembles `fw4`'s zone
 forwarding; the zone itself is the estate's. A zone naming hosts by address
-can follow on slots. **It also decides the per-client cap** (10.911): 0284
-has a client's limit and its filter name one subject, so the cap's "who" is
-the zone's.
+can follow on slots. **Built: zones in 10.927, and the per-client cap they
+decide in 10.928** (`client_limit`), 0284 having a client's limit and its
+filter name one subject.
 
 **Two things that were open, and are settled.**
 
@@ -7039,6 +7039,43 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.928 A zone caps each client: `client_limit`
+
+10.911 left a per-client cap unbuilt, a guest held to 5 Mbit/s each, waiting
+for its "who"; zones (10.927) are that. `zone "guest" { client_limit = "5mbit" }`
+-- the queue's rate grammar, `ncfg_lower_rate_bits`, one spelling for one
+concept -- compiles, for each of this host's links in the zone, to two drop
+rules: `guest>limit:up:LINK`, in by the link, a meter keyed on the client's
+source address; and `guest>limit:down:LINK`, out by it, keyed on the
+destination. Each meters bytes a second, per address, over the rate.
+
+**They lead the forward chain, ahead of the written rules**, as decided in
+10.927's register entry, and measured to matter: with the caps placed after a
+written `accept established` -- the rule real forward chains open with -- a
+guest transfer ran unthrottled both ways, 12.6 and 12.2 Gbit/s, since after the
+handshake every packet is established. A cap grants nothing; 0339's order is
+about which layer's permission decides.
+
+**In the kernel it is `over`'s meter (10.885) with two things more**, carried
+in the one string every path already takes -- digest, observation, reader,
+plan comparison: `BBYTES/SECONDSs`, a limit of type bytes, and `@dst`, the key
+loaded from the destination (offset 16, or 24 in IPv6). A written rule cannot
+spell either, and the renderer never writes a `>` rule. The reader decodes both
+back exactly, so a second plan has nothing to do. **The burst is an eighth of a
+second's bytes**, never under two frames: a whole second's worth let a
+three-second transfer average 8 Mbit/s under 5.
+
+**Measured** by `tests/live/zone_cap.sh`, new: a router namespace, a guest
+client and an upstream server on veths, iperf3 for six seconds each way --
+**5 Mbit/s up and 5 down** -- and the control, the cap taken out, about 13
+Gbit/s on the same rig. `nft_test`: each cap form encoded and read back.
+`lower_test`: the order, the round trip, a rate that is not one refused.
+`tests/live/firewall.sh`: both meters in the kernel, ahead of `ssh`.
+
+A policer, as decided in 10.911: TCP meets drops rather than a queue, which is
+what OpenWrt's `nft-qos` does for the same job; cake shapes the uplink as a
+whole beside it.
+
 ## 10.927 Zones: the estate's purposes, compiled on each host (0284's layer three)
 
 0284 settled what a zone is -- the distributed, purpose-driven layer, "guest",
@@ -7084,8 +7121,8 @@ in the kernel in that order, the guest link out by the uplink and only replies
 back, the guest link into the LAN with replies only, and a second plan with
 nothing to do.
 
-**Next, not built:** a zone naming hosts by address (on slots), and the
-per-client cap whose "who" a zone now is (10.911). **The cap's design,
+**Next, not built:** a zone naming hosts by address (on slots). The
+per-client cap whose "who" a zone now is (10.911) is built, 10.928. **The cap's design,
 decided 2026-11-24:** `zone "guest" { client_limit = "5mbit" }`, compiled to
 two drop rules per link of the zone -- out by it, a meter keyed on the
 client's source address; in by it, on its destination -- each counting bytes
@@ -7531,7 +7568,7 @@ observation only when set, shown by `ncfg status` as `per host behind NAT`;
 `qdisc.c` refuses it under any scheduler but cake, whose options number their
 attributes differently. `tests/live/qdisc.sh` checks tc's own listing.
 
-**Still not built:** a per-client *cap* (a guest held to 5 Mbit/s each).
+**Built since, 10.928:** a per-client *cap* (a guest held to 5 Mbit/s each).
 cake has none. **The mechanism is settled** (2026-11-24): a per-source meter
 in the firewall, as `over` is -- 0284's own argument that the queuing half
 goes with the firewall, because a client's limit and its filter name one

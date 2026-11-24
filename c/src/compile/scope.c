@@ -509,6 +509,7 @@ static const struct {
 
 	/* zone -- what it may reach, the whole of it (10.927). */
 	{ NCFG_BLOCK_ZONE, "reach", 0x00090001u },
+	{ NCFG_BLOCK_ZONE, "client_limit", 0x00090002u },
 
 	/*
 	 * rule -- a policy expression, group-wide entire.

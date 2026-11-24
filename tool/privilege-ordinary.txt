@@ -264,3 +264,4 @@ isolated
 # rules are.
 zone
 reach
+client_limit

@@ -2208,6 +2208,39 @@ static void zone_cases(void)
 	}
 	ncfg_document_free(document);
 
+	/* 10.928: a capped zone's rules lead the chain, ahead of the written
+	 * ones -- up keyed on the source, down on the destination. */
+	(void)snprintf(text, sizeof(text), "%s"
+	    "zone \"guest\" { reach = [\"internet\"]; client_limit = \"5mbit\" }\n"
+	    "zone \"internet\" { reach = [] }\n"
+	    "device g0 { kind = \"dummy\" }\ndevice w0 { kind = \"dummy\" }\n"
+	    "interface g0 { config = \"10.10.0.1/24\"; zone = \"guest\" }\n"
+	    "interface w0 { config = \"10.20.0.1/24\"; zone = \"internet\" }\n", firewall);
+	document = compiles(text, "a guest zone capped at 5mbit compiles");
+	forward = document && document->firewall ? &document->firewall->forward : NULL;
+	check(forward && forward->rule_count == 6 &&
+	        strcmp(forward->rules[0].name, "guest>limit:up:g0") == 0 &&
+	        strcmp(forward->rules[0].over, "B625000/1s") == 0 &&
+	        strcmp(forward->rules[0].interface, "g0") == 0 &&
+	        strcmp(forward->rules[1].name, "guest>limit:down:g0") == 0 &&
+	        strcmp(forward->rules[1].over, "B625000/1s@dst") == 0 &&
+	        strcmp(forward->rules[1].out_interface, "g0") == 0 &&
+	        strcmp(forward->rules[2].name, "ssh") == 0,
+	    "  each way first in the chain, 625000 bytes a second, then the written rule");
+	{
+		char why[NCFG_ERROR_MAX];
+
+		why[0] = '\0';
+		check(document && ncfg_config_round_trips(document, why, sizeof(why)),
+		    "  and the cap is written back and reads as itself");
+		if (why[0]) {
+			printf("  why: %s\n", why);
+		}
+	}
+	ncfg_document_free(document);
+	refuses("zone \"guest\" { client_limit = \"fast\" }\n", "is not a rate",
+	    "a cap that is no rate is refused");
+
 	refuses("zone \"guest\" { reach = [\"nowhere\"] }\n", "no `zone \"nowhere\"` block declares it",
 	    "a zone reaching an undeclared zone is refused");
 	refuses("device g0 { kind = \"dummy\" }\n"
