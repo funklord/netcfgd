@@ -502,13 +502,52 @@ static int node_value(const char *run_dir, const char *name, char *out, size_t o
 	return 0;
 }
 
+/* The face a fuzznet daemon names beside its own socket, `<socket>.face`, 0644
+ * (fuzznet a1793cc2): its own path where it is the face, the face's where it
+ * follows, kept current within a second. Read as `ncfg_fuzznet_face` reads
+ * the store's, one absolute path. */
+static int face_beside(const char *socket, char *out, size_t out_size)
+{
+	char   path[1100];
+	FILE  *file;
+	size_t length;
+
+	if (out_size < 2u || (size_t)snprintf(path, sizeof(path), "%s.face", socket) >=
+	    sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "r");
+	if (!file) {
+		return 0;
+	}
+	length = fread(out, 1u, out_size - 1u, file);
+	(void)fclose(file);
+	while (length && (out[length - 1u] == '\n' || out[length - 1u] == '\r')) {
+		length--;
+	}
+	out[length] = '\0';
+	return length > 0u && out[0] == '/';
+}
+
 int ncfg_fuzznet_daemon_socket(const char *run_dir, char *out, size_t out_size)
 {
 	char store[1024];
+	char own[1100];
 	int  wrote;
 
 	if (!run_dir || !out || out_size == 0u) {
 		return 0;
+	}
+	/*
+	 * **First what this machine's daemon says beside its socket** (project.md
+	 * 10.919): readable by anyone who may reach the socket, where the store's
+	 * own `face` below is under /root. A non-root `ncfg` beside a raidcfgd
+	 * that is the face used to fall back to netcfgd's follower socket, which
+	 * fuzznet serves to its own user alone.
+	 */
+	if ((size_t)snprintf(own, sizeof(own), "%s/fuzznet.sock", run_dir) < sizeof(own) &&
+	    face_beside(own, out, out_size)) {
+		return 1;
 	}
 	if (node_value(run_dir, "store", store, sizeof(store)) &&
 	    ncfg_fuzznet_face(store, out, out_size)) {

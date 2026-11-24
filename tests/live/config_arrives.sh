@@ -172,6 +172,11 @@ start_daemon
 awaits 'ip -br addr show arrive0 2>/dev/null | grep -q 10.20.0.1' || true
 check "the daemon converged on what it was started with" \
 	"$(has_address arrive0 10.20.0.1)" 1
+# 10.919: fuzznet names the face beside the daemon's socket, readable by a
+# client that cannot read the store under /root. Alone here, it is the face.
+awaits '[ -s "$work/run/fuzznet.sock.face" ]' || true
+check "the daemon names its face beside its socket, itself when alone" \
+	"$(cat "$work/run/fuzznet.sock.face" 2>/dev/null)" "$work/run/fuzznet.sock"
 
 # **The run says which mechanism it exercised, and that is what stops a second
 # invocation being a vacuous repeat of the first.** Running this file again

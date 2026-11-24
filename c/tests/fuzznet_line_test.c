@@ -210,6 +210,18 @@ int main(void)
 		    strcmp(where + strlen(dir), "/elsewhere.sock") == 0;
 		check(fell_back && faced,
 		    "the daemon's socket is the run directory's, or the one its store's face names");
+		/* 10.919: what the daemon names beside its socket comes first --
+		 * readable where the store's face, under /root, is not. */
+		(void)snprintf(file, sizeof(file), "%s/fuzznet.sock.face", dir);
+		out = fopen(file, "w");
+		if (out) {
+			(void)fprintf(out, "%s/raid.sock\n", dir);
+			(void)fclose(out);
+		}
+		check(ncfg_fuzznet_daemon_socket(dir, where, sizeof(where)) &&
+		        strcmp(where + strlen(dir), "/raid.sock") == 0,
+		    "  and the face named beside its socket comes before the store's");
+		(void)unlink(file);
 		(void)snprintf(file, sizeof(file), "%s/node", dir);
 		(void)unlink(file);
 		(void)snprintf(file, sizeof(file), "%s/face", dir);

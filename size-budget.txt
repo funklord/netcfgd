@@ -1129,4 +1129,10 @@ netcfgd
 # 2026-11-21: 2,961,368, +281,832 at fuzznet c20c1a66, all of it fuzznet's 274 commits
 # since 23e4f46 (node, search, contacts, members; text 2,276,451 to 2,517,217). Taken
 # for the idle-memory fix it carries (10.893); the growth is signalled to fuzznet.
-total 2961368
+# 2026-11-24: 3,179,928, +218,560: +60,032 netcfgd's own since 11-21 (WoL, the resolved
+# drop-in, slots and presets, cake's nat, port isolation, inside the tolerance), and
+# +158,528 at fuzznet 1640ff38, all of it fuzznet's 96 commits since c20c1a66: text
+# +97,631 spread over its situ-generated wire and record code (checks and packers, no
+# symbol over 3 KB). Taken for the face named beside the socket (10.919); the growth
+# is signalled to fuzznet.
+total 3179928

@@ -1179,7 +1179,9 @@ after its written rules and before its presets. The other reading is a zone
 as a set of *hosts* (by estate name or address) with rules about traffic to
 and from them, compiled on every host into rules matching those hosts'
 addresses -- membership kept current through slots. Which one, or both, is
-the holder's call.
+the holder's call. **It also decides the per-client cap** (10.911): 0284 has a
+client's rate limit and its filter name one subject, so the cap's "who" is the
+zone's, and only its mechanism is settled without it.
 
 **Two things that were open, and are settled.**
 
@@ -7036,6 +7038,36 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.919 `ncfg` follows the face fuzznet names beside the socket
+
+10.913 recorded, not built, a non-root `ncfg` on a machine where raidcfgd is
+the fuzznet face: it read `store=` and then `<store>/face`, under /root and
+unreadable to it, so it fell back to netcfgd's own socket -- a follower's,
+served by fuzznet to its own user alone. fuzznet built the readable half at
+its `a1793cc2` (its section 1424): every daemon writes `<its socket>.face`,
+0644, naming the face's socket and kept current within a second.
+
+The vendored fuzznet moves from `c20c1a66` to `1640ff38`, 96 commits, so
+that netcfgd's own daemon writes the file -- as a follower it names
+raidcfgd's socket, as the face its own. Most of the range is situ's
+generated wire code taking over fuzznet's hand-written encoders; nothing
+netcfgd builds against changed shape, and the build and the malta rig took it
+unchanged. **The size gate did not**: the same netcfgd built against each pin
+is 158,528 bytes larger installed, text +97,631 in code symbols, spread over
+the generated checks and packers with no symbol over 3 KB. The budget is
+raised with that reason, and fuzznet was told with the numbers (its inbox,
+20261124T0236Z). Resident memory moved less: `rss-node` peaks at 6,820 KB
+against 6,640 KB at the old pin, measured the same hour. `ncfg_fuzznet_daemon_socket` reads
+`<run>/fuzznet.sock.face` first, then the store's `face`, then the run
+directory's socket. `fuzznet_line_test` holds the order;
+`tests/live/config_arrives.sh` holds the daemon writing its own path there
+when it is alone.
+
+Not done here, and fuzznet's to say: the guidelines now have the leaf vendor
+each dependency once, at its root, and netcfgd carries `qtty` both at its
+root and inside `fuzznet/`. That pass reaches netcfgd after fuzznet, snurra
+and situ, in that order, and moves when it is handed here.
+
 ## 10.918 resolved's globals go to a drop-in it reads, never to `lo`
 
 The globals scope in `mode = "resolved"` was sent to `lo` as a link's
@@ -7251,8 +7283,7 @@ socket, 0644, naming the face's socket -- its own as the face, the face's as a
 follower, rewritten within a second when the face moves and removed when the
 daemon stops -- and `fzn_client_face_of(path, out, cap)` in `local/client.h`
 reads it. So `ncfg` at the desk reads `/run/netcfgd/fuzznet.sock.face` and
-connects to whichever daemon is the face. Not taken yet: the vendored fuzznet
-is at `c20c1a66`, before it, so taking it is a pin move.
+connects to whichever daemon is the face. **Taken by 10.919.**
 
 **Recorded, not built: 16 GUI tests do not compile under `fmake --eject` /
 `fmake test`** (fmake's sweep, 2026-11-23): each `.pro` supplies
@@ -7309,10 +7340,15 @@ observation only when set, shown by `ncfg status` as `per host behind NAT`;
 attributes differently. `tests/live/qdisc.sh` checks tc's own listing.
 
 **Still not built:** a per-client *cap* (a guest held to 5 Mbit/s each).
-cake has none; it would be a policer in the firewall (a per-source meter, as
-`over` is) or an HTB class per host, and the two behave differently enough --
-a policer drops TCP into a sawtooth, a class tree shapes but costs a class
-per client -- that it waits for a case that says which.
+cake has none. **The mechanism is settled** (2026-11-24): a per-source meter
+in the firewall, as `over` is -- 0284's own argument that the queuing half
+goes with the firewall, because a client's limit and its filter name one
+subject; the meter needs no list of clients, which a guest network never has;
+and it is what OpenWrt's `nft-qos` does for its per-IP limits. Rejected: an
+HTB class per host, which shapes more smoothly than a policer's TCP sawtooth
+but needs a class per client known in advance. **What waits** is who a client
+is -- the zone, the holder's question in the register -- so no syntax is
+written ahead of it.
 
 ## 10.910 Presets: the firewall's library layer (0341)
 
@@ -7427,7 +7463,7 @@ made validation share the language's name check (`ncfg_dns_sni_valid`) and
 port range, since a document holding `#a/b=c` rendered text that would not
 compile.
 
-**Open, small:** resolved is told `dnsovertls` and `dnssec` only where a scope
+**Closed by 10.916, and kept for its reasoning:** resolved was told `dnsovertls` and `dnssec` only where a scope
 states them, as it is told `domain` -- so a scope that stops stating one leaves
 resolved's last per-link value until `resolvectl revert`. A revert before each
 delivery would close it at the cost of a moment with no servers on the link;
