@@ -876,7 +876,11 @@ static void the_driver_settings_are_shown_where_the_warnings_point(void)
 	    "\"mtu\":1500,\"autoneg\":true,\"speed\":1000,\"duplex\":\"full\","
 	    "\"rx_ring\":256,\"tx_ring\":256,\"rx_ring_max\":4096,\"tx_ring_max\":4096,"
 	    "\"wol\":32,\"wol_supported\":47},"
-	    "{\"name\":\"dummy0\",\"index\":3,\"up\":true,\"carrier\":true,\"mtu\":1500}],"
+	    "{\"name\":\"dummy0\",\"index\":3,\"up\":true,\"carrier\":true,\"mtu\":1500},"
+	    "{\"name\":\"guest0\",\"index\":4,\"up\":true,\"carrier\":true,\"mtu\":1500,"
+	    "\"master\":\"br0\",\"port_isolated\":true},"
+	    "{\"name\":\"lan0\",\"index\":5,\"up\":true,\"carrier\":true,\"mtu\":1500,"
+	    "\"master\":\"br0\"}],"
 	    "\"address_proto_supported\":true}";
 	ncfg_observed_t *observed;
 	const char      *printed;
@@ -896,6 +900,8 @@ static void the_driver_settings_are_shown_where_the_warnings_point(void)
 	    "the rings, against the maxima a warning cites");
 	line(printed, "    wake-on-LAN g, can pumbg",
 	    "and wake-on-LAN, against the modes the card supports");
+	line(printed, "    port of br0, isolated", "an isolated bridge port says so (10.924)");
+	line(printed, "    port of br0", "  and an ordinary port says only whose it is");
 	{
 		const char *first = printed ? strstr(printed, "    rings ") : NULL;
 		const char *wake = printed ? strstr(printed, "    wake-on-LAN ") : NULL;

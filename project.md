@@ -7048,6 +7048,17 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.924 `ncfg status` says whose port a link is, and whether it is isolated
+
+10.912 made a bridge port isolable and observed it (`port_isolated`), and no
+front end showed it -- nor which bridge or bond a link belongs to at all,
+though the observation has carried `master` for as long as there have been
+bridges. `isolated = true` on a guest port is a promise about who reaches
+whom, and an operator had only `ip -d link` to see that it took. A port now
+says `port of br0`, and `port of br0, isolated`. `cli_test` holds both forms;
+`tests/live/links.sh` holds the isolated one against a real bridge in a
+namespace. The lens was 10.921's: a thing observed and shown nowhere.
+
 ## 10.923 One copy of each dependency, at this tree's root
 
 The holder's rule (harmonization.md, *The leaf decides*): the program at the

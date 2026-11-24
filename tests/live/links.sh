@@ -626,6 +626,9 @@ contains "a port with no interface block is enslaved" "$(detail barep)" "master 
 contains "and is brought up rather than left down" "$(ip link show barep)" ",UP,"
 contains "an isolated port is isolated by the apply that enslaves it" "$(detail barep)" \
 	"isolated on"
+# And netcfgd's own reading of it, where an operator looks (10.924).
+contains "ncfg status says the port is its bridge's, isolated" "$("$ncfg" status 2>&1)" \
+	"port of brbare, isolated"
 
 second=$("$ncfg" apply 2>&1)
 contains "one apply converges" "$second" "nothing to do"

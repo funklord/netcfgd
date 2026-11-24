@@ -106,6 +106,13 @@ static void print_link_settings(const ncfg_observed_link_t *link,
 		}
 		ncfg_out_line("");
 	}
+	/* Which bridge or bond holds it, and whether it is an isolated port
+	 * (10.924): `isolated = true` on a guest port is a promise about who
+	 * reaches whom, and the one place to see that it took is here. */
+	if (link->master) {
+		ncfg_out_writef("    port of %s%s\n", link->master,
+		    link->port_isolated ? ", isolated" : "");
+	}
 	if (link->rx_ring.has && link->tx_ring.has) {
 		ncfg_out_writef("    rings rx %lld", (long long)link->rx_ring.value);
 		if (link->rx_ring_max.has) {
