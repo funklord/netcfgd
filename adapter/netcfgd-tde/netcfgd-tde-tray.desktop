@@ -1,6 +1,6 @@
 [Desktop Entry]
 Exec=netcfgd-tde-tray
-Icon=netcfgd
+Icon=se.vibes.netcfgd
 Type=Application
 Terminal=false
 

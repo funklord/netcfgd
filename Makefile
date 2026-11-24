@@ -506,8 +506,14 @@ install-gui:
 	}
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/applications
 	install -m 0755 $(GUI_BUILD_DIR)/netcfgd-gui $(DESTDIR)$(BINDIR)/netcfgd-gui
-	install -m 0644 gui/packaging/netcfgd-gui.desktop \
-		$(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	@# **Renamed to the reverse-DNS id** (2026-11-24, desktop-entry skill):
+	@# the old name goes, so the menu does not list netcfgd twice; a launcher
+	@# pinned to the panel under it has to be pinned again, once.
+	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	install -m 0644 packaging/se.vibes.netcfgd.desktop \
+		$(DESTDIR)$(DATADIR)/applications/se.vibes.netcfgd.desktop
+	install -m 0644 packaging/se.vibes.netcfgd-tui.desktop \
+		$(DESTDIR)$(DATADIR)/applications/se.vibes.netcfgd-tui.desktop
 	@# **The tray at login**, which is where a laptop's owner looks for it.
 	@# A tray holds no authority and changes nothing about the network, so
 	@# this is the TDE tray's narrowing of "starts nothing" (debian/control)
@@ -516,7 +522,10 @@ install-gui:
 	@# machine that does not use it; the desktop's own autostart settings
 	@# turn it off. Not on TDE, which has its own tray and autostart.
 	install -d $(DESTDIR)$(SYSCONFDIR)/xdg/autostart
-	install -m 0644 gui/packaging/netcfgd-gui-tray.desktop \
+	@# The autostart file keeps its name: a desktop records "turned off" under
+	@# it, and a new name would switch the tray on again for whoever had not
+	@# wanted it.
+	install -m 0644 packaging/netcfgd-gui-tray.desktop \
 		$(DESTDIR)$(SYSCONFDIR)/xdg/autostart/netcfgd-gui-tray.desktop
 	@$(MAKE) --no-print-directory install-icons ICON_PREFIX=$(DATADIR)
 	@# **One binary, two names**, the way `ncfg` is the daemon's second name.
@@ -1126,13 +1135,15 @@ install-icons:
 			exit 1; \
 		}; \
 		install -d $(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps; \
+		rm -f $(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/netcfgd.png; \
 		install -m 0644 art/icon/netcfgd-$$size.png \
-			$(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/netcfgd.png; \
+			$(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/se.vibes.netcfgd.png; \
 	done
 
 uninstall-icons:
 	@for size in $(ICON_SIZES); do \
-		rm -f $(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/netcfgd.png; \
+		rm -f $(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/netcfgd.png \
+			$(DESTDIR)$(ICON_PREFIX)/icons/hicolor/$${size}x$${size}/apps/se.vibes.netcfgd.png; \
 	done
 
 packaging:
@@ -4065,6 +4076,8 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-gui
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-tui
 	rm -f $(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop
+	rm -f $(DESTDIR)$(DATADIR)/applications/se.vibes.netcfgd.desktop
+	rm -f $(DESTDIR)$(DATADIR)/applications/se.vibes.netcfgd-tui.desktop
 	rm -f $(DESTDIR)$(SYSCONFDIR)/xdg/autostart/netcfgd-gui-tray.desktop
 	@$(MAKE) --no-print-directory uninstall-icons ICON_PREFIX=$(DATADIR)
 	rm -f $(DESTDIR)$(BINDIR)/netcfgd-modem-mbim

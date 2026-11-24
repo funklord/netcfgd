@@ -29,6 +29,10 @@ MAKEFILE = pathlib.Path("Makefile")
 RENDERED = pathlib.Path("art/icon")
 MASTER = pathlib.Path("art/netcfgd-master.png")
 NAME = "netcfgd"
+# What every front end's `Icon=` names, and the file name it is installed
+# under: the reverse-DNS id since 2026-11-24 (desktop-entry skill). The
+# rendered sources in art/ keep NAME.
+ICON_ID = "se.vibes.netcfgd"
 
 # Where a TDE installation keeps its icon themes. Checked in order, and the
 # check below is skipped where none of them is there: TDE is not a build
@@ -163,9 +167,9 @@ def main():
 				continue
 			named += 1
 			icon = line.split("=", 1)[1].strip()
-			if icon != NAME:
+			if icon != ICON_ID:
 				print(f"icon: {path}:{number}: `Icon={icon}` is not this program's icon")
-				print(f"icon:   every front end names `{NAME}`, which is what art/ installs")
+				print(f"icon:   every front end names `{ICON_ID}`, which is what art/ installs")
 				fail = 1
 	if not named:
 		print("icon: no `Icon=` line in any desktop file; the extraction is broken")
@@ -176,7 +180,7 @@ def main():
 	if not fail:
 		print(
 			f"icon: {len(wanted)} size(s) rendered, "
-			f"{named} `Icon=` line(s) across {len(found)} desktop file(s), all `{NAME}`"
+			f"{named} `Icon=` line(s) across {len(found)} desktop file(s), all `{ICON_ID}`"
 		)
 	return fail
 

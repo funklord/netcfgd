@@ -157,6 +157,9 @@ int main(int argc, char **argv)
 		Qtty::setup(application);
 #endif
 	QApplication::setApplicationName(QStringLiteral("netcfgd-gui"));
+	/* The menu entry's id (desktop-entry skill): how a Wayland compositor and
+	 * a taskbar match this window to `se.vibes.netcfgd.desktop` and its icon. */
+	QGuiApplication::setDesktopFileName(QStringLiteral("se.vibes.netcfgd"));
 	/*
 	 * **A dark window on a dark desktop.** Qt alone hands a TDE or LXQt
 	 * session its light palette, so the window glared white there; qtkit

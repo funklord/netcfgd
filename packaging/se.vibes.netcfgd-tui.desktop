@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=netcfgd (terminal)
+GenericName=Network Configuration
+Comment=Review what netcfgd would change, then apply it, in a terminal
+Exec=netcfgd-tui
+Icon=se.vibes.netcfgd
+Terminal=true
+Categories=Settings;ConsoleOnly;
+Keywords=network;wifi;wireless;vpn;dns;

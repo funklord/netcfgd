@@ -7050,6 +7050,51 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.938 On the desktop's menu as se.vibes.netcfgd
+
+Three messages from the claude-guidelines session (inbox 20261124T2059Z,
+2111Z and 2112Z), from the holder's request that every program a person
+starts from a desktop be on its menu alike, and the id question it settled
+the same day: reverse-DNS, `se.vibes.<name>` (desktop-entry skill).
+
+**Renamed, once.** The GUI's entry was `netcfgd-gui.desktop` and its icon
+`netcfgd`; both are now `se.vibes.netcfgd` -- the project's name, since the
+menu already called the program netcfgd and the GUI and the TDE front end
+share the icon. `make install` takes the old entry and icon files out as it
+puts the new ones in, and `uninstall` removes both names, so the menu never
+lists netcfgd twice. **A launcher pinned to a panel under the old name has
+to be pinned again**, once. The binary keeps its name and
+`StartupWMClass=netcfgd-gui`, which is what Qt puts in WM_CLASS; the GUI
+calls `setDesktopFileName("se.vibes.netcfgd")`, which it never did, so a
+Wayland compositor and a taskbar can match its window to the entry. The TDE
+front end's three entries name the same icon id.
+
+**Kept: the tray's autostart file, `netcfgd-gui-tray.desktop`.** A desktop
+records "turned off" in the user's own copy under that name; a new name
+would have switched the tray on again for whoever had turned it off.
+
+**Added: a menu entry for the terminal frontend**, `se.vibes.netcfgd-tui`,
+`Terminal=true` and `ConsoleOnly`: `netcfgd-tui` is used as a session, which
+the rule gives an entry. The sources moved from `gui/packaging/` to
+`packaging/`, the checklist's place; the TDE adapter's stay under
+`adapter/`, which its own build installs.
+
+**The gates moved with it.** `tool/icon_gate.py` checks every `Icon=`
+against `ICON_ID` and the rendered sources against `NAME`, which keep their
+file names; `tool/uninstall_gate.py` gained `RETIRED`, paths an earlier
+version installed that `uninstall` may still remove, each with its date and
+reason -- the gate otherwise refuses removing what no install writes, which
+is right for a stranger's file and wrong for the name this tree used
+yesterday. All three entries pass `desktop-file-validate`, and `make
+install-gui` into a scratch DESTDIR places exactly the two menu entries,
+the autostart file under its old name, eight `se.vibes.netcfgd.png` from
+16 to 256, and the binary under both its names.
+
+**Not done, and why:** the tray's icon on TDE (2111Z). Qt's icon theme there
+is hicolor, so `QIcon::fromTheme` resolves none of the `network-*` names and
+`gui/src/tray.cpp` always falls back to its painted icon. The fix is the
+icon-theme piece qtkit is to hold; taken when it lands, as the message asks.
+
 ## 10.937 The window edits an access point's keys
 
 10.935 left the access point dialog without a field for keys and named them

@@ -26,6 +26,15 @@ import sys
 
 MAKEFILE = "Makefile"
 
+# Paths an earlier version installed and this one no longer does, which
+# `uninstall` -- and the install that replaced them -- still remove: a file
+# that was ours is not somebody else's. Each with when and why, so the list
+# is a record and not a way round the check.
+RETIRED = {
+	"$(DESTDIR)$(DATADIR)/applications/netcfgd-gui.desktop":
+		"the GUI's menu entry before its reverse-DNS id, se.vibes.netcfgd (2026-11-24)",
+}
+
 # `install -m MODE src DEST` and `ln -sf target DEST`. The destination is the
 # last word, and it is the only word that matters here.
 PLACES = re.compile(r"^\s+(?:install\s+-m\s+\S+|ln\s+-sf)\s+.*?(\$\(DESTDIR\)\S+)\s*$")
@@ -95,7 +104,7 @@ def main():
 		print(f"uninstall-gate: {by_target[path]} installs {path}, "
 		      f"and `uninstall` does not remove it")
 		fail = 1
-	for path in sorted(removed - installed):
+	for path in sorted(removed - installed - set(RETIRED)):
 		print(f"uninstall-gate: `uninstall` removes {path}, which no install "
 		      f"target writes -- if that is somebody's own file, it is not "
 		      f"ours to delete")
