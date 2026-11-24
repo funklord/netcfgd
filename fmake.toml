@@ -10,7 +10,11 @@
 # fuzz harnesses each define `ncfg_fuzz_one`). `client/fuzz` likewise: programs of
 # their own that `make fuzz` builds. `bridge` needs fuzznet, and `gui/src/phone` is
 # the Android build's, with a camera a desktop build has no Qt module for.
-exclude = ["adapter", "c", "fuzznet", "client/fuzz", "bridge", "gui/src/phone"]
+# `monocypher`, `flog` and `quirc` are the root's copies of fuzznet's
+# dependencies (10.923), compiled by `make -C c` and the Android build, and
+# each carries programs of its own.
+exclude = ["adapter", "c", "fuzznet", "client/fuzz", "bridge", "gui/src/phone",
+	"monocypher", "flog", "quirc"]
 
 # The Qt client, `make gui`. fmake names a target after the directory its
 # root TU sits in; `gui` is a directory in the way here, so it falls back to

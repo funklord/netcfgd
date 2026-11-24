@@ -64,7 +64,8 @@ android {
 	ANDROID_MIN_SDK_VERSION = 28
 	# The first screen (10.720), only here: a desktop has no use for a camera.
 	QT += multimedia
-	QUIRC = $$PWD/../fuzznet/quirc/lib
+	# The root's copy, not fuzznet's nested one (project.md 10.923).
+	QUIRC = $$PWD/../quirc/lib
 	INCLUDEPATH += $$QUIRC $$PWD/src/phone
 	SOURCES += src/phone/phone_host.cpp src/phone/code_reader.cpp src/phone/pair_view.cpp \
 		$$QUIRC/quirc.c $$QUIRC/decode.c $$QUIRC/identify.c $$QUIRC/version_db.c

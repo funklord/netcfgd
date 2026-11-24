@@ -40,8 +40,8 @@ export PATH=/tools:$PATH
 mkdir -p /work
 (cd /repo && tar -cf - --exclude='*.o' --exclude='*.a' --exclude='*.d' \
 	--exclude=fuzznet-build --exclude='fuzznet/build*' --exclude=.git \
-	--exclude=fuzznet/qtty --exclude=target --exclude=.build-flags \
-	c client fuzznet doc packaging tests helper VERSION) | tar -xf - -C /work
+	--exclude=fuzznet/qtty --exclude=fuzznet/monocypher --exclude=fuzznet/flog --exclude=target --exclude=.build-flags \
+	c client fuzznet monocypher flog doc packaging tests helper VERSION) | tar -xf - -C /work
 # Whatever this tree last built, by name, so that nothing x86 is linked.
 (cd /work/c && make -s clean >/dev/null 2>&1)
 rm -f /work/c/netcfgd /work/c/ncfg
@@ -88,8 +88,8 @@ fi
 mkdir -p /native
 (cd /repo && tar -cf - --exclude='*.o' --exclude='*.a' --exclude='*.d' \
 	--exclude=fuzznet-build --exclude='fuzznet/build*' --exclude=.git \
-	--exclude=fuzznet/qtty --exclude=.build-flags --exclude=c/netcfgd --exclude=c/ncfg \
-	c client fuzznet VERSION) | tar -xf - -C /native
+	--exclude=fuzznet/qtty --exclude=fuzznet/monocypher --exclude=fuzznet/flog --exclude=.build-flags --exclude=c/netcfgd --exclude=c/ncfg \
+	c client fuzznet monocypher flog VERSION) | tar -xf - -C /native
 (cd /native/c && PATH=${PATH#/tools:} timeout 900 make -j4 CC=gcc netcfgd ncfg) > /verdict/native.log 2>&1
 say "native build: exit $?"
 fleet() { # $1 the log, then the environment

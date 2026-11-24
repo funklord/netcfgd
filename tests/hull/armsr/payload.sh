@@ -28,8 +28,8 @@ export PATH=/tools:$toolchain/bin:$PATH
 mkdir -p /work
 (cd /repo && tar -cf - --exclude='*.o' --exclude='*.a' --exclude='*.d' \
 	--exclude=fuzznet-build --exclude='fuzznet/build*' --exclude=.git \
-	--exclude=fuzznet/qtty --exclude=.build-flags --exclude=c/netcfgd \
-	--exclude=c/netcfgd-static c client fuzznet VERSION) | tar -xf - -C /work
+	--exclude=fuzznet/qtty --exclude=fuzznet/monocypher --exclude=fuzznet/flog --exclude=.build-flags --exclude=c/netcfgd \
+	--exclude=c/netcfgd-static c client fuzznet monocypher flog VERSION) | tar -xf - -C /work
 cd /work/c || { say "VERDICT bad: the tree did not copy"; exit 0; }
 timeout 1500 make -j4 CC=aarch64-openwrt-linux-musl-gcc netcfgd-static > /verdict/build.log 2>&1
 built=$?

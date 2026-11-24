@@ -25,7 +25,7 @@ apk add -q make build-base linux-headers pkgconf strongswan iproute2 iputils >/d
 mkdir -p /work
 tar -C /src -cf - --exclude='*.o' --exclude='*.d' --exclude='*.a' --exclude='*_test' \
 	--exclude='*_replay' --exclude='*_fuzz' --exclude='c/netcfgd' --exclude='c/ncfg' \
-	--exclude='fuzznet/build' --exclude='.git' c client fuzznet VERSION | tar -C /work -xf -
+	--exclude='fuzznet/build' --exclude='fuzznet/monocypher' --exclude='fuzznet/flog' --exclude='.git' c client fuzznet monocypher flog VERSION | tar -C /work -xf -
 cd /work
 make -C c clean >/dev/null 2>&1 || true
 make -s -C c > /tmp/build.log 2>&1 || { say "build failed: $(tail -3 /tmp/build.log)"; exit 1; }

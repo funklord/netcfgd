@@ -234,6 +234,17 @@ $(LIB): $(LIB_OBJS)
 # is two writers of the same objects.
 FUZZNET       = ../fuzznet
 FUZZNET_BUILD = fuzznet-build
+# **One copy of each dependency, at this tree's root** (harmonization.md, "The
+# leaf decides"; project.md 10.923): fuzznet keeps its own submodules for its
+# own clone, and takes each directory from its consumer (its sec 1427). So it
+# compiles the root's monocypher and flog here, never its nested copies, which
+# this tree does not fetch. THORVG_DIR names a directory this tree does not
+# have: netcfgd draws no stickers, and an empty one turns ThorVG off rather
+# than reaching into fuzznet's.
+VENDOR_ROOT   = $(abspath ..)
+FUZZNET_VENDOR = MONOCYPHER_DIR=$(VENDOR_ROOT)/monocypher FLOG_DIR=$(VENDOR_ROOT)/flog \
+		QUIRC_DIR=$(VENDOR_ROOT)/quirc QTTY_DIR=$(VENDOR_ROOT)/qtty \
+		THORVG_DIR=$(VENDOR_ROOT)/thorvg
 FUZZNET_LIB   = fuzznet.a
 # fuzznet's feature flags, as `bridge/Makefile` names them: a header compiled
 # under different flags from the object it calls is the quietest kind of
@@ -294,7 +305,8 @@ src/node/node.o src/node/user_host.o: | $(FUZZNET_LIB)
 # `main` are left out, asked of the objects with `nm` rather than guessed from
 # their names -- `bridge/Makefile` says what the guess cost.
 $(FUZZNET_LIB): FORCE
-	@if [ ! -e $(FUZZNET)/Makefile ] || [ ! -e $(FUZZNET)/monocypher/src/monocypher.c ]; then \
+	@if [ ! -e $(FUZZNET)/Makefile ] || [ ! -e ../monocypher/src/monocypher.c ] || \
+	    [ ! -e ../flog/flog.h ]; then \
 		if ! command -v git >/dev/null 2>&1; then \
 			echo "c: fuzznet is absent and git is not installed to fetch it." >&2; \
 			exit 1; \
@@ -304,9 +316,9 @@ $(FUZZNET_LIB): FORCE
 			echo "c:   so there is no gitlink saying which commit to fetch." >&2; \
 			exit 1; \
 		fi; \
-		echo "c: fetching the fuzznet submodule at the commit this tree pins"; \
-		git -C .. submodule update --init --recursive -- fuzznet || { \
-			echo "c: could not fetch the fuzznet submodule." >&2; \
+		echo "c: fetching fuzznet, monocypher and flog at the commits this tree pins"; \
+		git -C .. submodule update --init -- fuzznet monocypher flog || { \
+			echo "c: could not fetch the fuzznet, monocypher or flog submodule." >&2; \
 			exit 1; \
 		}; \
 	fi
@@ -332,7 +344,7 @@ $(FUZZNET_LIB): FORCE
 	[ "$$(cat $(FUZZNET_BUILD)/.built-with 2>/dev/null)" = "$$want" ] || \
 		printf '%s\n' "$$want" > $(FUZZNET_BUILD)/.built-with
 	@CFLAGS='$(FUZZNET_CFLAGS)' $(MAKE) --no-print-directory -s -C $(FUZZNET) \
-		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) FZN_LOG_PACK=0 \
+		BUILD_DIR=$(CURDIR)/$(FUZZNET_BUILD) $(FUZZNET_VENDOR) FZN_LOG_PACK=0 \
 		FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0 all
 	@if [ ! -e $@ ] || [ -n "$$(find $(FUZZNET_BUILD) -name '*.o' -newer $@ | head -1)" ]; then \
 		objects=$$(find $(FUZZNET_BUILD) -name '*.o' | sort | while read -r o; do \

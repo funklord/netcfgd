@@ -7048,6 +7048,33 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.923 One copy of each dependency, at this tree's root
+
+The holder's rule (harmonization.md, *The leaf decides*): the program at the
+end of a chain vendors each dependency once, at its root, and a library takes
+each dependency's directory from its consumer. fuzznet does since its
+`24071d77` (its sec 1427); netcfgd is step 5 of 8, handed on by fuzzypickles
+(its `fa865b02`; inbox 20261124T0446Z), and hands on to raidcfgd.
+
+Measured from `c/`'s dependency files: netcfgd compiled fuzznet's nested
+**monocypher** and **flog**; the Android build compiled its nested **quirc**;
+**qtty** it already held at the root, and **ThorVG** it never compiles. So
+monocypher, flog and quirc are submodules at the root now, at the commits
+fuzznet pins, by their https addresses; fuzznet moves to `69c29f83` (seven
+commits, the one fuzzypickles took). `c/Makefile` hands fuzznet's build all
+five directories as `FUZZNET_VENDOR` -- `THORVG_DIR` naming a directory this
+tree does not have, which turns ThorVG off rather than reaching into
+fuzznet's -- and fetches `fuzznet monocypher flog` without `--recursive`; the
+Android node's sub-make gets the same five; `gui.pro` takes the root's quirc;
+the hull and ipsec payloads copy the root's copies into their guests and
+leave out fuzznet's; `fmake.toml` keeps fmake off all three.
+
+**Proved in a worktree whose fuzznet was fetched without `--recursive`**, its
+nested directories empty: `c/` built, every dependency file names only the
+root's copies, a second `make` compiled nothing, and `make hull-malta` built
+the MIPS program inside its guest from the copied root copies and passed
+whole.
+
 ## 10.922 The window shows a link's negotiated speed
 
 A desktop network tool shows how fast the cable came up -- nm-applet's

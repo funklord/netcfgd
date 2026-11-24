@@ -237,6 +237,8 @@ ANDROID_NODE_LIB = $(ANDROID_NODE_DIR)/libncfghost.so
 include ../c/fuzznet-bounds.mk
 ANDROID_NODE_FUZZNET = CFLAGS='-Os -ffunction-sections -fdata-sections $(FUZZNET_BOUNDS)' \
 	$(MAKE) -s -C ../fuzznet BUILD_DIR=$(ANDROID_NODE_DIR) CC=$(ANDROID_CC) \
+	MONOCYPHER_DIR=$(abspath ../monocypher) FLOG_DIR=$(abspath ../flog) \
+	QUIRC_DIR=$(abspath ../quirc) QTTY_DIR=$(abspath ../qtty) THORVG_DIR=$(abspath ../thorvg) \
 	FZN_LOG_PACK=0 FZN_STICKERS=0 FZN_CATALOG=0 FZN_NOTES=0 FZN_GROUPS=0
 ANDROID_NODE_CFLAGS = -Os -ffunction-sections -fdata-sections $(FUZZNET_BOUNDS) \
 	-I../c/include -I../client
