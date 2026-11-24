@@ -84,6 +84,48 @@ static void print_link_settings(const ncfg_observed_link_t *link,
 		}
 		ncfg_out_line("");
 	}
+	/*
+	 * **What the driver says, where it says it** (project.md 10.921): the
+	 * link mode, the ring sizes against their maxima, and the wake-on-LAN
+	 * modes on against those it supports. The plan's warnings and the apply's
+	 * refusals send an operator here for exactly these -- "past the maximum
+	 * `ncfg status` shows", "the ones it does" -- and until now none of them
+	 * was shown. Nothing for a device that reports none, which is every
+	 * virtual one.
+	 */
+	if (link->speed.has || link->autoneg.has) {
+		ncfg_out_write("    link");
+		if (link->speed.has) {
+			ncfg_out_writef(" %lld Mb/s", (long long)link->speed.value);
+		}
+		if (link->duplex) {
+			ncfg_out_writef(" %s duplex", link->duplex);
+		}
+		if (link->autoneg.has) {
+			ncfg_out_write(link->autoneg.value ? ", negotiated" : ", forced");
+		}
+		ncfg_out_line("");
+	}
+	if (link->rx_ring.has && link->tx_ring.has) {
+		ncfg_out_writef("    rings rx %lld", (long long)link->rx_ring.value);
+		if (link->rx_ring_max.has) {
+			ncfg_out_writef(" of %lld", (long long)link->rx_ring_max.value);
+		}
+		ncfg_out_writef(", tx %lld", (long long)link->tx_ring.value);
+		if (link->tx_ring_max.has) {
+			ncfg_out_writef(" of %lld", (long long)link->tx_ring_max.value);
+		}
+		ncfg_out_line("");
+	}
+	if (link->wol.has && link->wol_supported.has) {
+		char on[16];
+		char can[16];
+
+		ncfg_wol_text((uint32_t)link->wol.value & NCFG_WOL_MANAGED, on, sizeof(on));
+		ncfg_wol_text((uint32_t)link->wol_supported.value & NCFG_WOL_MANAGED, can,
+		    sizeof(can));
+		ncfg_out_writef("    wake-on-LAN %s, can %s\n", on, can);
+	}
 	if (link->qdisc) {
 		char shaped[96];
 		const char *ours = listed(observed->qdisc_applied, observed->qdisc_applied_count,

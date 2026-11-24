@@ -1165,7 +1165,17 @@ node", passed by both daemons, with devices re-paired to it. fuzznet has been
 asked for the constant. **What it changes here, once confirmed:** the two
 `--fuzznet-product` defaults and the assert move to that constant, and
 devices paired with product 3 are paired again. Not done until the holder
-says so in this tree and the constant exists.
+says so in this tree. **The constant exists** (fuzznet `aac57be5`, its sec
+1429; inbox 20261124T0347Z): `FZN_PRODUCT_HOST` (6) in `chain/service.h`,
+named `--fuzznet-product=host`, settled by the holder in fuzznet's session as
+"the daemons one unix user runs share that user's estate and one pairing" --
+a product composing only capabilities, never a record stream. It is past the
+vendored pin (`1640ff38`), so taking it also moves the pin. What is left is
+the holder's word here. **And raidcfgd has taken it** (its `7468b40`, inbox
+20261124T0420Z): its daemon passes product 6 unless told otherwise. So on a
+machine running both, the two now disagree outright -- where raidcfgd's daemon
+is the face, a device paired under netcfgd's 3 is refused, and the reverse --
+which makes the holder's word here the thing a mixed machine waits on.
 
 **A question for the holder: what a zone is** (0284's layer three; 0339
 left "the zone grammar and how a zone names a host" open, and slots (0340)
@@ -7037,6 +7047,18 @@ already records.
 **None of the four fixes touched the daemon.** Every one was a test holding a
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
+
+## 10.921 `ncfg status` shows what the driver says
+
+The plan's warnings and the apply's refusals for the ethtool block send an
+operator to `ncfg status` -- a ring size "past the maximum `ncfg status`
+shows", wake-on-LAN modes "the ones it does" -- and status showed none of
+them: the link modes, rings and wake-on-LAN were observed (10.877, 10.881,
+10.917) and read only by the planner. Each link now says, where its driver
+reports it, `link 1000 Mb/s full duplex, negotiated`, `rings rx 256 of 4096,
+tx 256 of 4096`, and `wake-on-LAN g, can pumbg`; a link reporting none, every
+virtual one, gains no line. `cli_test` holds the three lines and their
+absence on a dummy.
 
 ## 10.920 The router rigs carried netcfgd's program in RAM for nothing
 

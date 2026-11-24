@@ -864,6 +864,49 @@ static void what_something_else_reported_is_marked_as_reported(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * What the driver says (10.921): the warnings send an operator to `ncfg
+ * status` for a ring's maximum and the wake-on-LAN modes a card supports, so
+ * status has to show them -- and nothing for a link that reports none.
+ */
+static void the_driver_settings_are_shown_where_the_warnings_point(void)
+{
+	static const char observation[] =
+	    "{\"links\":[{\"name\":\"eth0\",\"index\":2,\"up\":true,\"carrier\":true,"
+	    "\"mtu\":1500,\"autoneg\":true,\"speed\":1000,\"duplex\":\"full\","
+	    "\"rx_ring\":256,\"tx_ring\":256,\"rx_ring_max\":4096,\"tx_ring_max\":4096,"
+	    "\"wol\":32,\"wol_supported\":47},"
+	    "{\"name\":\"dummy0\",\"index\":3,\"up\":true,\"carrier\":true,\"mtu\":1500}],"
+	    "\"address_proto_supported\":true}";
+	ncfg_observed_t *observed;
+	const char      *printed;
+	char             err[NCFG_ERROR_MAX];
+
+	observed = ncfg_observed_read(observation, sizeof(observation) - 1, err, sizeof(err));
+	if (!observed) {
+		check(0, "an observation carrying driver settings parses");
+		detail("why", err);
+		return;
+	}
+	capture_begin();
+	ncfg_cli_print_status(observed);
+	printed = capture_end();
+	line(printed, "    link 1000 Mb/s full duplex, negotiated", "the link mode is shown");
+	line(printed, "    rings rx 256 of 4096, tx 256 of 4096",
+	    "the rings, against the maxima a warning cites");
+	line(printed, "    wake-on-LAN g, can pumbg",
+	    "and wake-on-LAN, against the modes the card supports");
+	{
+		const char *first = printed ? strstr(printed, "    rings ") : NULL;
+		const char *wake = printed ? strstr(printed, "    wake-on-LAN ") : NULL;
+
+		check(first && !strstr(first + 1, "    rings ") && wake &&
+		        !strstr(wake + 1, "    wake-on-LAN "),
+		    "  and a link reporting none, the dummy, adds none of those lines");
+	}
+	ncfg_observed_free(observed);
+}
+
 /* ------------------------------------------------------------------------ *
  * `ncfg plan` and `ncfg show`
  * ------------------------------------------------------------------------ */
@@ -2874,6 +2917,7 @@ int main(void)
 	free(document_text);
 
 	what_something_else_reported_is_marked_as_reported();
+	the_driver_settings_are_shown_where_the_warnings_point();
 	an_empty_plan_still_prints_what_is_not_an_action();
 
 	a_scan_is_a_column_per_fact();
