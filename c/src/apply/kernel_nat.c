@@ -167,11 +167,37 @@ typedef struct {
 	size_t                  *count;
 } slot_gather_t;
 
+typedef struct {
+	ncfg_nft_slot_member_t **members;
+	size_t                  *count;
+	long long                now;
+} slot_restore_t;
+
+static void restore_one(const char *slot, void *context);
+
+/*
+ * **A slot whose members could not be read is carried from its record, never
+ * started empty.** The result here used to be dropped, so a dump that failed --
+ * a socket that timed out under load, measured at a load of 16 the night this
+ * was found -- started that slot empty in the new table: a quarantine slot's
+ * members walked back in on an ordinary apply, a firewall failing open. The
+ * record is what a boot starts from, so it is the same answer one step earlier.
+ * What the failed dump had appended is taken back first, so nothing is listed
+ * twice.
+ */
 static void gather_from_kernel(const char *slot, void *context)
 {
 	slot_gather_t *gather = context;
+	const size_t   before = *gather->count;
 
-	(void)slot_dump_one(gather->socket, slot, gather->members, gather->count);
+	if (!slot_dump_one(gather->socket, slot, gather->members, gather->count)) {
+		slot_restore_t restore = { gather->members, gather->count, (long long)time(NULL) };
+
+		*gather->count = before;
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "slot `%s`: its members are carried from their record, not the kernel", slot);
+		restore_one(slot, &restore);
+	}
 }
 
 /*
@@ -344,12 +370,6 @@ static void slot_forget(const ncfg_firewall_t *firewall)
 	}
 	closedir(dir);
 }
-
-typedef struct {
-	ncfg_nft_slot_member_t **members;
-	size_t                  *count;
-	long long                now;
-} slot_restore_t;
 
 /* One slot's record read back, its lapsed members left out. */
 static void restore_one(const char *slot, void *context)

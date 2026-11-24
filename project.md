@@ -7050,6 +7050,29 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.940 An apply no longer empties a slot whose members it could not read
+
+Found by the lens 10.934 left: a failed read taken as "nothing there". When
+an apply replaces the table it carries each slot's members into the new one,
+read from the kernel -- and `gather_from_kernel` dropped the read's result,
+so a dump that failed started that slot empty. For a `drop` slot -- a
+quarantine list -- that lets every member back in on an ordinary apply: a
+firewall failing open. A failing dump is not hypothetical here: the zone
+sync's neighbour dump timed out at a load of 16 the same night.
+
+Now a slot whose dump fails is carried from its record -- the file a boot
+starts from (0340), members written through netcfgd -- after taking back
+whatever the failed dump half-appended, with a warning naming the slot.
+**What the record cannot hold is still lost**: a member written with `nft`
+directly, behind netcfgd's back, has no record; that is the record's
+definition, not this fix's gap.
+
+Proved by sabotage, the dump forced to fail for one run, never committed: a
+`drop` slot holding 192.0.2.7 in the kernel and its record, a rule changed,
+the apply run -- the old code left the slot empty (`kept: 0`), the fix kept
+the member (`kept: 1`), the rule change landing either way.
+`tests/live/firewall.sh` passes unsabotaged.
+
 ## 10.939 Microcontroller nodes reading a subset of the document -- open, the holder's
 
 hal9001, the MCU hardware abstraction layer, plans a network stack configured
