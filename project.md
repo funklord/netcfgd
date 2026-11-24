@@ -1164,6 +1164,17 @@ refusal fuzznet's sec 1419 measured at the remote hop is not the design. **How
 the library is meant to be used is fuzznet's to state** -- the holder: *"inform
 fuzznet to disseminate how the library is meant to be used and my corrections
 as it holds authority"* -- told in its inbox, 20261124T1233Z, and its session.
+**And since fuzznet `b85096f4` (its sec 1437; inbox 20261124T1614Z), product
+no longer affects pairing at all**: on the holder's word in fuzznet's session
+-- *"why would the different products running as root need to be paired
+differently?"* -- fuzznetd composes every capability it checks under
+`FZN_PRODUCT_HOST` whatever `--fuzznet-product` a daemon passes, so a device
+paired with any consumer's daemon is admitted by every other serving the same
+estate. netcfgd's 6 (10.926) is harmless and stays; devices paired under 3
+before it re-pair once. Still open there, the holder's "too early to tell":
+what a product is for beyond this, a host stating its services so a consumer
+shows devices by them, and a host in several estates. That vendored fuzznet
+is not yet at `b85096f4`; nothing here needs it.
 
 **Zones are ours to build** (2026-11-24). This stood as a question for the
 holder -- 0284's layer three, which 0339 left as "the zone grammar and how a
@@ -7038,6 +7049,22 @@ already records.
 **None of the four fixes touched the daemon.** Every one was a test holding a
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
+
+## 10.929 The window edits zones
+
+Zones (10.927) and their caps (10.928) had no place in the window: a router
+or desktop owner could put a link in a zone from the interface dialog, and
+could not see or write the zone itself. A `zones` tab beside the firewall
+lists each with what it reaches and each client's cap, and opens it in an
+editor on the host lists' pattern -- name fixed once saved, since links name
+it; reach and the cap checked as the compiler would; saved as
+`conf.d/zone-NAME.conf`. The dialog says that a zone is the estate's and
+that the same drop-in belongs on every host (`ncfg config put --at estate`),
+rather than sending it there: a change to every machine is the operator's to
+send. `zone_load` against a running daemon: the zones read, one saves
+unchanged and compiles back the same, a new one saves and sorts among them, a
+cap that is no rate is refused, and a zone a link is still in cannot be
+deleted -- the daemon refuses a configuration that would not compile.
 
 ## 10.928 A zone caps each client: `client_limit`
 

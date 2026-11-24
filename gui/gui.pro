@@ -157,6 +157,8 @@ SOURCES += \
 	src/firewall_view.cpp \
 	src/host_list_dialog.cpp \
 	src/host_lists_view.cpp \
+	src/zone_dialog.cpp \
+	src/zones_view.cpp \
 	src/block_list_dialog.cpp \
 	src/block_lists_view.cpp \
 	src/dns_record_dialog.cpp \
@@ -208,6 +210,8 @@ HEADERS += \
 	src/firewall_view.h \
 	src/host_list_dialog.h \
 	src/host_lists_view.h \
+	src/zone_dialog.h \
+	src/zones_view.h \
 	src/block_list_dialog.h \
 	src/block_lists_view.h \
 	src/dns_record_dialog.h \

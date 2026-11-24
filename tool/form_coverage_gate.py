@@ -75,6 +75,8 @@ FORMS = {
 	# member its reader skips is a selector deleted -- `invert` was, until
 	# 2026-11-21, which turned an inverted rule inside out on Save.
 	"rule_fields": ("ncfg_client_rules", []),
+	# The zones tab writes conf.d/zone-NAME whole (10.929).
+	"zone_fields": ("ncfg_client_zones", []),
 }
 
 # Sub-blocks a dialog reads field by field, held to the same rule. Each names

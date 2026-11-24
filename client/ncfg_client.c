@@ -4023,6 +4023,69 @@ int ncfg_client_host_lists(ncfg_client_t *client, ncfg_host_lists_t *out, char *
 	return 1;
 }
 
+void ncfg_zones_free(ncfg_zones_t *zones)
+{
+	if (!zones) {
+		return;
+	}
+	for (size_t i = 0; i < zones->count; i++) {
+		free(zones->items[i].name);
+		free(zones->items[i].reach);
+		free(zones->items[i].client_limit);
+	}
+	free(zones->items);
+	zones->items = NULL;
+	zones->count = 0;
+}
+
+int ncfg_client_zones(ncfg_client_t *client, ncfg_zones_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t zones = ncfg_json_member(doc, ncfg_json_root(doc), "zones");
+	uint32_t count = ncfg_json_count(doc, zones);
+	if (!count) {
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, zones, i);
+
+		out->items[i].name = member_text(doc, entry, "name");
+		out->items[i].reach = join_strings(doc, ncfg_json_member(doc, entry, "reach"));
+		out->items[i].client_limit = member_text(doc, entry, "client_limit");
+		if (!out->items[i].name || !out->items[i].reach || !out->items[i].client_limit) {
+			ncfg_zones_free(out);
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			return 0;
+		}
+	}
+	ncfg_json_free(doc);
+	return 1;
+}
+
 void ncfg_bluetooths_free(ncfg_bluetooths_t *devices)
 {
 	if (!devices) {

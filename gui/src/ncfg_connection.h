@@ -393,6 +393,14 @@ struct ncfg_host_list_row {
 	QStringList mac;
 };
 
+/* One zone (10.927, 10.928): the zones it reaches, and each client's cap as
+ * written, empty where none. */
+struct ncfg_zone_row {
+	QString     name;
+	QStringList reach;
+	QString     client_limit;
+};
+
 /* One 802.11s mesh (10.588). `channel` -1 where unset; `credential` the
  * reference as written; `unmodelled` what the editor cannot carry. */
 struct ncfg_mesh_row {
@@ -1467,6 +1475,8 @@ public:
 	/* The host lists the configuration declares, for the tab that edits
 	 * them. */
 	bool host_lists(QList<ncfg_host_list_row> *out, QString *error);
+	/* The zones the configuration declares, for the tab that edits them. */
+	bool zones(QList<ncfg_zone_row> *out, QString *error);
 	/* The meshes the configuration declares, for the tab that edits them. */
 	bool meshes(QList<ncfg_mesh_row> *out, QString *error);
 	/* The local DNS records the configuration declares (0303). */

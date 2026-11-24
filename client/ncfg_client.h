@@ -1522,6 +1522,25 @@ int ncfg_client_meshes(ncfg_client_t *client, ncfg_meshes_t *out, char *err, siz
 int ncfg_client_host_lists(ncfg_client_t *client, ncfg_host_lists_t *out, char *err,
                            size_t err_size);
 
+/* One zone (10.927): a purpose of the estate's, the zones it reaches joined
+ * with ", ", and each client's cap as written, "" where none (10.928). */
+typedef struct {
+	char *name;
+	char *reach;
+	char *client_limit;
+} ncfg_zone_entry_t;
+
+typedef struct {
+	ncfg_zone_entry_t *items;
+	size_t             count;
+} ncfg_zones_t;
+
+void ncfg_zones_free(ncfg_zones_t *zones);
+
+/* The zones the configuration declares, for the editor that saves each one
+ * whole (10.929). */
+int ncfg_client_zones(ncfg_client_t *client, ncfg_zones_t *out, char *err, size_t err_size);
+
 /* One bluetooth device the configuration declares. */
 typedef struct {
 	char *id;
