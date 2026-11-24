@@ -717,6 +717,8 @@ struct ncfg_access_point_config {
 	QString mobility_domain;
 	QString roaming_key;
 	QList<QPair<QString, int>> neighbours;
+	/* Its own passwords (10.935): name, the passphrase's reference, zone. */
+	QList<QStringList> keys;
 	/* What the access point dialog has no field for, comma-joined; empty for
 	 * one it can write back whole (doc/journal.md 10.606). */
 	QString unmodelled;

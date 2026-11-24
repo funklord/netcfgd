@@ -2485,6 +2485,12 @@ void ncfg_access_points_free(ncfg_access_points_t *points)
 			free(points->items[i].neighbours[n].bssid);
 		}
 		free(points->items[i].neighbours);
+		for (size_t k = 0; k < points->items[i].key_count; k++) {
+			free(points->items[i].keys[k].name);
+			free(points->items[i].keys[k].passphrase);
+			free(points->items[i].keys[k].zone);
+		}
+		free(points->items[i].keys);
 	}
 	free(points->items);
 	memset(points, 0, sizeof(*points));
@@ -2750,10 +2756,26 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 				}
 			}
 		}
-		/* Its own keys (10.935), which the form has no field for yet: named,
-		 * so the window will not write it back without them. */
-		if (ncfg_json_count(doc, ncfg_json_member(doc, entry, "keys"))) {
-			note_unmodelled(&item->unmodelled, "keys");
+		/* Its own keys (10.935): each a name, a reference and a zone. */
+		{
+			uint32_t list = ncfg_json_member(doc, entry, "keys");
+			uint32_t many = ncfg_json_count(doc, list);
+
+			if (many) {
+				item->keys = calloc(many, sizeof(*item->keys));
+				if (item->keys) {
+					item->key_count = many;
+				}
+			}
+			for (uint32_t k = 0; k < item->key_count; k++) {
+				uint32_t one = ncfg_json_at(doc, list, k);
+				uint32_t secret = ncfg_json_member(doc, one, "passphrase");
+
+				item->keys[k].name = member_text(doc, one, "name");
+				item->keys[k].passphrase = ncfg_json_type(doc, secret) == NCFG_JSON_OBJECT
+				    ? reference_text(doc, secret) : dup_string("");
+				item->keys[k].zone = member_text(doc, one, "zone");
+			}
 		}
 		if (!item->unmodelled) {
 			item->unmodelled = dup_string("");

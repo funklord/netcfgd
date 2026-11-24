@@ -7050,6 +7050,43 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.937 The window edits an access point's keys
+
+10.935 left the access point dialog without a field for keys and named them
+`unmodelled`, so an access point with keys could not be saved from the
+window at all. The dialog now has a keys table -- name, the passphrase's
+`@secret:` reference, zone -- with add and remove beside it, as the
+neighbour table has, and writes each as `key "NAME" { passphrase = "...";
+zone = "..." }`. The client reads `keys` from the document, the passphrase
+as the reference written (provider and all), so `unmodelled` no longer
+names them. The passphrase itself never reaches the window, as the
+network's own does not.
+
+`access_point_load`: a WPA2 access point with a key and its zone read by the
+window as `kids|@secret:kids-wifi|kids`, saved unchanged through the dialog,
+and compiled back to the access point it was, its key whole.
+
+**Open: `dns_record_load` failed once under load.** In this change's full
+check, at a load average of 14 to 16 from other work on the machine, all
+four of its saves failed with "fuzznet at .../fuzznet.sock gave no answer
+that fits"; run alone three times straight after, at 9 to 11, it passed each
+time. Nothing here touches DNS records, and the reading is a reply deadline
+missed under load -- **a candidate, not a conclusion**: the experiment that
+would settle it is the test under a load of 16 made on purpose (`stress -c`
+beside it), run until it fails or twenty times clean.
+
+**What is left of 0284's yardstick, and whose it is.** Identity by
+authentication proper -- an access point that is an 802.1X authenticator, a
+device known by the user it logged in as -- is the one item no code serves.
+netcfgd has the supplicant side only (0008, 0087). The authenticator needs a
+choice that is not a worker's: hostapd's internal EAP server means server
+certificates and a user database on every access point (whose PKI, and
+whether fuzznet's identities are it), and RADIUS means an external server
+netcfgd only points at. **The holder's to decide**; the best guess is
+RADIUS first -- `auth_server_addr` and a shared secret through the store,
+the user's identity then reported per station as `keyid` is -- since it
+needs no PKI decision and every enterprise network already runs one.
+
 ## 10.936 The hull vm tiers boot hull's kernel, so they take its modules
 
 Every vm tier here mounted the host's `/lib/modules` at `/usr/lib/modules`.

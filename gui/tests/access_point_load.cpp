@@ -193,6 +193,48 @@ int main(int argc, char **argv)
 	check(compiled(work.path()), before, "  and compiles to the access point it was, whole");
 	stop(&daemon);
 
+	/* 10.935: an access point with keys of its own, WPA2's, saved unchanged
+	 * through the dialog -- its keys carried, the key's zone with it. */
+	{
+		QTemporaryDir keyed_work;
+		QProcess      keyed_daemon;
+		const QString keyed_socket = start(&keyed_daemon, keyed_work.path(),
+		    QStringLiteral("global { control { root = \"any\" } }\n"
+		                   "interface wlan0 { config = \"192.168.50.1/24\" }\n"
+		                   "zone \"kids\" { reach = [] }\n"),
+		    QStringLiteral("access_point \"Home\" {\n"
+		                   "\tdevice = \"wlan0\"\n\tchannel = 6\n"
+		                   "\twifi {\n\t\tpsk = \"@secret:keyring:ap\"\n\t\tproto = \"wpa2\"\n\t}\n"
+		                   "\tkey \"kids\" { passphrase = \"@secret:kids-wifi\"; zone = \"kids\" }\n"
+		                   "}\n"));
+		ncfg_connection keyed;
+		if (keyed_socket.isEmpty() || !keyed.open(keyed_socket, &error)) {
+			fprintf(stderr, "access_point_load: the keyed daemon never started\n");
+			stop(&keyed_daemon);
+			return 1;
+		}
+		const QString keyed_before = compiled(keyed_work.path());
+		check(keyed_before.contains(QStringLiteral("\"keys\"")) ? QStringLiteral("compiled")
+		                                                       : keyed_before,
+		    QStringLiteral("compiled"), "an access point with a key of its own compiles");
+		QList<ncfg_access_point_config> keyed_points;
+		keyed.access_points(&keyed_points, &error);
+		check(keyed_points.value(0).keys.value(0).join(QLatin1Char('|')),
+		    QStringLiteral("kids|@secret:kids-wifi|kids"),
+		    "  the window reads its key: name, reference, zone");
+		{
+			ncfg_access_point_dialog dialog(&keyed, keyed_points.value(0));
+			QMetaObject::invokeMethod(&dialog, "submit");
+			auto *note = dialog.findChild<QLabel *>(QStringLiteral("ap_note"));
+			check(!dialog.outcome().isEmpty() ? QStringLiteral("saved")
+			                                  : (note ? note->text() : QStringLiteral("<no note>")),
+			    QStringLiteral("saved"), "  and saves it unchanged");
+		}
+		check(compiled(keyed_work.path()), keyed_before,
+		    "  and compiles to the access point it was, its key whole");
+		stop(&keyed_daemon);
+	}
+
 	fprintf(stderr, "access_point_load: %s\n", failures ? "FAILED" : "all checks passed");
 	return failures ? 1 : 0;
 }

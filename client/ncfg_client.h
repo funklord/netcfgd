@@ -1750,6 +1750,14 @@ typedef struct {
 	int   channel;
 } ncfg_neighbour_entry_t;
 
+/* One of an access point's own passwords (10.935): its name, its passphrase's
+ * reference as the language writes it, and its zone, "" for none. */
+typedef struct {
+	char *name;
+	char *passphrase;
+	char *zone;
+} ncfg_ap_key_entry_t;
+
 /* One port forward, as an editor carries it (10.612): `to_port` -1 where it
  * is the same port, `hairpin` -1 where unset (on) or the 0 or 1 written,
  * `from` empty where anyone may use it (0336). */
@@ -2683,6 +2691,8 @@ typedef struct {
 	char *roaming_key;
 	ncfg_neighbour_entry_t *neighbours;
 	size_t                  neighbour_count;
+	ncfg_ap_key_entry_t    *keys;
+	size_t                  key_count;
 	/* What the access point dialog has no field for, comma-joined, as on a
 	 * saved network: fast roaming with its domain and key, and `neighbour`
 	 * blocks (doc/journal.md 10.606). Empty for one the dialog can write back

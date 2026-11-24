@@ -180,6 +180,18 @@ QString ncfg_access_point_block(const ncfg_access_point_config &settings)
 	if (!settings.roaming_key.isEmpty()) {
 		body << QStringLiteral("\troaming_key = \"%1\"").arg(settings.roaming_key);
 	}
+	/* Its own passwords (10.935), each a reference and, where set, a zone. */
+	for (const QStringList &one : settings.keys) {
+		if (one.value(0).isEmpty()) {
+			continue;
+		}
+		QString line = QStringLiteral("\tkey \"%1\" { passphrase = \"%2\"")
+		                   .arg(one.value(0), one.value(1));
+		if (!one.value(2).isEmpty()) {
+			line += QStringLiteral("; zone = \"%1\"").arg(one.value(2));
+		}
+		body << line + QStringLiteral(" }");
+	}
 	for (const auto &one : settings.neighbours) {
 		body << (one.second > 0
 		    ? QStringLiteral("\tneighbour \"%1\" { channel = %2 }").arg(one.first).arg(one.second)
@@ -367,6 +379,36 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 		});
 	}
 
+	keys = new QTableWidget(0, 3, this);
+	keys->setObjectName(QStringLiteral("ap_keys"));
+	keys->setHorizontalHeaderLabels(
+	    { QStringLiteral("name"), QStringLiteral("passphrase"), QStringLiteral("zone") });
+	keys->verticalHeader()->setVisible(false);
+	keys->horizontalHeader()->setStretchLastSection(true);
+	keys->setMaximumHeight(100);
+	keys->setToolTip(QStringLiteral("passwords of this network's own, each `@secret:NAME`; a "
+	               "station that joins with one is put in its zone. WPA2 only"));
+	keys->setAccessibleName(QStringLiteral("keys"));
+	form->addRow(QStringLiteral("keys"), keys);
+	{
+		auto *row = new QHBoxLayout();
+		auto *add = new QPushButton(QStringLiteral("add key"), this);
+		auto *drop = new QPushButton(QStringLiteral("remove key"), this);
+		row->addWidget(add);
+		row->addWidget(drop);
+		row->addStretch(1);
+		form->addRow(QString(), row);
+		connect(add, &QPushButton::clicked, this, [this]() {
+			keys->insertRow(keys->rowCount());
+			keys->setCurrentCell(keys->rowCount() - 1, 0);
+		});
+		connect(drop, &QPushButton::clicked, this, [this]() {
+			if (keys->currentRow() >= 0) {
+				keys->removeRow(keys->currentRow());
+			}
+		});
+	}
+
 	auto *holder = new QWidget(this);
 	holder->setLayout(form);
 	auto *scroll = new QScrollArea(this);
@@ -425,6 +467,13 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 		fast_roaming->setChecked(existing.fast_roaming);
 		mobility_domain->setText(existing.mobility_domain);
 		roaming_key->setText(existing.roaming_key);
+		for (const QStringList &one : existing.keys) {
+			const int row = keys->rowCount();
+			keys->insertRow(row);
+			for (int column = 0; column < 3; column++) {
+				keys->setItem(row, column, new QTableWidgetItem(one.value(column)));
+			}
+		}
 		for (const auto &one : existing.neighbours) {
 			const int row = neighbours->rowCount();
 			neighbours->insertRow(row);
@@ -518,6 +567,14 @@ QString ncfg_access_point_dialog::block_text() const
 	settings.fast_roaming = fast_roaming->isChecked();
 	settings.mobility_domain = mobility_domain->text().trimmed();
 	settings.roaming_key = roaming_key->text().trimmed();
+	for (int row = 0; row < keys->rowCount(); row++) {
+		QStringList one;
+		for (int column = 0; column < 3; column++) {
+			const QTableWidgetItem *cell = keys->item(row, column);
+			one << (cell ? cell->text().trimmed() : QString());
+		}
+		settings.keys << one;
+	}
 	for (int row = 0; row < neighbours->rowCount(); row++) {
 		const QTableWidgetItem *bssid = neighbours->item(row, 0);
 		const QTableWidgetItem *channel = neighbours->item(row, 1);

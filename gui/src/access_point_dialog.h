@@ -93,6 +93,7 @@ private:
 	QLineEdit    *mobility_domain;
 	QLineEdit    *roaming_key;
 	QTableWidget *neighbours;
+	QTableWidget *keys;
 	QFormLayout  *form_layout;
 	QLabel      *note;
 	QPushButton *save_button;

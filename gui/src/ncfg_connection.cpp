@@ -1223,6 +1223,10 @@ bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QStrin
 		row.fast_roaming = found.items[i].fast_roaming != 0;
 		row.mobility_domain = from_c(found.items[i].mobility_domain);
 		row.roaming_key = from_c(found.items[i].roaming_key);
+		for (size_t k = 0; k < found.items[i].key_count; k++) {
+			row.keys << QStringList { from_c(found.items[i].keys[k].name),
+				from_c(found.items[i].keys[k].passphrase), from_c(found.items[i].keys[k].zone) };
+		}
 		for (size_t n = 0; n < found.items[i].neighbour_count; n++) {
 			row.neighbours << qMakePair(from_c(found.items[i].neighbours[n].bssid),
 			                    found.items[i].neighbours[n].channel);
