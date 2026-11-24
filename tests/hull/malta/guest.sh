@@ -51,6 +51,9 @@ out=/verdict/wider
 : > "$out"
 say() { echo "$*" >> "$out"; }
 failed=0
+# A check that misses says where, so a bad verdict names its line: the
+# sourced files share this, and busybox ash keeps $LINENO per file.
+miss() { failed=1; say "missed: $1 line $2"; }
 
 cp /payload/wider.conf /etc/netcfgd/netcfgd.conf
 ip link del dummy0 2>/dev/null
@@ -64,13 +67,13 @@ done
 say "applied after $n s"
 line=$(grep '^vlan10 ' /proc/net/vlan/config 2>/dev/null | tr -s ' ')
 say "the kernel's vlan table: ${line:-nothing}"
-echo "$line" | grep -q '| 10 | lan0' || failed=1
+echo "$line" | grep -q '| 10 | lan0' || miss guest.sh "$LINENO"
 master=$(cat /sys/class/net/lan1/master/uevent 2>/dev/null | sed -n 's/^INTERFACE=//p')
 say "lan1 is a port of: ${master:-nothing}"
-[ "$master" = br0 ] || failed=1
+[ "$master" = br0 ] || miss guest.sh "$LINENO"
 route=$(ip route show 198.51.100.0/24 2>/dev/null)
 say "the route: ${route:-nothing}"
-echo "$route" | grep -q 'via 203.0.113.2' || failed=1
+echo "$route" | grep -q 'via 203.0.113.2' || miss guest.sh "$LINENO"
 
 n=0
 until nft list table inet netcfgd > /tmp/ruleset 2>&1 || [ $n -gt 30 ]; do
@@ -79,22 +82,25 @@ until nft list table inet netcfgd > /tmp/ruleset 2>&1 || [ $n -gt 30 ]; do
 done
 say "nft: $(grep -c . /tmp/ruleset) line(s) in netcfgd's table"
 grep -E 'dport' /tmp/ruleset | sed 's/^[[:space:]]*//' | cut -c1-110 >> "$out"
-grep -q 'tcp dport 443 dnat ip to 192.168.1.10:8443' /tmp/ruleset || failed=1
-grep -q 'udp dport 137 drop' /tmp/ruleset && grep -q 'udp dport 138 drop' /tmp/ruleset || failed=1
+grep -q 'tcp dport 443 dnat ip to 192.168.1.10:8443' /tmp/ruleset || miss guest.sh "$LINENO"
+grep -q 'udp dport 137 counter packets 0 bytes 0 drop' /tmp/ruleset && grep -q 'udp dport 138 counter packets 0 bytes 0 drop' /tmp/ruleset || miss guest.sh "$LINENO"
 # What layer one learned after this rig first ran (0329 to 0336), each with a
 # value a byte order could turn: a range's two bounds, a state's bits, a type, a
 # reset, a rated log, a per-source meter, a protocol, a source and its mask, and
 # the MSS clamp's register. nft printing them is the kernel's reading; the plan
-# below having nothing to do is netcfgd's reading agreeing with it.
-for want in 'udp dport 27000-27015 accept' 'ct state' 'icmp type echo-request accept' \
-    'icmpv6 type nd-neighbor-solicit accept' 'icmpv6 type nd-neighbor-advert accept' \
-    'tcp dport 113 reject with tcp reset' 'log prefix "netcfgd input/ident: "' \
-    'meta l4proto gre ip saddr 198.51.100.7 accept' 'sctp dport 3868 accept' \
+# below having nothing to do is netcfgd's reading agreeing with it. Every rule
+# carries its counter since 10.901, so each verdict follows `counter packets 0
+# bytes 0`.
+for want in 'udp dport 27000-27015 counter packets 0 bytes 0 accept' 'ct state' 'icmp type echo-request counter packets 0 bytes 0 accept' \
+    'icmpv6 type nd-neighbor-solicit counter packets 0 bytes 0 accept' 'icmpv6 type nd-neighbor-advert counter packets 0 bytes 0 accept' \
+    'tcp dport 113 counter packets 0 bytes 0 reject with tcp reset' 'log prefix "netcfgd input/ident: "' \
+    'meta l4proto gre ip saddr 198.51.100.7 counter packets 0 bytes 0 accept' 'sctp dport 3868 counter packets 0 bytes 0 accept' \
     'ip saddr 198.51.100.0/24 tcp dport 443 dnat ip to 192.168.1.10:8443' \
-    'tcp option maxseg size set rt mtu'; do
+    'tcp option maxseg size set rt mtu' \
+    'ip saddr @slot-quarantine-4 counter packets 0 bytes 0 drop'; do
 	if ! grep -qF -- "$want" /tmp/ruleset; then
 		say "nft lacks: $want"
-		failed=1
+		miss guest.sh "$LINENO"
 	fi
 done
 grep -E 'ct state|meter|limit|log|l4proto|maxseg' /tmp/ruleset | sed 's/^[[:space:]]*//' |
@@ -106,7 +112,7 @@ until /usr/bin/ncfg plan > /tmp/plan 2>&1 && grep -q 'nothing to do' /tmp/plan |
 	n=$((n + 1))
 done
 say "a second plan says: $(head -3 /tmp/plan | cut -c1-100 | tr '\n' ' ')"
-grep -q 'nothing to do' /tmp/plan || failed=1
+grep -q 'nothing to do' /tmp/plan || miss guest.sh "$LINENO"
 /usr/bin/ncfg status > /tmp/status 2>&1
 say "ncfg status left with $?, $(grep -c . /tmp/status) line(s)"
 
@@ -122,7 +128,7 @@ until { /usr/bin/ncfg plan 2>&1; logread; } | grep -q 'netifd also manages' || [
 done
 told=$({ /usr/bin/ncfg plan 2>&1; logread; } | grep 'netifd also manages' | tail -1 | cut -c1-150)
 say "netcfgd says: ${told:-nothing of netifd}"
-[ -n "$told" ] || failed=1
+[ -n "$told" ] || miss guest.sh "$LINENO"
 
 # A WAN port on DHCP, the commonest thing a router is told: OpenWrt's busybox
 # udhcpc under netcfgd, on one end of a pair netcfgd makes, and OpenWrt's dnsmasq
@@ -152,7 +158,7 @@ lease=$(ip addr show dev wan1 2>/dev/null | sed -n 's/.*inet \(192.168.77.[0-9]*
 say "wan1 took ${lease:-nothing} after $n s, by $(pidof udhcpc | wc -w) udhcpc"
 say "dnsmasq gave: $(cut -d' ' -f3 /tmp/leases 2>/dev/null | tr '\n' ' ')"
 [ -n "$lease" ] && grep -q "$lease" /tmp/leases 2>/dev/null || {
-	failed=1
+	miss guest.sh "$LINENO"
 	say "dnsmasq running: $(pidof dnsmasq | wc -w), tables: $(nft list tables 2>/dev/null | tr '\n' ' ')"
 	ps w | grep -E '[u]dhcpc|[d]nsmasq' | cut -c1-120 >> "$out"
 	logread | grep -E 'dnsmasq|udhcpc' | tail -10 | cut -c1-130 >> "$out"
@@ -190,6 +196,10 @@ fi
 # And the stock services restarted under all of it, on every tier: restart.sh.
 . /payload/restart.sh
 
+# And a firewall slot's members, kept where a router keeps what it must not
+# lose and brought back after fw4 empties the table: slot.sh.
+. /payload/slot.sh
+
 # And a radio, where the image has a wireless stack: radio.sh, beside this file.
 if [ -e /payload/no-radio ]; then
 	say "radio: not run, $(cat /payload/no-radio)"
@@ -215,8 +225,8 @@ listed=$(apk info -e netcfgd 2>/dev/null | grep -c '^netcfgd$')
 enabled=$(ls /etc/rc.d 2>/dev/null | grep -c netcfgd)
 running=$(pidof netcfgd | wc -w)
 say "installed $listed, enabled $enabled, running $running, $(/usr/bin/ncfg --version 2>&1 | head -1)"
-[ "$listed" = 1 ] && [ "$enabled" = 0 ] && [ "$running" = 0 ] || failed=1
-/usr/bin/ncfg --version 2>/dev/null | grep -q '^ncfg ' || failed=1
+[ "$listed" = 1 ] && [ "$enabled" = 0 ] && [ "$running" = 0 ] || miss guest.sh "$LINENO"
+/usr/bin/ncfg --version 2>/dev/null | grep -q '^ncfg ' || miss guest.sh "$LINENO"
 # What a firmware upgrade keeps, by `sysupgrade`'s own list, archived and restored:
 # what it leaves out is what an upgrade would lose. A router handed to netcfgd has to
 # come back still run by it, and as the same node.
@@ -253,7 +263,7 @@ sleep 2
 after=$(node_key keep-mark-two)
 say "after the restore: $(ls /etc/rc.d | grep -c netcfgd) start links, $(pidof netcfgd | wc -w) running, node $before then $after"
 [ "$conf" -ge 1 ] && [ -n "$before" ] && [ "$before" = "$after" ] && [ -n "$(pidof netcfgd)" ] &&
-	[ -e /etc/rc.d/S21netcfgd ] || failed=1
+	[ -e /etc/rc.d/S21netcfgd ] || miss guest.sh "$LINENO"
 # `ncfg pair open` on the router, which has no systemd (10.847): it writes
 # conf.d/remote.conf and restarts the daemon through procd, whose next start
 # serves netcfgd's fuzznet port (0xBBDA). Before, it restarted only under
@@ -270,9 +280,9 @@ served=$(grep -c ':BBDA ' /proc/net/udp /proc/net/udp6 2>/dev/null | awk -F: '{n
 say "pair open: \"$opened\"; after $looks s netcfgd $pid_before then $(pidof netcfgd), port served $served"
 case "$opened" in
 Open.*change*) ;;
-*) failed=1 ;;
+*) miss guest.sh "$LINENO" ;;
 esac
-[ "$(pidof netcfgd)" != "$pid_before" ] && [ "$served" -ge 1 ] || failed=1
+[ "$(pidof netcfgd)" != "$pid_before" ] && [ "$served" -ge 1 ] || miss guest.sh "$LINENO"
 rm -f /etc/netcfgd/conf.d/remote.conf
 /etc/init.d/netcfgd stop
 # And the package installed again over what the upgrade kept, which apk has no
@@ -282,7 +292,7 @@ readd=$(apk add --allow-untrusted --no-network --force-non-repository /payload/n
 say "apk add over the kept files: $readd listed $(apk info -e netcfgd 2>/dev/null | grep -c '^netcfgd$')"
 /etc/init.d/netcfgd disable
 apk del netcfgd > /dev/null 2>&1
-[ ! -e /usr/sbin/netcfgd ] && [ ! -e /etc/init.d/netcfgd ] || failed=1
+[ ! -e /usr/sbin/netcfgd ] && [ ! -e /etc/init.d/netcfgd ] || miss guest.sh "$LINENO"
 say "after removal: $(apk info -e netcfgd 2>/dev/null | grep -c '^netcfgd$') installed, $(ls /usr/sbin/netcfgd 2>/dev/null | wc -l) program"
 
 if [ "$failed" -ne 0 ]; then

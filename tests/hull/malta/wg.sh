@@ -47,7 +47,7 @@ done
 answered=$(ping -c 1 -W 1 10.99.0.1 > /dev/null 2>&1 && echo yes || echo no)
 say "the far peer answered through the tunnel: $answered, after $n s"
 [ "$answered" = yes ] || {
-	failed=1
+	miss wg.sh "$LINENO"
 	/usr/bin/ncfg status 2>/dev/null | grep -iA6 '^wg0' | head -8 | sed 's/^/  status: /' >> "$out"
 	logread | grep netcfgd | grep -iE 'wg0|wireguard' | tail -4 | cut -c1-160 | sed 's/^/  log: /' >> "$out"
 }

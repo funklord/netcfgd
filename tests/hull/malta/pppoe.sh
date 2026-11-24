@@ -51,7 +51,7 @@ case "$addr" in
 	;;
 esac
 if [ "$dialled" = no ]; then
-	failed=1
+	miss pppoe.sh "$LINENO"
 	ps w | grep '[p]ppd' | cut -c1-140 >> "$out"
 	logread | grep -E 'pppd|pppoe' | tail -12 | cut -c1-140 >> "$out"
 fi
@@ -71,7 +71,7 @@ say "delegated over the session after $n s: ${over:-nothing}"
 case "$over" in
 2001:db8:5678:*) ;;
 *)
-	failed=1
+	miss pppoe.sh "$LINENO"
 	ps w | grep '[o]dhcp6c' | cut -c1-140 >> "$out"
 	;;
 esac
@@ -83,4 +83,4 @@ until [ ! -e /sys/class/net/ppp0 ] || [ $n -gt 20 ]; do
 	n=$((n + 1))
 done
 say "after the device left the document: ppp0 $([ -e /sys/class/net/ppp0 ] && echo still there || echo gone), $(pidof pppd | wc -w) pppd"
-[ ! -e /sys/class/net/ppp0 ] || failed=1
+[ ! -e /sys/class/net/ppp0 ] || miss pppoe.sh "$LINENO"

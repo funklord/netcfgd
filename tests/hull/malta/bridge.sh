@@ -76,13 +76,13 @@ leased3=$(udhcpc -i host3 -n -q -t 6 -T 2 -s /bin/true 2>&1 |
 say "host1 on port1: ${leased1:-nothing}; host3 on port3: ${leased3:-nothing}"
 case "$leased1" in
 192.168.8.*" from 192.168.8.1") ;;
-*) failed=1 ;;
+*) miss bridge.sh "$LINENO" ;;
 esac
 case "$leased3" in
 192.168.8.*" from 192.168.8.1") ;;
-*) failed=1 ;;
+*) miss bridge.sh "$LINENO" ;;
 esac
-[ "${leased1%% *}" != "${leased3%% *}" ] || failed=1
+[ "${leased1%% *}" != "${leased3%% *}" ] || miss bridge.sh "$LINENO"
 if [ -n "$lan6" ]; then
 	n=0
 	until ip -o -6 addr show dev host1 scope global 2>/dev/null | grep -q . &&
@@ -95,9 +95,9 @@ if [ -n "$lan6" ]; then
 	took3=$(ip -o -6 addr show dev host3 scope global 2>/dev/null | awk '{print $4}' | head -1)
 	say "brlan's /64 ${on_bridge:-none}; after $n s host1 took ${took1:-nothing}, host3 ${took3:-nothing}"
 	prefix=$(echo "$on_bridge" | cut -d: -f1-4)
-	case "$took1" in "$prefix":*/64) ;; *) failed=1 ;; esac
-	case "$took3" in "$prefix":*/64) ;; *) failed=1 ;; esac
-	[ -n "$prefix" ] || failed=1
+	case "$took1" in "$prefix":*/64) ;; *) miss bridge.sh "$LINENO" ;; esac
+	case "$took3" in "$prefix":*/64) ;; *) miss bridge.sh "$LINENO" ;; esac
+	[ -n "$prefix" ] || miss bridge.sh "$LINENO"
 else
 	say "brlan's IPv6: not run, no delegated prefix and advertiser on this tier"
 fi
@@ -109,7 +109,7 @@ done
 settled=$(/usr/bin/ncfg plan 2>/dev/null | grep -c 'nothing to do')
 say "the plan after the bridge, $n s on: $([ "$settled" -ge 1 ] && echo 'nothing to do' || echo 'still wants something')"
 [ "$settled" -ge 1 ] || {
-	failed=1
+	miss bridge.sh "$LINENO"
 	/usr/bin/ncfg plan 2>&1 | grep -vE '^warning: (lan1|port[1-4]):' | head -24 | cut -c1-200 |
 		sed 's/^/  plan: /' >> "$out"
 	ip -br link 2>/dev/null | grep -E 'port|host[1-4]|brlan' | sed 's/^/  link: /' >> "$out"
@@ -159,7 +159,7 @@ say "the guest bridge on a VLAN after $n s: $guest"
 case "$guest" in
 "zport=up guest10=up brguest=up 192.168.10.1/24") ;;
 *)
-	failed=1
+	miss bridge.sh "$LINENO"
 	/usr/bin/ncfg plan 2>&1 | grep -E 'zport|guest10|brguest' | head -8 | cut -c1-200 |
 		sed 's/^/  plan: /' >> "$out"
 	logread 2>/dev/null | grep netcfgd | grep -E 'zport|guest10|brguest' | tail -6 |

@@ -30,7 +30,7 @@ for service in network firewall dnsmasq; do
 		n=$((n + 1))
 	done
 	say "after \`$service restart\`: whole after $n s: $(state)"
-	whole || failed=1
+	whole || miss restart.sh "$LINENO"
 done
 # And the LAN served with OpenWrt's own dnsmasq running, as it is on every router.
 # The firewall is stopped again first, as the router guide says to: restarted, fw4
@@ -51,7 +51,7 @@ say "client4 beside the stock dnsmasq: ${leased:-nothing}; $(netstat -lunp 2>/de
 case "$leased" in
 192.168.7.*" from 192.168.7.1") ;;
 *)
-	failed=1
+	miss restart.sh "$LINENO"
 	ps w | grep '[d]nsmasq' | cut -c1-160 >> "$out"
 	logread | grep -E 'dnsmasq-dhcp|DHCP' | tail -8 | cut -c1-160 | sed 's/^/  syslog: /' >> "$out"
 	nft list ruleset 2>/dev/null | grep -E '^table|hook input' | sed 's/^/  nft: /' >> "$out"
@@ -81,7 +81,7 @@ answer=$(nslookup localhost 192.168.7.1 2>&1 | sed -n 's/^Address[^:]*: *\(127\.
 say "the router offered as the LAN's resolver after $n s: $offered lease(s); localhost at 192.168.7.1 is ${answer:-not answered}, by $(netstat -lunp 2>/dev/null | grep '192.168.7.1:53 ' | awk '{print $NF}' | head -1)"
 grep -qE "$offers_router" /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null ||
 	say "  lan4.conf offers: $(grep -i 'dhcp-option' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | tr '\n' ' ')"
-[ "$offered" -ge 1 ] && [ "$answer" = 127.0.0.1 ] && whole || failed=1
+[ "$offered" -ge 1 ] && [ "$answer" = 127.0.0.1 ] && whole || miss restart.sh "$LINENO"
 
 # And `dns_forward` there after all, as the holder decided (10.827): its forwarder
 # cannot have port 53 beside the stock dnsmasq, and where that took the LAN's DHCP
@@ -102,7 +102,7 @@ warned=$(/usr/bin/ncfg plan 2>&1 | grep -c 'DNS forwarder on lan4 is not running
 say "dns_forward beside the stock dnsmasq, after $n s: $(sed -n 's/^# forwarder off: //p' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | cut -c1-90); offered dns ${offered:-nothing}; plan warns: $warned"
 rm -f /tmp/show-dns
 [ "$offered" = 192.168.7.1 ] && [ "$warned" -ge 1 ] && whole || {
-	failed=1
+	miss restart.sh "$LINENO"
 	tail -4 /run/netcfgd/dhcp-server/lan4.log 2>/dev/null | sed 's/^/  dnsmasq: /' >> "$out"
 	/usr/bin/ncfg plan 2>&1 | head -12 | cut -c1-160 | sed 's/^/  plan: /' >> "$out"
 }
@@ -123,8 +123,8 @@ leased=$(udhcpc -i client4 -n -q -t 6 -T 2 -s /bin/true 2>&1 |
 warned=$(/usr/bin/ncfg plan 2>&1 | grep -c 'serves no IPv6 addresses')
 say "range6 on the stock dnsmasq, after $n s: $(sed -n 's/^# dhcpv6 off: //p' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | cut -c1-80); v4 lease ${leased:-nothing}; plan warns: $warned"
 case "$leased" in
-192.168.7.*) [ "$warned" -ge 1 ] && whole || failed=1 ;;
-*) failed=1 ;;
+192.168.7.*) [ "$warned" -ge 1 ] && whole || miss restart.sh "$LINENO" ;;
+*) miss restart.sh "$LINENO" ;;
 esac
 [ "$failed" = 0 ] || {
 	tail -3 /run/netcfgd/dhcp-server/lan4.log 2>/dev/null | cut -c1-160 | sed 's/^/  dnsmasq: /' >> "$out"

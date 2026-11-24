@@ -92,7 +92,7 @@ done
 delegated=$(head -1 /run/netcfgd/prefixes/isp6 2>/dev/null)
 say "delegated on isp6 after $n s: ${delegated:-nothing}, by $(pidof odhcp6c | wc -w) odhcp6c"
 if [ -z "$delegated" ]; then
-	failed=1
+	miss prefix.sh "$LINENO"
 	say "  all-nodes on isp6: $(ping -6 -c 2 -W 2 -I isp6 ff02::1 2>&1 | grep -c 'bytes from') repl(ies)"
 	ps w | grep '[o]dhcp6c' | cut -c1-120 >> "$out"
 	for log in /run/netcfgd/dhcp/*.log; do
@@ -122,7 +122,7 @@ else
 		n=$((n + 1))
 	done
 	say "isp6's default route after $n s: $(ip -6 route show default dev isp6 2>/dev/null | head -1 | cut -c1-90)$(ip -6 route show default dev isp6 2>/dev/null | grep -q . || echo none); accept_ra $(cat /proc/sys/net/ipv6/conf/isp6/accept_ra), forwarding $(cat /proc/sys/net/ipv6/conf/isp6/forwarding)"
-	ip -6 route show default dev isp6 2>/dev/null | grep -q 'via fe80::' || failed=1
+	ip -6 route show default dev isp6 2>/dev/null | grep -q 'via fe80::' || miss prefix.sh "$LINENO"
 	# And what the lease gave the uplink itself, which odhcp6c configures nowhere:
 	# IA_NA's address on isp6, and the name server in its report (10.823).
 	n=0
@@ -133,7 +133,7 @@ else
 	ia_na=$(ip -6 -o addr show dev isp6 2>/dev/null | grep 'inet6 2001:db8:aaaa::1' | awk '{print $4}' | head -1)
 	say "isp6's own address after $n s: ${ia_na:-none}; its report: $(grep -v '^#' /run/netcfgd/reported.d/isp6/odhcp6c 2>/dev/null | tr '\n' ' ')"
 	[ -n "$ia_na" ] && grep -q '^dns=2001:db8:aaaa::53$' /run/netcfgd/reported.d/isp6/odhcp6c 2>/dev/null ||
-		failed=1
+		miss prefix.sh "$LINENO"
 	# Relational, as cpe.sh's: lan6's network is the delegated one's.
 	network=${delegated%%::*}
 	n=0
@@ -147,7 +147,7 @@ else
 	case "$got" in
 	"$network":*) ;;
 	*)
-		failed=1
+		miss prefix.sh "$LINENO"
 		/usr/bin/ncfg plan 2>&1 | head -6 | cut -c1-120 | sed 's/^/  plan: /' >> "$out"
 		;;
 	esac
@@ -181,7 +181,7 @@ else
 			done
 			say "  the uplink's masquerade after $n s more: $(nft list table inet netcfgd 2>/dev/null | grep 'masquerade' | grep -c isp6) rule(s), $(nft list table inet netcfgd 2>/dev/null | grep -c 'dport 443') port-forward line(s)"
 			nft list table inet netcfgd 2>/dev/null | grep -q 'oifname "isp6".*masquerade' || {
-				failed=1
+				miss prefix.sh "$LINENO"
 				nft list table inet netcfgd 2>/dev/null | grep -i masq | head -3 | sed 's/^[[:space:]]*/  nft: /' >> "$out"
 			}
 			# Flow offload (0319): the payload's client in the home holds a TCP
@@ -196,7 +196,7 @@ else
 			offloaded=$(grep -c 'dport=8099 .*\[OFFLOAD\]' /proc/net/nf_conntrack 2>/dev/null)
 			say "  flow offload after $n s: $(nft list flowtables inet 2>/dev/null | grep -c 'flowtable fastpath') flowtable, ${offloaded:-0} offloaded flow(s) to 8099 of $(grep -c 'dport=8099' /proc/net/nf_conntrack 2>/dev/null) seen"
 			[ "${offloaded:-0}" -ge 1 ] || {
-				failed=1
+				miss prefix.sh "$LINENO"
 				grep 'dport=8099' /proc/net/nf_conntrack 2>/dev/null | head -2 | cut -c1-200 |
 					sed 's/^/  conntrack: /' >> "$out"
 				nft list table inet netcfgd 2>/dev/null | grep -A3 -E 'flowtable|chain fastpath' |
@@ -204,9 +204,9 @@ else
 			}
 		fi
 		case "$host" in
-		"$network":*) [ -n "$route" ] || failed=1 ;;
+		"$network":*) [ -n "$route" ] || miss prefix.sh "$LINENO" ;;
 		*)
-			failed=1
+			miss prefix.sh "$LINENO"
 			ps w | grep '[u]radvd' | cut -c1-160 >> "$out"
 			tail -5 /run/netcfgd/radvd/lan6.log 2>/dev/null | sed 's/^/  uradvd: /' >> "$out"
 			/usr/bin/ncfg plan 2>&1 | grep -iE 'advert|uradvd|radvd' | head -4 |

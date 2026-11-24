@@ -56,6 +56,7 @@ cp /armsr/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
 cp /armsr/veth/lib/modules/*/veth.ko $top/payload/veth.ko
 cp /repo/tests/hull/malta/guest.sh /repo/tests/hull/malta/prefix.sh /repo/tests/hull/malta/pppoe.sh \
 	/repo/tests/hull/malta/lan.sh /repo/tests/hull/malta/bridge.sh /repo/tests/hull/malta/restart.sh \
+	/repo/tests/hull/malta/slot.sh \
 	/repo/tests/hull/malta/wg.sh /repo/tests/hull/malta/wider.conf $top/payload/
 # armsr's image carries no wireless stack, so guest.sh says the radio half was not
 # run and why, rather than failing it or passing over it.

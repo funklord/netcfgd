@@ -7185,6 +7185,18 @@ without DNS. Not changed: a router's configuration can name a `file` under
 `/etc`, and moving the ordinary directory per platform is a change to the
 privilege rule (10.760), not to this.
 
+**Measured on OpenWrt itself** (`make hull-malta`, `tests/hull/malta/slot.sh`):
+procd hands the daemon `NCFG_SLOT_DIR=/etc/netcfgd/slot`; `ncfg slot add`
+puts the member in the kernel's set and records it in `/etc`, with nothing
+under `/var/lib`; `/etc/init.d/firewall restart` -- fw4's flush, which takes
+netcfgd's table with the rest -- and the next apply has the member back from
+the record; `ncfg slot remove` empties the set and removes the record. The
+first run of it found the rig's own faults instead: `slot.sh` was never copied
+into the guest, and seven nft expectations still read rules without the
+counter every rule has carried since 10.901. Every check in the malta rig now
+says its file and line when it misses, where `VERDICT bad` used to be all it
+said.
+
 ## 10.914 The window writes a slot's members
 
 A slot's members could be written only with `ncfg slot`; the firewall tab

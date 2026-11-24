@@ -55,15 +55,15 @@ link=$(iw dev wlan1 link 2>/dev/null | grep -E 'Connected|SSID' | tr -s ' \t' ' 
 say "wlan1 after $n s: ${link:-not connected}"
 fell=$(logread | grep -c 'wlan1: CTRL-EVENT-DISCONNECTED')
 say "wlan1 fell $fell time(s) on the way"
-[ "$fell" = 0 ] || failed=1
+[ "$fell" = 0 ] || miss radio.sh "$LINENO"
 logread | grep 'RSN IE in' | sed 's/.*WPA: //' | cut -c1-120 >> "$out"
 station=$(iw dev wlan0 station dump 2>/dev/null | grep -c '^Station')
 say "wlan0 has $station station(s)"
 clients=$(/usr/bin/ncfg wifi clients wlan0 2>&1 | head -1 | cut -c1-90)
 say "netcfgd of the same: $clients"
-echo "$clients" | grep -q '^1 station' || failed=1
+echo "$clients" | grep -q '^1 station' || miss radio.sh "$LINENO"
 echo "$link" | grep -q 'SSID: bigend' && [ "$station" -ge 1 ] || {
-	failed=1
+	miss radio.sh "$LINENO"
 	ps w | grep -E '[h]ostapd|[w]pa_supplicant' | cut -c1-130 >> "$out"
 	logread | grep -E 'hostapd|wpa_supplicant|supplicant|wlan[01]' | tail -14 | cut -c1-150 >> "$out"
 }

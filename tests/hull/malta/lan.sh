@@ -39,10 +39,10 @@ say "and \`ncfg status\` shows it: $shown"
 case "$leased" in
 192.168.7.*)
 	grep -q "$leased" /run/netcfgd/dhcp-server/lan4.leases 2>/dev/null && [ "$shown" -ge 1 ] ||
-		failed=1
+		miss lan.sh "$LINENO"
 	;;
 *)
-	failed=1
+	miss lan.sh "$LINENO"
 	grep -vE '^#' /run/netcfgd/dhcp-server/lan4.conf 2>/dev/null | tr '\n' ' ' | cut -c1-300 |
 		sed 's/^/  lan4.conf: /' >> "$out"
 	echo >> "$out"
