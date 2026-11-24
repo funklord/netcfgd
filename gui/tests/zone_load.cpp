@@ -164,6 +164,27 @@ int main(int argc, char **argv)
 	}
 	check(listed(&connection), QStringLiteral("guest>internet/5mbit internet>/ iot>internet/"),
 	    "  and reads back among them, sorted");
+	/* 10.930: hosts by address, through the dialog and back. */
+	{
+		ncfg_zone_dialog dialog(&connection, ncfg_zone_row());
+		dialog.findChild<QLineEdit *>(QStringLiteral("zone_name"))
+		    ->setText(QStringLiteral("printers"));
+		dialog.findChild<QLineEdit *>(QStringLiteral("zone_hosts"))
+		    ->setText(QStringLiteral("192.0.2.20, 192.0.2.10"));
+		check(save(&dialog), QStringLiteral("saved"), "a zone of hosts by address saves");
+	}
+	{
+		QList<ncfg_zone_row> now;
+		connection.zones(&now, &error);
+		QString hosts;
+		for (const ncfg_zone_row &zone : now) {
+			if (zone.name == QStringLiteral("printers")) {
+				hosts = zone.hosts.join(QLatin1Char(','));
+			}
+		}
+		check(hosts, QStringLiteral("192.0.2.10,192.0.2.20"), "  and its hosts read back, sorted");
+	}
+	(void)connection.config_delete(QStringLiteral("zone-printers"), &error);
 	{
 		ncfg_zone_dialog dialog(&connection, ncfg_zone_row());
 		dialog.findChild<QLineEdit *>(QStringLiteral("zone_name"))->setText(QStringLiteral("bad"));

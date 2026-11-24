@@ -265,3 +265,5 @@ isolated
 zone
 reach
 client_limit
+# A zone's hosts by address (10.930): whose forwarded traffic the zone covers.
+hosts

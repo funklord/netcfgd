@@ -1528,6 +1528,8 @@ typedef struct {
 	char *name;
 	char *reach;
 	char *client_limit;
+	/* Hosts by address, joined with ", " (10.930); "" where none. */
+	char *hosts;
 } ncfg_zone_entry_t;
 
 typedef struct {

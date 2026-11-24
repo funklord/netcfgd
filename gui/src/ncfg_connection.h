@@ -399,6 +399,7 @@ struct ncfg_zone_row {
 	QString     name;
 	QStringList reach;
 	QString     client_limit;
+	QStringList hosts; /* by address, wherever they are (10.930) */
 };
 
 /* One 802.11s mesh (10.588). `channel` -1 where unset; `credential` the

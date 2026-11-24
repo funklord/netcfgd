@@ -7050,6 +7050,34 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.930 A zone may name hosts by address
+
+10.927's zones are of links. 0284 also has a zone that names hosts -- a
+printer, a server in another site, wherever it sits -- and that waited.
+`zone "printers" { reach = []; hosts = ["192.0.2.10", "10.0.5.0/28"] }`, each
+an address or prefix refused at compile time rather than by the kernel at
+apply (`ncfg_address_parse`), kind `0x00090003`.
+
+**The compile**, beside the links': where zone Z reaches R, from Z's hosts out
+by each of R's links here (`Z>R:hosts>LINK`); in by each of Z's links to R's
+hosts (`Z>R:LINK>hosts`); and from Z's hosts to R's (`Z>R:hosts>hosts`) -- each
+with its reply, established and related only, and the addresses sorted, so a
+profile written back compiles the same rules. The zones tab (10.929) carries
+`hosts` too, so its Save keeps them. **A host with neither a firewall
+nor a link in a zone is left alone**: a laptop the estate's drop-in reached
+has nothing to enforce it with, and refusing it would break every such host
+the moment the estate named a printer. A host with a firewall compiles all of
+them; one with links in zones and no firewall is still refused, as before.
+
+Not built: a zone whose hosts change, which is slots' work (0340) -- `hosts =
+["@slot:NAME"]` would make membership live without a recompile -- and a cap
+on a zone of hosts, which `client_limit` keys on links only.
+
+`lower_test`: a staff link reaching two printers by address, the reply rule,
+the round trip, a host that is no address refused, and a laptop with no
+firewall left alone. `tests/live/firewall.sh`: the two accepts and two replies
+in the kernel, and a second plan with nothing to do.
+
 ## 10.929 The window edits zones
 
 Zones (10.927) and their caps (10.928) had no place in the window: a router

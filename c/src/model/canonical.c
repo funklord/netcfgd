@@ -516,6 +516,7 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 	    compare_zone);
 	for (i = 0; i < document->zone_count; i++) {
 		sort_set(document->zones[i].reach, &document->zones[i].reach_count);
+		sort_set(document->zones[i].hosts, &document->zones[i].host_count);
 	}
 	/* DNS records are a set by name (0303); a record's addresses keep the
 	 * order written, which is the order they are answered in. */

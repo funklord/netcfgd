@@ -26,6 +26,13 @@ QString ncfg_zone_block(const ncfg_zone_row &zone)
 	}
 	QString block = QStringLiteral("zone \"%1\" {\n\treach = [%2]\n")
 	                    .arg(zone.name, quoted.join(QStringLiteral(", ")));
+	if (!zone.hosts.isEmpty()) {
+		QStringList addresses;
+		for (const QString &one : zone.hosts) {
+			addresses << QStringLiteral("\"%1\"").arg(one);
+		}
+		block += QStringLiteral("\thosts = [%1]\n").arg(addresses.join(QStringLiteral(", ")));
+	}
 	if (!zone.client_limit.isEmpty()) {
 		block += QStringLiteral("\tclient_limit = \"%1\"\n").arg(zone.client_limit);
 	}
@@ -51,6 +58,11 @@ ncfg_zone_dialog::ncfg_zone_dialog(ncfg_connection *connection, const ncfg_zone_
 	reach->setObjectName(QStringLiteral("zone_reach"));
 	reach->setPlaceholderText(QStringLiteral("internet -- the zones its traffic may reach"));
 	form->addRow(QStringLiteral("reaches"), reach);
+
+	hosts = new QLineEdit(existing.hosts.join(QStringLiteral(", ")), this);
+	hosts->setObjectName(QStringLiteral("zone_hosts"));
+	hosts->setPlaceholderText(QStringLiteral("192.168.1.20 -- hosts in it by address, wherever they are"));
+	form->addRow(QStringLiteral("hosts"), hosts);
 
 	client_limit = new QLineEdit(existing.client_limit, this);
 	client_limit->setObjectName(QStringLiteral("zone_client_limit"));
@@ -89,6 +101,8 @@ void ncfg_zone_dialog::submit()
 	zone.reach = reach->text().split(QRegularExpression(QStringLiteral("[,\\s]+")),
 	    Qt::SkipEmptyParts);
 	zone.client_limit = client_limit->text().trimmed();
+	zone.hosts = hosts->text().split(QRegularExpression(QStringLiteral("[,\\s]+")),
+	    Qt::SkipEmptyParts);
 
 	/* The compiler's own alphabet for a zone's name, asked here so the
 	 * sentence names the field rather than a file. */

@@ -1453,6 +1453,33 @@ int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, nc
 			continue;
 		}
 		assignment = &item->as.assignment;
+		/* Hosts by address (10.930), each an address or a prefix,
+		 * refused here rather than by the kernel at apply. */
+		if (strcmp(assignment->key, "hosts") == 0) {
+			ncfg_words_t named;
+			size_t       one;
+
+			if (!ncfg_as_words(ctx, assignment->value, &named)) {
+				ncfg_words_free(&named);
+				continue;
+			}
+			ncfg_strings_free(out->hosts, out->host_count);
+			out->hosts = NULL;
+			out->host_count = 0;
+			for (one = 0; one < named.count; one++) {
+				ncfg_address_t address;
+				char           why[NCFG_ERROR_MAX];
+
+				if (!ncfg_address_parse(named.at[one].text, &address, why, sizeof(why))) {
+					ncfg_diag(ctx, named.at[one].span, "zone `%s`'s host `%s`: %s", out->name,
+					    named.at[one].text, why);
+					continue;
+				}
+				(void)ncfg_push_string(ctx, &out->hosts, &out->host_count, named.at[one].text);
+			}
+			ncfg_words_free(&named);
+			continue;
+		}
 		/* Each client's cap (10.928): a rate as a queue's is written. */
 		if (strcmp(assignment->key, "client_limit") == 0) {
 			char   *text = ncfg_as_string(ctx, assignment->value);
@@ -1477,8 +1504,8 @@ int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, nc
 		}
 		if (strcmp(assignment->key, "reach") != 0) {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown zone key `%s`: a zone says which zones it may `reach`, and "
-			    "may set a `client_limit`", assignment->key);
+			    "unknown zone key `%s`: a zone says which zones it may `reach`, may "
+			    "name `hosts` by address, and may set a `client_limit`", assignment->key);
 			continue;
 		}
 		if (!ncfg_as_words(ctx, assignment->value, &words)) {
@@ -1579,18 +1606,40 @@ static int zone_cap(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *caps, const ch
 
 /* One compiled rule: accept from `in` out of `out`, named `NAME`, and only a
  * reply where `replies`. */
+static int zone_rule_hosts(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *forward,
+    const char *name, const char *in, const char *out, char *const *from, size_t from_count,
+    char *const *to, size_t to_count, int replies);
+
 static int zone_rule(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *forward, const char *name,
     const char *in, const char *out, int replies)
 {
+	return zone_rule_hosts(ctx, forward, name, in, out, NULL, 0, NULL, 0, replies);
+}
+
+/* One compiled rule: accept in by `in` and out by `out` where named, from
+ * and to the addresses where given (10.930), and only a reply where
+ * `replies`. */
+static int zone_rule_hosts(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *forward,
+    const char *name, const char *in, const char *out, char *const *from, size_t from_count,
+    char *const *to, size_t to_count, int replies)
+{
 	ncfg_firewall_rule_t rule;
 	ncfg_firewall_rule_t *grown;
+	size_t                at;
+	int                   ok = 1;
 
 	memset(&rule, 0, sizeof(rule));
 	rule.name = strdup(name);
 	rule.action = NCFG_FIREWALL_ACCEPT;
-	rule.interface = strdup(in);
-	rule.out_interface = strdup(out);
-	if (!rule.name || !rule.interface || !rule.out_interface ||
+	rule.interface = in ? strdup(in) : NULL;
+	rule.out_interface = out ? strdup(out) : NULL;
+	for (at = 0; ok && at < from_count; at++) {
+		ok = ncfg_push_string(ctx, &rule.from, &rule.from_count, from[at]);
+	}
+	for (at = 0; ok && at < to_count; at++) {
+		ok = ncfg_push_string(ctx, &rule.to, &rule.to_count, to[at]);
+	}
+	if (!ok || !rule.name || (in && !rule.interface) || (out && !rule.out_interface) ||
 	    (replies && (!ncfg_push_string(ctx, &rule.states, &rule.state_count, "established") ||
 	        !ncfg_push_string(ctx, &rule.states, &rule.state_count, "related")))) {
 		ncfg_lower_oom(ctx);
@@ -1643,6 +1692,10 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 			qsort(document->zones[z].reach, document->zones[z].reach_count,
 			    sizeof(*document->zones[z].reach), text_order);
 		}
+		if (document->zones[z].host_count > 1u) {
+			qsort(document->zones[z].hosts, document->zones[z].host_count,
+			    sizeof(*document->zones[z].hosts), text_order);
+		}
 	}
 	for (z = 0; z < document->zone_count; z++) {
 		for (r = 0; r < document->zones[z].reach_count; r++) {
@@ -1667,7 +1720,11 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 			    document->interfaces[a].name, zone, zone);
 		}
 	}
-	if (!any) {
+	/* A host with no firewall and no link in a zone is one the estate's zones
+	 * reached and that has nothing to enforce them with -- a laptop given the
+	 * drop-in -- and is left alone. Zones naming hosts by address compile
+	 * wherever there is a firewall to hold them (10.930). */
+	if (!any && !document->firewall) {
 		return;
 	}
 	if (!document->firewall) {
@@ -1748,6 +1805,59 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 					    zone->reach[r], out->name, in->name);
 					(void)zone_rule(ctx, &document->firewall->forward, name, out->name,
 					    in->name, 1);
+				}
+			}
+			/* Hosts by address (10.930), on either side: from Z's hosts
+			 * out by each of R's links here, in by each of Z's links to
+			 * R's hosts, and from Z's hosts to R's -- each with its
+			 * reply. `hosts` stands where a link's name would. */
+			{
+				const ncfg_zone_t *reached = zone_named(document, zone->reach[r]);
+				ncfg_firewall_chain_t *forward = &document->firewall->forward;
+				char                   name[256];
+
+				if (!reached) {
+					continue;
+				}
+				for (b = 0; zone->host_count && b < document->interface_count; b++) {
+					const ncfg_interface_t *out = &document->interfaces[b];
+
+					if (!out->zone || strcmp(out->zone, reached->name) != 0) {
+						continue;
+					}
+					(void)snprintf(name, sizeof(name), "%s>%s:hosts>%s", zone->name,
+					    reached->name, out->name);
+					(void)zone_rule_hosts(ctx, forward, name, NULL, out->name, zone->hosts,
+					    zone->host_count, NULL, 0, 0);
+					(void)snprintf(name, sizeof(name), "%s>%s:%s<hosts", zone->name,
+					    reached->name, out->name);
+					(void)zone_rule_hosts(ctx, forward, name, out->name, NULL, NULL, 0,
+					    zone->hosts, zone->host_count, 1);
+				}
+				for (a = 0; reached->host_count && a < document->interface_count; a++) {
+					const ncfg_interface_t *in = &document->interfaces[a];
+
+					if (!in->zone || strcmp(in->zone, zone->name) != 0) {
+						continue;
+					}
+					(void)snprintf(name, sizeof(name), "%s>%s:%s>hosts", zone->name,
+					    reached->name, in->name);
+					(void)zone_rule_hosts(ctx, forward, name, in->name, NULL, NULL, 0,
+					    reached->hosts, reached->host_count, 0);
+					(void)snprintf(name, sizeof(name), "%s>%s:hosts<%s", zone->name,
+					    reached->name, in->name);
+					(void)zone_rule_hosts(ctx, forward, name, NULL, in->name, reached->hosts,
+					    reached->host_count, NULL, 0, 1);
+				}
+				if (zone->host_count && reached->host_count) {
+					(void)snprintf(name, sizeof(name), "%s>%s:hosts>hosts", zone->name,
+					    reached->name);
+					(void)zone_rule_hosts(ctx, forward, name, NULL, NULL, zone->hosts,
+					    zone->host_count, reached->hosts, reached->host_count, 0);
+					(void)snprintf(name, sizeof(name), "%s>%s:hosts<hosts", zone->name,
+					    reached->name);
+					(void)zone_rule_hosts(ctx, forward, name, NULL, NULL, reached->hosts,
+					    reached->host_count, zone->hosts, zone->host_count, 1);
 				}
 			}
 		}

@@ -1314,6 +1314,16 @@ void ncfg_render_zone(const ncfg_zone_t *zone, const ncfg_overrides_t *overrides
 		ncfg_render_quote(text, zone->reach[i]);
 	}
 	ncfg_buf_add_text(text, "]\n");
+	if (zone->host_count) {
+		ncfg_buf_add_text(text, "\thosts = [");
+		for (i = 0; i < zone->host_count; i++) {
+			if (i) {
+				ncfg_buf_add_text(text, ", ");
+			}
+			ncfg_render_quote(text, zone->hosts[i]);
+		}
+		ncfg_buf_add_text(text, "]\n");
+	}
 	if (zone->client_limit) {
 		ncfg_buf_add_text(text, "\tclient_limit = ");
 		ncfg_render_quote(text, zone->client_limit);

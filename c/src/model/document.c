@@ -2440,7 +2440,10 @@ static const ncfg_field_t zone_fields[] = {
 	{ .name = "reach", .kind = NCFG_F_STR_LIST, .offset = offsetof(ncfg_zone_t, reach),
 	    .count_offset = offsetof(ncfg_zone_t, reach_count) },
 	/* Absent where the zone caps nobody (10.928). */
-	{ .name = "client_limit", .kind = NCFG_F_STR, .offset = offsetof(ncfg_zone_t, client_limit) }
+	{ .name = "client_limit", .kind = NCFG_F_STR, .offset = offsetof(ncfg_zone_t, client_limit) },
+	/* Absent where the zone names no host by address (10.930). */
+	{ .name = "hosts", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_zone_t, hosts), .count_offset = offsetof(ncfg_zone_t, host_count) }
 };
 static const ncfg_type_t zone_type = TYPE("zone", zone_fields);
 

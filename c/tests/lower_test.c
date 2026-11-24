@@ -2238,6 +2238,42 @@ static void zone_cases(void)
 		}
 	}
 	ncfg_document_free(document);
+	/* 10.930: a zone of hosts by address, reaching a zone of links and
+	 * reached by one, each with its reply; and one with no link here at all
+	 * compiling only where there is a firewall. */
+	(void)snprintf(text, sizeof(text), "%s"
+	    "zone \"printers\" { reach = [] ; hosts = [\"192.0.2.20\", \"192.0.2.10\"] }\n"
+	    "zone \"staff\" { reach = [\"printers\"] }\n"
+	    "device s0 { kind = \"dummy\" }\n"
+	    "interface s0 { config = \"10.40.0.1/24\"; zone = \"staff\" }\n", firewall);
+	document = compiles(text, "a zone of hosts by address, reached by a zone of links");
+	forward = document && document->firewall ? &document->firewall->forward : NULL;
+	check(forward && forward->rule_count == 4 &&
+	        strcmp(forward->rules[1].name, "staff>printers:s0>hosts") == 0 &&
+	        strcmp(forward->rules[1].interface, "s0") == 0 && !forward->rules[1].out_interface &&
+	        forward->rules[1].to_count == 2 &&
+	        strcmp(forward->rules[1].to[0], "192.0.2.10") == 0 &&
+	        strcmp(forward->rules[2].name, "staff>printers:hosts<s0") == 0 &&
+	        forward->rules[2].from_count == 2 && forward->rules[2].state_count == 2,
+	    "  in by the staff link to the printers' addresses, sorted, and only replies back");
+	{
+		char why[NCFG_ERROR_MAX];
+
+		why[0] = '\0';
+		check(document && ncfg_config_round_trips(document, why, sizeof(why)),
+		    "  and the hosts are written back and read as themselves");
+		if (why[0]) {
+			printf("  why: %s\n", why);
+		}
+	}
+	ncfg_document_free(document);
+	refuses("zone \"printers\" { hosts = [\"not-an-address\"] }\n", "zone `printers`'s host",
+	    "a host that is no address is refused at compile time");
+	document = compiles("zone \"printers\" { hosts = [\"192.0.2.10\"]; reach = [\"printers\"] }\n",
+	    "zones of hosts reach a host with no firewall and no link in them");
+	check(document && !document->firewall, "  which is left alone, a laptop given the drop-in");
+	ncfg_document_free(document);
+
 	refuses("zone \"guest\" { client_limit = \"fast\" }\n", "is not a rate",
 	    "a cap that is no rate is refused");
 

@@ -1718,6 +1718,7 @@ bool ncfg_connection::zones(QList<ncfg_zone_row> *out, QString *error)
 		row.name = from_c(found.items[i].name);
 		row.reach = firewall_list(found.items[i].reach);
 		row.client_limit = from_c(found.items[i].client_limit);
+		row.hosts = firewall_list(found.items[i].hosts);
 		out->append(row);
 	}
 	ncfg_zones_free(&found);

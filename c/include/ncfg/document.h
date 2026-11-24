@@ -1901,6 +1901,10 @@ typedef struct {
 	/* Each client's cap, as written -- `5mbit` -- or NULL (10.928): every
 	 * address on one of the zone's links held to it, each way. */
 	char   *client_limit;
+	/* Addresses and prefixes in the zone wherever they are (10.930): hosts
+	 * the estate names by address rather than by the link they are on. */
+	char  **hosts;
+	size_t  host_count;
 } ncfg_zone_t;
 
 /*

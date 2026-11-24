@@ -799,6 +799,27 @@ check "and the guest link reaches into the LAN with replies only" \
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and a firewall with zones is converged" "$(cat "$work/plan")" "nothing to do"
 
+# 10.930: a zone of hosts by address, reached by a zone of links.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+zone "printers" { reach = []; hosts = ["192.0.2.10", "192.0.2.20"] }
+zone "staff" { reach = ["printers"] }
+device zs0 { kind = "dummy" }
+interface zs0 { config = "10.74.0.1/24"; zone = "staff" }
+firewall {
+	input { policy = "accept" }
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+check "the staff link reaches each printer by address" \
+	"$(grep -c 'ip daddr 192.0.2.[12]0 iifname "zs0" counter packets 0 bytes 0 accept' "$work/listed" || true)" "2"
+check "and each printer answers it with replies only" \
+	"$(grep -c 'ip saddr 192.0.2.[12]0 oifname "zs0" ct state established,related counter packets 0 bytes 0 accept' "$work/listed" || true)" "2"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and a zone of hosts is converged" "$(cat "$work/plan")" "nothing to do"
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true
