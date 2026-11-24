@@ -132,6 +132,9 @@ done
 apply "the first apply"
 check "the rule is installed" \
 	"$(rule_at 1000 | grep -c 'from 10.9.0.0/16 lookup 100' || true)" "1"
+# And ncfg status says so, as netcfgd's (10.925).
+check "ncfg status shows the rule as netcfgd's" \
+	"$("$ncfg" status 2>&1 | grep -c '^  1000 from 10.9.0.0/16 table 100 \[Ours\]$' || true)" "1"
 
 # Idempotence. A rule reconciler that compared only the key would reinstall on
 # every apply; one that compared nothing would never notice a change.
@@ -201,6 +204,8 @@ check "and no delete is planned at all" \
 apply "an apply that cannot place its rule"
 check "and it is left exactly where it was" \
 	"$(rule_at 2000 | grep -c 'from 172.16.0.0/12 lookup 200' || true)" "1"
+check "and ncfg status shows it as somebody else's" \
+	"$("$ncfg" status 2>&1 | grep -c '^  2000 from 172.16.0.0/12 table 200 \[Foreign\]$' || true)" "1"
 ip rule del priority 2000
 
 # **An `l3mdev` rule, which netcfgd could not express at all.** The kernel

@@ -7048,6 +7048,24 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.925 `ncfg status` shows the DNS delivered and the routing rules
+
+The same lens as 10.921 and 10.924, over the whole observation: the DNS
+netcfgd delivered per scope and the policy routing rules were observed --
+the planner compares both every pass -- and printed nowhere. "Which resolver
+am I using" is the first question asked of a network tool. Status now ends
+with a `DNS delivered` section, a line per scope -- `eth0: resolved, servers
+192.0.2.53 192.0.2.54, search corp.example` -- and a `routing rules` section,
+each rule with whose it is as a route is shown, `1000 from 10.9.0.0/16 table
+100 [Ours]`. **The kernel's three default rules are left out** (local, main
+and default, at 0, 32766 and 32767 with no selector): every machine has them,
+and a section that always opened with them would hide the rule somebody is
+looking for. `cli_test` holds the formats and the omission;
+`tests/live/rules.sh` holds an owned rule and a foreign one against a real
+kernel. Not shown, being bookkeeping rather than state an operator acts on:
+the lists of what netcfgd applied (forwarding, privacy, accept_ra, ingress),
+hook state and backend restart counts.
+
 ## 10.924 `ncfg status` says whose port a link is, and whether it is isolated
 
 10.912 made a bridge port isolable and observed it (`port_isolated`), and no

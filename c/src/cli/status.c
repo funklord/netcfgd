@@ -371,6 +371,97 @@ static void print_firewall(const ncfg_observed_t *observed)
 }
 
 /*
+ * **What netcfgd delivered for name resolution, per scope** (project.md
+ * 10.925): the mode, the servers and the routing domains it handed over.
+ * "Which resolver am I using" is the first thing asked of a network tool, and
+ * the observation has carried these records since the DNS backends came in,
+ * read only by the planner. Nothing where netcfgd manages no DNS.
+ */
+static void print_dns(const ncfg_observed_t *observed)
+{
+	size_t at;
+	size_t one;
+
+	if (observed->dns_count == 0u) {
+		return;
+	}
+	ncfg_out_line("");
+	ncfg_out_line("DNS delivered");
+	for (at = 0; at < observed->dns_count; at++) {
+		const ncfg_applied_dns_t *applied = &observed->dns[at];
+		const ncfg_dns_policy_t  *policy = &applied->policy;
+
+		ncfg_out_writef("  %s: %s", applied->scope ? applied->scope : "?",
+		    ncfg_dns_mode_name(policy->mode.mode));
+		for (one = 0; one < policy->server_count; one++) {
+			ncfg_out_writef("%s%s", one ? " " : ", servers ",
+			    policy->servers[one].addr ? policy->servers[one].addr : "?");
+		}
+		for (one = 0; one < policy->domain_count; one++) {
+			ncfg_out_writef("%s%s%s", one ? " " : ", domains ",
+			    policy->domains[one].exclusive ? "~" : "", policy->domains[one].suffix);
+		}
+		for (one = 0; one < policy->search_count; one++) {
+			ncfg_out_writef("%s%s", one ? " " : ", search ", policy->search[one]);
+		}
+		ncfg_out_line("");
+	}
+}
+
+/*
+ * **The policy routing rules** (10.925), with whose they are, as a route is
+ * shown. The kernel's own three -- local, main and default, with no selector
+ * -- are left out: every machine has them, and a section that always opens
+ * with them hides the rule somebody is looking for.
+ */
+static int kernel_default_rule(const ncfg_observed_rule_t *rule)
+{
+	return (rule->priority == 0 || rule->priority == 32766 || rule->priority == 32767) &&
+	    !rule->from && !rule->to && !rule->iif && !rule->oif && !rule->fwmark.has;
+}
+
+static void print_rules(const ncfg_observed_t *observed)
+{
+	size_t at;
+	int    headed = 0;
+
+	for (at = 0; at < observed->rule_count; at++) {
+		const ncfg_observed_rule_t *rule = &observed->rules[at];
+
+		if (kernel_default_rule(rule)) {
+			continue;
+		}
+		if (!headed) {
+			ncfg_out_line("");
+			ncfg_out_line("routing rules");
+			headed = 1;
+		}
+		ncfg_out_writef("  %lld%s", (long long)rule->priority, rule->invert ? " not" : "");
+		if (rule->from) {
+			ncfg_out_writef(" from %s", rule->from);
+		}
+		if (rule->to) {
+			ncfg_out_writef(" to %s", rule->to);
+		}
+		if (rule->iif) {
+			ncfg_out_writef(" iif %s", rule->iif);
+		}
+		if (rule->oif) {
+			ncfg_out_writef(" oif %s", rule->oif);
+		}
+		if (rule->fwmark.has) {
+			ncfg_out_writef(" fwmark %lld", (long long)rule->fwmark.value);
+		}
+		if (rule->table.has) {
+			ncfg_out_writef(" table %lld", (long long)rule->table.value);
+		} else {
+			ncfg_out_writef(" %s", ncfg_rule_action_name(rule->action));
+		}
+		ncfg_out_writef(" [%s]\n", ownership_word(rule->ownership));
+	}
+}
+
+/*
  * Who holds which address from netcfgd's DHCP servers (0303), per interface:
  * UniFi's client list, from the lease file 0297 put under /run. The name is
  * the one the client sent, where it is a plain host name.
@@ -841,6 +932,8 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 	print_regdom(observed);
 	print_linksets(observed);
 	print_firewall(observed);
+	print_dns(observed);
+	print_rules(observed);
 	print_leases(observed);
 	print_delegations(observed);
 	/*

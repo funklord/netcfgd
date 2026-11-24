@@ -913,6 +913,45 @@ static void the_driver_settings_are_shown_where_the_warnings_point(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * 10.925: what netcfgd delivered for name resolution, per scope, and the
+ * policy routing rules with whose they are -- the kernel's three defaults
+ * left out.
+ */
+static void the_dns_and_the_rules_are_shown(void)
+{
+	static const char observation[] =
+	    "{\"links\":[],\"address_proto_supported\":true,"
+	    "\"dns\":[{\"scope\":\"eth0\",\"policy\":{\"mode\":\"resolved\","
+	    "\"servers\":[{\"addr\":\"192.0.2.53\"},{\"addr\":\"192.0.2.54\"}],"
+	    "\"search\":[\"corp.example\"],\"domains\":[],\"options\":[]}}],"
+	    "\"rules\":[{\"priority\":0,\"family\":\"inet\",\"table\":255,\"action\":\"lookup\","
+	    "\"ownership\":\"foreign\"},"
+	    "{\"priority\":100,\"family\":\"inet\",\"from\":\"10.1.0.0/16\",\"table\":200,"
+	    "\"action\":\"lookup\",\"ownership\":\"ours\"},"
+	    "{\"priority\":32766,\"family\":\"inet\",\"table\":254,\"action\":\"lookup\","
+	    "\"ownership\":\"foreign\"}]}";
+	ncfg_observed_t *observed;
+	const char      *printed;
+	char             err[NCFG_ERROR_MAX];
+
+	observed = ncfg_observed_read(observation, sizeof(observation) - 1, err, sizeof(err));
+	if (!observed) {
+		check(0, "an observation carrying dns and rules parses");
+		detail("why", err);
+		return;
+	}
+	capture_begin();
+	ncfg_cli_print_status(observed);
+	printed = capture_end();
+	line(printed, "  eth0: resolved, servers 192.0.2.53 192.0.2.54, search corp.example",
+	    "the DNS netcfgd delivered is shown per scope");
+	line(printed, "  100 from 10.1.0.0/16 table 200 [Ours]", "a policy rule is shown, with whose");
+	check(printed && !strstr(printed, "  0 table 255") && !strstr(printed, "32766"),
+	    "  and the kernel's default rules are not");
+	ncfg_observed_free(observed);
+}
+
 /* ------------------------------------------------------------------------ *
  * `ncfg plan` and `ncfg show`
  * ------------------------------------------------------------------------ */
@@ -2924,6 +2963,7 @@ int main(void)
 
 	what_something_else_reported_is_marked_as_reported();
 	the_driver_settings_are_shown_where_the_warnings_point();
+	the_dns_and_the_rules_are_shown();
 	an_empty_plan_still_prints_what_is_not_an_action();
 
 	a_scan_is_a_column_per_fact();
