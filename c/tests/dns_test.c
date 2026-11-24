@@ -1027,6 +1027,8 @@ static void resolved_is_told_the_port_the_name_tls_and_dnssec(const char *base)
 	char               run[512];
 	char               stub[1024];
 	char               said[1024];
+	char               drop_in[1100];
+	char               systemctl[1024];
 	char               body[2048];
 	char               message[NCFG_ERROR_MAX];
 	char              *got;
@@ -1058,6 +1060,15 @@ static void resolved_is_told_the_port_the_name_tls_and_dnssec(const char *base)
 	memset(&targets, 0, sizeof(targets));
 	targets.run_dir = run;
 	targets.resolvectl_program = stub;
+	/* 10.918: the globals' drop-in and the stand-in that is told to read it
+	 * are the test's own, so nothing here reaches the machine's /run. */
+	(void)testdir_in(run, "resolved.conf.d/netcfgd.conf", drop_in, sizeof(drop_in));
+	(void)testdir_in(run, "systemctl", systemctl, sizeof(systemctl));
+	(void)snprintf(body, sizeof(body), "#!/bin/sh\necho \"systemctl $*\" >> '%s'\n", said);
+	check(testdir_write(systemctl, body, strlen(body)) && chmod(systemctl, 0755) == 0,
+	    "the stand-in systemctl is written and executable");
+	targets.resolved_drop_in = drop_in;
+	targets.systemctl_program = systemctl;
 	message[0] = '\0';
 	check(ncfg_dns_deliver(&scope, 1u, &targets, NULL, NULL, message, sizeof(message)),
 	    "a resolved scope with a TLS upstream is delivered");
@@ -1109,6 +1120,51 @@ static void resolved_is_told_the_port_the_name_tls_and_dnssec(const char *base)
 		check(access(record, F_OK) != 0, "  and removes its record, so it is not departed again");
 		free(got);
 		(void)dns_dir;
+	}
+
+	/* 10.918: the globals scope goes to a drop-in resolved reads, never to
+	 * `lo`, written and reloaded only when it changes, and taken back --
+	 * removed and resolved restarted -- when no globals scope is left. */
+	{
+		ncfg_dns_scope_t  both[2];
+		ncfg_dns_policy_t globals = policy_of(servers, 1u, NULL, 0u);
+		char             *text;
+
+		globals.mode.mode = NCFG_DNS_MODE_RESOLVED;
+		globals.dnssec.has = 1;
+		globals.dnssec.value = NCFG_DNSSEC_ALLOW;
+		both[0] = scope;
+		both[1].name = NCFG_DNS_GLOBAL_SCOPE;
+		both[1].policy = &globals;
+		(void)unlink(said);
+		check(ncfg_dns_deliver(both, 2u, &targets, NULL, NULL, message, sizeof(message)),
+		    "a resolved delivery with a globals scope");
+		if (message[0] != '\0') {
+			printf("  said: %s\n", message);
+		}
+		text = testdir_read(drop_in, NULL);
+		check(text && strstr(text, "[Resolve]\nDNS=192.0.2.53:853#dns.example\n") &&
+		    strstr(text, "DNSSEC=allow-downgrade\n"),
+		    "  writes the drop-in with the servers and dnssec");
+		free(text);
+		got = testdir_read(said, NULL);
+		check(got && strstr(got, "systemctl reload systemd-resolved\n") && !strstr(got, " lo"),
+		    "  reloads resolved, and says nothing to `lo`");
+		free(got);
+		(void)unlink(said);
+		check(ncfg_dns_deliver(both, 2u, &targets, NULL, NULL, message, sizeof(message)),
+		    "the same delivery again");
+		got = testdir_read(said, NULL);
+		check(got && !strstr(got, "systemctl"), "  reloads nothing, the drop-in being unchanged");
+		free(got);
+		(void)unlink(said);
+		check(ncfg_dns_deliver(both, 1u, &targets, NULL, NULL, message, sizeof(message)),
+		    "a delivery with no globals scope");
+		got = testdir_read(said, NULL);
+		check(access(drop_in, F_OK) != 0 && got &&
+		    strstr(got, "systemctl restart systemd-resolved\n"),
+		    "  removes the drop-in and restarts resolved, giving back the admin's own");
+		free(got);
 	}
 }
 

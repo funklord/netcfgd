@@ -265,7 +265,17 @@ typedef struct {
 	 * why a check passes its own. */
 	const char *resolvconf_program;
 	const char *resolvectl_program;
+	/* resolved's globals: a drop-in it reads, and the program that tells it
+	 * to read it again (project.md 10.918). NULL means
+	 * `NCFG_RESOLVED_DROP_IN` and `systemctl`. */
+	const char *resolved_drop_in;
+	const char *systemctl_program;
 } ncfg_dns_targets_t;
+
+/* Under `/run`, which resolved reads drop-ins from as it does `/etc`'s: the
+ * globals are re-applied each boot, as everything else netcfgd delivers is,
+ * and nothing of the admin's own `resolved.conf` is edited. */
+#define NCFG_RESOLVED_DROP_IN "/run/systemd/resolved.conf.d/netcfgd.conf"
 
 /*
  * Deliver every scope, and say which were delivered.

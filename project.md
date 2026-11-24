@@ -7036,6 +7036,45 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.918 resolved's globals go to a drop-in it reads, never to `lo`
+
+The globals scope in `mode = "resolved"` was sent to `lo` as a link's
+settings. **resolved never took that**: it answers a loopback link as busy, and
+resolvectl then asks networkd, so without networkd every document stating
+global servers failed its `dns.apply` -- 10.916's tier measured it, `Unit
+dbus-org.freedesktop.network1.service not found`. resolved's own globals live
+in `resolved.conf`.
+
+Measured in the resolved image, systemd 257, before writing anything:
+
+- A drop-in under `/run/systemd/resolved.conf.d/` and `systemctl reload
+  systemd-resolved`: the servers, domains, DNS over TLS and DNSSEC all show as
+  `Global:`.
+- **A drop-in's `DNS=` and `Domains=` append** to the admin's own
+  `resolved.conf`: theirs and ours together.
+- Taking it back: the file removed and a reload clears the servers and
+  **leaves the domains**; removed and a restart gives back exactly the
+  admin's; and a link's per-link settings survive the restart. A drop-in of
+  empty assignments also clears -- and clears the admin's lists with ours, so
+  it is not the way.
+
+So netcfgd writes `NCFG_RESOLVED_DROP_IN`, `/run/systemd/resolved.conf.d/
+netcfgd.conf` -- under `/run`, re-applied each boot like everything else it
+delivers, and no edit to the admin's files -- only when its text changes,
+and reloads; with no globals scope left it removes the file and restarts
+resolved. Rejected: writing under `/etc` (a persistent edit of the admin's
+directory for state netcfgd re-derives anyway), and D-Bus's `SetDNS` on the
+manager, which does not exist -- resolved takes global servers only from its
+configuration.
+
+`make hull-resolved` gains eight checks, nineteen in all: the globals shown as
+resolved's own beside a link's server, a second plan with nothing to do, then
+dropped -- servers and domains gone, the file removed, the link's server
+through the restart. **Sabotage**: clearing by reload instead of restart, and
+the domains check fails, as the measurement said. `dns_test` holds the file,
+the single reload, none on an unchanged second pass, and the restart, against
+stand-ins.
+
 ## 10.917 Wake-on-LAN is applied, against an emulated card that keeps it
 
 `wol` was the last field of the `ethtool` block applied by nothing, parked for
@@ -7103,10 +7142,8 @@ three more beside it, all in `hand_to_resolved`:
   dbus-org.freedesktop.network1.service not found`, exit 1) where networkd is
   not running; with the clearing above, a document whose globals said only
   `mode = "resolved"` failed before any link's scope. A globals scope stating
-  nothing is now skipped. **Still open, and smaller:** a globals scope that
-  does state servers fails the same way without networkd -- resolved's own
-  global servers live in `resolved.conf`, not on a link, and whether netcfgd
-  should write a drop-in there is a design question nobody has asked yet.
+  nothing is now skipped. One that does state servers failed the same way
+  without networkd, which 10.918 settles.
 - **A link whose scope left the document was never reverted.** The loop walks
   desired scopes only, and the record under `<run>/dns/` was never removed, so
   the planner found it departed on every run. Each recorded link without a
@@ -7196,6 +7233,14 @@ publishes the face where it stays current -- the daemon rewriting it when it
 changes, or fuzznet keeping a readable copy under /run -- and the second is
 fuzznet's to decide. Who is in it: a non-root `ncfg` on a machine running both
 daemons with raidcfgd started first, which is a RAID server's operator.
+**fuzznet has built the second, at its `a1793cc2` (its section 1424; inbox
+20261124T0104Z):** every fuzznet daemon writes `<its socket>.face` beside its
+socket, 0644, naming the face's socket -- its own as the face, the face's as a
+follower, rewritten within a second when the face moves and removed when the
+daemon stops -- and `fzn_client_face_of(path, out, cap)` in `local/client.h`
+reads it. So `ncfg` at the desk reads `/run/netcfgd/fuzznet.sock.face` and
+connects to whichever daemon is the face. Not taken yet: the vendored fuzznet
+is at `c20c1a66`, before it, so taking it is a pin move.
 
 **Recorded, not built: 16 GUI tests do not compile under `fmake --eject` /
 `fmake test`** (fmake's sweep, 2026-11-23): each `.pro` supplies

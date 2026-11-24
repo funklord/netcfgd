@@ -71,6 +71,27 @@ sed 's/^/  apply3: /' "$work/apply3" | grep -v '\[observe\]' >> "$out"
 check "no scope left: the link reverted, no servers" "$(servers)" ""
 check "no scope left: and a second plan has nothing to do" \
 	"$(timeout 60 "$ncfg" plan 2>&1 | grep -c 'nothing to do')" "1"
+# 10.918: the globals scope as resolved's own settings, by a drop-in. Never
+# `lo`, which resolved refuses as a link (the measure lines below).
+global() { resolvectl dns 2>&1 | sed -n 's/^Global: *//p'; }
+gdomains() { resolvectl domain 2>&1 | sed -n 's/^Global: *//p'; }
+printf 'global {\n\tdns { mode = "resolved"; servers = ["192.0.2.77"]; domains = ["corp.example"] }\n}\ndevice dummy0 { kind = "dummy" }\ninterface dummy0 {\n\tconfig = "10.9.0.1/24"\n\tdns { servers = ["192.0.2.53"] }\n}\n' > "$work/etc/netcfgd.conf"
+timeout 60 "$ncfg" apply > "$work/apply4" 2>&1
+sed 's/^/  apply4: /' "$work/apply4" | grep -v '\[observe\]' >> "$out"
+check "globals: resolved's own servers" "$(global)" "192.0.2.77"
+check "globals: and its domains" "$(gdomains)" "corp.example"
+check "globals: the link's server beside them" "$(servers)" "192.0.2.53"
+check "globals: a second plan has nothing to do" \
+	"$(timeout 60 "$ncfg" plan 2>&1 | grep -c 'nothing to do')" "1"
+printf 'global {\n\tdns { mode = "resolved" }\n}\ndevice dummy0 { kind = "dummy" }\ninterface dummy0 {\n\tconfig = "10.9.0.1/24"\n\tdns { servers = ["192.0.2.53"] }\n}\n' > "$work/etc/netcfgd.conf"
+timeout 60 "$ncfg" apply > "$work/apply5" 2>&1
+sed 's/^/  apply5: /' "$work/apply5" | grep -v '\[observe\]' >> "$out"
+check "globals dropped: resolved's own servers gone" "$(global)" ""
+check "globals dropped: and its domains" "$(gdomains)" ""
+check "globals dropped: the drop-in removed" \
+	"$(ls /run/systemd/resolved.conf.d/netcfgd.conf 2>/dev/null | wc -l)" "0"
+check "globals dropped: the link's server survives the restart" "$(servers)" "192.0.2.53"
+
 # What resolved makes of a value on the loopback, which is where netcfgd has
 # sent the global scope: asked directly, so the reading is resolved's own.
 said=$(resolvectl dns lo 192.0.2.99 2>&1); status=$?

@@ -639,15 +639,162 @@ static void forget_departed(const ncfg_dns_scope_t *scopes, size_t count, const 
 	closedir(listing);
 }
 
-static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const char *program,
-    const char *run_dir, char *err, size_t err_size)
+static const char *resolved_drop_in(const ncfg_dns_targets_t *targets)
 {
-	size_t at;
+	return targets->resolved_drop_in ? targets->resolved_drop_in : NCFG_RESOLVED_DROP_IN;
+}
+
+static const char *resolved_systemctl(const ncfg_dns_targets_t *targets)
+{
+	return targets->systemctl_program ? targets->systemctl_program : "systemctl";
+}
+
+/* `systemctl VERB systemd-resolved`. */
+static int tell_resolved(const char *program, const char *verb, char *err, size_t err_size)
+{
+	const char *argv[4];
+	int         exited_ok = 0;
+	int         status = 0;
+	char        said[NCFG_ERROR_MAX];
+	char        how[64];
+
+	argv[0] = program;
+	argv[1] = verb;
+	argv[2] = "systemd-resolved";
+	argv[3] = NULL;
+	said[0] = '\0';
+	if (!run_with_input(program, argv, NULL, &exited_ok, &status, said, sizeof(said))) {
+		ncfg_error_set(err, err_size, "could not run %s to %s systemd-resolved: %s", program,
+		    verb, said);
+		return 0;
+	}
+	if (!exited_ok) {
+		describe_status(status, how, sizeof(how));
+		ncfg_error_set(err, err_size, "`%s %s systemd-resolved` %s", program, verb, how);
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * **The globals scope, as a drop-in resolved reads** (project.md 10.918).
+ *
+ * It used to go to `lo` as a link's settings, and resolved never took that:
+ * it answers a loopback link as busy, resolvectl then asks networkd, and
+ * without networkd the delivery failed. Measured under systemd 257: a
+ * drop-in's `DNS=` and `Domains=` *append* to the admin's own
+ * `resolved.conf`, and `systemctl reload` applies them; removing ours and
+ * restarting gives back exactly the admin's -- a reload alone leaves the
+ * domains -- and every link's settings survive the restart. Empty
+ * assignments would clear too, and would clear the admin's lists with ours,
+ * so they are not used.
+ *
+ * Written only when its text changes, so an unchanged apply reloads nothing.
+ */
+static int resolved_globals(const ncfg_dns_policy_t *policy, const char *path,
+    const char *systemctl, char *err, size_t err_size)
+{
+	ncfg_buf_t  buf;
+	char       *had;
+	char        dir[DNS_PATH_MAX];
+	char       *slash;
+	size_t      at;
+	int         states;
+	int         ok;
+
+	states = policy && (policy->server_count > 0u || policy->domain_count > 0u ||
+	    policy->search_count > 0u || policy->transport.has || policy->dnssec.has);
+	if (!states) {
+		if (access(path, F_OK) != 0) {
+			return 1;
+		}
+		if (unlink(path) != 0) {
+			ncfg_error_set(err, err_size, "could not remove %s: %s", path, strerror(errno));
+			return 0;
+		}
+		return tell_resolved(systemctl, "restart", err, err_size);
+	}
+
+	ncfg_buf_init(&buf, 0u);
+	ncfg_buf_add_text(&buf, "# Written by netcfgd: the globals of its `dns` block. It\n"
+	                        "# adds to resolved.conf rather than replacing it.\n[Resolve]\n");
+	if (policy->server_count > 0u) {
+		ncfg_buf_add_text(&buf, "DNS=");
+		for (at = 0u; at < policy->server_count; at++) {
+			const char *one = resolved_server(&policy->servers[at]);
+
+			if (!one) {
+				ncfg_buf_free(&buf);
+				ncfg_error_set(err, err_size, "out of memory listing the global servers");
+				return 0;
+			}
+			ncfg_buf_addf(&buf, "%s%s", at ? " " : "", one);
+			free((void *)one);
+		}
+		ncfg_buf_add_text(&buf, "\n");
+	}
+	if (policy->domain_count > 0u || policy->search_count > 0u) {
+		const char *gap = "";
+
+		ncfg_buf_add_text(&buf, "Domains=");
+		for (at = 0u; at < policy->domain_count; at++) {
+			ncfg_buf_addf(&buf, "%s%s%s", gap, policy->domains[at].exclusive ? "~" : "",
+			    policy->domains[at].suffix);
+			gap = " ";
+		}
+		for (at = 0u; at < policy->search_count; at++) {
+			ncfg_buf_addf(&buf, "%s%s", gap, policy->search[at]);
+			gap = " ";
+		}
+		ncfg_buf_add_text(&buf, "\n");
+	}
+	if (policy->transport.has) {
+		ncfg_buf_addf(&buf, "DNSOverTLS=%s\n",
+		    policy->transport.value == NCFG_DNS_TRANSPORT_TLS ? "yes" : "no");
+	}
+	if (policy->dnssec.has) {
+		ncfg_buf_addf(&buf, "DNSSEC=%s\n", policy->dnssec.value == NCFG_DNSSEC_YES ? "yes"
+		    : policy->dnssec.value == NCFG_DNSSEC_ALLOW ? "allow-downgrade" : "no");
+	}
+	if (ncfg_buf_failed(&buf)) {
+		ncfg_buf_free(&buf);
+		ncfg_error_set(err, err_size, "the global resolved settings are larger than this "
+		                              "build will write");
+		return 0;
+	}
+
+	had = ncfg_backend_read_file(path, NULL, 65536u);
+	if (had && strcmp(had, ncfg_buf_text(&buf)) == 0) {
+		free(had);
+		ncfg_buf_free(&buf);
+		return 1;
+	}
+	free(had);
+	(void)snprintf(dir, sizeof(dir), "%s", path);
+	slash = strrchr(dir, '/');
+	if (slash && slash != dir) {
+		*slash = '\0';
+		if (!ncfg_backend_make_dir(dir, 0755, err, err_size)) {
+			ncfg_buf_free(&buf);
+			return 0;
+		}
+	}
+	ok = ncfg_dns_replace(path, ncfg_buf_text(&buf), err, err_size);
+	ncfg_buf_free(&buf);
+	return ok && tell_resolved(systemctl, "reload", err, err_size);
+}
+
+static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count,
+    const ncfg_dns_targets_t *targets, char *err, size_t err_size)
+{
+	const char *program = targets->resolvectl_program;
+	size_t      at;
+	int         globals_said = 0;
 
 	if (!program) {
 		program = "resolvectl";
 	}
-	forget_departed(scopes, count, run_dir, program);
+	forget_departed(scopes, count, targets->run_dir, program);
 	for (at = 0u; at < count; at++) {
 		const ncfg_dns_policy_t *policy = scopes[at].policy;
 		const char             **servers = NULL;
@@ -657,21 +804,16 @@ static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const 
 		const char              *link;
 		int                      ok;
 
-		/* resolved is per-link and has no global scope of its own, so the
-		 * globals scope goes to the loopback -- which is where resolved puts
-		 * its own fallback configuration too. */
-		link = (scopes[at].name && strcmp(scopes[at].name, NCFG_DNS_GLOBAL_SCOPE) == 0)
-		    ? "lo"
-		    : scopes[at].name;
-		/* A globals scope that states nothing has nothing to say or to
-		 * clear: resolved refuses a cleared value on the loopback with an
-		 * exit of 1, which stopped the apply before any link's scope
-		 * (project.md 10.916). */
-		if (strcmp(link, "lo") == 0 &&
-		    (!policy || (policy->server_count == 0u && policy->domain_count == 0u &&
-		    policy->search_count == 0u && !policy->transport.has && !policy->dnssec.has))) {
+		/* The globals scope is resolved's own settings, not a link's. */
+		if (scopes[at].name && strcmp(scopes[at].name, NCFG_DNS_GLOBAL_SCOPE) == 0) {
+			globals_said = 1;
+			if (!resolved_globals(policy, resolved_drop_in(targets),
+			        resolved_systemctl(targets), err, err_size)) {
+				return 0;
+			}
 			continue;
 		}
+		link = scopes[at].name;
 
 		if (policy && policy->server_count > 0u) {
 			servers = calloc(policy->server_count, sizeof(*servers));
@@ -770,6 +912,11 @@ static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const 
 		if (!ok) {
 			return 0;
 		}
+	}
+	/* No globals scope at all: what an earlier one wrote is taken back. */
+	if (!globals_said && !resolved_globals(NULL, resolved_drop_in(targets),
+	        resolved_systemctl(targets), err, err_size)) {
+		return 0;
 	}
 	return 1;
 }
@@ -990,8 +1137,7 @@ int ncfg_dns_deliver(const ncfg_dns_scope_t *scopes, size_t count,
 		}
 		break;
 	case NCFG_DNS_MODE_RESOLVED:
-		if (!hand_to_resolved(scopes, count, targets->resolvectl_program, targets->run_dir,
-		        err, err_size)) {
+		if (!hand_to_resolved(scopes, count, targets, err, err_size)) {
 			return 0;
 		}
 		break;
