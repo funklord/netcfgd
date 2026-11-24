@@ -7050,6 +7050,71 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.934 A zone's clients by MAC, found through leases and the neighbour table
+
+0284's yardstick names "policy whose subject is a client -- a device
+identified by MAC, by lease". `zone "kids" { clients = ["02:aa:bb:cc:dd:01"] }`
+is that: the zone holds its clients in a slot named after it, opened as
+10.933 opens one, and the daemon keeps the slot to exactly the addresses
+those MACs hold -- what they lease from this host's DHCP servers, and what
+the kernel's neighbour table answers for them, both families. Layer 4 as
+0284 drew it --
+a subsystem writing membership in real time into a set the rules name,
+the rules untouched.
+
+**The neighbour table as well as the leases.** A lease file names only
+DHCPv4 leases, so a client with a static address, and every IPv6 address a
+client takes by SLAAC, would never be in its zone. The kernel's neighbour
+table maps both: an `RTM_GETNEIGH` dump, entries reachable, stale, being
+probed or permanent, link-local IPv6 left out since nothing forwards it.
+
+**Each pass, not each lease.** The pass dumps the slot, puts in a client's
+address it lacks, and takes out anything else -- a lease ended, an entry
+aged out, or an address now held by a MAC that is not a client.
+**Never removing on a pass that could not read**: the first version took a
+neighbour dump that failed as "no clients" and emptied the slot, which
+uncapped a capped client -- a firewall failing open. A lease file that is
+there and unreadable, or a dump that fails, now marks the pass partial, and
+a partial pass only adds. (The dump failed because the request went out
+without `NLM_F_REQUEST`, which the kernel ignores; `ncfg_dump_flags()` is
+what the tree's other dumps use.) Ticks are 5 s
+(`NCFG_MAIN_TICK_MS`), so a new lease is in the zone within a tick.
+Considered and not taken: dnsmasq's `dhcp-script` calling the daemon per
+lease, which is immediate but a second path into the kernel for the same
+state, run as dnsmasq's user and lost when the script fails; and element
+timeouts set to the lease's remaining life, which leave a gap at every
+renewal, since adding an element that exists does not refresh it.
+Membership stays nobody's desired state (0340), so the planner never sees
+it and `ncfg plan` stays converged. **The zone's slot is the zone's**: a
+member written into it by hand is taken out at the next pass, which the
+example says.
+
+Clients are kept lowercase, as dnsmasq's lease file and a device's `mac`
+are, and compared without case. The zone keeps its hosts as written: the
+compile alone sees `@slot:ZONE` among them, so a render writes `clients`
+back and no slot. A zone named so that it cannot name a slot is refused
+where it has clients. The window carries the field through the zone
+dialog, so saving a zone there keeps its clients.
+
+`netlink_test`: a stale IPv4 and a reachable IPv6 neighbour read, a
+link-local, a failed, an unresolved and a short entry not.
+`dhcp_server_test`: clients matched without case, a non-leasing client and
+a lease with no MAC adding nothing. `lower_test`: the slot opened, the rules
+naming it, clients lowercased, rendered back with no slot, a bad MAC
+refused. `zone_load`: a zone of clients saved from the dialog and read back.
+`tests/live/zone_cap.sh`: a client with a static address and no DHCP
+server, named by its MAC; the slot emptied first and checked empty -- the
+first run passed on an element the step before had written, carried into
+the new table, while the dump had never answered -- then in within one
+tick (5 s) from the neighbour table, and held at 5 Mbit/s each way.
+`hull-dhcp-server`: a real dhcpcd client's lease from dnsmasq under netcfgd,
+in the zone's slot after the daemon's pass, and out once the zone names
+another MAC: the lease 192.168.7.130 in within 5 s, out at the first look
+after the change, the whole tier's verdict ok. (Its first runs failed before
+any step: the vm could not make a veth, at 43d18968 too -- the tier confs'
+host /lib/modules volume hid hull's own kernel's modules; fixed by the next
+commit.)
+
 ## 10.933 A slot that only counts, and a zone of a slot's members
 
 A zone's hosts are written into the document, so a device joining "kids" took

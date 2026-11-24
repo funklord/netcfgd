@@ -38,6 +38,7 @@ private:
 	QLineEdit *reach;
 	QLineEdit *client_limit;
 	QLineEdit *hosts;
+	QLineEdit *clients;
 	QLabel    *note;
 };
 

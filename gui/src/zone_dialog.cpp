@@ -33,6 +33,13 @@ QString ncfg_zone_block(const ncfg_zone_row &zone)
 		}
 		block += QStringLiteral("\thosts = [%1]\n").arg(addresses.join(QStringLiteral(", ")));
 	}
+	if (!zone.clients.isEmpty()) {
+		QStringList macs;
+		for (const QString &one : zone.clients) {
+			macs << QStringLiteral("\"%1\"").arg(one);
+		}
+		block += QStringLiteral("\tclients = [%1]\n").arg(macs.join(QStringLiteral(", ")));
+	}
 	if (!zone.client_limit.isEmpty()) {
 		block += QStringLiteral("\tclient_limit = \"%1\"\n").arg(zone.client_limit);
 	}
@@ -63,6 +70,11 @@ ncfg_zone_dialog::ncfg_zone_dialog(ncfg_connection *connection, const ncfg_zone_
 	hosts->setObjectName(QStringLiteral("zone_hosts"));
 	hosts->setPlaceholderText(QStringLiteral("192.168.1.20 -- hosts in it by address, wherever they are"));
 	form->addRow(QStringLiteral("hosts"), hosts);
+	clients = new QLineEdit(existing.clients.join(QStringLiteral(", ")), this);
+	clients->setObjectName(QStringLiteral("zone_clients"));
+	clients->setPlaceholderText(
+	    QStringLiteral("02:aa:bb:cc:dd:01 -- devices in it by MAC, followed through their leases"));
+	form->addRow(QStringLiteral("clients"), clients);
 
 	client_limit = new QLineEdit(existing.client_limit, this);
 	client_limit->setObjectName(QStringLiteral("zone_client_limit"));
@@ -102,6 +114,8 @@ void ncfg_zone_dialog::submit()
 	    Qt::SkipEmptyParts);
 	zone.client_limit = client_limit->text().trimmed();
 	zone.hosts = hosts->text().split(QRegularExpression(QStringLiteral("[,\\s]+")),
+	    Qt::SkipEmptyParts);
+	zone.clients = clients->text().split(QRegularExpression(QStringLiteral("[,\\s]+")),
 	    Qt::SkipEmptyParts);
 
 	/* The compiler's own alphabet for a zone's name, asked here so the

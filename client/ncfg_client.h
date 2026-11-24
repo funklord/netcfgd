@@ -1530,6 +1530,8 @@ typedef struct {
 	char *client_limit;
 	/* Hosts by address, joined with ", " (10.930); "" where none. */
 	char *hosts;
+	/* Clients by MAC, joined with ", " (10.934); "" where none. */
+	char *clients;
 } ncfg_zone_entry_t;
 
 typedef struct {

@@ -732,6 +732,26 @@ int main(void)
 			        strcmp(leases[3].hostname, "laptop") == 0,
 			    "  and a v6 lease, which has no MAC, the duid line skipped");
 		}
+		/* 10.934: a zone's clients, lowercase as the document keeps them,
+		 * matched against the leases' uppercase; one not leasing adds
+		 * nothing, nor does a lease with no MAC. */
+		{
+			char  *clients[3] = { (char *)"aa:bb:cc:00:00:03", (char *)"aa:bb:cc:00:00:01",
+				(char *)"aa:bb:cc:00:00:99" };
+			char **held = NULL;
+			size_t held_count = 0;
+			size_t at;
+
+			check(ncfg_dhcp_server_clients_held(leases, count, clients, 3u, &held,
+			          &held_count) && held_count == 2u &&
+			        strcmp(held[0], "192.168.1.101") == 0 &&
+			        strcmp(held[1], "192.168.1.103") == 0,
+			    "a zone's clients are the addresses their MACs lease, without case");
+			for (at = 0; at < held_count; at++) {
+				free(held[at]);
+			}
+			free(held);
+		}
 		ncfg_dhcp_server_leases_free(leases, count);
 	}
 

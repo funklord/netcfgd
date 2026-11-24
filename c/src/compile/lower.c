@@ -1063,6 +1063,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 				ncfg_diag(&ctx, block->block->span, "zone `%s` is declared twice", zone.name);
 				ncfg_strings_free(zone.reach, zone.reach_count);
 				ncfg_strings_free(zone.hosts, zone.host_count);
+				ncfg_strings_free(zone.clients, zone.client_count);
 				free(zone.client_limit);
 				free(zone.name);
 				continue;
@@ -1077,6 +1078,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 				} else {
 					ncfg_strings_free(zone.reach, zone.reach_count);
 					ncfg_strings_free(zone.hosts, zone.host_count);
+					ncfg_strings_free(zone.clients, zone.client_count);
 					free(zone.client_limit);
 					free(zone.name);
 				}

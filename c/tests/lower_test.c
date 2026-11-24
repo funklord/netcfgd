@@ -2373,6 +2373,59 @@ static void zone_cases(void)
 		ncfg_buf_free(&written);
 	}
 	ncfg_document_free(document);
+	/* 10.934: a zone's clients by MAC -- its own slot, named after it,
+	 * opened and named by its rules; written back as `clients`, lowercase,
+	 * with no slot and no `@slot:` in what is rendered. */
+	document = compiles("device lan0 { kind = \"dummy\" }\n"
+	    "zone \"internet\" { }\n"
+	    "zone \"kids\" { clients = [\"02:AA:BB:CC:DD:01\"]; reach = [\"internet\"] }\n"
+	    "interface lan0 { zone = \"internet\" }\n"
+	    "firewall {\n\tinput { policy = \"accept\" }\n"
+	    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n",
+	    "a zone of clients by MAC compiles");
+	{
+		size_t at;
+		int    named = 0;
+
+		for (at = 0; document && document->firewall &&
+		     at < document->firewall->forward.rule_count; at++) {
+			const ncfg_firewall_rule_t *rule = &document->firewall->forward.rules[at];
+
+			named = named || (strcmp(rule->name, "kids>internet:hosts>lan0") == 0 &&
+			    rule->from_count == 1u && strcmp(rule->from[0], "@slot:kids") == 0);
+		}
+		check(named && document->firewall->forward.slot_count == 1u &&
+		    strcmp(document->firewall->forward.slots[0].name, "kids") == 0 &&
+		    document->firewall->forward.slots[0].zone,
+		    "  its own slot opened, and its rules naming it");
+		check(document && document->zone_count == 2u &&
+		    document->zones[1].client_count == 1u &&
+		    strcmp(document->zones[1].clients[0], "02:aa:bb:cc:dd:01") == 0 &&
+		    document->zones[1].host_count == 0u,
+		    "  its clients kept lowercase, and its hosts as written");
+	}
+	{
+		ncfg_buf_t          written;
+		ncfg_unrenderable_t missing;
+		char                message[NCFG_ERROR_MAX];
+		int                 rendered;
+
+		ncfg_buf_init(&written, 0);
+		ncfg_unrenderable_init(&missing);
+		rendered = document && ncfg_render(document, NULL, &written, &missing, message,
+		    sizeof(message));
+		ncfg_buf_add(&written, "", 1u);
+		check(rendered && strstr((const char *)written.data, "02:aa:bb:cc:dd:01") &&
+		    !strstr((const char *)written.data, "@slot") &&
+		    !strstr((const char *)written.data, "slot \"kids\""),
+		    "  rendered back as clients, with no slot");
+		ncfg_unrenderable_free(&missing);
+		ncfg_buf_free(&written);
+	}
+	ncfg_document_free(document);
+	refuses("zone \"kids\" { clients = [\"not-a-mac\"] }\n", "zone `kids`'s client",
+	    "  and a client that is not a MAC is refused");
+
 	refuses("zone \"kids\" { hosts = [\"@slot:\"] }\n", "does not name a slot",
 	    "  and `@slot:` naming nothing is refused");
 

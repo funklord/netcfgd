@@ -2443,7 +2443,10 @@ static const ncfg_field_t zone_fields[] = {
 	{ .name = "client_limit", .kind = NCFG_F_STR, .offset = offsetof(ncfg_zone_t, client_limit) },
 	/* Absent where the zone names no host by address (10.930). */
 	{ .name = "hosts", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
-	    .offset = offsetof(ncfg_zone_t, hosts), .count_offset = offsetof(ncfg_zone_t, host_count) }
+	    .offset = offsetof(ncfg_zone_t, hosts), .count_offset = offsetof(ncfg_zone_t, host_count) },
+	{ .name = "clients", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_zone_t, clients),
+	    .count_offset = offsetof(ncfg_zone_t, client_count) }
 };
 static const ncfg_type_t zone_type = TYPE("zone", zone_fields);
 

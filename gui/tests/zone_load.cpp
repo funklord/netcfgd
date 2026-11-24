@@ -184,6 +184,27 @@ int main(int argc, char **argv)
 		}
 		check(hosts, QStringLiteral("192.0.2.10,192.0.2.20"), "  and its hosts read back, sorted");
 	}
+	/* 10.934: clients by MAC, through the dialog and back, lowercased. */
+	{
+		ncfg_zone_dialog dialog(&connection, ncfg_zone_row());
+		dialog.findChild<QLineEdit *>(QStringLiteral("zone_name"))
+		    ->setText(QStringLiteral("kids"));
+		dialog.findChild<QLineEdit *>(QStringLiteral("zone_clients"))
+		    ->setText(QStringLiteral("02:AA:BB:CC:DD:01"));
+		check(save(&dialog), QStringLiteral("saved"), "a zone of clients by MAC saves");
+	}
+	{
+		QList<ncfg_zone_row> now;
+		connection.zones(&now, &error);
+		QString clients;
+		for (const ncfg_zone_row &zone : now) {
+			if (zone.name == QStringLiteral("kids")) {
+				clients = zone.clients.join(QLatin1Char(','));
+			}
+		}
+		check(clients, QStringLiteral("02:aa:bb:cc:dd:01"), "  and its clients read back");
+	}
+	(void)connection.config_delete(QStringLiteral("zone-kids"), &error);
 	(void)connection.config_delete(QStringLiteral("zone-printers"), &error);
 	{
 		ncfg_zone_dialog dialog(&connection, ncfg_zone_row());

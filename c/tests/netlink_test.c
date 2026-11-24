@@ -40,6 +40,7 @@
  * builds the bytes a kernel would send, so it needs the attribute numbers for
  * tunnels and bridge VLANs that `dump.c` reads. */
 #include <linux/if_bridge.h>
+#include <linux/neighbour.h>
 #include <linux/if_tunnel.h>
 
 static int failures;
@@ -238,9 +239,74 @@ static void queue(fake_t *fake, const ncfg_buf_t *buffer)
 
 /* ------------------------------------------------------------------------ */
 
+/* One RTM_NEWNEIGH payload: an ndmsg, then the destination and the
+ * hardware address where given (10.934). */
+static ncfg_buf_t neighbour(uint8_t family, uint16_t state, const void *destination,
+    size_t destination_length, const uint8_t *mac)
+{
+	ncfg_buf_t   out;
+	struct ndmsg head;
+
+	memset(&head, 0, sizeof(head));
+	head.ndm_family = family;
+	head.ndm_state = state;
+	ncfg_buf_init(&out, 0);
+	ncfg_buf_add(&out, &head, sizeof(head));
+	ncfg_wire_attr_put(&out, NDA_DST, destination, destination_length);
+	if (mac) {
+		ncfg_wire_attr_put(&out, NDA_LLADDR, mac, 6u);
+	}
+	return out;
+}
+
 int main(void)
 {
 	char err[NCFG_ERROR_MAX];
+
+	/* --- neighbours, for a zone's clients (10.934) --------------------- */
+	{
+		static const uint8_t mac[6] = { 0x02, 0xAA, 0xBB, 0xCC, 0xDD, 0x01 };
+		static const uint8_t v4[4] = { 192, 0, 2, 7 };
+		static const uint8_t v6[16] = { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 7 };
+		static const uint8_t local[16] = { 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			0, 7 };
+		char       address[64];
+		char       hardware[18];
+		ncfg_buf_t one;
+		int        read;
+
+		one = neighbour(AF_INET, NUD_STALE, v4, sizeof(v4), mac);
+		read = ncfg_dump_neighbour(one.data, one.length, address, sizeof(address), hardware,
+		    sizeof(hardware));
+		check(read && strcmp(address, "192.0.2.7") == 0 &&
+		        strcmp(hardware, "02:aa:bb:cc:dd:01") == 0,
+		    "a stale IPv4 neighbour: its address and its MAC, lowercase");
+		ncfg_buf_free(&one);
+		one = neighbour(AF_INET6, NUD_REACHABLE, v6, sizeof(v6), mac);
+		read = ncfg_dump_neighbour(one.data, one.length, address, sizeof(address), hardware,
+		    sizeof(hardware));
+		check(read && strcmp(address, "2001:db8::7") == 0, "a reachable IPv6 neighbour");
+		ncfg_buf_free(&one);
+		one = neighbour(AF_INET6, NUD_REACHABLE, local, sizeof(local), mac);
+		check(!ncfg_dump_neighbour(one.data, one.length, address, sizeof(address), hardware,
+		          sizeof(hardware)),
+		    "a link-local address is no client's, since nothing forwards it");
+		ncfg_buf_free(&one);
+		one = neighbour(AF_INET, NUD_FAILED, v4, sizeof(v4), mac);
+		check(!ncfg_dump_neighbour(one.data, one.length, address, sizeof(address), hardware,
+		          sizeof(hardware)),
+		    "an entry that failed to resolve is not read");
+		ncfg_buf_free(&one);
+		one = neighbour(AF_INET, NUD_INCOMPLETE, v4, sizeof(v4), NULL);
+		check(!ncfg_dump_neighbour(one.data, one.length, address, sizeof(address), hardware,
+		          sizeof(hardware)),
+		    "nor one with no hardware address yet");
+		ncfg_buf_free(&one);
+		check(!ncfg_dump_neighbour(v4, sizeof(v4), address, sizeof(address), hardware,
+		          sizeof(hardware)),
+		    "nor a message too short to be one");
+	}
 
 	/* --- a link message, the ordinary case ---------------------------- */
 	{

@@ -12,7 +12,8 @@
 # carry far more, so a low number is the cap and not the rig.
 #
 # HOW IT STOPS: every iperf3 runs under `timeout` and serves one test (`-1`);
-# the namespace holders are `sleep 120`, killed by the EXIT trap.
+# the namespace holders are `sleep 300` and the daemon one step starts, all
+# killed by the EXIT trap; each wait on the daemon is bounded at 20 s.
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -57,9 +58,9 @@ check() {
 	fi
 }
 
-unshare -n sleep 120 &
+unshare -n sleep 300 &
 guest_pid=$!
-unshare -n sleep 120 &
+unshare -n sleep 300 &
 up_pid=$!
 holders="$guest_pid $up_pid"
 own=$(readlink /proc/$$/ns/net)
@@ -192,6 +193,49 @@ check "and once written into it, held near 5 Mbit/s each way with no apply" \
 	"$([ "$member_up" -ge 1 ] && [ "$member_up" -le 6 ] && [ "$member_down" -ge 1 ] && [ "$member_down" -le 6 ] && echo held || echo "$member_up/$member_down")" "held"
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and the plan is still converged" "$(tail -1 "$work/plan")" "nothing to do"
+
+# 10.934: the same client named by its MAC, with a static address and no
+# DHCP server: the daemon's pass finds it in the neighbour table and puts
+# its address in the zone's slot, and from then on it is capped.
+client_mac=$(G ip link show gpeer | awk '/link\/ether/ {print $2}')
+cat > "$work/etc/netcfgd.conf" <<CONF
+zone "kids" { reach = ["internet"]; clients = ["$client_mac"]; client_limit = "5mbit" }
+zone "internet" { reach = [] }
+interface zg0 { config = "10.81.0.1/24"; forwarding = true }
+interface zw0 { config = "10.82.0.1/24"; zone = "internet"; forwarding = true }
+firewall {
+	input { policy = "accept" }
+	forward {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "others" { interface = "zg0" }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "a zone of clients by MAC applies" "$(grep -c '^FAIL' "$work/apply" || true)" "0"
+# The element the step before wrote by hand is carried into the new table;
+# taken out, so what the daemon puts in is the daemon's.
+nft delete element inet netcfgd slot-kids-4 '{ 10.81.0.2 }' > /dev/null 2>&1 || true
+check "the zone's slot starts empty" \
+	"$(nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -cw 10.81.0.2 || true)" "0"
+"$build/netcfgd" --fuzznet-dir "" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+holders="$holders $!"
+G ping -c 1 -W 2 10.81.0.1 > /dev/null 2>&1 || true
+waited=0
+while ! nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -qw 10.81.0.2 &&
+    [ "$waited" -lt 40 ]; do
+	sleep 0.5
+	waited=$((waited + 1))
+done
+check "the daemon puts a client's address, from the neighbour table, in its zone" \
+	"$(nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -cw 10.81.0.2 || true)" "1"
+by_mac_up=$(measure "")
+by_mac_down=$(measure -R)
+echo "  capped by MAC after $((waited / 2)) s: up $by_mac_up Mbit/s, down $by_mac_down Mbit/s"
+check "and the client is then held near 5 Mbit/s each way" \
+	"$([ "$by_mac_up" -ge 1 ] && [ "$by_mac_up" -le 6 ] && [ "$by_mac_down" -ge 1 ] && [ "$by_mac_down" -le 6 ] && echo held || echo "$by_mac_up/$by_mac_down")" "held"
 
 write ''
 "$ncfg" apply > "$work/apply" 2>&1 || true

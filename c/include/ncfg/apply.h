@@ -1034,6 +1034,17 @@ int ncfg_firewall_slot_write(const ncfg_document_t *desired, const char *slot, i
     const char *address, const char *lifetime, char *err, size_t err_size);
 
 /*
+ * A zone's clients (10.934): each zone with `clients` whose slot the
+ * firewall opens holds exactly the addresses those clients lease from this
+ * host's DHCP servers under `run` -- a missing one put in, anything else
+ * taken out. Membership is live state, never planned (0340), so this is
+ * the daemon's to run each pass rather than an action. 0, logged per
+ * member, where a write failed.
+ */
+int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *run,
+    char *err, size_t err_size);
+
+/*
  * Where a slot's members are recorded so a reboot does not empty it (0340):
  * one file a slot, `ADDRESS EXPIRES` a line, EXPIRES the Unix second it
  * lapses or 0 for never. `NCFG_SLOT_DIR` in the environment moves it, for a

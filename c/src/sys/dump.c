@@ -40,7 +40,9 @@
  * the kernel's `linux/if.h` rather than libc's `net/if.h` -- the two redefine
  * each other's structures, and a .c file decides it for nobody else.
  */
+#include <arpa/inet.h>
 #include <linux/if.h>
+#include <linux/neighbour.h>
 #include <linux/if_bridge.h>
 #include <linux/ip.h>
 #include <linux/if_tunnel.h>
@@ -1134,5 +1136,51 @@ int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlan_
 	if (out->count > 1u) {
 		qsort(out->items, out->count, sizeof(*out->items), compare_vlans);
 	}
+	return 1;
+}
+
+/*
+ * One `RTM_NEWNEIGH` from a neighbour dump (10.934): the address a device
+ * answers at and its hardware address, lowercase, for an entry the kernel
+ * believes in -- reachable, stale, being probed or permanent -- with both
+ * present. 0 for anything else: an entry that failed or never resolved, one
+ * with no link-layer address, a link-local IPv6 address (never forwarded),
+ * or a message too short to be one.
+ */
+int ncfg_dump_neighbour(const void *payload, size_t length, char *address, size_t address_size,
+    char *mac, size_t mac_size)
+{
+	const struct ndmsg *head = payload;
+	ncfg_wire_attrs_t   area;
+	ncfg_wire_attr_t    destination;
+	ncfg_wire_attr_t    link_layer;
+	const uint8_t      *octets;
+
+	if (!payload || length < NLMSG_ALIGN(sizeof(struct ndmsg)) || !address || !mac) {
+		return 0;
+	}
+	if ((head->ndm_family != AF_INET && head->ndm_family != AF_INET6) ||
+	    !(head->ndm_state &
+	        (NUD_REACHABLE | NUD_STALE | NUD_DELAY | NUD_PROBE | NUD_PERMANENT))) {
+		return 0;
+	}
+	ncfg_wire_attrs_start(&area, (const uint8_t *)payload + NLMSG_ALIGN(sizeof(struct ndmsg)),
+	    length - NLMSG_ALIGN(sizeof(struct ndmsg)));
+	if (ncfg_wire_attrs_find(&area, NDA_DST, &destination, NULL, 0) != NCFG_WIRE_OK ||
+	    ncfg_wire_attrs_find(&area, NDA_LLADDR, &link_layer, NULL, 0) != NCFG_WIRE_OK ||
+	    link_layer.length != 6u ||
+	    destination.length != (head->ndm_family == AF_INET ? 4u : 16u)) {
+		return 0;
+	}
+	octets = destination.value;
+	if (head->ndm_family == AF_INET6 && octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80) {
+		return 0;
+	}
+	if (!inet_ntop(head->ndm_family, destination.value, address, (socklen_t)address_size)) {
+		return 0;
+	}
+	octets = link_layer.value;
+	(void)snprintf(mac, mac_size, "%02x:%02x:%02x:%02x:%02x:%02x", octets[0], octets[1],
+	    octets[2], octets[3], octets[4], octets[5]);
 	return 1;
 }

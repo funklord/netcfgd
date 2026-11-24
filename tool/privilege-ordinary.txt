@@ -267,3 +267,5 @@ reach
 client_limit
 # A zone's hosts by address (10.930): whose forwarded traffic the zone covers.
 hosts
+# A zone's clients by MAC (10.934): the same, followed through their leases.
+clients

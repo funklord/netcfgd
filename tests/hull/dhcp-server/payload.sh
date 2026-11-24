@@ -437,7 +437,52 @@ intercept6_again=$(grep -c 'nothing to do' "$work/plan-intercept6b.log")
 kill "$upstream6" 2>/dev/null
 echo "nameserver 192.168.7.1" > /etc/netns/client/resolv.conf
 
+# A zone's clients by MAC (10.934): the zone's own slot holds what the
+# client leases, kept by the daemon's pass -- within a tick of the lease,
+# and out again within a tick of the client leaving the zone. Each wait is
+# bounded at 20 s, and the daemon is killed before the verdict.
+cat > "$work/etc/netcfgd.conf" <<CONF
+device wan0 { kind = "dummy" }
+interface lan0 {
+	config = "192.168.7.1/24"
+	dhcp_server { }
+}
+interface wan0 { config = "10.76.0.1/24"; zone = "internet" }
+zone "internet" { }
+zone "kids" { clients = ["$mac"]; reach = ["internet"] }
+firewall {
+	input { policy = "accept" }
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+CONF
+"$build/ncfg" apply > "$work/apply-clients.log" 2>&1
+say "ncfg apply rc=$?"
+leased=$(client | sed -n '1s/^address=\([^ ]*\).*/\1/p')
+"$build/netcfgd" --fuzznet-dir "" --no-apply-on-start > "$work/daemon-clients.log" 2>&1 &
+clients_daemon=$!
+member() { nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -cw "$1"; }
+waited=0
+while [ "$(member "$leased")" = 0 ] && [ "$waited" -lt 40 ]; do
+	sleep 0.5
+	waited=$((waited + 1))
+done
+clients_in=$(member "$leased")
+say "  the client leased '$leased'; in zone kids's slot after $((waited / 2)) s: $clients_in"
+sed -i "s/clients = \[\"$mac\"\]/clients = [\"02:00:00:00:00:99\"]/" "$work/etc/netcfgd.conf"
+waited=0
+while [ "$(member "$leased")" != 0 ] && [ "$waited" -lt 40 ]; do
+	sleep 0.5
+	waited=$((waited + 1))
+done
+clients_out=$(member "$leased")
+say "  and once the zone names another MAC, out after $((waited / 2)) s: $clients_out"
+kill "$clients_daemon" 2>/dev/null
+wait "$clients_daemon" 2>/dev/null
+
 failed=0
+[ -n "$leased" ] && [ "$clients_in" = 1 ] || { say "  a zone's client's lease did not reach its slot"; failed=1; }
+[ "$clients_out" = 0 ] || { say "  an address no client leases stayed in the zone's slot"; failed=1; }
 [ "$relay_plan" -ge 1 ] || { say "  the relay was not planned as a restart naming where it relays"; failed=1; }
 case "$beside" in
 	*"address=192.168.8."*) ;;
@@ -561,6 +606,8 @@ if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply10: /' "$work/apply10.log" | tail -6 >> "$out"
 	sed 's/^/  upstream-dhcp: /' "$work/upstream-dhcp.log" | tail -6 >> "$out"
 	sed 's/^/  client-ra: /' "$work/client-ra.log" | tail -10 >> "$out"
+	sed 's/^/  apply-clients: /' "$work/apply-clients.log" | tail -6 >> "$out"
+	sed 's/^/  daemon-clients: /' "$work/daemon-clients.log" | tail -8 >> "$out"
 	say "VERDICT bad"
 else
 	say "VERDICT ok"

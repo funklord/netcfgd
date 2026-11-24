@@ -1496,6 +1496,36 @@ int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, nc
 			continue;
 		}
 		assignment = &item->as.assignment;
+		/* Devices by hardware address (10.934), lowercase as a lease file
+		 * and a device's `mac` write them, refused here when not one. */
+		if (strcmp(assignment->key, "clients") == 0) {
+			ncfg_words_t named;
+			size_t       one;
+
+			if (!ncfg_as_words(ctx, assignment->value, &named)) {
+				ncfg_words_free(&named);
+				continue;
+			}
+			ncfg_strings_free(out->clients, out->client_count);
+			out->clients = NULL;
+			out->client_count = 0;
+			for (one = 0; one < named.count; one++) {
+				uint8_t octets[6];
+				char    why[NCFG_ERROR_MAX];
+				char    shown[18];
+
+				if (!ncfg_ops_parse_mac(named.at[one].text, octets, why, sizeof(why))) {
+					ncfg_diag(ctx, named.at[one].span, "zone `%s`'s client `%s`: %s",
+					    out->name, named.at[one].text, why);
+					continue;
+				}
+				(void)snprintf(shown, sizeof(shown), "%02x:%02x:%02x:%02x:%02x:%02x",
+				    octets[0], octets[1], octets[2], octets[3], octets[4], octets[5]);
+				(void)ncfg_push_string(ctx, &out->clients, &out->client_count, shown);
+			}
+			ncfg_words_free(&named);
+			continue;
+		}
 		/* Hosts by address (10.930), each an address or a prefix,
 		 * refused here rather than by the kernel at apply. */
 		if (strcmp(assignment->key, "hosts") == 0) {
@@ -1741,7 +1771,100 @@ static int zone_rule_hosts(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *forward
  * and a zone that silently compiled into nothing would be a guest network
  * that reaches everything.
  */
+static void zones_compile(ncfg_lower_ctx_t *ctx);
+
+/*
+ * A zone with `clients` (10.934) compiles as though its hosts also named its
+ * own slot, `@slot:ZONE` -- which the daemon fills from the leases those
+ * clients hold -- for the compile only: the zone keeps the hosts it was
+ * written with, so a render writes `clients` back and not the slot.
+ */
 void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
+{
+	ncfg_document_t *document = ctx ? ctx->document : NULL;
+	char          ***kept = NULL;
+	size_t          *kept_count = NULL;
+	size_t           z;
+
+	if (!document || !document->zone_count) {
+		zones_compile(ctx);
+		return;
+	}
+	/* In name order first, as the compile sorts them: what is kept here is
+	 * kept by position. Names are unique, so the compile's sort moves none. */
+	if (document->zone_count > 1u) {
+		qsort(document->zones, document->zone_count, sizeof(*document->zones), zone_order);
+	}
+	kept = calloc(document->zone_count, sizeof(*kept));
+	kept_count = calloc(document->zone_count, sizeof(*kept_count));
+	if (!kept || !kept_count) {
+		free(kept);
+		free(kept_count);
+		ncfg_lower_oom(ctx);
+		return;
+	}
+	for (z = 0; z < document->zone_count; z++) {
+		ncfg_zone_t *zone = &document->zones[z];
+		char       **compiled;
+		char         own[6u + NCFG_FIREWALL_SLOT_NAME_MAX + 1u];
+
+		kept[z] = zone->hosts;
+		kept_count[z] = zone->host_count;
+		if (!zone->client_count) {
+			continue;
+		}
+		if (zone->host_count > 1u) {
+			qsort(zone->hosts, zone->host_count, sizeof(*zone->hosts), text_order);
+		}
+		if (!ncfg_firewall_slot_name_valid(zone->name)) {
+			ncfg_diag(ctx, ctx->zones_span,
+			    "zone `%s` names clients, which it holds in a slot named after it, and "
+			    "`%s` cannot name a slot: a letter, then letters, digits, - and _, %u at most",
+			    zone->name, zone->name, (unsigned)NCFG_FIREWALL_SLOT_NAME_MAX);
+			continue;
+		}
+		compiled = calloc(zone->host_count + 1u, sizeof(*compiled));
+		if (!compiled) {
+			ncfg_lower_oom(ctx);
+			continue;
+		}
+		if (zone->host_count) {
+			memcpy(compiled, zone->hosts, zone->host_count * sizeof(*compiled));
+		}
+		(void)snprintf(own, sizeof(own), "@slot:%s", zone->name);
+		compiled[zone->host_count] = ncfg_dup(ctx, own);
+		zone->hosts = compiled;
+		zone->host_count++;
+	}
+	zones_compile(ctx);
+	for (z = 0; z < document->zone_count; z++) {
+		ncfg_zone_t *zone = &document->zones[z];
+		size_t       at;
+
+		if (zone->hosts == kept[z]) {
+			continue;
+		}
+		/* The one string the compile added; the rest are the zone's own. */
+		for (at = 0; at < zone->host_count; at++) {
+			size_t mine;
+			int    own = 1;
+
+			for (mine = 0; mine < kept_count[z]; mine++) {
+				own = own && zone->hosts[at] != kept[z][mine];
+			}
+			if (own) {
+				free(zone->hosts[at]);
+			}
+		}
+		free(zone->hosts);
+		zone->hosts = kept[z];
+		zone->host_count = kept_count[z];
+	}
+	free(kept);
+	free(kept_count);
+}
+
+static void zones_compile(ncfg_lower_ctx_t *ctx)
 {
 	ncfg_document_t *document = ctx ? ctx->document : NULL;
 	size_t           z, r, a, b;

@@ -4033,6 +4033,7 @@ void ncfg_zones_free(ncfg_zones_t *zones)
 		free(zones->items[i].reach);
 		free(zones->items[i].client_limit);
 		free(zones->items[i].hosts);
+		free(zones->items[i].clients);
 	}
 	free(zones->items);
 	zones->items = NULL;
@@ -4077,8 +4078,9 @@ int ncfg_client_zones(ncfg_client_t *client, ncfg_zones_t *out, char *err, size_
 		out->items[i].reach = join_strings(doc, ncfg_json_member(doc, entry, "reach"));
 		out->items[i].client_limit = member_text(doc, entry, "client_limit");
 		out->items[i].hosts = join_strings(doc, ncfg_json_member(doc, entry, "hosts"));
+		out->items[i].clients = join_strings(doc, ncfg_json_member(doc, entry, "clients"));
 		if (!out->items[i].name || !out->items[i].reach || !out->items[i].client_limit ||
-		    !out->items[i].hosts) {
+		    !out->items[i].hosts || !out->items[i].clients) {
 			ncfg_zones_free(out);
 			set_error(err, err_size, "out of memory");
 			ncfg_json_free(doc);

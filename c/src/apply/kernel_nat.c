@@ -41,16 +41,20 @@
 
 #include "ncfg/apply.h"
 #include "ncfg/base.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/log.h"
 #include "ncfg/state.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <linux/neighbour.h>
 #include <linux/netfilter.h>
+#include <linux/rtnetlink.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -746,5 +750,193 @@ int ncfg_firewall_slot_write(const ncfg_document_t *desired, const char *slot, i
 	}
 	ncfg_buf_free(&message);
 	ncfg_netlink_close(&socket);
+	return ok;
+}
+
+static void free_texts(char **list, size_t count)
+{
+	size_t at;
+
+	for (at = 0; list && at < count; at++) {
+		free(list[at]);
+	}
+	free(list);
+}
+
+/*
+ * The addresses the kernel's neighbour table holds for `clients` (10.934),
+ * both families, appended to `*out` where not there already: a client with
+ * a static address, or the IPv6 addresses no DHCPv4 lease names. A dump
+ * that cannot be had adds nothing, says so on the log and sets `*partial`:
+ * what was not read is not a client gone, so the caller takes nothing out
+ * on such a pass. 0 only for a failed allocation.
+ */
+static int neighbour_clients(char *const *clients, size_t client_count, char ***out,
+    size_t *count, int *partial)
+{
+	ncfg_netlink_t       socket;
+	ncfg_netlink_reply_t reply;
+	ncfg_buf_t           body;
+	struct ndmsg         head;
+	char                 detail[NCFG_ERROR_MAX];
+	size_t               at;
+	int                  ok = 1;
+
+	memset(&reply, 0, sizeof(reply));
+	memset(&head, 0, sizeof(head));
+	head.ndm_family = AF_UNSPEC;
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_add(&body, &head, sizeof(head));
+	ncfg_netlink_init(&socket);
+	if (!ncfg_netlink_open_protocol(&socket, NETLINK_ROUTE, 0, detail, sizeof(detail)) ||
+	    !ncfg_netlink_set_timeout(&socket, REQUEST_SECONDS, detail, sizeof(detail)) ||
+	    !ncfg_netlink_request(&socket, RTM_GETNEIGH, ncfg_dump_flags(), &body, NULL, &reply,
+	        detail, sizeof(detail))) {
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "the neighbour table could not be read for zones' clients: %s", detail);
+		*partial = 1;
+		ncfg_netlink_reply_free(&reply);
+		ncfg_netlink_close(&socket);
+		ncfg_buf_free(&body);
+		return 1;
+	}
+	ncfg_netlink_close(&socket);
+	ncfg_buf_free(&body);
+	for (at = 0; ok && at < reply.count; at++) {
+		char   address[64];
+		char   mac[18];
+		size_t one;
+		int    ours = 0;
+		int    again = 0;
+
+		if (!ncfg_dump_neighbour(reply.items[at].bytes, reply.items[at].length, address,
+		        sizeof(address), mac, sizeof(mac))) {
+			continue;
+		}
+		for (one = 0; one < client_count; one++) {
+			ours = ours || strcasecmp(mac, clients[one]) == 0;
+		}
+		for (one = 0; ours && one < *count; one++) {
+			again = again || strcmp((*out)[one], address) == 0;
+		}
+		if (ours && !again) {
+			char **grown = realloc(*out, (*count + 1u) * sizeof(**out));
+
+			if (!grown || !(grown[*count] = strdup(address))) {
+				if (grown) {
+					*out = grown;
+				}
+				ok = 0;
+				continue;
+			}
+			*out = grown;
+			(*count)++;
+		}
+	}
+	ncfg_netlink_reply_free(&reply);
+	return ok;
+}
+
+int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *run,
+    char *err, size_t err_size)
+{
+	size_t z;
+	int    ok = 1;
+
+	for (z = 0; desired && desired->firewall && z < desired->zone_count; z++) {
+		const ncfg_zone_t      *zone = &desired->zones[z];
+		ncfg_nft_slot_member_t *members = NULL;
+		size_t                  member_count = 0;
+		char                  **wanted = NULL;
+		size_t                  wanted_count = 0;
+		ncfg_netlink_t          socket;
+		size_t                  at;
+		size_t                  other;
+		int                     partial = 0;
+
+		if (!zone->client_count || !declared_slot(desired, zone->name)) {
+			continue;
+		}
+		if (!ncfg_dhcp_server_zone_clients(run, desired, zone->clients, zone->client_count,
+		        &wanted, &wanted_count, &partial) ||
+		    !neighbour_clients(zone->clients, zone->client_count, &wanted, &wanted_count,
+		        &partial)) {
+			free_texts(wanted, wanted_count);
+			ncfg_error_set(err, err_size, "out of memory reading zone `%s`'s leases",
+			    zone->name);
+			return 0;
+		}
+		ncfg_netlink_init(&socket);
+		if (!ncfg_netlink_open_protocol(&socket, NCFG_NFT_NETLINK_PROTOCOL, 0, err,
+		        err_size) ||
+		    !ncfg_netlink_set_timeout(&socket, REQUEST_SECONDS, err, err_size) ||
+		    !slot_dump_one(&socket, zone->name, &members, &member_count)) {
+			ncfg_netlink_close(&socket);
+			free(members);
+			free_texts(wanted, wanted_count);
+			ok = 0;
+			continue;
+		}
+		ncfg_netlink_close(&socket);
+		/* In: a client's address the slot does not hold yet. */
+		for (at = 0; at < wanted_count; at++) {
+			int held = 0;
+
+			for (other = 0; other < member_count; other++) {
+				char shown[64];
+
+				ncfg_nft_slot_member_text(&members[other], shown, sizeof(shown));
+				held = held || strcmp(shown, wanted[at]) == 0;
+			}
+			if (!held) {
+				char why[NCFG_ERROR_MAX];
+
+				if (ncfg_firewall_slot_write(desired, zone->name, 1, wanted[at], NULL, why,
+				        sizeof(why))) {
+					ncfg_log_emitf("apply", NCFG_LOG_INFO,
+					    "zone `%s`: %s, a client's lease, is in", zone->name, wanted[at]);
+				} else if (!strstr(why, "not in the kernel yet")) {
+					/* Before the first apply the slot is not there to fill;
+					 * the next pass after it does. */
+					ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+					    "zone `%s`: %s could not be put in: %s", zone->name, wanted[at], why);
+					ok = 0;
+				}
+			}
+		}
+		/* Out: anything else the slot holds -- a lease that ended, or an
+		 * address now leased to a device that is not a client. The zone's
+		 * slot is the zone's: a member written by hand goes too. **Never on
+		 * a pass that could not read where clients are**: a table that timed
+		 * out under load once emptied the slot and freed a capped client. */
+		for (other = 0; !partial && other < member_count; other++) {
+			char shown[64];
+			int  kept = 0;
+
+			ncfg_nft_slot_member_text(&members[other], shown, sizeof(shown));
+			for (at = 0; at < wanted_count; at++) {
+				kept = kept || strcmp(shown, wanted[at]) == 0;
+			}
+			if (!kept) {
+				char why[NCFG_ERROR_MAX];
+
+				if (ncfg_firewall_slot_write(desired, zone->name, 0, shown, NULL, why,
+				        sizeof(why))) {
+					ncfg_log_emitf("apply", NCFG_LOG_INFO,
+					    "zone `%s`: %s holds no client's lease, and is out", zone->name,
+					    shown);
+				} else {
+					ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+					    "zone `%s`: %s could not be taken out: %s", zone->name, shown, why);
+					ok = 0;
+				}
+			}
+		}
+		free(members);
+		free_texts(wanted, wanted_count);
+	}
+	if (!ok) {
+		ncfg_error_set(err, err_size, "a zone's clients were not all brought up to date");
+	}
 	return ok;
 }

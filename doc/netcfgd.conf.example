@@ -665,6 +665,16 @@
 # nothing else -- and a slot the host declares itself is used as written
 # (10.933).
 #
+# Devices are named by their hardware address with `clients =
+# ["02:aa:bb:cc:dd:01"]`: the zone holds them in a slot named after it,
+# and the daemon keeps that slot to exactly the addresses those devices
+# hold -- what they lease from this host's DHCP servers and what the
+# neighbour table answers for them, IPv6 and static addresses included --
+# a new one in within a tick, one that ends or moves to another device
+# out. A pass that cannot read either source takes nothing out. The zone's
+# slot is the zone's: a member written into it by hand is taken out again
+# (10.934).
+#
 # A zone may reach itself, which lets its own links forward between them --
 # two LAN ports, or a LAN and its radio, as one trusted network:
 

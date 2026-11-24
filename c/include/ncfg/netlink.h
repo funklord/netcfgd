@@ -908,6 +908,15 @@ int ncfg_dump_route(const void *payload, size_t length, ncfg_route_record_t *out
     char *err, size_t err_size);
 
 /*
+ * One neighbour from an `RTM_GETNEIGH` dump (10.934): its address and its
+ * hardware address, lowercase, where the kernel holds a usable entry with
+ * both -- not one failed or unresolved, nor an IPv6 link-local address. 0
+ * for anything else, which is an answer and not an error.
+ */
+int ncfg_dump_neighbour(const void *payload, size_t length, char *address, size_t address_size,
+    char *mac, size_t mac_size);
+
+/*
  * Decode the VLANs in one `AF_BRIDGE` link payload.
  *
  * Several records per message, sorted. The kernel compresses consecutive ids

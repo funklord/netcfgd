@@ -1905,6 +1905,11 @@ typedef struct {
 	 * the estate names by address rather than by the link they are on. */
 	char  **hosts;
 	size_t  host_count;
+	/* Devices in the zone by hardware address, lowercase (10.934): the
+	 * zone's own slot, named after it, holds what each one leases from
+	 * this host's DHCP servers, kept current by the daemon. */
+	char  **clients;
+	size_t  client_count;
 } ncfg_zone_t;
 
 /*

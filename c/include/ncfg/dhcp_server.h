@@ -170,6 +170,19 @@ int ncfg_dhcp_server_leases_in_text(const char *text, long long now,
     ncfg_observed_lease_t **out, size_t *count);
 void ncfg_dhcp_server_leases_free(ncfg_observed_lease_t *leases, size_t count);
 
+/*
+ * A zone's clients' addresses (10.934): the address each unexpired lease
+ * holds whose hardware address is one of `clients`, compared without case,
+ * each once -- from given leases, or from every lease file the document's
+ * DHCP servers write under `run`, setting `*partial` where a lease file
+ * that is there could not be read. The caller frees each string and the
+ * array. 0 only for a failed allocation.
+ */
+int ncfg_dhcp_server_clients_held(const ncfg_observed_lease_t *leases, size_t lease_count,
+    char *const *clients, size_t client_count, char ***out, size_t *count);
+int ncfg_dhcp_server_zone_clients(const char *run, const ncfg_document_t *document,
+    char *const *clients, size_t client_count, char ***out, size_t *count, int *partial);
+
 int ncfg_dhcp_server_lease_in_text(const char *text, const char *mac, long long now,
     char *hostname, size_t hostname_size, char *address, size_t address_size);
 

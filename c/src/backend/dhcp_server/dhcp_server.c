@@ -1069,3 +1069,88 @@ int ncfg_dhcp_server_lease_of(const char *run, const char *mac, long long now, c
 	(void)closedir(listing);
 	return found;
 }
+
+/*
+ * A zone's clients' addresses (10.934): what each lease whose hardware
+ * address is one of `clients` holds, compared without case, once each.
+ * Appended to `*out` (grown with realloc), `*count` advanced; 0 only for a
+ * failed allocation.
+ */
+int ncfg_dhcp_server_clients_held(const ncfg_observed_lease_t *leases, size_t lease_count,
+    char *const *clients, size_t client_count, char ***out, size_t *count)
+{
+	size_t at;
+	size_t client;
+	size_t seen;
+
+	for (at = 0; at < lease_count; at++) {
+		int ours = 0;
+		int again = 0;
+
+		for (client = 0; client < client_count; client++) {
+			ours = ours || (leases[at].mac && strcasecmp(leases[at].mac, clients[client]) == 0);
+		}
+		for (seen = 0; ours && seen < *count; seen++) {
+			again = again || strcmp((*out)[seen], leases[at].address) == 0;
+		}
+		if (ours && !again) {
+			char **grown = realloc(*out, (*count + 1u) * sizeof(**out));
+
+			if (!grown) {
+				return 0;
+			}
+			*out = grown;
+			(*out)[*count] = strdup(leases[at].address);
+			if (!(*out)[*count]) {
+				return 0;
+			}
+			(*count)++;
+		}
+	}
+	return 1;
+}
+
+/*
+ * The same, from every lease file this host's DHCP servers write under `run`
+ * -- one an interface serving -- read whole and bounded as observation reads
+ * them. A server that has leased nothing has no file, and adds nothing; a
+ * file that is there and cannot be read sets `*partial`.
+ */
+int ncfg_dhcp_server_zone_clients(const char *run, const ncfg_document_t *document,
+    char *const *clients, size_t client_count, char ***out, size_t *count, int *partial)
+{
+	size_t at;
+
+	*out = NULL;
+	*count = 0;
+	for (at = 0; document && at < document->interface_count; at++) {
+		char                   path[512];
+		char                  *text;
+		ncfg_observed_lease_t *leases = NULL;
+		size_t                 lease_count = 0;
+		int                    ok;
+
+		if (!document->interfaces[at].dhcp_server ||
+		    !ncfg_dhcp_server_leases_path(run, document->interfaces[at].name, path,
+		        sizeof(path), NULL, 0)) {
+			continue;
+		}
+		text = ncfg_backend_read_file(path, NULL, 1024u * 1024u);
+		if (!text) {
+			if (access(path, F_OK) == 0) {
+				*partial = 1;
+			}
+			continue;
+		}
+		ok = ncfg_dhcp_server_leases_in_text(text, (long long)time(NULL), &leases,
+		    &lease_count) &&
+		    ncfg_dhcp_server_clients_held(leases, lease_count, clients, client_count, out,
+		        count);
+		ncfg_dhcp_server_leases_free(leases, lease_count);
+		free(text);
+		if (!ok) {
+			return 0;
+		}
+	}
+	return 1;
+}
