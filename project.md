@@ -7050,6 +7050,25 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.936 The hull vm tiers boot hull's kernel, so they take its modules
+
+Every vm tier here mounted the host's `/lib/modules` at `/usr/lib/modules`.
+Since 2026-11-09 a hull vm boots hull's own kernel (6.12.118 when this was
+found) wherever hull's `make kernel` has built it, and hull shares that
+kernel's modules read-only for its agent; the volume laid the host's trees
+(6.1.x, 6.12.107, 6.12.111) over them, so modprobe found no veth and no
+mac80211_hwsim and every tier needing a module failed at its first step --
+`ip link add ... type veth` answering "Unknown device type", at 43d18968 as
+much as with any change. Measured by hull's session on netcfgd/hwsim and sent
+back to this inbox (20261124T1930Z): with the volume, no 6.12.118 modules;
+without it, `ip link add a type veth peer name b` works. hull will say so at
+plan in a later change.
+
+So the volume is gone from all 19 vm confs (22 machines). A test that wants
+the host's kernel asks for `(tuning (vm (profile full)))`, which boots it and
+shares its modules the same way. After the change `hull-dhcp-server` and
+`hull-hwsim` pass.
+
 ## 10.934 A zone's clients by MAC, found through leases and the neighbour table
 
 0284's yardstick names "policy whose subject is a client -- a device
