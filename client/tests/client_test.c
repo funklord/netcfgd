@@ -1370,7 +1370,8 @@ static const char status_response[] =
     "{\"response\":\"status\",\"links\":["
     "{\"name\":\"eth0\",\"kind\":\"\",\"up\":true,\"carrier\":false,\"mtu\":1500,"
     "\"mac\":\"02:00:00:00:00:01\"},"
-    "{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000},"
+    "{\"name\":\"br0\",\"kind\":\"bridge\",\"up\":true,\"carrier\":true,\"mtu\":9000,"
+    "\"speed\":1000,\"duplex\":\"full\"},"
     /* A radio on a configured network. netcfgd resolves the association to
      * the document's id before sending it, so what arrives is the network's
      * name and never an SSID a client would have to match itself. */
@@ -1574,6 +1575,12 @@ static void a_status_becomes_links(void)
 		equals("a link with no mac gets an empty string rather than a null",
 		       links.items[1].mac, "");
 		ok("the mtu comes through", links.items[1].mtu == 9000, NULL);
+		/* 10.922: what the driver negotiated, and nothing where it says
+		 * nothing. */
+		ok("the negotiated speed comes through", links.items[1].speed == 1000, NULL);
+		equals("  and the duplex", links.items[1].duplex, "full");
+		ok("a link whose driver says none has speed 0", links.items[0].speed == 0, NULL);
+		equals("  and an empty duplex rather than a null", links.items[0].duplex, "");
 		/* The association, which is what decides this link's route metric:
 		 * a network's `metric` replaces its interface's `preference` while
 		 * that network is the one in use (0153). */

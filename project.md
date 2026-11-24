@@ -7048,6 +7048,21 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.922 The window shows a link's negotiated speed
+
+A desktop network tool shows how fast the cable came up -- nm-applet's
+connection information does, and it is what a person checks first when a
+download is slow -- and this window showed nothing of it: the observation has
+carried `speed` and `duplex` since 10.877, and the client library read only
+the document's ethtool settings. The client's link gains `speed` (Mb/s, 0
+where unknown) and `duplex`, and the links tab's state cell reads `up, 1000
+Mb/s`, or `up, 100 Mb/s half`: full duplex unsaid, being what every link a
+person meets is, half said, being the mismatch worth seeing. In the state cell
+rather than a column, because a column is what once truncated the MAC; and
+only on an up link, a speed on one with no cable being the driver's last guess.
+`client_test` holds the reading, `link_filter` the cell. The TUI's devices
+pane says the same after the MTU, `100 Mb/s half`, held by `tui_test`.
+
 ## 10.921 `ncfg status` shows what the driver says
 
 The plan's warnings and the apply's refusals for the ethtool block send an

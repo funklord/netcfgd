@@ -171,7 +171,20 @@ struct ncfg_link_row {
 	 * named by BSSID has no SSID a screen could match on. It is also what
 	 * decides this link's route metric (0153). */
 	QString network;
+	/* What the driver negotiated: Mb/s, 0 where unknown, and "full", "half"
+	 * or "" (10.922). */
+	int     speed = 0;
+	QString duplex;
 };
+
+/*
+ * The state cell for a link: its word, and the speed the driver negotiated
+ * where it says one -- `up, 1000 Mb/s`, `up, 100 Mb/s half`. Full duplex is
+ * not said, being what every link a person meets is; half is, being the
+ * mismatch worth seeing. In the state cell rather than a column of its own,
+ * because a new column is what truncated the MAC once.
+ */
+QString ncfg_link_state_shown(const ncfg_link_row &link);
 
 /*
  * The addresses cell for a link: its addresses, and what an upstream

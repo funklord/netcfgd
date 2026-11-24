@@ -254,7 +254,7 @@ void ncfg_links_view::redraw()
 			if (known.subject == QLatin1String("linkset")) {
 				cells << ncfg_linkset_standing(sets, known.name);
 			} else {
-				cells << (seen ? seen->state : QString());
+				cells << (seen ? ncfg_link_state_shown(*seen) : QString());
 			}
 			/* Which hardware is carrying it, for a network. Blank for an
 			 * interface, which carries itself and would only repeat column
@@ -285,7 +285,7 @@ void ncfg_links_view::redraw()
 			/* And no inventory means no sets: an older daemon has none to
 			 * report, and this window does not work them out for itself. */
 			cells << QString();
-			cells << link.state;
+			cells << ncfg_link_state_shown(link);
 			/* No inventory, so no carrier is known. The kernel's own view has
 			 * the network on the radio's row, which is the shape this column
 			 * replaced -- leaving it blank says less than it could, and says

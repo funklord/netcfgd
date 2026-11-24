@@ -692,6 +692,18 @@ static void devices(const ncfg_tui_t *tui, size_t width, ncfg_tui_lines_t *out)
 		    bool_of(doc, link, "up", 0) ? "up" : "down",
 		    bool_of(doc, link, "carrier", 0) ? "carrier" : "no carrier",
 		    (long long)int_of(doc, link, "mtu", 0));
+		/* What the driver negotiated, as the window's state cell says it
+		 * (project.md 10.922): only with a carrier, half duplex said. */
+		if (bool_of(doc, link, "carrier", 0) && int_of(doc, link, "speed", 0) > 0) {
+			char   duplex[8];
+			size_t used = strlen(line);
+
+			duplex[0] = '\0';
+			(void)string_of(doc, link, "duplex", duplex, sizeof(duplex));
+			(void)snprintf(line + used, sizeof(line) - used, "  %lld Mb/s%s",
+			    (long long)int_of(doc, link, "speed", 0),
+			    strcmp(duplex, "half") == 0 ? " half" : "");
+		}
 		line_fit(out, line, width);
 
 		for (one = 0; one < many; one++) {

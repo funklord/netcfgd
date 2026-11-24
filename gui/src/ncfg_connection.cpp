@@ -78,6 +78,18 @@ void notes_into(const ncfg_note_t *items, size_t count, QList<ncfg_note_row> *ou
 
 } /* namespace */
 
+QString ncfg_link_state_shown(const ncfg_link_row &link)
+{
+	if (link.speed <= 0 || link.state != QLatin1String("up")) {
+		return link.state;
+	}
+	QString shown = QStringLiteral("%1, %2 Mb/s").arg(link.state).arg(link.speed);
+	if (link.duplex == QLatin1String("half")) {
+		shown += QStringLiteral(" half");
+	}
+	return shown;
+}
+
 QString ncfg_link_addresses_shown(const ncfg_link_row &link)
 {
 	if (link.delegated.isEmpty()) {
@@ -512,6 +524,8 @@ bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 			row.kind = QStringLiteral("device");
 		}
 		row.state = state_of(link);
+		row.speed = link.speed;
+		row.duplex = from_c(link.duplex);
 		row.mac = from_c(link.mac);
 		row.addresses = from_c(link.addresses);
 		row.delegated = from_c(link.delegated);

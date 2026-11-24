@@ -102,6 +102,31 @@ int main(int argc, char **argv)
 	check(ncfg_link_subject(rows, QStringLiteral("uplink")) == QStringLiteral("linkset"),
 	    "a group is not sent to either link editor");
 
+	/* 10.922: the state cell carries what the driver negotiated, where it
+	 * says -- and only on a link that is up, a speed on a link with no cable
+	 * being the driver's last guess rather than a fact. */
+	{
+		ncfg_link_row up;
+		up.state = QStringLiteral("up");
+		up.speed = 1000;
+		up.duplex = QStringLiteral("full");
+		check(ncfg_link_state_shown(up) == QStringLiteral("up, 1000 Mb/s"),
+		      "an up link shows its speed, full duplex unsaid");
+		up.speed = 100;
+		up.duplex = QStringLiteral("half");
+		check(ncfg_link_state_shown(up) == QStringLiteral("up, 100 Mb/s half"),
+		      "and half duplex said, being the mismatch");
+		ncfg_link_row cable;
+		cable.state = QStringLiteral("no cable");
+		cable.speed = 1000;
+		check(ncfg_link_state_shown(cable) == QStringLiteral("no cable"),
+		      "no speed on a link with no cable");
+		ncfg_link_row bare;
+		bare.state = QStringLiteral("up");
+		check(ncfg_link_state_shown(bare) == QStringLiteral("up"),
+		      "and none where the driver says none");
+	}
+
 	if (failures == 0) {
 		fprintf(stderr, "link_filter: all checks passed\n");
 	} else {

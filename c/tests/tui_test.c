@@ -817,6 +817,26 @@ static void a_stale_backend_says_it_will_be_restarted(void)
 	tui.status = held;
 }
 
+/* 10.922: the speed the driver negotiated, on a link with a carrier, half
+ * duplex said -- the window's state cell, in the pane. */
+static void a_link_shows_its_negotiated_speed(void)
+{
+	static const char status[] = "{\"response\":\"status\",\"links\":["
+	    "{\"name\":\"eth7\",\"index\":7,\"up\":true,\"carrier\":true,\"mtu\":1500,"
+	    "\"speed\":100,\"duplex\":\"half\"},"
+	    "{\"name\":\"eth8\",\"index\":8,\"up\":true,\"carrier\":false,\"mtu\":1500,"
+	    "\"speed\":1000,\"duplex\":\"full\"}],\"addresses\":[]}";
+	ncfg_tui_answer_t held = tui.status;
+
+	memset(&tui.status, 0, sizeof(tui.status));
+	give(&tui.status, status, "an observation with negotiated speeds parses");
+	draw(NCFG_TUI_PANE_DEVICES, 132);
+	check(any_line_has("mtu 1500  100 Mb/s half"), "a link shows its speed, half duplex said");
+	check(!any_line_has("1000 Mb/s"), "  and a link with no cable shows none");
+	ncfg_tui_answer_free(&tui.status);
+	tui.status = held;
+}
+
 /*
  * The plan pane shows the reason, not just the op.
  *
@@ -1666,6 +1686,7 @@ int main(void)
 
 	the_device_pane_draws_what_the_kernel_has();
 	a_stale_backend_says_it_will_be_restarted();
+	a_link_shows_its_negotiated_speed();
 	the_plan_pane_shows_why();
 	an_empty_plan_says_so();
 

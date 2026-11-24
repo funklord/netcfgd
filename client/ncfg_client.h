@@ -184,6 +184,11 @@ typedef struct {
 	int   up;
 	int   carrier;   /* up and carrier are separate answers: no cable is not
 	          * the same state as not configured */
+	/* What the driver negotiated, where it says (project.md 10.922): Mb/s,
+	 * 0 where unknown -- no carrier, or a virtual link -- and "full",
+	 * "half" or "". */
+	int   speed;
+	char *duplex;
 	/*
 	 * Whether a default route leaves through this link, in the main table.
 	 *

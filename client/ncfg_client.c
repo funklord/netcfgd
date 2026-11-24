@@ -698,6 +698,7 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].name);
 		free(links->items[i].kind);
 		free(links->items[i].mac);
+		free(links->items[i].duplex);
 		free(links->items[i].addresses);
 		free(links->items[i].default_via);
 		free(links->items[i].network);
@@ -1071,6 +1072,8 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->mtu = (int)ncfg_json_int(doc, ncfg_json_member(doc, link, "mtu"), 0);
 		item->up = ncfg_json_bool(doc, ncfg_json_member(doc, link, "up"), 0);
 		item->carrier = ncfg_json_bool(doc, ncfg_json_member(doc, link, "carrier"), 0);
+		item->speed = (int)ncfg_json_int(doc, ncfg_json_member(doc, link, "speed"), 0);
+		item->duplex = member_text(doc, link, "duplex");
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
 		item->delegated = item->name ? join_delegated(doc, delegations, item->name) : NULL;
 		item->default_route =
@@ -1114,7 +1117,7 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		/* "" from a daemon that does not report one, which a caller renders as
 		 * an unfiltered row rather than as a fault. */
 		item->category = member_text(doc, link, "category");
-		if (!item->name || !item->kind || !item->mac || !item->addresses ||
+		if (!item->name || !item->kind || !item->mac || !item->duplex || !item->addresses ||
 		    !item->network || !item->category || !item->master || !item->parent ||
 		    !item->public_key || !item->delegated) {
 			set_error(err, err_size, "out of memory");
