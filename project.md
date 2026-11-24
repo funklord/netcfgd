@@ -7132,6 +7132,14 @@ RADIUS first -- `auth_server_addr` and a shared secret through the store,
 the user's identity then reported per station as `keyid` is -- since it
 needs no PKI decision and every enterprise network already runs one.
 
+**And M9, RESTCONF, has no code at all**, the one roadmap milestone with
+nothing built (walked 2026-11-24). Since 0311 it is "a northbound interface
+for sites that want one", last, and no site has asked; as an adapter it may
+carry its own dependencies (constraint 3), but HTTPS means choosing a TLS
+library and an HTTP server for it. **Whether to start it now, or wait for a
+site to want it, is the holder's**; the best guess is wait, because the aims
+are served without it and the first two user groups come first (section 0).
+
 ## 10.936 The hull vm tiers boot hull's kernel, so they take its modules
 
 Every vm tier here mounted the host's `/lib/modules` at `/usr/lib/modules`.
