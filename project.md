@@ -7050,6 +7050,33 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.939 Microcontroller nodes reading a subset of the document -- open, the holder's
+
+hal9001, the MCU hardware abstraction layer, plans a network stack configured
+by netcfgd's desired-state document restricted to what a microcontroller can
+serve: devices (name, mac, mtu, match by mac; physical and VLAN), interface
+addressing (static, DHCPv4, DHCPv6 other-config, SLAAC, link-local), default
+and static routes, DNS servers and search, later wifi networks (ssid, hidden,
+open, PSK) -- no bridges, bonds, hooks, drift policy or router side
+(hal9001's project.md, "A network stack, toward netcfgd's model", its
+e13fd1b; inbox 20261124T2217Z, information and not a request).
+
+**What it touches here, measured:** readers of the document refuse a member
+they do not know, by name (`c/src/model/field.c`), so a node could not take
+a whole document; one would have to be produced for its subset -- the
+compiler with a target profile that refuses what the node cannot serve, or
+another way. **And this C implementation has no CBOR encoding**: the document
+is JSON (the CBOR the message names belonged to the retired Rust), which
+hal9001 is told.
+
+**Whose it is.** No concept arrives from outside -- the subset is netcfgd's
+own model -- so constraint 6 and 0271 do not forbid it; but whether netcfgd
+counts microcontroller nodes among its consumers is a new user group beside
+the three section 0 names, so **the holder's**. Best guess: yes, as a compile
+target (`ncfg show --target mcu`, refusing what is out of the subset, so the
+node never sees a field it cannot serve), with JSON as the encoding until a
+node's size says otherwise.
+
 ## 10.938 On the desktop's menu as se.vibes.netcfgd
 
 Three messages from the claude-guidelines session (inbox 20261124T2059Z,
