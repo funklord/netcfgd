@@ -112,7 +112,7 @@ int ncfg_host_user_main(int argc, char **argv, int skip)
 		args[count++] = service;
 	}
 	if (!given(argc, argv, "--fuzznet-product")) {
-		(void)snprintf(product, sizeof(product), "--fuzznet-product=%u", FZN_PRODUCT_NETCFGD);
+		(void)snprintf(product, sizeof(product), "--fuzznet-product=%u", FZN_PRODUCT_HOST);
 		args[count++] = product;
 	}
 	if (!given(argc, argv, "--udp-port")) {

@@ -58,7 +58,7 @@ s.sendall((sys.argv[2] + \"\n\").encode()); print(s.recv(4096).decode(errors=\"r
 		mkdir -m 700 "$2/device" "$2/xdg"
 		XDG_RUNTIME_DIR=$2/xdg timeout -k 2 40 "${1%netcfgd}fuzznet-build/fuzznetd" \
 			--fuzznet-dir="$2/device" --no-log-file --udp-port=48123 \
-			--fuzznet-service=1 --fuzznet-product=3 > "$2/device.log" 2>&1 &
+			--fuzznet-service=1 --fuzznet-product=6 > "$2/device.log" 2>&1 &
 		device=$!
 		timeout 12 "${1%netcfgd}ncfg" pair --run-dir "$2/run" > "$2/pair" 2>&1 &
 		pair=$!

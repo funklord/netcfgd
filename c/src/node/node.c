@@ -44,7 +44,7 @@
 #include <time.h>
 
 _Static_assert(NCFG_FUZZNET_SERVICE == FZN_SERVICE_NODE, "netcfgd's service is fuzznet's number");
-_Static_assert(NCFG_FUZZNET_PRODUCT == FZN_PRODUCT_NETCFGD, "netcfgd's product is fuzznet's number");
+_Static_assert(NCFG_FUZZNET_PRODUCT == FZN_PRODUCT_HOST, "netcfgd's product is the host's, fuzznet's number");
 #include <unistd.h>
 
 /*

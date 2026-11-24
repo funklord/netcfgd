@@ -44,9 +44,16 @@
  * The pair netcfgd's nodes run under (fuzznet's `chain/service.h`): a host's
  * netcfgd and a phone's fuzznetd must agree on it to be one estate. Restated
  * here because this file is libc only; `src/node/node.c` holds it to theirs.
+ *
+ * **The product is the host's, not netcfgd's own** (project.md 10.926, the
+ * holder's word 2026-11-24): `FZN_PRODUCT_HOST`, 6, the one every daemon a
+ * unix user runs passes -- raidcfgd too -- so they share one estate and one
+ * pairing, and what netcfgd shows of a device is chosen by the services it
+ * carries. It was `FZN_PRODUCT_NETCFGD`, 3; a device paired under 3 pairs
+ * again.
  */
 #define NCFG_FUZZNET_SERVICE 1u
-#define NCFG_FUZZNET_PRODUCT 3u
+#define NCFG_FUZZNET_PRODUCT 6u
 
 /* The port a node serves its remote hop on, where one is served at all. */
 #define NCFG_FUZZNET_PORT 48090u

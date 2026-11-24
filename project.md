@@ -1151,47 +1151,38 @@ APIs, and the event names as two client libraries use them.
 *"If we do this at all, we delay it until later. As it is an endless churn
 against a moving target."* Not built; a later decision starts from this reading.
 
-**Waiting on the holder's word here, and on fuzznet: one fuzznet product
-for the machine's node** (relayed by raidcfgd 2026-11-24, not authority).
-netcfgd and raidcfgd share root's fuzznet store, and fuzznet measured (its sec
-1419) that the node's remote hop checks one capability, from the serving
-daemon's `--fuzznet-service` and `--fuzznet-product` -- so whichever daemon
-starts first decides whose paired devices are accepted: netcfgd's
-`FZN_PRODUCT_NETCFGD` (3, passed in `daemon_main.c` and `node/user_host.c`,
-held equal by `node.c`'s static assert) or raidcfgd's 5. The holder chose, in
-raidcfgd's session, fuzznet's option (b): *"go with fuzznet's recommendation,
-one product for the machine"* -- a product number meaning "this machine's
-node", passed by both daemons, with devices re-paired to it. fuzznet has been
-asked for the constant. **What it changes here, once confirmed:** the two
-`--fuzznet-product` defaults and the assert move to that constant, and
-devices paired with product 3 are paired again. Not done until the holder
-says so in this tree. **The constant exists** (fuzznet `aac57be5`, its sec
-1429; inbox 20261124T0347Z): `FZN_PRODUCT_HOST` (6) in `chain/service.h`,
-named `--fuzznet-product=host`, settled by the holder in fuzznet's session as
-"the daemons one unix user runs share that user's estate and one pairing" --
-a product composing only capabilities, never a record stream. It is past the
-vendored pin (`1640ff38`), so taking it also moves the pin. What is left is
-the holder's word here. **And raidcfgd has taken it** (its `7468b40`, inbox
-20261124T0420Z): its daemon passes product 6 unless told otherwise. So on a
-machine running both, the two now disagree outright -- where raidcfgd's daemon
-is the face, a device paired under netcfgd's 3 is refused, and the reverse --
-which makes the holder's word here the thing a mixed machine waits on.
+**Settled by the holder here, 2026-11-24: one product for the host, and no
+device refused for another's.** In their words: *"no we do not refuse devices
+paired with other products, we write to the same fuzznet data stores and check
+what services/subsystems they have if they also have netcfgd we definitely
+need to show them. But if they don't they can still act as relay/retention or
+other services for netcfgd."* So netcfgd passes `FZN_PRODUCT_HOST` (6, fuzznet
+`aac57be5`, its sec 1429), as raidcfgd does (its `7468b40`), and devices paired
+under 3 pair again; what netcfgd shows is chosen by the services a device
+carries, and a device without netcfgd still serves as relay and retention. The
+refusal fuzznet's sec 1419 measured at the remote hop is not the design. **How
+the library is meant to be used is fuzznet's to state** -- the holder: *"inform
+fuzznet to disseminate how the library is meant to be used and my corrections
+as it holds authority"* -- told in its inbox, 20261124T1233Z, and its session.
 
-**A question for the holder: what a zone is** (0284's layer three; 0339
-left "the zone grammar and how a zone names a host" open, and slots (0340)
-and presets (0341) are built on either side of it). It decides what gets
-built, and the aims do not choose between the readings. **Best guess, not
-built:** a zone is an estate-scoped block naming a purpose and what it may
-reach -- `zone "guest" { reach = ["internet"] }` -- a host puts one of its own
-interfaces in a zone (`interface lan1 { zone = "guest" }`), and each host
-compiles the zones its interfaces are in into forward rules between them,
-after its written rules and before its presets. The other reading is a zone
-as a set of *hosts* (by estate name or address) with rules about traffic to
-and from them, compiled on every host into rules matching those hosts'
-addresses -- membership kept current through slots. Which one, or both, is
-the holder's call. **It also decides the per-client cap** (10.911): 0284 has a
-client's rate limit and its filter name one subject, so the cap's "who" is the
-zone's, and only its mechanism is settled without it.
+**Zones are ours to build** (2026-11-24). This stood as a question for the
+holder -- 0284's layer three, which 0339 left as "the zone grammar and how a
+zone names a host" -- and, asked why it was not being built, the holder
+answered with the question itself: it should not have waited. **What a zone
+is was settled by 0284 already**: the distributed, purpose-driven layer --
+"guest", "iot", "trusted", with reachability stated between them -- and
+explicitly *not* a firewalld or `fw4` per-interface zone; 0339 adds that no
+controller writes it, the nodes do. So: a zone is declared once for the
+estate -- `zone "guest" { reach = ["internet"] }` -- and travels to every host
+as configuration does; each host puts its own interfaces in zones
+(`interface lan1 { zone = "guest" }`) and compiles the zones they are in into
+forward rules, after its written rules and before its presets (0339's order),
+and a host that cannot reach the estate keeps enforcing the last zones it had
+(0284: never fail open). The per-host result resembles `fw4`'s zone
+forwarding; the zone itself is the estate's. A zone naming hosts by address
+can follow on slots. **It also decides the per-client cap** (10.911): 0284
+has a client's limit and its filter name one subject, so the cap's "who" is
+the zone's.
 
 **Two things that were open, and are settled.**
 
@@ -7047,6 +7038,26 @@ already records.
 **None of the four fixes touched the daemon.** Every one was a test holding a
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
+
+## 10.926 netcfgd passes the host's fuzznet product
+
+The holder settled it here (the register, 2026-11-24): consumers on one host
+share fuzznet's stores, one estate and one pairing, and no device is refused
+for having been paired under another consumer's product. netcfgd's daemon and
+its user host now pass `FZN_PRODUCT_HOST` (6) where they passed
+`FZN_PRODUCT_NETCFGD` (3): `NCFG_FUZZNET_PRODUCT` in `client/ncfg_fuzznet.h`,
+which the phone app and its pairing test take too, and the static assert in
+`node.c` holds it to fuzznet's number. raidcfgd passes 6 already, so a machine
+running both is one pairing again. **A device paired under 3 pairs again**:
+the capability a device is paired with is the serving daemon's.
+
+**Not built yet, and why: showing devices by the services they carry.** The
+fleet view lists every member of the estate and asks each for netcfgd's
+status, so a member without netcfgd -- a raidcfgd-only host, a relay -- reads
+as `no answer`, where the holder wants it understood as a relay and retention.
+`list peer` carries no services, and how a consumer learns a peer's services
+is part of what fuzznet was asked to state (inbox 20261124T1233Z); netcfgd
+builds on that statement rather than on the wording of an error.
 
 ## 10.925 `ncfg status` shows the DNS delivered and the routing rules
 
