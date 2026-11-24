@@ -307,8 +307,12 @@ rc=0
 i=1
 while [ "$i" -le "$count" ]; do
 	# The wire is shared by both guests; everything else differs.
+	#
+	# `VM_WIRE_NIC` names qemu's model for the wire's card, virtio by default.
+	# `e1000` is the one a wake-on-LAN test wants: a virtio card answers every
+	# WoL request `EOPNOTSUPP`, and Intel's driver keeps what it is told.
 	wire="-netdev socket,id=lan,mcast=230.0.0.42:$mcast_port,localaddr=127.0.0.1
-	      -device virtio-net-pci,netdev=lan,mac=52:54:00:12:34:0$i"
+	      -device ${VM_WIRE_NIC:-virtio-net-pci},netdev=lan,mac=52:54:00:12:34:0$i"
 
 	if [ "$guest" = alpine ]; then
 		# shellcheck disable=SC2086

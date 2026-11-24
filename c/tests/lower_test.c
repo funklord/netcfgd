@@ -2112,6 +2112,20 @@ static void isolated_port_cases(void)
 	    "is a bridge port's setting", "  and so is a bond's");
 }
 
+/* Wake-on-LAN (10.917): ethtool's letters, or `off`; `s` and the rest are
+ * refused at compile time, not by a driver at apply. */
+static void wol_cases(void)
+{
+	ncfg_document_free(compiles("device eth0 { ethtool { wol = \"pg\" } }\n",
+	    "`wol = \"pg\"` compiles"));
+	ncfg_document_free(compiles("device eth0 { ethtool { wol = \"off\" } }\n",
+	    "`wol = \"off\"` compiles"));
+	refuses("device eth0 { ethtool { wol = \"s\" } }\n", "is not a wake-on-LAN setting",
+	    "`s`, which needs a password the language cannot hold, is refused");
+	refuses("device eth0 { ethtool { wol = \"on\" } }\n", "is not a wake-on-LAN setting",
+	    "  and so is `on`, which names no mode");
+}
+
 /* Presets (0341): a used one's rules after the written ones, named
  * `PRESET/RULE`, in the order `presets` names them; the refusals by name. */
 static void firewall_preset_cases(void)
@@ -4575,6 +4589,7 @@ int main(void)
 	firewall_slot_cases();
 	firewall_preset_cases();
 	isolated_port_cases();
+	wol_cases();
 	firewall_schedule_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();

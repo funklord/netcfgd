@@ -355,6 +355,8 @@ void ncfg_plan_offloads(ncfg_builder_t *builder);
 void ncfg_plan_link_modes(ncfg_builder_t *builder);
 /* The ring sizes, in `offload.c` as well (10.881). */
 void ncfg_plan_rings(ncfg_builder_t *builder);
+/* Wake-on-LAN, there too (10.917). */
+void ncfg_plan_wol(ncfg_builder_t *builder);
 /*
  * The IPv6 interface identifier, and netcfgd's one nftables table.
  *

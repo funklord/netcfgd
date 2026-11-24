@@ -918,6 +918,8 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		return ncfg_kernel_link_modes_op(&world, op, err, err_size);
 	case NCFG_OP_LINK_SET_RINGS:
 		return ncfg_kernel_rings_op(&world, op, err, err_size);
+	case NCFG_OP_LINK_SET_WOL:
+		return ncfg_kernel_wol_op(&world, op, err, err_size);
 	case NCFG_OP_LINK_SET_WDS:
 		return ncfg_kernel_wds_op(&world, op, err, err_size);
 

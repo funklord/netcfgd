@@ -115,69 +115,6 @@ static const char *describe(ncfg_plan_t *plan, const ncfg_offload_t *features, s
 }
 
 /*
- * Say which half of an `ethtool` block is applied by nothing, and whose gap it
- * is.
- *
- * Field by field rather than as one sentence, and only where the document
- * states the field: the offloads beside them *are* applied, and telling an
- * operator who wrote `gro = true` that their block is ignored would be false.
- *
- * **It used to end "not applied by this build", which is a promise nobody
- * checked.** Settled against `crates/` the way 10.211 settled the last three:
- * `crates/netcfgd-plan/src/lib.rs:714` is this same warning, field for field
- * and almost word for word, and the encoder it is waiting on does not exist on
- * either side -- `crates/netcfgd-sys/src/ethtool.rs` defines
- * `ETHTOOL_MSG_FEATURES_GET` and `..._SET` and no other message at all, which
- * is exactly what `ethtool.h` here carries. So an operator was being told to
- * wait for a release, and the reason in the same sentence says why there will
- * not be one until somebody can write to a real NIC. `warn_unbuilt` is what
- * says that difference, and having it in one place is what stops this sentence
- * going stale again.
- */
-static void warn_unapplied(ncfg_builder_t *builder, const ncfg_device_t *device)
-{
-	const ncfg_link_settings_t *settings = device->link_settings;
-	const char                 *stated[6];
-	size_t                      count = 0;
-	ncfg_buf_t                  buf;
-	ncfg_buf_t                  block;
-	size_t                      i;
-
-	/* `autoneg`, `speed` and `duplex` are applied now (10.877), by
-	 * `ncfg_plan_link_modes` below. */
-	if (settings->wol) {
-		stated[count++] = "wol";
-	}
-	/* The ring sizes are applied too since 10.881, by `ncfg_plan_rings`. */
-	if (count == 0u) {
-		return;
-	}
-	ncfg_buf_init(&buf, 0);
-	for (i = 0; i < count; i++) {
-		ncfg_buf_addf(&buf, "%s%s", i ? "`, `" : "", stated[i]);
-	}
-	/*
-	 * **The whole of it has to arrive**, and this one has no room to spare:
-	 * `ncfg_plan_warnf` formats into `NCFG_ERROR_MAX` and marks what it had to
-	 * cut, and all six fields plus `warn_unbuilt`'s tail is 481 of 512
-	 * characters. Nothing here varies -- the six names are literals and the
-	 * device is the warning's interface rather than part of the sentence -- so
-	 * that number is the worst case rather than a sample, and
-	 * `plan_gaps_test.c` asserts the last words of it.
-	 */
-	ncfg_buf_init(&block, 0);
-	ncfg_buf_addf(&block,
-	    "`%s` in the `ethtool` block %s recognised and applied by nothing: %s can "
-	    "only be exercised against a physical NIC, and an encoder nobody has run "
-	    "against one is how the last three netlink bugs here got in. The offloads are "
-	    "applied",
-	    ncfg_buf_text(&buf), count == 1u ? "is" : "are", count == 1u ? "it" : "they");
-	ncfg_plan_warn_unbuilt(builder, device->name, ncfg_buf_text(&block));
-	ncfg_buf_free(&block);
-	ncfg_buf_free(&buf);
-}
-
-/*
  * The offloads on every device whose `ethtool` block names one.
  *
  * **Devices, not interfaces**: an offload belongs to the adapter, so a device
@@ -205,7 +142,6 @@ void ncfg_plan_offloads(ncfg_builder_t *builder)
 		if (!settings) {
 			continue;
 		}
-		warn_unapplied(builder, device);
 		link = ncfg_observed_link(builder->observed, device->name);
 
 		for (i = 0; i < NCFG_OFFLOAD_FIELD_COUNT; i++) {
@@ -503,6 +439,82 @@ void ncfg_plan_rings(ncfg_builder_t *builder)
 		    (long long)link->tx_ring.value);
 		reason = ncfg_plan_reason_differs(device->name, "ethtool",
 		    ncfg_plan_intern(builder->plan, wanted), ncfg_plan_intern(builder->plan, had));
+		ncfg_builder_gate(builder, device->name, &gate);
+		(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
+		ncfg_plan_ids_free(&gate);
+	}
+}
+
+/* ------------------------------------------------------------------------ *
+ * Wake-on-LAN
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `link.set_wol` for every device whose `ethtool` block states `wol` and
+ * whose link has other modes on (10.917). Only the managed six are compared,
+ * so a `magicsecure` somebody else set is neither undone nor a difference on
+ * every pass. A mode the device does not support is warned about and the
+ * set not asked for, since the driver would refuse it every time; a device
+ * that reports no modes is warned about too, unless the document asks for
+ * none -- `off` on a device that cannot wake is already true.
+ */
+void ncfg_plan_wol(ncfg_builder_t *builder)
+{
+	size_t at;
+
+	for (at = 0; at < builder->desired->device_count; at++) {
+		const ncfg_device_t        *device = &builder->desired->devices[at];
+		const ncfg_link_settings_t *settings = device->link_settings;
+		const ncfg_observed_link_t *link;
+		ncfg_plan_ids_t             gate = { NULL, 0, 0 };
+		ncfg_op_t                   op;
+		ncfg_op_t                   inverse;
+		ncfg_reason_t               reason;
+		uint32_t                    wanted;
+		uint32_t                    had;
+		char                        wanted_text[16];
+		char                        had_text[16];
+
+		if (!settings || !settings->wol || !ncfg_wol_modes(settings->wol, &wanted)) {
+			continue;
+		}
+		link = ncfg_observed_link(builder->observed, device->name);
+		if (!link) {
+			continue;
+		}
+		if (!link->wol.has || !link->wol_supported.has) {
+			if (wanted != 0u) {
+				ncfg_plan_warnf(builder->plan, device->name,
+				    "%s reports no wake-on-LAN modes, so `wol = \"%s\"` is not asked for: "
+				    "no virtual device can wake a machine", device->name, settings->wol);
+			}
+			continue;
+		}
+		if (wanted & ~(uint32_t)link->wol_supported.value) {
+			ncfg_wol_text((uint32_t)link->wol_supported.value & NCFG_WOL_MANAGED, had_text,
+			    sizeof(had_text));
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "%s can wake on `%s` only, so `wol = \"%s\"` is not asked for",
+			    device->name, had_text, settings->wol);
+			continue;
+		}
+		had = (uint32_t)link->wol.value & NCFG_WOL_MANAGED;
+		if (had == wanted) {
+			continue;
+		}
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_LINK_SET_WOL;
+		op.u.set_wol.name = device->name;
+		op.u.set_wol.modes = wanted;
+		memset(&inverse, 0, sizeof(inverse));
+		inverse.kind = NCFG_OP_LINK_SET_WOL;
+		inverse.u.set_wol.name = device->name;
+		inverse.u.set_wol.modes = had;
+		ncfg_wol_text(wanted, wanted_text, sizeof(wanted_text));
+		ncfg_wol_text(had, had_text, sizeof(had_text));
+		reason = ncfg_plan_reason_differs(device->name, "wol",
+		    ncfg_plan_intern(builder->plan, wanted_text),
+		    ncfg_plan_intern(builder->plan, had_text));
 		ncfg_builder_gate(builder, device->name, &gate);
 		(void)ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
 		ncfg_plan_ids_free(&gate);

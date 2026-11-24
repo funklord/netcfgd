@@ -476,8 +476,15 @@ static void lower_ethtool(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				free(name);
 			}
 		} else if (strcmp(key, "wol") == 0) {
+			uint32_t modes;
+
 			free(settings->wol);
 			settings->wol = ncfg_as_string(ctx, assignment->value);
+			if (settings->wol && !ncfg_wol_modes(settings->wol, &modes)) {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a wake-on-LAN setting: ethtool's letters, any of "
+				    "`pumbag`, or `off`", settings->wol);
+			}
 		} else {
 			ncfg_diag(ctx, assignment->span, "unknown ethtool key `%s`", key);
 		}

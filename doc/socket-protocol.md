@@ -570,6 +570,7 @@ are using and one that will cut them off.
 | `link.set_tunnel` | yes |  |
 | `link.set_vxlan` | yes |  |
 | `link.set_wds` |  |  |
+| `link.set_wol` |  |  |
 | `link.unset_master` | yes |  |
 | `link.up` |  |  |
 | `neighbour.add` |  |  |
@@ -613,7 +614,8 @@ block the change most often made to fix a NIC that is already corrupting
 traffic. `link.set_link_modes` and `link.set_rings` (10.877) cut traffic for
 a physical reason rather than a cautious one: a new speed, duplex or
 autonegotiation retrains the PHY, and resizing a ring resets the NIC on most
-drivers, so the carrier drops either way.
+drivers, so the carrier drops either way. `link.set_wol` (10.917) does not:
+it says what wakes the machine from sleep, and the awake link is untouched.
 
 **Three answer for their first case, and the other case is the opposite.**
 A row is the op with nothing filled in. `access_control.add` is a station

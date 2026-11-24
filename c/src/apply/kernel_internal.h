@@ -582,6 +582,8 @@ int ncfg_kernel_wds_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, ch
     size_t err_size);
 int ncfg_kernel_rings_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
+int ncfg_kernel_wol_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
+    size_t err_size);
 int ncfg_kernel_link_modes_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
 int ncfg_kernel_offloads_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,

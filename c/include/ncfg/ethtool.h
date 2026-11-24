@@ -9,23 +9,24 @@
  *   does. In this port that means genl.h resolves the family and this module
  *   only builds messages -- there is no descriptor in this file at all.
  *
- * THE OFFLOADS, THE LINK MODES AND THE RINGS, AND NOT WAKE-ON-LAN
- *   The model also carries wake-on-LAN, and that is not here. The reason is
- *   verification, not effort: a wake-on-LAN message is `EOPNOTSUPP` on
- *   anything that is not a physical NIC. Every
- *   netlink defect this project has shipped -- the WireGuard flags attribute,
- *   the nftables meta key, the qdisc rate unit -- was found by writing to a
- *   real kernel and reading it back, and none of them would have been found
- *   by writing an encoder carefully. So the settings that can only be
- *   exercised against hardware this build cannot safely write to stay
- *   unimplemented and stay warned about.
+ * THE WHOLE ETHTOOL BLOCK, EACH PART ONLY ONCE A REAL DRIVER TOOK IT
+ *   Each part of the `ethtool` block came here only once a real driver had
+ *   been written to and read back. The reason is verification, not effort:
+ *   every netlink defect this project has shipped -- the WireGuard flags
+ *   attribute, the nftables meta key, the qdisc rate unit -- was found by
+ *   writing to a real kernel and reading it back, and none of them would have
+ *   been found by writing an encoder carefully.
  *
- *   **The link modes left that list on 2026-11-20** (project.md 10.877): a
- *   veth refuses every link-modes set, but virtio-net takes speed and duplex
- *   with autonegotiation off, and a hull vm has one -- a real driver, read
- *   back through sysfs in `tests/hull/link-modes`. **The ring sizes followed
- *   the same day** (10.881): virtio-net resizes a ring where it has queue
- *   reset, which it has on PCI and not on a microvm's MMIO.
+ *   **The link modes on 2026-11-20** (project.md 10.877): a veth refuses
+ *   every link-modes set, but virtio-net takes speed and duplex with
+ *   autonegotiation off, and a hull vm has one -- a real driver, read back
+ *   through sysfs in `tests/hull/link-modes`. **The ring sizes the same day**
+ *   (10.881): virtio-net resizes a ring where it has queue reset, which it has
+ *   on PCI and not on a microvm's MMIO. **Wake-on-LAN on 2026-11-24** (10.917):
+ *   virtio answers it `EOPNOTSUPP`, qemu's e1000 has no power management for
+ *   its driver to wake through, and e1000e and igb say no modes at all; qemu's
+ *   RTL8139C+ under `8139cp` keeps what it is told, read back by the old
+ *   ioctl in `tool/vm/payload/wol.sh`.
  *
  * FEATURES ARE NAMED, NOT NUMBERED
  *   The kernel's bit indices are not stable across versions and are not a wire
@@ -253,6 +254,29 @@ int ncfg_ethtool_rings_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *fa
     const char *device, uint32_t rx, uint32_t tx, uint32_t seq, char *err, size_t err_size);
 
 int ncfg_ethtool_rings_merge(ncfg_ethtool_rings_t *out, const void *payload, size_t length,
+    char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Wake-on-LAN
+ * ------------------------------------------------------------------------ */
+
+/* What a `WOL_GET` reply says: the modes the device supports and the ones on,
+ * as `WAKE_*` bits. `known` 0 until a reply carrying the modes was read. */
+typedef struct {
+	int      known;
+	uint32_t supported;
+	uint32_t active;
+} ncfg_ethtool_wol_t;
+
+int ncfg_ethtool_wol_get_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t seq, char *err, size_t err_size);
+
+/* Sets each mode of `NCFG_WOL_MANAGED` (document.h) on or off as `modes`
+ * says; one outside that set is refused. */
+int ncfg_ethtool_wol_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t modes, uint32_t seq, char *err, size_t err_size);
+
+int ncfg_ethtool_wol_merge(ncfg_ethtool_wol_t *out, const void *payload, size_t length,
     char *err, size_t err_size);
 
 #endif /* NCFG_ETHTOOL_H */

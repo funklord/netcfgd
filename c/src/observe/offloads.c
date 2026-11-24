@@ -241,6 +241,48 @@ static void link_modes_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_fam
 	}
 }
 
+/* One device's wake-on-LAN modes and the ones it supports, where it says them;
+ * the same bargain as `rings_of`. A device that supports none -- every virtual
+ * one, and e1000e under qemu -- is left absent rather than recorded as `off`,
+ * so the plan can tell "cannot" from "is not". */
+static void wol_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *family,
+    ncfg_observed_link_t *link)
+{
+	ncfg_buf_t           message;
+	ncfg_buf_t           body;
+	ncfg_netlink_reply_t reply;
+	ncfg_ethtool_wol_t   wol;
+	uint16_t             kind = 0;
+	uint16_t             flags = 0;
+	size_t               at;
+	char                 why[NCFG_ERROR_MAX];
+	int                  ok;
+
+	memset(&reply, 0, sizeof(reply));
+	memset(&wol, 0, sizeof(wol));
+	ncfg_buf_init(&message, 0);
+	ncfg_buf_init(&body, 0);
+	ok = ncfg_ethtool_wol_get_request(&message, family, link->name, 0, why, sizeof(why)) &&
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why, sizeof(why));
+	ncfg_buf_free(&message);
+	if (ok) {
+		ok = genl->exchange(genl->context, kind, flags, &body, NULL, &reply, why, sizeof(why));
+	}
+	ncfg_buf_free(&body);
+	for (at = 0; ok && at < reply.count; at++) {
+		ok = ncfg_ethtool_wol_merge(&wol, reply.items[at].bytes, reply.items[at].length, why,
+		    sizeof(why));
+	}
+	ncfg_netlink_reply_free(&reply);
+	if (!ok || !wol.known || wol.supported == 0u) {
+		return;
+	}
+	link->wol.has = 1;
+	link->wol.value = (int64_t)wol.active;
+	link->wol_supported.has = 1;
+	link->wol_supported.value = (int64_t)wol.supported;
+}
+
 /* One device's ring sizes and their maxima, where it says them; the same
  * bargain as `link_modes_of`. */
 static void rings_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *family,
@@ -405,6 +447,8 @@ static void nothing_is_known(ncfg_observed_t *observed)
 		observed->links[at].tx_ring.has = 0;
 		observed->links[at].rx_ring_max.has = 0;
 		observed->links[at].tx_ring_max.has = 0;
+		observed->links[at].wol.has = 0;
+		observed->links[at].wol_supported.has = 0;
 		observed->links[at].speed.has = 0;
 		free(observed->links[at].duplex);
 		observed->links[at].duplex = NULL;
@@ -494,6 +538,7 @@ int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_
 	}
 	for (at = 0; at < observed->link_count; at++) {
 		rings_of(genl, &family, &observed->links[at]);
+		wol_of(genl, &family, &observed->links[at]);
 	}
 	ncfg_genl_family_free(&family);
 	if (unreadable != 0) {

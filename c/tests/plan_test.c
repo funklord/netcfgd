@@ -4,7 +4,7 @@
  *
  * WHAT THE WITNESS COMPARISON PROVES, AND HOW
  *   `doc/schema/plan.json` is one plan carrying **every op there is** -- one
- *   sample each, fifty-five of them -- with an inverse on every action, one
+ *   sample each, fifty-six of them -- with an inverse on every action, one
  *   warning, one refusal and one stranded credential. It is built here by hand
  *   exactly as `crates/netcfgd-plan/tests/frozen.rs` builds it, written, and
  *   compared **byte for byte against the witness with its whitespace
@@ -394,6 +394,9 @@ static size_t witness_ops(ncfg_op_t *ops, size_t max, const ncfg_route_t *route,
 	/* A guest bridge's port kept from its other ports (10.912). */
 	OP(NCFG_OP_LINK_SET_ISOLATED)->u.set_isolated.name = "eth0";
 	ops[at - 1u].u.set_isolated.on = 1;
+	/* What wakes the machine, over ethtool (10.917): the magic packet. */
+	OP(NCFG_OP_LINK_SET_WOL)->u.set_wol.name = "eth0";
+	ops[at - 1u].u.set_wol.modes = 0x20u;
 	OP(NCFG_OP_LINK_SET_IPV6_TOKEN)->u.set_ipv6_token.name = "eth0";
 	ops[at - 1u].u.set_ipv6_token.token = "::5";
 	OP(NCFG_OP_RULE_ADD)->u.rule.rule = rule;
@@ -730,7 +733,7 @@ static void the_frozen_witness(void)
 
 	plan = build_witness(ops, &count);
 	check(plan != NULL && !ncfg_plan_failed(plan), "the witness plan is built");
-	check(count == 55u, "and carries every op there is: fifty-five");
+	check(count == 56u, "and carries every op there is: fifty-six");
 	if (!plan) {
 		free(raw);
 		return;
@@ -815,13 +818,13 @@ static void the_frozen_witness(void)
  * The tag used to be serde's `snake_case` of the variant while the name was a
  * function, so one operation had two spellings and only a client outside the
  * workspace could see both at once (0082). Here they are one function, so what
- * this checks instead is the list: a sorted roll-call of fifty-five names,
+ * this checks instead is the list: a sorted roll-call of fifty-six names,
  * which fails when one is renamed, added or lost. `link.set_wds` was the
  * forty-ninth (10.587 item 4); `neighbour.add` and `neighbour.del` are the
  * fiftieth and fifty-first (10.595), and `station.steer` the fifty-second
  * (10.595 item 2), `link.set_link_modes` the fifty-third (10.877) and
- * `link.set_rings` the fifty-fourth (10.881), and `link.set_isolated` the
- * fifty-fifth (10.912).
+ * `link.set_rings` the fifty-fourth (10.881), `link.set_isolated` the
+ * fifty-fifth (10.912), and `link.set_wol` the fifty-sixth (10.917).
  */
 static void the_op_vocabulary(void)
 {
@@ -834,7 +837,8 @@ static void the_op_vocabulary(void)
 		"link.set_mac",
 		"link.set_link_modes", "link.set_macvlan", "link.set_master", "link.set_mtu",
 		"link.set_offloads", "link.set_rings",
-		"link.set_tunnel", "link.set_vxlan", "link.set_wds", "link.unset_master", "link.up",
+		"link.set_tunnel", "link.set_vxlan", "link.set_wds", "link.set_wol",
+		"link.unset_master", "link.up",
 		"neighbour.add", "neighbour.del", "nftables.replace", "qdisc.reset", "qdisc.set",
 		"route.add", "route.del", "rule.add",
 		"rule.del", "station.steer", "sysctl.set_accept_ra", "sysctl.set_forwarding",
@@ -845,11 +849,11 @@ static void the_op_vocabulary(void)
 	size_t       i;
 	size_t       j;
 
-	check(count == 55u, "the vocabulary is fifty-five ops");
+	check(count == 56u, "the vocabulary is fifty-six ops");
 	for (i = 0; i < count; i++) {
 		int found = 0;
 
-		for (j = 0; j < 55u; j++) {
+		for (j = 0; j < 56u; j++) {
 			ncfg_op_t op;
 
 			memset(&op, 0, sizeof(op));
@@ -864,7 +868,7 @@ static void the_op_vocabulary(void)
 			complete = 0;
 		}
 	}
-	for (j = 0; j < 55u; j++) {
+	for (j = 0; j < 56u; j++) {
 		ncfg_op_t op;
 		int       found = 0;
 

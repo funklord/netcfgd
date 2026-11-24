@@ -33,6 +33,7 @@
 #                         Under systemd's sysv-generator, not under sysvinit,
 #                         and the payload says what that does not prove
 #   make vm-sandbox    -- the systemd unit's sandbox, against real systemd
+#   make vm-wol        -- wake-on-LAN, against qemu's RTL8139C+
 #   make hull          -- the payloads a namespace or a container cannot host,
 #                         in machines `hull` runs. Four need a kernel of their
 #                         own: hwsim radios, the systemd sandbox, the OpenRC
@@ -2148,6 +2149,13 @@ vm-debian: vm-image
 vm-sandbox: vm-image
 	VM_GUEST=debian sh tool/vm/run.sh tool/vm/payload/sandbox_writes.sh
 
+# Wake-on-LAN against a driver that keeps it (project.md 10.917): qemu's
+# RTL8139C+ under `8139cp`, the one emulated card that does -- virtio refuses
+# it, the e1000 has no power management to wake through, e1000e and igb
+# report no modes. Read back by the ioctl, not by netcfgd's own decoder.
+vm-wol: vm-image
+	VM_GUEST=debian VM_WIRE_NIC=rtl8139 sh tool/vm/run.sh tool/vm/payload/wol.sh
+
 # Every live script that skips here, run in a guest that can run them. It
 # installs what they need inside the guest first, so this one wants a network
 # and takes several minutes; `VM_TIMEOUT` is set high for that reason.
@@ -2213,7 +2221,7 @@ vm-init: vm-image
 vm-image:
 	sh tool/vm/fetch.sh
 
-.PHONY: vm vm-cluster vm-debian vm-delegation vm-image vm-init vm-sandbox \
+.PHONY: vm vm-cluster vm-debian vm-delegation vm-image vm-init vm-sandbox vm-wol \
 	vm-skipped
 
 # The hull tier: the same payloads, in a machine `hull` runs.

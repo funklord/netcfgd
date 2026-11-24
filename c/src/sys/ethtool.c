@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ncfg/document.h"
 #include "ncfg/wire.h"
 
 /* The header nest every ethtool message begins with: the device it is about. */
@@ -551,5 +552,208 @@ int ncfg_ethtool_rings_merge(ncfg_ethtool_rings_t *out, const void *payload, siz
 	out->tx = tx;
 	out->rx_max = has_rx_max ? rx_max : 0u;
 	out->tx_max = has_tx_max ? tx_max : 0u;
+	return 1;
+}
+
+/* ---------------------------------------------------------- wake-on-LAN */
+
+/* The kernel's names for the wake-on-LAN modes, by `WAKE_*` bit
+ * (`wol_mode_names` in net/ethtool/common.c). The names are what goes on the
+ * wire, as for the features; the letters are the language's, in document.h. */
+static const struct {
+	const char *name;
+} wol_modes[] = {
+	{ "phy" }, { "ucast" }, { "mcast" }, { "bcast" },
+	{ "arp" }, { "magic" }, { "magicsecure" }, { "filter" },
+};
+
+#define WOL_MODE_NAMES (sizeof(wol_modes) / sizeof(wol_modes[0]))
+
+int ncfg_ethtool_wol_get_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	int                built;
+
+	if (!out || !family) {
+		ncfg_error_set(err, err_size, "an ethtool request needs the resolved family");
+		return 0;
+	}
+	ncfg_buf_init(&attrs, 0);
+	if (!ethtool_header(&attrs, device, err, err_size)) {
+		ncfg_buf_free(&attrs);
+		return 0;
+	}
+	header.cmd = ETHTOOL_MSG_WOL_GET;
+	header.version = 1;
+	built = ncfg_genl_build_request(out, family->id, &header, 0, seq, &attrs, err, err_size);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+int ncfg_ethtool_wol_set_request(ncfg_buf_t *out, const ncfg_genl_family_t *family,
+    const char *device, uint32_t modes, uint32_t seq, char *err, size_t err_size)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         attrs;
+	ncfg_buf_t         bitset;
+	ncfg_buf_t         bits;
+	size_t             at;
+	int                built;
+
+	if (!out || !family) {
+		ncfg_error_set(err, err_size, "an ethtool request needs the resolved family");
+		return 0;
+	}
+	if (modes & ~NCFG_WOL_MANAGED) {
+		ncfg_error_set(err, err_size,
+		    "a wake-on-LAN request on %s names a mode netcfgd does not manage",
+		    device ? device : "?");
+		return 0;
+	}
+	ncfg_buf_init(&attrs, 0);
+	if (!ethtool_header(&attrs, device, err, err_size)) {
+		ncfg_buf_free(&attrs);
+		return 0;
+	}
+	/*
+	 * **A mask bitset naming every mode netcfgd manages**, each on or off:
+	 * "these six are exactly so, and the rest are not mine". The no-mask form
+	 * would also clear `magicsecure` and `filter`, which need a password or a
+	 * filter table this language has no word for, and which somebody else may
+	 * have set on purpose.
+	 */
+	ncfg_buf_init(&bits, 0);
+	for (at = 0; at < WOL_MODE_NAMES; at++) {
+		ncfg_buf_t bit;
+
+		if (!((1u << at) & NCFG_WOL_MANAGED)) {
+			continue;
+		}
+		ncfg_buf_init(&bit, 0);
+		ncfg_wire_attr_put_str(&bit, ETHTOOL_A_BITSET_BIT_NAME, wol_modes[at].name);
+		if (modes & (1u << at)) {
+			ncfg_wire_attr_put(&bit, ETHTOOL_A_BITSET_BIT_VALUE, NULL, 0);
+		}
+		ncfg_wire_attr_put_nested(&bits, ETHTOOL_A_BITSET_BITS_BIT, &bit);
+		ncfg_buf_free(&bit);
+	}
+	ncfg_buf_init(&bitset, 0);
+	ncfg_wire_attr_put_nested(&bitset, ETHTOOL_A_BITSET_BITS, &bits);
+	ncfg_wire_attr_put_nested(&attrs, ETHTOOL_A_WOL_MODES, &bitset);
+
+	header.cmd = ETHTOOL_MSG_WOL_SET;
+	header.version = 1;
+	built = ncfg_genl_build_request(out, family->id, &header, NLM_F_ACK, seq, &attrs,
+	    err, err_size);
+	ncfg_buf_free(&bits);
+	ncfg_buf_free(&bitset);
+	ncfg_buf_free(&attrs);
+	return built;
+}
+
+/*
+ * A `WOL_GET` reply's modes: a mask bitset, the mask the modes the device
+ * supports and the value the ones on (`ethnl_put_bitset32` with
+ * `wol.supported` as the mask). Read by name, as the features are; a bit the
+ * kernel sends with an index and no name, or a name not in the table, is
+ * skipped. A compact bitset is not asked for, so one is refused rather than
+ * misread.
+ */
+int ncfg_ethtool_wol_merge(ncfg_ethtool_wol_t *out, const void *payload, size_t length,
+    char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attrs_t inside;
+	ncfg_wire_attrs_t bits;
+	ncfg_wire_attr_t  modes;
+	ncfg_wire_attr_t  attr;
+	ncfg_wire_step_t  step;
+	uint32_t          supported = 0;
+	uint32_t          active = 0;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "wake-on-LAN modes need somewhere to go");
+		return 0;
+	}
+	if (!ncfg_genl_payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	step = ncfg_wire_attrs_find(&area, ETHTOOL_A_WOL_MODES, &modes, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step == NCFG_WIRE_END) {
+		return 1;
+	}
+	ncfg_wire_attrs_start(&inside, modes.value, modes.length);
+	step = ncfg_wire_attrs_find(&inside, ETHTOOL_A_BITSET_VALUE, &attr, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step != NCFG_WIRE_END) {
+		ncfg_error_set(err, err_size,
+		    "a wake-on-LAN reply came as a compact bitset, which was not asked for");
+		return 0;
+	}
+	ncfg_wire_attrs_start(&inside, modes.value, modes.length);
+	step = ncfg_wire_attrs_find(&inside, ETHTOOL_A_BITSET_BITS, &attr, err, err_size);
+	if (step == NCFG_WIRE_BAD) {
+		return 0;
+	}
+	if (step != NCFG_WIRE_END) {
+		ncfg_wire_attrs_start(&bits, attr.value, attr.length);
+		for (;;) {
+			ncfg_wire_attr_t  bit;
+			ncfg_wire_attrs_t one;
+			ncfg_wire_attr_t  named;
+			ncfg_wire_attr_t  value;
+			char              name[NCFG_ETHTOOL_NAME_MAX];
+			size_t            at;
+
+			step = ncfg_wire_attrs_next(&bits, &bit, err, err_size);
+			if (step == NCFG_WIRE_END) {
+				break;
+			}
+			if (step == NCFG_WIRE_BAD) {
+				return 0;
+			}
+			if (bit.kind != ETHTOOL_A_BITSET_BITS_BIT) {
+				continue;
+			}
+			ncfg_wire_attrs_start(&one, bit.value, bit.length);
+			step = ncfg_wire_attrs_find(&one, ETHTOOL_A_BITSET_BIT_NAME, &named, err,
+			    err_size);
+			if (step == NCFG_WIRE_BAD) {
+				return 0;
+			}
+			if (step == NCFG_WIRE_END ||
+			    !ncfg_wire_attr_string(&named, name, sizeof(name), NULL, 0)) {
+				continue;
+			}
+			for (at = 0; at < WOL_MODE_NAMES; at++) {
+				if (strcmp(wol_modes[at].name, name) == 0) {
+					break;
+				}
+			}
+			if (at == WOL_MODE_NAMES) {
+				continue;
+			}
+			supported |= 1u << at;
+			ncfg_wire_attrs_start(&one, bit.value, bit.length);
+			step = ncfg_wire_attrs_find(&one, ETHTOOL_A_BITSET_BIT_VALUE, &value, err,
+			    err_size);
+			if (step == NCFG_WIRE_BAD) {
+				return 0;
+			}
+			if (step != NCFG_WIRE_END) {
+				active |= 1u << at;
+			}
+		}
+	}
+	out->known = 1;
+	out->supported = supported;
+	out->active = active;
 	return 1;
 }

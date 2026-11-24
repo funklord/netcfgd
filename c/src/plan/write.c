@@ -181,6 +181,14 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		member_text(writer, "name", op->u.set_isolated.name);
 		ncfg_json_write_member_bool(writer, "on", op->u.set_isolated.on);
 		break;
+	case NCFG_OP_LINK_SET_WOL: {
+		char letters[16];
+
+		member_text(writer, "name", op->u.set_wol.name);
+		ncfg_wol_text(op->u.set_wol.modes, letters, sizeof(letters));
+		member_text(writer, "wol", letters);
+	}
+		break;
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		member_text(writer, "name", op->u.set_link_modes.name);
 		if (op->u.set_link_modes.autoneg >= 0) {

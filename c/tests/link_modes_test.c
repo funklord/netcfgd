@@ -20,6 +20,7 @@
  */
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/document.h"
 #include "ncfg/ethtool.h"
 #include "ncfg/genl.h"
 #include "ncfg/observe.h"
@@ -362,6 +363,126 @@ static void test_rings(void)
 	planfix_release(plan, document, observed);
 }
 
+/* One bit of a verbose bitset, by name, on or off. */
+static void wol_bit(ncfg_buf_t *bits, const char *name, int on)
+{
+	ncfg_buf_t bit;
+
+	ncfg_buf_init(&bit, 0);
+	ncfg_wire_attr_put_str(&bit, ETHTOOL_A_BITSET_BIT_NAME, name);
+	if (on) {
+		ncfg_wire_attr_put(&bit, ETHTOOL_A_BITSET_BIT_VALUE, NULL, 0);
+	}
+	ncfg_wire_attr_put_nested(bits, ETHTOOL_A_BITSET_BITS_BIT, &bit);
+	ncfg_buf_free(&bit);
+}
+
+/* Wake-on-LAN (project.md 10.917): the letters, the set, the reply, and the
+ * plan. The driver's side is `make vm-wol`'s, against qemu's RTL8139C+. */
+static void test_wol(void)
+{
+	ncfg_genl_family_t   family;
+	ncfg_buf_t           message, payload, bits, bitset;
+	ncfg_genl_header_t   header;
+	ncfg_ethtool_wol_t   wol;
+	ncfg_wire_attr_t     attr;
+	ncfg_wire_attrs_t    inside;
+	uint32_t             modes = 0;
+	char                 text[16];
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan;
+	const ncfg_action_t *action;
+
+	check(ncfg_wol_modes("g", &modes) && modes == 0x20u, "`g` is the magic packet, WAKE_MAGIC");
+	check(ncfg_wol_modes("pg", &modes) && modes == 0x21u, "`pg` adds a PHY event");
+	check(ncfg_wol_modes("off", &modes) && modes == 0u && ncfg_wol_modes("d", &modes) &&
+	    modes == 0u, "`off` and ethtool's `d` are none");
+	check(!ncfg_wol_modes("s", &modes) && !ncfg_wol_modes("gx", &modes) &&
+	    !ncfg_wol_modes("", &modes) && !ncfg_wol_modes("on", &modes),
+	    "`s`, an unknown letter, nothing at all and `on` are refused");
+	ncfg_wol_text(0x21u, text, sizeof(text));
+	check(strcmp(text, "pg") == 0, "and the bits read back as `pg`");
+	ncfg_wol_text(0u, text, sizeof(text));
+	check(strcmp(text, "off") == 0, "  and none as `off`");
+
+	resolved_family(&family);
+	check(ETHTOOL_MSG_WOL_GET == 9 && ETHTOOL_MSG_WOL_SET == 10,
+	    "WOL_GET and _SET are commands nine and ten");
+	ncfg_buf_init(&message, 0);
+	check(ncfg_ethtool_wol_set_request(&message, &family, "eth0", 0x20u, 4, NULL, 0),
+	    "a wake-on-LAN set for the magic packet is built");
+	check(has_attr(&message, ETHTOOL_A_WOL_MODES, &attr), "  carrying the modes");
+	ncfg_wire_attrs_start(&inside, attr.value, attr.length);
+	check(ncfg_wire_attrs_find(&inside, ETHTOOL_A_BITSET_NOMASK, &attr, NULL, 0) ==
+	    NCFG_WIRE_END, "  as a mask bitset, so `magicsecure` and `filter` are left alone");
+	memset(&wol, 0, sizeof(wol));
+	check(ncfg_ethtool_wol_merge(&wol, message.data + NCFG_WIRE_NLMSG_HDR_LEN,
+	    message.length - NCFG_WIRE_NLMSG_HDR_LEN, NULL, 0) && wol.supported == 0x3fu &&
+	    wol.active == 0x20u, "  naming the six managed modes, the magic packet alone on");
+	ncfg_buf_free(&message);
+	ncfg_buf_init(&message, 0);
+	check(!ncfg_ethtool_wol_set_request(&message, &family, "eth0", 0x40u, 4, NULL, 0),
+	    "a set asking for `magicsecure` is refused");
+	ncfg_buf_free(&message);
+
+	/* A reply as the kernel writes it: the modes as a verbose mask bitset,
+	 * the mask the supported modes, the value the ones on. */
+	header.cmd = ETHTOOL_MSG_WOL_GET_REPLY;
+	header.version = 1;
+	ncfg_buf_init(&payload, 0);
+	ncfg_genl_header_encode(&header, &payload);
+	ncfg_buf_init(&bits, 0);
+	wol_bit(&bits, "phy", 0);
+	wol_bit(&bits, "ucast", 0);
+	wol_bit(&bits, "mcast", 0);
+	wol_bit(&bits, "bcast", 0);
+	wol_bit(&bits, "magic", 1);
+	wol_bit(&bits, "magicsecure", 1);
+	ncfg_buf_init(&bitset, 0);
+	ncfg_wire_attr_put_u32(&bitset, ETHTOOL_A_BITSET_SIZE, 8);
+	ncfg_wire_attr_put_nested(&bitset, ETHTOOL_A_BITSET_BITS, &bits);
+	ncfg_wire_attr_put_nested(&payload, ETHTOOL_A_WOL_MODES, &bitset);
+	memset(&wol, 0, sizeof(wol));
+	check(ncfg_ethtool_wol_merge(&wol, payload.data, payload.length, NULL, 0) && wol.known &&
+	    wol.supported == 0x6fu && wol.active == 0x60u,
+	    "a reply is read: supported pumbg and s, on g and s");
+	ncfg_buf_free(&bits);
+	ncfg_buf_free(&bitset);
+	ncfg_buf_free(&payload);
+
+	plan = planfix_plan(DEVICE("\"wol\":\"g\""), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"wol\":64,\"wol_supported\":111") "]", &document,
+	    &observed);
+	action = plan ? planfix_action(plan, "link.set_wol") : NULL;
+	check(action && action->op.u.set_wol.modes == 0x20u,
+	    "the magic packet is turned on");
+	check(action && action->has_inverse && action->inverse.u.set_wol.modes == 0u,
+	    "  and the inverse turns the managed modes back off, `s` not being one");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("\"wol\":\"g\""), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"wol\":96,\"wol_supported\":111") "]", &document,
+	    &observed);
+	check(plan && !planfix_action(plan, "link.set_wol"),
+	    "a link already waking on `g` is left, whatever `s` says");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("\"wol\":\"a\""), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"wol\":0,\"wol_supported\":47") "]", &document,
+	    &observed);
+	check(plan && !planfix_action(plan, "link.set_wol") &&
+	    planfix_warned(plan, "can wake on `pumbg` only"),
+	    "a mode the device does not support is warned about, not asked for");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(DEVICE("\"wol\":\"off\""), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
+	check(plan && !planfix_action(plan, "link.set_wol") && !planfix_warned(plan, "wake-on-LAN"),
+	    "`off` on a device that cannot wake is already true, and said nothing about");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	const char *run = testdir_make("link-modes");
@@ -374,6 +495,7 @@ int main(void)
 	test_record(run);
 	test_plan();
 	test_rings();
+	test_wol();
 	testdir_remove(run);
 	printf("%s\n", failures ? "link_modes_test: FAILED" : "link_modes_test: all passed");
 	return failures ? 1 : 0;

@@ -1114,14 +1114,28 @@ typedef enum {
 /*
  * Driver-level link settings, the `ethtool` surface.
  *
- * **The offloads are applied; the rest is not**, and the reason is
- * verification rather than effort: a veth takes a features message and refuses
- * a link-modes set with a bare `EINVAL`, while ring and wake-on-LAN messages
- * are `EOPNOTSUPP` on anything that is not a physical NIC. Every netlink bug
- * this project has shipped was found by writing to a real kernel and reading
- * it back, so settings that can only be exercised against hardware the test
- * suite cannot safely write to are left alone and reported in the plan.
+ * **All of it is applied**, each part only once a real driver had taken it
+ * and been read back -- the reason the block once sat half unapplied: a veth
+ * refuses all but the offloads, and every netlink bug this project shipped
+ * was found by writing to a real kernel. The link modes and rings came in
+ * against virtio-net (10.877, 10.881), wake-on-LAN against qemu's RTL8139C+
+ * (10.917).
  */
+/*
+ * Wake-on-LAN, in ethtool(8)'s letters: any of `p u m b a g` -- a PHY event,
+ * unicast, multicast, broadcast, ARP, the magic packet -- or `d` or `off` for
+ * none. The modes are the kernel's `WAKE_*` bits, which are uapi and do not
+ * move. `s` and `f` are refused: they need a password or a filter table this
+ * language has no word for, so netcfgd leaves them as they are (10.917).
+ */
+#define NCFG_WOL_MANAGED 0x3fu
+
+/* 1 and the bits where `text` is a wake-on-LAN setting, 0 where not. */
+int ncfg_wol_modes(const char *text, uint32_t *modes);
+
+/* The bits back to letters, `off` for none. */
+void ncfg_wol_text(uint32_t modes, char *out, size_t size);
+
 typedef struct {
 	int           autoneg; /* ncfg_toggle_t */
 	ncfg_optint_t speed;

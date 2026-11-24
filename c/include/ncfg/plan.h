@@ -118,6 +118,8 @@ typedef enum {
 	NCFG_OP_LINK_SET_WDS,
 	/* A bridge port's isolation (`IFLA_BRPORT_ISOLATED`, 10.912). */
 	NCFG_OP_LINK_SET_ISOLATED,
+	/* Wake-on-LAN, over ethtool (project.md 10.917). */
+	NCFG_OP_LINK_SET_WOL,
 	NCFG_OP_LINK_SET_IPV6_TOKEN,
 	NCFG_OP_RULE_ADD,
 	NCFG_OP_RULE_DEL,
@@ -219,6 +221,11 @@ typedef struct {
 			const char *name;
 			int         on;
 		} set_isolated;
+		/* `WAKE_*` bits, each of `NCFG_WOL_MANAGED` on or off as said. */
+		struct {
+			const char *name;
+			uint32_t    modes;
+		} set_wol;
 		struct {
 			const char   *iface;
 			const char   *addr;

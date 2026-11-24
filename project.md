@@ -644,7 +644,7 @@ Order matters: the model freezes before any adapter exists, so no adapter can sh
 | **M8** | Desktop | GUI + tray applet; NM shim tier 2. **The shim half is done** (0032-0034). **The desktop half is in progress**: the GUI has a wifi tab, a tray applet, and adds a network itself (`8de3d003`, under the `laptop` tier). The permission overhaul the holder released on 2026-11-21 is [0327](doc/decision/0327-three-tiers-view-laptop-root.md): `view`, `laptop` and `root`, nested, with `root` called what it is (*Settled: the permission system's overhaul*). The GUI is Qt Widgets, C++17, desktop and Android from one source, in the style of the sibling `fuzzypickles`/`hydra`/`beerssh` trees -- brief in [gui/project.md](gui/project.md). Remote access was planned as an agent terminating a remote protocol beside an unchanged daemon; **0308 and 0309 superseded that**: fuzznet is linked into the daemon, which speaks fuzznet to local and remote clients alike (10.668, 10.676), and [doc/remote-access-feasibility.md](doc/remote-access-feasibility.md) is the earlier reading. |
 | **M9** | **RESTCONF — last** | `netcfgd-restconf`: `ietf-interfaces`/`ietf-ip` mapping plus a netcfgd augment module, hooks read-only. Full NETCONF (SSH/XML) only if sites ask. **No longer the fleet answer** ([0311](doc/decision/0311-fuzznet-is-the-store-and-the-estate-is-the-fleet.md)): the fleet is the fuzznet estate, an authenticated operator managing every node of it; this milestone is a northbound interface for sites that want one. |
 
-**The M4 freeze's four inert features are all closed**, after M6 rather than at M4 — the schema had to carry them before the freeze, the behaviour did not. Policy routing rules, `ipv6_token` and the ethtool offloads are netlink; access points are hostapd, configured by a generated file under `/run` ([0026](doc/decision/0026-an-access-point-is-a-file-hostapd-reads.md)). What is still recognised and not applied is the half of the `ethtool` block that needs a physical NIC to exercise, and `ncfg plan` names those fields individually.
+**The M4 freeze's four inert features are all closed**, after M6 rather than at M4 — the schema had to carry them before the freeze, the behaviour did not. Policy routing rules, `ipv6_token` and the ethtool offloads are netlink; access points are hostapd, configured by a generated file under `/run` ([0026](doc/decision/0026-an-access-point-is-a-file-hostapd-reads.md)). The rest of the `ethtool` block followed against emulated drivers -- link modes and rings on virtio-net (10.877, 10.881), wake-on-LAN on qemu's RTL8139C+ (10.917) -- so nothing in it is recognised and left unapplied.
 
 **Access points carry a station list**, which is the single-host half of the Ubiquiti-style roaming [0036](doc/decision/0036-the-shim-is-not-the-roadmap.md) wrote down: forcing a client onto one access point means every other access point refusing it. `access_control { deny = [..] }` or `allow`, never both, because hostapd reads one file or the other ([0039](doc/decision/0039-a-station-list-is-one-list.md)). Changing the list converges over hostapd's control socket, with no restart and no deauthentication ([0041](doc/decision/0041-a-station-list-converges-over-the-control-socket.md)); only a change of `macaddr_acl` itself still restarts the access point, with a warning, for the reason §9's limits give.
 
@@ -7035,6 +7035,49 @@ already records.
 **None of the four fixes touched the daemon.** Every one was a test holding a
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
+
+## 10.917 Wake-on-LAN is applied, against an emulated card that keeps it
+
+`wol` was the last field of the `ethtool` block applied by nothing, parked for
+want of a physical NIC. **A virtual one turned out to do**, once measured card
+by card in the Debian guest with an independent reader -- the old
+`SIOCETHTOOL` ioctl from Python, so netcfgd's netlink cannot agree with itself:
+
+- virtio-net: `EOPNOTSUPP`, as before.
+- e1000: reports unicast, multicast, broadcast and magic as supported and
+  refuses every set, `EOPNOTSUPP`: `e1000_set_wol` needs `device_can_wakeup`,
+  and qemu's 82540EM has no PCI power-management capability.
+- e1000e and igb: no modes at all. Their drivers take wake-on-LAN from an
+  EEPROM bit qemu does not set.
+- **rtl8139, under `8139cp`**: supported 47 (phy, unicast, multicast,
+  broadcast, magic), a set read back, cleared again. The driver writes the
+  chip's Config registers and qemu keeps them.
+
+So `tool/vm/run.sh` takes `VM_WIRE_NIC` for the wire card's model, and `make
+vm-wol` runs the Debian guest on an RTL8139C+. Five checks: `wol = "g"` set
+and read back as 32; a second apply with nothing to do; `pg` as 33; `a`, which
+the card cannot, warned about by the plan and nothing changed; `off` back to 0.
+**Sabotage**: the encoder's on and off swapped, four of the five fail.
+
+What was built, on the rings' shape: `WOL_GET` into the observed link (`wol`,
+`wol_supported`, as `WAKE_*` bits; absent where a device supports none, so the
+plan tells "cannot" from "is not"), and `link.set_wol`, the fifty-sixth op --
+not disruptive, since it says what wakes a sleeping machine and touches the
+awake link not at all, and optional, as a ring size is. The set is a **mask
+bitset naming the six managed modes**: `magicsecure` and `filter` need a
+password or a filter table the language has no word for, so they are left as
+they are rather than cleared, and are refused as letters at compile time
+(`s`, `f`). The letters are ethtool(8)'s, which the example already used, plus
+`off`; the renderer refuses a `wol` the language would refuse, which the
+example sweep's extreme strings found. A mode the device does not support is
+warned about and not asked for; `off` on a device that cannot wake is already
+true and says nothing.
+
+`warn_unapplied` is gone with it: the block has no field left that nothing
+applies. `tests/live/c_warnings.sh` still expected the `speed` sentence that
+10.877 retired; its case is now the device's own warning, `wol` on `lo` -- a device that
+exists before the plan, since one the plan is about to create has no link yet
+to say what it supports.
 
 ## 10.916 What netcfgd leaves in systemd-resolved, measured
 

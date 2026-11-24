@@ -3232,3 +3232,51 @@ int ncfg_document_write_canonical(ncfg_document_t *document, ncfg_buf_t *buf, ch
 	ncfg_buf_free(&compact);
 	return 1;
 }
+
+/* ethtool(8)'s letters, by `WAKE_*` bit. */
+static const char wol_letters[] = "pumbag";
+
+int ncfg_wol_modes(const char *text, uint32_t *modes)
+{
+	const char *letter;
+
+	*modes = 0;
+	if (!text || text[0] == '\0') {
+		return 0;
+	}
+	if (strcmp(text, "off") == 0 || strcmp(text, "d") == 0) {
+		return 1;
+	}
+	for (; *text; text++) {
+		letter = strchr(wol_letters, *text);
+		if (!letter) {
+			*modes = 0;
+			return 0;
+		}
+		*modes |= 1u << (unsigned)(letter - wol_letters);
+	}
+	return 1;
+}
+
+void ncfg_wol_text(uint32_t modes, char *out, size_t size)
+{
+	size_t at;
+	size_t used = 0;
+
+	if (size < 4u) {
+		if (size) {
+			out[0] = '\0';
+		}
+		return;
+	}
+	for (at = 0; wol_letters[at] && used + 1u < size; at++) {
+		if (modes & (1u << at)) {
+			out[used++] = wol_letters[at];
+		}
+	}
+	if (used == 0u) {
+		(void)memcpy(out, "off", 4u);
+		return;
+	}
+	out[used] = '\0';
+}

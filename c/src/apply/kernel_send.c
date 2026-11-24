@@ -245,6 +245,16 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "shows, or not one this driver takes";
 		}
 		return NULL;
+	case NCFG_OP_LINK_SET_WOL:
+		if (code == EOPNOTSUPP) {
+			return "this device cannot wake the machine -- no virtual one can, and some "
+			       "NICs only where the board wires their wake line";
+		}
+		if (code == EINVAL) {
+			return "the driver does not support one of the modes asked; `ncfg status` "
+			       "shows the ones it does";
+		}
+		return NULL;
 	case NCFG_OP_LINK_SET_LINK_MODES:
 		if (code == EOPNOTSUPP) {
 			return "this device has no link modes to set -- most virtual ones do not";

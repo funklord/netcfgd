@@ -181,18 +181,19 @@ network "n1" {
 	config = "dhcp"
 }'
 
-# The same gap, for an ethtool setting. `plan/offload.c` budgets the length of
-# this one to the character.
+# An ethtool setting a virtual device cannot take. The whole block is applied
+# since 10.917, so what is left to say is the device's, not netcfgd's. `lo`,
+# because it exists before the plan: a device the plan is about to create has
+# no link yet to say what it supports.
 cat > "$work/wanted" <<'WANTED'
-warning: eth0: `speed` in the `ethtool` block is recognised and applied by nothing: it can only be exercised against a physical NIC, and an encoder nobody has run against one is how the last three netlink bugs here got in. The offloads are applied. Nothing in netcfgd acts on it, so there is nothing to wait for. The block is kept so a configuration written now still means this when the code arrives
+warning: lo: lo reports no wake-on-LAN modes, so `wol = "g"` is not asked for: no virtual device can wake a machine
 WANTED
-expect "an ethtool setting that needs hardware nothing here has" '
-device eth0 {
-	kind = "dummy"
-	ethtool { rx_checksum = "on"; gro = "off"; speed = 1000 }
+expect "an ethtool setting a virtual device cannot take" '
+device lo {
+	ethtool { wol = "g" }
 }
-interface eth0 {
-	config = "10.9.50.1/24"
+interface lo {
+	config = "127.0.0.1/8"
 }'
 
 # ---------------------------------------------------------- and the rest

@@ -1691,6 +1691,15 @@ static void refuse_unwritable_strings(const ncfg_document_t *document,
 			    "a `duplex` of `%s`, which is neither full nor half",
 			    device->link_settings->duplex);
 		}
+		if (device->link_settings && device->link_settings->wol) {
+			uint32_t modes;
+
+			if (!ncfg_wol_modes(device->link_settings->wol, &modes)) {
+				ncfg_render_refuse(missing, "device", device->name,
+				    "a `wol` of `%s`, which is not ethtool's letters or `off`",
+				    device->link_settings->wol);
+			}
+		}
 		if (device->modem && device->modem->apn && device->modem->apn[0] == '\0') {
 			ncfg_render_refuse(missing, "device", device->name, "an `apn` with nothing in it");
 		}

@@ -952,7 +952,9 @@
 # ETHERNET OFFLOADS AND LINK SETTINGS, for a NIC whose defaults are wrong.
 # Each toggle is "on", "off" or "unmanaged" -- three values rather than two,
 # because "leave this one alone" is a different instruction from "turn it
-# off", and a boolean could not say it.
+# off", and a boolean could not say it. `wol` is what wakes the machine from
+# sleep, in ethtool's letters: `g` the magic packet, `p` a PHY event, `u`,
+# `m` and `b` a unicast, multicast or broadcast frame, `a` an ARP, or "off".
 
 #device eth0 {
 #	ethtool {

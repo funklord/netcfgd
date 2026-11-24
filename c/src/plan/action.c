@@ -97,6 +97,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "link.set_wds";
 	case NCFG_OP_LINK_SET_ISOLATED:
 		return "link.set_isolated";
+	case NCFG_OP_LINK_SET_WOL:
+		return "link.set_wol";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 		return "link.set_ipv6_token";
 	case NCFG_OP_RULE_ADD:
@@ -289,6 +291,9 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	/* Isolating a port changes which of the bridge's ports reach each other,
 	 * not whether this machine keeps its own connection (10.912). */
 	case NCFG_OP_LINK_SET_ISOLATED:
+	/* Wake-on-LAN says what wakes a sleeping machine; the awake one's link
+	 * is not touched by it (10.917). */
+	case NCFG_OP_LINK_SET_WOL:
 	/* A neighbour list only changes what a station is told about where it
 	 * may go; nothing associated is moved by it (10.595). */
 	case NCFG_OP_NEIGHBOUR_ADD:
@@ -353,6 +358,8 @@ static const char *subject_class(int kind)
 		return "wds";
 	case NCFG_OP_LINK_SET_ISOLATED:
 		return "isolated";
+	case NCFG_OP_LINK_SET_WOL:
+		return "wol";
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
 		return "token";
 	case NCFG_OP_ADDR_ADD:
@@ -554,6 +561,8 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 		return op->u.set_wds.name;
 	case NCFG_OP_LINK_SET_ISOLATED:
 		return op->u.set_isolated.name;
+	case NCFG_OP_LINK_SET_WOL:
+		return op->u.set_wol.name;
 	case NCFG_OP_LINK_DELETE:
 	case NCFG_OP_LINK_UNSET_MASTER:
 	case NCFG_OP_LINK_UP:

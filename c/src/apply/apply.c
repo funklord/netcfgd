@@ -246,6 +246,8 @@ int ncfg_apply_optional(const ncfg_op_t *op)
 	case NCFG_OP_LINK_SET_LINK_MODES:
 	/* A ring size the driver will not take leaves the ring as it was. */
 	case NCFG_OP_LINK_SET_RINGS:
+	/* So does a wake-on-LAN mode: the machine stays as awake as it was. */
+	case NCFG_OP_LINK_SET_WOL:
 		return 1;
 	/*
 	 * The `ifb` device and its state, which exist only for ingress shaping.
@@ -360,6 +362,7 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_LINK_SET_RINGS:
 	case NCFG_OP_LINK_SET_WDS:
 	case NCFG_OP_LINK_SET_ISOLATED:
+	case NCFG_OP_LINK_SET_WOL:
 	case NCFG_OP_BRIDGE_VLAN_ADD:
 	case NCFG_OP_BRIDGE_VLAN_DEL:
 	case NCFG_OP_WG_SET_DEVICE:

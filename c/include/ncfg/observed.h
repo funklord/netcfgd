@@ -693,6 +693,10 @@ typedef struct {
 	ncfg_optint_t  tx_ring;
 	ncfg_optint_t  rx_ring_max;
 	ncfg_optint_t  tx_ring_max;
+	/* Wake-on-LAN from `WOL_GET`, as `WAKE_*` bits: the modes on and the ones
+	 * the device supports (10.917); absent where it says none. */
+	ncfg_optint_t  wol;
+	ncfg_optint_t  wol_supported;
 	/* Absent covers both "no token" and "this device cannot have one": a dummy
 	 * or any other NOARP device does no neighbour discovery, and the kernel
 	 * refuses a token on it. */

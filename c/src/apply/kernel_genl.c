@@ -1125,3 +1125,40 @@ int ncfg_kernel_rings_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, 
 	ncfg_netlink_close(&socket);
 	return ok;
 }
+
+/* ------------------------------------------------------------------------ *
+ * Wake-on-LAN
+ * ------------------------------------------------------------------------ */
+
+int ncfg_kernel_wol_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
+    size_t err_size)
+{
+	ncfg_netlink_t     socket;
+	ncfg_genl_family_t family;
+	ncfg_buf_t         message;
+	char               doing[NCFG_ERROR_MAX];
+	uint32_t           seq;
+	int                ok;
+
+	(void)world;
+	if (!op) {
+		ncfg_error_set(err, err_size, "there is no wake-on-LAN action to carry out");
+		return 0;
+	}
+	if (!ncfg_genl_family_open(NCFG_ETHTOOL_FAMILY, &socket, &family, err, err_size)) {
+		return 0;
+	}
+	seq = ncfg_netlink_take_seq(&socket);
+	ncfg_buf_init(&message, 0);
+	ok = ncfg_ethtool_wol_set_request(&message, &family, op->u.set_wol.name,
+	    op->u.set_wol.modes, seq, err, err_size);
+	if (ok) {
+		(void)snprintf(doing, sizeof(doing), "set wake-on-LAN on %s",
+		    op->u.set_wol.name ? op->u.set_wol.name : "?");
+		ok = ncfg_kernel_send(&socket, &message, seq, op->kind, doing, err, err_size);
+	}
+	ncfg_buf_free(&message);
+	ncfg_genl_family_free(&family);
+	ncfg_netlink_close(&socket);
+	return ok;
+}

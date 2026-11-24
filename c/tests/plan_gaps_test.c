@@ -780,24 +780,13 @@ static void every_startable_backend_can_also_be_stopped(void)
 }
 
 /*
- * The half of an `ethtool` block nothing encodes, which is neither language's
- * to have encoded.
+ * The half of an `ethtool` block nothing encoded, which is none of it now.
  *
- * **The reason was in the sentence and the blame was not.** "Recognised but not
- * applied by this build" sat immediately before the reason it will stay that
- * way -- that ring sizes, link modes and wake-on-LAN can only be exercised
- * against a physical NIC -- so the same sentence promised a release and
- * explained why there is not one. `crates/netcfgd-sys/src/ethtool.rs` defines
- * `ETHTOOL_MSG_FEATURES_GET` and `..._SET` and nothing else, which is what
- * `c/include/ncfg/ethtool.h` carries: the encoder does not exist on either
- * side.
- *
- * Six fields stated, because that was the longest this sentence got and the
- * case that ran into `NCFG_ERROR_MAX`. **Three of them are applied since
- * project.md 10.877** -- `autoneg`, `speed` and `duplex`, verified against
- * virtio-net -- and two more since 10.881, the ring sizes, so the sentence
- * names `wol` alone, and the case holds that the applied ones are no longer
- * called nobody's.
+ * This case held that `autoneg`, `speed`, `duplex` and the ring sizes, once
+ * applied, stopped being called nobody's gap (10.877, 10.881), and that `wol`
+ * still was -- the sentence ran to `NCFG_ERROR_MAX` with all six. Since 10.917
+ * `wol` is applied too, verified against qemu's RTL8139C+, so a block stating
+ * all six names none of them as netcfgd's gap.
  */
 static void the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for(void)
 {
@@ -810,19 +799,9 @@ static void the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for(voi
 	    "{\"name\":\"eth0\",\"addressing\":[]}", "", "",
 	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
 
-	check(plan && planfix_warned(plan, "`wol` in the `ethtool` block is recognised and applied by "
-	    "nothing"), "the one unapplied field the document stated is named");
-	check(plan && !planfix_warned(plan, "`autoneg`, `speed`") && !planfix_warned(plan, "`rx_ring`"),
-	    "and the link modes and ring sizes, applied now, are not among them");
-	check(planfix_whole(planfix_warning_with(plan, "in the `ethtool` block"),
-	    PLANFIX_UNBUILT_TAIL),
-	    "and the whole of the longest form arrives, marked as nobody's gap");
-	check(plan && !planfix_warned(plan, "not applied by this build"),
-	    "and not as a release this port owes anybody");
-	/* That the sentence names only what was written, and that a block of
-	 * offloads alone says nothing at all, is `plan_tc_test.c`'s -- the pass
-	 * that owns the offloads owns the rule about naming them. What is here is
-	 * the part that file cannot see: whose gap the other half is. */
+	check(plan && !planfix_warned(plan, "in the `ethtool` block") &&
+	    !planfix_warned(plan, "applied by nothing"),
+	    "no field of the block is named as applied by nothing");
 	planfix_release(plan, document, observed);
 }
 

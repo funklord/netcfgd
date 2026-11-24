@@ -219,14 +219,10 @@ static void a_feature_wanted_and_not_delivered_is_the_same_case(void)
 }
 
 /*
- * The half of an `ethtool` block that needs a physical NIC is named field by
- * field rather than as one blanket sentence -- an operator who set only `gro`
- * should not be told their configuration is ignored.
- *
- * **One field, so the sentence has to agree with itself about number.** It
- * used to say "are recognised" of a single one, which read as a list where
- * there was none; whose gap that half is, and that the whole of the longest
- * form fits, is `plan_gaps_test.c`'s.
+ * A field the device cannot take is named for the device, and the offload
+ * beside it, which it can, is not -- an operator who set `gro` should not be
+ * told their configuration is ignored. Until 10.917 `wol` was named as
+ * netcfgd's own gap; now it is applied, and what is left is the device's.
  */
 static void only_the_unapplied_ethtool_fields_are_named(void)
 {
@@ -236,10 +232,10 @@ static void only_the_unapplied_ethtool_fields_are_named(void)
 	    "\"links\":[" PLANFIX_LINK("eth0", ",\"offloads\":[]") "]", &document, &observed);
 
 	check(plan && planfix_warned(plan,
-	    "`wol` in the `ethtool` block is recognised and applied by nothing: it can"),
-	    "a field that needs a physical NIC is named, in the singular it was written in");
-	check(plan && !planfix_warned(plan, "`gro`"),
-	    "and the offload beside it, which is applied, is not");
+	    "eth0 reports no wake-on-LAN modes, so `wol = \"g\"` is not asked for"),
+	    "a field the device cannot take is named for the device");
+	check(plan && !planfix_warned(plan, "`gro`") && !planfix_warned(plan, "applied by nothing"),
+	    "and neither the offload beside it nor netcfgd's own gap is");
 	planfix_release(plan, document, observed);
 
 	plan = one(ETHTOOL_DEVICE("\"gro\":\"on\""),
