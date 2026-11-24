@@ -1480,6 +1480,7 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	out->dot1x_private_key = from_c(found.dot1x_private_key);
 	out->dot1x_password = from_c(found.dot1x_password);
 	out->ipv6_token = from_c(found.ipv6_token);
+	out->zone = from_c(found.zone);
 	out->guard = from_c(found.guard);
 	out->advertise = found.advertise != 0;
 	out->advertise_backend = from_c(found.advertise_backend);

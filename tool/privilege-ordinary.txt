@@ -258,3 +258,9 @@ match
 # A bridge port's isolation (10.912): which of a bridge's ports reach each
 # other, a property of the network.
 isolated
+#
+# Zones (10.927): the estate's purposes and what each reaches, and which zone
+# a link is in -- which forwarded traffic the firewall lets through, as its
+# rules are.
+zone
+reach

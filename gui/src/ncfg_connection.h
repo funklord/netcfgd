@@ -637,6 +637,7 @@ struct ncfg_interface_config {
 	};
 	QList<forward> port_forwards;
 	QString ipv6_token;
+	QString zone;
 	QString guard;
 	/* Wired 802.1X (0008), as a network's: references and certificates as
 	 * the language writes them. */

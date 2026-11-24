@@ -2128,7 +2128,9 @@ static const ncfg_field_t interface_fields[] = {
 	{ .name = "preference", .kind = NCFG_F_OPT_INT, R_U32,
 	    .offset = offsetof(ncfg_interface_t, preference) },
 	{ .name = "probe", .kind = NCFG_F_OPT_STRUCT, .type = &probe_type,
-	    .element_size = sizeof(ncfg_probe_policy_t), .offset = offsetof(ncfg_interface_t, probe) }
+	    .element_size = sizeof(ncfg_probe_policy_t), .offset = offsetof(ncfg_interface_t, probe) },
+	/* Absent where the interface is in no zone (10.927). */
+	{ .name = "zone", .kind = NCFG_F_STR, .offset = offsetof(ncfg_interface_t, zone) }
 };
 static const ncfg_type_t interface_type = TYPE("interface", interface_fields);
 
@@ -2431,6 +2433,14 @@ static const ncfg_field_t host_list_fields[] = {
 	    .count_offset = offsetof(ncfg_host_list_t, mac_count) }
 };
 static const ncfg_type_t host_list_type = TYPE("host list", host_list_fields);
+
+static const ncfg_field_t zone_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_zone_t, name) },
+	{ .name = "reach", .kind = NCFG_F_STR_LIST, .offset = offsetof(ncfg_zone_t, reach),
+	    .count_offset = offsetof(ncfg_zone_t, reach_count) }
+};
+static const ncfg_type_t zone_type = TYPE("zone", zone_fields);
 
 /* ------------------------------------------------------------------------ *
  * Rules, bluetooth devices, linksets
@@ -2983,7 +2993,11 @@ static const ncfg_field_t document_fields[] = {
 	{ .name = "block_lists", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &block_list_type, .element_size = sizeof(ncfg_block_list_t),
 	    .offset = offsetof(ncfg_document_t, block_lists),
-	    .count_offset = offsetof(ncfg_document_t, block_list_count) }
+	    .count_offset = offsetof(ncfg_document_t, block_list_count) },
+	/* Left out when empty (10.927). */
+	{ .name = "zones", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY, .type = &zone_type,
+	    .element_size = sizeof(ncfg_zone_t), .offset = offsetof(ncfg_document_t, zones),
+	    .count_offset = offsetof(ncfg_document_t, zone_count) }
 };
 static const ncfg_type_t document_type = TYPE("document", document_fields);
 

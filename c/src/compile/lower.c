@@ -1043,6 +1043,40 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		} else if (strcmp(head, "preset") == 0) {
 			/* Lowered once every block is read, by `ncfg_lower_presets`. */
 			continue;
+		} else if (strcmp(head, "zone") == 0) {
+			ncfg_zone_t zone;
+			size_t      at;
+			int         repeated = 0;
+
+			if (!ctx.zones_seen) {
+				ctx.zones_seen = 1;
+				ctx.zones_span = block->block->span;
+				ctx.zones_source = block->source;
+			}
+			if (!ncfg_lower_zone(&ctx, block, &zone)) {
+				continue;
+			}
+			for (at = 0; at < ctx.document->zone_count; at++) {
+				repeated = repeated || strcmp(ctx.document->zones[at].name, zone.name) == 0;
+			}
+			if (repeated) {
+				ncfg_diag(&ctx, block->block->span, "zone `%s` is declared twice", zone.name);
+				ncfg_strings_free(zone.reach, zone.reach_count);
+				free(zone.name);
+				continue;
+			}
+			ncfg_record(&ctx, block->source, block->block->span, "zone.%s", zone.name);
+			{
+				ncfg_zone_t *slot = ncfg_push(&ctx, &ctx.document->zones,
+				    &ctx.document->zone_count, sizeof(*slot));
+
+				if (slot) {
+					*slot = zone;
+				} else {
+					ncfg_strings_free(zone.reach, zone.reach_count);
+					free(zone.name);
+				}
+			}
 		} else if (strcmp(head, "firewall") == 0) {
 			firewall_span = block->block->span;
 			firewall_source = block->source;
@@ -1371,6 +1405,9 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		}
 	}
 	/* The presets first: their rules name host lists as written rules do. */
+	/* Zones before presets: 0339's order puts a zone's compiled rules after
+	 * the written ones and before any preset's (10.927). */
+	ncfg_lower_zones(&ctx);
 	ncfg_lower_presets(&ctx, merged);
 	resolve_firewall_host_lists(&ctx, firewall_span, firewall_source);
 	resolve_forward_hosts(&ctx, forwarders, forwarder_count);

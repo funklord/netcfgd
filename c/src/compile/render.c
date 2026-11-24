@@ -1525,8 +1525,10 @@ static void render_firewall_chain(const ncfg_firewall_chain_t *chain, const char
 		ncfg_buf_add_text(body, " }\n");
 	}
 	for (at = 0; at < chain->rule_count; at++) {
-		/* A preset's rule is written in its preset, not here (0341). */
-		if (strchr(chain->rules[at].name, '/') != NULL) {
+		/* A preset's rule is written in its preset, not here (0341), and
+		 * a zone's is compiled from its zones (10.927). */
+		if (strchr(chain->rules[at].name, '/') != NULL ||
+		    strchr(chain->rules[at].name, '>') != NULL) {
 			continue;
 		}
 		render_firewall_rule(&chain->rules[at], body, missing, name);
@@ -1816,6 +1818,9 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	 * order it is used. */
 	for (i = 0; i < document->host_list_count; i++) {
 		ncfg_render_host_list(&document->host_lists[i], overrides, text, missing);
+	}
+	for (i = 0; i < document->zone_count; i++) {
+		ncfg_render_zone(&document->zones[i], overrides, text, missing);
 	}
 	for (i = 0; i < document->dns_record_count; i++) {
 		ncfg_render_dns_record(&document->dns_records[i], overrides, text, missing);

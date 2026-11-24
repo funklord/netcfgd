@@ -1185,6 +1185,28 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 		ncfg_as_u32_opt(ctx, assignment->value, &interface->preference);
 		return;
 	}
+	/* The estate's zone this link is in (10.927); whether one declares it is
+	 * checked once every block is lowered, by `ncfg_lower_zones`. */
+	if (strcmp(key, "zone") == 0) {
+		char *text = ncfg_as_string(ctx, assignment->value);
+
+		if (!text) {
+			return;
+		}
+		if (!ncfg_firewall_slot_name_valid(text)) {
+			ncfg_diag(ctx, assignment->span, "`%s` cannot name a zone", text);
+			free(text);
+			return;
+		}
+		if (!ctx->zones_seen) {
+			ctx->zones_seen = 1;
+			ctx->zones_span = assignment->span;
+			ctx->zones_source = ctx->source;
+		}
+		free(interface->zone);
+		interface->zone = text;
+		return;
+	}
 	if (strcmp(key, "ipv6_token") == 0) {
 		char          *text = ncfg_as_string(ctx, assignment->value);
 		ncfg_address_t address;

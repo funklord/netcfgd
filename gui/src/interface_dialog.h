@@ -137,6 +137,7 @@ private:
 	QTableWidget *dhcp_options;
 	QTableWidget *forwards;
 	QLineEdit   *ipv6_token;
+	QLineEdit   *zone;
 	QLineEdit   *guard;
 	/* Wired 802.1X (10.612): the same keys a network's `wifi` block takes,
 	 * and the password as its reference plus a field to store a new one. */

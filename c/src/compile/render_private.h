@@ -125,6 +125,8 @@ void ncfg_render_block_list(const ncfg_block_list_t *list, const ncfg_overrides_
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 
 /* One `host_list` block (10.591). */
+void ncfg_render_zone(const ncfg_zone_t *zone, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 void ncfg_render_host_list(const ncfg_host_list_t *list, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 

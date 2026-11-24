@@ -2126,6 +2126,103 @@ static void wol_cases(void)
 	    "  and so is `on`, which names no mode");
 }
 
+/* Zones (10.927): the estate's purposes, compiled into this host's forward
+ * chain after the written rules and before the presets, each pair named
+ * `ZONE>REACH:IN>OUT` with its reply; the refusals by name. */
+static void zone_cases(void)
+{
+	static const char firewall[] =
+	    "firewall {\n\tpresets = [\"web\"]\n\tinput { policy = \"accept\" }\n"
+	    "\tforward {\n\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ssh\" { protocol = \"tcp\"; port = 22 }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n"
+	    "preset \"web\" { forward { accept \"http\" { protocol = \"tcp\"; port = 80 } } }\n";
+	char             text[2048];
+	ncfg_document_t *document;
+	const ncfg_firewall_chain_t *forward;
+
+	(void)snprintf(text, sizeof(text), "%s"
+	    "zone \"guest\" { reach = [\"internet\"] }\nzone \"internet\" { reach = [] }\n"
+	    "device g0 { kind = \"dummy\" }\ndevice w0 { kind = \"dummy\" }\n"
+	    "interface g0 { config = \"10.10.0.1/24\"; zone = \"guest\" }\n"
+	    "interface w0 { config = \"10.20.0.1/24\"; zone = \"internet\" }\n", firewall);
+	document = compiles(text, "a guest zone reaching the internet compiles");
+	forward = document && document->firewall ? &document->firewall->forward : NULL;
+	check(forward && forward->rule_count == 4 &&
+	        strcmp(forward->rules[0].name, "ssh") == 0 &&
+	        strcmp(forward->rules[1].name, "guest>internet:g0>w0") == 0 &&
+	        strcmp(forward->rules[2].name, "guest>internet:w0<g0") == 0 &&
+	        strcmp(forward->rules[3].name, "web/http") == 0,
+	    "  the written rule, then the zone's pair and its reply, then the preset's");
+	check(forward && forward->rule_count == 4 && forward->rules[1].state_count == 0 &&
+	        strcmp(forward->rules[1].interface, "g0") == 0 &&
+	        strcmp(forward->rules[1].out_interface, "w0") == 0 &&
+	        forward->rules[2].state_count == 2 && strcmp(forward->rules[2].interface, "w0") == 0,
+	    "  in by the guest link and out by the uplink, and only replies the other way");
+	check(document && document->zone_count == 2, "  and both zones are kept");
+	{
+		char why[NCFG_ERROR_MAX];
+
+		why[0] = '\0';
+		check(document && ncfg_config_round_trips(document, why, sizeof(why)),
+		    "  and the document is written back and reads as itself: the zones, not "
+		    "their compiled rules");
+		if (why[0]) {
+			printf("  why: %s\n", why);
+		}
+	}
+	ncfg_document_free(document);
+
+	(void)snprintf(text, sizeof(text), "%s"
+	    "zone \"guest\" { reach = [\"internet\"] }\nzone \"internet\" { reach = [] }\n", firewall);
+	document = compiles(text, "zones with no interface of this host in them compile");
+	forward = document && document->firewall ? &document->firewall->forward : NULL;
+	check(forward && forward->rule_count == 2, "  and add no rule");
+	ncfg_document_free(document);
+
+	/* Declared backwards, the rules come out in name order all the same, so
+	 * a profile written back -- zones sorted -- compiles the same ruleset. */
+	(void)snprintf(text, sizeof(text), "%s"
+	    "zone \"lan\" { reach = [\"internet\", \"guest\"] }\nzone \"internet\" { reach = [] }\n"
+	    "zone \"guest\" { reach = [\"internet\"] }\n"
+	    "device g0 { kind = \"dummy\" }\ndevice w0 { kind = \"dummy\" }\ndevice l0 { kind = \"dummy\" }\n"
+	    "interface g0 { config = \"10.10.0.1/24\"; zone = \"guest\" }\n"
+	    "interface w0 { config = \"10.20.0.1/24\"; zone = \"internet\" }\n"
+	    "interface l0 { config = \"10.30.0.1/24\"; zone = \"lan\" }\n", firewall);
+	document = compiles(text, "zones declared out of name order compile");
+	forward = document && document->firewall ? &document->firewall->forward : NULL;
+	check(forward && forward->rule_count == 8 &&
+	        strcmp(forward->rules[1].name, "guest>internet:g0>w0") == 0 &&
+	        strcmp(forward->rules[3].name, "lan>guest:l0>g0") == 0 &&
+	        strcmp(forward->rules[5].name, "lan>internet:l0>w0") == 0,
+	    "  into rules in name order, zone then reach");
+	{
+		char why[NCFG_ERROR_MAX];
+
+		why[0] = '\0';
+		check(document && ncfg_config_round_trips(document, why, sizeof(why)),
+		    "  and the document written back compiles the same ruleset");
+		if (why[0]) {
+			printf("  why: %s\n", why);
+		}
+	}
+	ncfg_document_free(document);
+
+	refuses("zone \"guest\" { reach = [\"nowhere\"] }\n", "no `zone \"nowhere\"` block declares it",
+	    "a zone reaching an undeclared zone is refused");
+	refuses("device g0 { kind = \"dummy\" }\n"
+	        "interface g0 { config = \"10.10.0.1/24\"; zone = \"guest\" }\n",
+	    "no `zone \"guest\"` block declares it", "an interface in an undeclared zone is refused");
+	refuses("zone \"guest\" { reach = [] }\ndevice g0 { kind = \"dummy\" }\n"
+	        "interface g0 { config = \"10.10.0.1/24\"; zone = \"guest\" }\n",
+	    "has no `firewall` block", "  and one on a host with no firewall to compile into");
+	(void)snprintf(text, sizeof(text),
+	    "firewall {\n\tinput { policy = \"accept\" }\n\tforward { policy = \"drop\"\n"
+	    "\t\taccept \"a>b\" { protocol = \"tcp\"; port = 22 }\n\t}\n"
+	    "\toutput { policy = \"accept\" }\n}\n");
+	refuses(text, "marks a zone's compiled rule", "a written rule may not wear the zone's `>`");
+}
+
 /* Presets (0341): a used one's rules after the written ones, named
  * `PRESET/RULE`, in the order `presets` names them; the refusals by name. */
 static void firewall_preset_cases(void)
@@ -4590,6 +4687,7 @@ int main(void)
 	firewall_preset_cases();
 	isolated_port_cases();
 	wol_cases();
+	zone_cases();
 	firewall_schedule_cases();
 	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();

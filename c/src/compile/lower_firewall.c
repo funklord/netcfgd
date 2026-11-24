@@ -966,10 +966,12 @@ static int lower_chain(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			/* **A `/` is the preset's mark** (0341): `web/http` is the
 			 * rule `http` from preset `web`, so a written rule may not
 			 * wear one, and a preset's rule is given it here. */
-			if (strchr(rule.name, '/') != NULL) {
+			if (strchr(rule.name, '/') != NULL || strchr(rule.name, '>') != NULL) {
 				ncfg_diag(ctx, item->as.block.span,
-				    "rule `%s` has a `/` in its name, which marks a preset's rule "
-				    "(`PRESET/RULE`)", rule.name);
+				    "rule `%s` has a `%c` in its name, which marks a %s",
+				    rule.name, strchr(rule.name, '/') ? '/' : '>',
+				    strchr(rule.name, '/') ? "preset's rule (`PRESET/RULE`)"
+				                           : "zone's compiled rule (`ZONE>REACH:...`)");
 				rule_free(&rule);
 				continue;
 			}
@@ -1397,4 +1399,242 @@ void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merge
 		}
 	}
 	ctx->document->firewall = firewall;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Zones (0284's layer three, project.md 10.927)
+ * ------------------------------------------------------------------------ */
+
+/* A zone's name: a slot's alphabet, as a preset's is, since it names compiled
+ * rules and travels to every host. */
+static int zone_name_ok(const char *name)
+{
+	return ncfg_firewall_slot_name_valid(name);
+}
+
+/*
+ *     zone "guest" { reach = ["internet"] }
+ *
+ * The estate's: one name, one meaning, on every host. What it may reach is
+ * other zones by name, itself included -- a zone that reaches itself lets its
+ * interfaces forward between them.
+ */
+int ncfg_lower_zone(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, ncfg_zone_t *out)
+{
+	const ncfg_ast_block_t *block = merged->block;
+	size_t                  i;
+
+	memset(out, 0, sizeof(*out));
+	out->name = ncfg_require_label(ctx, block);
+	if (!out->name) {
+		return 0;
+	}
+	if (!zone_name_ok(out->name)) {
+		ncfg_diag(ctx, block->span,
+		    "`%s` cannot name a zone: a letter, then letters, digits, `-` or `_`, up to %u",
+		    out->name, NCFG_FIREWALL_SLOT_NAME_MAX);
+		free(out->name);
+		out->name = NULL;
+		return 0;
+	}
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t       *item = merged->items[i].item;
+		const ncfg_ast_assignment_t *assignment;
+		ncfg_words_t                 words;
+		size_t                       at;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `zone`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "reach") != 0) {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown zone key `%s`: a zone says which zones it may `reach`",
+			    assignment->key);
+			continue;
+		}
+		if (!ncfg_as_words(ctx, assignment->value, &words)) {
+			ncfg_words_free(&words);
+			continue;
+		}
+		for (at = 0; at < words.count; at++) {
+			size_t seen;
+			int    twice = 0;
+
+			if (!zone_name_ok(words.at[at].text)) {
+				ncfg_diag(ctx, words.at[at].span, "`%s` cannot name a zone",
+				    words.at[at].text);
+				continue;
+			}
+			for (seen = 0; seen < out->reach_count; seen++) {
+				twice = twice || strcmp(out->reach[seen], words.at[at].text) == 0;
+			}
+			if (twice) {
+				ncfg_diag(ctx, words.at[at].span, "zone `%s` reaches `%s` twice", out->name,
+				    words.at[at].text);
+				continue;
+			}
+			(void)ncfg_push_string(ctx, &out->reach, &out->reach_count, words.at[at].text);
+		}
+		ncfg_words_free(&words);
+	}
+	return 1;
+}
+
+static int zone_order(const void *left, const void *right)
+{
+	return strcmp(((const ncfg_zone_t *)left)->name, ((const ncfg_zone_t *)right)->name);
+}
+
+static int text_order(const void *left, const void *right)
+{
+	return strcmp(*(char *const *)left, *(char *const *)right);
+}
+
+static const ncfg_zone_t *zone_named(const ncfg_document_t *document, const char *name)
+{
+	size_t at;
+
+	for (at = 0; at < document->zone_count; at++) {
+		if (strcmp(document->zones[at].name, name) == 0) {
+			return &document->zones[at];
+		}
+	}
+	return NULL;
+}
+
+/* One compiled rule: accept from `in` out of `out`, named `NAME`, and only a
+ * reply where `replies`. */
+static int zone_rule(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *forward, const char *name,
+    const char *in, const char *out, int replies)
+{
+	ncfg_firewall_rule_t rule;
+	ncfg_firewall_rule_t *grown;
+
+	memset(&rule, 0, sizeof(rule));
+	rule.name = strdup(name);
+	rule.action = NCFG_FIREWALL_ACCEPT;
+	rule.interface = strdup(in);
+	rule.out_interface = strdup(out);
+	if (!rule.name || !rule.interface || !rule.out_interface ||
+	    (replies && (!ncfg_push_string(ctx, &rule.states, &rule.state_count, "established") ||
+	        !ncfg_push_string(ctx, &rule.states, &rule.state_count, "related")))) {
+		ncfg_lower_oom(ctx);
+		rule_free(&rule);
+		return 0;
+	}
+	grown = realloc(forward->rules, (forward->rule_count + 1u) * sizeof(*grown));
+	if (!grown) {
+		ncfg_lower_oom(ctx);
+		rule_free(&rule);
+		return 0;
+	}
+	forward->rules = grown;
+	forward->rules[forward->rule_count++] = rule;
+	return 1;
+}
+
+/*
+ * The zones this host's interfaces are in, compiled into its forward chain:
+ * for each zone Z, each zone R it reaches, each of this host's interfaces a in
+ * Z and b in R, an accept from a out of b named `Z>R:a>b`, and the reply's
+ * way back named `Z>R:b<a`, established and related only. After the written
+ * rules and before the presets (0339); a `>` is the zone's mark, as `/` is a
+ * preset's, and a written rule may not wear one.
+ *
+ * A zone or a reach naming no declared zone is refused, and an interface in a
+ * zone on a host with no `firewall` block too: the rules have nowhere to go,
+ * and a zone that silently compiled into nothing would be a guest network
+ * that reaches everything.
+ */
+void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
+{
+	ncfg_document_t *document = ctx ? ctx->document : NULL;
+	size_t           z, r, a, b;
+	int              any = 0;
+
+	if (!document) {
+		return;
+	}
+	ctx->source = ctx->zones_source;
+	/* **In name order, not the order written**: the document keeps zones as a
+	 * set by name, so a profile written back lists them sorted, and rules
+	 * compiled in file order would come back in another order -- a round
+	 * trip that changes the kernel's rule order. */
+	if (document->zone_count > 1u) {
+		qsort(document->zones, document->zone_count, sizeof(*document->zones), zone_order);
+	}
+	for (z = 0; z < document->zone_count; z++) {
+		if (document->zones[z].reach_count > 1u) {
+			qsort(document->zones[z].reach, document->zones[z].reach_count,
+			    sizeof(*document->zones[z].reach), text_order);
+		}
+	}
+	for (z = 0; z < document->zone_count; z++) {
+		for (r = 0; r < document->zones[z].reach_count; r++) {
+			if (!zone_named(document, document->zones[z].reach[r])) {
+				ncfg_diag(ctx, ctx->zones_span,
+				    "zone `%s` reaches `%s`, and no `zone \"%s\"` block declares it",
+				    document->zones[z].name, document->zones[z].reach[r],
+				    document->zones[z].reach[r]);
+			}
+		}
+	}
+	for (a = 0; a < document->interface_count; a++) {
+		const char *zone = document->interfaces[a].zone;
+
+		if (!zone) {
+			continue;
+		}
+		any = 1;
+		if (!zone_named(document, zone)) {
+			ncfg_diag(ctx, ctx->zones_span,
+			    "interface `%s` is in zone `%s`, and no `zone \"%s\"` block declares it",
+			    document->interfaces[a].name, zone, zone);
+		}
+	}
+	if (!any) {
+		return;
+	}
+	if (!document->firewall) {
+		ncfg_diag(ctx, ctx->zones_span,
+		    "this host puts interfaces in zones and has no `firewall` block: a zone "
+		    "compiles into the firewall's forward chain, so it needs one to compile into");
+		return;
+	}
+	for (z = 0; z < document->zone_count; z++) {
+		const ncfg_zone_t *zone = &document->zones[z];
+
+		for (r = 0; r < zone->reach_count; r++) {
+			for (a = 0; a < document->interface_count; a++) {
+				const ncfg_interface_t *in = &document->interfaces[a];
+
+				if (!in->zone || strcmp(in->zone, zone->name) != 0) {
+					continue;
+				}
+				for (b = 0; b < document->interface_count; b++) {
+					const ncfg_interface_t *out = &document->interfaces[b];
+					char                    name[256];
+
+					if (b == a || !out->zone || strcmp(out->zone, zone->reach[r]) != 0) {
+						continue;
+					}
+					(void)snprintf(name, sizeof(name), "%s>%s:%s>%s", zone->name,
+					    zone->reach[r], in->name, out->name);
+					(void)zone_rule(ctx, &document->firewall->forward, name, in->name,
+					    out->name, 0);
+					(void)snprintf(name, sizeof(name), "%s>%s:%s<%s", zone->name,
+					    zone->reach[r], out->name, in->name);
+					(void)zone_rule(ctx, &document->firewall->forward, name, out->name,
+					    in->name, 1);
+				}
+			}
+		}
+	}
 }

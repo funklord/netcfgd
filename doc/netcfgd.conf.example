@@ -619,6 +619,31 @@
 #	}
 #}
 
+# ZONES: the estate's purposes -- guest, iot, trusted -- and what each may
+# reach (0284's layer three). A zone is the estate's: declared once, in a
+# drop-in every host gets (`ncfg config put --at estate`), it means the same
+# on every machine. Each host puts its own interfaces in zones, and compiles
+# them into its firewall's forward chain, after its written rules and before
+# its presets: for a zone and each zone it reaches, one rule per pair of this
+# host's links in them, `guest>internet:lan1>wan0`, and the reply's way back,
+# `guest>internet:wan0<lan1`, which takes replies only. A host with links in
+# zones needs a `firewall` block to compile into; one with none in them is
+# untouched by the zones it was given. With the firewall above:
+#
+#     zone "guest"    { reach = ["internet"] }
+#     zone "trusted"  { reach = ["internet", "guest"] }
+#     zone "internet" { reach = [] }
+#     interface lan1  { config = "192.168.10.1/24"; zone = "guest" }
+#     interface lan0  { config = "192.168.1.1/24";  zone = "trusted" }
+#     interface wan0  { config = "dhcp";            zone = "internet" }
+#
+# A zone may reach itself, which lets its own links forward between them --
+# two LAN ports, or a LAN and its radio, as one trusted network:
+
+#zone "trusted" {
+#	reach = ["trusted"]
+#}
+
 # QUEUEING, which is where bufferbloat is fixed. `cake` with the real
 # upstream bandwidth is the answer for nearly every home connection. It is
 # fair between hosts as well as between flows, so one machine's downloads

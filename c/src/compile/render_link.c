@@ -550,6 +550,11 @@ static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t 
 		ncfg_render_quote(body, interface->ipv6_token);
 		ncfg_buf_add_char(body, '\n');
 	}
+	if (interface->zone) {
+		ncfg_buf_add_text(body, "\tzone = ");
+		ncfg_render_quote(body, interface->zone);
+		ncfg_buf_add_text(body, "\n");
+	}
 	if (interface->clamp_mss) {
 		ncfg_buf_add_text(body, "\tclamp_mss = true\n");
 	}
@@ -1283,6 +1288,30 @@ void ncfg_render_host_list(const ncfg_host_list_t *list, const ncfg_overrides_t 
 			ncfg_buf_add_text(text, ", ");
 		}
 		ncfg_render_quote(text, list->mac[i]);
+	}
+	ncfg_buf_add_text(text, "]\n}\n");
+}
+
+/* A zone (10.927): its name and what it reaches. Its compiled rules are not
+ * written; the firewall's renderer leaves every `>` rule out. */
+void ncfg_render_zone(const ncfg_zone_t *zone, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
+{
+	size_t i;
+
+	if (!ncfg_firewall_slot_name_valid(zone->name)) {
+		ncfg_render_refuse(missing, "zone", zone->name,
+		    "a name a zone cannot have: a letter, then letters, digits, `-` or `_`");
+		return;
+	}
+	ncfg_render_opening(text, "zone", zone->name, overrides);
+	ncfg_render_quote(text, zone->name);
+	ncfg_buf_add_text(text, " {\n\treach = [");
+	for (i = 0; i < zone->reach_count; i++) {
+		if (i) {
+			ncfg_buf_add_text(text, ", ");
+		}
+		ncfg_render_quote(text, zone->reach[i]);
 	}
 	ncfg_buf_add_text(text, "]\n}\n");
 }

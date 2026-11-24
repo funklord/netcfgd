@@ -4196,6 +4196,7 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	}
 	free(config->port_forwards);
 	free(config->ipv6_token);
+	free(config->zone);
 	free(config->guard);
 	free(config->advertise_backend);
 	free(config->advertise_prefixes);
@@ -5587,6 +5588,7 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		}
 	}
 	out->ipv6_token = member_text(doc, found, "ipv6_token");
+	out->zone = member_text(doc, found, "zone");
 	out->guard = member_text(doc, ncfg_json_member(doc, found, "guard"), "reason");
 	out->advertise_lifetime = -1;
 	{

@@ -16,7 +16,7 @@
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
 	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh",
-	"host_list", "dns_record", "block_list", "switch", "preset" };
+	"host_list", "dns_record", "block_list", "switch", "preset", "zone" };
 
 const char *ncfg_block_name(int block)
 {
@@ -106,7 +106,11 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	 * shares -- but its keys are a chain's and a rule's, nested, and the kind
 	 * registry has no numbers for those. Host-private until it does, which
 	 * is the narrow direction this header argues for. */
-	[NCFG_BLOCK_PRESET] = NCFG_SCOPE_HOST_PRIVATE
+	[NCFG_BLOCK_PRESET] = NCFG_SCOPE_HOST_PRIVATE,
+	/* A zone is the estate's by what it is (0284: the distributed,
+	 * purpose-driven layer, 10.927): "guest" means one thing on every host,
+	 * and which of a host's interfaces are in it is that host's, below. */
+	[NCFG_BLOCK_ZONE] = NCFG_SCOPE_ESTATE
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)
@@ -323,6 +327,7 @@ static const struct {
  *     0x0003xxxx  network       0x0006xxxx  linkset
  *                               0x0007xxxx  mesh
  *                               0x0008xxxx  host_list
+ *                               0x0009xxxx  zone
  *
  * `device` and `bluetooth` have no range because they are host-private
  * entire: nothing in them travels, so nothing in them has a number.
@@ -403,6 +408,9 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "dns_options", 0x0002002fu },
 	{ NCFG_BLOCK_INTERFACE, "dns_transport", 0x00020030u },
 	{ NCFG_BLOCK_INTERFACE, "dns_dnssec", 0x00020031u },
+	/* Which zone a link is in travels as its address does: the estate sees
+	 * and manages it, and it means the same on any host (10.927). */
+	{ NCFG_BLOCK_INTERFACE, "zone", 0x00020032u },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the
@@ -498,6 +506,9 @@ static const struct {
 	/* host_list -- its addresses, which travel with the access points that
 	 * name the list (10.591). */
 	{ NCFG_BLOCK_HOST_LIST, "mac", 0x00080001u },
+
+	/* zone -- what it may reach, the whole of it (10.927). */
+	{ NCFG_BLOCK_ZONE, "reach", 0x00090001u },
 
 	/*
 	 * rule -- a policy expression, group-wide entire.

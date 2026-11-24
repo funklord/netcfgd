@@ -216,6 +216,11 @@ static int compare_host_list(const void *left, const void *right)
 	    ((const ncfg_host_list_t *)right)->name);
 }
 
+static int compare_zone(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_zone_t *)left)->name, ((const ncfg_zone_t *)right)->name);
+}
+
 /*
  * Sort a set of strings and drop the repeats, freeing them.
  *
@@ -506,6 +511,12 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 
 	stable_sort(document->host_lists, document->host_list_count,
 	    sizeof(*document->host_lists), compare_host_list);
+	/* Zones are a set by name, and what each reaches a set too (10.927). */
+	stable_sort(document->zones, document->zone_count, sizeof(*document->zones),
+	    compare_zone);
+	for (i = 0; i < document->zone_count; i++) {
+		sort_set(document->zones[i].reach, &document->zones[i].reach_count);
+	}
 	/* DNS records are a set by name (0303); a record's addresses keep the
 	 * order written, which is the order they are answered in. */
 	stable_sort(document->dns_records, document->dns_record_count,

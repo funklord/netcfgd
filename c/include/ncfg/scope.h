@@ -107,6 +107,7 @@ typedef enum {
 	/* A named set of firewall rules a firewall uses (0341). Last, for the
 	 * reason above. */
 	NCFG_BLOCK_PRESET,
+	NCFG_BLOCK_ZONE,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

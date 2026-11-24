@@ -1817,6 +1817,8 @@ typedef struct {
 	/* `ipv6_token` and a guard's reason, each "" where unset (10.612). */
 	char *ipv6_token;
 	char *guard;
+	/* The estate's zone the interface is in, "" where none (10.927). */
+	char *zone;
 	/* Router advertisements (0009): `advertise` set where the block is
 	 * there; `advertise_prefixes` space-joined as the language writes them,
 	 * `@pd:wan0/1`; the backend `auto`, `radvd`, `uradvd` or `odhcpd`; the lifetime

@@ -758,6 +758,42 @@ check "a preset's rules follow the written ones in the kernel" \
 "$ncfg" plan > "$work/plan" 2>&1 || true
 check "and a firewall using a preset is converged" "$(cat "$work/plan")" "nothing to do"
 
+# Zones (10.927): a guest link reaching the uplink and not the LAN, compiled
+# into the forward chain after the written rules, each with its reply rule.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+zone "guest" { reach = ["internet"] }
+zone "internet" { reach = [] }
+zone "lan" { reach = ["internet", "guest"] }
+device zg0 { kind = "dummy" }
+device zw0 { kind = "dummy" }
+device zl0 { kind = "dummy" }
+interface zg0 { config = "10.71.0.1/24"; zone = "guest" }
+interface zw0 { config = "10.72.0.1/24"; zone = "internet" }
+interface zl0 { config = "10.73.0.1/24"; zone = "lan" }
+firewall {
+	input { policy = "accept" }
+	forward {
+		policy = "drop"
+		accept "ssh" { protocol = "tcp"; port = 22 }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+nft list ruleset > "$work/listed" 2>&1 || true
+check "a zone's rules follow the written ones in the kernel" \
+	"$(sed -n '/chain forward {/,/}/p' "$work/listed" | grep -o 'name=[a-z0-9<>:]*' | tr '\n' ' ')" \
+	"name=ssh name=guest>internet:zg0>zw0 name=guest>internet:zw0<zg0 name=lan>guest:zl0>zg0 name=lan>guest:zg0<zl0 name=lan>internet:zl0>zw0 name=lan>internet:zw0<zl0 "
+check "the guest link is let out by the uplink" \
+	"$(grep -c 'iifname "zg0" oifname "zw0" counter packets 0 bytes 0 accept' "$work/listed" || true)" "1"
+check "and the uplink lets only its replies back" \
+	"$(grep -c 'iifname "zw0" oifname "zg0" ct state established,related counter packets 0 bytes 0 accept' "$work/listed" || true)" "1"
+# lan reaches guest, so the guest link answers the LAN -- replies only.
+check "and the guest link reaches into the LAN with replies only" \
+	"$(grep 'iifname "zg0" oifname "zl0"' "$work/listed" | grep -vc 'ct state established,related' || true)" "0"
+"$ncfg" plan > "$work/plan" 2>&1 || true
+check "and a firewall with zones is converged" "$(cat "$work/plan")" "nothing to do"
+
 # Taking the firewall out of the document takes it out of the kernel.
 : > "$work/etc/netcfgd.conf"
 "$ncfg" apply > "$work/apply" 2>&1 || true

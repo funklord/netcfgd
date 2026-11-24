@@ -570,6 +570,12 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	connect(dot1x, &QCheckBox::toggled, this, authenticating);
 	authenticating(false);
 
+	/* The estate's zone this link is in (10.927): a name the estate declares,
+	 * which the compiler checks. */
+	zone = new QLineEdit(this);
+	zone->setObjectName(QStringLiteral("iface_zone"));
+	zone->setPlaceholderText(QStringLiteral("guest -- a zone the estate declares"));
+	form->addRow(QStringLiteral("zone"), zone);
 	ipv6_token = new QLineEdit(this);
 	ipv6_token->setObjectName(QStringLiteral("iface_ipv6_token"));
 	ipv6_token->setPlaceholderText(QStringLiteral("::5 -- the host part of a SLAAC address"));
@@ -733,6 +739,7 @@ void ncfg_interface_dialog::load_existing()
 	advertise_dns->setChecked(existing.advertise_dns);
 	advertise_lifetime->setValue(existing.advertise_lifetime > 0 ? existing.advertise_lifetime : 0);
 	ipv6_token->setText(existing.ipv6_token);
+	zone->setText(existing.zone);
 	guard->setText(existing.guard);
 	dot1x->setChecked(existing.dot1x);
 	{
@@ -1169,6 +1176,9 @@ QString ncfg_interface_dialog::block_text() const
 		}
 		body << QStringLiteral("\t}");
 	}
+	if (!zone->text().trimmed().isEmpty()) {
+		body << QStringLiteral("\tzone = \"%1\"").arg(zone->text().trimmed());
+	}
 	if (!ipv6_token->text().trimmed().isEmpty()) {
 		body << QStringLiteral("\tipv6_token = \"%1\"").arg(ipv6_token->text().trimmed());
 	}
@@ -1258,7 +1268,7 @@ void ncfg_interface_dialog::submit()
 		probe_command, probe_args, dhcp_range, dhcp_dns, dhcp_gateway, dhcp_domain, dhcp_ntp,
 		dhcp_boot_file, dhcp_boot_server, dhcp_tftp_server, dhcp_wpad, dhcp_range6, dhcp_relay,
 		dhcp_block, advertise_prefixes,
-		ipv6_token,
+		ipv6_token, zone,
 		guard, dot1x_identity, dot1x_anonymous_identity, dot1x_phase2, dot1x_ca_cert,
 		dot1x_domain_suffix_match, dot1x_client_cert, dot1x_private_key, dot1x_reference };
 	for (const QLineEdit *value : values) {

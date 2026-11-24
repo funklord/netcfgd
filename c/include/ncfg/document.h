@@ -1704,6 +1704,9 @@ typedef struct ncfg_interface {
 	 */
 	ncfg_optint_t          preference;
 	ncfg_probe_policy_t   *probe;
+	/* The estate's zone this interface is in (0284's layer three, project.md
+	 * 10.927), or NULL. Last, so a document with none is the one it was. */
+	char                  *zone;
 } ncfg_interface_t;
 
 /* ------------------------------------------------------------------------ *
@@ -1883,6 +1886,19 @@ typedef struct {
 	char  **mac;
 	size_t  mac_count;
 } ncfg_host_list_t;
+
+/*
+ * A zone (0284's layer three, project.md 10.927): a purpose the estate names --
+ * "guest", "iot", "trusted" -- and the other zones its traffic may reach. It is
+ * the estate's, declared once and carried to every host as configuration is;
+ * each host puts its own interfaces in zones and compiles what they reach into
+ * forward rules after its written ones and before its presets (0339).
+ */
+typedef struct {
+	char   *name; /* the label, and the sorting key */
+	char  **reach;
+	size_t  reach_count;
+} ncfg_zone_t;
 
 /*
  * A local DNS record (decision 0303): a name the router's forwarders answer
@@ -2916,6 +2932,9 @@ typedef struct {
 	/* After the DNS records, and omitted when empty, for the same reason. */
 	ncfg_block_list_t       *block_lists; /* sorted by name */
 	size_t                   block_list_count;
+	/* After everything else, and omitted when empty (10.927). */
+	ncfg_zone_t             *zones; /* sorted by name */
+	size_t                   zone_count;
 } ncfg_document_t;
 
 /*

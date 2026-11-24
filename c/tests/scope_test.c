@@ -80,7 +80,10 @@ static const struct {
 	{ "switch", NCFG_SCOPE_HOST_PRIVATE },
 	/* A preset's keys are a chain's and a rule's, with no kind numbers yet
 	 * (0341). */
-	{ "preset", NCFG_SCOPE_HOST_PRIVATE }
+	{ "preset", NCFG_SCOPE_HOST_PRIVATE },
+	/* A zone is the estate's purpose -- "guest" means one thing on every
+	 * host -- and which of a host's links are in it is the host's (10.927). */
+	{ "zone", NCFG_SCOPE_ESTATE }
 };
 
 #define EXPECTED_COUNT (sizeof(EXPECTED) / sizeof(EXPECTED[0]))

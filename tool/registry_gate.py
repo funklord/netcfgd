@@ -80,8 +80,10 @@ OWNERS = {
 	"lower_rule.c": {"NCFG_BLOCK_RULE", "NCFG_BLOCK_LINKSET", "NCFG_BLOCK_BLUETOOTH"},
 	# Layer one's firewall (0294). Its keys are read inside the chains rather
 	# than at the top of the block, so every one of them is attributed here
-	# and nowhere else -- no other lowering file may supply a firewall key.
-	"lower_firewall.c": {"NCFG_BLOCK_FIREWALL"},
+	# and nowhere else -- no other lowering file may supply a firewall key. The
+	# zones (10.927) are lowered beside them, since they compile into the
+	# firewall's forward chain.
+	"lower_firewall.c": {"NCFG_BLOCK_FIREWALL", "NCFG_BLOCK_ZONE"},
 	# The value grammar -- addressing words, route words. It defines no keys,
 	# and is listed so that an unlisted file is a gate failure rather than a
 	# silent nothing.

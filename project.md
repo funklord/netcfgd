@@ -7039,6 +7039,66 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.927 Zones: the estate's purposes, compiled on each host (0284's layer three)
+
+0284 settled what a zone is -- the distributed, purpose-driven layer, "guest",
+"iot", "trusted" with reachability stated between them, not a `fw4` or
+firewalld per-interface zone -- and 0339 its place: after the written rules,
+before the presets, written by no controller. It waited as a question for the
+holder, who asked why it was not being built; the register entry is rewritten.
+
+**The grammar.** `zone "guest" { reach = ["internet"] }` at the top level,
+`reach` naming other zones (itself included: a zone reaching itself lets its
+own links forward between them); `interface lan1 { zone = "guest" }`. A zone is
+estate-scoped (`NCFG_SCOPE_ESTATE`; `zone.reach` is kind `0x00090001`,
+`interface.zone` `0x00020032`): declared once, it reaches every host as
+configuration does -- `ncfg config put --at estate` carries a drop-in to the
+whole estate today -- and stays on each host's disk, so a host cut off keeps
+enforcing (0284: never fail open). Which of a host's links are in a zone is
+that host's.
+
+**The compile.** For each zone Z, each zone R it reaches, and each pair of this
+host's links a in Z and b in R: an accept from a out of b named `Z>R:a>b`, and
+the reply's way back, `Z>R:b<a`, established and related only. In name order,
+zone then reach, not file order: the document keeps zones as a set by name, so
+a profile written back lists them sorted, and file-order rules would come back
+reordered. `>` is the zone's mark, as `/` is a preset's, refused in a written
+rule's name; the renderer writes the zones and leaves their rules out. Refused
+by name: a reach or an interface naming an undeclared zone, and links in zones
+on a host with no `firewall` block -- a zone that compiled into nothing would
+be a guest network reaching everything. Zones declared on a host none of whose
+links are in them add nothing.
+
+**What it took beyond the compiler**, each found by a gate: the window's
+interface dialog carries `zone` (`form_coverage_gate`: Save would have deleted
+it), `ncfg profile save` names a base's zones as overrides
+(`override_coverage_gate`), the registry gate knows zones are lowered beside
+the firewall, `zone` and `reach` are ordinary for privilege, and the example
+shows a zone. The undo copy rebuilt from the kernel carries the `>` rules as
+plain rules, so a revert reinstalls the same ruleset.
+
+**Measured.** `lower_test`: the order (written, zone pair and reply, preset),
+the interfaces and states, the round trip, zones declared backwards compiling
+the same, and each refusal. `tests/live/firewall.sh` in a namespace: the rules
+in the kernel in that order, the guest link out by the uplink and only replies
+back, the guest link into the LAN with replies only, and a second plan with
+nothing to do.
+
+**Next, not built:** a zone naming hosts by address (on slots), and the
+per-client cap whose "who" a zone now is (10.911). **The cap's design,
+decided 2026-11-24:** `zone "guest" { client_limit = "5mbit" }`, compiled to
+two drop rules per link of the zone -- out by it, a meter keyed on the
+client's source address; in by it, on its destination -- each counting bytes
+per second over the rate (`over`'s meter, 10.885, with a bytes limit and a
+destination key). **They lead the forward chain, ahead of the written rules**:
+a forward chain almost always opens with `accept established`, which would
+let every download past a cap placed among the zone's rules, and a cap grants
+nothing -- it is a property of the zone's traffic, as a qdisc is, holding
+whatever accepts later. 0339's order is about which layer's permission
+decides; a limit is not a permission. A zone shows where the
+document does -- `ncfg show` -- and its compiled rules by name in `ncfg
+status`'s firewall section.
+
 ## 10.926 netcfgd passes the host's fuzznet product
 
 The holder settled it here (the register, 2026-11-24): consumers on one host
@@ -7114,6 +7174,15 @@ nested directories empty: `c/` built, every dependency file names only the
 root's copies, a second `make` compiled nothing, and `make hull-malta` built
 the MIPS program inside its guest from the copied root copies and passed
 whole.
+
+**10.923 missed the window's own fetch.** Its proof built `c/` alone, so a
+fresh clone's `make -C gui test` stopped at `quirc.h`: nothing in `gui/`
+fetched the root's quirc, monocypher or flog, which used to arrive inside
+fuzznet's recursive fetch, and `phone_pair.pro` still named fuzznet's nested
+quirc through a `$$FUZZNET` variable the search for the literal path missed.
+Fixed by `8296e9f6`, a `vendored` rule beside qtkit's. That commit's `Fixes:`
+trailer names `463ddda4c7f2`, a hash written from memory; the commit it fixes
+is **`463ddda4bff3`**.
 
 ## 10.922 The window shows a link's negotiated speed
 
