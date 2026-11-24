@@ -7038,6 +7038,25 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.920 The router rigs carried netcfgd's program in RAM for nothing
+
+`make hull-armsr` with fuzznet at `1640ff38` (10.919) died in its guest: the
+OOM killer at sysupgrade's `tar` into `/tmp`, then rpcd, uhttpd, netifd and
+dnsmasq, then a panic -- 128 MB, with the root an initramfs in that same RAM.
+**The same rig at the old pin passed, and its console held one OOM kill at
+the same step** (tar, rpcd, survived): the rig sat at its edge either way, and
+the new pin's few hundred kilobytes went over it. Measured in a scratch
+worktree at the old pin, so the comparison is the pin and nothing else.
+
+What the rig had in that RAM that a router does not: **the stripped program
+itself, copied into the overlay's `/payload` only so the host could pack the
+`.apk` from it**, and read by nothing in the guest -- about 2.7 MB beside the
+package and the installed copy, three copies of a program every growth of
+which this guest pays for three times. armsr's and malta's payloads now strip
+and pack from `/work`, outside the overlay; the guest has the package and what
+it installs. **armsr then passed whole at the new pin with no OOM kill at
+all**, and malta whole beside it.
+
 ## 10.919 `ncfg` follows the face fuzznet names beside the socket
 
 10.913 recorded, not built, a non-root `ncfg` on a machine where raidcfgd is

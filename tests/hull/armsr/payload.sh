@@ -41,15 +41,18 @@ say "segments: $(size netcfgd-static | awk 'NR==2 { print "text", $1, "bss", $3 
 # What the guest gets, laid over the stock rootfs.
 top=/overlay
 mkdir -p $top/payload $top/repo/packaging/procd $top/verdict $top/etc
-cp netcfgd-static $top/payload/netcfgd
-"$toolchain/bin/aarch64-openwrt-linux-musl-strip" $top/payload/netcfgd
+# The stripped program is packed from outside the overlay: the guest runs the
+# package's copy, and one left in /payload sat in the guest's RAM unread, about
+# 2.7 MB of a 128 MB machine whose root is already in that RAM (project.md 10.920).
+cp netcfgd-static /work/netcfgd.stripped
+"$toolchain/bin/aarch64-openwrt-linux-musl-strip" /work/netcfgd.stripped
 # The apk-v3 package of 25.12 (10.813), made by the apk-tools the image built,
 # from every file the tool packs: the whole of packaging/ and the example, not a
 # list here that the tool outgrows (it gained three on 2026-11-18, b2a594ab, and
 # this rig made no package from then until it was found, project.md 10.897).
 (cd /work && mkdir -p tool doc && cp /repo/tool/openwrt_apk.sh tool/openwrt_apk.sh &&
 	cp -R /repo/packaging . && cp /repo/doc/netcfgd.conf.example doc/ &&
-	APK=/armsr/apk-tools/build/src/apk sh tool/openwrt_apk.sh $top/payload/netcfgd aarch64_generic \
+	APK=/armsr/apk-tools/build/src/apk sh tool/openwrt_apk.sh /work/netcfgd.stripped aarch64_generic \
 		$top/payload/netcfgd.apk)
 say "package: $(wc -c < $top/payload/netcfgd.apk 2>/dev/null) bytes"
 cp /armsr/module/lib/modules/*/dummy.ko $top/payload/dummy.ko
