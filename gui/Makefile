@@ -56,6 +56,29 @@ QTTY_DIR = ../qtty
 QTKIT_DIR = ../qtkit
 QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
 
+# The root's copies of fuzznet's dependencies that this directory compiles
+# (10.923): quirc, for the phone build and its pairing test, and monocypher and
+# flog, for the phone's node. Fetched as qtkit is, at the commits the gitlinks
+# name. Before 10.923 they arrived inside fuzznet's recursive fetch; with that
+# fetch no longer recursive, a fresh clone had none, and `make -C gui test`
+# stopped at `quirc.h`.
+VENDORED = ../quirc/lib/quirc.h ../monocypher/src/monocypher.c ../flog/flog.h
+.PHONY: vendored
+vendored:
+	@missing=; for f in $(VENDORED); do [ -f "$$f" ] || missing="$$missing $$f"; done; \
+	if [ -z "$$missing" ]; then \
+		:; \
+	elif ! command -v git >/dev/null 2>&1 || ! git -C .. rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "gui:$$missing missing, and there is no git checkout to fetch them from."; \
+		exit 1; \
+	else \
+		echo "gui: fetching quirc, monocypher and flog at the commits this tree pins"; \
+		GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true \
+		timeout 600 git -C .. submodule update --init -- quirc monocypher flog || { \
+			echo "gui:   could not fetch them: no network, or the remote refused."; \
+			exit 1; }; \
+	fi
+
 # qtkit, the theme the window follows a dark desktop with. Unlike qtty it is
 # not optional, so where it cannot be had the build stops and says which of
 # three reasons it is (0273's spelling) rather than building a window that
@@ -170,7 +193,7 @@ run: $(TARGET)
 TEST_PROS = $(wildcard tests/*.pro)
 
 # `ncfg` too, whose node `phone_pair` pairs: a test builds what it needs.
-test: $(CLIENT_LIB)
+test: $(CLIENT_LIB) vendored
 	@$(MAKE) --no-print-directory -C ../c netcfgd ncfg
 	@failed=0; \
 	for pro in $(TEST_PROS); do \
@@ -245,7 +268,7 @@ ANDROID_NODE_CFLAGS = -Os -ffunction-sections -fdata-sections $(FUZZNET_BOUNDS) 
 ANDROID_NODE_SRCS = src/phone/host_main.c ../c/src/node/user_host.c
 ANDROID_NODE_HDRS = ../c/include/ncfg/node.h ../client/ncfg_fuzznet.h
 
-android-node: android-check
+android-node: android-check vendored
 	$(ANDROID_NODE_FUZZNET) daemon-lib
 	@$(MAKE) --no-print-directory $(ANDROID_NODE_LIB)
 
@@ -264,7 +287,7 @@ $(ANDROID_NODE_LIB): $(ANDROID_NODE_SRCS) $(ANDROID_NODE_HDRS) \
 # file to be run, so the libraries are extracted at install, which AGP calls
 # legacy packaging and refuses from the manifest. fuzzypickles' Makefile has the
 # long form of how that was found.
-$(ANDROID_BUILD_DIR)/Makefile: android-check android-node gui.pro
+$(ANDROID_BUILD_DIR)/Makefile: android-check android-node gui.pro | vendored
 	mkdir -p $(ANDROID_BUILD_DIR)
 	cd $(ANDROID_BUILD_DIR) && $(QT_ANDROID_ROOT)/bin/qmake ../gui.pro \
 	        NETCFGD_VERSION=$(VERSION) NETCFGD_VERSION_CODE=$(ANDROID_VERSION_CODE) \

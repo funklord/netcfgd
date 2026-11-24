@@ -14,7 +14,8 @@ QMAKE_CXXFLAGS_RELEASE += -Os
 
 CLIENT_DIR = $$PWD/../../client
 FUZZNET = $$PWD/../../fuzznet
-QUIRC = $$FUZZNET/quirc/lib
+# The root's quirc, not fuzznet's nested copy (project.md 10.923).
+QUIRC = $$PWD/../../quirc/lib
 INCLUDEPATH += $$CLIENT_DIR $$PWD/../src/phone $$QUIRC $$FUZZNET/qr
 LIBS += $$CLIENT_DIR/libncfg_client.a -lm
 PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
