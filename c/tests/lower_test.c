@@ -2267,6 +2267,23 @@ static void zone_cases(void)
 		}
 	}
 	ncfg_document_free(document);
+	/* 10.931: a cap on a zone of hosts, up from its addresses and down to
+	 * them, ahead of everything as a link's is. */
+	(void)snprintf(text, sizeof(text), "%s"
+	    "zone \"kids\" { reach = [] ; hosts = [\"192.0.2.31\", \"192.0.2.30\"]; "
+	    "client_limit = \"2mbit\" }\n", firewall);
+	document = compiles(text, "a zone of hosts capped at 2mbit compiles");
+	forward = document && document->firewall ? &document->firewall->forward : NULL;
+	check(forward && forward->rule_count >= 3 &&
+	        strcmp(forward->rules[0].name, "kids>limit:up:hosts") == 0 &&
+	        strcmp(forward->rules[0].over, "B250000/1s") == 0 &&
+	        forward->rules[0].from_count == 2 && !forward->rules[0].interface &&
+	        strcmp(forward->rules[1].name, "kids>limit:down:hosts") == 0 &&
+	        strcmp(forward->rules[1].over, "B250000/1s@dst") == 0 &&
+	        forward->rules[1].to_count == 2 && strcmp(forward->rules[1].to[0], "192.0.2.30") == 0,
+	    "  up from its addresses and down to them, sorted, first in the chain");
+	ncfg_document_free(document);
+
 	refuses("zone \"printers\" { hosts = [\"not-an-address\"] }\n", "zone `printers`'s host",
 	    "a host that is no address is refused at compile time");
 	document = compiles("zone \"printers\" { hosts = [\"192.0.2.10\"]; reach = [\"printers\"] }\n",

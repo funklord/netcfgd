@@ -136,6 +136,29 @@ check "what a guest client sends is held near 5 Mbit/s" \
 check "and what it receives" \
 	"$([ "$down" -ge 1 ] && [ "$down" -le 6 ] && echo held || echo "$down")" "held"
 
+# 10.931: the same client capped by its address, in a zone of hosts rather
+# than by the link it is on.
+cat > "$work/etc/netcfgd.conf" <<'CONF'
+zone "kids" { reach = ["internet"]; hosts = ["10.81.0.2"]; client_limit = "5mbit" }
+zone "internet" { reach = [] }
+interface zg0 { config = "10.81.0.1/24"; forwarding = true }
+interface zw0 { config = "10.82.0.1/24"; zone = "internet"; forwarding = true }
+firewall {
+	input { policy = "accept" }
+	forward {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+	}
+	output { policy = "accept" }
+}
+CONF
+"$ncfg" apply > "$work/apply" 2>&1 || true
+by_up=$(measure "")
+by_down=$(measure -R)
+echo "  capped by address: up $by_up Mbit/s, down $by_down Mbit/s"
+check "a client in a zone of hosts is held near 5 Mbit/s each way" \
+	"$([ "$by_up" -ge 1 ] && [ "$by_up" -le 6 ] && [ "$by_down" -ge 1 ] && [ "$by_down" -le 6 ] && echo held || echo "$by_up/$by_down")" "held"
+
 write ''
 "$ncfg" apply > "$work/apply" 2>&1 || true
 free_up=$(measure "")

@@ -7050,6 +7050,17 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.931 A zone of hosts is capped too
+
+10.930 left a cap on a zone of hosts unbuilt: `client_limit` keyed on links
+only. Now a zone's hosts are capped as its links are -- `Z>limit:up:hosts`
+from its addresses, `Z>limit:down:hosts` to them, the same per-address meter,
+first in the forward chain. A rule naming addresses is one kernel rule per
+address sharing the meter keyed per address, so each host is held on its own.
+`tests/live/zone_cap.sh` gains the measurement: the same guest client, capped
+by its address in a zone of hosts rather than by its link, **5 Mbit/s up and
+5 down**; `lower_test` holds the two rules, their addresses sorted.
+
 ## 10.930 A zone may name hosts by address
 
 10.927's zones are of links. 0284 also has a zone that names hosts -- a
@@ -7070,8 +7081,8 @@ the moment the estate named a printer. A host with a firewall compiles all of
 them; one with links in zones and no firewall is still refused, as before.
 
 Not built: a zone whose hosts change, which is slots' work (0340) -- `hosts =
-["@slot:NAME"]` would make membership live without a recompile -- and a cap
-on a zone of hosts, which `client_limit` keys on links only.
+["@slot:NAME"]` would make membership live without a recompile. A cap on a
+zone of hosts followed, 10.931.
 
 `lower_test`: a staff link reaching two printers by address, the reply rule,
 the round trip, a host that is no address refused, and a laptop with no

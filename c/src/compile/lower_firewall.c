@@ -1564,8 +1564,10 @@ static const ncfg_zone_t *zone_named(const ncfg_document_t *document, const char
  * the destination, each over `bytes` a second. Put first in the chain by the
  * caller.
  */
+/* With `link` NULL, a zone of hosts (10.931): up from its addresses, down to
+ * them, wherever they are routed. */
 static int zone_cap(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *caps, const char *zone,
-    const char *link, int64_t bytes)
+    const char *link, char *const *hosts, size_t host_count, int64_t bytes)
 {
 	static const char *const ways[2] = { "up", "down" };
 	int                      way;
@@ -1576,18 +1578,30 @@ static int zone_cap(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *caps, const ch
 		char                  name[160];
 		char                  over[48];
 
-		(void)snprintf(name, sizeof(name), "%s>limit:%s:%s", zone, ways[way], link);
+		(void)snprintf(name, sizeof(name), "%s>limit:%s:%s", zone, ways[way],
+		    link ? link : "hosts");
 		(void)snprintf(over, sizeof(over), "B%lld/1s%s", (long long)bytes, way ? "@dst" : "");
 		memset(&rule, 0, sizeof(rule));
 		rule.name = strdup(name);
 		rule.action = NCFG_FIREWALL_DROP;
 		rule.over = strdup(over);
-		if (way == 0) {
+		if (link && way == 0) {
 			rule.interface = strdup(link);
-		} else {
+		} else if (link) {
 			rule.out_interface = strdup(link);
+		} else {
+			size_t at;
+
+			for (at = 0; at < host_count; at++) {
+				if (!ncfg_push_string(ctx, way == 0 ? &rule.from : &rule.to,
+				        way == 0 ? &rule.from_count : &rule.to_count, hosts[at])) {
+					break;
+				}
+			}
 		}
-		if (!rule.name || !rule.over || (way == 0 ? !rule.interface : !rule.out_interface)) {
+		if (!rule.name || !rule.over ||
+		    (link && (way == 0 ? !rule.interface : !rule.out_interface)) ||
+		    (!link && (way == 0 ? rule.from_count : rule.to_count) != host_count)) {
 			ncfg_lower_oom(ctx);
 			rule_free(&rule);
 			return 0;
@@ -1757,8 +1771,13 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 				const ncfg_interface_t *in = &document->interfaces[a];
 
 				if (in->zone && strcmp(in->zone, zone->name) == 0) {
-					(void)zone_cap(ctx, &caps, zone->name, in->name, bits / 8);
+					(void)zone_cap(ctx, &caps, zone->name, in->name, NULL, 0, bits / 8);
 				}
+			}
+			/* And its hosts by address, wherever they are (10.931). */
+			if (zone->host_count) {
+				(void)zone_cap(ctx, &caps, zone->name, NULL, zone->hosts, zone->host_count,
+				    bits / 8);
 			}
 		}
 		if (caps.rule_count) {

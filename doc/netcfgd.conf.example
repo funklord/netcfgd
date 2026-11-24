@@ -637,8 +637,8 @@
 #     interface lan0  { config = "192.168.1.1/24";  zone = "trusted" }
 #     interface wan0  { config = "dhcp";            zone = "internet" }
 #
-# `client_limit = "5mbit"` in a zone holds each address on its links to that
-# rate, each way: what a client sends is metered on its source, what it
+# `client_limit = "5mbit"` in a zone holds each address on its links, and
+# each of its `hosts`, to that rate, each way: what a client sends is metered on its source, what it
 # receives on its destination, and past the rate it is dropped. These rules
 # lead the forward chain, ahead of the written ones -- an `accept established`
 # would otherwise let every download past -- since a cap grants nothing:
