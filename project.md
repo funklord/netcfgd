@@ -7058,6 +7058,16 @@ the next -- the first version compared in the kernel's order and
 test checks an unrelated apply leaves the record untouched, and failed with
 the skip turned off.
 
+**The one other thing under `/var/lib`, read for the same reason:** a block
+list's `file` (0305). It is the configuration's choice, and the GUI and the
+example suggest `/var/lib/netcfgd/block` (`NCFG_BLOCK_LIST_DIR`, which the
+privilege rules treat as ordinary). On OpenWrt a list kept there is gone after
+a reboot until the next `ncfg block fetch`, and the server starts without its
+names, as it does for any list not fetched yet -- ads unblocked, not a LAN
+without DNS. Not changed: a router's configuration can name a `file` under
+`/etc`, and moving the ordinary directory per platform is a change to the
+privilege rule (10.760), not to this.
+
 ## 10.914 The window writes a slot's members
 
 A slot's members could be written only with `ncfg slot`; the firewall tab
