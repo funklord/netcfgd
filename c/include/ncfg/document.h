@@ -1968,6 +1968,19 @@ typedef struct {
 } ncfg_block_list_t;
 
 /*
+ * One of an access point's own passwords (10.935): a name, a passphrase from
+ * the secret store, and the zone a station that joins with it is put in.
+ * Written to hostapd's per-key file as `keyid=NAME`, which hostapd reports
+ * back per station, so the daemon can tell which password each device used.
+ * Sorted by name.
+ */
+typedef struct ncfg_access_point_key {
+	char              *name;
+	ncfg_secret_ref_t  passphrase;
+	char              *zone; /* NULL for none */
+} ncfg_access_point_key_t;
+
+/*
  * An access point netcfgd runs, rather than joins.
  *
  * Bound to a device, unlike a wifi network which deliberately is not: a
@@ -2046,6 +2059,8 @@ typedef struct {
 	 * naming this access point's own radio is skipped, so one list can be
 	 * written for the whole network. Sorted by BSSID; omitted when empty.
 	 */
+	struct ncfg_access_point_key *keys;
+	size_t                 key_count;
 	struct ncfg_neighbour *neighbours;
 	size_t                 neighbour_count;
 	/*

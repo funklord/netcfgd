@@ -496,6 +496,11 @@ static const struct {
 	/* Whether its stations may reach one another (10.648): what a guest
 	 * network is, so the estate's, as `hidden` is. */
 	{ NCFG_BLOCK_ACCESS_POINT, "isolate_stations", 0x00040015u },
+	/* The network's own passwords and the zone each puts a station in
+	 * (10.935): the network's, so every access point of it offers the same
+	 * ones. The passphrase a reference, as `wifi.psk` is. */
+	{ NCFG_BLOCK_ACCESS_POINT, "key.passphrase", 0x00040016u },
+	{ NCFG_BLOCK_ACCESS_POINT, "key.zone", 0x00040017u },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

@@ -7069,6 +7069,66 @@ the host's kernel asks for `(tuning (vm (profile full)))`, which boots it and
 shares its modules the same way. After the change `hull-dhcp-server` and
 `hull-hwsim` pass.
 
+## 10.935 A zone by which password a station used
+
+The rest of 0284's "a device identified by authentication". The access point
+has no 802.1X authenticator -- it offers PSK and SAE (render.c's key
+management arms) -- but per-station passwords need none: hostapd's
+`wpa_psk_file` takes `keyid=NAME` per passphrase, and its STA reply says
+which one a station used.
+
+    access_point "home" {
+        device = "wlan0"
+        wifi { psk = "@secret:home"; proto = "wpa2" }
+        key "kids" { passphrase = "@secret:kids-wifi"; zone = "kids" }
+    }
+
+**Model and compile.** `key "NAME" { passphrase; zone }` in an access point,
+sorted by name; the name a slot's alphabet, since it goes into hostapd's file
+and back out of its replies; the passphrase a reference, as `psk` is (a
+secret leaf for the walk); estate-scoped, as `roaming_key` is, so every
+access point of the network offers the same keys. **WPA2 only**: a key on a
+network offering WPA3 is refused, because a station offered SAE beside the
+keys tries SAE first with the network's one password and fails with its own.
+A key naming an undeclared zone is refused; a zone a key names gets its own
+slot as 10.934's zone of clients does. The renderer refuses what the compiler
+would -- a key name hostapd cannot carry, keys off WPA2, a nameless secret, a
+zone nobody declares -- each of which the mutation suite found as "renders
+and will not recompile" before the refusal was there.
+
+**hostapd.** The configuration names `CTRL_DIR/DEV.psk` as `wpa_psk_file`;
+`ncfg_hostapd_write_keys` writes it first, `keyid=NAME 00:00:00:00:00:00
+PASSPHRASE` a line, 0600, wiped from memory, a passphrase outside 8 to 63
+characters or holding a line break refused without being quoted. hostapd
+reads it once, at its start, so currency compares the file with what the
+store says now and a changed, added or removed key is a restart, as a changed
+passphrase is. The apply's precheck resolves each key before anything runs.
+
+**Into the zone.** The station walk keeps `keyid=` (only a name netcfgd
+could have written), observation keeps `ADDRESS KEYID` per keyed station,
+and each pass's zone sync (10.934) takes as the zone's clients the MACs it
+names plus every station that joined one of this host's access points with
+a key naming it -- from there to addresses through the leases and the
+neighbour table, as before. The window has no field for keys yet; an access
+point with keys is named `unmodelled`, so the dialog will not write it back
+without them.
+
+Measured: `keyid=%s` is a string in /usr/sbin/hostapd 2.10, and in the hull
+vm (`hull-ap-lease`) hostapd's `all_sta` carried `keyid=kids` for the
+station that used it. `hostapd_test`: the file's lines and mode, the
+configuration naming it, a short secret and a missing one refused naming the
+key and not the secret; the `keyid` parse, a name netcfgd could not have
+written dropped. `lower_test`: keys sorted with their zones, the zone's slot,
+rendered back as references, WPA3 / undeclared zone / two of one name / an
+inline passphrase refused. `hull-ap-lease`: a station rejoining with the
+kids' key associates, takes a lease, and its address is in the kids zone's
+slot at the first look; the other station, on the network's own passphrase,
+is not (its re-association after the restart is not itself asserted).
+
+Found on the way: the tier's first daemon is stopped before its isolation
+step on purpose, so a step needing a pass starts its own -- three runs went
+to a sync that had no daemon to run in.
+
 ## 10.934 A zone's clients by MAC, found through leases and the neighbour table
 
 0284's yardstick names "policy whose subject is a client -- a device

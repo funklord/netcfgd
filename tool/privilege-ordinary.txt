@@ -205,6 +205,9 @@ isolate_stations
 mobility_domain
 neighbour_reports
 roaming_key
+# An access point's own passwords (10.935): a reference to the store, as
+# `psk` is, and the zone each puts a station in, as an interface's `zone`.
+passphrase
 wds
 width
 #

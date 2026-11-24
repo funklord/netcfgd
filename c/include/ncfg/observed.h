@@ -1041,6 +1041,13 @@ typedef struct {
 	char                 **associated;
 	size_t                 associated_count;
 	/*
+	 * Of those, each that joined with one of the access point's own keys,
+	 * as `ADDRESS KEYID` (10.935): what puts a station in the key's zone.
+	 * Sorted; left out when empty.
+	 */
+	char                 **keyed;
+	size_t                 keyed_count;
+	/*
 	 * hostapd stopped answering partway through the station walk, so the two
 	 * lists of stations are short rather than complete: what steering is
 	 * planned against, and what a deny list's prefix expands against, may be

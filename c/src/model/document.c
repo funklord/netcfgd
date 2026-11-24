@@ -2323,6 +2323,16 @@ static const ncfg_field_t steering_fields[] = {
 };
 static const ncfg_type_t steering_type = TYPE("steering", steering_fields);
 
+/* 10.935: an access point's own passwords, each a name, a secret and a zone. */
+static const ncfg_field_t access_point_key_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_access_point_key_t, name) },
+	{ .name = "passphrase", .kind = NCFG_F_STRUCT, .flags = NCFG_FF_REQUIRED,
+	    .type = &secret_ref_type, .offset = offsetof(ncfg_access_point_key_t, passphrase) },
+	{ .name = "zone", .kind = NCFG_F_STR, .offset = offsetof(ncfg_access_point_key_t, zone) }
+};
+static const ncfg_type_t access_point_key_type = TYPE("access point key", access_point_key_fields);
+
 static const ncfg_field_t access_point_fields[] = {
 	{ .name = "id", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_access_point_t, id) },
@@ -2358,6 +2368,11 @@ static const ncfg_field_t access_point_fields[] = {
 	/* Omitted when off, so every earlier document is what it was (10.648). */
 	{ .name = "isolate_stations", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_access_point_t, isolate_stations) },
+	/* Omitted when empty, so every earlier document is what it was (10.935). */
+	{ .name = "keys", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &access_point_key_type, .element_size = sizeof(ncfg_access_point_key_t),
+	    .offset = offsetof(ncfg_access_point_t, keys),
+	    .count_offset = offsetof(ncfg_access_point_t, key_count) },
 	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &neighbour_type, .element_size = sizeof(ncfg_neighbour_t),
 	    .offset = offsetof(ncfg_access_point_t, neighbours),

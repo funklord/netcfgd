@@ -64,6 +64,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/dns.h"
 #include "ncfg/document.h"
+#include "ncfg/observed.h"
 #include "ncfg/json_write.h"
 #include "ncfg/plan.h"
 #include "ncfg/secrets.h"
@@ -1041,8 +1042,8 @@ int ncfg_firewall_slot_write(const ncfg_document_t *desired, const char *slot, i
  * the daemon's to run each pass rather than an action. 0, logged per
  * member, where a write failed.
  */
-int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *run,
-    char *err, size_t err_size);
+int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, const char *run, char *err, size_t err_size);
 
 /*
  * Where a slot's members are recorded so a reboot does not empty it (0340):

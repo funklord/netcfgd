@@ -1245,6 +1245,12 @@ static void access_point_free(ncfg_access_point_t *access_point)
 		free(access_point->roaming_key->name);
 		free(access_point->roaming_key);
 	}
+	for (size_t key = 0; key < access_point->key_count; key++) {
+		free(access_point->keys[key].name);
+		free(access_point->keys[key].passphrase.name);
+		free(access_point->keys[key].zone);
+	}
+	free(access_point->keys);
 	ncfg_security_free(&access_point->security);
 	if (access_point->access_control) {
 		access_control_lists_free(access_point->access_control);
@@ -1356,6 +1362,92 @@ static int check_fast_roaming(ncfg_lower_ctx_t *ctx, const ncfg_access_point_t *
  * turns neither on would be steering that does nothing, so it is refused, as
  * is a second one.
  */
+static int key_order(const void *left, const void *right)
+{
+	return strcmp(((const ncfg_access_point_key_t *)left)->name,
+	    ((const ncfg_access_point_key_t *)right)->name);
+}
+
+/*
+ * One `key "NAME" { passphrase = "@secret:..."; zone = "Z" }` (10.935): a
+ * password of the access point's own, by a name hostapd reports per station.
+ * The name is a slot's alphabet, since it goes into hostapd's file as
+ * `keyid=` and back out of its replies; the zone is checked once the zones
+ * are lowered.
+ */
+static void lower_access_point_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_access_point_t *access_point)
+{
+	ncfg_access_point_key_t key;
+	ncfg_access_point_key_t *slot;
+	size_t                   at;
+	int                      have_passphrase = 0;
+
+	memset(&key, 0, sizeof(key));
+	if (!block->label || !ncfg_firewall_slot_name_valid(block->label)) {
+		ncfg_diag(ctx, block->span,
+		    "a key's name is a letter, then letters, digits, - and _, %u at most: `key "
+		    "\"kids\" { ... }`", (unsigned)NCFG_FIREWALL_SLOT_NAME_MAX);
+		return;
+	}
+	for (at = 0; at < access_point->key_count; at++) {
+		if (strcmp(access_point->keys[at].name, block->label) == 0) {
+			ncfg_diag(ctx, block->span, "access point `%s` has two keys named `%s`",
+			    access_point->id, block->label);
+			return;
+		}
+	}
+	for (at = 0; at < block->items.count; at++) {
+		const ncfg_ast_item_t       *item = block->items.at[at];
+		const ncfg_ast_assignment_t *assignment;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `key`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "passphrase") == 0) {
+			ncfg_secret_ref_t secret;
+
+			memset(&secret, 0, sizeof(secret));
+			if (ncfg_as_secret(ctx, assignment->value, &secret)) {
+				free(key.passphrase.name);
+				key.passphrase = secret;
+				have_passphrase = 1;
+			}
+		} else if (strcmp(assignment->key, "zone") == 0) {
+			char *text = ncfg_as_string(ctx, assignment->value);
+
+			if (text) {
+				free(key.zone);
+				key.zone = text;
+			}
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "`%s` is not a key's: one of passphrase, zone", assignment->key);
+		}
+	}
+	if (!have_passphrase) {
+		ncfg_diag(ctx, block->span,
+		    "key `%s` has no passphrase: `passphrase = \"@secret:NAME\"`", block->label);
+		free(key.zone);
+		return;
+	}
+	key.name = ncfg_dup(ctx, block->label);
+	slot = ncfg_push(ctx, &access_point->keys, &access_point->key_count, sizeof(*slot));
+	if (!key.name || !slot) {
+		free(key.name);
+		free(key.passphrase.name);
+		free(key.zone);
+		return;
+	}
+	*slot = key;
+}
+
 static void lower_steering(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
     ncfg_access_point_t *access_point)
 {
@@ -1493,6 +1585,7 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	ncfg_span_t             key_span = block->span;
 	ncfg_span_t             neighbour_span = block->span;
 	ncfg_span_t             steering_span = block->span;
+	ncfg_span_t             keys_span = block->span;
 	ncfg_span_t             width_span = block->span;
 	const char             *why = NULL;
 	int                     security_seen = 0;
@@ -1636,6 +1729,9 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 		} else if (strcmp(item->as.block.head, "neighbour") == 0) {
 			neighbour_span = item->as.block.span;
 			lower_neighbour(ctx, &item->as.block, &access_point);
+		} else if (strcmp(item->as.block.head, "key") == 0) {
+			keys_span = item->as.block.span;
+			lower_access_point_key(ctx, &item->as.block, &access_point);
 		} else if (strcmp(item->as.block.head, "steering") == 0) {
 			steering_span = item->as.block.span;
 			lower_steering(ctx, &item->as.block, &access_point);
@@ -1714,6 +1810,22 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	}
 	if (!check_fast_roaming(ctx, &access_point, roaming_span, domain_span, key_span)) {
 		goto refused;
+	}
+	/* Per-key passwords are WPA2's (10.935): hostapd's key file is read for
+	 * WPA-PSK only, and a station offered SAE beside it would try SAE first,
+	 * with the network's one password, and fail with its own. */
+	if (access_point.key_count && (access_point.security.kind != NCFG_SECURITY_PSK ||
+	        access_point.security.psk.proto != NCFG_PSK_PROTO_WPA2)) {
+		ncfg_diag(ctx, keys_span,
+		    "access point `%s` has keys of its own, which are WPA2's: give its `wifi` "
+		    "block `psk = ...` and `proto = \"wpa2\"`. A station offered WPA3 beside them "
+		    "would try SAE with the network's password and fail with its own key",
+		    access_point.id);
+		goto refused;
+	}
+	if (access_point.key_count > 1u) {
+		qsort(access_point.keys, access_point.key_count, sizeof(*access_point.keys),
+		    key_order);
 	}
 	*out = access_point;
 	return 1;

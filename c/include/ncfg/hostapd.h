@@ -61,6 +61,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "ncfg/buf.h"
 #include "ncfg/document.h"
 #include "ncfg/observed.h"
 #include "ncfg/secrets.h"
@@ -323,6 +324,19 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
  * would leave a list that nothing reads, which is worse than no file: the next
  * person to look would find an ACL and believe it.
  */
+/*
+ * The access point's own passwords, hostapd's `wpa_psk_file` under `dir`
+ * (10.935): `keyid=NAME 00:00:00:00:00:00 PASSPHRASE` a line, 0600. Nothing
+ * where it has none.
+ */
+int ncfg_hostapd_write_keys(const char *dir, const ncfg_access_point_t *access_point,
+    const ncfg_secret_resolver_t *resolver, char *err, size_t err_size);
+/* The file's text, which holds the passphrases: the caller wipes it. */
+int ncfg_hostapd_keys_text(const ncfg_access_point_t *access_point,
+    const ncfg_secret_resolver_t *resolver, ncfg_buf_t *out, char *err, size_t err_size);
+/* `DIR/DEVICE.psk`; 0 where it does not fit. */
+int ncfg_hostapd_keys_path(const char *dir, const char *device, char *out, size_t out_size);
+
 int ncfg_hostapd_write_acl(const char *run, const ncfg_access_point_t *access_point, char *err,
     size_t err_size);
 
@@ -503,6 +517,11 @@ typedef struct {
 	 * (`ext_capab`, hex, least significant octet first), measured on a
 	 * wpa_supplicant station (doc/journal.md 10.595). */
 	int           bss_transition;
+	/* Which of the access point's keys it joined with, by the name the key
+	 * was written under (`keyid=` in hostapd's per-key file, 10.935); ""
+	 * for the network's one passphrase. Only a name netcfgd could have
+	 * written -- a key's name -- is kept. */
+	char          keyid[49];
 } ncfg_hostapd_station_t;
 
 /*

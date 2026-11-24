@@ -1773,6 +1773,24 @@ static int zone_rule_hosts(ncfg_lower_ctx_t *ctx, ncfg_firewall_chain_t *forward
  */
 static void zones_compile(ncfg_lower_ctx_t *ctx);
 
+/* Whether a key of an access point's puts stations in `zone` (10.935). */
+static int key_names(const ncfg_document_t *document, const char *zone)
+{
+	size_t point;
+	size_t key;
+
+	for (point = 0; point < document->access_point_count; point++) {
+		for (key = 0; key < document->access_points[point].key_count; key++) {
+			const char *named = document->access_points[point].keys[key].zone;
+
+			if (named && strcmp(named, zone) == 0) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
 /*
  * A zone with `clients` (10.934) compiles as though its hosts also named its
  * own slot, `@slot:ZONE` -- which the daemon fills from the leases those
@@ -1786,7 +1804,27 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 	size_t          *kept_count = NULL;
 	size_t           z;
 
-	if (!document || !document->zone_count) {
+	if (!document) {
+		zones_compile(ctx);
+		return;
+	}
+	/* A key of an access point's naming a zone (10.935) names one that is
+	 * declared, as an interface's `zone` must. */
+	for (z = 0; z < document->access_point_count; z++) {
+		size_t key;
+
+		for (key = 0; key < document->access_points[z].key_count; key++) {
+			const char *named = document->access_points[z].keys[key].zone;
+
+			if (named && !zone_named(document, named)) {
+				ncfg_diag(ctx, ctx->zones_span,
+				    "access point `%s`'s key `%s` puts stations in zone `%s`, and no "
+				    "`zone \"%s\"` block declares it", document->access_points[z].id,
+				    document->access_points[z].keys[key].name, named, named);
+			}
+		}
+	}
+	if (!document->zone_count) {
 		zones_compile(ctx);
 		return;
 	}
@@ -1810,7 +1848,7 @@ void ncfg_lower_zones(ncfg_lower_ctx_t *ctx)
 
 		kept[z] = zone->hosts;
 		kept_count[z] = zone->host_count;
-		if (!zone->client_count) {
+		if (!zone->client_count && !key_names(document, zone->name)) {
 			continue;
 		}
 		if (zone->host_count > 1u) {

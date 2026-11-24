@@ -609,6 +609,19 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 			ncfg_hostapd_lines_free(out);
 			return 0;
 		}
+		/* The network's own passwords (10.935), in a file of their own beside
+		 * the list's, which `ncfg_hostapd_write_keys` writes first. */
+		if (access_point->key_count) {
+			char keys_file[NCFG_HOSTAPD_PATH_MAX];
+
+			(void)snprintf(keys_file, sizeof(keys_file), "%s/%s.psk", ctrl_dir,
+			    access_point->device ? access_point->device : "");
+			if (!add_line(out, "wpa_psk_file", keys_file, 0)) {
+				ncfg_hostapd_lines_free(out);
+				ncfg_error_set(err, err_size, "out of memory rendering the keys' file");
+				return 0;
+			}
+		}
 		break;
 	case NCFG_SECURITY_OWE:
 		if (!add_line(out, "wpa", "2", 0) || !add_line(out, "wpa_key_mgmt",

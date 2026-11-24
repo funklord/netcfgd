@@ -1770,6 +1770,23 @@ static void refuse_unwritable_strings(const ncfg_document_t *document,
 		}
 		refuse_nameless_secret(missing, "access_point", point->id, "a `roaming_key`",
 		    point->roaming_key);
+		/* Its own keys (10.935): each passphrase a reference with a name, and
+		 * each zone one the document declares, as the compiler insists. */
+		for (size_t key = 0; key < point->key_count; key++) {
+			int declared = 0;
+
+			refuse_nameless_secret(missing, "access_point", point->id,
+			    "a key's `passphrase`", &point->keys[key].passphrase);
+			for (size_t z = 0; point->keys[key].zone && z < document->zone_count; z++) {
+				declared = declared || (document->zones[z].name &&
+				    strcmp(document->zones[z].name, point->keys[key].zone) == 0);
+			}
+			if (point->keys[key].zone && !declared) {
+				ncfg_render_refuse(missing, "access_point", point->id,
+				    "a key putting stations in zone `%s`, which no zone declares",
+				    point->keys[key].zone);
+			}
+		}
 	}
 }
 

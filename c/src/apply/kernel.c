@@ -1025,6 +1025,18 @@ static int ready(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 				}
 				ncfg_secret_free(secret);
 			}
+			/* Each of its own passwords too (10.935), before anything runs. */
+			for (size_t key = 0; key < point->key_count; key++) {
+				why[0] = '\0';
+				secret = ncfg_secret_resolve(service->secrets, &point->keys[key].passphrase,
+				    NULL, why, sizeof(why));
+				if (!secret) {
+					ncfg_error_set(err, err_size, "access point `%s` key `%s`: %s",
+					    point->id ? point->id : "", point->keys[key].name, why);
+					return 0;
+				}
+				ncfg_secret_free(secret);
+			}
 		}
 		return 1;
 	}

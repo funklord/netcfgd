@@ -133,6 +133,53 @@ static int roaming_key_current(const char *text, const ncfg_access_point_t *poin
 }
 
 /*
+ * Whether the keys' file hostapd was started with (10.935) is what the store
+ * says now: 1, 0, or -1 where nothing may be concluded. hostapd reads the
+ * file once, at its start, so a key changed in the store, added or taken out
+ * is a restart, as a changed passphrase is. Compared whole, and both sides
+ * wiped.
+ */
+static int keys_current(const char *run_dir, const ncfg_access_point_t *point,
+    const ncfg_secret_resolver_t *secrets)
+{
+	char       dir[NCFG_HOSTAPD_PATH_MAX];
+	char       path[NCFG_HOSTAPD_PATH_MAX];
+	char       why[NCFG_ERROR_MAX];
+	ncfg_buf_t wanted;
+	char      *started;
+	int        same;
+
+	if (!point->key_count) {
+		return 1;
+	}
+	if (!ncfg_hostapd_ctrl_dir(run_dir, dir, sizeof(dir), NULL, 0) ||
+	    !ncfg_hostapd_keys_path(dir, point->device, path, sizeof(path))) {
+		return -1;
+	}
+	started = observe_read_generated(path);
+	if (!started) {
+		return 0; /* keys wanted and no file: started before they were added */
+	}
+	ncfg_buf_init(&wanted, 0);
+	if (!ncfg_hostapd_keys_text(point, secrets, &wanted, why, sizeof(why))) {
+		if (wanted.data) {
+			explicit_bzero(wanted.data, wanted.length);
+		}
+		ncfg_buf_free(&wanted);
+		explicit_bzero(started, strlen(started));
+		free(started);
+		return -1;
+	}
+	same = wanted.length == strlen(started) &&
+	    memcmp(wanted.data, started, wanted.length) == 0;
+	explicit_bzero(wanted.data, wanted.length);
+	ncfg_buf_free(&wanted);
+	explicit_bzero(started, strlen(started));
+	free(started);
+	return same;
+}
+
+/*
  * Whether the passphrase hostapd was started with is the one the store holds,
  * and its `roaming_key` with it: both are secrets it read once.
  *
@@ -187,7 +234,8 @@ static void access_point_currency(ncfg_observed_backend_t *backend, const char *
 		return;
 	}
 	backend->secret_matches.has = 1;
-	backend->secret_matches.value = strcmp(started, ncfg_secret_expose(wanted)) == 0 && key != 0;
+	backend->secret_matches.value = strcmp(started, ncfg_secret_expose(wanted)) == 0 && key != 0 &&
+	    keys_current(run_dir, point, secrets) != 0;
 	/* Both sides wiped before returning, which is `secrets.h`'s discipline: the
 	 * buffer is netcfgd's until the last instant, and clearing it shortens the
 	 * window in which a core dump or a later allocation carries a passphrase. */

@@ -675,6 +675,20 @@
 # slot is the zone's: a member written into it by hand is taken out again
 # (10.934).
 #
+# Or by which password a device joined with: an access point may have keys
+# of its own beside its one passphrase (10.935) --
+#
+#     access_point "home" {
+#         device = "wlan0"
+#         wifi { psk = "@secret:home"; proto = "wpa2" }
+#         key "kids" { passphrase = "@secret:kids-wifi" }
+#     }
+#
+# -- and a key's `zone = "kids"` puts each station that joins with it in
+# that zone: hostapd says per station which key it used, and the daemon
+# puts that station's MAC among the zone's clients. Keys are WPA2's: a station
+# offered WPA3 beside them would try SAE with the network's password.
+#
 # A zone may reach itself, which lets its own links forward between them --
 # two LAN ports, or a LAN and its radio, as one trusted network:
 

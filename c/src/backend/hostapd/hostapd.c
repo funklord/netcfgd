@@ -129,6 +129,84 @@ int ncfg_hostapd_write_acl(const char *run, const ncfg_access_point_t *access_po
 	return ok;
 }
 
+/*
+ * The text of the access point's own passwords' file (10.935): hostapd's
+ * `wpa_psk_file`, one `keyid=NAME 00:00:00:00:00:00 PASSPHRASE` a line --
+ * any station may use any of them, and says which as `keyid=`. Into `out`,
+ * which the caller wipes and frees: it holds the passphrases.
+ */
+int ncfg_hostapd_keys_text(const ncfg_access_point_t *access_point,
+    const ncfg_secret_resolver_t *resolver, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	size_t at;
+
+	for (at = 0; at < access_point->key_count; at++) {
+		const ncfg_access_point_key_t *key = &access_point->keys[at];
+		char                           said[NCFG_ERROR_MAX];
+		ncfg_secret_t                 *secret;
+		const char                    *value;
+		size_t                         length;
+
+		said[0] = '\0';
+		secret = ncfg_secret_resolve(resolver, &key->passphrase, NULL, said, sizeof(said));
+		if (!secret) {
+			ncfg_error_set(err, err_size, "`%s` key `%s`: %s",
+			    access_point->id ? access_point->id : "", key->name, said);
+			return 0;
+		}
+		value = ncfg_secret_expose(secret);
+		length = strlen(value);
+		/* WPA's passphrase is 8 to 63 characters, and a line of this file
+		 * ends at a newline: refused rather than written as one hostapd would
+		 * read as something else. */
+		if (length < 8u || length > 63u || strpbrk(value, "\r\n") != NULL) {
+			ncfg_secret_free(secret);
+			ncfg_error_set(err, err_size,
+			    "`%s` key `%s`: a WPA passphrase is 8 to 63 characters on one line",
+			    access_point->id ? access_point->id : "", key->name);
+			return 0;
+		}
+		ncfg_buf_addf(out, "keyid=%s 00:00:00:00:00:00 %s\n", key->name, value);
+		ncfg_secret_free(secret);
+	}
+	if (ncfg_buf_failed(out)) {
+		ncfg_error_set(err, err_size, "out of memory writing the keys' file");
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_hostapd_keys_path(const char *dir, const char *device, char *out, size_t out_size)
+{
+	return (size_t)snprintf(out, out_size, "%s/%s.psk", dir, device ? device : "") < out_size;
+}
+
+/* That text, written 0600 under `dir` before the configuration naming it. */
+int ncfg_hostapd_write_keys(const char *dir, const ncfg_access_point_t *access_point,
+    const ncfg_secret_resolver_t *resolver, char *err, size_t err_size)
+{
+	char       path[NCFG_HOSTAPD_PATH_MAX];
+	ncfg_buf_t text;
+	int        ok;
+
+	if (!access_point->key_count) {
+		return 1;
+	}
+	if (!ncfg_hostapd_keys_path(dir, access_point->device, path, sizeof(path))) {
+		ncfg_error_set(err, err_size, "the keys' file's path is too long");
+		return 0;
+	}
+	ncfg_buf_init(&text, 0);
+	ok = ncfg_hostapd_keys_text(access_point, resolver, &text, err, err_size) &&
+	    ncfg_backend_write_file(path, (const char *)text.data, text.length, 0600, err,
+	        err_size);
+	if (text.data) {
+		explicit_bzero(text.data, text.length);
+	}
+	ncfg_buf_free(&text);
+	return ok;
+}
+
 int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access_point,
     const ncfg_hostapd_local_t *local, const ncfg_secret_resolver_t *resolver, char *path_out,
     size_t path_size, char *err, size_t err_size)
@@ -201,7 +279,8 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
 	 * would take the access point down rather than leave the list unenforced.
 	 * Written even for an empty list, for the same reason: an empty file is the
 	 * statement "nobody is denied", and a missing one is a failure. */
-	if (!ncfg_hostapd_write_acl(run, access_point, err, err_size)) {
+	if (!ncfg_hostapd_write_acl(run, access_point, err, err_size) ||
+	    !ncfg_hostapd_write_keys(dir, access_point, resolver, err, err_size)) {
 		ncfg_hostapd_lines_free(&lines);
 		ncfg_secret_free(passphrase);
 		return 0;

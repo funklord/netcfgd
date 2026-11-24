@@ -1401,8 +1401,8 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 	if (loop->state->desired && loop->state->desired->zone_count) {
 		char why[NCFG_ERROR_MAX];
 
-		(void)ncfg_firewall_zone_clients_sync(loop->state->desired, loop->state->paths.run,
-		    why, sizeof(why));
+		(void)ncfg_firewall_zone_clients_sync(loop->state->desired, loop->state->observed,
+		    loop->state->paths.run, why, sizeof(why));
 	}
 	memset(&options, 0, sizeof(options));
 	for (pending = 0; pending < ncfg_sims_pending_count(loop->sims) &&

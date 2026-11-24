@@ -1203,6 +1203,32 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	ncfg_buf_add_text(&body, "\twifi {\n");
 	render_security(&point->security, &body);
 	ncfg_buf_add_text(&body, "\t}\n");
+	/* The network's own passwords (10.935), as references -- refused where the
+	 * compiler would refuse them: a name hostapd's file cannot carry, or keys
+	 * on a network that is not WPA2's alone. */
+	if (point->key_count && (point->security.kind != NCFG_SECURITY_PSK ||
+	        point->security.psk.proto != NCFG_PSK_PROTO_WPA2)) {
+		ncfg_render_refuse(missing, "access_point", point->id,
+		    "keys of its own on a network that is not WPA2's alone");
+	}
+	for (size_t key = 0; key < point->key_count; key++) {
+		if (!ncfg_firewall_slot_name_valid(point->keys[key].name)) {
+			ncfg_render_refuse(missing, "access_point", point->id, "a key named `%s`",
+			    point->keys[key].name ? point->keys[key].name : "");
+			continue;
+		}
+		ncfg_buf_add_text(&body, "\tkey ");
+		ncfg_render_quote(&body, point->keys[key].name);
+		ncfg_buf_add_text(&body, " {\n\t\tpassphrase = ");
+		ncfg_render_quote_secret(&body, &point->keys[key].passphrase);
+		ncfg_buf_add_char(&body, '\n');
+		if (point->keys[key].zone) {
+			ncfg_buf_add_text(&body, "\t\tzone = ");
+			ncfg_render_quote(&body, point->keys[key].zone);
+			ncfg_buf_add_char(&body, '\n');
+		}
+		ncfg_buf_add_text(&body, "\t}\n");
+	}
 
 	if (point->access_control) {
 		const ncfg_access_control_t *acl = point->access_control;

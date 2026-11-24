@@ -347,7 +347,7 @@ static int steerable_of(const ncfg_hostapd_station_t *found, size_t found_count,
 
 /* The addresses alone, for the observation, and the steerable ones beside. */
 static int associated_of(ncfg_supplicant_client_t *client, const char *interface, char ***out,
-    size_t *count,
+    size_t *count, char ***keyed, size_t *keyed_count,
     ncfg_observed_steerable_t **steerable, size_t *steerable_count, int *unread)
 {
 	ncfg_hostapd_station_t *found = NULL;
@@ -356,6 +356,8 @@ static int associated_of(ncfg_supplicant_client_t *client, const char *interface
 
 	*out = NULL;
 	*count = 0u;
+	*keyed = NULL;
+	*keyed_count = 0u;
 	*steerable = NULL;
 	*steerable_count = 0u;
 	if (!ncfg_observe_hostapd_stations(client, interface, &found, &found_count, unread)) {
@@ -385,6 +387,32 @@ static int associated_of(ncfg_supplicant_client_t *client, const char *interface
 		}
 	}
 	*count = found_count;
+	/* 10.935: which of them joined with a key of the access point's own. */
+	for (at = 0; at < found_count; at++) {
+		char   pair[18u + 1u + sizeof(found[at].keyid)];
+		char **grown;
+
+		if (!found[at].keyid[0]) {
+			continue;
+		}
+		(void)snprintf(pair, sizeof(pair), "%s %s", found[at].address, found[at].keyid);
+		grown = realloc(*keyed, (*keyed_count + 1u) * sizeof(**keyed));
+		if (!grown || !(grown[*keyed_count] = observe_dup(pair))) {
+			if (grown) {
+				*keyed = grown;
+			}
+			ncfg_hostapd_stations_free(*keyed, *keyed_count);
+			ncfg_hostapd_stations_free(*out, *count);
+			*keyed = NULL;
+			*keyed_count = 0u;
+			*out = NULL;
+			*count = 0u;
+			free(found);
+			return 0;
+		}
+		*keyed = grown;
+		(*keyed_count)++;
+	}
 	free(found);
 	return 1;
 }
@@ -411,6 +439,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		char                          **denied = NULL;
 		char                          **accepted = NULL;
 		char                          **associated = NULL;
+		char                          **keyed = NULL;
+		size_t                          keyed_count = 0;
 		size_t                          denied_count = 0;
 		size_t                          accepted_count = 0;
 		size_t                          associated_count = 0;
@@ -460,11 +490,13 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		 * direction -- nothing is removed on the strength of it, because a
 		 * held entry is kept by the planner whether or not it is associated.
 		 */
-		if (!associated_of(client, backend->interface, &associated, &associated_count,
-		        &steerable,
+		if (!associated_of(client, backend->interface, &associated, &associated_count, &keyed,
+		        &keyed_count, &steerable,
 		        &steerable_count, &unread)) {
 			associated = NULL;
 			associated_count = 0;
+			keyed = NULL;
+			keyed_count = 0;
 		}
 		neighbours = NULL;
 		neighbour_count = 0;
@@ -473,6 +505,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			ncfg_hostapd_stations_free(denied, denied_count);
 			ncfg_hostapd_stations_free(accepted, accepted_count);
 			ncfg_hostapd_stations_free(associated, associated_count);
+			ncfg_hostapd_stations_free(keyed, keyed_count);
 			free_neighbours(neighbours, neighbour_count);
 			free_steerable(steerable, steerable_count);
 			ncfg_error_set(err, err_size, "out of memory recording %s's neighbours",
@@ -487,6 +520,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			ncfg_hostapd_stations_free(denied, denied_count);
 			ncfg_hostapd_stations_free(accepted, accepted_count);
 			ncfg_hostapd_stations_free(associated, associated_count);
+			ncfg_hostapd_stations_free(keyed, keyed_count);
 			free_neighbours(neighbours, neighbour_count);
 			free_steerable(steerable, steerable_count);
 			ncfg_error_set(err, err_size,
@@ -500,6 +534,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		lists->accepted_count = accepted_count;
 		lists->associated = associated;
 		lists->associated_count = associated_count;
+		lists->keyed = keyed;
+		lists->keyed_count = keyed_count;
 		lists->neighbours = neighbours;
 		lists->neighbour_count = neighbour_count;
 		lists->steerable = steerable;

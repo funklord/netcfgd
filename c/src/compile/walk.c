@@ -68,7 +68,7 @@ static const char *const CREDENTIAL_LEAVES[] = { "ca_cert", "client_cert", "priv
  * under-matching here would cost the key itself.
  */
 static const char *const SECRET_LEAVES[] = { "psk", "password", "preshared_key",
-	                                       "roaming_key" };
+	                                       "roaming_key", "passphrase" };
 
 /* The one spelling `ncfg_as_secret` accepts, so anything else under one of the
  * keys above is a path. Named here rather than guessed: `lower_value.c`

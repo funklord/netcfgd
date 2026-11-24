@@ -2750,6 +2750,11 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 				}
 			}
 		}
+		/* Its own keys (10.935), which the form has no field for yet: named,
+		 * so the window will not write it back without them. */
+		if (ncfg_json_count(doc, ncfg_json_member(doc, entry, "keys"))) {
+			note_unmodelled(&item->unmodelled, "keys");
+		}
 		if (!item->unmodelled) {
 			item->unmodelled = dup_string("");
 		}

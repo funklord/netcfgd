@@ -2423,6 +2423,69 @@ static void zone_cases(void)
 		ncfg_buf_free(&written);
 	}
 	ncfg_document_free(document);
+	/* 10.935: an access point's own keys, each putting its stations in a
+	 * zone, which then has a slot of its own as a zone of clients does. */
+	{
+		static const char keyed[] =
+		    "device lan0 { kind = \"dummy\" }\n"
+		    "zone \"internet\" { }\n"
+		    "zone \"kids\" { reach = [\"internet\"] }\n"
+		    "interface lan0 { zone = \"internet\" }\n"
+		    "access_point \"home\" {\n\tdevice = \"wlan0\"\n"
+		    "\twifi { psk = \"@secret:home\"\n\tproto = \"wpa2\" }\n"
+		    "\tkey \"kids\" { passphrase = \"@secret:kids-wifi\"; zone = \"kids\" }\n"
+		    "\tkey \"guests\" { passphrase = \"@secret:guests-wifi\" }\n}\n"
+		    "firewall {\n\tinput { policy = \"accept\" }\n"
+		    "\tforward { policy = \"drop\" }\n\toutput { policy = \"accept\" }\n}\n";
+
+		document = compiles(keyed, "an access point with keys of its own compiles");
+		check(document && document->access_point_count == 1u &&
+		    document->access_points[0].key_count == 2u &&
+		    strcmp(document->access_points[0].keys[0].name, "guests") == 0 &&
+		    !document->access_points[0].keys[0].zone &&
+		    strcmp(document->access_points[0].keys[1].zone, "kids") == 0,
+		    "  its keys sorted by name, each with the zone it names");
+		check(document && document->firewall && document->firewall->forward.slot_count == 1u &&
+		    strcmp(document->firewall->forward.slots[0].name, "kids") == 0,
+		    "  and the zone a key names has its slot");
+		{
+			ncfg_buf_t          written;
+			ncfg_unrenderable_t missing;
+			char                message[NCFG_ERROR_MAX];
+			int                 rendered;
+
+			ncfg_buf_init(&written, 0);
+			ncfg_unrenderable_init(&missing);
+			rendered = document && ncfg_render(document, NULL, &written, &missing, message,
+			    sizeof(message));
+			ncfg_buf_add(&written, "", 1u);
+			check(rendered &&
+			    strstr((const char *)written.data, "key \"kids\" {\n\t\tpassphrase = "
+			                                       "\"@secret:kids-wifi\"\n\t\tzone = \"kids\"") &&
+			    strstr((const char *)written.data, "key \"guests\""),
+			    "  rendered back as keys, the passphrase a reference");
+			ncfg_unrenderable_free(&missing);
+			ncfg_buf_free(&written);
+		}
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"home\" {\n\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:home\" }\n"
+	        "\tkey \"kids\" { passphrase = \"@secret:kids-wifi\" }\n}\n",
+	    "which are WPA2's", "  and keys on a network offering WPA3 are refused");
+	refuses("access_point \"home\" {\n\tdevice = \"wlan0\"\n"
+	        "\twifi { psk = \"@secret:home\"\n\tproto = \"wpa2\" }\n"
+	        "\tkey \"kids\" { passphrase = \"@secret:kids-wifi\"; zone = \"kids\" }\n}\n",
+	    "no `zone \"kids\"` block", "  and so is a key naming a zone nobody declares");
+	refuses("access_point \"home\" {\n\tdevice = \"wlan0\"\n"
+	        "\twifi { psk = \"@secret:home\"\n\tproto = \"wpa2\" }\n"
+	        "\tkey \"kids\" { passphrase = \"@secret:a\" }\n"
+	        "\tkey \"kids\" { passphrase = \"@secret:b\" }\n}\n",
+	    "two keys named", "  and two keys of one name");
+	refuses("access_point \"home\" {\n\tdevice = \"wlan0\"\n"
+	        "\twifi { psk = \"@secret:home\"\n\tproto = \"wpa2\" }\n"
+	        "\tkey \"kids\" { passphrase = \"in the clear\" }\n}\n",
+	    "", "  and a passphrase written in the file rather than named");
+
 	refuses("zone \"kids\" { clients = [\"not-a-mac\"] }\n", "zone `kids`'s client",
 	    "  and a client that is not a MAC is refused");
 

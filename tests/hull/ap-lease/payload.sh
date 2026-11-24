@@ -231,8 +231,91 @@ else
 	say "ok   and no longer reaches the other station"
 fi
 
+# A key of the access point's own (10.935): the first station rejoins with
+# the kids' password rather than the network's, hostapd reports which key it
+# used, and the daemon's pass puts its address in the kids zone's slot.
+# Bounded: the rejoin at 30 s, the slot at 20 s.
+printf 'kids-only-1' > "$work/etc/secrets/kids-wifi"
+chmod 600 "$work/etc/secrets/kids-wifi"
+cat > "$work/etc/netcfgd.conf" <<CONF
+device wan0 { kind = "dummy" }
+interface wan0 { config = "10.76.0.1/24"; zone = "internet" }
+interface wlan0 {
+	config = "192.168.4.1/24"
+	dhcp_server {
+		dns = ["192.168.4.1"]
+	}
+}
+
+access_point "home" {
+	device = "wlan0"
+	ssid = "686f6d65"
+	channel = 6
+	wifi { psk = "@secret:home"; proto = "wpa2" }
+	key "kids" { passphrase = "@secret:kids-wifi"; zone = "kids" }
+}
+
+zone "internet" { }
+zone "kids" { reach = ["internet"] }
+firewall {
+	input { policy = "accept" }
+	forward { policy = "drop" }
+	output { policy = "accept" }
+}
+CONF
+"$build/ncfg" apply > "$work/apply-keys.log" 2>&1
+say "ncfg apply rc=$?"
+[ -s "$work/run/hostapd/wlan0.psk" ] || { say "  hostapd was given no keys' file"; failed=1; }
+# A daemon of its own for the pass that keeps the zone (the first was
+# stopped before the isolation step), told not to apply on start.
+"$build/netcfgd" --no-apply-on-start > "$work/daemon-keys.log" 2>&1 &
+keys_daemon=$!
+cat > "$work/sta.conf" <<CONF
+ctrl_interface=$work/sta
+network={
+	ssid="home"
+	psk="kids-only-1"
+	key_mgmt=WPA-PSK
+}
+CONF
+S reconfigure > /dev/null
+n=0
+until S status | grep -q '^wpa_state=COMPLETED' || [ "$n" -gt 300 ]; do
+	sleep 0.1
+	n=$((n + 1))
+done
+keyed_joined=$(S status | sed -n 's/^wpa_state=//p')
+: > "$work/given"
+ip netns exec client timeout 20 dhcpcd -1 -4 -t 15 -h phone --script /payload/hook.sh wlan1 \
+	> "$work/client-keys.log" 2>&1
+keyed=$(sed -n 's/.*address=\(192\.168\.4\.[0-9]*\) .*/\1/p' "$work/given" | head -1)
+n=0
+until nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -qw "${keyed:-none}" ||
+    [ "$n" -gt 40 ]; do
+	sleep 0.5
+	n=$((n + 1))
+done
+in_kids=$(nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -cw "${keyed:-none}")
+say "the station rejoined with the kids' key: ${keyed_joined:-no state}, at '${keyed}';"
+say "  in zone kids's slot after $((n / 2)) s: $in_kids"
+[ "$keyed_joined" = COMPLETED ] || { say "  the station did not join with the kids' key"; failed=1; }
+[ -n "$keyed" ] && [ "$in_kids" = 1 ] ||
+	{ say "  a station that joined with the kids' key is not in the kids zone"; failed=1; }
+# And the other station, which rejoined with the network's own passphrase,
+# is in no zone: it is the key that put the first one there.
+tablet_in=$(nft list set inet netcfgd slot-kids-4 2>/dev/null | grep -cw 192.168.4.51)
+say "  the station on the network's own passphrase, in zone kids's slot: $tablet_in"
+[ "$tablet_in" = 0 ] ||
+	{ say "  a station on the network's own passphrase is in the kids zone"; failed=1; }
+kill "$keys_daemon" 2>/dev/null
+wait "$keys_daemon" 2>/dev/null
+
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -6 >> "$out"
+	sed 's/^/  apply-keys: /' "$work/apply-keys.log" 2>/dev/null | tail -8 >> "$out"
+	hostapd_cli -p "$work/run/hostapd" -i wlan0 all_sta 2>&1 | sed 's/^/  all_sta: /' >> "$out"
+	nft list set inet netcfgd slot-kids-4 2>&1 | sed 's/^/  slot: /' >> "$out"
+	tail -8 "$work/daemon-keys.log" 2>/dev/null | sed 's/^/  daemon-keys: /' >> "$out"
 	sed 's/^/  apply-guest: /' "$work/apply-guest.log" 2>/dev/null | tail -8 >> "$out"
 	ls "$work/run/hostapd" 2>&1 | sed 's/^/  run\/hostapd: /' >> "$out"
 	grep -H '^ap_isolate' "$work/run/hostapd/"*.conf 2>&1 | sed 's/^/  /' >> "$out"

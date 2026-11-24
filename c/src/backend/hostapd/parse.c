@@ -206,7 +206,17 @@ int ncfg_hostapd_parse_station(const char *reply, ncfg_hostapd_station_t *out)
 		}
 		*split = '\0';
 		value = split + 1u;
-		if (strcmp(line, "flags") == 0) {
+		if (strcmp(line, "keyid") == 0) {
+			/* 10.935: the key it used, kept only when it is a name netcfgd
+			 * writes -- a letter, then letters, digits, - and _. */
+			size_t span = strspn(value, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+			                            "0123456789-_");
+
+			if (span == strlen(value) && span > 0u && span < sizeof(out->keyid) &&
+			    isalpha((unsigned char)value[0])) {
+				memcpy(out->keyid, value, span + 1u);
+			}
+		} else if (strcmp(line, "flags") == 0) {
 			/* The flag that separates a station that completed authentication
 			 * from one part way through it. An unauthorized station is
 			 * associated and cannot pass traffic, which is worth showing

@@ -837,8 +837,79 @@ static int neighbour_clients(char *const *clients, size_t client_count, char ***
 	return ok;
 }
 
-int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *run,
-    char *err, size_t err_size)
+/* Whether any access point here has a key naming `zone` (10.935). */
+static int zone_has_keys(const ncfg_document_t *desired, const char *zone)
+{
+	size_t point;
+	size_t key;
+
+	for (point = 0; point < desired->access_point_count; point++) {
+		for (key = 0; key < desired->access_points[point].key_count; key++) {
+			const char *named = desired->access_points[point].keys[key].zone;
+
+			if (named && strcmp(named, zone) == 0) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/*
+ * The stations that joined one of this host's access points with a key that
+ * names `zone` (10.935), as hardware addresses appended to `*out`: from what
+ * the observation read of each, `ADDRESS KEYID`. 0 only for a failed
+ * allocation.
+ */
+static int keyed_clients(const ncfg_document_t *desired, const ncfg_observed_t *observed,
+    const char *zone, char ***out, size_t *count)
+{
+	size_t point;
+	size_t at;
+
+	for (point = 0; observed && point < desired->access_point_count; point++) {
+		const ncfg_access_point_t *ap = &desired->access_points[point];
+
+		for (at = 0; ap->device && at < observed->backend_count; at++) {
+			const ncfg_observed_backend_t *backend = &observed->backends[at];
+			size_t                         one;
+
+			if (!backend->access_control || !backend->interface ||
+			    strcmp(backend->interface, ap->device) != 0) {
+				continue;
+			}
+			for (one = 0; one < backend->access_control->keyed_count; one++) {
+				const char *pair = backend->access_control->keyed[one];
+				const char *space = strchr(pair, ' ');
+				size_t      key;
+				int         ours = 0;
+
+				for (key = 0; space && key < ap->key_count; key++) {
+					ours = ours || (ap->keys[key].zone &&
+					    strcmp(ap->keys[key].zone, zone) == 0 &&
+					    strcmp(ap->keys[key].name, space + 1) == 0);
+				}
+				if (ours) {
+					char **grown = realloc(*out, (*count + 1u) * sizeof(**out));
+
+					if (!grown) {
+						return 0;
+					}
+					*out = grown;
+					(*out)[*count] = strndup(pair, (size_t)(space - pair));
+					if (!(*out)[*count]) {
+						return 0;
+					}
+					(*count)++;
+				}
+			}
+		}
+	}
+	return 1;
+}
+
+int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, const char *run, char *err, size_t err_size)
 {
 	size_t z;
 	int    ok = 1;
@@ -853,14 +924,42 @@ int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *
 		size_t                  at;
 		size_t                  other;
 		int                     partial = 0;
+		char                  **clients = NULL;
+		size_t                  client_count = 0;
+		int                     gathered;
 
-		if (!zone->client_count || !declared_slot(desired, zone->name)) {
+		if (!declared_slot(desired, zone->name)) {
 			continue;
 		}
-		if (!ncfg_dhcp_server_zone_clients(run, desired, zone->clients, zone->client_count,
+		/* The zone's clients: those it names, and those a key of this host's
+		 * access points put in it (10.935). */
+		gathered = keyed_clients(desired, observed, zone->name, &clients, &client_count);
+		for (at = 0; gathered && at < zone->client_count; at++) {
+			char **grown = realloc(clients, (client_count + 1u) * sizeof(*clients));
+
+			gathered = grown != NULL;
+			if (grown) {
+				clients = grown;
+				clients[client_count] = strdup(zone->clients[at]);
+				gathered = clients[client_count] != NULL;
+				client_count += (size_t)gathered;
+			}
+		}
+		if (!client_count && gathered) {
+			/* A zone with no clients and no keyed station: nothing to keep
+			 * unless something is in its slot -- a station that left. Read
+			 * on, so it is taken out. */
+			if (!zone->client_count && !zone_has_keys(desired, zone->name)) {
+				free(clients);
+				continue;
+			}
+		}
+		if (!gathered ||
+		    !ncfg_dhcp_server_zone_clients(run, desired, clients, client_count,
 		        &wanted, &wanted_count, &partial) ||
-		    !neighbour_clients(zone->clients, zone->client_count, &wanted, &wanted_count,
+		    !neighbour_clients(clients, client_count, &wanted, &wanted_count,
 		        &partial)) {
+			free_texts(clients, client_count);
 			free_texts(wanted, wanted_count);
 			ncfg_error_set(err, err_size, "out of memory reading zone `%s`'s leases",
 			    zone->name);
@@ -874,6 +973,7 @@ int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *
 			ncfg_netlink_close(&socket);
 			free(members);
 			free_texts(wanted, wanted_count);
+			free_texts(clients, client_count);
 			ok = 0;
 			continue;
 		}
@@ -934,6 +1034,7 @@ int ncfg_firewall_zone_clients_sync(const ncfg_document_t *desired, const char *
 		}
 		free(members);
 		free_texts(wanted, wanted_count);
+		free_texts(clients, client_count);
 	}
 	if (!ok) {
 		ncfg_error_set(err, err_size, "a zone's clients were not all brought up to date");

@@ -1183,6 +1183,18 @@ static void a_station_reply_is_read(void)
 	check(ncfg_hostapd_parse_station(BARE, &station) && !station.bss_transition,
 	    "  and nor can one that does not say");
 
+	/* 10.935: the key a station joined with, `keyid=` -- a string hostapd
+	 * 2.10 carries (measured in /usr/sbin/hostapd) -- kept only as a name
+	 * netcfgd could have written. */
+	check(ncfg_hostapd_parse_station("aa:bb:cc:dd:ee:ff\nkeyid=kids\n", &station) &&
+	    strcmp(station.keyid, "kids") == 0,
+	    "a station that joined with a named key says which");
+	check(ncfg_hostapd_parse_station("aa:bb:cc:dd:ee:ff\nkeyid=a b;rm\n", &station) &&
+	    station.keyid[0] == '\0',
+	    "  and a keyid that is no name netcfgd writes is not kept");
+	check(ncfg_hostapd_parse_station(BARE, &station) && station.keyid[0] == '\0',
+	    "  and one with none has none");
+
 	/* Both spellings hostapd uses for "no more": an empty reply from a null
 	 * station, and FAIL for an address it does not know. */
 	check(!ncfg_hostapd_parse_station("", &station), "an empty reply is the end of the walk");
@@ -1383,6 +1395,85 @@ static void a_rewritten_configuration_is_still_only_readable_by_root(const char 
 		memset(body, 0, strlen(body));
 	}
 	free(body);
+}
+
+/*
+ * 10.935: the access point's own passwords, in hostapd's per-key file -- one
+ * `keyid=NAME 00:00:00:00:00:00 PASSPHRASE` a line, 0600 -- named by the
+ * configuration; a key whose secret is short or missing refuses the write.
+ */
+static void its_own_keys_go_in_a_file_of_their_own(const char *run)
+{
+	ncfg_access_point_t     point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_access_point_key_t keys[2];
+	ncfg_secret_resolver_t  resolver;
+	char                    secret[512];
+	char                    path[NCFG_HOSTAPD_PATH_MAX];
+	char                    keys_path[NCFG_HOSTAPD_PATH_MAX];
+	char                    dir[NCFG_HOSTAPD_PATH_MAX];
+	char                    message[NCFG_ERROR_MAX];
+	char                   *body;
+
+	memset(&resolver, 0, sizeof(resolver));
+	resolver.secrets_dir = run;
+	(void)testdir_in(run, "guest", secret, sizeof(secret));
+	(void)(testdir_write(secret, CANARY "\n", strlen(CANARY) + 1u) && chmod(secret, 0600) == 0);
+	(void)testdir_in(run, "kids-wifi", secret, sizeof(secret));
+	check(testdir_write(secret, "kids-only-1\n", 12u) && chmod(secret, 0600) == 0,
+	    "a key's secret of this test's own");
+	(void)testdir_in(run, "guests-wifi", secret, sizeof(secret));
+	(void)(testdir_write(secret, "guests-only-2\n", 14u) && chmod(secret, 0600) == 0);
+	memset(keys, 0, sizeof(keys));
+	keys[0].name = (char *)(void *)"guests";
+	keys[0].passphrase.provider = NCFG_SECRET_PROVIDER_FILE;
+	keys[0].passphrase.name = (char *)(void *)"guests-wifi";
+	keys[1].name = (char *)(void *)"kids";
+	keys[1].passphrase.provider = NCFG_SECRET_PROVIDER_FILE;
+	keys[1].passphrase.name = (char *)(void *)"kids-wifi";
+	keys[1].zone = (char *)(void *)"kids";
+	point.keys = keys;
+	point.key_count = 2u;
+
+	message[0] = '\0';
+	check(ncfg_hostapd_write_config(run, &point, NULL, &resolver, path, sizeof(path), message,
+	          sizeof(message)),
+	    "an access point with keys of its own is written");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", kept(message));
+	}
+	(void)ncfg_hostapd_ctrl_dir(run, dir, sizeof(dir), NULL, 0);
+	(void)ncfg_hostapd_keys_path(dir, point.device, keys_path, sizeof(keys_path));
+	body = testdir_read(keys_path, NULL);
+	check(body != NULL && strcmp(body, "keyid=guests 00:00:00:00:00:00 guests-only-2\n"
+	                                   "keyid=kids 00:00:00:00:00:00 kids-only-1\n") == 0,
+	    "  each key a line of hostapd's per-key file, by its name");
+	check(testdir_mode(keys_path) == 0600, "  readable only by root, as the configuration is");
+	if (body) {
+		memset(body, 0, strlen(body));
+	}
+	free(body);
+	body = testdir_read(path, NULL);
+	check(body != NULL && strstr(body, "wpa_psk_file=") != NULL &&
+	        strstr(body, keys_path) != NULL,
+	    "  and the configuration names it");
+	if (body) {
+		memset(body, 0, strlen(body));
+	}
+	free(body);
+
+	(void)testdir_in(run, "kids-wifi", secret, sizeof(secret));
+	(void)(testdir_write(secret, "short\n", 6u) && chmod(secret, 0600) == 0);
+	message[0] = '\0';
+	check(!ncfg_hostapd_write_config(run, &point, NULL, &resolver, path, sizeof(path), message,
+	          sizeof(message)) &&
+	        strstr(message, "8 to 63") != NULL && strstr(message, "short") == NULL,
+	    "a key under 8 characters is refused, and the refusal does not say it");
+	keys[1].passphrase.name = (char *)(void *)"nobody-wrote-this";
+	message[0] = '\0';
+	check(!ncfg_hostapd_write_config(run, &point, NULL, &resolver, path, sizeof(path), message,
+	          sizeof(message)) &&
+	        strstr(message, "key `kids`") != NULL,
+	    "a key whose secret is not there is refused, naming the key");
 }
 
 static void the_access_point_is_told_where_to_record_its_pid(void)
@@ -1641,6 +1732,7 @@ int main(void)
 	a_station_reply_is_read();
 
 	a_rewritten_configuration_is_still_only_readable_by_root(run);
+	its_own_keys_go_in_a_file_of_their_own(run);
 	a_steer_is_recorded_for_the_hour_and_no_longer(run);
 	the_hostapd_build_is_asked_for_802_11ax(run);
 	the_access_point_is_told_where_to_record_its_pid();
