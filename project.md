@@ -7036,6 +7036,28 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.915 On a router, slot records go to flash, and only when they change
+
+0340 records each slot's members so a reboot does not leave a quarantine open,
+under `/var/lib/netcfgd/slot`. **On OpenWrt that is RAM**: base-files links
+`/var` to `tmp` unless the image is built with
+`CONFIG_TARGET_ROOTFS_PERSIST_VAR=y` (read from `package/base-files/Makefile`,
+2026-11-24) -- and OpenWrt routers are the next hardware this tree expects
+(section 10's pick-up list), through the M5 path. The procd script now sets
+`NCFG_SLOT_DIR=/etc/netcfgd/slot`, on the writable overlay. That `/tmp` is a
+tmpfs and `/etc` the flash overlay is OpenWrt's ordinary layout, not read from
+a source here.
+
+**Flash wants fewer writes**, and every apply rewrote every slot's record. A
+record is now written only when its members change: the same addresses, each
+expiry within two seconds (an expiry is worked out again from what is left of
+a member's life, so it moves by a rounding), and the members sorted first,
+since a hash set lists the same members in a different order from one dump to
+the next -- the first version compared in the kernel's order and
+`tests/live/firewall.sh` caught it rewriting an unchanged record. The live
+test checks an unrelated apply leaves the record untouched, and failed with
+the skip turned off.
+
 ## 10.914 The window writes a slot's members
 
 A slot's members could be written only with `ncfg slot`; the firewall tab

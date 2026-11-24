@@ -714,6 +714,14 @@ check "the first apply after it writes the recorded members back" \
 	"$(grep -c '192.0.2.10' "$work/listed" || true)" "1"
 check "less one whose lifetime ran out meanwhile" \
 	"$(grep -c '192.0.2.11' "$work/listed" || true)" "0"
+# An apply that changes something else leaves the record as it was: on a
+# router it is on flash (10.915), and rewriting it every apply wears it.
+recorded=$(stat -c '%y %i' "$work/slot/quarantine" 2>/dev/null || echo none)
+sed -i 's/accept "lan-out" { interface = "lan1" }/accept "lan-out" { interface = "lan2" }/' \
+	"$work/etc/netcfgd.conf"
+"$ncfg" apply > "$work/apply" 2>&1 || true
+check "and an apply changing something else does not write the record again" \
+	"$(stat -c '%y %i' "$work/slot/quarantine" 2>/dev/null || echo none)" "$recorded"
 
 # A slot the document stops declaring takes its members with it.
 sed -i '/slot "quarantine"/d' "$work/etc/netcfgd.conf"

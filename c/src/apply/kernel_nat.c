@@ -171,6 +171,68 @@ static void gather_from_kernel(const char *slot, void *context)
 }
 
 /*
+ * Whether the record at `path` already says what `text` says: the same
+ * addresses in the same order, each expiry within two seconds -- an expiry is
+ * worked out again from what is left, so it moves by a rounding between two
+ * readings of one member. On a router the record is on flash (procd's
+ * `NCFG_SLOT_DIR`, 10.915), and every apply rewriting every record would
+ * wear it for nothing.
+ */
+/* Members in one order whatever order the kernel listed them in: a hash set
+ * lists the same members differently from one dump to the next, and a record
+ * written in that order would differ from itself. */
+static int member_order(const void *left, const void *right)
+{
+	const ncfg_nft_slot_member_t *one = left;
+	const ncfg_nft_slot_member_t *other = right;
+
+	if (one->ipv6 != other->ipv6) {
+		return one->ipv6 - other->ipv6;
+	}
+	return memcmp(one->address, other->address, sizeof(one->address));
+}
+
+static int record_unchanged(const char *path, const char *text)
+{
+	char        old[16384];
+	FILE       *file = fopen(path, "re");
+	size_t      length;
+	const char *a;
+	const char *b;
+
+	if (!file) {
+		return 0;
+	}
+	length = fread(old, 1u, sizeof(old) - 1u, file);
+	(void)fclose(file);
+	if (length == sizeof(old) - 1u) {
+		return 0; /* too long to compare here: written again */
+	}
+	old[length] = '\0';
+	a = old;
+	b = text;
+	while (*a && *b) {
+		char      address_a[64], address_b[64];
+		long long expires_a = 0, expires_b = 0;
+
+		if (sscanf(a, "%63s %lld", address_a, &expires_a) != 2 ||
+		    sscanf(b, "%63s %lld", address_b, &expires_b) != 2 ||
+		    strcmp(address_a, address_b) != 0 || (expires_a == 0) != (expires_b == 0) ||
+		    expires_a - expires_b > 2 || expires_b - expires_a > 2) {
+			return 0;
+		}
+		a = strchr(a, '\n');
+		b = strchr(b, '\n');
+		if (!a || !b) {
+			return !a && !b;
+		}
+		a++;
+		b++;
+	}
+	return !*a && !*b;
+}
+
+/*
  * One slot's record, rewritten from what the kernel holds now (0340): after a
  * live write and after every replacement, so the file is the membership as of
  * the last change netcfgd made. A slot with no members has no file. A record
@@ -205,6 +267,9 @@ static void slot_record(ncfg_netlink_t *socket, const char *slot)
 		free(members);
 		return;
 	}
+	if (count > 1u) {
+		qsort(members, count, sizeof(*members), member_order);
+	}
 	ncfg_buf_init(&text, 0);
 	for (at = 0; at < count; at++) {
 		char address[64];
@@ -219,6 +284,8 @@ static void slot_record(ncfg_netlink_t *socket, const char *slot)
 		ncfg_error_set(why, sizeof(why), "%s: %s", dir, strerror(errno));
 	} else if (ncfg_buf_failed(&text)) {
 		ncfg_error_set(why, sizeof(why), "out of memory");
+	} else if (record_unchanged(path, ncfg_buf_text(&text))) {
+		/* Already says so: nothing written. */
 	} else if (!ncfg_write_atomically(path, text.data, text.length, 0600, why, sizeof(why)) &&
 	    why[0] == '\0') {
 		ncfg_error_set(why, sizeof(why), "the write failed");
