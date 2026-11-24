@@ -2333,7 +2333,7 @@ hull_image = stamp=$(HULL_SPEC_DIR)/$(1).sha256; mkdir -p $(HULL_SPEC_DIR); \
 # it; hull's docker engine would leave the container running with the
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
-hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
+hull: hull-hwsim hull-sandbox hull-resolved hull-openrc hull-natcap hull-wire hull-delegation \
       hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
       hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac \
       hull-upnp hull-openwrt hull-openwrt-select
@@ -3110,6 +3110,23 @@ hull-armsr:
 	sed 's/^/armsr: /' tests/hull/armsr/verdict/armsr; \
 	tail -1 tests/hull/armsr/verdict/armsr | grep -q '^VERDICT ok'
 
+# What netcfgd leaves in systemd-resolved per link, and what each way of taking
+# a setting back does (project.md 10.916): Debian under its own systemd with
+# systemd-resolved. Prints its readings; the verdict is the last line.
+hull-resolved:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/resolved)
+	@$(call hull_image,resolved)
+	@rm -f tests/hull/resolved/verdict/resolved
+	@mkdir -p tests/hull/resolved/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/resolved/hull.conf || true
+	@if [ ! -f tests/hull/resolved/verdict/resolved ]; then \
+		echo "resolved: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	cat tests/hull/resolved/verdict/resolved; \
+	tail -1 tests/hull/resolved/verdict/resolved | grep -q '^VERDICT ok'
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -3247,7 +3264,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-takeover hull-takeover-openrc hull-storage-ring hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-suspend hull-image hull-clean
+.PHONY: apk-tools openwrt-apk hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-ap-lease hull-slaac hull-link-modes hull-rescue hull-takeover hull-takeover-openrc hull-storage-ring hull-upnp hull-openwrt hull-openwrt-select hull-openwrt-ipsec hull-mips hull-malta hull-armsr hull-resolved hull-suspend hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

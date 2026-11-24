@@ -7036,6 +7036,43 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.916 What netcfgd leaves in systemd-resolved, measured
+
+10.908 left resolved's revert gap open for want of a machine running it.
+`make hull-resolved` is that machine: Debian trixie under its own systemd 257
+with systemd-resolved, in a hull vm on the host's kernel, driving `ncfg apply`
+against a dummy link and reading `resolvectl` back. Measuring the gap found
+three more beside it, all in `hand_to_resolved`:
+
+- **The gap itself.** A scope that stopped stating `transport` or `dnssec` left
+  resolved's per-link value. Measured: `resolvectl dnsovertls LINK ""` and
+  `dnssec LINK ""` exit 0 and hand the link back to the global setting, and
+  touch nothing else -- the servers stay. So each is now said on every
+  delivery, `""` where the scope is silent. `revert` also clears them, and the
+  servers with them, which is the moment without servers 10.908 feared.
+- **A cleared list was a question.** `resolvectl dns LINK` with no value prints
+  the link and changes nothing, so a scope that dropped all its servers kept
+  them, and the printout (`Link 1 (lo):`) reached `ncfg apply`'s output.
+  `domain` was skipped outright when empty, so dropped domains stayed too. An
+  empty list is now one `""`, which clears.
+- **An empty globals scope stopped the apply.** The globals scope goes to `lo`,
+  and resolved refuses any per-link setting there (`Unit
+  dbus-org.freedesktop.network1.service not found`, exit 1) where networkd is
+  not running; with the clearing above, a document whose globals said only
+  `mode = "resolved"` failed before any link's scope. A globals scope stating
+  nothing is now skipped. **Still open, and smaller:** a globals scope that
+  does state servers fails the same way without networkd -- resolved's own
+  global servers live in `resolved.conf`, not on a link, and whether netcfgd
+  should write a drop-in there is a design question nobody has asked yet.
+- **A link whose scope left the document was never reverted.** The loop walks
+  desired scopes only, and the record under `<run>/dns/` was never removed, so
+  the planner found it departed on every run. Each recorded link without a
+  scope is now `resolvectl revert`ed and its record removed.
+
+`dns_test` holds the command lines against a stand-in `resolvectl`; the hull
+tier holds what resolved does with them, eleven checks, and its first run
+before the fix failed exactly the gap's.
+
 ## 10.915 On a router, slot records go to flash, and only when they change
 
 0340 records each slot's members so a reboot does not leave a quarantine open,
@@ -7302,7 +7339,8 @@ resolved `""` where a scope states nothing would hand the link back to the
 global setting with no moment lacking servers. Current `resolvectl` turns `""`
 into NULL and calls the Varlink `io.systemd.Resolve.Link` methods instead
 (NEWS, 263), whose handling of NULL, and the versions where either path
-exists, were not read. So it waits on a machine with resolved, still.
+exists, were not read. So it waits on a machine with resolved, still. **Closed by 10.916**, measured
+under systemd 257: `""` hands each back, and the delivery says it every time.
 
 ## 10.907 The fuzzer reaches the firewall's readers
 

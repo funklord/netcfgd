@@ -11,6 +11,7 @@
 #include "ncfg/base.h"
 #include "ncfg/value.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -482,7 +483,7 @@ static int run_resolvectl(const char *program, const char *verb, const char *lin
 	size_t       at;
 	int          ok;
 
-	argv = calloc(value_count + 4u, sizeof(*argv));
+	argv = calloc(value_count + 5u, sizeof(*argv));
 	if (!argv) {
 		ncfg_error_set(err, err_size, "out of memory building a resolvectl command");
 		return 0;
@@ -492,6 +493,19 @@ static int run_resolvectl(const char *program, const char *verb, const char *lin
 	argv[2] = link;
 	for (at = 0u; at < value_count; at++) {
 		argv[3u + at] = values[at];
+	}
+	/*
+	 * **Nothing is one empty value, not none** (project.md 10.916). With no
+	 * value after the link, `resolvectl dns LINK` is a *question*: it prints
+	 * the link's servers -- which reached `ncfg apply`'s output as `Link 1
+	 * (lo):` -- and changes nothing, so a scope that dropped its servers or
+	 * domains kept the old ones. `""` is resolvectl's way to clear, and for
+	 * `dnsovertls` and `dnssec` it hands the link back to the global setting.
+	 * Measured under systemd 257 by `make hull-resolved`.
+	 */
+	if (value_count == 0u) {
+		argv[3u] = "";
+		value_count = 1u;
 	}
 	argv[3u + value_count] = NULL;
 
@@ -564,14 +578,76 @@ static void free_servers(const char **servers, size_t count)
  * documented command is a contract; scraping an interactive tool's display is
  * not.
  */
+/*
+ * **A link netcfgd gave resolved settings and no longer has a scope for** is
+ * reverted, and its record removed (project.md 10.916). A scope that left the
+ * document is never visited by the loop below, so its servers, domains and
+ * TLS setting stayed in resolved for ever; the record under `<run>/dns/` is
+ * how the planner knew it had left, and with it gone the planner stops
+ * asking. A revert, not an empty value, because the link has nothing of
+ * netcfgd's left to keep. A link that has gone is nothing to revert.
+ */
+static void forget_departed(const ncfg_dns_scope_t *scopes, size_t count, const char *run_dir,
+    const char *program)
+{
+	char           dir[DNS_PATH_MAX];
+	DIR           *listing;
+	struct dirent *entry;
+
+	if (!run_dir || !ncfg_backend_join(dir, sizeof(dir), run_dir, "dns", NULL, 0)) {
+		return;
+	}
+	listing = opendir(dir);
+	if (!listing) {
+		return;
+	}
+	while ((entry = readdir(listing)) != NULL) {
+		char        name[64];
+		char        path[DNS_PATH_MAX];
+		size_t      length = strlen(entry->d_name);
+		size_t      at;
+		int         still = 0;
+		const char *argv[4];
+		int         exited_ok = 0;
+		int         status = 0;
+		char        said[NCFG_ERROR_MAX];
+
+		if (length <= 5u || strcmp(entry->d_name + length - 5u, ".conf") != 0 ||
+		    length - 5u >= sizeof(name)) {
+			continue;
+		}
+		memcpy(name, entry->d_name, length - 5u);
+		name[length - 5u] = '\0';
+		if (strcmp(name, NCFG_DNS_GLOBAL_SCOPE) == 0) {
+			continue;
+		}
+		for (at = 0u; at < count; at++) {
+			still = still || (scopes[at].name && strcmp(scopes[at].name, name) == 0);
+		}
+		if (still) {
+			continue;
+		}
+		argv[0] = program;
+		argv[1] = "revert";
+		argv[2] = name;
+		argv[3] = NULL;
+		(void)run_with_input(program, argv, NULL, &exited_ok, &status, said, sizeof(said));
+		if (ncfg_backend_path(path, sizeof(path), run_dir, "dns", name, ".conf", NULL, 0)) {
+			(void)unlink(path);
+		}
+	}
+	closedir(listing);
+}
+
 static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const char *program,
-    char *err, size_t err_size)
+    const char *run_dir, char *err, size_t err_size)
 {
 	size_t at;
 
 	if (!program) {
 		program = "resolvectl";
 	}
+	forget_departed(scopes, count, run_dir, program);
 	for (at = 0u; at < count; at++) {
 		const ncfg_dns_policy_t *policy = scopes[at].policy;
 		const char             **servers = NULL;
@@ -587,6 +663,15 @@ static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const 
 		link = (scopes[at].name && strcmp(scopes[at].name, NCFG_DNS_GLOBAL_SCOPE) == 0)
 		    ? "lo"
 		    : scopes[at].name;
+		/* A globals scope that states nothing has nothing to say or to
+		 * clear: resolved refuses a cleared value on the loopback with an
+		 * exit of 1, which stopped the apply before any link's scope
+		 * (project.md 10.916). */
+		if (strcmp(link, "lo") == 0 &&
+		    (!policy || (policy->server_count == 0u && policy->domain_count == 0u &&
+		    policy->search_count == 0u && !policy->transport.has && !policy->dnssec.has))) {
+			continue;
+		}
 
 		if (policy && policy->server_count > 0u) {
 			servers = calloc(policy->server_count, sizeof(*servers));
@@ -613,30 +698,39 @@ static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const 
 			return 0;
 		}
 
-		if (!policy) {
-			continue;
-		}
 		/*
-		 * **Set where the scope states them, and left alone where it does
-		 * not** -- the same bargain `domain` below already has, and the same
-		 * gap: a scope that stops stating one leaves resolved's last per-link
-		 * value until the link is reverted (project.md 10.908).
+		 * **Said every time, and an unstated one handed back to the global
+		 * setting** (project.md 10.916): a scope that stopped stating
+		 * `transport` or `dnssec` used to leave resolved's last per-link
+		 * value in place (10.908's open gap), and a revert to clear it would
+		 * have taken the link's servers away for a moment. An empty value
+		 * resets the one setting and nothing else, measured under systemd 257.
 		 */
-		if (policy->transport.has) {
-			const char *word = policy->transport.value == NCFG_DNS_TRANSPORT_TLS ? "yes" : "no";
+		{
+			const char *word = "";
 
+			if (policy && policy->transport.has) {
+				word = policy->transport.value == NCFG_DNS_TRANSPORT_TLS ? "yes" : "no";
+			}
 			if (!run_resolvectl(program, "dnsovertls", link, &word, 1u, err, err_size)) {
 				return 0;
 			}
-		}
-		if (policy->dnssec.has) {
-			const char *word = policy->dnssec.value == NCFG_DNSSEC_YES ? "yes"
-			    : policy->dnssec.value == NCFG_DNSSEC_ALLOW               ? "allow-downgrade"
-			                                                             : "no";
-
+			word = "";
+			if (policy && policy->dnssec.has) {
+				word = policy->dnssec.value == NCFG_DNSSEC_YES ? "yes"
+				    : policy->dnssec.value == NCFG_DNSSEC_ALLOW ? "allow-downgrade"
+				                                                : "no";
+			}
 			if (!run_resolvectl(program, "dnssec", link, &word, 1u, err, err_size)) {
 				return 0;
 			}
+		}
+		if (!policy) {
+			/* No domains to state, and the old ones cleared. */
+			if (!run_resolvectl(program, "domain", link, NULL, 0u, err, err_size)) {
+				return 0;
+			}
+			continue;
 		}
 		domains = calloc(policy->domain_count + policy->search_count + 1u, sizeof(*domains));
 		if (!domains) {
@@ -666,11 +760,9 @@ static int hand_to_resolved(const ncfg_dns_scope_t *scopes, size_t count, const 
 			}
 			domains[domain_count++] = one;
 		}
-		ok = 1;
-		if (domain_count > 0u) {
-			ok = run_resolvectl(program, "domain", link, (const char *const *)domains,
-			    domain_count, err, err_size);
-		}
+		/* Every time, so a scope that dropped its domains clears them. */
+		ok = run_resolvectl(program, "domain", link, (const char *const *)domains,
+		    domain_count, err, err_size);
 		for (which = 0u; which < domain_count; which++) {
 			free(domains[which]);
 		}
@@ -898,7 +990,8 @@ int ncfg_dns_deliver(const ncfg_dns_scope_t *scopes, size_t count,
 		}
 		break;
 	case NCFG_DNS_MODE_RESOLVED:
-		if (!hand_to_resolved(scopes, count, targets->resolvectl_program, err, err_size)) {
+		if (!hand_to_resolved(scopes, count, targets->resolvectl_program, targets->run_dir,
+		        err, err_size)) {
 			return 0;
 		}
 		break;

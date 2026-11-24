@@ -1068,9 +1068,48 @@ static void resolved_is_told_the_port_the_name_tls_and_dnssec(const char *base)
 	check_text(got,
 	    "dns eth0 192.0.2.53:853#dns.example [2001:db8::53]:853\n"
 	    "dnsovertls eth0 yes\n"
-	    "dnssec eth0 allow-downgrade\n",
+	    "dnssec eth0 allow-downgrade\n"
+	    "domain eth0 \n",
 	    "and resolvectl is given the servers, DNS over TLS and dnssec for the link");
 	free(got);
+
+	/* 10.916: a scope that states none of them clears each -- an empty
+	 * value, which resolvectl takes as "clear" or "back to the global
+	 * setting"; with no value at all it only prints the link. */
+	(void)unlink(said);
+	policy = policy_of(NULL, 0u, NULL, 0u);
+	policy.mode.mode = NCFG_DNS_MODE_RESOLVED;
+	message[0] = '\0';
+	check(ncfg_dns_deliver(&scope, 1u, &targets, NULL, NULL, message, sizeof(message)),
+	    "a resolved scope stating nothing is delivered");
+	got = testdir_read(said, NULL);
+	check_text(got,
+	    "dns eth0 \n"
+	    "dnsovertls eth0 \n"
+	    "dnssec eth0 \n"
+	    "domain eth0 \n",
+	    "  and clears the servers, DNS over TLS, dnssec and the domains, each by an empty value");
+	free(got);
+
+	/* 10.916: a link netcfgd recorded a scope for, and the document no
+	 * longer has one for, is reverted and its record removed. */
+	{
+		char record[1100];
+		char dns_dir[1100];
+
+		(void)snprintf(dns_dir, sizeof(dns_dir), "%s/dns", run);
+		(void)snprintf(record, sizeof(record), "%s/dns/eth9.conf", run);
+		check(testdir_write(record, "# scope: eth9\n", 14u), "a record of a scope eth9 had");
+		(void)unlink(said);
+		check(ncfg_dns_deliver(&scope, 1u, &targets, NULL, NULL, message, sizeof(message)),
+		    "a delivery without eth9's scope");
+		got = testdir_read(said, NULL);
+		check(got && strncmp(got, "revert eth9\n", 12) == 0,
+		    "  reverts eth9 in resolved before anything else");
+		check(access(record, F_OK) != 0, "  and removes its record, so it is not departed again");
+		free(got);
+		(void)dns_dir;
+	}
 }
 
 int main(void)
