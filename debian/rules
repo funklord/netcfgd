@@ -30,6 +30,21 @@ TDE_PROFILE := $(filter pkg.netcfgd.tde,$(DEB_BUILD_PROFILES))
 %:
 	dh $@
 
+# The package's own GUI and TDE trees (DEB_BUILD_DIR, from `make deb`), so a
+# second `make deb` compiles nothing and `make` after it does not rebuild a
+# qmake or CMake tree for the change of flags. The C directories are shared
+# with a plain build and keep a record of their flags (the Makefile says why).
+DEB_BUILD_DIR ?= build-deb
+GUI_DEB_DIR = gui/$(DEB_BUILD_DIR)
+TDE_DEB_DIR = adapter/netcfgd-tde/$(DEB_BUILD_DIR)
+
+# Debian's flags are ADDED to the project's. The C directories take CFLAGS
+# whole (`CFLAGS ?= -Os`), so the daemon and the shim went out at dpkg's -O2
+# until -Os came back here, the last -O winning; qmake and fuzznet get them
+# with -O filtered out.
+export DEB_CFLAGS_MAINT_APPEND = -Os
+export DEB_CXXFLAGS_MAINT_APPEND = -Os
+
 override_dh_auto_build:
 	$(MAKE) build
 	$(MAKE) nm
@@ -37,7 +52,7 @@ ifneq (,$(GUI_PROFILE))
 	@# -C gui rather than the root `gui` target, which also runs the GUI test
 	@# suite. dh_auto_test is a no-op here for the same reason: `make check`
 	@# is the gate, and a package build is not the place to discover it.
-	$(MAKE) -C gui
+	$(MAKE) -C gui BUILD_DIR=$(DEB_BUILD_DIR)
 endif
 ifneq (,$(TDE_PROFILE))
 	@# Debian's hardening flags, which nothing else would pass: this build
@@ -55,7 +70,7 @@ ifneq (,$(TDE_PROFILE))
 	@# this machine is the same, tdesu and tdepowersave included, so this is
 	@# not something the packaging can fix. It is passed so that the build is
 	@# right and so that a fixed TDE tool starts working here for free.
-	$(MAKE) tde TDE_CMAKE_ARGS='\
+	$(MAKE) tde TDE_BUILD_DIR=$(TDE_DEB_DIR) TDE_CMAKE_ARGS='\
 		-DCMAKE_EXE_LINKER_FLAGS=$(shell dpkg-buildflags --get LDFLAGS) \
 		-DCMAKE_MODULE_LINKER_FLAGS=$(shell dpkg-buildflags --get LDFLAGS) \
 		-DCMAKE_SHARED_LINKER_FLAGS=$(shell dpkg-buildflags --get LDFLAGS)'
@@ -86,10 +101,10 @@ override_dh_auto_install:
 	@# machine with no modem has no use for any of it.
 	$(MAKE) install-modem DESTDIR=$(CURDIR)/debian/netcfgd-modem PREFIX=/usr
 ifneq (,$(GUI_PROFILE))
-	$(MAKE) install-gui DESTDIR=$(CURDIR)/debian/netcfgd-gui PREFIX=/usr
+	$(MAKE) install-gui GUI_BUILD_DIR=$(GUI_DEB_DIR) DESTDIR=$(CURDIR)/debian/netcfgd-gui PREFIX=/usr
 endif
 ifneq (,$(TDE_PROFILE))
-	$(MAKE) install-tde DESTDIR=$(CURDIR)/debian/netcfgd-trinity
+	$(MAKE) install-tde TDE_BUILD_DIR=$(TDE_DEB_DIR) DESTDIR=$(CURDIR)/debian/netcfgd-trinity
 endif
 
 # dh_installsystemd enables the unit and starts it, on first install, unless
@@ -152,5 +167,7 @@ override_dh_auto_test:
 	# `make check` is the gate; it wants a build tree the packaging keeps no
 	# part of.
 
+# For dpkg-buildpackage run directly; `make deb` passes -nc and does not
+# clean. The package's own trees, and dist/ as before.
 override_dh_auto_clean:
-	$(MAKE) clean
+	DEB_BUILD_DIR=$(DEB_BUILD_DIR) $(MAKE) clean

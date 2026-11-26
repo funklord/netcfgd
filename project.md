@@ -7050,6 +7050,62 @@ already records.
 premise the product had changed under it, which is what a suite that halts on
 the first failure will hide for as long as nobody runs it to the end.
 
+## 10.941 A second `make deb` compiles nothing, and the package carries Debian's flags
+
+From claude-guidelines' debian-packaging rule (inbox 20261125T1430Z,
+2026-11-26). Measured at HEAD first, in a scratch clone: `make`, `make deb`,
+`make deb`, `make` compiled 239, 0, 239 objects -- the `.build-flags`
+records in `c/` and `client/` already rebuilt on a change of flags and kept
+two package builds in a row at nothing. What the rule found here was the
+flags themselves:
+
+- **No `_FORTIFY_SOURCE` anywhere.** No compile line in `c/`, `client/` or
+  the shim read `$(CPPFLAGS)`, where dpkg puts it: netcfgd and netcfgd-nm
+  shipped with 0 `_chk` imports. Every compile line reads it now, and the
+  records include it and `LDFLAGS`.
+- **The daemon went out at `-O2`.** `CFLAGS ?= -Os` gives way to dpkg's
+  `CFLAGS` whole, as abuild's did for `-std` (the comment above it). `-Os`
+  comes back by `DEB_CFLAGS_MAINT_APPEND` in `debian/rules`, the last `-O`
+  winning: netcfgd 3,199,616 -> 2,978,496 bytes.
+- **fuzznet had none of Debian's hardening**: `FUZZNET_CFLAGS` is built
+  from nothing. It now adds the environment's `CFLAGS`, `-O` filtered out,
+  captured as `ENV_CFLAGS` before this Makefile's `+=` changes them.
+- **The shim's recursion into `client/` would have added its flags twice.**
+  A variable from the environment is exported to sub-makes with its
+  modified value, so `client/` built from the shim saw the shim's `-I` and
+  warnings on top of dpkg's, and from the GUI saw dpkg's alone -- two
+  records, a rebuild per caller. The shim passes `ENV_CFLAGS`/`ENV_LDFLAGS`
+  as they arrived. And its program depended on a phony `client`, so every
+  `make` relinked netcfgd-nm; it depends on the archive now, recursed with
+  FORCE, and a second `make` writes no file.
+- **The window had none of them**, qmake reading no flags: `gui/Makefile`
+  hands them to qmake as `QMAKE_*FLAGS+=` with `-O` filtered, in a record
+  that cleans the objects on a change.
+
+`make deb` passes `-nc` after removing `debian/debhelper-build-stamp` and
+`debian/.debhelper`. The GUI and TDE builds have trees of their own,
+`gui/build-deb` and `adapter/netcfgd-tde/build-deb` (`DEB_BUILD_DIR`),
+removed by `make clean` and by a bare `dpkg-buildpackage`'s clean;
+qtty is pinned to `BUILD_DIR=build` so the package build's does not move
+the library `gui.pro` links.
+
+**The C directories stay shared with the plain build, and a switch
+rebuilds them.** Moving them would mean rewriting the in-place pattern
+rules of three Makefiles (234 sources in `c/` alone) and 53 gate
+references to `c/netcfgd`; keeping them costs a rebuild of 574 objects,
+fuzznet's included, each time `make` and `make deb` alternate -- about 40
+seconds at `-j8` here. That is ossacli's shape, which the skill allows
+where outputs do not move cheaply; whether this tree should pay for the
+move instead is the holder's call. Measured after, in a scratch clone:
+`make`, `make`, `make deb`, `make deb`, `make` = 574, 0, 574, 0, 574;
+the GUI profile's own tree 103 then 0, and the plain GUI 0 after it; the
+install step compiles nothing; a bare `dpkg-buildpackage` removed only
+`gui/build-deb` and left the plain GUI's 103 objects. `_chk` imports
+netcfgd 17, netcfgd-nm 9, netcfgd-gui 9, all with the stack protector and
+relro, one debug file each named by its build-id. lintian's tags are the
+ones the packages built before this already carried. The TDE profile was
+checked by reading: TDE's CMake modules are not installed here.
+
 ## 10.940 An apply no longer empties a slot whose members it could not read
 
 Found by the lens 10.934 left: a failed read taken as "nothing there". When

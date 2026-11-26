@@ -126,6 +126,14 @@ WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 # want of `IFNAMSIZ`. The optimisation level is a packager's to choose and the
 # language this code is written in is not, so one is a default and the other is
 # appended.
+# **What the environment hands over, before this file adds to it.** A
+# package build's CFLAGS and LDFLAGS (dpkg's hardening) arrive from the
+# environment, and the `+=` below modifies them in place -- and a variable
+# that came from the environment is exported to every sub-make with its
+# modified value, so a recursion would add this file's flags to a sibling's
+# a second time and its `.build-flags` would differ by caller.
+ENV_CFLAGS  := $(if $(filter environment%,$(origin CFLAGS)),$(CFLAGS))
+ENV_LDFLAGS := $(if $(filter environment%,$(origin LDFLAGS)),$(LDFLAGS))
 CFLAGS  ?= -Os
 CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client -MMD -MP
 # A 32-bit glibc's `off_t` and `time_t` otherwise stay 32 bits: `readdir` can fail
@@ -202,7 +210,7 @@ EXAMPLES = examples/live_association examples/live_firewall examples/live_suppli
 examples: $(EXAMPLES)
 
 examples/%: examples/%.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # **Made afresh, never updated in place.** `ar rcs` adds and replaces members
 # and never removes one, so an object whose source was deleted stays in the
@@ -276,7 +284,7 @@ FUZZNET_DEFS  = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 # And the tables bounded, in the fragment the phone's build reads too.
 include fuzznet-bounds.mk
 FUZZNET_CFLAGS = $(if $(DEBUG),-Og -g,-Os) -ffunction-sections -fdata-sections \
-		$(FUZZNET_BOUNDS) $(LARGE_TYPES)
+		$(FUZZNET_BOUNDS) $(LARGE_TYPES) $(filter-out -O%,$(ENV_CFLAGS))
 # The system libraries the objects decided they need, asked of the archive
 # with `nm` for the reason `bridge/Makefile` gives (fuzznet probes for zstd,
 # so naming it here would be a claim about another tree's configuration) --
@@ -359,7 +367,7 @@ $(FUZZNET_LIB): FORCE
 # The library last on the line, because it is an archive: the objects that need
 # it are listed before it or the linker has already walked past what it wanted.
 $(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
-	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The program linked statically, for a system whose libc is not this one --
 # OpenWrt's is musl (`make hull-openwrt`, doc/journal.md 10.672). Not in `all`: it
@@ -367,7 +375,7 @@ $(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
 # and address lookups need its NSS modules at run time; without them they
 # answer nothing, which every caller here already takes as "none".
 netcfgd-static: $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB)
-	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) -static $(LDFLAGS) \
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) -static $(LDFLAGS) \
 		$(FUZZNET_SYSLIBS) -o $@ 2>&1 | grep -v 'statically linked applications requires' || true
 	@test -x $@
 
@@ -386,19 +394,19 @@ $(PROGRAM_LINK): $(PROGRAM)
 # `cmp` rather than a plain write: an unchanged stamp keeps its timestamp and
 # nothing rebuilds.
 .build-flags: FORCE
-	@echo '$(CC) $(CFLAGS)' > $@.candidate
+	@echo '$(CC) $(CFLAGS) $(CPPFLAGS) $(CPPFLAGS) $(LDFLAGS)' > $@.candidate
 	@cmp -s $@.candidate $@ || mv $@.candidate $@
 	@rm -f $@.candidate
 
 %.o: %.c .build-flags
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Named, because the pattern rule above would write it into `client/`. A
 # static pattern, so each object is compiled from its own source: with a
 # second shared source, `$<` of the one rule they shared was the first source
 # for both, and `ncfg_fuzznet.o` would have been a second `ncfg_json.o`.
 $(SHARED_OBJS): %.o: ../client/%.c .build-flags
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Each test is its own binary, and each is run. A suite that stops at the
 # first failure hides how much is broken, so every one runs and the target
@@ -450,7 +458,7 @@ node-fleet-test: $(PROGRAM) $(PROGRAM_LINK) $(FUZZNET_LIB)
 	timeout 400 sh tests/node_fleet.sh
 
 tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The two tests that link more than the library, because what they check is not
 # in the library: the entry points and the descriptor loop are under
@@ -463,24 +471,24 @@ tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
 # that decides when a process stops. `world_test` and `answer_test` are the
 # other two halves of the same sentence.
 tests/node_answer_test: tests/node_answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 tests/ask_test: tests/ask_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The same two, for the same reason: the four seams a reconcile pass reaches
 # the machine through and the request dispatcher are `src/main/`'s work --
 # owning the apply lock, the netlink socket and the connections an event is
 # written to is what that directory is for.
 tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # A parse and a check of every source, writing nothing.
 #
@@ -604,7 +612,7 @@ fuzz-replay: $(FUZZ_REPLAYS)
 # are prerequisites that must not reach the compiler, which is the hazard
 # `build-and-commit.md` names about a compile-and-link rule.
 fuzz/%_replay: fuzz/%.c fuzz/fuzz_replay.c fuzz/fuzz_text.c $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) .build-flags
-	$(CC) $(CFLAGS) -Ifuzz $(filter %.c,$^) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Ifuzz $(filter %.c,$^) $(SHARED_OBJS) $(LIB) $(FUZZNET_LIB) $(LDFLAGS) $(FUZZNET_SYSLIBS) -o $@
 
 # The exploring half. Not reached by `all` or `test`: it needs clang, and a
 # fuzzer in a gate is a gate whose verdict depends on where its seed took it.

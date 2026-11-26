@@ -45,6 +45,14 @@ WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 # want of `IFNAMSIZ`. The optimisation level is a packager's to choose and the
 # language this code is written in is not, so one is a default and the other is
 # appended.
+# **What the environment hands over, before this file adds to it.** A
+# package build's CFLAGS and LDFLAGS (dpkg's hardening) arrive from the
+# environment, and the `+=` below modifies them in place -- and a variable
+# that came from the environment is exported to every sub-make with its
+# modified value, so a recursion would add this file's flags to a sibling's
+# a second time and its `.build-flags` would differ by caller.
+ENV_CFLAGS  := $(if $(filter environment%,$(origin CFLAGS)),$(CFLAGS))
+ENV_LDFLAGS := $(if $(filter environment%,$(origin LDFLAGS)),$(LDFLAGS))
 CFLAGS  ?= -Os
 # The client library netcfgd already has in C, which is why there is no
 # `client.c` here: `state.c` links what `ncfg` links.
@@ -67,7 +75,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test syntax syntax-tests clean fuzz fuzz-list fuzz-replay
+.PHONY: all test syntax syntax-tests clean fuzz fuzz-list fuzz-replay FORCE
 
 
 # **The default goal is pinned, and it is not decoration.** A target added
@@ -101,24 +109,41 @@ syntax-tests:
 	@printf 'syntax-tests: %s read %s test source(s) with no warning\n' "$(CC)" \
 		"$(words $(TEST_SRCS))"
 
-%.o: %.c
-	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+%.o: %.c .build-flags
+	$(CC) $(CFLAGS) $(CPPFLAGS) -MMD -MP -c $< -o $@
+
+# What these objects were built with, as c/ and client/ keep it: a package
+# build's flags differ from a plain one's, the two share this directory, and
+# an object depends on its source and not on the flags it was compiled with.
+# Rewritten only when it changes, so a second `make` writes nothing.
+.build-flags: FORCE
+	@echo '$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)' > $@.candidate
+	@cmp -s $@.candidate $@ || mv $@.candidate $@
+	@rm -f $@.candidate
 
 # **Built here rather than trusted**, which is the root Makefile's rule for
 # every gate: what is sitting in `client/` depends on the last build.
+#
+# The archive with FORCE rather than a phony `client` the program depended
+# on, which relinked netcfgd-nm on every `make`: only the sub-make knows
+# whether its sources moved, and the archive's date moves only when it
+# rebuilds. The environment's flags go as they arrived, not as this file
+# modified them (ENV_CFLAGS above).
 .PHONY: client
-client:
-	@$(MAKE) --no-print-directory -C $(CLIENT)
+client: $(CLIENT)/libncfg_client.a
+$(CLIENT)/libncfg_client.a: FORCE
+	@$(if $(ENV_CFLAGS),CFLAGS='$(ENV_CFLAGS)') $(if $(ENV_LDFLAGS),LDFLAGS='$(ENV_LDFLAGS)') \
+	  $(MAKE) --no-print-directory -C $(CLIENT)
 
-$(PROGRAM): src/main.o $(OBJS) client
-	$(CC) $(CFLAGS) src/main.o $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+$(PROGRAM): src/main.o $(OBJS) $(CLIENT)/libncfg_client.a
+	$(CC) $(CFLAGS) $(CPPFLAGS) src/main.o $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # The dispatcher against its own tables, with no bus: introspection is a pure
 # function of the tables and is the half that can be checked without one.
 test: tests/bus_test fuzz-replay
 	./tests/bus_test
 
-tests/bus_test: tests/bus_test.o $(OBJS) client
+tests/bus_test: tests/bus_test.o $(OBJS) $(CLIENT)/libncfg_client.a
 	$(CC) $(CFLAGS) tests/bus_test.o $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # ---------------------------------------------------------------- fuzzing

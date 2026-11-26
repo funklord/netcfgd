@@ -107,7 +107,7 @@ syntax-tests:
 # than in somebody's memory. `cmp` rather than a plain write, so an unchanged
 # stamp keeps its timestamp and nothing rebuilds.
 .build-flags: FORCE
-	@echo '$(CC) $(CFLAGS)' > $@.candidate
+	@echo '$(CC) $(CFLAGS) $(CPPFLAGS) $(CPPFLAGS) $(LDFLAGS)' > $@.candidate
 	@cmp -s $@.candidate $@ || mv $@.candidate $@
 	@rm -f $@.candidate
 
@@ -118,14 +118,14 @@ $(LIB): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 %.o: %.c $(HEADERS) .build-flags
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # The witness is the fixture. tests/client_test.c reads every line of
 # doc/schema/socket.json -- the daemon's own frozen surface -- so this goes red
 # when the protocol changes, which is the whole reason for pointing at it rather
 # than at a copy.
 tests/client_test: tests/client_test.c $(LIB) $(HEADERS) .build-flags
-	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 test: tests/client_test fuzz-replay
 	./tests/client_test ../doc/schema/socket.json
@@ -169,7 +169,7 @@ fuzz-replay: $(FUZZ_REPLAYS)
 
 fuzz/%_replay: fuzz/%.c $(FUZZ_SHARED_DIR)/fuzz_replay.c $(FUZZ_SHARED_DIR)/fuzz_text.c \
 		$(LIB) .build-flags
-	$(CC) $(CFLAGS) -I. -I$(FUZZ_SHARED_DIR) $(filter %.c,$^) $(LIB) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) -I. -I$(FUZZ_SHARED_DIR) $(filter %.c,$^) $(LIB) $(LDFLAGS) -o $@
 
 fuzz: $(FUZZ_PROGRAMS)
 

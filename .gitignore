@@ -160,6 +160,7 @@ doc/capture/
 
 # The TDE adapter builds with CMake, which wants its own binary directory.
 adapter/netcfgd-tde/build/
+adapter/netcfgd-tde/build-deb/
 
 # The NM adapter's C port, which builds in place the way `c/` does: one object
 # beside each source, one test binary, and a `.d` per object now that it has

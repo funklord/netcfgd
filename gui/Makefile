@@ -34,7 +34,7 @@ CLIENT_LIB = $(CLIENT_DIR)/libncfg_client.a
 BUILD_DIR ?= build
 TARGET = $(BUILD_DIR)/netcfgd-gui
 
-.PHONY: all run test clean $(CLIENT_LIB)
+.PHONY: all run test clean $(CLIENT_LIB) FORCE
 
 all: $(TARGET)
 
@@ -160,7 +160,7 @@ qtty:
 			echo "gui:   could not fetch it: no network, or no key for the remote."; \
 	fi; \
 	if [ -f $(QTTY_DIR)/qtty.pro ]; then \
-		$(MAKE) -C $(QTTY_DIR); \
+		$(MAKE) -C $(QTTY_DIR) BUILD_DIR=build; \
 	else \
 		echo "gui: no $(QTTY_DIR) -- building the window only, with no --tui."; \
 		echo "gui:   netcfgd-tui will say so rather than opening a window (0173)."; \
@@ -169,9 +169,36 @@ qtty:
 # qmake only when its input moved, so a second `make` writes nothing: `qtty` is
 # phony, and as a plain prerequisite it ran qmake every time. Order-only here, and
 # its library is named, because gui.pro decides `--tui` by whether that exists.
-$(BUILD_DIR)/Makefile: gui.pro $(wildcard $(QTTY_LIB)) | qtty qtkit
+$(BUILD_DIR)/Makefile: gui.pro $(wildcard $(QTTY_LIB)) $(BUILD_DIR)/flags.source | qtty qtkit
 	@mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR) && $(QMAKE) ../gui.pro
+	cd $(BUILD_DIR) && $(QMAKE) ../gui.pro "QMAKE_CFLAGS+=$$GUI_HANDED_CFLAGS" \
+		"QMAKE_CXXFLAGS+=$$GUI_HANDED_CXXFLAGS" "QMAKE_LFLAGS+=$$GUI_HANDED_LFLAGS"
+
+# **What a build hands qmake from the environment, ADDED to what gui.pro
+# says** (the debian-packaging rule). dh puts Debian's CPPFLAGS, CFLAGS,
+# CXXFLAGS and LDFLAGS there, and qmake writes a Makefile that reads none of
+# them, so the packaged window had no _FORTIFY_SOURCE. -O is filtered out,
+# the level being gui.pro's. Kept in a record that cleans the objects when it
+# changes -- rerunning qmake recompiles nothing -- and read from the
+# environment in the recipe, so no quote in a flag can end the string. A
+# package build has its own BUILD_DIR, so the record moves only when the
+# flags really do. qtty is told BUILD_DIR=build above: QTTY_LIB names that,
+# and BUILD_DIR from a package build's environment would move it.
+$(BUILD_DIR)/flags.source $(BUILD_DIR)/Makefile: export GUI_HANDED_CFLAGS := $(filter-out -O%,$(CPPFLAGS) $(CFLAGS))
+$(BUILD_DIR)/flags.source $(BUILD_DIR)/Makefile: export GUI_HANDED_CXXFLAGS := $(filter-out -O%,$(CPPFLAGS) $(CXXFLAGS))
+$(BUILD_DIR)/flags.source $(BUILD_DIR)/Makefile: export GUI_HANDED_LFLAGS := $(LDFLAGS)
+$(BUILD_DIR)/flags.source: FORCE
+	@want="$$GUI_HANDED_CFLAGS|$$GUI_HANDED_CXXFLAGS|$$GUI_HANDED_LFLAGS"; \
+	if [ -f '$@' ]; then have=$$(cat '$@'); else have='||'; fi; \
+	[ "$$have" = "$$want" ] && [ -f '$@' ] && exit 0; \
+	mkdir -p '$(BUILD_DIR)' || exit 1; \
+	if [ "$$have" != "$$want" ] && [ -f '$(BUILD_DIR)/Makefile' ]; then \
+		echo "gui: the flags handed to qmake changed; cleaning $(BUILD_DIR)"; \
+		make -o Makefile -C '$(BUILD_DIR)' clean >/dev/null || exit 1; \
+	fi; \
+	printf '%s\n' "$$want" > '$@'
+
+FORCE:
 
 $(TARGET): $(CLIENT_LIB) qtty qtkit $(BUILD_DIR)/Makefile $(wildcard src/*.cpp src/*.h)
 	$(MAKE) -C $(BUILD_DIR)

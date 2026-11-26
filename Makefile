@@ -86,7 +86,7 @@
 # without it still runs the rest of `check` and the skip says what is missing.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build gui c-test claims installed-diff icons icon-check install-icons uninstall-icons FORCE shell packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz clean veryclean distclean uninstall style style-source style-tool style-docs registry bridge-test nm-c-test hooks linkage linkage-one live-container tde tde-container install-tde deb-tde help
+.PHONY: clang deb-clean default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build gui c-test claims installed-diff icons icon-check install-icons uninstall-icons FORCE shell packaging ascii size footprint rss rss-node bss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz clean veryclean distclean uninstall style style-source style-tool style-docs registry bridge-test nm-c-test hooks linkage linkage-one live-container tde tde-container install-tde deb-tde help
 
 all: build
 
@@ -348,6 +348,15 @@ GUI_BUILD_DIR ?= gui/build
 # control centre and the panel search.
 TDE_BUILD_DIR ?= adapter/netcfgd-tde/build
 TDE_PREFIX    ?= /opt/trinity
+# The package build's own GUI and TDE trees (debian/rules names them from
+# DEB_BUILD_DIR): their flags differ from a plain build's, and a qmake or
+# CMake tree rebuilt for every switch is minutes. The C directories share
+# the plain build's and rebuild from their `.build-flags` records instead
+# -- 234 sources in place and 53 gate references to c/netcfgd, against
+# about 36 seconds per switch, measured 2026-11-26. `make clean` removes
+# these two.
+DEB_BUILD_DIR ?= build-deb
+DEB_TREES = gui/$(DEB_BUILD_DIR) adapter/netcfgd-tde/$(DEB_BUILD_DIR)
 SYSCONFDIR ?= /etc
 
 # Two binaries and a config directory. Nothing else, and nothing that makes
@@ -768,7 +777,20 @@ deb-tde:
 
 deb: version-check
 	@test -n "$(DIST)" || { echo "deb: DIST is empty, refusing" >&2; exit 1; }
-	DEB_BUILD_PROFILES="$(DEB_BUILD_PROFILES)" dpkg-buildpackage -b -us -uc
+	@# -nc, so the build is not cleaned first (the debian-packaging rule: a
+	@# second `make deb` compiles nothing). Make decides what is stale; the
+	@# C directories keep a record of their flags and rebuild when a package
+	@# build's differ from a plain one's, and the GUI and TDE builds have
+	@# trees of their own (DEB_BUILD_DIR). The stamp goes because with it dh
+	@# skips the whole build sequence and packages what was there;
+	@# debian/.debhelper because dh_strip collects every build's debug file
+	@# there and only the skipped clean emptied it, so -dbgsym would carry
+	@# the debug files of binaries built before. Not dh_clean, which also
+	@# deletes every *.orig, *.rej and *~ in the tree.
+	rm -f debian/debhelper-build-stamp
+	rm -rf debian/.debhelper
+	DEB_BUILD_DIR=$(DEB_BUILD_DIR) DEB_BUILD_PROFILES="$(DEB_BUILD_PROFILES)" \
+		dpkg-buildpackage -b -us -uc -nc
 	@mkdir -p $(DIST)
 	@# Every artifact by name, `-dbgsym` and the shim included. A glob that
 	@# names only the source package leaves a binary package in the parent
@@ -3950,6 +3972,18 @@ clean:
 		fi; \
 		[ "$$kept" -eq 1 ] || rmdir "$(DIST)" 2>/dev/null || true; \
 	fi
+	@$(MAKE) --no-print-directory deb-clean
+
+# The package build's own trees, by name, with the name checked first. What
+# a bare dpkg-buildpackage cleans with (debian/rules); `make deb` passes -nc.
+deb-clean:
+	@case "$(DEB_BUILD_DIR)" in \
+	""|/*|*..*|.|./) echo "deb-clean: DEB_BUILD_DIR '$(DEB_BUILD_DIR)' is not a plain relative name, refusing"; exit 1 ;; \
+	esac; \
+	for d in $(DEB_TREES); do \
+		[ -e "$$d" ] || continue; \
+		echo "deb-clean: removing $$d"; rm -rf "$$d"; \
+	done
 
 # The shared style gate: `tool/style_gate.py`, a copy committed in this
 # repository and the one this build runs. It is kept byte-identical to the
